@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import hashlib
+import asyncio
 import json
 import re
 from datetime import datetime
@@ -30,6 +30,11 @@ from pc_assistant.tools.memory_tool import MemoryTool
 from pc_assistant.tools.weather import WeatherTool
 from pc_assistant.tools.exchange import ExchangeTool
 from pc_assistant.tools.timer import TimerTool
+from pc_assistant.tools.window import WindowTool
+from pc_assistant.tools.notification import NotificationTool
+from pc_assistant.tools.keyboard import KeyboardTool
+from pc_assistant.tools.mouse import MouseTool
+from pc_assistant.tools.scheduler import SchedulerTool
 
 
 class AgentEvent(BaseModel):
@@ -63,10 +68,6 @@ def _strip_think_tags(text: str) -> tuple[str, str]:
     return remaining.strip(), thinking.strip()
 
 
-def _compute_call_signature(tool_name: str, arguments: dict[str, Any]) -> str:
-    args_json = json.dumps(arguments, sort_keys=True, ensure_ascii=False)
-    args_hash = hashlib.md5(args_json.encode()).hexdigest()[:8]
-    return f"{tool_name}:{args_hash}"
 
 
 def _build_date_context() -> str:
@@ -182,6 +183,7 @@ class Agent:
         self._audit = AuditLogger()
         self._confirm_callback = confirm_callback
         self._cancelled = False
+        self._current_task: asyncio.Task | None = None
         self._total_prompt_tokens = 0
         self._total_completion_tokens = 0
         self._total_iterations = 0
@@ -192,6 +194,9 @@ class Agent:
         )
         self._conversation.set_system_context(self._system_prompt)
         self._register_builtin_tools()
+        # Loop detection
+        self._tool_call_history: list[str] = []
+        self._max_consecutive_same_tool = 3
 
     @property
     def conversation(self) -> ConversationManager:
@@ -207,6 +212,105 @@ class Agent:
 
     def cancel(self) -> None:
         self._cancelled = True
+        self._llm.cancel()
+        if self._current_task is not None and not self._current_task.done():
+            self._current_task.cancel()
+
+    def _check_tool_loop(self, tool_name: str, arguments: dict[str, Any]) -> tuple[bool, str]:
+        """Check if we're in a tool calling loop. Returns (is_loop, reason).
+
+        Only detects TRUE loops - same tool + same arguments repeatedly.
+        Different arguments for same tool is NOT a loop (e.g., checking weather for multiple cities).
+        """
+        # Create signature based on tool name AND arguments
+        # Normalize arguments for comparison
+        try:
+            import json
+            args_str = json.dumps(arguments, sort_keys=True)
+        except:
+            args_str = str(sorted(arguments.items()))
+
+        call_sig = f"{tool_name}:{args_str[:200]}"
+
+        # Track recent tool calls
+        self._tool_call_history.append(call_sig)
+        if len(self._tool_call_history) > 20:
+            self._tool_call_history.pop(0)
+
+        # Only loop if EXACTLY the same call is made repeatedly (same tool + same args)
+        # This is different from calling the same tool with different arguments
+        if len(self._tool_call_history) >= 5:
+            recent = self._tool_call_history[-5:]
+            if all(t == call_sig for t in recent):
+                return True, f"Same tool '{tool_name}' with identical arguments called 5 times consecutively"
+
+        return False, ""
+
+    def _smart_truncate(self, result_str: str, tool_name: str, result: Any) -> str:
+        """Smart truncation for long tool outputs.
+
+        For process lists and similar outputs, provide a useful summary
+        instead of just head+tail truncation.
+        """
+        max_chars = 3000
+
+        if len(result_str) <= max_chars:
+            return result_str
+
+        # Handle application tool specially
+        if tool_name == "application" and isinstance(result, dict):
+            # list_running action
+            processes = result.get("processes", [])
+            if processes:
+                # Get top processes by CPU usage
+                sorted_by_cpu = sorted(processes, key=lambda x: x.get("cpu_percent", 0) or 0, reverse=True)
+                top_cpu = sorted_by_cpu[:10]
+                # Get top processes by memory usage
+                sorted_by_mem = sorted(processes, key=lambda x: x.get("memory_percent", 0) or 0, reverse=True)
+                top_mem = sorted_by_mem[:10]
+
+                summary = [
+                    f"Total processes: {len(processes)}",
+                    "",
+                    "Top 10 by CPU%:",
+                ]
+                for p in top_cpu:
+                    name = p.get("name", "unknown")
+                    cpu = p.get("cpu_percent", 0)
+                    pid = p.get("pid", "?")
+                    summary.append(f"  {pid:>6} {name:<30} {cpu:>5.1f}%")
+
+                summary.append("")
+                summary.append("Top 10 by Memory%:")
+                for p in top_mem:
+                    name = p.get("name", "unknown")
+                    mem = p.get("memory_percent", 0)
+                    pid = p.get("pid", "?")
+                    summary.append(f"  {pid:>6} {name:<30} {mem:>5.1f}%")
+
+                summary_str = "\n".join(summary)
+                if len(summary_str) <= max_chars:
+                    return summary_str + f"\n\n[Truncated: showing top processes. Total: {len(processes)}]"
+                return summary_str[:max_chars - 50] + f"\n\n[Truncated from {len(processes)} processes]"
+
+            # search action - already filtered, show all matches
+            matches = result.get("matches", [])
+            if matches:
+                return result_str[:max_chars] + f"\n\n[Showing {len(matches)} matching processes]"
+
+            # info action - should be small, just truncate if needed
+            if result.get("process"):
+                return result_str[:max_chars]
+
+        # Default head+tail truncation for other outputs
+        head_size = max_chars * 2 // 3
+        tail_size = max_chars - head_size
+        omitted = len(result_str) - max_chars
+        return (
+            result_str[:head_size]
+            + f"\n\n... [{omitted} chars omitted] ...\n\n"
+            + result_str[-tail_size:]
+        )
 
     def get_status(self) -> dict[str, Any]:
         return {
@@ -242,9 +346,19 @@ class Agent:
             WeatherTool(),
             ExchangeTool(),
             TimerTool(),
+            WindowTool(),
+            NotificationTool(),
+            KeyboardTool(),
+            MouseTool(),
+            SchedulerTool(),
         ]
         for tool in builtin_tools:
             self._registry.register(tool)
+
+        # Set agent reference for scheduler to enable dynamic task execution
+        scheduler = self._registry.get("scheduler")
+        if scheduler is not None:
+            scheduler.set_agent(self)
 
     def register_tool(self, tool: Any) -> None:
         self._registry.register(tool)
@@ -288,6 +402,9 @@ class Agent:
         self._current_status = "thinking"
         self._conversation.add_user(user_input)
 
+        # Reset loop detection for new task
+        self._tool_call_history.clear()
+
         memory_context = self._memory.build_context_string()
         if memory_context:
             full_system = self._system_prompt + "\n\n" + memory_context
@@ -295,8 +412,6 @@ class Agent:
             full_system = self._system_prompt
         self._conversation.set_system_context(full_system)
 
-        recent_calls: list[str] = []
-        max_recent_calls = 10
         empty_response_count = 0
         max_empty_retries = 2
 
@@ -416,10 +531,9 @@ class Agent:
                 )
 
             if tool_calls_from_stream:
-                self._conversation.add_assistant(
-                    clean_content or full_content,
-                    tool_calls=tool_calls_from_stream,
-                )
+                # Store content without tool_calls to prevent AI confusion in history
+                # The tool_calls were already sent and results will follow
+                self._conversation.add_assistant_final(clean_content or full_content)
                 for tool_call in tool_calls_from_stream:
                     if self._cancelled:
                         yield AgentEvent(type="cancelled", content="Operation cancelled by user.", iteration=iteration)
@@ -440,26 +554,21 @@ class Agent:
                     if not isinstance(arguments, dict):
                         arguments = {}
 
-                    call_sig = _compute_call_signature(tool_name, arguments)
-                    if call_sig in recent_calls:
-                        self._audit.log(
-                            action="loop_detected",
-                            tool=tool_name,
-                            parameters=arguments,
-                            allowed=False,
-                            reason=f"Repeated tool call detected: {tool_name}",
-                        )
+                    # Check for tool calling loops
+                    is_loop, loop_reason = self._check_tool_loop(tool_name, arguments)
+                    if is_loop:
                         yield AgentEvent(
-                            type="iteration_limit",
-                            content=f"Repeated tool call detected ({tool_name}), possible infinite loop. Terminated.",
+                            type="tool_result",
+                            tool_name=tool_name,
+                            tool_args=arguments,
+                            tool_result={"error": f"Loop detected: {loop_reason}"},
+                            content=f"Stopped: {loop_reason}",
                             iteration=iteration,
                         )
-                        self._current_status = "ready"
-                        return
-
-                    recent_calls.append(call_sig)
-                    if len(recent_calls) > max_recent_calls:
-                        recent_calls.pop(0)
+                        self._conversation.add_tool_result(tool_call_id, f"Stopped: {loop_reason}")
+                        # Clear history to allow recovery
+                        self._tool_call_history.clear()
+                        break
 
                     safety_result = self._safety.check_tool_call(tool_name, arguments)
 
@@ -518,18 +627,25 @@ class Agent:
                     self._current_status = f"executing_{tool_name}"
 
                     try:
-                        result = await self._registry.execute(tool_name, **arguments)
+                        self._current_task = asyncio.create_task(
+                            self._registry.execute(tool_name, **arguments)
+                        )
+                        # Wait for task with cancellation check
+                        while not self._current_task.done():
+                            if self._cancelled:
+                                self._current_task.cancel()
+                                try:
+                                    await self._current_task
+                                except asyncio.CancelledError:
+                                    pass
+                                self._current_status = "ready"
+                                yield AgentEvent(type="cancelled", content="Operation cancelled by user.", iteration=iteration)
+                                return
+                            await asyncio.sleep(0.1)
+                        result = await self._current_task
                         result_str = str(result)
-                        max_result_chars = 3000
-                        if len(result_str) > max_result_chars:
-                            head_size = max_result_chars * 2 // 3
-                            tail_size = max_result_chars - head_size
-                            omitted = len(result_str) - max_result_chars
-                            result_str = (
-                                result_str[:head_size]
-                                + f"\n\n... [{omitted} chars omitted] ...\n\n"
-                                + result_str[-tail_size:]
-                            )
+                        # Smart truncation for long outputs
+                        result_str = self._smart_truncate(result_str, tool_name, result)
                         self._conversation.add_tool_result(tool_call_id, result_str)
                         self._current_status = "thinking"
                         yield AgentEvent(
@@ -540,6 +656,9 @@ class Agent:
                             content=result_str,
                             iteration=iteration,
                         )
+                    except asyncio.CancelledError:
+                        self._current_status = "ready"
+                        return
                     except Exception as e:
                         error_msg = f"Error: {e}"
                         self._conversation.add_tool_result(tool_call_id, error_msg)
@@ -554,7 +673,7 @@ class Agent:
                         )
             else:
                 if finish_reason == "length" and clean_content:
-                    self._conversation.add_assistant(clean_content)
+                    self._conversation.add_assistant_final(clean_content)
                     yield AgentEvent(
                         type="final_answer",
                         content=clean_content,
@@ -566,7 +685,7 @@ class Agent:
                 if not clean_content and not full_content:
                     empty_response_count += 1
                     if empty_response_count > max_empty_retries:
-                        self._conversation.add_assistant("I was unable to generate a response. Please try again.")
+                        self._conversation.add_assistant_final("I was unable to generate a response. Please try again.")
                         yield AgentEvent(
                             type="final_answer",
                             content="I was unable to generate a response. Please try again.",
@@ -580,7 +699,7 @@ class Agent:
                 if not clean_content and full_content:
                     empty_response_count += 1
                     if empty_response_count > max_empty_retries:
-                        self._conversation.add_assistant("I was unable to generate a visible response. Please try again.")
+                        self._conversation.add_assistant_final("I was unable to generate a visible response. Please try again.")
                         yield AgentEvent(
                             type="final_answer",
                             content="I was unable to generate a visible response. Please try again.",
@@ -592,7 +711,7 @@ class Agent:
                     continue
 
                 empty_response_count = 0
-                self._conversation.add_assistant(clean_content or full_content)
+                self._conversation.add_assistant_final(clean_content or full_content)
                 yield AgentEvent(
                     type="final_answer",
                     content=clean_content or full_content,

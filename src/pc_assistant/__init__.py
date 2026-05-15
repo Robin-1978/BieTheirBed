@@ -58,7 +58,42 @@ async def async_main(config_path: str | None, verbose: bool) -> int:
             print("Please set PC_LLM_API_KEY environment variable or add llm_api_key to your config file.")
         return 1
 
-    agent = Agent(config=cfg)
+    def agent_confirm_callback(tool_name: str, arguments: dict) -> bool:
+        title = f"Dangerous operation: {tool_name}"
+        details = "\n".join(f"  {k}: {v}" for k, v in arguments.items())
+        try:
+            from rich.console import Console
+            from rich.panel import Panel
+
+            console = Console()
+            console.print(
+                Panel(
+                    details,
+                    title=f"[yellow]⚠ {title}[/yellow]",
+                    border_style="yellow",
+                    expand=False,
+                )
+            )
+        except ImportError:
+            print(f"\n⚠ {title}")
+            print(details)
+        try:
+            answer = input("Proceed? (y/n): ").strip().lower()
+            return answer in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            return False
+
+    agent = Agent(config=cfg, confirm_callback=agent_confirm_callback)
+
+    # Auto-start scheduler if there are tasks
+    scheduler = agent.registry.get("scheduler")
+    if scheduler:
+        task_count = len(scheduler._tasks)
+        if task_count > 0:
+            await scheduler.execute(action="start")
+            logger.info("Scheduler started with %d tasks", task_count)
+        else:
+            logger.info("No scheduled tasks to run")
 
     logger.info("Checking LLM server health at %s", cfg.llm_server_url)
     healthy = await agent.health_check()
@@ -87,33 +122,6 @@ async def async_main(config_path: str | None, verbose: bool) -> int:
 
     logger.info("LLM server is healthy")
 
-    def agent_confirm_callback(tool_name: str, arguments: dict) -> bool:
-        title = f"Dangerous operation: {tool_name}"
-        details = "\n".join(f"  {k}: {v}" for k, v in arguments.items())
-        try:
-            from rich.console import Console
-            from rich.panel import Panel
-
-            console = Console()
-            console.print(
-                Panel(
-                    details,
-                    title=f"[yellow]⚠ {title}[/yellow]",
-                    border_style="yellow",
-                    expand=False,
-                )
-            )
-        except ImportError:
-            print(f"\n⚠ {title}")
-            print(details)
-        try:
-            answer = input("Proceed? (y/n): ").strip().lower()
-            return answer in ("y", "yes")
-        except (EOFError, KeyboardInterrupt):
-            return False
-
-    agent = Agent(config=cfg, confirm_callback=agent_confirm_callback)
-
     chat_ui = ChatUI(config=cfg)
     chat_ui._agent = agent
 
@@ -127,6 +135,10 @@ async def async_main(config_path: str | None, verbose: bool) -> int:
             Console().print("\n[dim]Interrupted. Goodbye![/dim]")
         except ImportError:
             print("\nInterrupted. Goodbye!")
+    finally:
+        # Stop scheduler on exit
+        if scheduler:
+            await scheduler.execute(action="stop")
 
     return 0
 

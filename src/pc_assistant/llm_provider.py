@@ -44,6 +44,7 @@ class LLMProvider:
         self._model_name = model_name
         self._timeout = timeout
         self._max_retries = max_retries
+        self._cancelled = False
 
         if provider == "openai":
             self._server_url = "https://api.openai.com/v1"
@@ -210,8 +211,12 @@ class LLMProvider:
         max_tokens: int = 1024,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> AsyncGenerator[StreamChunk, None]:
+        self._cancelled = False
+
         if self._provider == "anthropic":
             result = await self.chat(messages, tools, temperature, max_tokens, tool_choice)
+            if self._cancelled:
+                return
             yield StreamChunk(
                 delta_content=result.content,
                 delta_tool_calls=result.tool_calls,
@@ -253,6 +258,10 @@ class LLMProvider:
                 ) as response:
                     response.raise_for_status()
                     async for line in response.aiter_lines():
+                        if self._cancelled:
+                            await response.aclose()
+                            return
+
                         line = line.strip()
                         if not line:
                             continue
@@ -333,19 +342,17 @@ class LLMProvider:
                                 delta_tool_calls=delta_tool_calls,
                                 finish_reason="",
                             )
-        except httpx.TimeoutException as e:
-            yield StreamChunk(
-                delta_content=f"LLM request timed out: {e}",
-                delta_tool_calls=[],
-                finish_reason="error",
-            )
         except httpx.HTTPError as e:
+            if self._cancelled:
+                return
             yield StreamChunk(
                 delta_content=f"LLM stream failed: {e}",
                 delta_tool_calls=[],
                 finish_reason="error",
             )
         except Exception as e:
+            if self._cancelled:
+                return
             error_detail = str(e) if str(e) else type(e).__name__
             yield StreamChunk(
                 delta_content=f"LLM stream failed: {error_detail}",
@@ -378,6 +385,9 @@ class LLMProvider:
             "tool_call_id": tool_call_id,
             "content": content,
         }
+
+    def cancel(self) -> None:
+        self._cancelled = True
 
     async def health_check(self) -> bool:
         try:

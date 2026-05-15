@@ -16,7 +16,7 @@ class TestBuildSystemPrompt:
     def test_basic(self):
         prompt = build_system_prompt()
         assert "PC Assistant" in prompt
-        assert "Tool Usage Rules" in prompt
+        assert "Tool Usage" in prompt
         assert f"Shell: {get_shell_name()}" in prompt
 
     def test_with_tools(self):
@@ -109,7 +109,9 @@ class TestConversationManager:
         assert msgs[0] == {"role": "system", "content": "sys"}
         assert msgs[1] == {"role": "user", "content": "hello"}
         assert msgs[2]["role"] == "assistant"
-        assert "tool_calls" in msgs[2]
+        # tool_calls are stripped from assistant messages to prevent AI confusion
+        assert "tool_calls" not in msgs[2]
+        assert msgs[2]["content"] == "thinking"
         assert msgs[3] == {"role": "tool", "content": "result", "tool_call_id": "call_1"}
 
     def test_only_one_system_message_in_llm_output(self):

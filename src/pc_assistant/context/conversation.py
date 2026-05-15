@@ -44,6 +44,10 @@ class ConversationManager:
     def add_assistant(self, content: str, tool_calls: list[dict[str, Any]] | None = None) -> Message:
         return self.add("assistant", content, tool_calls=tool_calls)
 
+    def add_assistant_final(self, content: str) -> Message:
+        """Store final assistant response without tool_calls (to prevent AI confusion in history)."""
+        return self.add("assistant", content, tool_calls=None)
+
     def add_tool_result(self, tool_call_id: str, content: str) -> Message:
         return self.add("tool", content, tool_call_id=tool_call_id)
 
@@ -76,9 +80,10 @@ class ConversationManager:
             elif msg.role == "user":
                 result.append({"role": "user", "content": msg.content})
             elif msg.role == "assistant":
+                # Only include final content, not tool_calls
+                # This prevents the AI from being influenced by previous tool usage patterns
                 d: dict[str, Any] = {"role": "assistant", "content": msg.content}
-                if msg.tool_calls is not None:
-                    d["tool_calls"] = msg.tool_calls
+                # Note: tool_calls are stripped from history to prevent AI confusion
                 result.append(d)
             elif msg.role == "tool":
                 result.append({

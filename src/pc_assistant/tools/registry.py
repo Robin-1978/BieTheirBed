@@ -38,12 +38,18 @@ class ToolRegistry:
             })
         return schemas
 
-    async def execute(self, name: str, **kwargs: Any) -> Any:
-        tool = self._tools.get(name)
+    async def execute(self, tool_name: str, **kwargs: Any) -> Any:
+        """Execute a tool by name.
+
+        Args:
+            tool_name: The name of the tool to execute
+            **kwargs: Arguments to pass to the tool
+        """
+        tool = self._tools.get(tool_name)
         if tool is None:
-            raise KeyError(f"Tool '{name}' not found in registry")
+            raise KeyError(f"Tool '{tool_name}' not found in registry")
         if self._safety is not None:
-            result = self._safety.check_tool_call(name, kwargs)
+            result = self._safety.check_tool_call(tool_name, kwargs)
             if not result:
                 return {"error": f"Blocked by safety check: {result.reason}"}
         return await tool.execute(**kwargs)
