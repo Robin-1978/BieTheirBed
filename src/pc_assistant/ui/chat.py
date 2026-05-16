@@ -314,6 +314,7 @@ class ChatUI:
         first_content_received = False
         think_start_time: float | None = None
         think_text = ""
+        think_live: Live | None = None
         live: Live | None = None
 
         try:
@@ -329,22 +330,29 @@ class ChatUI:
                     think_start_time = time.time()
                     think_text = ""
                     self._console.print(Text("◇ ", style="think_icon"), end="")
-                    self._console.print(Text("Thinking...", style="think_dim"), end="")
+                    think_live = Live(
+                        Text("Thinking...", style="think_dim"),
+                        console=self._console,
+                        refresh_per_second=12,
+                        vertical_overflow="visible",
+                    )
+                    think_live.start()
 
                 elif event.type == "stream_think_delta":
                     think_text += event.content
+                    if think_live is not None:
+                        think_live.update(Text(think_text, style="think_dim"))
 
                 elif event.type == "think_end":
                     elapsed = time.time() - think_start_time if think_start_time else 0
-                    self._console.print(Text(f" {elapsed:.1f}s", style="think_dim"))
+                    if think_live is not None:
+                        think_live.stop()
+                        think_live = None
+                    self._console.print(Text(
+                        f"◇ Thinking... {elapsed:.1f}s",
+                        style="think_dim",
+                    ))
                     think_start_time = None
-                    if think_text.strip():
-                        self._console.print(Panel(
-                            Text(think_text.strip(), style="think_dim"),
-                            border_style="think_icon",
-                            padding=(0, 1),
-                            expand=False,
-                        ))
                     think_text = ""
 
                 elif event.type == "stream_delta":
@@ -365,13 +373,7 @@ class ChatUI:
                         live = None
 
                 elif event.type == "thought":
-                    if event.content and event.content.strip():
-                        self._console.print(Panel(
-                            Text(event.content.strip(), style="think_dim"),
-                            border_style="think_icon",
-                            padding=(0, 1),
-                            expand=False,
-                        ))
+                    pass
 
                 elif event.type == "tool_call":
                     if event.blocked:
@@ -402,6 +404,8 @@ class ChatUI:
         except KeyboardInterrupt:
             self._cancel()
         finally:
+            if think_live is not None:
+                think_live.stop()
             if live is not None:
                 live.stop()
             try:
