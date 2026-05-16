@@ -1,5 +1,5 @@
 llm_provider: "llamacpp"
-llm_server_url: "http://127.0.0.1:8080"
+llm_server_url: "http://127.0.0.1:8192"
 llm_model_name: ""
 llm_api_key: ""
 llm_api_base: ""
