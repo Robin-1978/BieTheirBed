@@ -74,24 +74,30 @@ class ConversationManager:
         if system_parts:
             result.append({"role": "system", "content": "\n\n".join(system_parts)})
 
+        skip_tool = False
         for msg in self._messages:
             if msg.role == "system":
                 continue
             elif msg.role == "user":
+                skip_tool = True
                 result.append({"role": "user", "content": msg.content})
             elif msg.role == "assistant":
-                # Only include final content, not tool_calls
-                # This prevents the AI from being influenced by previous tool usage patterns
                 d: dict[str, Any] = {"role": "assistant", "content": msg.content}
-                # Note: tool_calls are stripped from history to prevent AI confusion
+                if msg.tool_calls:
+                    d["tool_calls"] = msg.tool_calls
+                    skip_tool = False
+                else:
+                    skip_tool = True
                 result.append(d)
             elif msg.role == "tool":
-                result.append({
-                    "role": "tool",
-                    "content": msg.content,
-                    "tool_call_id": msg.tool_call_id or "",
-                })
+                if not skip_tool:
+                    result.append({
+                        "role": "tool",
+                        "content": msg.content,
+                        "tool_call_id": msg.tool_call_id or "",
+                    })
             else:
+                skip_tool = True
                 result.append({"role": msg.role, "content": msg.content})
 
         return result

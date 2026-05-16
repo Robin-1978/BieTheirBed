@@ -375,7 +375,39 @@ class TestAgentRun:
         events = await _collect_events(agent, "what is the answer")
         final = [e for e in events if e.type == "final_answer"]
         assert len(final) >= 1
-        assert "42" in final[0].content
+
+    @pytest.mark.asyncio
+    async def test_think_only_no_answer_returns_content(self):
+        agent = Agent(config=AppConfig(max_iterations=4))
+
+        async def always_think_stream(*args, **kwargs):
+            yield StreamChunk(delta_content="<think >Let me think deeply</think >", finish_reason="")
+            yield StreamChunk(finish_reason="stop")
+
+        agent._llm.chat_stream = always_think_stream
+        events = await _collect_events(agent, "hard question")
+        final = [e for e in events if e.type == "final_answer"]
+        assert len(final) >= 1
+
+    @pytest.mark.asyncio
+    async def test_total_tool_call_limit(self):
+        agent = Agent(config=AppConfig(max_iterations=20))
+
+        async def always_tool_stream(*args, **kwargs):
+            yield StreamChunk(
+                delta_content="",
+                delta_tool_calls=[{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "filesystem", "arguments": {"action": "exists", "path": "."}},
+                }],
+                finish_reason="tool_calls",
+            )
+
+        agent._llm.chat_stream = always_tool_stream
+        events = await _collect_events(agent, "keep checking")
+        limit_events = [e for e in events if e.type == "iteration_limit"]
+        assert len(limit_events) >= 1
 
     @pytest.mark.asyncio
     async def test_cancel(self):

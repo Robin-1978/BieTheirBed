@@ -109,8 +109,7 @@ class TestConversationManager:
         assert msgs[0] == {"role": "system", "content": "sys"}
         assert msgs[1] == {"role": "user", "content": "hello"}
         assert msgs[2]["role"] == "assistant"
-        # tool_calls are stripped from assistant messages to prevent AI confusion
-        assert "tool_calls" not in msgs[2]
+        assert "tool_calls" in msgs[2]
         assert msgs[2]["content"] == "thinking"
         assert msgs[3] == {"role": "tool", "content": "result", "tool_call_id": "call_1"}
 

@@ -6,7 +6,7 @@ llm_api_base: ""
 llm_temperature: 0.7
 llm_timeout: 120
 max_iterations: 8
-max_tokens: 1024
+max_tokens: 4096
 shell_timeout: 30
 context_window_budget: 8192
 log_file: "logs/pc_assistant.json"

@@ -402,7 +402,6 @@ class Agent:
         self._current_status = "thinking"
         self._conversation.add_user(user_input)
 
-        # Reset loop detection for new task
         self._tool_call_history.clear()
 
         memory_context = self._memory.build_context_string()
@@ -413,7 +412,10 @@ class Agent:
         self._conversation.set_system_context(full_system)
 
         empty_response_count = 0
-        max_empty_retries = 2
+        max_empty_retries = 1
+        total_tool_calls = 0
+        max_total_tool_calls = 15
+        consecutive_tool_without_answer = 0
 
         for iteration in range(self._config.max_iterations):
             if self._cancelled:
@@ -509,17 +511,8 @@ class Agent:
 
             self._connected = True
 
-            remaining_events = think_parser.flush()
-            for evt_type, evt_content in remaining_events:
-                yield AgentEvent(type=evt_type, content=evt_content, iteration=iteration)
-
-            if think_parser.in_think:
-                yield AgentEvent(type="think_end", content="", iteration=iteration)
-
-            if thinking_from_field:
-                yield AgentEvent(type="think_end", content="", iteration=iteration)
-
-            clean_content, thinking_content = _strip_think_tags(full_content)
+            clean_content = think_parser.clean_content
+            thinking_content = think_parser.think_content
 
             yield AgentEvent(type="stream_end", iteration=iteration)
 
@@ -624,6 +617,27 @@ class Agent:
                         allowed=True,
                     )
 
+                    total_tool_calls += 1
+                    consecutive_tool_without_answer += 1
+
+                    if total_tool_calls >= max_total_tool_calls:
+                        yield AgentEvent(
+                            type="iteration_limit",
+                            content=f"Total tool call limit reached ({max_total_tool_calls}).",
+                            iteration=iteration,
+                        )
+                        self._current_status = "ready"
+                        return
+
+                    if consecutive_tool_without_answer >= 5:
+                        yield AgentEvent(
+                            type="iteration_limit",
+                            content="Too many tool calls without producing an answer.",
+                            iteration=iteration,
+                        )
+                        self._current_status = "ready"
+                        return
+
                     self._current_status = f"executing_{tool_name}"
 
                     try:
@@ -672,6 +686,8 @@ class Agent:
                             iteration=iteration,
                         )
             else:
+                consecutive_tool_without_answer = 0
+
                 if finish_reason == "length" and clean_content:
                     self._conversation.add_assistant_final(clean_content)
                     yield AgentEvent(
@@ -693,21 +709,21 @@ class Agent:
                         )
                         self._current_status = "ready"
                         return
-                    self._conversation.add("user", "[System] You did not produce any output. Please respond to the user's question.")
+                    self._conversation.add("user", "[System] You did not produce any output. Please respond to the user's question directly.")
                     continue
 
                 if not clean_content and full_content:
                     empty_response_count += 1
                     if empty_response_count > max_empty_retries:
-                        self._conversation.add_assistant_final("I was unable to generate a visible response. Please try again.")
+                        self._conversation.add_assistant_final(full_content)
                         yield AgentEvent(
                             type="final_answer",
-                            content="I was unable to generate a visible response. Please try again.",
+                            content=full_content,
                             iteration=iteration,
                         )
                         self._current_status = "ready"
                         return
-                    self._conversation.add("user", "Please provide your answer based on your thinking.")
+                    self._conversation.add("user", "[System] Please provide a direct answer to the user's question. Do not just think, respond with your answer.")
                     continue
 
                 empty_response_count = 0
