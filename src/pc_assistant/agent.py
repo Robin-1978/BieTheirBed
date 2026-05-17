@@ -307,7 +307,7 @@ class Agent:
         empty_response_count = 0
         max_empty_retries = 1
         total_tool_calls = 0
-        max_total_tool_calls = 15
+        max_total_tool_calls = 50
         consecutive_tool_without_answer = 0
 
         for iteration in range(self._config.max_iterations):
@@ -510,10 +510,10 @@ class Agent:
                         self._current_status = "ready"
                         return
 
-                    if consecutive_tool_without_answer >= 5:
+                    if consecutive_tool_without_answer >= 50:
                         yield AgentEvent(
                             type="iteration_limit",
-                            content="Too many tool calls without producing an answer.",
+                            content=f"Too many tool calls ({consecutive_tool_without_answer}) without producing an answer.",
                             iteration=iteration,
                         )
                         self._current_status = "ready"

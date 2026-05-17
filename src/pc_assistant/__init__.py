@@ -20,7 +20,13 @@ def build_parser() -> "argparse.ArgumentParser":
     return parser
 
 
-async def async_main(config_path: str | None, verbose: bool) -> int:
+async def async_main(
+    config_path: str | None,
+    verbose: bool,
+    ask: str | None = None,
+    json_output: bool = False,
+    no_tools: bool = False,
+) -> int:
     import logging
 
     from pc_assistant.config import load_config
@@ -122,6 +128,9 @@ async def async_main(config_path: str | None, verbose: bool) -> int:
 
     logger.info("LLM server is healthy")
 
+    if ask is not None:
+        return await _run_benchmark(agent, ask, json_output=json_output, no_tools=no_tools)
+
     chat_ui = ChatUI(config=cfg)
     chat_ui.set_agent(agent)
 
@@ -140,6 +149,148 @@ async def async_main(config_path: str | None, verbose: bool) -> int:
         if scheduler:
             await scheduler.execute(action="stop")
 
+    return 0
+
+
+async def _run_benchmark(
+    agent: "Agent",
+    question: str,
+    json_output: bool = False,
+    no_tools: bool = False,
+) -> int:
+    import json
+    import sys
+    import time
+
+    if question == "-":
+        question = sys.stdin.read().strip()
+        if not question:
+            print("Error: no input from stdin", file=sys.stderr)
+            return 1
+
+    if no_tools:
+        from pc_assistant.tools.registry import ToolRegistry
+        from pc_assistant.harness.safety import SafetyChecker
+        agent._registry = ToolRegistry(safety=agent._safety)
+
+    start_time = time.monotonic()
+    tool_call_count = 0
+    answer = None
+    error_msg = None
+
+    try:
+        async for event in agent.run(question):
+            if event.type == "tool_call" and not event.blocked:
+                tool_call_count += 1
+            elif event.type == "final_answer":
+                answer = event.content
+            elif event.type == "error":
+                error_msg = event.content
+            elif event.type == "iteration_limit":
+                error_msg = event.content
+            elif event.type == "cancelled":
+                error_msg = event.content
+    except Exception as e:
+        error_msg = str(e)
+
+    elapsed = time.monotonic() - start_time
+    status = agent.get_status()
+
+    metrics = {
+        "elapsed_seconds": round(elapsed, 3),
+        "prompt_tokens": status["total_prompt_tokens"],
+        "completion_tokens": status["total_completion_tokens"],
+        "total_tokens": status["total_tokens"],
+        "iterations": status["total_iterations"],
+        "tool_calls": tool_call_count,
+        "model": status["model"],
+        "provider": status["provider"],
+    }
+
+    if json_output:
+        result = {
+            "question": question,
+            "answer": answer if not error_msg else None,
+            "metrics": metrics,
+            "error": error_msg,
+        }
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        print(f"Question: {question}")
+        print(f"Answer: {answer if not error_msg else 'ERROR: ' + error_msg}")
+        print("---")
+        print(f"Time: {elapsed:.2f}s")
+        print(f"Tokens: prompt={metrics['prompt_tokens']}, "
+              f"completion={metrics['completion_tokens']}, "
+              f"total={metrics['total_tokens']}")
+        print(f"Iterations: {metrics['iterations']}")
+        print(f"Tool calls: {metrics['tool_calls']}")
+
+    return 0 if not error_msg else 1
+
+
+async def async_benchmark(
+    config_path: str | None,
+    verbose: bool,
+    benchmark_path: str,
+    categories: list[str] | None = None,
+    output_path: str | None = None,
+) -> int:
+    from pc_assistant.benchmark.runner import BenchmarkRunner
+    from pc_assistant.config import AppConfig
+
+    cfg = AppConfig.from_yaml(config_path)
+    cfg.verbose = verbose
+
+    runner = BenchmarkRunner(config=cfg, output_path=output_path)
+
+    import os
+    if os.path.isdir(benchmark_path):
+        results = await runner.run_all(benchmark_path, categories=categories)
+    else:
+        results = await runner.run_dataset(benchmark_path)
+
+    print(f"\nDone. {len(results)} questions evaluated.")
+    total = sum(r.weighted_score for r in results)
+    total_weight = sum(r.weight for r in results)
+    overall = total / total_weight if total_weight > 0 else 0.0
+    print(f"Overall score: {overall:.2f}")
+
+    if output_path:
+        print(f"Results saved to {output_path}")
+
+    return 0
+
+
+def async_benchmark_report(results_dir: str) -> int:
+    import json
+    from pathlib import Path
+
+    from pc_assistant.benchmark.reporter import Reporter
+    from pc_assistant.benchmark.types import BenchmarkResult
+
+    results_dir = Path(results_dir)
+    if not results_dir.is_dir():
+        print(f"Error: not a directory: {results_dir}", file=sys.stderr)
+        return 1
+
+    results: list[BenchmarkResult] = []
+    for jsonl in sorted(results_dir.glob("*.jsonl")):
+        with open(jsonl, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        results.append(BenchmarkResult.model_validate(json.loads(line)))
+                    except Exception:
+                        pass
+
+    if not results:
+        print(f"Error: no results found in {results_dir}", file=sys.stderr)
+        return 1
+
+    report_path = Reporter.generate_report(results, str(results_dir))
+    print(f"Report generated: {report_path}")
     return 0
 
 
