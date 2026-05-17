@@ -31,6 +31,41 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Print version and exit",
     )
+    parser.add_argument(
+        "-a", "--ask",
+        type=str, default=None,
+        help="Ask a single question and exit (benchmark mode). Use '-' to read from stdin.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true", default=False,
+        help="Output result as JSON (requires --ask)",
+    )
+    parser.add_argument(
+        "--no-tools",
+        action="store_true", default=False,
+        help="Disable tool execution (requires --ask)",
+    )
+    parser.add_argument(
+        "-b", "--benchmark",
+        type=str, default=None,
+        help="Run a benchmark dataset (JSONL file or directory)",
+    )
+    parser.add_argument(
+        "--benchmark-report",
+        type=str, default=None,
+        help="Generate report from benchmark results directory",
+    )
+    parser.add_argument(
+        "--categories",
+        type=str, default=None,
+        help="Comma-separated benchmark categories to run (requires --benchmark)",
+    )
+    parser.add_argument(
+        "--output",
+        type=str, default=None,
+        help="Output file for benchmark results (requires --benchmark)",
+    )
     return parser
 
 
@@ -44,14 +79,36 @@ def main(argv: list[str] | None = None) -> int:
         print(f"pc_assistant {__version__}")
         return 0
 
+    if args.json and not args.ask:
+        parser.error("--json requires --ask")
+    if args.no_tools and not args.ask:
+        parser.error("--no-tools requires --ask")
+    if args.categories and not args.benchmark:
+        parser.error("--categories requires --benchmark")
+    if args.output and not args.benchmark:
+        parser.error("--output requires --benchmark")
+
     config_path = args.config
     if config_path is not None:
         config_path = str(Path(config_path).resolve())
 
-    from pc_assistant import async_main
+    from pc_assistant import async_main, async_benchmark, async_benchmark_report
+
+    if args.benchmark_report:
+        return async_benchmark_report(args.benchmark_report)
+
+    if args.benchmark:
+        categories = args.categories.split(",") if args.categories else None
+        return asyncio.run(async_benchmark(
+            config_path, args.verbose, args.benchmark,
+            categories=categories, output_path=args.output,
+        ))
 
     try:
-        return asyncio.run(async_main(config_path, args.verbose))
+        return asyncio.run(async_main(
+            config_path, args.verbose,
+            ask=args.ask, json_output=args.json, no_tools=args.no_tools,
+        ))
     except KeyboardInterrupt:
         return 130
 

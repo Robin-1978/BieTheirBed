@@ -12,6 +12,7 @@ from pc_assistant.ui.state import UIState, Message, MessageType
 from pc_assistant.ui.theme import TOKYO_NIGHT
 
 from rich.console import Console
+from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
@@ -321,40 +322,67 @@ class ChatUI:
         streaming_text = ""
         first_content_received = False
         think_active = False
+        answer_live: Live | None = None
+
+        def _stop_live() -> None:
+            nonlocal answer_live, think_active
+            if answer_live:
+                answer_live.stop()
+                answer_live = None
+            if think_active:
+                self._console.print()
+                think_active = False
 
         try:
             async for event in self._agent.run(user_input):
                 if self._cancelled:
+                    _stop_live()
                     self._console.print(Text("! Operation cancelled.", style="warning"))
                     break
 
                 if event.type == "stream_start":
+                    _stop_live()
                     first_content_received = False
                     streaming_text = ""
                     think_active = False
 
                 elif event.type == "stream_think_delta":
+                    output = answer_live.console if answer_live else self._console
                     if not think_active:
                         think_active = True
-                        self._console.print()
-                        self._console.print(Text("💭 ", style="dim"), end="")
-                    self._console.print(Text(event.content, style="dim"), end="")
+                        output.print()
+                        output.print(Text("💭 ", style="dim"), end="")
+                    output.print(Text(event.content, style="dim"), end="")
 
                 elif event.type == "stream_delta":
-                    first_content_received = True
                     streaming_text += event.content
+                    if answer_live is None:
+                        if think_active:
+                            self._console.print()
+                            think_active = False
+                        first_content_received = True
+                        self._console.print(Text("◆ ", style="ai_label"))
+                        answer_live = Live(
+                            Text(streaming_text),
+                            console=self._console,
+                            refresh_per_second=15,
+                            transient=False,
+                        )
+                        answer_live.start()
+                    else:
+                        answer_live.update(Text(streaming_text))
 
                 elif event.type == "stream_end":
-                    if think_active:
+                    if answer_live and streaming_text:
+                        answer_live.update(Markdown(streaming_text))
+                        answer_live.stop()
+                        answer_live = None
+                    elif streaming_text:
                         self._console.print()
-                        think_active = False
-                    if streaming_text:
-                        if first_content_received:
-                            self._console.print()
-                        self._console.print(Text("◆ ", style="ai_label"), end="")
-                        self._console.print(Markdown(streaming_text))
+                    think_active = False
 
                 elif event.type == "tool_call":
+                    _stop_live()
                     if event.blocked:
                         self._print_warning(f"Blocked: {event.content}")
                     else:
@@ -366,15 +394,18 @@ class ChatUI:
                     self._print_tool_result(event.tool_name, result_str, is_error)
 
                 elif event.type == "final_answer":
+                    _stop_live()
                     if not first_content_received and event.content:
                         self._console.print()
                         self._console.print(Text("◆ ", style="ai_label"), end="")
                         self._console.print(Markdown(event.content))
 
                 elif event.type == "error":
+                    _stop_live()
                     self._print_error(event.content)
 
                 elif event.type == "iteration_limit":
+                    _stop_live()
                     self._print_warning(event.content)
 
                 elif event.type == "cancelled":
