@@ -123,7 +123,7 @@ async def async_main(config_path: str | None, verbose: bool) -> int:
     logger.info("LLM server is healthy")
 
     chat_ui = ChatUI(config=cfg)
-    chat_ui._agent = agent
+    chat_ui.set_agent(agent)
 
     try:
         await chat_ui.run()

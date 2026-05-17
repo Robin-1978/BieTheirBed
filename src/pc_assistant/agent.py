@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import datetime
 from typing import Any, AsyncGenerator, Callable
 
 from pydantic import BaseModel
@@ -47,18 +46,16 @@ class AgentEvent(BaseModel):
     iteration: int = 0
 
 
-_THINK_OPEN = re.compile(r"<think[^>]*>", re.IGNORECASE)
-_THINK_CLOSE = re.compile(r"</think\s*>", re.IGNORECASE)
-
-
 def _strip_think_tags(text: str) -> tuple[str, str]:
+    _think_open = re.compile(r"<think[^>]*>", re.IGNORECASE)
+    _think_close = re.compile(r"</think[^>]*>", re.IGNORECASE)
     thinking = ""
     remaining = text
     while True:
-        m_open = _THINK_OPEN.search(remaining)
+        m_open = _think_open.search(remaining)
         if m_open is None:
             break
-        m_close = _THINK_CLOSE.search(remaining, m_open.end())
+        m_close = _think_close.search(remaining, m_open.end())
         if m_close is None:
             thinking += remaining[m_open.end():]
             remaining = remaining[:m_open.start()]
@@ -66,94 +63,6 @@ def _strip_think_tags(text: str) -> tuple[str, str]:
         thinking += remaining[m_open.end():m_close.start()]
         remaining = remaining[:m_open.start()] + remaining[m_close.end():]
     return remaining.strip(), thinking.strip()
-
-
-
-
-def _build_date_context() -> str:
-    now = datetime.now()
-    weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-    return f"Current date: {now.strftime('%Y-%m-%d')} ({weekday_names[now.weekday()]})\nCurrent time: {now.strftime('%H:%M:%S')}"
-
-
-class _ThinkStreamParser:
-    def __init__(self) -> None:
-        self._in_think = False
-        self._buffer = ""
-        self._think_content = ""
-        self._clean_content = ""
-
-    @property
-    def in_think(self) -> bool:
-        return self._in_think
-
-    @property
-    def think_content(self) -> str:
-        return self._think_content
-
-    @property
-    def clean_content(self) -> str:
-        return self._clean_content
-
-    def feed(self, delta: str) -> list[tuple[str, str]]:
-        self._buffer += delta
-        events: list[tuple[str, str]] = []
-
-        while self._buffer:
-            if self._in_think:
-                close_match = _THINK_CLOSE.search(self._buffer)
-                if close_match:
-                    text = self._buffer[:close_match.start()]
-                    if text:
-                        self._think_content += text
-                        events.append(("stream_think_delta", text))
-                    self._in_think = False
-                    self._buffer = self._buffer[close_match.end():]
-                    events.append(("think_end", ""))
-                else:
-                    if _THINK_OPEN.search(self._buffer):
-                        potential_partial = self._buffer
-                        self._buffer = ""
-                        break
-                    text = self._buffer
-                    self._think_content += text
-                    if text:
-                        events.append(("stream_think_delta", text))
-                    self._buffer = ""
-            else:
-                open_match = _THINK_OPEN.search(self._buffer)
-                if open_match:
-                    before = self._buffer[:open_match.start()]
-                    if before:
-                        self._clean_content += before
-                        events.append(("stream_delta", before))
-                    self._in_think = True
-                    self._buffer = self._buffer[open_match.end():]
-                    events.append(("think_start", ""))
-                else:
-                    if "</think" in self._buffer or "<thi" in self._buffer:
-                        potential_partial = self._buffer
-                        self._buffer = ""
-                        break
-                    text = self._buffer
-                    self._clean_content += text
-                    if text:
-                        events.append(("stream_delta", text))
-                    self._buffer = ""
-
-        return events
-
-    def flush(self) -> list[tuple[str, str]]:
-        events: list[tuple[str, str]] = []
-        if self._buffer:
-            if self._in_think:
-                self._think_content += self._buffer
-                events.append(("stream_think_delta", self._buffer))
-            else:
-                self._clean_content += self._buffer
-                events.append(("stream_delta", self._buffer))
-            self._buffer = ""
-        return events
 
 
 class Agent:
@@ -216,6 +125,10 @@ class Agent:
         if self._current_task is not None and not self._current_task.done():
             self._current_task.cancel()
 
+    def reset_cancelled(self) -> None:
+        self._cancelled = False
+        self._llm._cancelled = False
+
     def _check_tool_loop(self, tool_name: str, arguments: dict[str, Any]) -> tuple[bool, str]:
         """Check if we're in a tool calling loop. Returns (is_loop, reason).
 
@@ -225,7 +138,6 @@ class Agent:
         # Create signature based on tool name AND arguments
         # Normalize arguments for comparison
         try:
-            import json
             args_str = json.dumps(arguments, sort_keys=True)
         except:
             args_str = str(sorted(arguments.items()))
@@ -239,10 +151,10 @@ class Agent:
 
         # Only loop if EXACTLY the same call is made repeatedly (same tool + same args)
         # This is different from calling the same tool with different arguments
-        if len(self._tool_call_history) >= 5:
-            recent = self._tool_call_history[-5:]
+        if len(self._tool_call_history) >= self._max_consecutive_same_tool:
+            recent = self._tool_call_history[-self._max_consecutive_same_tool:]
             if all(t == call_sig for t in recent):
-                return True, f"Same tool '{tool_name}' with identical arguments called 5 times consecutively"
+                return True, f"Same tool '{tool_name}' with identical arguments called {self._max_consecutive_same_tool} times consecutively"
 
         return False, ""
 
@@ -371,25 +283,6 @@ class Agent:
         other_msgs = [m for m in messages if m.get("role") != "system"]
         return system_msgs + other_msgs
 
-    async def _call_llm_with_retry(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        max_retries: int = 3,
-    ) -> LLMResponse | None:
-        last_error: Exception | None = None
-        for attempt in range(max_retries):
-            try:
-                return await self._llm.chat(messages, tools=tools)
-            except Exception as e:
-                last_error = e
-                if attempt < max_retries - 1:
-                    import asyncio
-                    await asyncio.sleep(0.5 * (2 ** attempt))
-        if last_error is not None:
-            return LLMResponse(content=f"LLM request failed after retries: {last_error}", finish_reason="error")
-        return None
-
     async def run(self, user_input: str) -> AsyncGenerator[AgentEvent, None]:
         if not self._limiter.is_allowed("agent"):
             yield AgentEvent(
@@ -435,11 +328,11 @@ class Agent:
             tools = self._registry.all_schemas() if len(self._registry) > 0 else None
 
             full_content = ""
+            emitted_clean_len = 0
+            emitted_think_len = 0
             tool_calls_from_stream: list[dict[str, Any]] = []
             finish_reason = ""
             stream_had_error = False
-            think_parser = _ThinkStreamParser()
-            thinking_from_field = False
 
             yield AgentEvent(type="stream_start", iteration=iteration)
 
@@ -459,25 +352,22 @@ class Agent:
                         stream_had_error = True
                         break
 
-                    if chunk.delta_thinking:
-                        if not thinking_from_field:
-                            thinking_from_field = True
-                            yield AgentEvent(type="think_start", iteration=iteration)
-                        yield AgentEvent(
-                            type="stream_think_delta",
-                            content=chunk.delta_thinking,
-                            iteration=iteration,
-                        )
-
                     if chunk.delta_content:
                         full_content += chunk.delta_content
-                        parsed_events = think_parser.feed(chunk.delta_content)
-                        for evt_type, evt_content in parsed_events:
-                            yield AgentEvent(
-                                type=evt_type,
-                                content=evt_content,
-                                iteration=iteration,
-                            )
+                        clean_part, think_part = _strip_think_tags(full_content)
+
+                        new_content = clean_part[emitted_clean_len:]
+                        if new_content:
+                            yield AgentEvent(type="stream_delta", content=new_content, iteration=iteration)
+                            emitted_clean_len = len(clean_part)
+
+                        new_think = think_part[emitted_think_len:]
+                        if new_think:
+                            yield AgentEvent(type="stream_think_delta", content=new_think, iteration=iteration)
+                            emitted_think_len = len(think_part)
+
+                    if chunk.delta_thinking:
+                        yield AgentEvent(type="stream_think_delta", content=chunk.delta_thinking, iteration=iteration)
 
                     if chunk.delta_tool_calls:
                         tool_calls_from_stream = chunk.delta_tool_calls
@@ -511,22 +401,13 @@ class Agent:
 
             self._connected = True
 
-            clean_content = think_parser.clean_content
-            thinking_content = think_parser.think_content
+            clean_content = _strip_think_tags(full_content)[0]
 
             yield AgentEvent(type="stream_end", iteration=iteration)
 
-            if thinking_content:
-                yield AgentEvent(
-                    type="thought",
-                    content=thinking_content,
-                    iteration=iteration,
-                )
-
             if tool_calls_from_stream:
-                # Store content without tool_calls to prevent AI confusion in history
-                # The tool_calls were already sent and results will follow
-                self._conversation.add_assistant_final(clean_content or full_content)
+                stored_content = clean_content.strip()
+                self._conversation.add_assistant(stored_content, delta_tool_calls=tool_calls_from_stream)
                 for tool_call in tool_calls_from_stream:
                     if self._cancelled:
                         yield AgentEvent(type="cancelled", content="Operation cancelled by user.", iteration=iteration)
@@ -698,7 +579,7 @@ class Agent:
                     self._current_status = "ready"
                     return
 
-                if not clean_content and not full_content:
+                if not clean_content:
                     empty_response_count += 1
                     if empty_response_count > max_empty_retries:
                         self._conversation.add_assistant_final("I was unable to generate a response. Please try again.")
@@ -712,25 +593,11 @@ class Agent:
                     self._conversation.add("user", "[System] You did not produce any output. Please respond to the user's question directly.")
                     continue
 
-                if not clean_content and full_content:
-                    empty_response_count += 1
-                    if empty_response_count > max_empty_retries:
-                        self._conversation.add_assistant_final(full_content)
-                        yield AgentEvent(
-                            type="final_answer",
-                            content=full_content,
-                            iteration=iteration,
-                        )
-                        self._current_status = "ready"
-                        return
-                    self._conversation.add("user", "[System] Please provide a direct answer to the user's question. Do not just think, respond with your answer.")
-                    continue
-
                 empty_response_count = 0
-                self._conversation.add_assistant_final(clean_content or full_content)
+                self._conversation.add_assistant_final(clean_content)
                 yield AgentEvent(
                     type="final_answer",
-                    content=clean_content or full_content,
+                    content=clean_content,
                     iteration=iteration,
                 )
                 self._current_status = "ready"

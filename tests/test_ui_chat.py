@@ -174,9 +174,7 @@ class TestChatUIProcessEvents:
 
         async def _run_with_think(*args, **kwargs):
             yield AgentEvent(type="stream_start", content="")
-            yield AgentEvent(type="think_start", content="")
             yield AgentEvent(type="stream_think_delta", content="hmm")
-            yield AgentEvent(type="think_end", content="")
             yield AgentEvent(type="stream_delta", content="Answer")
             yield AgentEvent(type="stream_end", content="")
 
@@ -184,7 +182,8 @@ class TestChatUIProcessEvents:
         ui._agent = agent
         await ui._process_events("hello")
         captured = capsys.readouterr()
-        assert "Thinking" in captured.out
+        assert "Answer" in captured.out
+        assert "hmm" in captured.out
 
     @pytest.mark.asyncio
     async def test_process_events_cancel_protection(self):

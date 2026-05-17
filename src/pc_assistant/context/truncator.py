@@ -31,10 +31,10 @@ def _group_tool_pairs(messages: list[dict[str, Any]]) -> list[list[dict[str, Any
     i = 0
     while i < len(messages):
         msg = messages[i]
-        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+        if msg.get("role") == "assistant" and msg.get("delta_tool_calls"):
             group: list[dict[str, Any]] = [msg]
             tool_call_ids = {
-                tc.get("id") for tc in msg.get("tool_calls", []) if tc.get("id")
+                tc.get("id") for tc in msg.get("delta_tool_calls", []) if tc.get("id")
             }
             j = i + 1
             while j < len(messages) and messages[j].get("role") == "tool":
