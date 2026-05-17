@@ -4,7 +4,7 @@ import asyncio
 import json
 import re
 from croniter import croniter
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -43,8 +43,8 @@ class ScheduledTask:
         self._is_running: bool = False
 
     def calculate_next_run(self) -> datetime | None:
-        """Calculate the next run time based on schedule."""
-        now = datetime.now(timezone.utc)
+        """Calculate the next run time based on schedule (in local time)."""
+        now = datetime.now()
 
         if self._is_cron_schedule():
             try:
@@ -53,7 +53,6 @@ class ScheduledTask:
             except (ValueError, KeyError):
                 return None
         else:
-            # Parse interval format like "every 5m", "every 1h", "every 1d"
             match = re.match(r"every\s+(\d+)\s*([smhd])", self.schedule.lower())
             if match:
                 value = int(match.group(1))
@@ -68,7 +67,7 @@ class ScheduledTask:
         return " " in self.schedule and not self.schedule.lower().startswith("every")
 
     def should_run(self) -> bool:
-        """Check if task should run now."""
+        """Check if task should run now (using local time)."""
         if not self.enabled:
             return False
         if self._is_running:
@@ -77,7 +76,7 @@ class ScheduledTask:
             return False
         if self.next_run is None:
             return False
-        now = datetime.now(timezone.utc)
+        now = datetime.now()
         return now >= self.next_run
 
     def to_dict(self) -> dict[str, Any]:
@@ -98,14 +97,22 @@ class ScheduledTask:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ScheduledTask":
+        def _to_local(dt_str: str | None) -> datetime | None:
+            if not dt_str:
+                return None
+            dt = datetime.fromisoformat(dt_str)
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(None).replace(tzinfo=None)
+            return dt
+
         task = cls(
             task_id=data["task_id"],
             name=data["name"],
             command=data["command"],
             schedule=data["schedule"],
             enabled=data.get("enabled", True),
-            last_run=datetime.fromisoformat(data["last_run"]) if data.get("last_run") else None,
-            next_run=datetime.fromisoformat(data["next_run"]) if data.get("next_run") else None,
+            last_run=_to_local(data.get("last_run")),
+            next_run=_to_local(data.get("next_run")),
             run_count=data.get("run_count", 0),
             max_runs=data.get("max_runs", 0),
             timeout=data.get("timeout", 300),
@@ -166,7 +173,7 @@ class SchedulerTool(ToolBase):
         self._storage_path.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "version": 1,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now().isoformat(),
             "tasks": [task.to_dict() for task in self._tasks.values()],
         }
         with open(self._storage_path, "w", encoding="utf-8") as f:
@@ -294,7 +301,7 @@ class SchedulerTool(ToolBase):
             info = task.to_dict()
             # Calculate remaining time
             if task.next_run:
-                remaining = (task.next_run - datetime.now(timezone.utc)).total_seconds()
+                remaining = (task.next_run - datetime.now()).total_seconds()
                 info["next_run_in"] = f"{int(remaining)}s" if remaining > 0 else "now"
             tasks_data.append(info)
 
@@ -318,7 +325,7 @@ class SchedulerTool(ToolBase):
 
         info = task.to_dict()
         if task.next_run:
-            remaining = (task.next_run - datetime.now(timezone.utc)).total_seconds()
+            remaining = (task.next_run - datetime.now()).total_seconds()
             info["next_run_in_seconds"] = int(remaining) if remaining > 0 else 0
 
         return info
@@ -393,7 +400,7 @@ class SchedulerTool(ToolBase):
 
         # Update run count and next run
         task.run_count += 1
-        task.last_run = datetime.now(timezone.utc)
+        task.last_run = datetime.now()
         task.next_run = task.calculate_next_run()
         self._save()
 
@@ -491,7 +498,7 @@ class SchedulerTool(ToolBase):
                     if task.should_run():
                         await self._execute_task(task)
                         task.run_count += 1
-                        task.last_run = datetime.now(timezone.utc)
+                        task.last_run = datetime.now()
                         task.next_run = task.calculate_next_run()
                         self._save()
 
