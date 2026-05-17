@@ -12,12 +12,13 @@ from pc_assistant.ui.state import UIState, Message, MessageType
 from pc_assistant.ui.theme import TOKYO_NIGHT
 
 from rich.console import Console
-from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
 from rich.table import Table
-from rich.prompt import Prompt
+
+from prompt_toolkit.shortcuts import PromptSession
+from prompt_toolkit.styles import Style as PTStyle
 
 _WELCOME_ART = r"""
   ____  _        _   _               ____           _
@@ -61,6 +62,11 @@ class ChatUI:
         self._console = Console(theme=TOKYO_NIGHT)
         self._last_input: str = ""
         self._cancelled = False
+        self._event_task: asyncio.Task | None = None
+        self._pt_session = PromptSession()
+
+    def set_agent(self, agent: Agent) -> None:
+        self._agent = agent
 
     def _show_welcome(self) -> None:
         self._console.print(_WELCOME_ART, style="bold green", highlight=False)
@@ -274,7 +280,9 @@ class ChatUI:
         if cmd == "/retry":
             if self._last_input:
                 self._console.print("[dim]Retrying last input...[/dim]")
-                asyncio.create_task(self._process_events(self._last_input))
+                if self._event_task is not None and not self._event_task.done():
+                    self._event_task.cancel()
+                self._event_task = asyncio.create_task(self._process_events(self._last_input))
             else:
                 self._print_warning("No previous input to retry.")
             return True
@@ -302,7 +310,7 @@ class ChatUI:
             return
 
         self._cancelled = False
-        self._agent._cancelled = False
+        self._agent.reset_cancelled()
 
         loop = asyncio.get_event_loop()
         try:
@@ -312,10 +320,7 @@ class ChatUI:
 
         streaming_text = ""
         first_content_received = False
-        think_start_time: float | None = None
-        think_text = ""
-        think_live: Live | None = None
-        live: Live | None = None
+        think_active = False
 
         try:
             async for event in self._agent.run(user_input):
@@ -325,55 +330,29 @@ class ChatUI:
 
                 if event.type == "stream_start":
                     first_content_received = False
-
-                elif event.type == "think_start":
-                    think_start_time = time.time()
-                    think_text = ""
-                    self._console.print(Text("◇ ", style="think_icon"), end="")
-                    think_live = Live(
-                        Text("Thinking...", style="think_dim"),
-                        console=self._console,
-                        refresh_per_second=12,
-                        vertical_overflow="visible",
-                    )
-                    think_live.start()
+                    streaming_text = ""
+                    think_active = False
 
                 elif event.type == "stream_think_delta":
-                    think_text += event.content
-                    if think_live is not None:
-                        think_live.update(Text(think_text, style="think_dim"))
-
-                elif event.type == "think_end":
-                    elapsed = time.time() - think_start_time if think_start_time else 0
-                    if think_live is not None:
-                        think_live.stop()
-                        think_live = None
-                    self._console.print(Text(
-                        f"◇ Thinking... {elapsed:.1f}s",
-                        style="think_dim",
-                    ))
-                    think_start_time = None
-                    think_text = ""
+                    if not think_active:
+                        think_active = True
+                        self._console.print()
+                        self._console.print(Text("💭 ", style="dim"), end="")
+                    self._console.print(Text(event.content, style="dim"), end="")
 
                 elif event.type == "stream_delta":
-                    if not first_content_received:
-                        first_content_received = True
-                        self._console.print()
-                        self._console.print(Text("◆ ", style="ai_label"), end="")
-                        live = Live(console=self._console, refresh_per_second=12, vertical_overflow="visible")
-                        live.start()
+                    first_content_received = True
                     streaming_text += event.content
-                    if live is not None:
-                        live.update(Markdown(streaming_text))
 
                 elif event.type == "stream_end":
-                    if live is not None:
-                        live.update(Markdown(streaming_text))
-                        live.stop()
-                        live = None
-
-                elif event.type == "thought":
-                    pass
+                    if think_active:
+                        self._console.print()
+                        think_active = False
+                    if streaming_text:
+                        if first_content_received:
+                            self._console.print()
+                        self._console.print(Text("◆ ", style="ai_label"), end="")
+                        self._console.print(Markdown(streaming_text))
 
                 elif event.type == "tool_call":
                     if event.blocked:
@@ -389,7 +368,7 @@ class ChatUI:
                 elif event.type == "final_answer":
                     if not first_content_received and event.content:
                         self._console.print()
-                        self._console.print(Text("◆ ", style="ai_label"))
+                        self._console.print(Text("◆ ", style="ai_label"), end="")
                         self._console.print(Markdown(event.content))
 
                 elif event.type == "error":
@@ -404,10 +383,6 @@ class ChatUI:
         except KeyboardInterrupt:
             self._cancel()
         finally:
-            if think_live is not None:
-                think_live.stop()
-            if live is not None:
-                live.stop()
             try:
                 loop.remove_signal_handler(signal.SIGINT)
             except (NotImplementedError, OSError):
@@ -436,7 +411,12 @@ class ChatUI:
 
         while self._running:
             try:
-                user_input = Prompt.ask("[prompt]❯[/prompt]", console=self._console)
+                user_input = await self._pt_session.prompt_async(
+                    [("class:prompt", "❯ ")],
+                    style=PTStyle.from_dict({
+                        "prompt": "ansigreen bold",
+                    }),
+                )
             except (EOFError, KeyboardInterrupt):
                 self._console.print("\n[dim]Goodbye![/dim]")
                 break

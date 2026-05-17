@@ -8,7 +8,9 @@
       "Bash(py *)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(python -m pytest tests/test_agent.py -v)",
+      "Bash(python *)"
     ]
   },
   "enabledPlugins": {

@@ -40,7 +40,7 @@ class TestGroupToolPairs:
 
     def test_tool_call_with_result(self):
         messages = [
-            {"role": "assistant", "content": "", "tool_calls": [{"id": "tc1", "function": {"name": "shell", "arguments": {}}}]},
+            {"role": "assistant", "content": "", "delta_tool_calls": [{"id": "tc1", "function": {"name": "shell", "arguments": {}}}]},
             {"role": "tool", "content": "result", "tool_call_id": "tc1"},
         ]
         groups = _group_tool_pairs(messages)
@@ -50,7 +50,7 @@ class TestGroupToolPairs:
     def test_mixed_messages(self):
         messages = [
             {"role": "user", "content": "run ls"},
-            {"role": "assistant", "content": "", "tool_calls": [{"id": "tc1", "function": {"name": "shell", "arguments": {"command": "ls"}}}]},
+            {"role": "assistant", "content": "", "delta_tool_calls": [{"id": "tc1", "function": {"name": "shell", "arguments": {"command": "ls"}}}]},
             {"role": "tool", "content": "file1.txt\nfile2.txt", "tool_call_id": "tc1"},
             {"role": "assistant", "content": "Here are the files."},
         ]

@@ -44,6 +44,9 @@ class TestConversationManager:
     def test_tool_result(self):
         cm = ConversationManager()
         cm.set_system_context("sys")
+        cm.add_assistant("checking...", delta_tool_calls=[
+            {"id": "tc1", "type": "function", "function": {"name": "shell", "arguments": {"command": "ls"}}}
+        ])
         cm.add_tool_result("tc1", "result text")
         messages = cm.get_messages_for_llm()
         tool_msgs = [m for m in messages if m["role"] == "tool"]
@@ -75,7 +78,7 @@ class TestConversationManager:
         cm = ConversationManager()
         cm.set_system_context("sys")
         cm.add_user("hello")
-        cm.add_assistant("thinking...", tool_calls=[
+        cm.add_assistant("thinking...", delta_tool_calls=[
             {"id": "tc1", "type": "function", "function": {"name": "shell", "arguments": {"command": "ls"}}}
         ])
         cm.add_tool_result("tc1", "file1.txt")
@@ -90,14 +93,14 @@ class TestConversationManager:
         cm = ConversationManager()
         cm.set_system_context("sys")
         cm.add_user("list files")
-        cm.add_assistant("checking...", tool_calls=[
+        cm.add_assistant("checking...", delta_tool_calls=[
             {"id": "tc1", "type": "function", "function": {"name": "shell", "arguments": {"command": "ls"}}}
         ])
         cm.add_tool_result("tc1", "file1.txt")
         messages = cm.get_messages_for_llm()
         assistant_msgs = [m for m in messages if m["role"] == "assistant"]
         assert len(assistant_msgs) == 1
-        assert "tool_calls" in assistant_msgs[0]
+        assert "delta_tool_calls" in assistant_msgs[0]
 
     def test_assistant_without_tool_calls_no_tool_field(self):
         cm = ConversationManager()
@@ -107,4 +110,28 @@ class TestConversationManager:
         messages = cm.get_messages_for_llm()
         assistant_msgs = [m for m in messages if m["role"] == "assistant"]
         assert len(assistant_msgs) == 1
-        assert "tool_calls" not in assistant_msgs[0]
+        assert "delta_tool_calls" not in assistant_msgs[0]
+
+    def test_tool_result_preserved_with_tool_calls(self):
+        cm = ConversationManager()
+        cm.set_system_context("sys")
+        cm.add_user("list files")
+        cm.add_assistant("checking...", delta_tool_calls=[
+            {"id": "tc1", "type": "function", "function": {"name": "shell", "arguments": {"command": "ls"}}}
+        ])
+        cm.add_tool_result("tc1", "file1.txt")
+        cm.add_assistant_final("Here are the files.")
+        messages = cm.get_messages_for_llm()
+        tool_msgs = [m for m in messages if m["role"] == "tool"]
+        assert len(tool_msgs) == 1
+        assert tool_msgs[0]["tool_call_id"] == "tc1"
+
+    def test_tool_result_orphaned_without_tool_calls(self):
+        cm = ConversationManager()
+        cm.set_system_context("sys")
+        cm.add_user("hello")
+        cm.add_assistant_final("Hi there!")
+        cm.add_tool_result("orphan_tc", "orphan result")
+        messages = cm.get_messages_for_llm()
+        tool_msgs = [m for m in messages if m["role"] == "tool"]
+        assert len(tool_msgs) == 0

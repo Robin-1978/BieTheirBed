@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 class Message(BaseModel):
     role: str
     content: str
-    tool_calls: list[dict[str, Any]] | None = None
+    delta_tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
 
 
@@ -22,7 +22,6 @@ def _build_date_context() -> str:
 class ConversationManager:
     def __init__(self, max_messages: int = 100) -> None:
         self._messages: list[Message] = []
-        self._max_messages = max_messages
         self._system_prompt: str = ""
         self._date_context_provider: Callable[[], str] = _build_date_context
 
@@ -40,13 +39,12 @@ class ConversationManager:
 
     def add_user(self, content: str) -> Message:
         return self.add("user", content)
-
-    def add_assistant(self, content: str, tool_calls: list[dict[str, Any]] | None = None) -> Message:
-        return self.add("assistant", content, tool_calls=tool_calls)
+    def add_assistant(self, content: str, delta_tool_calls: list[dict[str, Any]] | None = None) -> Message:
+        return self.add("assistant", content, delta_tool_calls=delta_tool_calls)
 
     def add_assistant_final(self, content: str) -> Message:
-        """Store final assistant response without tool_calls (to prevent AI confusion in history)."""
-        return self.add("assistant", content, tool_calls=None)
+        """Store final assistant response without delta_tool_calls (to prevent AI confusion in history)."""
+        return self.add("assistant", content, delta_tool_calls=None)
 
     def add_tool_result(self, tool_call_id: str, content: str) -> Message:
         return self.add("tool", content, tool_call_id=tool_call_id)
@@ -55,8 +53,8 @@ class ConversationManager:
         result: list[dict[str, Any]] = []
         for msg in self._messages:
             d: dict[str, Any] = {"role": msg.role, "content": msg.content}
-            if msg.tool_calls is not None:
-                d["tool_calls"] = msg.tool_calls
+            if msg.delta_tool_calls is not None:
+                d["delta_tool_calls"] = msg.delta_tool_calls
             if msg.tool_call_id is not None:
                 d["tool_call_id"] = msg.tool_call_id
             result.append(d)
@@ -74,30 +72,33 @@ class ConversationManager:
         if system_parts:
             result.append({"role": "system", "content": "\n\n".join(system_parts)})
 
-        skip_tool = False
+        valid_tool_ids: set[str] = set()
+        for msg in self._messages:
+            if msg.role == "assistant" and msg.delta_tool_calls:
+                for tc in msg.delta_tool_calls:
+                    tc_id = tc.get("id", "")
+                    if tc_id:
+                        valid_tool_ids.add(tc_id)
+
         for msg in self._messages:
             if msg.role == "system":
                 continue
             elif msg.role == "user":
-                skip_tool = True
                 result.append({"role": "user", "content": msg.content})
             elif msg.role == "assistant":
                 d: dict[str, Any] = {"role": "assistant", "content": msg.content}
-                if msg.tool_calls:
-                    d["tool_calls"] = msg.tool_calls
-                    skip_tool = False
-                else:
-                    skip_tool = True
+                if msg.delta_tool_calls:
+                    d["delta_tool_calls"] = msg.delta_tool_calls
                 result.append(d)
             elif msg.role == "tool":
-                if not skip_tool:
+                tc_id = msg.tool_call_id or ""
+                if tc_id in valid_tool_ids:
                     result.append({
                         "role": "tool",
                         "content": msg.content,
                         "tool_call_id": msg.tool_call_id or "",
                     })
             else:
-                skip_tool = True
                 result.append({"role": msg.role, "content": msg.content})
 
         return result
@@ -107,8 +108,8 @@ class ConversationManager:
         total = 0
         for msg in self._messages:
             total += _estimate_tokens(msg.content)
-            if msg.tool_calls is not None:
-                for tc in msg.tool_calls:
+            if msg.delta_tool_calls is not None:
+                for tc in msg.delta_tool_calls: 
                     total += _estimate_tokens(str(tc))
         return total
 

@@ -37,13 +37,13 @@ class TestMessage:
         m = Message(role="user", content="hello")
         assert m.role == "user"
         assert m.content == "hello"
-        assert m.tool_calls is None
+        assert m.delta_tool_calls is None
         assert m.tool_call_id is None
 
     def test_message_with_tool_calls(self):
         tc = [{"id": "call_1", "function": {"name": "test", "arguments": {}}}]
-        m = Message(role="assistant", content="", tool_calls=tc)
-        assert m.tool_calls == tc
+        m = Message(role="assistant", content="", delta_tool_calls=tc)
+        assert m.delta_tool_calls == tc
 
     def test_message_with_tool_call_id(self):
         m = Message(role="tool", content="result", tool_call_id="call_1")
@@ -66,8 +66,8 @@ class TestConversationManager:
     def test_add_assistant_with_tool_calls(self):
         cm = ConversationManager()
         tc = [{"id": "call_1", "function": {"name": "test", "arguments": {}}}]
-        msg = cm.add_assistant("thinking", tool_calls=tc)
-        assert msg.tool_calls == tc
+        msg = cm.add_assistant("thinking", delta_tool_calls=tc)
+        assert msg.delta_tool_calls == tc
 
     def test_add_tool_result(self):
         cm = ConversationManager()
@@ -92,10 +92,10 @@ class TestConversationManager:
     def test_get_messages_with_tool_calls(self):
         cm = ConversationManager()
         tc = [{"id": "call_1", "function": {"name": "test", "arguments": {}}}]
-        cm.add_assistant("thinking", tool_calls=tc)
+        cm.add_assistant("thinking", delta_tool_calls=tc)
         cm.add_tool_result("call_1", "result")
         msgs = cm.get_messages()
-        assert "tool_calls" in msgs[0]
+        assert "delta_tool_calls" in msgs[0]
         assert msgs[1]["tool_call_id"] == "call_1"
 
     def test_get_messages_for_llm(self):
@@ -103,13 +103,13 @@ class TestConversationManager:
         cm.set_system_context("sys", date_context_provider=lambda: "")
         cm.add_user("hello")
         tc = [{"id": "call_1", "function": {"name": "test", "arguments": {}}}]
-        cm.add_assistant("thinking", tool_calls=tc)
+        cm.add_assistant("thinking", delta_tool_calls=tc)
         cm.add_tool_result("call_1", "result")
         msgs = cm.get_messages_for_llm()
         assert msgs[0] == {"role": "system", "content": "sys"}
         assert msgs[1] == {"role": "user", "content": "hello"}
         assert msgs[2]["role"] == "assistant"
-        assert "tool_calls" in msgs[2]
+        assert "delta_tool_calls" in msgs[2]
         assert msgs[2]["content"] == "thinking"
         assert msgs[3] == {"role": "tool", "content": "result", "tool_call_id": "call_1"}
 
@@ -155,7 +155,7 @@ class TestConversationManager:
     def test_estimate_token_count_with_tool_calls(self):
         cm = ConversationManager()
         tc = [{"id": "call_1", "function": {"name": "test_tool_with_long_name", "arguments": {"key": "value"}}}]
-        cm.add_assistant("thinking", tool_calls=tc)
+        cm.add_assistant("thinking", delta_tool_calls=tc)
         tokens = cm.estimate_token_count()
         assert tokens > 0
 

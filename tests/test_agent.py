@@ -346,14 +346,33 @@ class TestAgentRun:
         final = [e for e in events if e.type == "final_answer"]
         assert len(final) >= 1
         assert "42" in final[0].content
-        thoughts = [e for e in events if e.type == "thought"]
-        assert len(thoughts) >= 1
+        stream_deltas = [e for e in events if e.type == "stream_delta"]
+        all_streamed = "".join(e.content for e in stream_deltas)
+        assert "42" in all_streamed
+        assert "Let me reason" not in all_streamed
         think_deltas = [e for e in events if e.type == "stream_think_delta"]
-        assert len(think_deltas) >= 1
-        think_starts = [e for e in events if e.type == "think_start"]
-        assert len(think_starts) >= 1
-        think_ends = [e for e in events if e.type == "think_end"]
-        assert len(think_ends) >= 1
+        all_think = "".join(e.content for e in think_deltas)
+        assert "Let me reason" in all_think
+
+    @pytest.mark.asyncio
+    async def test_delta_thinking_emitted_as_stream_think_delta(self):
+        agent = Agent(config=AppConfig())
+
+        async def thinking_stream(*args, **kwargs):
+            yield StreamChunk(delta_thinking="I need to search first", finish_reason="")
+            yield StreamChunk(delta_thinking=" let me check", finish_reason="")
+            yield StreamChunk(delta_content="The search results show 42", finish_reason="")
+            yield StreamChunk(finish_reason="stop")
+
+        agent._llm.chat_stream = thinking_stream
+        events = await _collect_events(agent, "what is the answer")
+        think_deltas = [e for e in events if e.type == "stream_think_delta"]
+        all_think = "".join(e.content for e in think_deltas)
+        assert "I need to search first" in all_think
+        assert "let me check" in all_think
+        final = [e for e in events if e.type == "final_answer"]
+        assert len(final) >= 1
+        assert "42" in final[0].content
 
     @pytest.mark.asyncio
     async def test_think_only_response(self):
