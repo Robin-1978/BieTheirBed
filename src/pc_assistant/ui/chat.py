@@ -4,7 +4,6 @@ import asyncio
 import json
 import signal
 import time
-from collections import defaultdict
 from io import StringIO
 from typing import Any, Callable
 
@@ -21,7 +20,7 @@ from rich.table import Table
 from rich.text import Text
 
 from prompt_toolkit.application import Application
-from prompt_toolkit.formatted_text import ANSI as PTANSI, FormattedText, StyleAndTextTuples, merge_formatted_text
+from prompt_toolkit.formatted_text import ANSI as PTANSI, FormattedText, StyleAndTextTuples, merge_formatted_text, to_formatted_text
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout, HSplit, Window, WindowAlign
 from prompt_toolkit.layout.controls import FormattedTextControl
@@ -71,10 +70,20 @@ class _ChatWindow(Window):
         super().__init__(*args, **kwargs)
         self.pinned_to_bottom = True
 
-    def _scroll(self) -> int:
+    def _scroll(self, ui_content: Any, width: int, height: int) -> None:
+        super()._scroll(ui_content, width, height)
         if self.pinned_to_bottom:
-            return 10 ** 9
-        return super()._scroll()
+            total_lines = ui_content.line_count
+            max_scroll = max(0, total_lines - height)
+            self.vertical_scroll = max_scroll
+
+    def _scroll_up(self) -> None:
+        self.pinned_to_bottom = False
+        super()._scroll_up()
+
+    def _scroll_down(self) -> None:
+        self.pinned_to_bottom = False
+        super()._scroll_down()
 
 
 class ChatUI:
@@ -100,11 +109,11 @@ class ChatUI:
         self._kb: KeyBindings | None = None
         self._refresh_task: asyncio.Task | None = None
         self._spinner_idx = 0
+        self._console_buffer: StringIO | None = None
+        self._saved_console_file: Any = None
 
         # TUI rendering state
         self._chat_fragments: list[StyleAndTextTuples] = []
-        self._streaming_fragments: StyleAndTextTuples = []
-        self._streaming_active = False
         self._current_op = ""
         self._token_count = 0
 
@@ -422,12 +431,13 @@ class ChatUI:
             width=80,
         )
         console.print(Markdown(text))
-        return list(PTANSI(buf.getvalue()))
+        return self._clean_styles(list(to_formatted_text(PTANSI(buf.getvalue()))))
 
     def _init_tui(self) -> None:
         self._chat_fragments.clear()
-        self._streaming_fragments = []
-        self._streaming_active = False
+        self._console_buffer = StringIO()
+        self._saved_console_file = self._console.file
+        self._console.file = self._console_buffer
 
         chat_control = FormattedTextControl(self._get_chat_fragments)
 
@@ -447,7 +457,7 @@ class ChatUI:
 
         self._layout = HSplit([
             self._chat_window,
-            Window(height=1, content=self._input_field.control, dont_extend_height=True),
+            self._input_field,
             Window(height=1, content=status_control, dont_extend_height=True,
                    align=WindowAlign.LEFT, style="class:status"),
         ])
@@ -464,12 +474,30 @@ class ChatUI:
             mouse_support=True,
         )
 
+    def _clean_styles(self, fragments: StyleAndTextTuples) -> StyleAndTextTuples:
+        """Remove unsupported style tokens (e.g. 'dim') from parsed ANSI."""
+        result: StyleAndTextTuples = []
+        for style, text in fragments:
+            if style and "dim" in style:
+                style = style.replace(" dim", "").replace("dim ", "").replace("dim", "")
+                if not style.strip():
+                    style = ""
+            result.append((style, text))
+        return result
+
+    def _sync_console_to_chat(self) -> None:
+        if self._console_buffer is None:
+            return
+        text = self._console_buffer.getvalue()
+        if text:
+            fragments = list(to_formatted_text(PTANSI(text)))
+            self._chat_fragments.append(self._clean_styles(fragments))
+            self._console_buffer = StringIO()
+            self._console.file = self._console_buffer
+
     def _get_chat_fragments(self) -> StyleAndTextTuples:
+        self._sync_console_to_chat()
         parts: list[StyleAndTextTuples] = list(self._chat_fragments)
-
-        if self._streaming_active and self._streaming_fragments:
-            parts.append(self._streaming_fragments)
-
         return merge_formatted_text(parts) if parts else FormattedText([("", "")])
 
     def _get_status_text(self) -> StyleAndTextTuples:
@@ -536,8 +564,6 @@ class ChatUI:
             await self._process_events_console(user_input)
 
         self._state.processing = False
-        self._streaming_active = False
-        self._streaming_fragments = []
         self._current_op = ""
         try:
             loop.remove_signal_handler(signal.SIGINT)
@@ -556,18 +582,18 @@ class ChatUI:
 
                 if event.type == "stream_start":
                     streaming_text = ""
-                    self._streaming_active = True
-                    self._streaming_fragments = [("bold #7aa2f7", "\u25c6 ")]
+                    self._chat_fragments.append([("bold #7aa2f7", "\u25c6 ")])
                     think_active = False
                     self._current_op = "generating..."
                     self._app.invalidate()
 
                 elif event.type == "stream_delta":
                     streaming_text += event.content
-                    self._streaming_fragments = [
-                        ("bold #7aa2f7", "\u25c6 "),
-                        ("", streaming_text),
-                    ]
+                    if self._chat_fragments:
+                        self._chat_fragments[-1] = [
+                            ("bold #7aa2f7", "\u25c6 "),
+                            ("", streaming_text),
+                        ]
                     if think_active:
                         self._chat_fragments.append([("", "\n")])
                         think_active = False
@@ -576,21 +602,22 @@ class ChatUI:
                 elif event.type == "stream_think_delta":
                     if not think_active:
                         think_active = True
-                        self._chat_fragments.append([("dim italic #3b4261", "\U0001f4ad ")])
+                        self._chat_fragments.append([("italic #565f89", "\U0001f4ad ")])
                     else:
                         last = self._chat_fragments[-1] if self._chat_fragments else None
-                        if last and len(last) == 1 and last[0][0] == "dim italic #3b4261":
-                            last[0] = ("dim italic #3b4261", last[0][1] + event.content)
+                        if last and len(last) == 1 and last[0][0] == "italic #565f89":
+                            last[0] = ("italic #565f89", last[0][1] + event.content)
                         else:
-                            self._chat_fragments.append([("dim italic #3b4261", event.content)])
+                            self._chat_fragments.append([("italic #565f89", event.content)])
                     self._current_op = "thinking..."
 
                 elif event.type == "stream_end":
-                    self._streaming_active = False
                     if streaming_text:
                         rendered = self._render_md(f"\u25c6 {streaming_text}")
-                        self._chat_fragments.append(rendered)
-                    self._streaming_fragments = []
+                        if self._chat_fragments:
+                            self._chat_fragments[-1] = rendered
+                        else:
+                            self._chat_fragments.append(rendered)
                     self._current_op = ""
                     self._app.invalidate()
 
@@ -653,8 +680,6 @@ class ChatUI:
         except Exception as e:
             self._chat_fragments.append([("bold #f7768e", f"\u2717 {e}\n")])
         finally:
-            self._streaming_active = False
-            self._streaming_fragments = []
             self._current_op = ""
             self._app.invalidate()
 
@@ -762,10 +787,21 @@ class ChatUI:
         except (EOFError, KeyboardInterrupt):
             return None
 
+    def _show_welcome_tui(self) -> None:
+        self._chat_fragments.append([("bold #9ece6a", _WELCOME_ART)])
+        from pc_assistant import __version__
+        self._chat_fragments.append([
+            ("", f"  "),
+            ("bold", f"v{__version__}"),
+            ("#565f89", f"  \u2022  Type "),
+            ("bold", "/help"),
+            ("#565f89", " for commands\n\n"),
+        ])
+
     async def run(self) -> None:
         self._running = True
         self._init_tui()
-        self._show_welcome()
+        self._show_welcome_tui()
 
         self._refresh_task = asyncio.get_event_loop().create_task(self._refresh_loop())
 
@@ -777,3 +813,6 @@ class ChatUI:
                 await self._refresh_task
             except asyncio.CancelledError:
                 pass
+            if self._saved_console_file is not None:
+                self._console.file = self._saved_console_file
+                self._saved_console_file = None
