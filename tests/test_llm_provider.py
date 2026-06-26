@@ -471,45 +471,121 @@ class TestLLMProviderChatStream:
     @pytest.mark.asyncio
     async def test_chat_stream_anthropic_fallback(self):
         p = LLMProvider(provider="anthropic", api_key="key", model_name="claude-3")
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "content": [{"type": "text", "text": "Hello from Claude!"}],
-            "stop_reason": "end_turn",
-            "usage": {},
-        }
-        mock_response.raise_for_status = MagicMock()
 
-        with patch.object(p, "_request_with_retry", return_value=mock_response):
+        # Simulate Anthropic SSE streaming events
+        sse_events = [
+            'event: message_start',
+            'data: {"type": "message_start", "message": {"id": "msg_1", "content": [], "usage": {"input_tokens": 10}}}',
+            '',
+            'event: content_block_start',
+            'data: {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}',
+            '',
+            'event: content_block_delta',
+            'data: {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Hello from Claude!"}}',
+            '',
+            'event: content_block_stop',
+            'data: {"type": "content_block_stop", "index": 0}',
+            '',
+            'event: message_delta',
+            'data: {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 5}}',
+            '',
+            'event: message_stop',
+            'data: {"type": "message_stop"}',
+            '',
+        ]
+
+        class MockStreamResponse:
+            def raise_for_status(self):
+                pass
+            async def aiter_lines(self):
+                for line in sse_events:
+                    yield line
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+
+        class MockClient:
+            def stream(self, method, url, **kwargs):
+                return MockStreamResponse()
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+
+        with patch("httpx.AsyncClient", return_value=MockClient()):
             chunks = []
             async for chunk in p.chat_stream([{"role": "user", "content": "hi"}]):
                 chunks.append(chunk)
-            assert len(chunks) == 1
+            assert len(chunks) == 2
             assert chunks[0].delta_content == "Hello from Claude!"
-            assert chunks[0].finish_reason == "end_turn"
+            assert chunks[1].finish_reason == "end_turn"
 
     @pytest.mark.asyncio
     async def test_chat_stream_anthropic_with_tools(self):
         p = LLMProvider(provider="anthropic", api_key="key", model_name="claude-3")
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "content": [
-                {"type": "tool_use", "id": "toolu_1", "name": "test", "input": {"x": 1}},
-            ],
-            "stop_reason": "tool_use",
-            "usage": {},
-        }
-        mock_response.raise_for_status = MagicMock()
 
-        with patch.object(p, "_request_with_retry", return_value=mock_response):
+        sse_events = [
+            'event: message_start',
+            'data: {"type": "message_start", "message": {"id": "msg_1", "content": [], "usage": {"input_tokens": 10}}}',
+            '',
+            'event: content_block_start',
+            'data: {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}',
+            '',
+            'event: content_block_stop',
+            'data: {"type": "content_block_stop", "index": 0}',
+            '',
+            'event: content_block_start',
+            'data: {"type": "content_block_start", "index": 1, "content_block": {"type": "tool_use", "id": "toolu_1", "name": "test", "input": {}}}',
+            '',
+            'event: content_block_delta',
+            'data: {"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "{\\"x\\": 1}"}}',
+            '',
+            'event: content_block_stop',
+            'data: {"type": "content_block_stop", "index": 1}',
+            '',
+            'event: message_delta',
+            'data: {"type": "message_delta", "delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}}',
+            '',
+            'event: message_stop',
+            'data: {"type": "message_stop"}',
+            '',
+        ]
+
+        class MockStreamResponse:
+            def raise_for_status(self):
+                pass
+            async def aiter_lines(self):
+                for line in sse_events:
+                    yield line
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+
+        class MockClient:
+            def stream(self, method, url, **kwargs):
+                return MockStreamResponse()
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+
+        with patch("httpx.AsyncClient", return_value=MockClient()):
             chunks = []
             async for chunk in p.chat_stream(
                 [{"role": "user", "content": "do it"}],
                 tools=[{"type": "function", "function": {"name": "test", "parameters": {}}}],
             ):
                 chunks.append(chunk)
-            assert len(chunks) == 1
-            assert len(chunks[0].delta_tool_calls) == 1
-            assert chunks[0].delta_tool_calls[0]["function"]["name"] == "test"
+            # Expect: text empty + tool call delta + message_stop
+            tool_call_chunks = [c for c in chunks if c.delta_tool_calls]
+            assert len(tool_call_chunks) >= 1
+            assert tool_call_chunks[0].delta_tool_calls[0]["function"]["name"] == "test"
+            assert tool_call_chunks[0].delta_tool_calls[0]["function"]["arguments"] == {"x": 1}
+            stop_chunks = [c for c in chunks if c.finish_reason]
+            assert len(stop_chunks) >= 1
+            assert stop_chunks[0].finish_reason == "tool_use"
 
     @pytest.mark.asyncio
     async def test_chat_stream_with_usage(self):

@@ -11,3 +11,8 @@ shell_timeout: 30
 context_window_budget: 8192
 log_file: "logs/pc_assistant.json"
 working_directory: "."
+feishu_enabled: false
+feishu_app_id: ""
+feishu_app_secret: ""
+feishu_receive_id: ""
+feishu_receive_id_type: "open_id"

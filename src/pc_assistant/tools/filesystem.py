@@ -18,9 +18,10 @@ class FilesystemTool(ToolBase):
     async def execute(self, **kwargs: Any) -> Any:
         action = kwargs.get("action")
         path = kwargs.get("path", "")
+        encoding = kwargs.get("encoding", "utf-8")
         handlers = {
-            "read": self._read,
-            "write": self._write,
+            "read": lambda p, k: self._read(p, k, encoding),
+            "write": lambda p, k: self._write(p, k, encoding),
             "list": self._list,
             "mkdir": self._mkdir,
             "delete": self._delete,
@@ -47,12 +48,13 @@ class FilesystemTool(ToolBase):
                     "path": {"type": "string", "description": "Target file or directory path"},
                     "content": {"type": "string", "description": "Content to write (for write action)"},
                     "destination": {"type": "string", "description": "Destination path (for copy/move)"},
+                    "encoding": {"type": "string", "description": "File encoding (default: utf-8). Use 'latin-1', 'utf-16', etc. for non-UTF-8 files."},
                 },
                 "required": ["action", "path"],
             },
         }
 
-    def _read(self, path: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+    def _read(self, path: str, kwargs: dict[str, Any], encoding: str = "utf-8") -> dict[str, Any]:
         try:
             p = Path(path)
             if not p.exists():
@@ -61,23 +63,27 @@ class FilesystemTool(ToolBase):
                 return {"error": f"Path is a directory, not a file: {path}"}
             file_size = p.stat().st_size
             if file_size > _MAX_FILE_SIZE:
-                content = p.read_text(encoding="utf-8", errors="replace")[:_MAX_FILE_SIZE]
+                content = p.read_text(encoding=encoding, errors="replace")[:_MAX_FILE_SIZE]
                 return {"content": content, "size": file_size, "truncated": True, "max_size": _MAX_FILE_SIZE}
-            content = p.read_text(encoding="utf-8")
+            content = p.read_text(encoding=encoding)
             return {"content": content, "size": file_size}
+        except UnicodeDecodeError:
+            return {"error": f"Cannot decode file with encoding '{encoding}'. Try a different encoding (e.g., latin-1, utf-16)."}
         except Exception as e:
             return {"error": str(e)}
 
-    def _write(self, path: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+    def _write(self, path: str, kwargs: dict[str, Any], encoding: str = "utf-8") -> dict[str, Any]:
         content = kwargs.get("content", "")
         try:
-            content_bytes = content.encode("utf-8")
+            content_bytes = content.encode(encoding)
             if len(content_bytes) > _MAX_FILE_SIZE:
                 return {"error": f"Content exceeds maximum size of {_MAX_FILE_SIZE} bytes"}
             p = Path(path)
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(content, encoding="utf-8")
+            p.write_text(content, encoding=encoding)
             return {"success": True, "bytes_written": len(content_bytes)}
+        except UnicodeEncodeError:
+            return {"error": f"Cannot encode content with encoding '{encoding}'. Try a different encoding."}
         except Exception as e:
             return {"error": str(e)}
 

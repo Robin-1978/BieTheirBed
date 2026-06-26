@@ -70,10 +70,18 @@ class Agent:
         self,
         config: AppConfig | None = None,
         confirm_callback: Callable[[str, dict[str, Any]], bool] | None = None,
+        *,
+        llm: LLMProvider | None = None,
+        conversation: ConversationManager | None = None,
+        memory: UserMemory | None = None,
+        safety: SafetyChecker | None = None,
+        registry: ToolRegistry | None = None,
+        limiter: RateLimiter | None = None,
+        audit: AuditLogger | None = None,
     ) -> None:
         self._config = config or load_config()
         self._logger = get_logger("agent")
-        self._llm = LLMProvider(
+        self._llm = llm if llm is not None else LLMProvider(
             server_url=self._config.llm_server_url,
             model_name=self._config.llm_model_name,
             provider=self._config.llm_provider,
@@ -81,15 +89,15 @@ class Agent:
             api_base=self._config.llm_api_base,
             timeout=self._config.llm_timeout,
         )
-        self._conversation = ConversationManager()
-        self._memory = UserMemory()
-        self._safety = SafetyChecker(
+        self._conversation = conversation if conversation is not None else ConversationManager()
+        self._memory = memory if memory is not None else UserMemory()
+        self._safety = safety if safety is not None else SafetyChecker(
             dangerous_commands=self._config.dangerous_commands,
             protected_paths=self._config.protected_paths,
         )
-        self._registry = ToolRegistry(safety=self._safety)
-        self._limiter = RateLimiter()
-        self._audit = AuditLogger()
+        self._registry = registry if registry is not None else ToolRegistry()
+        self._limiter = limiter if limiter is not None else RateLimiter()
+        self._audit = audit if audit is not None else AuditLogger()
         self._confirm_callback = confirm_callback
         self._cancelled = False
         self._current_task: asyncio.Task | None = None
@@ -105,7 +113,7 @@ class Agent:
         self._register_builtin_tools()
         # Loop detection
         self._tool_call_history: list[str] = []
-        self._max_consecutive_same_tool = 3
+        self._max_consecutive_same_tool = self._config.max_consecutive_same_tool
 
     @property
     def conversation(self) -> ConversationManager:
@@ -127,7 +135,7 @@ class Agent:
 
     def reset_cancelled(self) -> None:
         self._cancelled = False
-        self._llm._cancelled = False
+        self._llm.reset_cancelled()
 
     def _check_tool_loop(self, tool_name: str, arguments: dict[str, Any]) -> tuple[bool, str]:
         """Check if we're in a tool calling loop. Returns (is_loop, reason).
@@ -249,7 +257,7 @@ class Agent:
     def _register_builtin_tools(self) -> None:
         builtin_tools = [
             FilesystemTool(),
-            ShellTool(),
+            ShellTool(default_timeout=self._config.shell_timeout),
             ApplicationTool(),
             WebTool(),
             SystemTool(),
@@ -380,6 +388,8 @@ class Agent:
                         completion_tokens = chunk.usage.get("completion_tokens") or chunk.usage.get("output_tokens") or 0
                         self._total_prompt_tokens += int(prompt_tokens)
                         self._total_completion_tokens += int(completion_tokens)
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
                 error_msg = str(e)
                 if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():

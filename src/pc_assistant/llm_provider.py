@@ -66,7 +66,7 @@ class LLMProvider:
         url: str,
         **kwargs: Any,
     ) -> httpx.Response:
-        last_error: Exception | None = None
+        last_error: Exception = RuntimeError("Request failed with no error information")
         for attempt in range(self._max_retries):
             try:
                 if method == "POST":
@@ -75,6 +75,8 @@ class LLMProvider:
                     resp = await client.get(url, **kwargs)
                 resp.raise_for_status()
                 return resp
+            except asyncio.CancelledError:
+                raise
             except (httpx.ConnectError, httpx.ReadError, httpx.WriteError, httpx.PoolTimeout) as e:
                 last_error = e
                 if attempt < self._max_retries - 1:
@@ -154,9 +156,143 @@ class LLMProvider:
                 data = resp.json()
         except httpx.HTTPError as e:
             return LLMResponse(content=f"LLM request failed: {e}", finish_reason="error")
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             return LLMResponse(content=f"LLM request failed: {e}", finish_reason="error")
         return self._parse_anthropic_response(data)
+
+    async def _chat_stream_anthropic(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 1024,
+        tool_choice: str | dict[str, Any] | None = None,
+    ) -> AsyncGenerator[StreamChunk, None]:
+        payload = self._build_anthropic_payload(messages, tools, temperature, max_tokens)
+        payload["stream"] = True
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
+
+        stream_timeout = httpx.Timeout(
+            connect=10.0,
+            read=max(self._timeout * 2, 300.0),
+            write=10.0,
+            pool=10.0,
+        )
+
+        content_blocks: dict[int, dict[str, Any]] = {}
+        last_stop_reason = ""
+        last_usage: dict[str, Any] = {}
+
+        try:
+            async with httpx.AsyncClient(timeout=stream_timeout) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self._server_url}/v1/messages",
+                    json=payload,
+                    headers=self._headers,
+                ) as response:
+                    response.raise_for_status()
+                    current_event = ""
+                    async for line in response.aiter_lines():
+                        if self._cancelled:
+                            await response.aclose()
+                            return
+
+                        line = line.strip()
+                        if not line:
+                            continue
+                        if line.startswith("event: "):
+                            current_event = line[len("event: "):]
+                            continue
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[len("data: "):]
+
+                        try:
+                            data = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+
+                        event_type = data.get("type", current_event)
+
+                        if event_type == "message_start":
+                            msg = data.get("message", {})
+                            last_usage = msg.get("usage", {})
+
+                        elif event_type == "content_block_start":
+                            idx = data.get("index", 0)
+                            block = data.get("content_block", {})
+                            content_blocks[idx] = block
+
+                        elif event_type == "content_block_delta":
+                            idx = data.get("index", 0)
+                            delta = data.get("delta", {})
+                            delta_type = delta.get("type", "")
+                            block = content_blocks.setdefault(idx, {"type": delta_type})
+
+                            if delta_type == "text_delta":
+                                text = delta.get("text", "")
+                                block["text"] = block.get("text", "") + text
+                                yield StreamChunk(delta_content=text)
+
+                            elif delta_type == "input_json_delta":
+                                partial = delta.get("partial_json", "")
+                                block["partial_json"] = block.get("partial_json", "") + partial
+
+                        elif event_type == "content_block_stop":
+                            idx = data.get("index", 0)
+                            block = content_blocks.get(idx, {})
+
+                            if block.get("type") == "tool_use":
+                                raw_json = block.get("partial_json", "")
+                                try:
+                                    arguments = json.loads(raw_json) if raw_json else {}
+                                except (json.JSONDecodeError, TypeError):
+                                    arguments = {}
+                                tool_call = {
+                                    "id": block.get("id", ""),
+                                    "type": "function",
+                                    "function": {
+                                        "name": block.get("name", ""),
+                                        "arguments": arguments,
+                                    },
+                                }
+                                yield StreamChunk(delta_tool_calls=[tool_call])
+
+                        elif event_type == "message_delta":
+                            delta = data.get("delta", {})
+                            last_stop_reason = delta.get("stop_reason", "")
+                            usage = data.get("usage", {})
+                            if usage:
+                                last_usage = {**last_usage, **usage}
+
+                        elif event_type == "message_stop":
+                            yield StreamChunk(
+                                finish_reason=last_stop_reason,
+                                usage=last_usage,
+                            )
+                            return
+
+        except httpx.HTTPError as e:
+            if self._cancelled:
+                return
+            yield StreamChunk(
+                delta_content=f"LLM stream failed: {e}",
+                finish_reason="error",
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            if self._cancelled:
+                return
+            error_detail = str(e) if str(e) else type(e).__name__
+            yield StreamChunk(
+                delta_content=f"LLM stream failed: {error_detail}",
+                finish_reason="error",
+            )
 
     async def chat(
         self,
@@ -187,6 +323,8 @@ class LLMProvider:
                 data = resp.json()
         except httpx.HTTPError as e:
             return LLMResponse(content=f"LLM request failed: {e}", finish_reason="error")
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             return LLMResponse(content=f"LLM request failed: {e}", finish_reason="error")
         choice = data.get("choices", [{}])[0]
@@ -214,15 +352,8 @@ class LLMProvider:
         self._cancelled = False
 
         if self._provider == "anthropic":
-            result = await self.chat(messages, tools, temperature, max_tokens, tool_choice)
-            if self._cancelled:
-                return
-            yield StreamChunk(
-                delta_content=result.content,
-                delta_tool_calls=result.tool_calls,
-                finish_reason=result.finish_reason,
-                usage=result.usage,
-            )
+            async for chunk in self._chat_stream_anthropic(messages, tools, temperature, max_tokens, tool_choice):
+                yield chunk
             return
 
         payload: dict[str, Any] = {
@@ -350,6 +481,8 @@ class LLMProvider:
                 delta_tool_calls=[],
                 finish_reason="error",
             )
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             if self._cancelled:
                 return
@@ -388,6 +521,9 @@ class LLMProvider:
 
     def cancel(self) -> None:
         self._cancelled = True
+
+    def reset_cancelled(self) -> None:
+        self._cancelled = False
 
     async def health_check(self) -> bool:
         try:
