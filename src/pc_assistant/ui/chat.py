@@ -4,6 +4,8 @@ import asyncio
 import json
 import signal
 import time
+from collections import defaultdict
+from io import StringIO
 from typing import Any, Callable
 
 from pc_assistant.config import AppConfig
@@ -15,11 +17,16 @@ from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.text import Text
 from rich.table import Table
+from rich.text import Text
 
-from prompt_toolkit.shortcuts import PromptSession
+from prompt_toolkit.application import Application
+from prompt_toolkit.formatted_text import ANSI as PTANSI, FormattedText, StyleAndTextTuples, merge_formatted_text
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.layout import Layout, HSplit, Window, WindowAlign
+from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.styles import Style as PTStyle
+from prompt_toolkit.widgets import TextArea
 
 _WELCOME_ART = r"""
   ____  _        _   _               ____           _
@@ -48,6 +55,27 @@ _COMMANDS_HELP = """\
 /compact        Compact context (remove old messages)\
 """
 
+TUI_STYLE = PTStyle.from_dict({
+    "input": "fg:#9ece6a",
+    "status": "bg:#1a1b26 fg:#565f89",
+    "status.ready": "bold fg:#9ece6a",
+    "status.thinking": "bold fg:#7aa2f7",
+    "status.executing": "bold fg:#e0af68",
+    "status.info": "italic fg:#565f89",
+    "user_text": "bold fg:#9ece6a",
+})
+
+
+class _ChatWindow(Window):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.pinned_to_bottom = True
+
+    def _scroll(self) -> int:
+        if self.pinned_to_bottom:
+            return 10 ** 9
+        return super()._scroll()
+
 
 class ChatUI:
     def __init__(
@@ -64,7 +92,21 @@ class ChatUI:
         self._last_input: str = ""
         self._cancelled = False
         self._event_task: asyncio.Task | None = None
-        self._pt_session = PromptSession()
+
+        # TUI components (lazy init)
+        self._app: Application | None = None
+        self._chat_window: _ChatWindow | None = None
+        self._input_field: TextArea | None = None
+        self._kb: KeyBindings | None = None
+        self._refresh_task: asyncio.Task | None = None
+        self._spinner_idx = 0
+
+        # TUI rendering state
+        self._chat_fragments: list[StyleAndTextTuples] = []
+        self._streaming_fragments: StyleAndTextTuples = []
+        self._streaming_active = False
+        self._current_op = ""
+        self._token_count = 0
 
     def set_agent(self, agent: Agent) -> None:
         self._agent = agent
@@ -72,7 +114,7 @@ class ChatUI:
     def _show_welcome(self) -> None:
         self._console.print(_WELCOME_ART, style="bold green", highlight=False)
         from pc_assistant import __version__
-        self._console.print(f"  [bold]v{__version__}[/bold]  •  Type [bold]/help[/bold] for commands\n")
+        self._console.print(f"  [bold]v{__version__}[/bold]  \u2022  Type [bold]/help[/bold] for commands\n")
 
     def _print_tool_call(self, name: str, arguments: dict[str, Any]) -> None:
         self._state.add_message(MessageType.TOOL_CALL, f"[{name}]", tool_name=name, tool_args=arguments)
@@ -82,22 +124,22 @@ class ChatUI:
             val_str = json.dumps(first_v, ensure_ascii=False)
             if len(val_str) > 60:
                 val_str = val_str[:57] + "..."
-            self._console.print(Text(f"  ⚙ {name} {first_k}={val_str}", style="tool_icon"))
+            self._console.print(Text(f"  \u2699 {name} {first_k}={val_str}", style="tool_icon"))
         else:
-            self._console.print(Text(f"  ⚙ {name}", style="tool_icon"))
+            self._console.print(Text(f"  \u2699 {name}", style="tool_icon"))
 
     def _print_tool_result(self, name: str, result: str, is_error: bool = False) -> None:
         self._state.add_message(MessageType.TOOL_RESULT, result[:200], tool_name=name)
         truncated = result[:200]
         if len(result) > 200:
             truncated += "..."
-        icon = "✗" if is_error else "✓"
+        icon = "\u2717" if is_error else "\u2713"
         style = "error" if is_error else "tool_result"
         self._console.print(Text(f"    {icon} {truncated}", style=style))
 
     def _print_error(self, message: str) -> None:
         self._state.add_message(MessageType.ERROR, message)
-        self._console.print(Text(f"✗ {message}", style="error"))
+        self._console.print(Text(f"\u2717 {message}", style="error"))
 
     def _print_warning(self, message: str) -> None:
         self._state.add_message(MessageType.SYSTEM, message)
@@ -161,6 +203,7 @@ class ChatUI:
             if self._agent is not None:
                 self._agent.reset_conversation()
             self._state.clear_messages()
+            self._chat_fragments.clear()
             self._console.print("[dim]Conversation history cleared.[/dim]")
             return True
 
@@ -305,6 +348,172 @@ class ChatUI:
         self._print_warning(f"Unknown command: {command}")
         return True
 
+    def _build_key_bindings(self) -> KeyBindings:
+        kb = KeyBindings()
+
+        @kb.add("enter")
+        def _(event: Any) -> None:
+            buffer = event.current_buffer
+            text = buffer.text.strip()
+            if not text:
+                return
+            buffer.text = ""
+            self._on_input(text)
+
+        @kb.add("c-c")
+        def _(event: Any) -> None:
+            if self._state.processing:
+                self._cancel()
+            elif self._input_field and self._input_field.buffer.text:
+                self._input_field.buffer.text = ""
+            else:
+                self._running = False
+                self._app.exit()
+
+        @kb.add("c-d")
+        def _(event: Any) -> None:
+            self._running = False
+            self._app.exit()
+
+        @kb.add("pageup")
+        def _(event: Any) -> None:
+            if self._chat_window:
+                self._chat_window.pinned_to_bottom = False
+                vs = self._chat_window.vertical_scroll or 0
+                ri = self._chat_window.render_info
+                page = ri.window_height if ri else 20
+                self._chat_window.vertical_scroll = max(0, vs - page)
+
+        @kb.add("pagedown")
+        def _(event: Any) -> None:
+            if self._chat_window:
+                self._chat_window.pinned_to_bottom = False
+                vs = self._chat_window.vertical_scroll or 0
+                ri = self._chat_window.render_info
+                page = ri.window_height if ri else 20
+                self._chat_window.vertical_scroll = min(10 ** 9, vs + page)
+
+        @kb.add("end")
+        def _(event: Any) -> None:
+            if self._chat_window:
+                self._chat_window.pinned_to_bottom = True
+
+        return kb
+
+    def _on_input(self, text: str) -> None:
+        if text.startswith("/"):
+            self._handle_user_command(text)
+            if not self._running:
+                self._app.exit()
+        else:
+            self._state.add_message(MessageType.USER, text)
+            self._chat_fragments.append([("bold #9ece6a", f"  \u276f {text}\n")])
+            self._last_input = text
+            self._event_task = asyncio.ensure_future(self._process_events(text))
+
+    def _render_md(self, text: str) -> StyleAndTextTuples:
+        """Render markdown text to prompt_toolkit styled fragments."""
+        buf = StringIO()
+        console = Console(
+            theme=TOKYO_NIGHT,
+            file=buf,
+            force_terminal=True,
+            color_system="truecolor",
+            width=80,
+        )
+        console.print(Markdown(text))
+        return list(PTANSI(buf.getvalue()))
+
+    def _init_tui(self) -> None:
+        self._chat_fragments.clear()
+        self._streaming_fragments = []
+        self._streaming_active = False
+
+        chat_control = FormattedTextControl(self._get_chat_fragments)
+
+        self._chat_window = _ChatWindow(
+            content=chat_control,
+            wrap_lines=True,
+            dont_extend_height=False,
+        )
+
+        self._input_field = TextArea(
+            height=1,
+            multiline=False,
+            style="class:input",
+        )
+
+        status_control = FormattedTextControl(self._get_status_text)
+
+        self._layout = HSplit([
+            self._chat_window,
+            Window(height=1, content=self._input_field.control, dont_extend_height=True),
+            Window(height=1, content=status_control, dont_extend_height=True,
+                   align=WindowAlign.LEFT, style="class:status"),
+        ])
+
+        self._kb = self._build_key_bindings()
+
+        layout = Layout(self._layout, focused_element=self._input_field)
+
+        self._app = Application(
+            layout=layout,
+            key_bindings=self._kb,
+            full_screen=True,
+            style=TUI_STYLE,
+            mouse_support=True,
+        )
+
+    def _get_chat_fragments(self) -> StyleAndTextTuples:
+        parts: list[StyleAndTextTuples] = list(self._chat_fragments)
+
+        if self._streaming_active and self._streaming_fragments:
+            parts.append(self._streaming_fragments)
+
+        return merge_formatted_text(parts) if parts else FormattedText([("", "")])
+
+    def _get_status_text(self) -> StyleAndTextTuples:
+        spinners = ["\u280b", "\u2819", "\u2839", "\u2838", "\u283c",
+                    "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"]
+        if self._state.processing:
+            spinner = spinners[self._spinner_idx % len(spinners)]
+            self._spinner_idx += 1
+            op = self._current_op or "thinking..."
+            asst_count = sum(1 for m in self._state.messages if m.type in (
+                MessageType.ASSISTANT, MessageType.THINK))
+            return FormattedText([
+                ("class:status.thinking", f"{spinner} {op}"),
+                ("", "  "),
+                ("class:status.info", f"Tokens: {self._token_count:,}"),
+                ("", "  "),
+                ("class:status.info", f"Iter: {asst_count}"),
+            ])
+        else:
+            asst_count = sum(1 for m in self._state.messages if m.type in (
+                MessageType.ASSISTANT, MessageType.THINK))
+            return FormattedText([
+                ("class:status.ready", "\u25cf Ready"),
+                ("", "  "),
+                ("class:status.info", f"Tokens: {self._token_count:,}"),
+                ("", "  "),
+                ("class:status.info", f"Iter: {asst_count}"),
+                ("", "   "),
+                ("class:status.info", "Ctrl+C cancel  Ctrl+D exit"),
+            ])
+
+    async def _refresh_loop(self) -> None:
+        while True:
+            if self._app:
+                self._app.invalidate()
+            await asyncio.sleep(0.08)
+
+    def _cancel(self) -> None:
+        if self._cancelled:
+            return
+        self._cancelled = True
+        if self._agent is not None:
+            self._agent.cancel()
+
     async def _process_events(self, user_input: str) -> None:
         if self._agent is None:
             self._print_error("Agent not initialized.")
@@ -312,6 +521,7 @@ class ChatUI:
 
         self._cancelled = False
         self._agent.reset_cancelled()
+        self._state.processing = True
 
         loop = asyncio.get_event_loop()
         try:
@@ -319,6 +529,136 @@ class ChatUI:
         except (NotImplementedError, OSError):
             pass
 
+        # Detect if we are in TUI mode
+        if self._app is not None:
+            await self._process_events_tui(user_input)
+        else:
+            await self._process_events_console(user_input)
+
+        self._state.processing = False
+        self._streaming_active = False
+        self._streaming_fragments = []
+        self._current_op = ""
+        try:
+            loop.remove_signal_handler(signal.SIGINT)
+        except (NotImplementedError, OSError):
+            pass
+
+    async def _process_events_tui(self, user_input: str) -> None:
+        streaming_text = ""
+        think_active = False
+
+        try:
+            async for event in self._agent.run(user_input):
+                if self._cancelled:
+                    self._chat_fragments.append([("bold #f7768e", "! Operation cancelled.\n")])
+                    break
+
+                if event.type == "stream_start":
+                    streaming_text = ""
+                    self._streaming_active = True
+                    self._streaming_fragments = [("bold #7aa2f7", "\u25c6 ")]
+                    think_active = False
+                    self._current_op = "generating..."
+                    self._app.invalidate()
+
+                elif event.type == "stream_delta":
+                    streaming_text += event.content
+                    self._streaming_fragments = [
+                        ("bold #7aa2f7", "\u25c6 "),
+                        ("", streaming_text),
+                    ]
+                    if think_active:
+                        self._chat_fragments.append([("", "\n")])
+                        think_active = False
+                    self._app.invalidate()
+
+                elif event.type == "stream_think_delta":
+                    if not think_active:
+                        think_active = True
+                        self._chat_fragments.append([("dim italic #3b4261", "\U0001f4ad ")])
+                    else:
+                        last = self._chat_fragments[-1] if self._chat_fragments else None
+                        if last and len(last) == 1 and last[0][0] == "dim italic #3b4261":
+                            last[0] = ("dim italic #3b4261", last[0][1] + event.content)
+                        else:
+                            self._chat_fragments.append([("dim italic #3b4261", event.content)])
+                    self._current_op = "thinking..."
+
+                elif event.type == "stream_end":
+                    self._streaming_active = False
+                    if streaming_text:
+                        rendered = self._render_md(f"\u25c6 {streaming_text}")
+                        self._chat_fragments.append(rendered)
+                    self._streaming_fragments = []
+                    self._current_op = ""
+                    self._app.invalidate()
+
+                elif event.type == "tool_call":
+                    if event.blocked:
+                        self._chat_fragments.append([("bold #e0af68", f"! Blocked: {event.content}\n")])
+                    else:
+                        items = list(event.tool_args.items())
+                        if items:
+                            k, v = items[0]
+                            val = json.dumps(v, ensure_ascii=False)
+                            if len(val) > 60:
+                                val = val[:57] + "..."
+                            self._chat_fragments.append([
+                                ("bold #73daca", f"  \u2699 "),
+                                ("bold #7aa2f7", event.tool_name),
+                                ("#73daca", f" {k}={val}\n"),
+                            ])
+                        else:
+                            self._chat_fragments.append([
+                                ("bold #73daca", f"  \u2699 {event.tool_name}\n"),
+                            ])
+                    self._state.add_message(MessageType.TOOL_CALL, f"[{event.tool_name}]",
+                                            tool_name=event.tool_name, tool_args=event.tool_args)
+                    self._current_op = event.tool_name
+                    self._app.invalidate()
+
+                elif event.type == "tool_result":
+                    result_str = str(event.tool_result) if event.tool_result is not None else event.content
+                    truncated = result_str[:200]
+                    if len(result_str) > 200:
+                        truncated += "..."
+                    is_error = isinstance(event.tool_result, dict) and "error" in event.tool_result
+                    icon = "\u2713" if not is_error else "\u2717"
+                    style = "#9ece6a" if not is_error else "#f7768e"
+                    self._chat_fragments.append([(f"bold {style}", f"    {icon} {truncated}\n")])
+                    self._state.add_message(MessageType.TOOL_RESULT, result_str[:200],
+                                            tool_name=event.tool_name)
+                    self._app.invalidate()
+
+                elif event.type == "final_answer":
+                    if event.content:
+                        rendered = self._render_md(f"\u25c6 {event.content}")
+                        self._chat_fragments.append(rendered)
+                        self._app.invalidate()
+
+                elif event.type == "error":
+                    self._chat_fragments.append([("bold #f7768e", f"\u2717 {event.content}\n")])
+                    self._state.add_message(MessageType.ERROR, event.content)
+                    self._app.invalidate()
+
+                elif event.type == "iteration_limit":
+                    self._chat_fragments.append([("bold #e0af68", f"! {event.content}\n")])
+
+                elif event.type == "cancelled":
+                    pass
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            self._chat_fragments.append([("bold #f7768e", f"\u2717 {e}\n")])
+        finally:
+            self._streaming_active = False
+            self._streaming_fragments = []
+            self._current_op = ""
+            self._app.invalidate()
+
+    async def _process_events_console(self, user_input: str) -> None:
         streaming_text = ""
         first_content_received = False
         think_active = False
@@ -345,8 +685,7 @@ class ChatUI:
                     first_content_received = False
                     streaming_text = ""
                     think_active = False
-                    # Pre-create Live to avoid flicker on first content
-                    self._console.print(Text("◆ ", style="ai_label"))
+                    self._console.print(Text("\u25c6 ", style="ai_label"))
                     answer_live = Live(
                         Text(""),
                         console=self._console,
@@ -354,14 +693,6 @@ class ChatUI:
                         transient=False,
                     )
                     answer_live.start()
-
-                elif event.type == "stream_think_delta":
-                    output = answer_live.console if answer_live is not None else self._console
-                    if not think_active:
-                        think_active = True
-                        output.print()
-                        output.print(Text("💭 ", style="dim"), end="")
-                    output.print(Text(event.content, style="dim"), end="")
 
                 elif event.type == "stream_delta":
                     streaming_text += event.content
@@ -372,6 +703,14 @@ class ChatUI:
                         first_content_received = True
                     if answer_live is not None:
                         answer_live.update(Text(streaming_text))
+
+                elif event.type == "stream_think_delta":
+                    output = answer_live.console if answer_live is not None else self._console
+                    if not think_active:
+                        think_active = True
+                        output.print()
+                        output.print(Text("\U0001f4ad ", style="dim"), end="")
+                    output.print(Text(event.content, style="dim"), end="")
 
                 elif event.type == "stream_end":
                     if answer_live is not None:
@@ -394,7 +733,6 @@ class ChatUI:
                     self._print_tool_result(event.tool_name, result_str, is_error)
 
                 elif event.type == "final_answer":
-                    # Only render if not already shown via stream_end
                     if not first_content_received and event.content:
                         self._console.print(Markdown(event.content))
 
@@ -409,20 +747,10 @@ class ChatUI:
                 elif event.type == "cancelled":
                     pass
 
+        except asyncio.CancelledError:
+            raise
         except KeyboardInterrupt:
             self._cancel()
-        finally:
-            try:
-                loop.remove_signal_handler(signal.SIGINT)
-            except (NotImplementedError, OSError):
-                pass
-
-    def _cancel(self) -> None:
-        if self._cancelled:
-            return
-        self._cancelled = True
-        if self._agent is not None:
-            self._agent.cancel()
 
     async def ask_input(self, prompt: str, password_mode: bool = False) -> str | None:
         self._console.print(Text(f"! {prompt}", style="warning"))
@@ -436,30 +764,16 @@ class ChatUI:
 
     async def run(self) -> None:
         self._running = True
+        self._init_tui()
         self._show_welcome()
 
-        while self._running:
+        self._refresh_task = asyncio.get_event_loop().create_task(self._refresh_loop())
+
+        try:
+            await self._app.run_async()
+        finally:
+            self._refresh_task.cancel()
             try:
-                user_input = await self._pt_session.prompt_async(
-                    [("class:prompt", "❯ ")],
-                    style=PTStyle.from_dict({
-                        "prompt": "ansigreen bold",
-                    }),
-                )
-            except (EOFError, KeyboardInterrupt):
-                self._console.print("\n[dim]Goodbye![/dim]")
-                break
-
-            if user_input is None:
-                break
-            user_input = user_input.strip()
-            if not user_input:
-                continue
-
-            if user_input.startswith("/"):
-                self._handle_user_command(user_input)
-                if not self._running:
-                    break
-            else:
-                self._last_input = user_input
-                await self._process_events(user_input)
+                await self._refresh_task
+            except asyncio.CancelledError:
+                pass
