@@ -345,9 +345,18 @@ class ChatUI:
                     first_content_received = False
                     streaming_text = ""
                     think_active = False
+                    # Pre-create Live to avoid flicker on first content
+                    self._console.print(Text("◆ ", style="ai_label"))
+                    answer_live = Live(
+                        Text(""),
+                        console=self._console,
+                        refresh_per_second=15,
+                        transient=False,
+                    )
+                    answer_live.start()
 
                 elif event.type == "stream_think_delta":
-                    output = answer_live.console if answer_live else self._console
+                    output = answer_live.console if answer_live is not None else self._console
                     if not think_active:
                         think_active = True
                         output.print()
@@ -356,29 +365,20 @@ class ChatUI:
 
                 elif event.type == "stream_delta":
                     streaming_text += event.content
-                    if answer_live is None:
-                        if think_active:
-                            self._console.print()
-                            think_active = False
+                    if think_active:
+                        self._console.print()
+                        think_active = False
+                    if not first_content_received:
                         first_content_received = True
-                        self._console.print(Text("◆ ", style="ai_label"))
-                        answer_live = Live(
-                            Text(streaming_text),
-                            console=self._console,
-                            refresh_per_second=15,
-                            transient=False,
-                        )
-                        answer_live.start()
-                    else:
+                    if answer_live is not None:
                         answer_live.update(Text(streaming_text))
 
                 elif event.type == "stream_end":
-                    if answer_live and streaming_text:
-                        answer_live.update(Markdown(streaming_text))
+                    if answer_live is not None:
+                        if streaming_text:
+                            answer_live.update(Markdown(streaming_text))
                         answer_live.stop()
                         answer_live = None
-                    elif streaming_text:
-                        self._console.print()
                     think_active = False
 
                 elif event.type == "tool_call":
@@ -394,10 +394,8 @@ class ChatUI:
                     self._print_tool_result(event.tool_name, result_str, is_error)
 
                 elif event.type == "final_answer":
-                    _stop_live()
+                    # Only render if not already shown via stream_end
                     if not first_content_received and event.content:
-                        self._console.print()
-                        self._console.print(Text("◆ ", style="ai_label"), end="")
                         self._console.print(Markdown(event.content))
 
                 elif event.type == "error":

@@ -128,6 +128,15 @@ async def async_main(
 
     logger.info("LLM server is healthy")
 
+    channel_manager = None
+    if cfg.feishu_enabled:
+        from pc_assistant.channels import create_channels_from_config
+
+        channel_manager = create_channels_from_config(cfg)
+        if channel_manager.active_channels:
+            await channel_manager.start_all(agent)
+            logger.info("Channels started: %s", channel_manager.active_channels)
+
     if ask is not None:
         return await _run_benchmark(agent, ask, json_output=json_output, no_tools=no_tools)
 
@@ -145,7 +154,8 @@ async def async_main(
         except ImportError:
             print("\nInterrupted. Goodbye!")
     finally:
-        # Stop scheduler on exit
+        if channel_manager:
+            await channel_manager.stop_all()
         if scheduler:
             await scheduler.execute(action="stop")
 
@@ -170,8 +180,7 @@ async def _run_benchmark(
 
     if no_tools:
         from pc_assistant.tools.registry import ToolRegistry
-        from pc_assistant.harness.safety import SafetyChecker
-        agent._registry = ToolRegistry(safety=agent._safety)
+        agent._registry = ToolRegistry()
 
     start_time = time.monotonic()
     tool_call_count = 0

@@ -119,6 +119,9 @@ class ShellTool(ToolBase):
     name = "shell"
     description = "Execute shell commands with full shell support (pipes, redirects, etc.)"
 
+    def __init__(self, default_timeout: int = 30) -> None:
+        self._default_timeout = default_timeout
+
     async def execute(self, **kwargs: Any) -> Any:
         command = kwargs.get("command", "")
         timeout = kwargs.get("timeout")
@@ -127,7 +130,7 @@ class ShellTool(ToolBase):
         if not command:
             return {"error": "No command provided"}
         try:
-            timeout_val = int(timeout) if timeout is not None else _DEFAULT_TIMEOUT
+            timeout_val = int(timeout) if timeout is not None else self._default_timeout
         except (ValueError, TypeError):
             timeout_val = _DEFAULT_TIMEOUT
         return await self._run(command, timeout_val, cwd, env)
