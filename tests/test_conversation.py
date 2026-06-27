@@ -100,7 +100,7 @@ class TestConversationManager:
         messages = cm.get_messages_for_llm()
         assistant_msgs = [m for m in messages if m["role"] == "assistant"]
         assert len(assistant_msgs) == 1
-        assert "delta_tool_calls" in assistant_msgs[0]
+        assert "tool_calls" in assistant_msgs[0]
 
     def test_assistant_without_tool_calls_no_tool_field(self):
         cm = ConversationManager()
@@ -110,7 +110,7 @@ class TestConversationManager:
         messages = cm.get_messages_for_llm()
         assistant_msgs = [m for m in messages if m["role"] == "assistant"]
         assert len(assistant_msgs) == 1
-        assert "delta_tool_calls" not in assistant_msgs[0]
+        assert "tool_calls" not in assistant_msgs[0]
 
     def test_tool_result_preserved_with_tool_calls(self):
         cm = ConversationManager()

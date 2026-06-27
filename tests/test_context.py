@@ -95,7 +95,7 @@ class TestConversationManager:
         cm.add_assistant("thinking", delta_tool_calls=tc)
         cm.add_tool_result("call_1", "result")
         msgs = cm.get_messages()
-        assert "delta_tool_calls" in msgs[0]
+        assert "tool_calls" in msgs[0]
         assert msgs[1]["tool_call_id"] == "call_1"
 
     def test_get_messages_for_llm(self):
@@ -109,7 +109,7 @@ class TestConversationManager:
         assert msgs[0] == {"role": "system", "content": "sys"}
         assert msgs[1] == {"role": "user", "content": "hello"}
         assert msgs[2]["role"] == "assistant"
-        assert "delta_tool_calls" in msgs[2]
+        assert "tool_calls" in msgs[2]
         assert msgs[2]["content"] == "thinking"
         assert msgs[3] == {"role": "tool", "content": "result", "tool_call_id": "call_1"}
 

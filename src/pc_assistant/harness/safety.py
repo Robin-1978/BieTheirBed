@@ -91,7 +91,7 @@ class SafetyChecker:
             if action == "delete":
                 return self.check_path(path, write=True)
             return SafetyCheckResult(True)
-        if tool_name in ("process", "task"):
+        if tool_name in ("application", "system", "process", "task"):
             action = kwargs.get("action", "")
             if action == "kill":
                 return SafetyCheckResult(False, "Blocked: killing processes requires confirmation")
@@ -120,11 +120,14 @@ class SafetyChecker:
                     return (True, f"Path {path} is outside working directory {self._working_directory}")
             return (False, "")
 
-        if tool_name in ("process", "task"):
+        if tool_name in ("application", "system", "process", "task"):
             action = kwargs.get("action", "")
             if action == "kill":
                 return (True, "Killing a process requires confirmation")
             return (False, "")
+
+        if tool_name in ("keyboard", "mouse", "clipboard", "scheduler"):
+            return (True, f"Tool '{tool_name}' can control your system and requires confirmation")
 
         return (False, "")
 

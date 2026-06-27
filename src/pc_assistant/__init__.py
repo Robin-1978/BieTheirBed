@@ -64,7 +64,9 @@ async def async_main(
             print("Please set PC_LLM_API_KEY environment variable or add llm_api_key to your config file.")
         return 1
 
-    def agent_confirm_callback(tool_name: str, arguments: dict) -> bool:
+    async def agent_confirm_callback(tool_name: str, arguments: dict) -> bool:
+        import asyncio
+
         title = f"Dangerous operation: {tool_name}"
         details = "\n".join(f"  {k}: {v}" for k, v in arguments.items())
         try:
@@ -84,8 +86,8 @@ async def async_main(
             print(f"\n⚠ {title}")
             print(details)
         try:
-            answer = input("Proceed? (y/n): ").strip().lower()
-            return answer in ("y", "yes")
+            answer = await asyncio.to_thread(input, "Proceed? (y/n): ")
+            return answer.strip().lower() in ("y", "yes")
         except (EOFError, KeyboardInterrupt):
             return False
 

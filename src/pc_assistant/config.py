@@ -20,6 +20,8 @@ class AppConfig(BaseModel):
     llm_timeout: float = 120.0
     max_iterations: int = 8
     max_consecutive_same_tool: int = 3
+    max_total_tool_calls: int = 50
+    max_consecutive_tool_calls: int = 50
     max_tokens: int = 1024
     shell_timeout: int = 30
     context_window_budget: int = 8192
@@ -53,7 +55,9 @@ class AppConfig(BaseModel):
             "llm_provider": str, "llm_server_url": str, "llm_model_name": str,
             "llm_api_key": str, "llm_api_base": str,
             "llm_temperature": float, "llm_timeout": float,
-            "max_iterations": int, "max_consecutive_same_tool": int, "max_tokens": int, "shell_timeout": int,
+            "max_iterations": int, "max_consecutive_same_tool": int,
+            "max_total_tool_calls": int, "max_consecutive_tool_calls": int,
+            "max_tokens": int, "shell_timeout": int,
             "context_window_budget": int, "log_file": str, "working_directory": str,
             "feishu_enabled": bool, "feishu_app_id": str, "feishu_app_secret": str,
             "feishu_receive_id": str, "feishu_receive_id_type": str,
@@ -86,6 +90,8 @@ def _env_overrides() -> dict[str, Any]:
         "PC_LLM_TIMEOUT": ("llm_timeout", float),
         "PC_MAX_ITERATIONS": ("max_iterations", int),
         "PC_MAX_CONSECUTIVE_SAME_TOOL": ("max_consecutive_same_tool", int),
+        "PC_MAX_TOTAL_TOOL_CALLS": ("max_total_tool_calls", int),
+        "PC_MAX_CONSECUTIVE_TOOL_CALLS": ("max_consecutive_tool_calls", int),
         "PC_SHELL_TIMEOUT": ("shell_timeout", int),
         "PC_CONTEXT_WINDOW_BUDGET": ("context_window_budget", int),
         "PC_LOG_FILE": ("log_file", str),
