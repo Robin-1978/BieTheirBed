@@ -5,12 +5,28 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, Field
 
+from pc_assistant.context.tags import wrap_tool_result
+
 
 class Message(BaseModel):
     role: str
     content: str
+    tool_calls: list[dict[str, Any]] | None = None
     delta_tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
+    reasoning_content: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"role": self.role, "content": self.content}
+        if self.tool_calls is not None:
+            d["tool_calls"] = self.tool_calls
+        if self.delta_tool_calls is not None:
+            d["delta_tool_calls"] = self.delta_tool_calls
+        if self.tool_call_id is not None:
+            d["tool_call_id"] = self.tool_call_id
+        if self.reasoning_content is not None:
+            d["reasoning_content"] = self.reasoning_content
+        return d
 
 
 def _build_date_context() -> str:
@@ -33,49 +49,59 @@ class ConversationManager:
     def add(self, role: str, content: str, **kwargs: Any) -> Message:
         if role == "system":
             raise ValueError("System messages must be set via set_system_context(), not add()")
+        # Normalize tool_calls/delta_tool_calls
+        if "delta_tool_calls" in kwargs and "tool_calls" not in kwargs:
+            kwargs["tool_calls"] = kwargs["delta_tool_calls"]
         msg = Message(role=role, content=content, **kwargs)
         self._messages.append(msg)
         return msg
 
     def add_user(self, content: str) -> Message:
         return self.add("user", content)
-    def add_assistant(self, content: str, delta_tool_calls: list[dict[str, Any]] | None = None) -> Message:
-        return self.add("assistant", content, delta_tool_calls=delta_tool_calls)
+
+    def add_assistant(self, content: str, tool_calls: list[dict[str, Any]] | None = None, delta_tool_calls: list[dict[str, Any]] | None = None, reasoning_content: str | None = None) -> Message:
+        tcs = tool_calls or delta_tool_calls
+        return self.add("assistant", content, tool_calls=tcs, delta_tool_calls=tcs, reasoning_content=reasoning_content)
 
     def add_assistant_final(self, content: str) -> Message:
-        """Store final assistant response without delta_tool_calls (to prevent AI confusion in history)."""
-        return self.add("assistant", content, delta_tool_calls=None)
+        """Store final assistant response without tool_calls."""
+        return self.add("assistant", content, tool_calls=None, delta_tool_calls=None)
 
-    def add_tool_result(self, tool_call_id: str, content: str) -> Message:
+    def add_tool_result(self, tool_call_id: str, content: str, tool_name: str = "") -> Message:
+        """Store tool result, optionally wrapped in XML tags for structured context."""
+        if tool_name:
+            wrapped = wrap_tool_result(tool_name, content)
+            return self.add("tool", wrapped, tool_call_id=tool_call_id)
         return self.add("tool", content, tool_call_id=tool_call_id)
 
     def get_messages(self) -> list[dict[str, Any]]:
-        result: list[dict[str, Any]] = []
-        for msg in self._messages:
-            d: dict[str, Any] = {"role": msg.role, "content": msg.content}
-            if msg.delta_tool_calls is not None:
-                d["delta_tool_calls"] = msg.delta_tool_calls
-            if msg.tool_call_id is not None:
-                d["tool_call_id"] = msg.tool_call_id
-            result.append(d)
-        return result
+        return [m.to_dict() for m in self._messages]
 
     def get_messages_for_llm(self) -> list[dict[str, Any]]:
+        """Build messages for LLM API call."""
+        from pc_assistant.context.assembly import assemble_llm_messages, truncate_messages, _sanitize_tool_calls
+        from pc_assistant.context.tags import normalize_message_content
+
         result: list[dict[str, Any]] = []
 
+        # Build system message
         system_parts = []
         if self._system_prompt:
             system_parts.append(self._system_prompt)
         date_ctx = self._date_context_provider()
         if date_ctx:
             system_parts.append(date_ctx)
-        if system_parts:
-            result.append({"role": "system", "content": "\n\n".join(system_parts)})
+        system_prompt = "\n\n".join(system_parts) if system_parts else ""
 
+        if system_prompt:
+            result.append({"role": "system", "content": system_prompt})
+
+        # Build conversation messages
         valid_tool_ids: set[str] = set()
         for msg in self._messages:
-            if msg.role == "assistant" and msg.delta_tool_calls:
-                for tc in msg.delta_tool_calls:
+            tcs = msg.tool_calls or msg.delta_tool_calls
+            if msg.role == "assistant" and tcs:
+                for tc in tcs:
                     tc_id = tc.get("id", "")
                     if tc_id:
                         valid_tool_ids.add(tc_id)
@@ -87,8 +113,10 @@ class ConversationManager:
                 result.append({"role": "user", "content": msg.content})
             elif msg.role == "assistant":
                 d: dict[str, Any] = {"role": "assistant", "content": msg.content}
-                if msg.delta_tool_calls:
-                    d["delta_tool_calls"] = msg.delta_tool_calls
+                if msg.tool_calls:
+                    d["tool_calls"] = msg.tool_calls
+                if msg.reasoning_content:
+                    d["reasoning_content"] = msg.reasoning_content
                 result.append(d)
             elif msg.role == "tool":
                 tc_id = msg.tool_call_id or ""
@@ -96,22 +124,86 @@ class ConversationManager:
                     result.append({
                         "role": "tool",
                         "content": msg.content,
-                        "tool_call_id": msg.tool_call_id or "",
+                        "tool_call_id": tc_id,
                     })
             else:
                 result.append({"role": msg.role, "content": msg.content})
 
         return result
 
-    def estimate_token_count(self) -> int:
-        from pc_assistant.context.truncator import _estimate_tokens
-        total = 0
+    def get_messages_for_llm_raw(self) -> list[dict[str, Any]]:
+        """Get raw messages suitable for the new assembly pipeline."""
+        result: list[dict[str, Any]] = []
+
+        valid_tool_ids: set[str] = set()
         for msg in self._messages:
-            total += _estimate_tokens(msg.content)
-            if msg.delta_tool_calls is not None:
-                for tc in msg.delta_tool_calls: 
-                    total += _estimate_tokens(str(tc))
-        return total
+            tcs = msg.tool_calls or msg.delta_tool_calls
+            if msg.role == "assistant" and tcs:
+                for tc in tcs:
+                    tc_id = tc.get("id", "")
+                    if tc_id:
+                        valid_tool_ids.add(tc_id)
+
+        for msg in self._messages:
+            if msg.role == "system":
+                continue
+            elif msg.role == "user":
+                result.append({"role": "user", "content": msg.content})
+            elif msg.role == "assistant":
+                d: dict[str, Any] = {"role": "assistant", "content": msg.content}
+                if msg.tool_calls:
+                    d["tool_calls"] = msg.tool_calls
+                if msg.reasoning_content:
+                    d["reasoning_content"] = msg.reasoning_content
+                result.append(d)
+            elif msg.role == "tool":
+                tc_id = msg.tool_call_id or ""
+                if tc_id in valid_tool_ids:
+                    result.append({
+                        "role": "tool",
+                        "content": msg.content,
+                        "tool_call_id": tc_id,
+                    })
+            else:
+                result.append({"role": msg.role, "content": msg.content})
+
+        return result
+
+    def compress(self, *, keep_recent: int = 4) -> None:
+        """Compress conversation history in-place, keeping recent messages full-fidelity."""
+        from pc_assistant.context.compact import compress_message_list, strip_ephemeral
+
+        raw = self.get_messages_for_llm_raw()
+        if len(raw) <= keep_recent:
+            return
+
+        compressed = compress_message_list(raw, keep_recent=keep_recent, source="user_trim")
+        compressed = strip_ephemeral(compressed)
+
+        # Rebuild internal messages from compressed list
+        new_messages: list[Message] = []
+        for m in compressed:
+            role = m.get("role", "")
+            content = m.get("content", "")
+            if role == "system":
+                continue
+            tc_id = m.get("tool_call_id")
+            msg = Message(
+                role=role,
+                content=content,
+                tool_calls=m.get("tool_calls"),
+                tool_call_id=tc_id,
+                reasoning_content=m.get("reasoning_content"),
+            )
+            if m.get("tool_calls"):
+                msg.delta_tool_calls = m["tool_calls"]
+            new_messages.append(msg)
+
+        self._messages = new_messages
+
+    def estimate_token_count(self) -> int:
+        from pc_assistant.context.assembly import _estimate_tokens
+        return _estimate_tokens(self.get_messages_for_llm_raw())
 
     def clear(self) -> None:
         self._messages.clear()

@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import shutil
 import signal
 import time
 from io import StringIO
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from pc_assistant.config import AppConfig
-from pc_assistant.agent import Agent, AgentEvent
-from pc_assistant.ui.state import UIState, Message, MessageType
+from pc_assistant.agent import Agent
+from pc_assistant.ui.state import UIState, MessageType
 from pc_assistant.ui.theme import TOKYO_NIGHT
 
 from rich.console import Console
@@ -17,15 +19,16 @@ from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
+from rich.text import Text as RichText
 
 from prompt_toolkit.application import Application
-from prompt_toolkit.formatted_text import ANSI as PTANSI, FormattedText, StyleAndTextTuples, merge_formatted_text, to_formatted_text
+from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.document import Document
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout, HSplit, Window, WindowAlign
-from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.styles import Style as PTStyle
-from prompt_toolkit.widgets import TextArea
 
 _WELCOME_ART = r"""
   ____  _        _   _               ____           _
@@ -35,6 +38,17 @@ _WELCOME_ART = r"""
  | |_) | |  __/ | |_| | | |  __/ |  | |_) |  __/ (_| |
  |____/|_|\___|  \__|_| |_|\___|_|  |____/ \___|\__,_|
 """
+
+ICON_PROMPT = "\u25b8"       # ▸
+ICON_ANSWER = "\u2502"       # │
+ICON_TOOL = "\u25cf"         # ●
+ICON_SUCCESS = "\u2713"      # ✓
+ICON_ERROR = "\u2717"        # ✗
+ICON_THINK = "\u25e6"        # ◦
+ICON_WARN = "\u25b2"         # ▲
+ICON_READY = "\u25cf"        # ●
+ICON_CANCEL = "\u25a0"       # ■
+ICON_BULLET = "\u2022"       # •
 
 _COMMANDS_HELP = """\
 /exit, /quit    Save conversation and exit
@@ -55,42 +69,73 @@ _COMMANDS_HELP = """\
 """
 
 TUI_STYLE = PTStyle.from_dict({
-    "input": "fg:#9ece6a",
     "status": "bg:#1a1b26 fg:#565f89",
     "status.ready": "bold fg:#9ece6a",
     "status.thinking": "bold fg:#7aa2f7",
     "status.executing": "bold fg:#e0af68",
-    "status.info": "italic fg:#565f89",
-    "user_text": "bold fg:#9ece6a",
+    "status.info": "italic fg:#3b4261",
+    "status.hint": "fg:#3b4261",
 })
 
+_ANSI_RX = re.compile(r'\x1b\[[0-9;]*m')
 
-class _ChatWindow(Window):
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.pinned_to_bottom = True
 
-    def _scroll(self, ui_content: Any, width: int, height: int) -> None:
-        super()._scroll(ui_content, width, height)
-        if self.pinned_to_bottom:
-            total_lines = ui_content.line_count
-            max_scroll = max(0, total_lines - height)
-            self.vertical_scroll = max_scroll
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RX.sub('', text)
 
-    def _scroll_up(self) -> None:
-        self.pinned_to_bottom = False
-        super()._scroll_up()
 
-    def _scroll_down(self) -> None:
-        self.pinned_to_bottom = False
-        super()._scroll_down()
+def _render_plain(text: str, width: int = 80, markdown: bool = True) -> str:
+    buf = StringIO()
+    console = Console(
+        theme=TOKYO_NIGHT,
+        file=buf,
+        force_terminal=False,
+        no_color=True,
+        width=max(40, min(width, shutil.get_terminal_size().columns - 4)),
+    )
+    if markdown:
+        console.print(Markdown(text))
+    else:
+        console.print(text)
+    return _strip_ansi(buf.getvalue())
+
+
+class _ChatLexer(Lexer):
+    """Color chat output based on line prefix characters."""
+    def lex_document(self, document: Document):
+        lines = document.lines
+
+        def get_line(lineno: int):
+            line = lines[lineno] if lineno < len(lines) else ""
+            stripped = line.lstrip()
+            if stripped.startswith(ICON_ANSWER):
+                return [("#7aa2f7", line)]
+            if stripped.startswith(ICON_THINK):
+                return [("#3b4261", line)]
+            if stripped.startswith(ICON_TOOL):
+                return [("#73daca", line)]
+            if stripped.startswith(ICON_SUCCESS):
+                return [("#9ece6a", line)]
+            if stripped.startswith(ICON_ERROR):
+                return [("#f7768e", line)]
+            if stripped.startswith(ICON_WARN):
+                return [("#e0af68", line)]
+            if stripped.startswith(ICON_CANCEL):
+                return [("#f7768e", line)]
+            if stripped.startswith(ICON_PROMPT):
+                return [("#9ece6a", line)]
+            if "____" in line or "|_" in line:
+                return [("#7aa2f7", line)]
+            return [("", line)]
+
+        return get_line
 
 
 class ChatUI:
     def __init__(
         self,
         config: AppConfig,
-        confirm_callback: Callable[[str, str], bool] | None = None,
+        confirm_callback: Callable[[str, dict[str, Any]], bool | Awaitable[bool]] | None = None,
     ) -> None:
         self._config = config
         self._agent: Agent | None = None
@@ -102,57 +147,74 @@ class ChatUI:
         self._cancelled = False
         self._event_task: asyncio.Task | None = None
 
-        # TUI components (lazy init)
         self._app: Application | None = None
-        self._chat_window: _ChatWindow | None = None
-        self._input_field: TextArea | None = None
+        self._chat_buffer: Buffer | None = None
+        self._input_buffer: str = ""
+        self._input_cursor: int = 0
         self._kb: KeyBindings | None = None
         self._refresh_task: asyncio.Task | None = None
         self._spinner_idx = 0
-        self._console_buffer: StringIO | None = None
-        self._saved_console_file: Any = None
 
-        # TUI rendering state
-        self._chat_fragments: list[StyleAndTextTuples] = []
+        self._chat_text: str = ""
+        self._stream_start: int = 0
+        self._stream_text: str = ""
+        self._think_start: int = 0
+        self._think_text: str = ""
+        self._think_active: bool = False
+        self._stream_rendered: bool = False
         self._current_op = ""
         self._token_count = 0
+        self._last_assistant_text: str = ""
+        self._confirm_future: asyncio.Future | None = None
 
     def set_agent(self, agent: Agent) -> None:
         self._agent = agent
+        agent._confirm_callback = self._tui_confirm
 
-    def _show_welcome(self) -> None:
-        self._console.print(_WELCOME_ART, style="bold green", highlight=False)
-        from pc_assistant import __version__
-        self._console.print(f"  [bold]v{__version__}[/bold]  \u2022  Type [bold]/help[/bold] for commands\n")
+    async def _tui_confirm(self, tool_name: str, arguments: dict[str, Any]) -> bool:
+        details = "\n".join(
+            f"  {k}: {json.dumps(v, ensure_ascii=False)}"
+            for k, v in list(arguments.items())[:4]
+        )
+        self._append_text(f"\n{ICON_WARN} Confirm: {tool_name}\n{details}\nProceed? (y/n): ")
+        self._rebuild_buffer()
+        loop = asyncio.get_event_loop()
+        self._confirm_future = loop.create_future()
+        try:
+            return await self._confirm_future
+        finally:
+            self._confirm_future = None
 
-    def _print_tool_call(self, name: str, arguments: dict[str, Any]) -> None:
-        self._state.add_message(MessageType.TOOL_CALL, f"[{name}]", tool_name=name, tool_args=arguments)
-        items = list(arguments.items())
-        if items:
-            first_k, first_v = items[0]
-            val_str = json.dumps(first_v, ensure_ascii=False)
-            if len(val_str) > 60:
-                val_str = val_str[:57] + "..."
-            self._console.print(Text(f"  \u2699 {name} {first_k}={val_str}", style="tool_icon"))
-        else:
-            self._console.print(Text(f"  \u2699 {name}", style="tool_icon"))
+    # ── Text management ────────────────────────────────────────────────
 
-    def _print_tool_result(self, name: str, result: str, is_error: bool = False) -> None:
-        self._state.add_message(MessageType.TOOL_RESULT, result[:200], tool_name=name)
-        truncated = result[:200]
-        if len(result) > 200:
-            truncated += "..."
-        icon = "\u2717" if is_error else "\u2713"
-        style = "error" if is_error else "tool_result"
-        self._console.print(Text(f"    {icon} {truncated}", style=style))
+    def _append_text(self, text: str) -> None:
+        self._chat_text += text
+
+    def _replace_text_range(self, start: int, text: str) -> None:
+        self._chat_text = self._chat_text[:start] + text
+
+    def _rebuild_buffer(self) -> None:
+        if self._chat_buffer is None:
+            return
+        text = self._chat_text
+        if not self._state.processing:
+            text += f"\n  {ICON_PROMPT} {self._input_buffer}"
+        self._chat_buffer.set_document(
+            Document(text, cursor_position=len(text)),
+            bypass_readonly=True,
+        )
+
+    # ── Console helpers ────────────────────────────────────────────────
 
     def _print_error(self, message: str) -> None:
         self._state.add_message(MessageType.ERROR, message)
-        self._console.print(Text(f"\u2717 {message}", style="error"))
+        self._console.print(RichText(f"{ICON_ERROR} {message}", style="error"))
 
     def _print_warning(self, message: str) -> None:
         self._state.add_message(MessageType.SYSTEM, message)
-        self._console.print(Text(f"! {message}", style="warning"))
+        self._console.print(RichText(f"{ICON_WARN} {message}", style="warning"))
+
+    # ── Commands ────────────────────────────────────────────────────────
 
     def _handle_screenshot(self) -> None:
         save_path = f"screenshot_{int(time.time())}.png"
@@ -200,137 +262,125 @@ class ChatUI:
         except Exception as e:
             self._print_error(f"Failed to export: {e}")
 
-    def _handle_user_command(self, command: str) -> bool:
+    def _run_command(self, command: str) -> str:
+        """Execute a slash command.
+        TUI mode: capture output via self._console and return plain text.
+        Console mode: print directly to stdout, return ''.
+        """
+        tui_mode = self._app is not None
+        buf = StringIO() if tui_mode else None
+        old_file = self._console.file
+        if tui_mode:
+            self._console.file = buf
         cmd = command.lower().strip()
 
         if cmd in ("/exit", "/quit"):
             self._console.print("[dim]Goodbye![/dim]")
             self._running = False
-            return True
-
-        if cmd == "/clear":
+        elif cmd == "/clear":
             if self._agent is not None:
                 self._agent.reset_conversation()
             self._state.clear_messages()
-            self._chat_fragments.clear()
+            self._chat_text = ""
             self._console.print("[dim]Conversation history cleared.[/dim]")
-            return True
-
-        if cmd == "/history":
+        elif cmd == "/history":
             if self._agent is None:
                 self._print_warning("No agent initialized yet.")
-                return True
-            messages = self._agent.conversation.get_messages()
-            if not messages:
-                self._console.print("[dim]No conversation history.[/dim]")
-                return True
-            table = Table(title="Conversation History", show_lines=True)
-            table.add_column("#", style="dim", width=4)
-            table.add_column("Role", style="bold", width=10)
-            table.add_column("Content", width=60)
-            for i, msg in enumerate(messages):
-                role = msg.get("role", "?")
-                content = msg.get("content", "")
-                if len(content) > 120:
-                    content = content[:117] + "..."
-                table.add_row(str(i + 1), role, content)
-            self._console.print(table)
-            return True
-
-        if cmd == "/tools":
+            else:
+                messages = self._agent.conversation.get_messages()
+                if not messages:
+                    self._console.print("[dim]No conversation history.[/dim]")
+                else:
+                    table = Table(title="Conversation History", show_lines=True)
+                    table.add_column("#", style="dim", width=4)
+                    table.add_column("Role", style="bold", width=10)
+                    table.add_column("Content", width=60)
+                    for i, msg in enumerate(messages):
+                        role = msg.get("role", "?")
+                        content = msg.get("content", "")
+                        if len(content) > 120:
+                            content = content[:117] + "..."
+                        table.add_row(str(i + 1), role, content)
+                    self._console.print(table)
+        elif cmd == "/tools":
             if self._agent is None:
                 self._print_warning("No agent initialized yet.")
-                return True
-            tools = self._agent.registry.list_tools()
-            if not tools:
-                self._console.print("[dim]No tools registered.[/dim]")
-                return True
-            table = Table(title="Available Tools")
-            table.add_column("Tool", style="cyan bold")
-            for t in tools:
-                table.add_row(t)
-            self._console.print(table)
-            return True
-
-        if cmd == "/help":
+            else:
+                tools = self._agent.registry.list_tools()
+                if not tools:
+                    self._console.print("[dim]No tools registered.[/dim]")
+                else:
+                    table = Table(title="Available Tools")
+                    table.add_column("Tool", style="cyan bold")
+                    for t in tools:
+                        table.add_row(t)
+                    self._console.print(table)
+        elif cmd == "/help":
             self._console.print(Panel(_COMMANDS_HELP, title="Commands", border_style="green", expand=False))
-            return True
-
-        if cmd == "/config":
+        elif cmd == "/config":
             parts = command.strip().split(None, 2)
             if len(parts) >= 3 and parts[1].lower() == "set":
                 field_name = parts[2].split("=", 1)[0].strip() if "=" in parts[2] else ""
                 field_value = parts[2].split("=", 1)[1].strip() if "=" in parts[2] else ""
                 if not field_name or not field_value:
                     self._print_warning("Usage: /config set key=value")
-                    return True
-                if self._config.set_field(field_name, field_value):
+                elif self._config.set_field(field_name, field_value):
                     display_val = "****" if field_name == "llm_api_key" else field_value
                     self._console.print(f"[dim]Set {field_name} = {display_val}[/dim]")
                 else:
                     self._print_warning(f"Unknown or invalid config field: {field_name}")
-                return True
-            table = Table(title="Configuration", show_lines=True)
-            table.add_column("Key", style="bold")
-            table.add_column("Value")
-            table.add_row("Provider", self._config.llm_provider)
-            table.add_row("LLM Server", self._config.llm_server_url)
-            table.add_row("Model", self._config.llm_model_name or "(not set)")
-            table.add_row("API Key", self._config.masked_api_key())
-            table.add_row("Max Iterations", str(self._config.max_iterations))
-            table.add_row("Shell Timeout", str(self._config.shell_timeout))
-            table.add_row("Context Budget", str(self._config.context_window_budget))
-            table.add_row("Log File", self._config.log_file)
-            table.add_row("Working Dir", self._config.working_directory)
-            self._console.print(table)
-            return True
-
-        if cmd == "/status":
+            else:
+                table = Table(title="Configuration", show_lines=True)
+                table.add_column("Key", style="bold")
+                table.add_column("Value")
+                table.add_row("Provider", self._config.llm_provider)
+                table.add_row("LLM Server", self._config.llm_server_url)
+                table.add_row("Model", self._config.llm_model_name or "(not set)")
+                table.add_row("API Key", self._config.masked_api_key())
+                table.add_row("Max Iterations", str(self._config.max_iterations))
+                table.add_row("Shell Timeout", str(self._config.shell_timeout))
+                table.add_row("Context Budget", str(self._config.context_window_budget))
+                table.add_row("Log File", self._config.log_file)
+                table.add_row("Working Dir", self._config.working_directory)
+                self._console.print(table)
+        elif cmd == "/status":
             if self._agent is None:
                 self._print_warning("No agent initialized yet.")
-                return True
-            status = self._agent.get_status()
-            table = Table(title="Agent Status", show_lines=True)
-            table.add_column("Property", style="bold")
-            table.add_column("Value")
-            for k, v in status.items():
-                if isinstance(v, list):
-                    v = ", ".join(str(x) for x in v)
-                table.add_row(k, str(v))
-            self._console.print(table)
-            return True
-
-        if cmd == "/memory clear":
+            else:
+                status = self._agent.get_status()
+                table = Table(title="Agent Status", show_lines=True)
+                table.add_column("Property", style="bold")
+                table.add_column("Value")
+                for k, v in status.items():
+                    if isinstance(v, list):
+                        v = ", ".join(str(x) for x in v)
+                    table.add_row(k, str(v))
+                self._console.print(table)
+        elif cmd == "/memory clear":
             if self._agent is None:
                 self._print_warning("No agent initialized yet.")
-                return True
-            self._agent.memory.clear()
-            self._console.print("[dim]All memories cleared.[/dim]")
-            return True
-
-        if cmd == "/memory":
+            else:
+                self._agent.memory.clear()
+                self._console.print("[dim]All memories cleared.[/dim]")
+        elif cmd == "/memory":
             if self._agent is None:
                 self._print_warning("No agent initialized yet.")
-                return True
-            items = self._agent.memory.get_all()
-            if not items:
-                self._console.print("[dim]No memories stored yet.[/dim]")
-                return True
-            table = Table(title="User Memory", show_lines=True)
-            table.add_column("Category", style="bold", width=12)
-            table.add_column("Key", width=25)
-            table.add_column("Value", width=40)
-            table.add_column("Access", width=6)
-            for item in sorted(items, key=lambda x: x.category):
-                table.add_row(item.category, item.key, item.value[:60], str(item.access_count))
-            self._console.print(table)
-            return True
-
-        if cmd == "/screenshot":
+            else:
+                items = self._agent.memory.get_all()
+                if not items:
+                    self._console.print("[dim]No memories stored yet.[/dim]")
+                else:
+                    table = Table(title="User Memory", show_lines=True)
+                    table.add_column("Category", style="bold", width=12)
+                    table.add_column("Key", width=25)
+                    table.add_column("Value", width=40)
+                    table.add_column("Access", width=6)
+                    for item in sorted(items, key=lambda x: x.category):
+                        table.add_row(item.category, item.key, item.value[:60], str(item.access_count))
+                    self._console.print(table)
+        elif cmd == "/screenshot":
             self._handle_screenshot()
-            return True
-
-        if cmd == "/retry":
+        elif cmd == "/retry":
             if self._last_input:
                 self._console.print("[dim]Retrying last input...[/dim]")
                 if self._event_task is not None and not self._event_task.done():
@@ -338,133 +388,221 @@ class ChatUI:
                 self._event_task = asyncio.create_task(self._process_events(self._last_input))
             else:
                 self._print_warning("No previous input to retry.")
-            return True
-
-        if cmd == "/debug":
+        elif cmd == "/debug":
             self._handle_debug()
-            return True
-
-        if cmd == "/export":
+        elif cmd == "/export":
             self._handle_export()
-            return True
-
-        if cmd == "/compact":
+        elif cmd == "/compact":
             if self._agent is not None:
                 self._agent.conversation.clear()
                 self._console.print("[dim]Context compacted (conversation cleared).[/dim]")
-            return True
+        else:
+            self._print_warning(f"Unknown command: {command}")
 
-        self._print_warning(f"Unknown command: {command}")
+        if tui_mode:
+            self._console.file = old_file
+            return _strip_ansi(buf.getvalue()) if buf else ""
+        return ""
+
+    def _handle_user_command(self, command: str) -> bool:
+        """Handle a slash command. Returns True (test-compat entry point).
+        Console mode: _run_command already printed to stdout.
+        TUI mode: append captured output to the chat buffer.
+        """
+        output = self._run_command(command)
+        if self._app is not None:
+            if output:
+                self._chat_text += output
+            self._rebuild_buffer()
+            if not self._running:
+                self._app.exit()
         return True
+
+    # ── Key bindings ───────────────────────────────────────────────────
 
     def _build_key_bindings(self) -> KeyBindings:
         kb = KeyBindings()
 
         @kb.add("enter")
         def _(event: Any) -> None:
-            buffer = event.current_buffer
-            text = buffer.text.strip()
+            text = self._input_buffer.strip()
             if not text:
                 return
-            buffer.text = ""
+            self._input_buffer = ""
+            self._input_cursor = 0
             self._on_input(text)
 
         @kb.add("c-c")
         def _(event: Any) -> None:
             if self._state.processing:
                 self._cancel()
-            elif self._input_field and self._input_field.buffer.text:
-                self._input_field.buffer.text = ""
+            elif self._input_buffer:
+                self._input_buffer = ""
+                self._input_cursor = 0
+                self._rebuild_buffer()
             else:
                 self._running = False
                 self._app.exit()
 
         @kb.add("c-d")
         def _(event: Any) -> None:
-            self._running = False
-            self._app.exit()
+            if self._input_cursor < len(self._input_buffer):
+                self._input_buffer = (
+                    self._input_buffer[:self._input_cursor]
+                    + self._input_buffer[self._input_cursor + 1:]
+                )
+                self._rebuild_buffer()
+            elif not self._input_buffer:
+                self._running = False
+                self._app.exit()
 
-        @kb.add("pageup")
+        @kb.add("c-h")
+        @kb.add("backspace")
         def _(event: Any) -> None:
-            if self._chat_window:
-                self._chat_window.pinned_to_bottom = False
-                vs = self._chat_window.vertical_scroll or 0
-                ri = self._chat_window.render_info
-                page = ri.window_height if ri else 20
-                self._chat_window.vertical_scroll = max(0, vs - page)
+            if self._input_cursor > 0:
+                self._input_buffer = (
+                    self._input_buffer[:self._input_cursor - 1]
+                    + self._input_buffer[self._input_cursor:]
+                )
+                self._input_cursor -= 1
+                self._rebuild_buffer()
 
-        @kb.add("pagedown")
+        @kb.add("left")
         def _(event: Any) -> None:
-            if self._chat_window:
-                self._chat_window.pinned_to_bottom = False
-                vs = self._chat_window.vertical_scroll or 0
-                ri = self._chat_window.render_info
-                page = ri.window_height if ri else 20
-                self._chat_window.vertical_scroll = min(10 ** 9, vs + page)
+            if self._input_cursor > 0:
+                self._input_cursor -= 1
+                self._rebuild_buffer()
+
+        @kb.add("right")
+        def _(event: Any) -> None:
+            if self._input_cursor < len(self._input_buffer):
+                self._input_cursor += 1
+                self._rebuild_buffer()
+
+        @kb.add("home")
+        @kb.add("c-a")
+        def _(event: Any) -> None:
+            self._input_cursor = 0
+            self._rebuild_buffer()
 
         @kb.add("end")
+        @kb.add("c-e")
         def _(event: Any) -> None:
-            if self._chat_window:
-                self._chat_window.pinned_to_bottom = True
+            self._input_cursor = len(self._input_buffer)
+            self._rebuild_buffer()
+
+        @kb.add("c-w")
+        def _(event: Any) -> None:
+            before = self._input_buffer[:self._input_cursor]
+            after = self._input_buffer[self._input_cursor:]
+            before = before.rstrip()
+            idx = before.rfind(" ")
+            before = before[:idx + 1] if idx >= 0 else ""
+            self._input_buffer = before + after
+            self._input_cursor = len(before)
+            self._rebuild_buffer()
+
+        @kb.add("c-u")
+        def _(event: Any) -> None:
+            self._input_buffer = self._input_buffer[self._input_cursor:]
+            self._input_cursor = 0
+            self._rebuild_buffer()
+
+        @kb.add("c-k")
+        def _(event: Any) -> None:
+            self._input_buffer = self._input_buffer[:self._input_cursor]
+            self._rebuild_buffer()
+
+        @kb.add("c-y")
+        def _(event: Any) -> None:
+            import pyperclip
+            if self._last_assistant_text:
+                pyperclip.copy(self._last_assistant_text)
+                self._append_text(f"  Copied to clipboard ({len(self._last_assistant_text)} chars)\n")
+                self._rebuild_buffer()
+
+        @kb.add("<any>")
+        def _(event: Any) -> None:
+            key_press = event.key_sequence[0]
+            data = key_press.data
+            if not data:
+                return
+            if ord(data[0]) < 32:
+                return
+            self._input_buffer = (
+                self._input_buffer[:self._input_cursor]
+                + data
+                + self._input_buffer[self._input_cursor:]
+            )
+            self._input_cursor += len(data)
+            self._rebuild_buffer()
 
         return kb
 
+    # ── Input handling ─────────────────────────────────────────────────
+
     def _on_input(self, text: str) -> None:
+        if self._confirm_future is not None and not self._confirm_future.done():
+            answer = text.strip().lower()
+            if answer in ("y", "yes"):
+                self._chat_text += "y\n"
+                self._rebuild_buffer()
+                self._confirm_future.set_result(True)
+            elif answer in ("n", "no"):
+                self._chat_text += "n\n"
+                self._rebuild_buffer()
+                self._confirm_future.set_result(False)
+            else:
+                self._chat_text += "Please answer y or n\nProceed? (y/n): "
+                self._rebuild_buffer()
+            return
+
         if text.startswith("/"):
-            self._handle_user_command(text)
+            output = self._run_command(text)
+            if output:
+                self._chat_text += output
+            self._rebuild_buffer()
             if not self._running:
                 self._app.exit()
         else:
             self._state.add_message(MessageType.USER, text)
-            self._chat_fragments.append([("bold #9ece6a", f"  \u276f {text}\n")])
+            self._chat_text += f"  {ICON_PROMPT} {text}\n"
+            self._rebuild_buffer()
             self._last_input = text
             self._event_task = asyncio.ensure_future(self._process_events(text))
 
-    def _render_md(self, text: str) -> StyleAndTextTuples:
-        """Render markdown text to prompt_toolkit styled fragments."""
-        buf = StringIO()
-        console = Console(
-            theme=TOKYO_NIGHT,
-            file=buf,
-            force_terminal=True,
-            color_system="truecolor",
-            width=80,
-        )
-        console.print(Markdown(text))
-        return self._clean_styles(list(to_formatted_text(PTANSI(buf.getvalue()))))
+    # ── TUI Init ───────────────────────────────────────────────────────
 
     def _init_tui(self) -> None:
-        self._chat_fragments.clear()
-        self._console_buffer = StringIO()
-        self._saved_console_file = self._console.file
-        self._console.file = self._console_buffer
-
-        chat_control = FormattedTextControl(self._get_chat_fragments)
-
-        self._chat_window = _ChatWindow(
-            content=chat_control,
-            wrap_lines=True,
-            dont_extend_height=False,
+        self._chat_text = ""
+        # read_only Buffer: content updated via set_document(bypass_readonly=True)
+        # focusable=True so the Window follows cursor_position and auto-scrolls
+        # to the bottom (where the input line lives). Mouse wheel also works.
+        self._chat_buffer = Buffer(read_only=True, multiline=True)
+        self._chat_control = BufferControl(
+            buffer=self._chat_buffer,
+            lexer=_ChatLexer(),
+            focusable=True,
         )
 
-        self._input_field = TextArea(
-            height=1,
-            multiline=False,
-            style="class:input",
+        self._chat_window = Window(
+            content=self._chat_control,
+            wrap_lines=True,
+            allow_scroll_beyond_bottom=False,
+            dont_extend_height=False,
         )
 
         status_control = FormattedTextControl(self._get_status_text)
 
-        self._layout = HSplit([
+        self._layout_container = HSplit([
             self._chat_window,
-            self._input_field,
             Window(height=1, content=status_control, dont_extend_height=True,
                    align=WindowAlign.LEFT, style="class:status"),
         ])
 
         self._kb = self._build_key_bindings()
 
-        layout = Layout(self._layout, focused_element=self._input_field)
+        layout = Layout(self._layout_container, focused_element=self._chat_control)
 
         self._app = Application(
             layout=layout,
@@ -474,64 +612,47 @@ class ChatUI:
             mouse_support=True,
         )
 
-    def _clean_styles(self, fragments: StyleAndTextTuples) -> StyleAndTextTuples:
-        """Remove unsupported style tokens (e.g. 'dim') from parsed ANSI."""
-        result: StyleAndTextTuples = []
-        for style, text in fragments:
-            if style and "dim" in style:
-                style = style.replace(" dim", "").replace("dim ", "").replace("dim", "")
-                if not style.strip():
-                    style = ""
-            result.append((style, text))
-        return result
-
-    def _sync_console_to_chat(self) -> None:
-        if self._console_buffer is None:
-            return
-        text = self._console_buffer.getvalue()
-        if text:
-            fragments = list(to_formatted_text(PTANSI(text)))
-            self._chat_fragments.append(self._clean_styles(fragments))
-            self._console_buffer = StringIO()
-            self._console.file = self._console_buffer
-
-    def _get_chat_fragments(self) -> StyleAndTextTuples:
-        self._sync_console_to_chat()
-        parts: list[StyleAndTextTuples] = list(self._chat_fragments)
-        return merge_formatted_text(parts) if parts else FormattedText([("", "")])
-
-    def _get_status_text(self) -> StyleAndTextTuples:
+    def _get_status_text(self) -> Any:
         spinners = ["\u280b", "\u2819", "\u2839", "\u2838", "\u283c",
                     "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"]
         if self._state.processing:
             spinner = spinners[self._spinner_idx % len(spinners)]
             self._spinner_idx += 1
             op = self._current_op or "thinking..."
-            asst_count = sum(1 for m in self._state.messages if m.type in (
-                MessageType.ASSISTANT, MessageType.THINK))
-            return FormattedText([
-                ("class:status.thinking", f"{spinner} {op}"),
+            asst_count = sum(
+                1 for m in self._state.messages
+                if m.type in (MessageType.ASSISTANT, MessageType.THINK)
+            )
+            return [
+                ("class:status.thinking", f" {spinner} {op}"),
                 ("", "  "),
                 ("class:status.info", f"Tokens: {self._token_count:,}"),
                 ("", "  "),
                 ("class:status.info", f"Iter: {asst_count}"),
-            ])
+            ]
         else:
-            asst_count = sum(1 for m in self._state.messages if m.type in (
-                MessageType.ASSISTANT, MessageType.THINK))
-            return FormattedText([
-                ("class:status.ready", "\u25cf Ready"),
+            asst_count = sum(
+                1 for m in self._state.messages
+                if m.type in (MessageType.ASSISTANT, MessageType.THINK)
+            )
+            return [
+                ("class:status.ready", f" {ICON_READY} Ready"),
                 ("", "  "),
                 ("class:status.info", f"Tokens: {self._token_count:,}"),
                 ("", "  "),
                 ("class:status.info", f"Iter: {asst_count}"),
                 ("", "   "),
-                ("class:status.info", "Ctrl+C cancel  Ctrl+D exit"),
-            ])
+                ("class:status.hint", "Ctrl+C cancel  Ctrl+D exit"),
+            ]
+
+    # ── Refresh / Cancel ───────────────────────────────────────────────
 
     async def _refresh_loop(self) -> None:
         while True:
             if self._app:
+                if self._agent is not None:
+                    status = self._agent.get_status()
+                    self._token_count = status.get("total_tokens", 0)
                 self._app.invalidate()
             await asyncio.sleep(0.08)
 
@@ -541,6 +662,10 @@ class ChatUI:
         self._cancelled = True
         if self._agent is not None:
             self._agent.cancel()
+        if self._confirm_future is not None and not self._confirm_future.done():
+            self._confirm_future.set_result(False)
+
+    # ── Event processing ───────────────────────────────────────────────
 
     async def _process_events(self, user_input: str) -> None:
         if self._agent is None:
@@ -551,13 +676,6 @@ class ChatUI:
         self._agent.reset_cancelled()
         self._state.processing = True
 
-        loop = asyncio.get_event_loop()
-        try:
-            loop.add_signal_handler(signal.SIGINT, self._cancel)
-        except (NotImplementedError, OSError):
-            pass
-
-        # Detect if we are in TUI mode
         if self._app is not None:
             await self._process_events_tui(user_input)
         else:
@@ -565,65 +683,73 @@ class ChatUI:
 
         self._state.processing = False
         self._current_op = ""
-        try:
-            loop.remove_signal_handler(signal.SIGINT)
-        except (NotImplementedError, OSError):
-            pass
 
     async def _process_events_tui(self, user_input: str) -> None:
-        streaming_text = ""
-        think_active = False
-
         try:
             async for event in self._agent.run(user_input):
                 if self._cancelled:
-                    self._chat_fragments.append([("bold #f7768e", "! Operation cancelled.\n")])
+                    self._append_text(f"{ICON_CANCEL} Cancelled.\n")
+                    self._think_active = False
+                    self._rebuild_buffer()
                     break
 
                 if event.type == "stream_start":
-                    streaming_text = ""
-                    self._chat_fragments.append([("bold #7aa2f7", "\u25c6 ")])
-                    think_active = False
+                    self._stream_text = ""
+                    self._stream_start = len(self._chat_text)
+                    self._stream_rendered = False
+                    self._think_active = False
+                    self._think_text = ""
+                    self._last_assistant_text = ""
                     self._current_op = "generating..."
-                    self._app.invalidate()
+                    self._rebuild_buffer()
 
                 elif event.type == "stream_delta":
-                    streaming_text += event.content
-                    if self._chat_fragments:
-                        self._chat_fragments[-1] = [
-                            ("bold #7aa2f7", "\u25c6 "),
-                            ("", streaming_text),
-                        ]
-                    if think_active:
-                        self._chat_fragments.append([("", "\n")])
-                        think_active = False
-                    self._app.invalidate()
+                    self._stream_text += event.content
+                    self._replace_text_range(
+                        self._stream_start, f"{ICON_ANSWER} {self._stream_text}"
+                    )
+                    self._current_op = "generating..."
+                    self._rebuild_buffer()
 
                 elif event.type == "stream_think_delta":
-                    if not think_active:
-                        think_active = True
-                        self._chat_fragments.append([("italic #565f89", "\U0001f4ad ")])
+                    if not self._think_active:
+                        self._think_active = True
+                        self._think_start = len(self._chat_text)
+                        self._think_text = event.content
+                        self._append_text(f"{ICON_THINK} {self._think_text}")
+                        self._state.add_message(MessageType.THINK, self._think_text)
                     else:
-                        last = self._chat_fragments[-1] if self._chat_fragments else None
-                        if last and len(last) == 1 and last[0][0] == "italic #565f89":
-                            last[0] = ("italic #565f89", last[0][1] + event.content)
-                        else:
-                            self._chat_fragments.append([("italic #565f89", event.content)])
+                        self._think_text += event.content
+                        self._replace_text_range(
+                            self._think_start, f"{ICON_THINK} {self._think_text}"
+                        )
+                        if self._state.messages:
+                            for m in reversed(self._state.messages):
+                                if m.type == MessageType.THINK:
+                                    m.content = self._think_text
+                                    break
                     self._current_op = "thinking..."
+                    self._rebuild_buffer()
 
                 elif event.type == "stream_end":
-                    if streaming_text:
-                        rendered = self._render_md(f"\u25c6 {streaming_text}")
-                        if self._chat_fragments:
-                            self._chat_fragments[-1] = rendered
-                        else:
-                            self._chat_fragments.append(rendered)
+                    self._think_active = False
+                    self._think_text = ""
+                    if self._stream_text:
+                        self._last_assistant_text = self._stream_text
+                        rendered = _render_plain(f"{ICON_ANSWER} {self._stream_text}")
+                        self._replace_text_range(self._stream_start, rendered + "\n")
+                        self._stream_rendered = True
+                        self._state.add_message(MessageType.ASSISTANT, self._stream_text)
+                    else:
+                        self._replace_text_range(self._stream_start, "")
+                    self._stream_text = ""
                     self._current_op = ""
-                    self._app.invalidate()
+                    self._rebuild_buffer()
 
                 elif event.type == "tool_call":
+                    self._think_active = False
                     if event.blocked:
-                        self._chat_fragments.append([("bold #e0af68", f"! Blocked: {event.content}\n")])
+                        self._append_text(f"{ICON_WARN} Blocked: {event.content}\n")
                     else:
                         items = list(event.tool_args.items())
                         if items:
@@ -631,57 +757,70 @@ class ChatUI:
                             val = json.dumps(v, ensure_ascii=False)
                             if len(val) > 60:
                                 val = val[:57] + "..."
-                            self._chat_fragments.append([
-                                ("bold #73daca", f"  \u2699 "),
-                                ("bold #7aa2f7", event.tool_name),
-                                ("#73daca", f" {k}={val}\n"),
-                            ])
+                            self._append_text(f"  {ICON_TOOL} {event.tool_name} {k}={val}\n")
                         else:
-                            self._chat_fragments.append([
-                                ("bold #73daca", f"  \u2699 {event.tool_name}\n"),
-                            ])
-                    self._state.add_message(MessageType.TOOL_CALL, f"[{event.tool_name}]",
-                                            tool_name=event.tool_name, tool_args=event.tool_args)
+                            self._append_text(f"  {ICON_TOOL} {event.tool_name}\n")
+                    self._state.add_message(
+                        MessageType.TOOL_CALL, f"[{event.tool_name}]",
+                        tool_name=event.tool_name, tool_args=event.tool_args,
+                    )
                     self._current_op = event.tool_name
-                    self._app.invalidate()
+                    self._rebuild_buffer()
 
                 elif event.type == "tool_result":
-                    result_str = str(event.tool_result) if event.tool_result is not None else event.content
+                    result_str = (
+                        str(event.tool_result)
+                        if event.tool_result is not None
+                        else event.content
+                    )
                     truncated = result_str[:200]
                     if len(result_str) > 200:
                         truncated += "..."
-                    is_error = isinstance(event.tool_result, dict) and "error" in event.tool_result
-                    icon = "\u2713" if not is_error else "\u2717"
-                    style = "#9ece6a" if not is_error else "#f7768e"
-                    self._chat_fragments.append([(f"bold {style}", f"    {icon} {truncated}\n")])
-                    self._state.add_message(MessageType.TOOL_RESULT, result_str[:200],
-                                            tool_name=event.tool_name)
-                    self._app.invalidate()
+                    is_error = (
+                        isinstance(event.tool_result, dict)
+                        and "error" in event.tool_result
+                    )
+                    icon = ICON_SUCCESS if not is_error else ICON_ERROR
+                    self._append_text(f"    {icon} {truncated}\n")
+                    self._state.add_message(
+                        MessageType.TOOL_RESULT, result_str[:200],
+                        tool_name=event.tool_name,
+                    )
+                    self._rebuild_buffer()
 
                 elif event.type == "final_answer":
-                    if event.content:
-                        rendered = self._render_md(f"\u25c6 {event.content}")
-                        self._chat_fragments.append(rendered)
-                        self._app.invalidate()
+                    self._think_active = False
+                    if event.content and not self._stream_rendered:
+                        self._last_assistant_text = event.content
+                        rendered = _render_plain(f"{ICON_ANSWER} {event.content}")
+                        self._append_text(rendered + "\n")
+                        self._state.add_message(MessageType.ASSISTANT, event.content)
+                        self._rebuild_buffer()
 
                 elif event.type == "error":
-                    self._chat_fragments.append([("bold #f7768e", f"\u2717 {event.content}\n")])
+                    self._think_active = False
+                    self._append_text(f"{ICON_ERROR} {event.content}\n")
                     self._state.add_message(MessageType.ERROR, event.content)
-                    self._app.invalidate()
+                    self._rebuild_buffer()
 
                 elif event.type == "iteration_limit":
-                    self._chat_fragments.append([("bold #e0af68", f"! {event.content}\n")])
+                    self._think_active = False
+                    self._append_text(f"{ICON_WARN} {event.content}\n")
+                    self._rebuild_buffer()
 
                 elif event.type == "cancelled":
-                    pass
+                    self._think_active = False
 
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            self._chat_fragments.append([("bold #f7768e", f"\u2717 {e}\n")])
+            self._append_text(f"{ICON_ERROR} {e}\n")
         finally:
+            self._think_active = False
+            self._stream_text = ""
+            self._stream_rendered = False
             self._current_op = ""
-            self._app.invalidate()
+            self._rebuild_buffer()
 
     async def _process_events_console(self, user_input: str) -> None:
         streaming_text = ""
@@ -702,7 +841,9 @@ class ChatUI:
             async for event in self._agent.run(user_input):
                 if self._cancelled:
                     _stop_live()
-                    self._console.print(Text("! Operation cancelled.", style="warning"))
+                    self._console.print(
+                        RichText(f"{ICON_CANCEL} Cancelled.", style="warning")
+                    )
                     break
 
                 if event.type == "stream_start":
@@ -710,9 +851,9 @@ class ChatUI:
                     first_content_received = False
                     streaming_text = ""
                     think_active = False
-                    self._console.print(Text("\u25c6 ", style="ai_label"))
+                    self._console.print(RichText(f"{ICON_ANSWER} ", style="ai_label"))
                     answer_live = Live(
-                        Text(""),
+                        RichText(""),
                         console=self._console,
                         refresh_per_second=15,
                         transient=False,
@@ -727,15 +868,17 @@ class ChatUI:
                     if not first_content_received:
                         first_content_received = True
                     if answer_live is not None:
-                        answer_live.update(Text(streaming_text))
+                        answer_live.update(RichText(streaming_text))
 
                 elif event.type == "stream_think_delta":
-                    output = answer_live.console if answer_live is not None else self._console
+                    output = (
+                        answer_live.console if answer_live is not None else self._console
+                    )
                     if not think_active:
                         think_active = True
                         output.print()
-                        output.print(Text("\U0001f4ad ", style="dim"), end="")
-                    output.print(Text(event.content, style="dim"), end="")
+                        output.print(RichText(f"{ICON_THINK} ", style="dim"), end="")
+                    output.print(RichText(event.content, style="dim"), end="")
 
                 elif event.type == "stream_end":
                     if answer_live is not None:
@@ -750,12 +893,47 @@ class ChatUI:
                     if event.blocked:
                         self._print_warning(f"Blocked: {event.content}")
                     else:
-                        self._print_tool_call(event.tool_name, event.tool_args)
+                        self._state.add_message(
+                            MessageType.TOOL_CALL, f"[{event.tool_name}]",
+                            tool_name=event.tool_name, tool_args=event.tool_args,
+                        )
+                        items = list(event.tool_args.items())
+                        if items:
+                            first_k, first_v = items[0]
+                            val_str = json.dumps(first_v, ensure_ascii=False)
+                            if len(val_str) > 60:
+                                val_str = val_str[:57] + "..."
+                            self._console.print(
+                                RichText(
+                                    f"  {ICON_TOOL} {event.tool_name} {first_k}={val_str}",
+                                    style="tool_icon",
+                                )
+                            )
+                        else:
+                            self._console.print(
+                                RichText(f"  {ICON_TOOL} {event.tool_name}", style="tool_icon")
+                            )
 
                 elif event.type == "tool_result":
-                    result_str = str(event.tool_result) if event.tool_result is not None else event.content
-                    is_error = isinstance(event.tool_result, dict) and "error" in event.tool_result
-                    self._print_tool_result(event.tool_name, result_str, is_error)
+                    result_str = (
+                        str(event.tool_result)
+                        if event.tool_result is not None
+                        else event.content
+                    )
+                    is_error = (
+                        isinstance(event.tool_result, dict)
+                        and "error" in event.tool_result
+                    )
+                    truncated = result_str[:200]
+                    if len(result_str) > 200:
+                        truncated += "..."
+                    icon = ICON_ERROR if is_error else ICON_SUCCESS
+                    style = "error" if is_error else "tool_result"
+                    self._state.add_message(
+                        MessageType.TOOL_RESULT, result_str[:200],
+                        tool_name=event.tool_name,
+                    )
+                    self._console.print(RichText(f"    {icon} {truncated}", style=style))
 
                 elif event.type == "final_answer":
                     if not first_content_received and event.content:
@@ -778,30 +956,47 @@ class ChatUI:
             self._cancel()
 
     async def ask_input(self, prompt: str, password_mode: bool = False) -> str | None:
-        self._console.print(Text(f"! {prompt}", style="warning"))
-        if password_mode:
-            import getpass
-            return getpass.getpass("Password: ")
-        try:
-            return input("Input: ")
-        except (EOFError, KeyboardInterrupt):
-            return None
+        self._console.print(RichText(f"! {prompt}", style="warning"))
+        import getpass
+
+        def _get_input() -> str | None:
+            try:
+                if password_mode:
+                    return getpass.getpass("Password: ")
+                return input("Input: ")
+            except (EOFError, KeyboardInterrupt):
+                return None
+
+        return await asyncio.to_thread(_get_input)
+
+    def _show_welcome(self) -> None:
+        """Show welcome message. Console mode prints to stdout; TUI mode updates buffer."""
+        if self._app is not None:
+            self._show_welcome_tui()
+        else:
+            self._show_welcome_console()
+
+    def _show_welcome_console(self) -> None:
+        self._console.print(_WELCOME_ART, style="bold cyan")
+        from pc_assistant import __version__
+        self._console.print(f"  v{__version__}  {ICON_BULLET}  Type /help for commands")
 
     def _show_welcome_tui(self) -> None:
-        self._chat_fragments.append([("bold #9ece6a", _WELCOME_ART)])
+        self._chat_text = _WELCOME_ART + "\n"
         from pc_assistant import __version__
-        self._chat_fragments.append([
-            ("", f"  "),
-            ("bold", f"v{__version__}"),
-            ("#565f89", f"  \u2022  Type "),
-            ("bold", "/help"),
-            ("#565f89", " for commands\n\n"),
-        ])
+        self._chat_text += f"  v{__version__}  {ICON_BULLET}  Type /help for commands\n\n"
+        self._rebuild_buffer()
 
     async def run(self) -> None:
         self._running = True
         self._init_tui()
         self._show_welcome_tui()
+
+        loop = asyncio.get_event_loop()
+        try:
+            loop.add_signal_handler(signal.SIGINT, self._cancel)
+        except (NotImplementedError, OSError):
+            pass
 
         self._refresh_task = asyncio.get_event_loop().create_task(self._refresh_loop())
 
@@ -813,6 +1008,7 @@ class ChatUI:
                 await self._refresh_task
             except asyncio.CancelledError:
                 pass
-            if self._saved_console_file is not None:
-                self._console.file = self._saved_console_file
-                self._saved_console_file = None
+            try:
+                loop.remove_signal_handler(signal.SIGINT)
+            except (NotImplementedError, OSError):
+                pass

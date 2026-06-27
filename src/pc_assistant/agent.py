@@ -3,15 +3,15 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from typing import Any, AsyncGenerator, Callable
+from typing import Any, AsyncGenerator, Awaitable, Callable
 
 from pydantic import BaseModel
 
 from pc_assistant.config import AppConfig, load_config
+from pc_assistant.context.assembly import assemble_llm_messages, truncate_messages
 from pc_assistant.context.conversation import ConversationManager
 from pc_assistant.context.memory import UserMemory
-from pc_assistant.context.system_prompt import build_system_prompt
-from pc_assistant.context.truncator import truncate_messages
+from pc_assistant.context.prompt import build_system_prompt
 from pc_assistant.harness.audit import AuditLogger
 from pc_assistant.harness.limiter import RateLimiter
 from pc_assistant.harness.safety import SafetyChecker
@@ -69,7 +69,7 @@ class Agent:
     def __init__(
         self,
         config: AppConfig | None = None,
-        confirm_callback: Callable[[str, dict[str, Any]], bool] | None = None,
+        confirm_callback: Callable[[str, dict[str, Any]], bool | Awaitable[bool]] | None = None,
         *,
         llm: LLMProvider | None = None,
         conversation: ConversationManager | None = None,
@@ -147,7 +147,7 @@ class Agent:
         # Normalize arguments for comparison
         try:
             args_str = json.dumps(arguments, sort_keys=True)
-        except:
+        except Exception:
             args_str = str(sorted(arguments.items()))
 
         call_sig = f"{tool_name}:{args_str[:200]}"
@@ -306,17 +306,14 @@ class Agent:
         self._tool_call_history.clear()
 
         memory_context = self._memory.build_context_string()
-        if memory_context:
-            full_system = self._system_prompt + "\n\n" + memory_context
-        else:
-            full_system = self._system_prompt
-        self._conversation.set_system_context(full_system)
+        self._conversation.set_system_context(self._system_prompt)
 
         empty_response_count = 0
         max_empty_retries = 1
         total_tool_calls = 0
-        max_total_tool_calls = 50
+        max_total_tool_calls = self._config.max_total_tool_calls
         consecutive_tool_without_answer = 0
+        max_consecutive_tool_calls = self._config.max_consecutive_tool_calls
 
         for iteration in range(self._config.max_iterations):
             if self._cancelled:
@@ -327,7 +324,14 @@ class Agent:
             self._current_status = "thinking"
             self._total_iterations += 1
 
-            messages = self._conversation.get_messages_for_llm()
+            raw_messages = self._conversation.get_messages_for_llm_raw()
+            messages = assemble_llm_messages(
+                self._system_prompt,
+                raw_messages,
+                user_input,
+                working_directory=self._config.working_directory,
+                memory_context=memory_context,
+            )
             messages = truncate_messages(
                 messages,
                 budget=self._config.context_window_budget,
@@ -339,6 +343,7 @@ class Agent:
             emitted_clean_len = 0
             emitted_think_len = 0
             tool_calls_from_stream: list[dict[str, Any]] = []
+            accumulated_tool_calls: dict[int, dict[str, Any]] = {}
             finish_reason = ""
             stream_had_error = False
 
@@ -378,7 +383,41 @@ class Agent:
                         yield AgentEvent(type="stream_think_delta", content=chunk.delta_thinking, iteration=iteration)
 
                     if chunk.delta_tool_calls:
-                        tool_calls_from_stream = chunk.delta_tool_calls
+                        for dtc in chunk.delta_tool_calls:
+                            idx = dtc.get("index", len(accumulated_tool_calls))
+                            func_delta = dtc.get("function", {})
+                            delta_args = func_delta.get("arguments", "")
+
+                            if isinstance(delta_args, dict):
+                                accumulated_tool_calls[idx] = {
+                                    "id": dtc.get("id", ""),
+                                    "type": "function",
+                                    "function": {
+                                        "name": func_delta.get("name", ""),
+                                        "arguments": delta_args,
+                                    },
+                                }
+                                continue
+
+                            if idx not in accumulated_tool_calls:
+                                accumulated_tool_calls[idx] = {
+                                    "id": dtc.get("id", ""),
+                                    "type": "function",
+                                    "function": {
+                                        "name": "",
+                                        "arguments": "",
+                                    },
+                                }
+                            acc = accumulated_tool_calls[idx]
+                            if dtc.get("id"):
+                                acc["id"] = dtc["id"]
+                            if func_delta.get("name"):
+                                acc["function"]["name"] += func_delta["name"]
+                            if delta_args:
+                                if isinstance(acc["function"]["arguments"], str):
+                                    acc["function"]["arguments"] += delta_args
+                                else:
+                                    acc["function"]["arguments"] = delta_args
 
                     if chunk.finish_reason:
                         finish_reason = chunk.finish_reason
@@ -410,6 +449,18 @@ class Agent:
                 return
 
             self._connected = True
+
+            if accumulated_tool_calls:
+                final_tool_calls = []
+                for idx in sorted(accumulated_tool_calls.keys()):
+                    tc = accumulated_tool_calls[idx]
+                    if "function" in tc and isinstance(tc["function"].get("arguments"), str):
+                        try:
+                            tc["function"]["arguments"] = json.loads(tc["function"]["arguments"])
+                        except (json.JSONDecodeError, TypeError):
+                            tc["function"]["arguments"] = {}
+                    final_tool_calls.append(tc)
+                tool_calls_from_stream = final_tool_calls
 
             clean_content = _strip_think_tags(full_content)[0]
 
@@ -449,50 +500,99 @@ class Agent:
                             content=f"Stopped: {loop_reason}",
                             iteration=iteration,
                         )
-                        self._conversation.add_tool_result(tool_call_id, f"Stopped: {loop_reason}")
+                        self._conversation.add_tool_result(tool_call_id, f"Stopped: {loop_reason}", tool_name=tool_name)
                         # Clear history to allow recovery
                         self._tool_call_history.clear()
                         break
 
                     safety_result = self._safety.check_tool_call(tool_name, arguments)
+                    need_confirm, confirm_reason = self._safety.needs_confirmation(tool_name, arguments)
+
+                    blocked = False
+                    block_reason = ""
 
                     if not safety_result:
-                        user_confirmed = False
+                        block_reason = safety_result.reason
                         if self._confirm_callback is not None:
                             try:
-                                user_confirmed = self._confirm_callback(tool_name, arguments)
+                                cb_result = self._confirm_callback(tool_name, arguments)
+                                if asyncio.iscoroutine(cb_result):
+                                    user_confirmed = await cb_result
+                                else:
+                                    user_confirmed = cb_result
                             except Exception:
                                 user_confirmed = False
-
-                        if user_confirmed:
+                            if user_confirmed:
+                                self._audit.log(
+                                    action="tool_call_confirmed",
+                                    tool=tool_name,
+                                    parameters=arguments,
+                                    allowed=True,
+                                    reason=f"User confirmed override of: {safety_result.reason}",
+                                )
+                            else:
+                                blocked = True
+                        else:
+                            blocked = True
+                    elif need_confirm:
+                        block_reason = confirm_reason
+                        if self._confirm_callback is not None:
+                            try:
+                                cb_result = self._confirm_callback(tool_name, arguments)
+                                if asyncio.iscoroutine(cb_result):
+                                    user_confirmed = await cb_result
+                                else:
+                                    user_confirmed = cb_result
+                            except Exception:
+                                user_confirmed = False
+                            if not user_confirmed:
+                                blocked = True
+                                self._audit.log(
+                                    action="tool_call_blocked",
+                                    tool=tool_name,
+                                    parameters=arguments,
+                                    allowed=False,
+                                    reason=confirm_reason,
+                                )
+                            else:
+                                self._audit.log(
+                                    action="tool_call_confirmed",
+                                    tool=tool_name,
+                                    parameters=arguments,
+                                    allowed=True,
+                                    reason=f"User confirmed: {confirm_reason}",
+                                )
+                        else:
                             self._audit.log(
-                                action="tool_call_confirmed",
+                                action="tool_call",
                                 tool=tool_name,
                                 parameters=arguments,
                                 allowed=True,
-                                reason=f"User confirmed override of: {safety_result.reason}",
+                                reason=f"No confirmation callback; proceeding with: {confirm_reason}",
                             )
-                        else:
-                            self._audit.log(
-                                action="tool_call_blocked",
-                                tool=tool_name,
-                                parameters=arguments,
-                                allowed=False,
-                                reason=safety_result.reason,
-                            )
-                            yield AgentEvent(
-                                type="tool_call",
-                                tool_name=tool_name,
-                                tool_args=arguments,
-                                blocked=True,
-                                content=safety_result.reason,
-                                iteration=iteration,
-                            )
-                            self._conversation.add_tool_result(
-                                tool_call_id,
-                                f"Blocked: {safety_result.reason}",
-                            )
-                            continue
+
+                    if blocked:
+                        self._audit.log(
+                            action="tool_call_blocked",
+                            tool=tool_name,
+                            parameters=arguments,
+                            allowed=False,
+                            reason=block_reason,
+                        )
+                        yield AgentEvent(
+                            type="tool_call",
+                            tool_name=tool_name,
+                            tool_args=arguments,
+                            blocked=True,
+                            content=block_reason,
+                            iteration=iteration,
+                        )
+                        self._conversation.add_tool_result(
+                            tool_call_id,
+                            f"Blocked: {block_reason}",
+                            tool_name=tool_name,
+                        )
+                        continue
 
                     yield AgentEvent(
                         type="tool_call",
@@ -520,7 +620,7 @@ class Agent:
                         self._current_status = "ready"
                         return
 
-                    if consecutive_tool_without_answer >= 50:
+                    if consecutive_tool_without_answer >= max_consecutive_tool_calls:
                         yield AgentEvent(
                             type="iteration_limit",
                             content=f"Too many tool calls ({consecutive_tool_without_answer}) without producing an answer.",
@@ -532,26 +632,20 @@ class Agent:
                     self._current_status = f"executing_{tool_name}"
 
                     try:
-                        self._current_task = asyncio.create_task(
-                            self._registry.execute(tool_name, **arguments)
-                        )
-                        # Wait for task with cancellation check
-                        while not self._current_task.done():
+                        execute_coro = self._registry.execute(tool_name, **arguments)
+                        self._current_task = asyncio.create_task(execute_coro)
+                        try:
+                            result = await self._current_task
+                        except asyncio.CancelledError:
                             if self._cancelled:
-                                self._current_task.cancel()
-                                try:
-                                    await self._current_task
-                                except asyncio.CancelledError:
-                                    pass
                                 self._current_status = "ready"
                                 yield AgentEvent(type="cancelled", content="Operation cancelled by user.", iteration=iteration)
                                 return
-                            await asyncio.sleep(0.1)
-                        result = await self._current_task
+                            raise
+                        self._current_task = None
                         result_str = str(result)
-                        # Smart truncation for long outputs
                         result_str = self._smart_truncate(result_str, tool_name, result)
-                        self._conversation.add_tool_result(tool_call_id, result_str)
+                        self._conversation.add_tool_result(tool_call_id, result_str, tool_name=tool_name)
                         self._current_status = "thinking"
                         yield AgentEvent(
                             type="tool_result",
@@ -566,7 +660,7 @@ class Agent:
                         return
                     except Exception as e:
                         error_msg = f"Error: {e}"
-                        self._conversation.add_tool_result(tool_call_id, error_msg)
+                        self._conversation.add_tool_result(tool_call_id, error_msg, tool_name=tool_name)
                         self._current_status = "thinking"
                         yield AgentEvent(
                             type="tool_result",
@@ -600,7 +694,7 @@ class Agent:
                         )
                         self._current_status = "ready"
                         return
-                    self._conversation.add("user", "[System] You did not produce any output. Please respond to the user's question directly.")
+                    self._conversation.add_user("[System] You did not produce any output. Please respond to the user's question directly.")
                     continue
 
                 empty_response_count = 0
@@ -639,8 +733,4 @@ class Agent:
             working_directory=self._config.working_directory,
         )
         memory_context = self._memory.build_context_string()
-        if memory_context:
-            full_system = self._system_prompt + "\n\n" + memory_context
-        else:
-            full_system = self._system_prompt
-        self._conversation.set_system_context(full_system)
+        self._conversation.set_system_context(self._system_prompt)
