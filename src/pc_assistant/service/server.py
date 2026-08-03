@@ -44,6 +44,7 @@ class ServiceServer:
         self._config = config
         self._agent: Agent | None = None
         self._ws_server: Any = None
+        self._tcp_server: Any = None
         self._clients: dict[str, ServerConnection] = {}
         self._confirm_futures: dict[str, asyncio.Future[bool]] = {}
         self._running = False
@@ -87,10 +88,23 @@ class ServiceServer:
             self._handle_client,
             str(SOCKET_PATH),
         )
-        self._running = True
+        logger.info("Unix socket listening on %s", SOCKET_PATH)
 
+        if self._config.service_port > 0:
+            self._tcp_server = await websockets.serve(
+                self._handle_client,
+                self._config.service_host,
+                self._config.service_port,
+            )
+            logger.info(
+                "TCP listening on %s:%d",
+                self._config.service_host,
+                self._config.service_port,
+            )
+
+        self._running = True
         _write_pid()
-        logger.info("Service listening on %s (pid %d)", SOCKET_PATH, os.getpid())
+        logger.info("Service ready (pid %d)", os.getpid())
 
     async def stop(self) -> None:
         self._running = False
@@ -105,6 +119,10 @@ class ServiceServer:
         if self._ws_server is not None:
             self._ws_server.close()
             await self._ws_server.wait_closed()
+
+        if self._tcp_server is not None:
+            self._tcp_server.close()
+            await self._tcp_server.wait_closed()
 
         if self._agent is not None:
             scheduler = self._agent.registry.get("scheduler")

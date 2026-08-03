@@ -39,6 +39,8 @@ class AppConfig(BaseModel):
     reflection_enabled: bool = False
     reflection_threshold: int = 7
     ui_theme: str = "catppuccin"
+    service_host: str = "127.0.0.1"
+    service_port: int = 0
     feishu_enabled: bool = False
     feishu_app_id: str = ""
     feishu_app_secret: str = ""
@@ -74,6 +76,7 @@ class AppConfig(BaseModel):
             "llm_trace_log": str, "turn_trace_log": str,
             "evidence_policy_enabled": bool,
             "reflection_enabled": bool, "reflection_threshold": int, "ui_theme": str,
+            "service_host": str, "service_port": int,
             "feishu_enabled": bool, "feishu_app_id": str, "feishu_app_secret": str,
             "feishu_receive_id": str, "feishu_receive_id_type": str,
         }

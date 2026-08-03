@@ -28,8 +28,16 @@ logger = logging.getLogger(__name__)
 class ServiceClient:
     """WebSocket client that speaks the service wire protocol."""
 
-    def __init__(self, socket_path: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        socket_path: Path | str | None = None,
+        *,
+        host: str = "",
+        port: int = 0,
+    ) -> None:
         self._socket_path = Path(socket_path) if socket_path else SOCKET_PATH
+        self._host = host
+        self._port = port
         self._ws: Any = None
         self._msg_id = 0
         self._pending: dict[int, asyncio.Future[ServerMessage]] = {}
@@ -42,7 +50,11 @@ class ServiceClient:
     # ── Connection lifecycle ──────────────────────────────────
 
     async def connect(self) -> None:
-        self._ws = await websockets.unix_connect(path=str(self._socket_path))
+        if self._host and self._port > 0:
+            uri = f"ws://{self._host}:{self._port}"
+            self._ws = await websockets.connect(uri)
+        else:
+            self._ws = await websockets.unix_connect(path=str(self._socket_path))
         self._connected = True
         self._reader_task = asyncio.create_task(self._reader_loop())
 

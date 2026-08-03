@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 async def get_agent_or_client(config: AppConfig) -> Any:
     """Get an Agent-like object: prefer connecting to the service daemon.
 
-    1. Try connecting to an existing service.
+    1. Try connecting to an existing service (TCP first if configured, then Unix).
     2. If none running, auto-start the daemon and connect.
     3. If auto-start fails, fall back to in-process Agent.
 
@@ -34,13 +34,23 @@ async def get_agent_or_client(config: AppConfig) -> Any:
     """
     from pc_assistant.service.client import ServiceClient
 
+    if config.service_port > 0:
+        tcp_client = ServiceClient(host=config.service_host, port=config.service_port)
+        try:
+            await asyncio.wait_for(tcp_client.connect(), timeout=2.0)
+            if tcp_client.is_connected:
+                logger.info("Connected to service via TCP %s:%d", config.service_host, config.service_port)
+                return tcp_client
+        except Exception as e:
+            logger.debug("TCP connect failed: %s", e)
+
     client = ServiceClient()
 
     if is_running() and SOCKET_PATH.exists():
         try:
             await asyncio.wait_for(client.connect(), timeout=2.0)
             if client.is_connected:
-                logger.info("Connected to existing service")
+                logger.info("Connected to existing service via Unix socket")
                 return client
         except Exception as e:
             logger.debug("Failed to connect to existing service: %s", e)
