@@ -14,7 +14,6 @@ from pc_assistant.tools.notification import NotificationTool
 from pc_assistant.tools.scheduler import SchedulerTool
 from pc_assistant.tools.shell import ShellTool
 from pc_assistant.tools.system import SystemTool
-from pc_assistant.tools.timer import TimerTool
 from pc_assistant.tools.weather import WeatherTool
 from pc_assistant.tools.web import WebTool
 from pc_assistant.tools.window import WindowTool
@@ -38,7 +37,6 @@ ALL_TOOLS = [
     SchedulerTool(),
     ShellTool(),
     SystemTool(),
-    TimerTool(),
     WeatherTool(),
     WebTool(),
     WindowTool(),

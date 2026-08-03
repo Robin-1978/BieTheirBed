@@ -24,7 +24,7 @@ from rich.text import Text as RichText
 from pc_assistant.agent import Agent, AgentEvent
 from pc_assistant.config import AppConfig
 from pc_assistant.ui.state import UIState, MessageType
-from pc_assistant.ui.theme import TOKYO_NIGHT
+from pc_assistant.ui.theme import get_rich_theme
 
 ICON_PROMPT = "\u25b8"       # ▸
 ICON_ANSWER = "\u2502"       # │
@@ -51,7 +51,8 @@ _COMMANDS_HELP = """\
 /retry          Retry the last user input
 /debug          Toggle debug mode
 /export         Export conversation to file
-/compact        Compact context (remove old messages)\
+/compact        Compact context (remove old messages)
+/theme          List or switch color themes\
 """
 
 
@@ -205,7 +206,7 @@ class ChatUI:
         self._confirm_callback = confirm_callback
         self._running = False
         self._state = UIState()
-        self._console = Console(theme=TOKYO_NIGHT)
+        self._console = Console(theme=get_rich_theme())
         self._last_input: str = ""
         self._cancelled = False
         self._event_task: asyncio.Task | None = None

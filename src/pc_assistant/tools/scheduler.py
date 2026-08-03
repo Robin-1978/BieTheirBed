@@ -1,3 +1,12 @@
+"""Unified scheduler: cron tasks, interval repeats, and one-shot timers.
+
+Replaces the separate SchedulerTool + TimerTool with a single tool that
+handles all time-based scheduling:
+
+- Cron expressions: ``"0 9 * * *"``
+- Interval repeats: ``"every 5m"``
+- One-shot delays:  ``"in 30s"``, ``"in 2h30m"``
+"""
 from __future__ import annotations
 
 import asyncio
@@ -11,21 +20,30 @@ from typing import Any, Callable
 from pc_assistant.tools.base import ToolBase
 
 
+_DELAY_RE = re.compile(
+    r"^in\s+(?:(\d+)\s*h)?(?:(\d+)\s*m)?(?:(\d+)\s*s)?$",
+    re.IGNORECASE,
+)
+_INTERVAL_RE = re.compile(r"^every\s+(\d+)\s*([smhd])$", re.IGNORECASE)
+_INTERVAL_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
 class ScheduledTask:
-    """Represents a scheduled task."""
+    """A single scheduled item -- cron, interval, or one-shot delay."""
 
     def __init__(
         self,
         task_id: str,
         name: str,
         command: str,
-        schedule: str,  # cron expression or interval
+        schedule: str,
         enabled: bool = True,
         last_run: datetime | None = None,
         next_run: datetime | None = None,
         run_count: int = 0,
-        max_runs: int = 0,  # 0 = unlimited
+        max_runs: int = 0,
         timeout: int = 300,
+        message: str = "",
         callback: Callable[[str, str], Any] | None = None,
     ) -> None:
         self.task_id = task_id
@@ -38,46 +56,88 @@ class ScheduledTask:
         self.run_count = run_count
         self.max_runs = max_runs
         self.timeout = timeout
+        self.message = message
         self.callback = callback
         self._task: asyncio.Task | None = None
         self._is_running: bool = False
+        self._paused_remaining: float | None = None
+
+    # ── Schedule type detection ───────────────────────────────
+
+    @property
+    def schedule_type(self) -> str:
+        if _DELAY_RE.match(self.schedule):
+            return "delay"
+        if _INTERVAL_RE.match(self.schedule):
+            return "interval"
+        return "cron"
+
+    @property
+    def is_one_shot(self) -> bool:
+        return self.schedule_type == "delay"
+
+    @property
+    def is_running(self) -> bool:
+        return self._task is not None and not self._task.done()
+
+    @property
+    def is_paused(self) -> bool:
+        return self._paused_remaining is not None
+
+    # ── Next-run calculation ──────────────────────────────────
 
     def calculate_next_run(self) -> datetime | None:
-        """Calculate the next run time based on schedule (in local time)."""
         now = datetime.now()
+        stype = self.schedule_type
 
-        if self._is_cron_schedule():
-            try:
-                cron = croniter(self.schedule, now)
-                return cron.get_next(datetime)
-            except (ValueError, KeyError):
-                return None
-        else:
-            match = re.match(r"every\s+(\d+)\s*([smhd])", self.schedule.lower())
-            if match:
-                value = int(match.group(1))
-                unit = match.group(2)
-                intervals = {"s": 1, "m": 60, "h": 3600, "d": 86400}
-                seconds = value * intervals.get(unit, 60)
-                return now + timedelta(seconds=seconds)
-        return None
+        if stype == "delay":
+            secs = self._parse_delay_seconds()
+            return now + timedelta(seconds=secs) if secs and secs > 0 else None
 
-    def _is_cron_schedule(self) -> bool:
-        """Check if schedule is a cron expression."""
-        return " " in self.schedule and not self.schedule.lower().startswith("every")
+        if stype == "interval":
+            m = _INTERVAL_RE.match(self.schedule)
+            if m:
+                secs = int(m.group(1)) * _INTERVAL_UNITS.get(m.group(2).lower(), 60)
+                return now + timedelta(seconds=secs)
+            return None
+
+        # cron
+        try:
+            return croniter(self.schedule, now).get_next(datetime)
+        except (ValueError, KeyError):
+            return None
+
+    def _parse_delay_seconds(self) -> int:
+        m = _DELAY_RE.match(self.schedule)
+        if not m:
+            return 0
+        h = int(m.group(1) or 0)
+        mi = int(m.group(2) or 0)
+        s = int(m.group(3) or 0)
+        return h * 3600 + mi * 60 + s
+
+    # ── Pause / resume helpers ────────────────────────────────
+
+    @property
+    def remaining_seconds(self) -> float:
+        if self._paused_remaining is not None:
+            return self._paused_remaining
+        if self.next_run is None:
+            return 0
+        return max(0, (self.next_run - datetime.now()).total_seconds())
+
+    # ── Should-run check ──────────────────────────────────────
 
     def should_run(self) -> bool:
-        """Check if task should run now (using local time)."""
-        if not self.enabled:
-            return False
-        if self._is_running:
+        if not self.enabled or self._is_running:
             return False
         if self.max_runs > 0 and self.run_count >= self.max_runs:
             return False
         if self.next_run is None:
             return False
-        now = datetime.now()
-        return now >= self.next_run
+        return datetime.now() >= self.next_run
+
+    # ── Serialization ─────────────────────────────────────────
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -91,12 +151,14 @@ class ScheduledTask:
             "run_count": self.run_count,
             "max_runs": self.max_runs,
             "timeout": self.timeout,
+            "message": self.message,
             "is_running": self._is_running,
-            "schedule_type": "cron" if self._is_cron_schedule() else "interval",
+            "schedule_type": self.schedule_type,
+            "paused_remaining": self._paused_remaining,
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ScheduledTask":
+    def from_dict(cls, data: dict[str, Any]) -> ScheduledTask:
         def _to_local(dt_str: str | None) -> datetime | None:
             if not dt_str:
                 return None
@@ -108,7 +170,7 @@ class ScheduledTask:
         task = cls(
             task_id=data["task_id"],
             name=data["name"],
-            command=data["command"],
+            command=data.get("command", ""),
             schedule=data["schedule"],
             enabled=data.get("enabled", True),
             last_run=_to_local(data.get("last_run")),
@@ -116,45 +178,48 @@ class ScheduledTask:
             run_count=data.get("run_count", 0),
             max_runs=data.get("max_runs", 0),
             timeout=data.get("timeout", 300),
+            message=data.get("message", ""),
         )
+        task._paused_remaining = data.get("paused_remaining")
         return task
 
 
+# ── Tool ──────────────────────────────────────────────────────────────
+
+
 class SchedulerTool(ToolBase):
-    """Schedule tasks to run at specific times or intervals.
-    Supports cron expressions and simple interval notation.
+    """Schedule tasks: cron, intervals, and one-shot timers.
 
     Examples:
-    - "0 9 * * *" = Every day at 9:00 AM
-    - "*/15 * * * *" = Every 15 minutes
-    - "every 5m" = Every 5 minutes
-    - "every 1h" = Every hour
-    - "every 1d" = Every day
+    - ``"0 9 * * *"``   -- every day at 9:00 AM
+    - ``"*/15 * * * *"`` -- every 15 minutes
+    - ``"every 5m"``     -- every 5 minutes
+    - ``"in 30s"``       -- countdown timer: 30 seconds from now
+    - ``"in 2h30m"``     -- countdown timer: 2 hours 30 minutes
     """
 
     name = "scheduler"
-    description = "Schedule tasks to run at specific times or intervals (cron-like scheduling)"
+    description = "Schedule recurring tasks, timers, and reminders (cron, intervals, one-shot delays)"
     is_side_effecting = True
 
     def __init__(self, storage_path: str = "data/scheduled_tasks.json") -> None:
         self._tasks: dict[str, ScheduledTask] = {}
-        self._callback: Callable[[str, str], Any] | None = None
+        self._notification_callback: Callable[[str, str], None] | None = None
         self._storage_path = Path(storage_path)
         self._scheduler_task: asyncio.Task | None = None
         self._running = False
-        self._agent: Any = None  # Reference to Agent for task execution
+        self._agent: Any = None
         self._load()
 
     def set_agent(self, agent: Any) -> None:
-        """Set the agent for task execution."""
         self._agent = agent
 
-    def set_execute_callback(self, callback: Callable[[str, str], Any]) -> None:
-        """Set callback for task execution results."""
-        self._callback = callback
+    def set_notification_callback(self, callback: Callable[[str, str], None]) -> None:
+        self._notification_callback = callback
+
+    # ── Persistence ───────────────────────────────────────────
 
     def _load(self) -> None:
-        """Load tasks from persistent storage."""
         if not self._storage_path.exists():
             return
         try:
@@ -162,45 +227,327 @@ class SchedulerTool(ToolBase):
                 data = json.load(f)
             for task_data in data.get("tasks", []):
                 task = ScheduledTask.from_dict(task_data)
-                # Recalculate next_run for loaded tasks
-                task.next_run = task.calculate_next_run()
+                if task._paused_remaining is None:
+                    task.next_run = task.calculate_next_run()
                 self._tasks[task.task_id] = task
         except (json.JSONDecodeError, OSError, KeyError):
             pass
 
     def _save(self) -> None:
-        """Save tasks to persistent storage."""
         self._storage_path.parent.mkdir(parents=True, exist_ok=True)
         data = {
-            "version": 1,
+            "version": 2,
             "updated_at": datetime.now().isoformat(),
-            "tasks": [task.to_dict() for task in self._tasks.values()],
+            "tasks": [t.to_dict() for t in self._tasks.values()],
         }
         with open(self._storage_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+
+    # ── Execute dispatch ──────────────────────────────────────
 
     async def execute(self, **kwargs: Any) -> Any:
         action = kwargs.get("action", "list")
         handlers = {
             "create": self._create_task,
             "add": self._create_task,
+            "set": self._create_task,
             "list": self._list_tasks,
             "info": self._task_info,
             "enable": self._enable_task,
             "disable": self._disable_task,
             "delete": self._delete_task,
+            "cancel": self._delete_task,
             "run": self._run_task,
             "start": self._start_scheduler,
             "stop": self._stop_scheduler,
             "status": self._scheduler_status,
+            "pause": self._pause_task,
+            "resume": self._resume_task,
         }
         handler = handlers.get(action)
         if handler is None:
-            return {"error": f"Unknown action: {action}. Use: create, list, info, enable, disable, delete, run, start, stop, status."}
+            return {"error": f"Unknown action: {action}. Use: create/set, list, delete/cancel, pause, resume, start, stop, status."}
         result = handler(**kwargs)
         if asyncio.iscoroutine(result):
             return await result
         return result
+
+    # ── Actions ───────────────────────────────────────────────
+
+    async def _create_task(self, **kwargs: Any) -> dict[str, Any]:
+        name = kwargs.get("task_name", kwargs.get("name", ""))
+        command = kwargs.get("command", "")
+        schedule = kwargs.get("schedule", "")
+        message = kwargs.get("message", "")
+        enabled = kwargs.get("enabled", True)
+        max_runs = kwargs.get("max_runs", 0)
+        timeout = kwargs.get("timeout", 300)
+
+        if not schedule:
+            return {"error": "schedule is required (cron, 'every Nm', or 'in Ns/Nm/Nh')"}
+        if not command and not message:
+            return {"error": "command or message is required"}
+
+        import uuid
+        task_id = f"task_{uuid.uuid4().hex[:8]}"
+        if not name:
+            name = task_id
+
+        task = ScheduledTask(
+            task_id=task_id,
+            name=name,
+            command=command,
+            schedule=schedule,
+            enabled=enabled,
+            max_runs=max_runs,
+            timeout=timeout,
+            message=message,
+        )
+        next_run = task.calculate_next_run()
+        if next_run is None:
+            return {"error": f"Invalid schedule: {schedule}. Use cron, 'every Nm', or 'in Ns/Nm/Nh'."}
+
+        task.next_run = next_run
+        if task.is_one_shot:
+            task.max_runs = 1
+
+        self._tasks[task_id] = task
+        self._save()
+
+        if task.is_one_shot:
+            task._task = asyncio.create_task(self._run_delay(task))
+
+        return {
+            "task_id": task_id,
+            "name": name,
+            "schedule": schedule,
+            "schedule_type": task.schedule_type,
+            "next_run": next_run.strftime("%Y-%m-%d %H:%M:%S"),
+            "message": message,
+            "description": f"Task '{name}' scheduled ({task.schedule_type}). Next: {next_run.strftime('%H:%M:%S')}",
+        }
+
+    def _list_tasks(self, **kwargs: Any) -> dict[str, Any]:
+        if not self._tasks:
+            return {"tasks": [], "count": 0, "message": "No scheduled tasks"}
+
+        tasks_data = []
+        for task in self._tasks.values():
+            info = task.to_dict()
+            remaining = task.remaining_seconds
+            info["remaining"] = self._fmt_duration(int(remaining))
+            info["status"] = (
+                "paused" if task.is_paused
+                else "running" if task.is_running
+                else "waiting"
+            )
+            tasks_data.append(info)
+
+        tasks_data.sort(key=lambda x: x.get("next_run") or "")
+        return {"tasks": tasks_data, "count": len(tasks_data), "scheduler_running": self._running}
+
+    def _task_info(self, **kwargs: Any) -> dict[str, Any]:
+        task = self._find_task(kwargs)
+        if task is None:
+            return {"error": self._not_found_msg(kwargs)}
+        info = task.to_dict()
+        info["remaining"] = self._fmt_duration(int(task.remaining_seconds))
+        info["status"] = (
+            "paused" if task.is_paused
+            else "running" if task.is_running
+            else "waiting"
+        )
+        return info
+
+    def _enable_task(self, **kwargs: Any) -> dict[str, Any]:
+        task = self._find_task(kwargs)
+        if task is None:
+            return {"error": self._not_found_msg(kwargs)}
+        task.enabled = True
+        task.next_run = task.calculate_next_run()
+        self._save()
+        return {"success": True, "task_id": task.task_id, "name": task.name, "next_run": str(task.next_run)}
+
+    def _disable_task(self, **kwargs: Any) -> dict[str, Any]:
+        task = self._find_task(kwargs)
+        if task is None:
+            return {"error": self._not_found_msg(kwargs)}
+        task.enabled = False
+        self._save()
+        return {"success": True, "task_id": task.task_id, "name": task.name, "message": f"'{task.name}' disabled"}
+
+    def _delete_task(self, **kwargs: Any) -> dict[str, Any]:
+        task = self._find_task(kwargs)
+        if task is None:
+            return {"error": self._not_found_msg(kwargs)}
+        if task._task and not task._task.done():
+            task._task.cancel()
+        del self._tasks[task.task_id]
+        self._save()
+        return {"success": True, "message": f"'{task.name}' deleted"}
+
+    def _pause_task(self, **kwargs: Any) -> dict[str, Any]:
+        task = self._find_task(kwargs)
+        if task is None:
+            return {"error": self._not_found_msg(kwargs)}
+        if task.is_paused:
+            return {"error": f"'{task.name}' is already paused"}
+        remaining = task.remaining_seconds
+        if task._task and not task._task.done():
+            task._task.cancel()
+            task._task = None
+        task._paused_remaining = remaining
+        self._save()
+        return {"paused": task.task_id, "remaining": self._fmt_duration(int(remaining))}
+
+    def _resume_task(self, **kwargs: Any) -> dict[str, Any]:
+        task = self._find_task(kwargs)
+        if task is None:
+            return {"error": self._not_found_msg(kwargs)}
+        if not task.is_paused:
+            return {"error": f"'{task.name}' is not paused"}
+        remaining = task._paused_remaining or 0
+        task._paused_remaining = None
+        task.next_run = datetime.now() + timedelta(seconds=remaining)
+        task._task = asyncio.create_task(self._run_delay(task))
+        self._save()
+        return {"resumed": task.task_id, "remaining": self._fmt_duration(int(remaining))}
+
+    async def _run_task(self, **kwargs: Any) -> dict[str, Any]:
+        task = self._find_task(kwargs)
+        if task is None:
+            return {"error": self._not_found_msg(kwargs)}
+        result = await self._execute_task(task)
+        task.run_count += 1
+        task.last_run = datetime.now()
+        if not task.is_one_shot:
+            task.next_run = task.calculate_next_run()
+        self._save()
+        return {"success": True, "task_id": task.task_id, "result": result}
+
+    async def _start_scheduler(self, **kwargs: Any) -> dict[str, Any]:
+        if self._running:
+            return {"message": "Scheduler already running", "running": True}
+        self._running = True
+        self._scheduler_task = asyncio.create_task(self._scheduler_loop())
+        return {"success": True, "message": "Scheduler started", "running": True}
+
+    async def _stop_scheduler(self, **kwargs: Any) -> dict[str, Any]:
+        if not self._running:
+            return {"message": "Scheduler is not running", "running": False}
+        self._running = False
+        if self._scheduler_task:
+            self._scheduler_task.cancel()
+            try:
+                await self._scheduler_task
+            except asyncio.CancelledError:
+                pass
+        return {"success": True, "message": "Scheduler stopped", "running": False}
+
+    def _scheduler_status(self, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "running": self._running,
+            "total": len(self._tasks),
+            "enabled": len([t for t in self._tasks.values() if t.enabled]),
+            "paused": len([t for t in self._tasks.values() if t.is_paused]),
+            "pending": len([t for t in self._tasks.values() if t.should_run()]),
+        }
+
+    # ── Execution engine ──────────────────────────────────────
+
+    async def _execute_task(self, task: ScheduledTask) -> dict[str, Any]:
+        task._is_running = True
+        try:
+            if task.message and self._notification_callback:
+                try:
+                    self._notification_callback(task.task_id, task.message)
+                except Exception:
+                    pass
+
+            if task.command and self._agent is not None:
+                try:
+                    result = await self._agent.run_simple(task.command)
+                    return {"executed": True, "command": task.command, "result": result}
+                except Exception as e:
+                    return {"executed": False, "error": str(e)}
+
+            if task.message and not task.command:
+                return {"executed": True, "notified": True, "message": task.message}
+
+            return {"executed": False, "message": "No agent or callback configured"}
+        finally:
+            task._is_running = False
+
+    async def _run_delay(self, task: ScheduledTask) -> None:
+        """Background coroutine for one-shot delay tasks."""
+        try:
+            sleep_time = (
+                task._paused_remaining
+                if task._paused_remaining is not None
+                else task.remaining_seconds
+            )
+            await asyncio.sleep(max(0, sleep_time))
+
+            await self._execute_task(task)
+            task.run_count += 1
+            task.last_run = datetime.now()
+
+            if task.task_id in self._tasks:
+                del self._tasks[task.task_id]
+                self._save()
+        except asyncio.CancelledError:
+            pass
+
+    async def _scheduler_loop(self) -> None:
+        while self._running:
+            try:
+                for task in list(self._tasks.values()):
+                    if task.should_run() and not task.is_one_shot:
+                        await self._execute_task(task)
+                        task.run_count += 1
+                        task.last_run = datetime.now()
+                        task.next_run = task.calculate_next_run()
+                        self._save()
+                await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                await asyncio.sleep(5)
+
+    # ── Helpers ───────────────────────────────────────────────
+
+    def _find_task(self, kwargs: dict[str, Any]) -> ScheduledTask | None:
+        task_id = kwargs.get("task_id", "")
+        name = kwargs.get("task_name", kwargs.get("name", ""))
+        if task_id and task_id in self._tasks:
+            return self._tasks[task_id]
+        if name:
+            for task in self._tasks.values():
+                if task.name.lower() == name.lower():
+                    return task
+        return None
+
+    def _not_found_msg(self, kwargs: dict[str, Any]) -> str:
+        key = kwargs.get("task_id") or kwargs.get("task_name") or kwargs.get("name") or "?"
+        return f"Task not found: {key}"
+
+    @staticmethod
+    def _fmt_duration(seconds: int) -> str:
+        if seconds < 0:
+            seconds = 0
+        parts = []
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+        if h > 0:
+            parts.append(f"{h}h")
+        if m > 0:
+            parts.append(f"{m}m")
+        if s > 0 or not parts:
+            parts.append(f"{s}s")
+        return " ".join(parts)
+
+    # ── Schemas ───────────────────────────────────────────────
 
     def schema(self) -> dict[str, Any]:
         return {
@@ -211,37 +558,21 @@ class SchedulerTool(ToolBase):
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["create", "add", "list", "info", "enable", "disable", "delete", "run", "start", "stop", "status"],
+                        "enum": ["create", "add", "set", "list", "info", "enable", "disable",
+                                 "delete", "cancel", "run", "start", "stop", "status", "pause", "resume"],
                         "description": "Action to perform",
                     },
-                    "task_name": {
-                        "type": "string",
-                        "description": "Task name (for create, info, enable, disable, delete)",
-                    },
-                    "command": {
-                        "type": "string",
-                        "description": "Command or message to execute (for create)",
-                    },
+                    "task_name": {"type": "string", "description": "Task name"},
+                    "command": {"type": "string", "description": "Command to execute via agent"},
                     "schedule": {
                         "type": "string",
-                        "description": "Schedule: cron expression (e.g., '25 9 * * *' for 9:25 AM daily) or interval (e.g., 'every 5m', 'every 1h')",
+                        "description": "Schedule: cron ('0 9 * * *'), interval ('every 5m'), or delay ('in 30s', 'in 2h30m')",
                     },
-                    "task_id": {
-                        "type": "string",
-                        "description": "Task ID (for info, enable, disable, delete, run)",
-                    },
-                    "enabled": {
-                        "type": "boolean",
-                        "description": "Enable/disable task (for create, enable, disable)",
-                    },
-                    "max_runs": {
-                        "type": "integer",
-                        "description": "Maximum number of runs (0 = unlimited, for create)",
-                    },
-                    "timeout": {
-                        "type": "integer",
-                        "description": "Task timeout in seconds (for create, default: 300)",
-                    },
+                    "message": {"type": "string", "description": "Notification/reminder message"},
+                    "task_id": {"type": "string", "description": "Task ID"},
+                    "enabled": {"type": "boolean"},
+                    "max_runs": {"type": "integer", "description": "Max runs (0=unlimited)"},
+                    "timeout": {"type": "integer", "description": "Timeout in seconds"},
                 },
                 "required": ["action"],
             },
@@ -250,288 +581,22 @@ class SchedulerTool(ToolBase):
     def core_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "Schedule recurring tasks with cron or intervals.",
+            "description": "Schedule tasks, timers, reminders: cron, intervals, one-shot delays. "
+                           "Use 'in 5m' for timers, 'every 1h' for intervals, '0 9 * * *' for cron.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["create", "add", "list", "info", "enable", "disable", "delete", "run", "start", "stop", "status"]},
+                    "action": {
+                        "type": "string",
+                        "enum": ["create", "set", "list", "info", "delete", "cancel",
+                                 "pause", "resume", "run", "start", "stop", "status"],
+                    },
                     "task_name": {"type": "string"},
                     "command": {"type": "string"},
                     "schedule": {"type": "string"},
+                    "message": {"type": "string"},
                     "task_id": {"type": "string"},
                 },
                 "required": ["action"],
             },
         }
-
-    async def _create_task(self, **kwargs: Any) -> dict[str, Any]:
-        """Create a new scheduled task."""
-        name = kwargs.get("task_name", "")
-        command = kwargs.get("command", "")
-        schedule = kwargs.get("schedule", "")
-        enabled = kwargs.get("enabled", True)
-        max_runs = kwargs.get("max_runs", 0)
-        timeout = kwargs.get("timeout", 300)
-
-        if not name:
-            return {"error": "task_name is required"}
-        if not command:
-            return {"error": "command is required"}
-        if not schedule:
-            return {"error": "schedule is required"}
-
-        # Validate schedule
-        task = ScheduledTask(
-            task_id=f"task_{len(self._tasks) + 1}",
-            name=name,
-            command=command,
-            schedule=schedule,
-            enabled=enabled,
-            max_runs=max_runs,
-            timeout=timeout,
-        )
-        next_run = task.calculate_next_run()
-        if next_run is None:
-            return {"error": f"Invalid schedule: {schedule}"}
-
-        task.next_run = next_run
-        self._tasks[task.task_id] = task
-        self._save()
-
-        return {
-            "success": True,
-            "task_id": task.task_id,
-            "name": name,
-            "schedule": schedule,
-            "schedule_type": "cron" if task._is_cron_schedule() else "interval",
-            "next_run": next_run.isoformat(),
-            "message": f"Task '{name}' created. Next run: {next_run.strftime('%Y-%m-%d %H:%M:%S')}",
-        }
-
-    def _list_tasks(self, **kwargs: Any) -> dict[str, Any]:
-        """List all scheduled tasks."""
-        if not self._tasks:
-            return {"tasks": [], "count": 0, "message": "No scheduled tasks"}
-
-        tasks_data = []
-        for task in self._tasks.values():
-            info = task.to_dict()
-            # Calculate remaining time
-            if task.next_run:
-                remaining = (task.next_run - datetime.now()).total_seconds()
-                info["next_run_in"] = f"{int(remaining)}s" if remaining > 0 else "now"
-            tasks_data.append(info)
-
-        # Sort by next_run
-        tasks_data.sort(key=lambda x: x.get("next_run") or "")
-
-        return {
-            "tasks": tasks_data,
-            "count": len(tasks_data),
-            "running": self._running,
-        }
-
-    def _task_info(self, **kwargs: Any) -> dict[str, Any]:
-        """Get detailed info about a task."""
-        task_id = kwargs.get("task_id", "")
-        name = kwargs.get("task_name", "")
-
-        task = self._find_task(task_id, name)
-        if task is None:
-            return {"error": f"Task not found: {task_id or name}"}
-
-        info = task.to_dict()
-        if task.next_run:
-            remaining = (task.next_run - datetime.now()).total_seconds()
-            info["next_run_in_seconds"] = int(remaining) if remaining > 0 else 0
-
-        return info
-
-    def _enable_task(self, **kwargs: Any) -> dict[str, Any]:
-        """Enable a scheduled task."""
-        task_id = kwargs.get("task_id", "")
-        name = kwargs.get("task_name", "")
-
-        task = self._find_task(task_id, name)
-        if task is None:
-            return {"error": f"Task not found: {task_id or name}"}
-
-        task.enabled = True
-        task.next_run = task.calculate_next_run()
-        self._save()
-
-        return {
-            "success": True,
-            "task_id": task.task_id,
-            "name": task.name,
-            "message": f"Task '{task.name}' enabled. Next run: {task.next_run}",
-        }
-
-    def _disable_task(self, **kwargs: Any) -> dict[str, Any]:
-        """Disable a scheduled task."""
-        task_id = kwargs.get("task_id", "")
-        name = kwargs.get("task_name", "")
-
-        task = self._find_task(task_id, name)
-        if task is None:
-            return {"error": f"Task not found: {task_id or name}"}
-
-        task.enabled = False
-        self._save()
-
-        return {
-            "success": True,
-            "task_id": task.task_id,
-            "name": task.name,
-            "message": f"Task '{task.name}' disabled",
-        }
-
-    def _delete_task(self, **kwargs: Any) -> dict[str, Any]:
-        """Delete a scheduled task."""
-        task_id = kwargs.get("task_id", "")
-        name = kwargs.get("task_name", "")
-
-        task = self._find_task(task_id, name)
-        if task is None:
-            return {"error": f"Task not found: {task_id or name}"}
-
-        del self._tasks[task.task_id]
-        self._save()
-
-        return {
-            "success": True,
-            "message": f"Task '{task.name}' deleted",
-        }
-
-    async def _run_task(self, **kwargs: Any) -> dict[str, Any]:
-        """Manually run a task immediately."""
-        task_id = kwargs.get("task_id", "")
-        name = kwargs.get("task_name", "")
-
-        task = self._find_task(task_id, name)
-        if task is None:
-            return {"error": f"Task not found: {task_id or name}"}
-
-        # Execute the task
-        result = await self._execute_task(task)
-
-        # Update run count and next run
-        task.run_count += 1
-        task.last_run = datetime.now()
-        task.next_run = task.calculate_next_run()
-        self._save()
-
-        return {
-            "success": True,
-            "task_id": task.task_id,
-            "name": task.name,
-            "result": result,
-            "next_run": task.next_run.isoformat() if task.next_run else None,
-        }
-
-    async def _execute_task(self, task: ScheduledTask) -> dict[str, Any]:
-        """Execute a scheduled task using Agent if available."""
-        task._is_running = True
-        try:
-            # If we have an agent, execute the command through it
-            if self._agent is not None:
-                try:
-                    # Execute through agent - this will call LLM and tools
-                    result = await self._agent.run_simple(task.command)
-                    return {
-                        "executed": True,
-                        "command": task.command,
-                        "result": result,
-                        "executor": "agent"
-                    }
-                except Exception as e:
-                    return {
-                        "executed": False,
-                        "command": task.command,
-                        "error": str(e),
-                        "executor": "agent"
-                    }
-            # Fallback to callback
-            elif self._callback:
-                result = self._callback(task.task_id, task.command)
-                if asyncio.iscoroutine(result):
-                    result = await result
-                return {"executed": True, "command": task.command, "executor": "callback"}
-            return {
-                "executed": False,
-                "command": task.command,
-                "message": "No agent or callback registered for task execution",
-                "executor": "none"
-            }
-        finally:
-            task._is_running = False
-
-    async def _start_scheduler(self, **kwargs: Any) -> dict[str, Any]:
-        """Start the scheduler."""
-        if self._running:
-            return {"message": "Scheduler is already running", "running": True}
-
-        self._running = True
-        self._scheduler_task = asyncio.create_task(self._scheduler_loop())
-
-        return {
-            "success": True,
-            "message": "Scheduler started",
-            "running": True,
-            "tasks_count": len([t for t in self._tasks.values() if t.enabled]),
-        }
-
-    async def _stop_scheduler(self, **kwargs: Any) -> dict[str, Any]:
-        """Stop the scheduler."""
-        if not self._running:
-            return {"message": "Scheduler is not running", "running": False}
-
-        self._running = False
-        if self._scheduler_task:
-            self._scheduler_task.cancel()
-            try:
-                await self._scheduler_task
-            except asyncio.CancelledError:
-                pass
-
-        return {"success": True, "message": "Scheduler stopped", "running": False}
-
-    def _scheduler_status(self, **kwargs: Any) -> dict[str, Any]:
-        """Get scheduler status."""
-        return {
-            "running": self._running,
-            "total_tasks": len(self._tasks),
-            "enabled_tasks": len([t for t in self._tasks.values() if t.enabled]),
-            "disabled_tasks": len([t for t in self._tasks.values() if not t.enabled]),
-            "pending_tasks": len([t for t in self._tasks.values() if t.should_run()]),
-        }
-
-    async def _scheduler_loop(self) -> None:
-        """Main scheduler loop."""
-        while self._running:
-            try:
-                # Check each task
-                for task in self._tasks.values():
-                    if task.should_run():
-                        await self._execute_task(task)
-                        task.run_count += 1
-                        task.last_run = datetime.now()
-                        task.next_run = task.calculate_next_run()
-                        self._save()
-
-                # Sleep for a bit
-                await asyncio.sleep(1)
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                await asyncio.sleep(5)
-
-    def _find_task(self, task_id: str, name: str) -> ScheduledTask | None:
-        """Find a task by ID or name."""
-        if task_id and task_id in self._tasks:
-            return self._tasks[task_id]
-        if name:
-            for task in self._tasks.values():
-                if task.name.lower() == name.lower():
-                    return task
-        return None
