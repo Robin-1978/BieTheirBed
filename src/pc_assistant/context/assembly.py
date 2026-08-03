@@ -11,7 +11,7 @@ from pc_assistant.context.tags import (
     is_session_context_message,
     is_strategy_context_message,
 )
-from pc_assistant.context.prompt import build_runtime_context, build_session_context
+from pc_assistant.context.prompt import build_session_context
 
 logger = logging.getLogger(__name__)
 
@@ -53,29 +53,40 @@ def assemble_llm_messages(
     *,
     working_directory: str = "",
     memory_context: str = "",
+    turn_context: str = "",
 ) -> list[dict[str, Any]]:
-    """Build API messages: system → runtime_ctx → old_history → session_ctx → current_turn."""
+    """Build API messages: system → history → session_ctx+memory → current_turn.
+
+    Cache-friendly layout: the system message and the (answered) history are
+    byte-identical across turns, so a prompt-cache prefix match is preserved.
+    Volatile content (<user_memory>, <session>, current-turn context) is pinned
+    to the tail, right before the current user turn.
+    """
     history = _last_n_turns(conversation, _MAX_TURNS)
     prefix_hist, current_turn = _split_last_dialogue_turn(history)
 
-    messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+    if not current_turn and last_user_msg:
+        current_turn = [{"role": "user", "content": last_user_msg}]
 
-    runtime_ctx = build_runtime_context(
-        working_directory=working_directory,
-        memory_context=memory_context,
-        system_prompt=system_prompt,
-    )
-    if runtime_ctx:
-        messages.append({"role": "user", "content": runtime_ctx})
+    if turn_context and current_turn and current_turn[-1].get("role") == "user":
+        current_turn[-1] = {
+            **current_turn[-1],
+            "content": current_turn[-1]["content"] + "\n\n" + turn_context,
+        }
+
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
 
     messages.extend(prefix_hist)
 
-    session_ctx = build_session_context(working_directory=working_directory)
+    session_ctx = build_session_context(
+        working_directory=working_directory,
+        memory_context=memory_context,
+    )
     if session_ctx:
         messages.append({"role": "user", "content": session_ctx})
 
     messages.extend(current_turn)
-    return messages
+    return _sanitize_tool_calls(messages)
 
 
 def _sanitize_tool_calls(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

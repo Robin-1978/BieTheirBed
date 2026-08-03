@@ -1,10 +1,11 @@
 """Prompt-cache planning — static prefix isolation for cache-capable backends.
 
 For backends that support prompt caching (Anthropic, DeepSeek, some OpenAI
-models, llama.cpp with KV-cache), a stable static prefix (system prompt + tool
-schemas + runtime context) can be cached across calls. `CachePlan` isolates that
-prefix and exposes a stable `prompt_cache_key` so downstream providers can attach
-`cache_control` hints or reuse a KV-cache slot.
+models, llama.cpp with ``cache_prompt``/``--cache-reuse``), a stable static
+prefix (system prompt + tool schemas + runtime context) can be cached across
+calls. `CachePlan` isolates that prefix and exposes a stable `prompt_cache_key`
+so downstream providers can attach `cache_control` hints or reuse a KV-cache
+slot.
 """
 from __future__ import annotations
 
@@ -15,9 +16,10 @@ from typing import Any
 
 from pc_assistant.context.token_estimate import TokenEstimator, estimate_messages_tokens
 
-_CACHE_CAPABLE_PROVIDERS = {"anthropic", "deepseek", "openai", "gemini"}
-# llama.cpp / vLLM / ollama typically expose their own KV cache; mark unknown.
-_NON_CACHE_PROVIDERS = {"llamacpp", "local"}
+_CACHE_CAPABLE_PROVIDERS = {"anthropic", "deepseek", "openai", "gemini", "llamacpp"}
+# llama.cpp exposes cache_prompt / --cache-reuse (KV prefix cache); vLLM / ollama
+# expose their own KV cache and are treated as unknown.
+_NON_CACHE_PROVIDERS = {"local"}
 
 
 def _stable_digest(text: str) -> str:
