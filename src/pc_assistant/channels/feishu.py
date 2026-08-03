@@ -514,6 +514,30 @@ class FeishuChannel(ChannelBase):
 
         feishu_session_id = f"feishu:{open_id}"
 
+        original_cb = self._agent._confirm_callback
+        confirm_event = asyncio.Event()
+        confirm_result = [False]
+
+        async def feishu_confirm(tool_name: str, args: dict) -> bool:
+            args_brief = json.dumps(args, ensure_ascii=False)[:120]
+            action_desc = f"🔧 **{tool_name}**\n`{args_brief}`"
+
+            def on_confirmed():
+                confirm_result[0] = True
+                confirm_event.set()
+                return "✅ 操作已执行"
+
+            self._request_confirm(open_id, action_desc, on_confirmed)
+
+            try:
+                await asyncio.wait_for(confirm_event.wait(), timeout=300.0)
+                return confirm_result[0]
+            except asyncio.TimeoutError:
+                return False
+
+        self._agent._confirm_callback = feishu_confirm
+        self._agent._verifier._confirm_callback = feishu_confirm
+
         try:
             tool_calls_info: list[str] = []
             thinking_chunks: list[str] = []
@@ -574,6 +598,9 @@ class FeishuChannel(ChannelBase):
         except Exception as e:
             logger.error("[PROCESS] Agent error: %s", e, exc_info=True)
             self._send_text(open_id, f"❌ 处理出错: {e}")
+        finally:
+            self._agent._confirm_callback = original_cb
+            self._agent._verifier._confirm_callback = original_cb
 
     def _build_response_card(
         self,

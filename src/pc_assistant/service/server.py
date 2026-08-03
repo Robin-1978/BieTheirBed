@@ -110,6 +110,17 @@ class ServiceServer:
     async def stop(self) -> None:
         self._running = False
 
+        if self._channel_manager is not None:
+            for ch in self._channel_manager._channels:
+                try:
+                    if hasattr(ch, "_get_last_open_id") and hasattr(ch, "_send_text"):
+                        open_id = ch._get_last_open_id()
+                        if open_id:
+                            ch._send_text(open_id, "🔴 PC Assistant 服务正在关闭...")
+                except Exception:
+                    pass
+            await self._channel_manager.stop_all()
+
         for client_id, ws in list(self._clients.items()):
             try:
                 await ws.close()
@@ -322,47 +333,6 @@ class ServiceServer:
                 self._confirm_futures.pop(code, None)
                 return False
 
-        feishu = self._get_feishu_channel()
-        if feishu is not None:
-            return self._confirm_via_feishu(feishu, tool_name, tool_args)
-
-        return False
-
-    def _get_feishu_channel(self) -> Any:
-        """Get the Feishu channel if available."""
-        try:
-            from pc_assistant.channels.feishu import FeishuChannel
-            if hasattr(self, "_channel_manager") and self._channel_manager:
-                for ch in self._channel_manager._channels:
-                    if isinstance(ch, FeishuChannel):
-                        return ch
-        except ImportError:
-            pass
-        return None
-
-    def _confirm_via_feishu(
-        self,
-        feishu: Any,
-        tool_name: str,
-        tool_args: dict[str, Any],
-    ) -> bool:
-        """Request confirmation through Feishu for the most recent active user."""
-        open_id = feishu._get_last_open_id()
-        if not open_id:
-            return False
-
-        args_brief = ", ".join(f"{k}={v}" for k, v in list(tool_args.items())[:3])
-        action_desc = f"🔧 **{tool_name}**\n`{args_brief}`"
-
-        confirmed_event = asyncio.Event()
-        confirmed_result = [False]
-
-        def on_confirmed():
-            confirmed_result[0] = True
-            confirmed_event.set()
-            return "✅ 操作已执行"
-
-        feishu._request_confirm(open_id, action_desc, on_confirmed)
         return False
 
     # ── Timer / scheduler notifications ───────────────────────
