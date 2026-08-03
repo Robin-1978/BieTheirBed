@@ -1,0 +1,16 @@
+[Unit]
+Description=PC Assistant Service Daemon
+Documentation=https://github.com/user/BieTheirBed
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/pc-assistant --serve
+ExecStop=%h/.local/bin/pc-assistant --stop
+WorkingDirectory=%h/ws/BieTheirBed
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

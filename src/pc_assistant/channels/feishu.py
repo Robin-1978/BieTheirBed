@@ -365,10 +365,33 @@ class FeishuChannel(ChannelBase):
                 expired = [k for k, v in self._pending_confirm.items() if now - v["ts"] > 300]
                 for k in expired:
                     del self._pending_confirm[k]
-        return self._send_text(
-            open_id,
-            f"⚠️ **请确认操作**\n{action_desc}\n\n发送 `确认 {code}` 执行，`取消` 放弃，5分钟内有效",
-        )
+        card = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "template": "orange",
+                "title": {"tag": "plain_text", "content": "⚠️ 操作确认"},
+            },
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {"tag": "lark_md", "content": action_desc},
+                },
+                {"tag": "hr"},
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"发送 `确认 {code}` 执行，`取消` 放弃\n⏱ 5分钟内有效",
+                    },
+                },
+            ],
+        }
+        if not self._send_card(open_id, card):
+            return self._send_text(
+                open_id,
+                f"⚠️ **请确认操作**\n{action_desc}\n\n发送 `确认 {code}` 执行，`取消` 放弃，5分钟内有效",
+            )
+        return True
 
     async def _process_with_agent(self, open_id: str, text: str) -> None:
         if self._agent is None:
@@ -406,25 +429,73 @@ class FeishuChannel(ChannelBase):
                 tools_summary = "\n".join(tool_calls_info[:5])
                 if len(tool_calls_info) > 5:
                     tools_summary += f"\n... +{len(tool_calls_info) - 5} more"
-                response = f"{tools_summary}\n\n{final_answer}"
+                plain_response = f"{tools_summary}\n\n{final_answer}"
             elif final_answer:
-                response = final_answer
+                plain_response = final_answer
+                tools_summary = ""
             elif error_msg:
-                response = f"❌ {error_msg}"
+                plain_response = f"❌ {error_msg}"
+                tools_summary = ""
             else:
-                response = "⚠️ 未获得有效回复，请重试"
+                plain_response = "⚠️ 未获得有效回复，请重试"
+                tools_summary = ""
 
-            conv.append({"role": "assistant", "content": response})
+            conv.append({"role": "assistant", "content": plain_response})
 
             with self._conversation_lock:
                 if len(self._conversations.get(open_id, [])) > 40:
                     self._conversations[open_id] = self._conversations[open_id][-20:]
 
-            self._send_long_text(open_id, response)
+            card = self._build_response_card(
+                final_answer or plain_response,
+                tool_calls_info,
+                bool(error_msg),
+            )
+            if not self._send_card(open_id, card):
+                self._send_long_text(open_id, plain_response)
 
         except Exception as e:
             logger.error("[PROCESS] Agent error: %s", e, exc_info=True)
             self._send_text(open_id, f"❌ 处理出错: {e}")
+
+    def _build_response_card(
+        self,
+        answer: str,
+        tool_calls: list[str],
+        is_error: bool,
+    ) -> dict:
+        """Build a Feishu interactive card for the agent response."""
+        elements: list[dict] = []
+
+        if tool_calls:
+            tools_md = "\n".join(tool_calls[:5])
+            if len(tool_calls) > 5:
+                tools_md += f"\n... +{len(tool_calls) - 5} more"
+            elements.append({
+                "tag": "div",
+                "text": {"tag": "lark_md", "content": tools_md},
+            })
+            elements.append({"tag": "hr"})
+
+        content = answer[:3800]
+        if len(answer) > 3800:
+            content += "\n\n... (内容过长已截断)"
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": content},
+        })
+
+        header_color = "red" if is_error else "blue"
+        header_title = "❌ 处理出错" if is_error else "💬 PC Assistant"
+
+        return {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "template": header_color,
+                "title": {"tag": "plain_text", "content": header_title},
+            },
+            "elements": elements,
+        }
 
     def _send_long_text(self, open_id: str, text: str) -> None:
         max_len = 2000

@@ -154,6 +154,13 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     if not yaml_data and not config_path.exists():
         import warnings
         warnings.warn(f"Config file not found: {config_path}. Using defaults and environment variables.")
+
+    local_path = Path("config/local.yaml")
+    if local_path.exists():
+        local_data = _load_yaml(local_path)
+        if local_data:
+            yaml_data = {**yaml_data, **local_data}
+
     env_data = _env_overrides()
     merged: dict[str, Any] = {**yaml_data, **env_data}
     return AppConfig(**merged)
