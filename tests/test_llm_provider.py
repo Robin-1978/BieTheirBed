@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -626,3 +625,43 @@ class TestLLMProviderChatStream:
             assert len(final_chunks) >= 1
             assert final_chunks[0].usage.get("prompt_tokens") == 10
             assert final_chunks[0].usage.get("completion_tokens") == 5
+
+
+class TestLLMProviderCancel:
+    @pytest.mark.asyncio
+    async def test_cancel_aborts_stalled_stream(self):
+        """Ctrl+C must interrupt a stream even when the server stalls
+        (no new SSE chunks arriving)."""
+        import asyncio
+        import json as _json
+
+        async def handle(reader, writer):
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n")
+            await writer.drain()
+            chunk = {"choices": [{"delta": {"content": "hi"}}]}
+            writer.write(("data: " + _json.dumps(chunk) + "\n\n").encode())
+            await writer.drain()
+            await asyncio.sleep(30)  # stall: no more chunks
+            writer.close()
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            p = LLMProvider(server_url=f"http://127.0.0.1:{port}", model_name="test", provider="llamacpp")
+            gen = p.chat_stream([{"role": "user", "content": "hello"}])
+            first = await gen.__anext__()
+            assert first.delta_content == "hi"
+
+            # The next chunk blocks until the server sends more data.
+            blocked = asyncio.get_running_loop().create_task(gen.__anext__())
+            await asyncio.sleep(0.2)
+            p.cancel()  # what the UI's Ctrl+C calls
+            try:
+                await asyncio.wait_for(blocked, timeout=3.0)
+                raise AssertionError("stream yielded an unexpected value after cancel")
+            except StopAsyncIteration:
+                pass  # stream ended promptly after cancel — expected
+            except asyncio.TimeoutError:
+                raise AssertionError("stream did not unblock within 3s after cancel")
+        finally:
+            server.close()

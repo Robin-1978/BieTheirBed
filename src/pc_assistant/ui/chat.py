@@ -1,3 +1,18 @@
+"""Chat UI: a full-screen prompt_toolkit TUI with a dedicated input line.
+
+Layout (top → bottom):
+
+    +---------------------------+
+    |  conversation window      |   focusable: click to scroll history fully,
+    |  ...                      |   drag to select, Ctrl-C/Ctrl-W to copy
+    |  ▸ user message           |
+    |  │ assistant response     |
+    +---------------------------+
+    |  ▸ input line             |   native editable Buffer (history, emacs keys)
+    +---------------------------+
+    |  ● Ready  Tokens  Iter    |   status bar (below the input line)
+    +---------------------------+
+"""
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +25,7 @@ from io import StringIO
 from typing import Any, Awaitable, Callable
 
 from pc_assistant.config import AppConfig
-from pc_assistant.agent import Agent
+from pc_assistant.agent import Agent, AgentEvent
 from pc_assistant.ui.state import UIState, MessageType
 from pc_assistant.ui.theme import TOKYO_NIGHT
 
@@ -23,10 +38,14 @@ from rich.text import Text as RichText
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.clipboard.pyperclip import PyperclipClipboard
 from prompt_toolkit.document import Document
+from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout import Layout, HSplit, Window, WindowAlign
+from prompt_toolkit.layout import Layout, HSplit, Window, WindowAlign, Dimension
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+from prompt_toolkit.layout.margins import ScrollbarMargin
+from prompt_toolkit.layout.processors import BeforeInput
 from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.styles import Style as PTStyle
 
@@ -75,6 +94,8 @@ TUI_STYLE = PTStyle.from_dict({
     "status.executing": "bold fg:#e0af68",
     "status.info": "italic fg:#3b4261",
     "status.hint": "fg:#3b4261",
+    "prompt": "bold fg:#9ece6a",
+    "input": "fg:#c0caf5",
 })
 
 _ANSI_RX = re.compile(r'\x1b\[[0-9;]*m')
@@ -131,6 +152,133 @@ class _ChatLexer(Lexer):
         return get_line
 
 
+class _ConsoleView:
+    """Console-mode renderer for agent events (headless/CI, no TUI).
+
+    The event handling itself lives in ``ChatUI._handle_event`` and is shared
+    with the TUI; this class only turns events into rich console output.
+    """
+
+    def __init__(self, ui: ChatUI) -> None:
+        self.ui = ui
+        self.console = ui._console
+        self.streaming_text = ""
+        self.think_active = False
+        self.answer_live: Live | None = None
+
+    def render(self, event: AgentEvent) -> None:
+        if event.type == "stream_start":
+            self._stop_live()
+            self.streaming_text = ""
+            self.think_active = False
+            self.console.print(RichText(f"{ICON_ANSWER} ", style="ai_label"))
+            self.answer_live = Live(
+                RichText(""),
+                console=self.console,
+                refresh_per_second=15,
+                transient=False,
+            )
+            self.answer_live.start()
+
+        elif event.type == "stream_delta":
+            self.streaming_text += event.content
+            if self.think_active:
+                self.console.print()
+                self.think_active = False
+            if self.answer_live is not None:
+                self.answer_live.update(RichText(self.streaming_text))
+
+        elif event.type == "stream_think_delta":
+            output = (
+                self.answer_live.console if self.answer_live is not None else self.console
+            )
+            if not self.think_active:
+                self.think_active = True
+                output.print()
+                output.print(RichText(f"{ICON_THINK} ", style="dim"), end="")
+            output.print(RichText(event.content, style="dim"), end="")
+
+        elif event.type == "stream_end":
+            if self.answer_live is not None:
+                if self.streaming_text:
+                    self.answer_live.update(Markdown(self.streaming_text))
+                self.answer_live.stop()
+                self.answer_live = None
+            self.think_active = False
+
+        elif event.type == "tool_call":
+            self._stop_live()
+            if event.blocked:
+                self.console.print(
+                    RichText(f"{ICON_WARN} Blocked: {event.content}", style="warning")
+                )
+            else:
+                items = list(event.tool_args.items())
+                if items:
+                    first_k, first_v = items[0]
+                    val_str = json.dumps(first_v, ensure_ascii=False)
+                    if len(val_str) > 60:
+                        val_str = val_str[:57] + "..."
+                    self.console.print(
+                        RichText(
+                            f"  {ICON_TOOL} {event.tool_name} {first_k}={val_str}",
+                            style="tool_icon",
+                        )
+                    )
+                else:
+                    self.console.print(
+                        RichText(f"  {ICON_TOOL} {event.tool_name}", style="tool_icon")
+                    )
+
+        elif event.type == "tool_result":
+            result_str = (
+                str(event.tool_result)
+                if event.tool_result is not None
+                else event.content
+            )
+            is_error = (
+                isinstance(event.tool_result, dict)
+                and "error" in event.tool_result
+            )
+            truncated = result_str[:200]
+            if len(result_str) > 200:
+                truncated += "..."
+            icon = ICON_ERROR if is_error else ICON_SUCCESS
+            style = "error" if is_error else "tool_result"
+            self.console.print(RichText(f"    {icon} {truncated}", style=style))
+
+        elif event.type == "final_answer":
+            if not self.streaming_text and event.content:
+                self.console.print(Markdown(event.content))
+
+        elif event.type == "error":
+            self._stop_live()
+            self.console.print(RichText(f"{ICON_ERROR} {event.content}", style="error"))
+
+        elif event.type == "iteration_limit":
+            self._stop_live()
+            self.console.print(
+                RichText(f"{ICON_WARN} {event.content}", style="warning")
+            )
+
+        elif event.type == "cancelled":
+            self._stop_live()
+            self.console.print(
+                RichText(f"{ICON_CANCEL} Cancelled.", style="warning")
+            )
+
+    def stop(self) -> None:
+        self._stop_live()
+
+    def _stop_live(self) -> None:
+        if self.answer_live:
+            self.answer_live.stop()
+            self.answer_live = None
+        if self.think_active:
+            self.console.print()
+            self.think_active = False
+
+
 class ChatUI:
     def __init__(
         self,
@@ -149,11 +297,16 @@ class ChatUI:
 
         self._app: Application | None = None
         self._chat_buffer: Buffer | None = None
-        self._input_buffer: str = ""
-        self._input_cursor: int = 0
+        self._chat_control: BufferControl | None = None
+        self._chat_window: Window | None = None
+        self._input_buffer: Buffer | None = None
+        self._input_control: BufferControl | None = None
+        self._input_window: Window | None = None
+        self._status_control: FormattedTextControl | None = None
         self._kb: KeyBindings | None = None
         self._refresh_task: asyncio.Task | None = None
         self._spinner_idx = 0
+        self._history = InMemoryHistory()
 
         self._chat_text: str = ""
         self._stream_start: int = 0
@@ -197,8 +350,8 @@ class ChatUI:
         if self._chat_buffer is None:
             return
         text = self._chat_text
-        if not self._state.processing:
-            text += f"\n  {ICON_PROMPT} {self._input_buffer}"
+        # Cursor at end keeps the read-only window auto-scrolled to the bottom,
+        # even though the chat window is not focusable.
         self._chat_buffer.set_document(
             Document(text, cursor_position=len(text)),
             bypass_readonly=True,
@@ -424,118 +577,51 @@ class ChatUI:
         kb = KeyBindings()
 
         @kb.add("enter")
-        def _(event: Any) -> None:
-            text = self._input_buffer.strip()
+        def _accept(event: Any) -> None:
+            text = self._input_buffer.text.strip() if self._input_buffer else ""
             if not text:
                 return
-            self._input_buffer = ""
-            self._input_cursor = 0
+            # Ignore Enter while a turn is running (unless answering a confirm).
+            if self._state.processing and (
+                self._confirm_future is None or self._confirm_future.done()
+            ):
+                return
+            self._input_buffer.reset(append_to_history=True)
             self._on_input(text)
 
         @kb.add("c-c")
-        def _(event: Any) -> None:
+        def _interrupt(event: Any) -> None:
             if self._state.processing:
                 self._cancel()
-            elif self._input_buffer:
-                self._input_buffer = ""
-                self._input_cursor = 0
-                self._rebuild_buffer()
+            elif self._input_buffer and self._input_buffer.text:
+                self._input_buffer.reset()
             else:
                 self._running = False
                 self._app.exit()
 
         @kb.add("c-d")
-        def _(event: Any) -> None:
-            if self._input_cursor < len(self._input_buffer):
-                self._input_buffer = (
-                    self._input_buffer[:self._input_cursor]
-                    + self._input_buffer[self._input_cursor + 1:]
-                )
-                self._rebuild_buffer()
-            elif not self._input_buffer:
+        def _eof(event: Any) -> None:
+            if self._input_buffer and self._input_buffer.text:
+                self._input_buffer.delete_forward()
+            else:
                 self._running = False
                 self._app.exit()
 
-        @kb.add("c-h")
-        @kb.add("backspace")
-        def _(event: Any) -> None:
-            if self._input_cursor > 0:
-                self._input_buffer = (
-                    self._input_buffer[:self._input_cursor - 1]
-                    + self._input_buffer[self._input_cursor:]
-                )
-                self._input_cursor -= 1
-                self._rebuild_buffer()
+        @kb.add("up")
+        def _hist_backward(event: Any) -> None:
+            self._input_buffer.history_backward()
 
-        @kb.add("left")
-        def _(event: Any) -> None:
-            if self._input_cursor > 0:
-                self._input_cursor -= 1
-                self._rebuild_buffer()
-
-        @kb.add("right")
-        def _(event: Any) -> None:
-            if self._input_cursor < len(self._input_buffer):
-                self._input_cursor += 1
-                self._rebuild_buffer()
-
-        @kb.add("home")
-        @kb.add("c-a")
-        def _(event: Any) -> None:
-            self._input_cursor = 0
-            self._rebuild_buffer()
-
-        @kb.add("end")
-        @kb.add("c-e")
-        def _(event: Any) -> None:
-            self._input_cursor = len(self._input_buffer)
-            self._rebuild_buffer()
-
-        @kb.add("c-w")
-        def _(event: Any) -> None:
-            before = self._input_buffer[:self._input_cursor]
-            after = self._input_buffer[self._input_cursor:]
-            before = before.rstrip()
-            idx = before.rfind(" ")
-            before = before[:idx + 1] if idx >= 0 else ""
-            self._input_buffer = before + after
-            self._input_cursor = len(before)
-            self._rebuild_buffer()
-
-        @kb.add("c-u")
-        def _(event: Any) -> None:
-            self._input_buffer = self._input_buffer[self._input_cursor:]
-            self._input_cursor = 0
-            self._rebuild_buffer()
-
-        @kb.add("c-k")
-        def _(event: Any) -> None:
-            self._input_buffer = self._input_buffer[:self._input_cursor]
-            self._rebuild_buffer()
+        @kb.add("down")
+        def _hist_forward(event: Any) -> None:
+            self._input_buffer.history_forward()
 
         @kb.add("c-y")
-        def _(event: Any) -> None:
+        def _copy_last(event: Any) -> None:
             import pyperclip
             if self._last_assistant_text:
                 pyperclip.copy(self._last_assistant_text)
                 self._append_text(f"  Copied to clipboard ({len(self._last_assistant_text)} chars)\n")
                 self._rebuild_buffer()
-
-        @kb.add("<any>")
-        def _(event: Any) -> None:
-            key_press = event.key_sequence[0]
-            data = key_press.data
-            if not data:
-                return
-            if ord(data[0]) < 32:
-                return
-            self._input_buffer = (
-                self._input_buffer[:self._input_cursor]
-                + data
-                + self._input_buffer[self._input_cursor:]
-            )
-            self._input_cursor += len(data)
-            self._rebuild_buffer()
 
         return kb
 
@@ -575,46 +661,112 @@ class ChatUI:
 
     def _init_tui(self) -> None:
         self._chat_text = ""
-        # read_only Buffer: content updated via set_document(bypass_readonly=True)
-        # focusable=True so the Window follows cursor_position and auto-scrolls
-        # to the bottom (where the input line lives). Mouse wheel also works.
+        self._kb = self._build_key_bindings()
+        self._chat_kb = self._build_chat_key_bindings()
+
+        # Conversation window: read-only but focusable. Clicking it (or
+        # wheel-scrolling over it) scrolls freely through the full history;
+        # once focused you can drag to select text and Ctrl-C / Ctrl-W to copy.
+        # When idle the cursor stays at the document end, so the window
+        # auto-follows the bottom.
         self._chat_buffer = Buffer(read_only=True, multiline=True)
         self._chat_control = BufferControl(
             buffer=self._chat_buffer,
             lexer=_ChatLexer(),
             focusable=True,
+            focus_on_click=True,
+            key_bindings=self._chat_kb,
         )
-
         self._chat_window = Window(
             content=self._chat_control,
             wrap_lines=True,
             allow_scroll_beyond_bottom=False,
-            dont_extend_height=False,
+            right_margins=[ScrollbarMargin(display_arrows=False)],
         )
 
-        status_control = FormattedTextControl(self._get_status_text)
+        # Input line: a real editable Buffer with history and native editing
+        # (arrows, backspace, Ctrl-A/E/W/U/K...). The "▸ " prompt is drawn by a
+        # BeforeInput processor so it is never part of the submitted text.
+        self._input_buffer = Buffer(
+            multiline=False,
+            history=self._history,
+        )
+        self._input_control = BufferControl(
+            buffer=self._input_buffer,
+            focusable=True,
+            key_bindings=self._kb,
+            input_processors=[
+                BeforeInput(lambda: f" {ICON_PROMPT} ", style="class:prompt"),
+            ],
+        )
+        self._input_window = Window(
+            content=self._input_control,
+            wrap_lines=True,
+            height=Dimension(min=1, max=3),
+            dont_extend_height=True,
+        )
 
-        self._layout_container = HSplit([
-            self._chat_window,
-            Window(height=1, content=status_control, dont_extend_height=True,
-                   align=WindowAlign.LEFT, style="class:status"),
-        ])
+        # Status bar: sits below the input line.
+        self._status_control = FormattedTextControl(self._get_status_text)
+        self._status_window = Window(
+            height=1,
+            content=self._status_control,
+            dont_extend_height=True,
+            align=WindowAlign.LEFT,
+            style="class:status",
+        )
 
-        self._kb = self._build_key_bindings()
-
-        layout = Layout(self._layout_container, focused_element=self._chat_control)
+        layout = Layout(
+            HSplit([self._chat_window, self._input_window, self._status_window]),
+            focused_element=self._input_control,
+        )
 
         self._app = Application(
             layout=layout,
-            key_bindings=self._kb,
             full_screen=True,
             style=TUI_STYLE,
             mouse_support=True,
+            clipboard=PyperclipClipboard(),
         )
+
+    def _build_chat_key_bindings(self) -> KeyBindings:
+        """Key bindings for the focused chat window."""
+        kb = KeyBindings()
+
+        @kb.add("c-c")
+        def _copy_selection(event: Any) -> None:
+            self._copy_chat_selection(event.app)
+
+        @kb.add("enter")
+        @kb.add("escape")
+        def _focus_input(event: Any) -> None:
+            if self._app is not None:
+                self._app.layout.focus(self._input_control)
+
+        return kb
+
+    def _copy_chat_selection(self, app: Any) -> bool:
+        """Copy the active chat selection to the clipboard.
+
+        Returns True when a selection was copied; otherwise cancels a running
+        turn and returns False.
+        """
+        buff = self._chat_buffer
+        if buff is not None and buff.selection_state is not None:
+            data = buff.copy_selection()
+            try:
+                app.clipboard.set_data(data)
+            except Exception:
+                pass
+            buff.exit_selection()
+            return True
+        if self._state.processing:
+            self._cancel()
+        return False
 
     def _get_status_text(self) -> Any:
         spinners = ["\u280b", "\u2819", "\u2839", "\u2838", "\u283c",
-                    "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"]
+                    "\u2834", "\u2826", "\u2827", "\u2809", "\u280f"]
         if self._state.processing:
             spinner = spinners[self._spinner_idx % len(spinners)]
             self._spinner_idx += 1
@@ -642,19 +794,23 @@ class ChatUI:
                 ("", "  "),
                 ("class:status.info", f"Iter: {asst_count}"),
                 ("", "   "),
-                ("class:status.hint", "Ctrl+C cancel  Ctrl+D exit"),
+                ("class:status.hint",
+                 "Ctrl+C cancel  Ctrl+D exit  click chat: scroll / select+copy"),
             ]
 
     # ── Refresh / Cancel ───────────────────────────────────────────────
 
     async def _refresh_loop(self) -> None:
+        # Invalidate only while processing (spinner + streaming). When idle,
+        # prompt_toolkit redraws on buffer/input events, keeping CPU near zero.
         while True:
-            if self._app:
+            if self._app is not None and self._state.processing:
                 if self._agent is not None:
-                    status = self._agent.get_status()
-                    self._token_count = status.get("total_tokens", 0)
+                    self._token_count = self._agent.get_status().get(
+                        "total_tokens", self._token_count
+                    )
                 self._app.invalidate()
-            await asyncio.sleep(0.08)
+            await asyncio.sleep(0.1)
 
     def _cancel(self) -> None:
         if self._cancelled:
@@ -676,284 +832,152 @@ class ChatUI:
         self._agent.reset_cancelled()
         self._state.processing = True
 
-        if self._app is not None:
-            await self._process_events_tui(user_input)
-        else:
-            await self._process_events_console(user_input)
+        # Console mode (headless/CI) renders through rich; the TUI rebuilds the
+        # chat buffer. Event handling is shared via `_handle_event`.
+        console_view = _ConsoleView(self) if self._app is None else None
 
-        self._state.processing = False
-        self._current_op = ""
-
-    async def _process_events_tui(self, user_input: str) -> None:
         try:
             async for event in self._agent.run(user_input):
                 if self._cancelled:
                     self._append_text(f"{ICON_CANCEL} Cancelled.\n")
-                    self._think_active = False
-                    self._rebuild_buffer()
+                    self._handle_event(AgentEvent(type="cancelled", content=""))
                     break
-
-                if event.type == "stream_start":
-                    self._stream_text = ""
-                    self._stream_start = len(self._chat_text)
-                    self._stream_rendered = False
-                    self._think_active = False
-                    self._think_text = ""
-                    self._last_assistant_text = ""
-                    self._current_op = "generating..."
+                self._handle_event(event)
+                if console_view is not None:
+                    console_view.render(event)
+                else:
                     self._rebuild_buffer()
-
-                elif event.type == "stream_delta":
-                    self._stream_text += event.content
-                    self._replace_text_range(
-                        self._stream_start, f"{ICON_ANSWER} {self._stream_text}"
-                    )
-                    self._current_op = "generating..."
-                    self._rebuild_buffer()
-
-                elif event.type == "stream_think_delta":
-                    if not self._think_active:
-                        self._think_active = True
-                        self._think_start = len(self._chat_text)
-                        self._think_text = event.content
-                        self._append_text(f"{ICON_THINK} {self._think_text}")
-                        self._state.add_message(MessageType.THINK, self._think_text)
-                    else:
-                        self._think_text += event.content
-                        self._replace_text_range(
-                            self._think_start, f"{ICON_THINK} {self._think_text}"
-                        )
-                        if self._state.messages:
-                            for m in reversed(self._state.messages):
-                                if m.type == MessageType.THINK:
-                                    m.content = self._think_text
-                                    break
-                    self._current_op = "thinking..."
-                    self._rebuild_buffer()
-
-                elif event.type == "stream_end":
-                    self._think_active = False
-                    self._think_text = ""
-                    if self._stream_text:
-                        self._last_assistant_text = self._stream_text
-                        rendered = _render_plain(f"{ICON_ANSWER} {self._stream_text}")
-                        self._replace_text_range(self._stream_start, rendered + "\n")
-                        self._stream_rendered = True
-                        self._state.add_message(MessageType.ASSISTANT, self._stream_text)
-                    else:
-                        self._replace_text_range(self._stream_start, "")
-                    self._stream_text = ""
-                    self._current_op = ""
-                    self._rebuild_buffer()
-
-                elif event.type == "tool_call":
-                    self._think_active = False
-                    if event.blocked:
-                        self._append_text(f"{ICON_WARN} Blocked: {event.content}\n")
-                    else:
-                        items = list(event.tool_args.items())
-                        if items:
-                            k, v = items[0]
-                            val = json.dumps(v, ensure_ascii=False)
-                            if len(val) > 60:
-                                val = val[:57] + "..."
-                            self._append_text(f"  {ICON_TOOL} {event.tool_name} {k}={val}\n")
-                        else:
-                            self._append_text(f"  {ICON_TOOL} {event.tool_name}\n")
-                    self._state.add_message(
-                        MessageType.TOOL_CALL, f"[{event.tool_name}]",
-                        tool_name=event.tool_name, tool_args=event.tool_args,
-                    )
-                    self._current_op = event.tool_name
-                    self._rebuild_buffer()
-
-                elif event.type == "tool_result":
-                    result_str = (
-                        str(event.tool_result)
-                        if event.tool_result is not None
-                        else event.content
-                    )
-                    truncated = result_str[:200]
-                    if len(result_str) > 200:
-                        truncated += "..."
-                    is_error = (
-                        isinstance(event.tool_result, dict)
-                        and "error" in event.tool_result
-                    )
-                    icon = ICON_SUCCESS if not is_error else ICON_ERROR
-                    self._append_text(f"    {icon} {truncated}\n")
-                    self._state.add_message(
-                        MessageType.TOOL_RESULT, result_str[:200],
-                        tool_name=event.tool_name,
-                    )
-                    self._rebuild_buffer()
-
-                elif event.type == "final_answer":
-                    self._think_active = False
-                    if event.content and not self._stream_rendered:
-                        self._last_assistant_text = event.content
-                        rendered = _render_plain(f"{ICON_ANSWER} {event.content}")
-                        self._append_text(rendered + "\n")
-                        self._state.add_message(MessageType.ASSISTANT, event.content)
-                        self._rebuild_buffer()
-
-                elif event.type == "error":
-                    self._think_active = False
-                    self._append_text(f"{ICON_ERROR} {event.content}\n")
-                    self._state.add_message(MessageType.ERROR, event.content)
-                    self._rebuild_buffer()
-
-                elif event.type == "iteration_limit":
-                    self._think_active = False
-                    self._append_text(f"{ICON_WARN} {event.content}\n")
-                    self._rebuild_buffer()
-
-                elif event.type == "cancelled":
-                    self._think_active = False
-
         except asyncio.CancelledError:
             raise
+        except KeyboardInterrupt:
+            self._cancel()
         except Exception as e:
             self._append_text(f"{ICON_ERROR} {e}\n")
+            if console_view is not None:
+                self._console.print(RichText(f"{ICON_ERROR} {e}", style="error"))
         finally:
+            if console_view is not None:
+                console_view.stop()
             self._think_active = False
             self._stream_text = ""
             self._stream_rendered = False
             self._current_op = ""
             self._rebuild_buffer()
 
-    async def _process_events_console(self, user_input: str) -> None:
-        streaming_text = ""
-        first_content_received = False
-        think_active = False
-        answer_live: Live | None = None
+        self._state.processing = False
+        self._current_op = ""
+        self._rebuild_buffer()
 
-        def _stop_live() -> None:
-            nonlocal answer_live, think_active
-            if answer_live:
-                answer_live.stop()
-                answer_live = None
-            if think_active:
-                self._console.print()
-                think_active = False
+    def _handle_event(self, event: AgentEvent) -> None:
+        """Apply a single agent event to shared chat/state (both UI modes)."""
+        if event.type == "stream_start":
+            self._stream_text = ""
+            self._stream_start = len(self._chat_text)
+            self._stream_rendered = False
+            self._think_active = False
+            self._think_text = ""
+            self._last_assistant_text = ""
+            self._current_op = "generating..."
 
-        try:
-            async for event in self._agent.run(user_input):
-                if self._cancelled:
-                    _stop_live()
-                    self._console.print(
-                        RichText(f"{ICON_CANCEL} Cancelled.", style="warning")
-                    )
-                    break
+        elif event.type == "stream_delta":
+            self._stream_text += event.content
+            self._replace_text_range(
+                self._stream_start, f"{ICON_ANSWER} {self._stream_text}"
+            )
+            self._current_op = "generating..."
 
-                if event.type == "stream_start":
-                    _stop_live()
-                    first_content_received = False
-                    streaming_text = ""
-                    think_active = False
-                    self._console.print(RichText(f"{ICON_ANSWER} ", style="ai_label"))
-                    answer_live = Live(
-                        RichText(""),
-                        console=self._console,
-                        refresh_per_second=15,
-                        transient=False,
-                    )
-                    answer_live.start()
+        elif event.type == "stream_think_delta":
+            if not self._think_active:
+                self._think_active = True
+                self._think_start = len(self._chat_text)
+                self._think_text = event.content
+                self._append_text(f"{ICON_THINK} {self._think_text}")
+                self._state.add_message(MessageType.THINK, self._think_text)
+            else:
+                self._think_text += event.content
+                self._replace_text_range(
+                    self._think_start, f"{ICON_THINK} {self._think_text}"
+                )
+                if self._state.messages:
+                    for m in reversed(self._state.messages):
+                        if m.type == MessageType.THINK:
+                            m.content = self._think_text
+                            break
+            self._current_op = "thinking..."
 
-                elif event.type == "stream_delta":
-                    streaming_text += event.content
-                    if think_active:
-                        self._console.print()
-                        think_active = False
-                    if not first_content_received:
-                        first_content_received = True
-                    if answer_live is not None:
-                        answer_live.update(RichText(streaming_text))
+        elif event.type == "stream_end":
+            self._think_active = False
+            self._think_text = ""
+            if self._stream_text:
+                self._last_assistant_text = self._stream_text
+                rendered = _render_plain(f"{ICON_ANSWER} {self._stream_text}")
+                self._replace_text_range(self._stream_start, rendered + "\n")
+                self._stream_rendered = True
+                self._state.add_message(MessageType.ASSISTANT, self._stream_text)
+            else:
+                self._replace_text_range(self._stream_start, "")
+            self._stream_text = ""
+            self._current_op = ""
 
-                elif event.type == "stream_think_delta":
-                    output = (
-                        answer_live.console if answer_live is not None else self._console
-                    )
-                    if not think_active:
-                        think_active = True
-                        output.print()
-                        output.print(RichText(f"{ICON_THINK} ", style="dim"), end="")
-                    output.print(RichText(event.content, style="dim"), end="")
+        elif event.type == "tool_call":
+            self._think_active = False
+            if event.blocked:
+                self._append_text(f"{ICON_WARN} Blocked: {event.content}\n")
+            else:
+                items = list(event.tool_args.items())
+                if items:
+                    k, v = items[0]
+                    val = json.dumps(v, ensure_ascii=False)
+                    if len(val) > 60:
+                        val = val[:57] + "..."
+                    self._append_text(f"  {ICON_TOOL} {event.tool_name} {k}={val}\n")
+                else:
+                    self._append_text(f"  {ICON_TOOL} {event.tool_name}\n")
+            self._state.add_message(
+                MessageType.TOOL_CALL, f"[{event.tool_name}]",
+                tool_name=event.tool_name, tool_args=event.tool_args,
+            )
+            self._current_op = event.tool_name
 
-                elif event.type == "stream_end":
-                    if answer_live is not None:
-                        if streaming_text:
-                            answer_live.update(Markdown(streaming_text))
-                        answer_live.stop()
-                        answer_live = None
-                    think_active = False
+        elif event.type == "tool_result":
+            result_str = (
+                str(event.tool_result)
+                if event.tool_result is not None
+                else event.content
+            )
+            truncated = result_str[:200]
+            if len(result_str) > 200:
+                truncated += "..."
+            is_error = (
+                isinstance(event.tool_result, dict)
+                and "error" in event.tool_result
+            )
+            icon = ICON_SUCCESS if not is_error else ICON_ERROR
+            self._append_text(f"    {icon} {truncated}\n")
+            self._state.add_message(
+                MessageType.TOOL_RESULT, result_str[:200],
+                tool_name=event.tool_name,
+            )
 
-                elif event.type == "tool_call":
-                    _stop_live()
-                    if event.blocked:
-                        self._print_warning(f"Blocked: {event.content}")
-                    else:
-                        self._state.add_message(
-                            MessageType.TOOL_CALL, f"[{event.tool_name}]",
-                            tool_name=event.tool_name, tool_args=event.tool_args,
-                        )
-                        items = list(event.tool_args.items())
-                        if items:
-                            first_k, first_v = items[0]
-                            val_str = json.dumps(first_v, ensure_ascii=False)
-                            if len(val_str) > 60:
-                                val_str = val_str[:57] + "..."
-                            self._console.print(
-                                RichText(
-                                    f"  {ICON_TOOL} {event.tool_name} {first_k}={val_str}",
-                                    style="tool_icon",
-                                )
-                            )
-                        else:
-                            self._console.print(
-                                RichText(f"  {ICON_TOOL} {event.tool_name}", style="tool_icon")
-                            )
+        elif event.type == "final_answer":
+            self._think_active = False
+            if event.content and not self._stream_rendered:
+                self._last_assistant_text = event.content
+                rendered = _render_plain(f"{ICON_ANSWER} {event.content}")
+                self._append_text(rendered + "\n")
+                self._state.add_message(MessageType.ASSISTANT, event.content)
 
-                elif event.type == "tool_result":
-                    result_str = (
-                        str(event.tool_result)
-                        if event.tool_result is not None
-                        else event.content
-                    )
-                    is_error = (
-                        isinstance(event.tool_result, dict)
-                        and "error" in event.tool_result
-                    )
-                    truncated = result_str[:200]
-                    if len(result_str) > 200:
-                        truncated += "..."
-                    icon = ICON_ERROR if is_error else ICON_SUCCESS
-                    style = "error" if is_error else "tool_result"
-                    self._state.add_message(
-                        MessageType.TOOL_RESULT, result_str[:200],
-                        tool_name=event.tool_name,
-                    )
-                    self._console.print(RichText(f"    {icon} {truncated}", style=style))
+        elif event.type == "error":
+            self._think_active = False
+            self._append_text(f"{ICON_ERROR} {event.content}\n")
+            self._state.add_message(MessageType.ERROR, event.content)
 
-                elif event.type == "final_answer":
-                    if not first_content_received and event.content:
-                        self._console.print(Markdown(event.content))
+        elif event.type == "iteration_limit":
+            self._think_active = False
+            self._append_text(f"{ICON_WARN} {event.content}\n")
 
-                elif event.type == "error":
-                    _stop_live()
-                    self._print_error(event.content)
-
-                elif event.type == "iteration_limit":
-                    _stop_live()
-                    self._print_warning(event.content)
-
-                elif event.type == "cancelled":
-                    pass
-
-        except asyncio.CancelledError:
-            raise
-        except KeyboardInterrupt:
-            self._cancel()
+        elif event.type == "cancelled":
+            self._think_active = False
 
     async def ask_input(self, prompt: str, password_mode: bool = False) -> str | None:
         self._console.print(RichText(f"! {prompt}", style="warning"))
