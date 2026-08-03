@@ -167,6 +167,10 @@ class FeishuChannel(ChannelBase):
                 pass
         return ""
 
+    def _get_last_open_id(self) -> str:
+        """Get the most recently active Feishu user open_id."""
+        return self._get_receive_id()
+
     def _save_open_id(self, open_id: str) -> None:
         try:
             with open(_RECEIVED_OPEN_ID_FILE, "w") as f:
@@ -347,13 +351,28 @@ class FeishuChannel(ChannelBase):
         if cmd == "/status":
             if self._agent is not None:
                 status = self._agent.get_status()
+                session_id = f"feishu:{open_id}"
+                session_stats = [s for s in self._agent.session_stats() if s.get("session_id") == session_id]
+                session_info = session_stats[0] if session_stats else {}
+
+                prompt_tokens = session_info.get("total_prompt_tokens", 0)
+                comp_tokens = session_info.get("total_completion_tokens", 0)
+                iterations = session_info.get("total_iterations", 0)
+
                 info = (
                     f"**Provider**: {status.get('provider', '?')}\n"
                     f"**Model**: {status.get('model', '?')}\n"
                     f"**Status**: {status.get('status', '?')}\n"
-                    f"**Connected**: {status.get('connected', False)}\n"
-                    f"**Sessions**: {status.get('active_sessions', 0)}\n"
-                    f"**Tokens**: {status.get('total_tokens', 0)}"
+                    f"**LLM Connected**: {'✅' if status.get('connected') else '❌'}\n"
+                    f"**Active Sessions**: {status.get('active_sessions', 0)}\n"
+                    f"**Available Tools**: {len(status.get('tools', []))}\n"
+                    "---\n"
+                    f"📊 **Your Session** (`{session_id}`)\n"
+                    f"**Prompt Tokens**: {prompt_tokens:,}\n"
+                    f"**Completion Tokens**: {comp_tokens:,}\n"
+                    f"**Total Tokens**: {prompt_tokens + comp_tokens:,}\n"
+                    f"**Iterations**: {iterations}\n"
+                    f"**Messages**: {session_info.get('messages', 0)}"
                 )
                 self._send_card(open_id, {
                     "config": {"wide_screen_mode": True},

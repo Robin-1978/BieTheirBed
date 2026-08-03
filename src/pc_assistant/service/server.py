@@ -47,6 +47,7 @@ class ServiceServer:
         self._tcp_server: Any = None
         self._clients: dict[str, ServerConnection] = {}
         self._confirm_futures: dict[str, asyncio.Future[bool]] = {}
+        self._channel_manager: Any = None
         self._running = False
 
     # ── Lifecycle ─────────────────────────────────────────────
@@ -77,10 +78,10 @@ class ServiceServer:
         if self._config.feishu_enabled:
             try:
                 from pc_assistant.channels import create_channels_from_config
-                channel_manager = create_channels_from_config(self._config)
-                if channel_manager.active_channels:
-                    await channel_manager.start_all(self._agent)
-                    logger.info("Channels started: %s", channel_manager.active_channels)
+                self._channel_manager = create_channels_from_config(self._config)
+                if self._channel_manager.active_channels:
+                    await self._channel_manager.start_all(self._agent)
+                    logger.info("Channels started: %s", self._channel_manager.active_channels)
             except Exception as e:
                 logger.error("Failed to start channels: %s", e)
 
@@ -302,26 +303,67 @@ class ServiceServer:
         tool_name: str,
         tool_args: dict[str, Any],
     ) -> bool:
-        if not self._clients:
-            return False
+        if self._clients:
+            code = uuid.uuid4().hex[:8]
+            future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+            self._confirm_futures[code] = future
 
-        code = uuid.uuid4().hex[:8]
-        future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
-        self._confirm_futures[code] = future
+            frame = ServerMessage.confirm_request(tool_name, tool_args, code)
+            msg = serialize(frame)
+            for ws in self._clients.values():
+                try:
+                    await ws.send(msg)
+                except Exception:
+                    pass
 
-        frame = ServerMessage.confirm_request(tool_name, tool_args, code)
-        msg = serialize(frame)
-        for ws in self._clients.values():
             try:
-                await ws.send(msg)
-            except Exception:
-                pass
+                return await asyncio.wait_for(future, timeout=120.0)
+            except asyncio.TimeoutError:
+                self._confirm_futures.pop(code, None)
+                return False
 
+        feishu = self._get_feishu_channel()
+        if feishu is not None:
+            return self._confirm_via_feishu(feishu, tool_name, tool_args)
+
+        return False
+
+    def _get_feishu_channel(self) -> Any:
+        """Get the Feishu channel if available."""
         try:
-            return await asyncio.wait_for(future, timeout=120.0)
-        except asyncio.TimeoutError:
-            self._confirm_futures.pop(code, None)
+            from pc_assistant.channels.feishu import FeishuChannel
+            if hasattr(self, "_channel_manager") and self._channel_manager:
+                for ch in self._channel_manager._channels:
+                    if isinstance(ch, FeishuChannel):
+                        return ch
+        except ImportError:
+            pass
+        return None
+
+    def _confirm_via_feishu(
+        self,
+        feishu: Any,
+        tool_name: str,
+        tool_args: dict[str, Any],
+    ) -> bool:
+        """Request confirmation through Feishu for the most recent active user."""
+        open_id = feishu._get_last_open_id()
+        if not open_id:
             return False
+
+        args_brief = ", ".join(f"{k}={v}" for k, v in list(tool_args.items())[:3])
+        action_desc = f"🔧 **{tool_name}**\n`{args_brief}`"
+
+        confirmed_event = asyncio.Event()
+        confirmed_result = [False]
+
+        def on_confirmed():
+            confirmed_result[0] = True
+            confirmed_event.set()
+            return "✅ 操作已执行"
+
+        feishu._request_confirm(open_id, action_desc, on_confirmed)
+        return False
 
     # ── Timer / scheduler notifications ───────────────────────
 
