@@ -151,8 +151,16 @@ class ServiceServer:
 
     async def _handle_client(self, ws: ServerConnection) -> None:
         client_id = f"ws:{uuid.uuid4().hex[:12]}"
+
+        is_tcp = not _is_unix_connection(ws)
+        if is_tcp and self._config.service_token:
+            if not await self._authenticate(ws):
+                logger.warning("Client %s failed auth, closing", client_id)
+                await ws.close(4001, "Unauthorized")
+                return
+
         self._clients[client_id] = ws
-        logger.info("Client connected: %s", client_id)
+        logger.info("Client connected: %s (%s)", client_id, "tcp" if is_tcp else "unix")
 
         try:
             async for raw in ws:
@@ -171,6 +179,20 @@ class ServiceServer:
         finally:
             self._clients.pop(client_id, None)
             logger.info("Client disconnected: %s", client_id)
+
+    async def _authenticate(self, ws: ServerConnection) -> bool:
+        """Verify bearer token on the first message for TCP connections."""
+        try:
+            raw = await asyncio.wait_for(ws.recv(), timeout=10.0)
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8")
+            msg = deserialize_client(raw)
+            if msg.method != "auth":
+                return False
+            token = msg.params.get("token", "")
+            return token == self._config.service_token
+        except Exception:
+            return False
 
     async def _dispatch(
         self,
@@ -310,6 +332,18 @@ class ServiceServer:
                 asyncio.create_task(ws.send(frame))
             except Exception:
                 pass
+
+
+def _is_unix_connection(ws: ServerConnection) -> bool:
+    """Check if a WebSocket connection is from a Unix socket."""
+    try:
+        sock = ws.transport.get_extra_info("socket")
+        if sock is not None:
+            import socket
+            return sock.family == socket.AF_UNIX
+    except Exception:
+        pass
+    return False
 
 
 # ── PID / socket helpers ──────────────────────────────────────────────
