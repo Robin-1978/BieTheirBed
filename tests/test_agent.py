@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -577,3 +578,35 @@ class TestAgentGetStatus:
         assert status["total_prompt_tokens"] == 50
         assert status["total_completion_tokens"] == 20
         assert status["total_tokens"] == 70
+
+
+class TestAgentTurnMetrics:
+    @pytest.mark.asyncio
+    async def test_record_turn_is_per_turn_not_cumulative(self, tmp_path):
+        from pc_assistant.observability.trace import TurnRecorder
+
+        rec = TurnRecorder(path=str(tmp_path / "turns.jsonl"), enabled=True)
+        agent = Agent(config=AppConfig(), turn_recorder=rec)
+
+        def stream_with_usage(prompt: int, completion: int):
+            async def _stream(*args, **kwargs):
+                yield StreamChunk(delta_content="Hello", finish_reason="")
+                yield StreamChunk(
+                    finish_reason="stop",
+                    usage={"prompt_tokens": prompt, "completion_tokens": completion},
+                )
+            return _stream
+
+        agent._llm.chat_stream = stream_with_usage(50, 20)
+        await _collect_events(agent, "first")
+        agent._llm.chat_stream = stream_with_usage(60, 30)
+        await _collect_events(agent, "second")
+
+        lines = open(str(tmp_path / "turns.jsonl"), encoding="utf-8").read().strip().splitlines()
+        turns = [json.loads(line) for line in lines]
+        assert len(turns) == 2
+        assert turns[0]["prompt_tokens"] == 50
+        assert turns[0]["completion_tokens"] == 20
+        assert turns[1]["prompt_tokens"] == 60
+        assert turns[1]["completion_tokens"] == 30
+        assert turns[1]["iterations"] == 1

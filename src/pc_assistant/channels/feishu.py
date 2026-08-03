@@ -378,29 +378,14 @@ class FeishuChannel(ChannelBase):
         conv = self._get_conversation(open_id)
         conv.append({"role": "user", "content": text})
 
-        original_conversation = self._agent._conversation
-        original_system_prompt = self._agent._system_prompt
+        feishu_session_id = f"feishu:{open_id}"
 
         try:
-            from pc_assistant.context.conversation import ConversationManager
-
-            feishu_conv = ConversationManager()
-            feishu_conv.set_system_context(original_system_prompt)
-            for msg in conv:
-                role = msg.get("role", "user")
-                content = msg.get("content", "")
-                if role == "user":
-                    feishu_conv.add_user(content)
-                elif role == "assistant":
-                    feishu_conv.add_assistant_final(content)
-
-            self._agent._conversation = feishu_conv
-
             tool_calls_info: list[str] = []
             final_answer = ""
             error_msg = ""
 
-            async for event in self._agent.run(text):
+            async for event in self._agent.run(text, session_id=feishu_session_id):
                 if event.type == "tool_call" and not event.blocked:
                     tool_name = event.tool_name
                     tool_args = event.tool_args
@@ -440,8 +425,6 @@ class FeishuChannel(ChannelBase):
         except Exception as e:
             logger.error("[PROCESS] Agent error: %s", e, exc_info=True)
             self._send_text(open_id, f"❌ 处理出错: {e}")
-        finally:
-            self._agent._conversation = original_conversation
 
     def _send_long_text(self, open_id: str, text: str) -> None:
         max_len = 2000

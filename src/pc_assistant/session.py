@@ -6,6 +6,7 @@ and usage accounting.
 """
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ class SessionState:
     conversation: ConversationManager
     cancelled: bool = False
     tool_call_history: list[str] = field(default_factory=list)
+    tool_task: asyncio.Task | None = None
     total_prompt_tokens: int = 0
     total_completion_tokens: int = 0
     total_iterations: int = 0

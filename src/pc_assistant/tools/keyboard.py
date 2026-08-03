@@ -10,6 +10,7 @@ from pc_assistant.tools.base import ToolBase
 class KeyboardTool(ToolBase):
     name = "keyboard"
     description = "Control keyboard: send key presses, hotkeys, and text input"
+    is_side_effecting = True
 
     # Key name mappings for cross-platform compatibility
     KEY_ALIASES = {
@@ -107,6 +108,22 @@ class KeyboardTool(ToolBase):
                         "type": "number",
                         "description": "Delay between keys in seconds (for 'type' action)",
                     },
+                },
+                "required": ["action"],
+            },
+        }
+
+    def core_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": "Keyboard: press keys, type text, send hotkeys.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["press", "type", "hotkey", "write", "shortcut"]},
+                    "key": {"type": "string"},
+                    "keys": {"type": "array", "items": {"type": "string"}},
+                    "text": {"type": "string"},
                 },
                 "required": ["action"],
             },

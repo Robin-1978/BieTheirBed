@@ -14,6 +14,7 @@ _MAX_FILE_SIZE = 1_048_576
 class FilesystemTool(ToolBase):
     name = "filesystem"
     description = "Read, write, list, and manage files and directories"
+    is_side_effecting = True
 
     async def execute(self, **kwargs: Any) -> Any:
         action = kwargs.get("action")
@@ -49,6 +50,21 @@ class FilesystemTool(ToolBase):
                     "content": {"type": "string", "description": "Content to write (for write action)"},
                     "destination": {"type": "string", "description": "Destination path (for copy/move)"},
                     "encoding": {"type": "string", "description": "File encoding (default: utf-8). Use 'latin-1', 'utf-16', etc. for non-UTF-8 files."},
+                },
+                "required": ["action", "path"],
+            },
+        }
+
+    def core_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": "Read and write files. Common actions: read, write, list, exists.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["read", "write", "list", "mkdir", "delete", "copy", "move", "exists"]},
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
                 },
                 "required": ["action", "path"],
             },

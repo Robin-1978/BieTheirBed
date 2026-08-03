@@ -36,6 +36,8 @@ class AppConfig(BaseModel):
     protected_paths: list[str] = Field(default_factory=get_default_protected_paths)
     log_file: str = "logs/pc_assistant.json"
     working_directory: str = Field(default_factory=os.getcwd)
+    reflection_enabled: bool = False
+    reflection_threshold: int = 7
     feishu_enabled: bool = False
     feishu_app_id: str = ""
     feishu_app_secret: str = ""
@@ -70,6 +72,7 @@ class AppConfig(BaseModel):
             "max_sessions": int, "trace_enabled": bool,
             "llm_trace_log": str, "turn_trace_log": str,
             "evidence_policy_enabled": bool,
+            "reflection_enabled": bool, "reflection_threshold": int,
             "feishu_enabled": bool, "feishu_app_id": str, "feishu_app_secret": str,
             "feishu_receive_id": str, "feishu_receive_id_type": str,
         }

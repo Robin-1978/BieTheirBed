@@ -248,10 +248,9 @@ async def async_benchmark(
     output_path: str | None = None,
 ) -> int:
     from pc_assistant.benchmark.runner import BenchmarkRunner
-    from pc_assistant.config import AppConfig
+    from pc_assistant.config import load_config
 
-    cfg = AppConfig.from_yaml(config_path)
-    cfg.verbose = verbose
+    cfg = load_config(config_path)
 
     runner = BenchmarkRunner(config=cfg, output_path=output_path)
 

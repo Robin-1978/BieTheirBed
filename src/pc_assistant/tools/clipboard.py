@@ -8,6 +8,7 @@ from pc_assistant.tools.base import ToolBase
 class ClipboardTool(ToolBase):
     name = "clipboard"
     description = "Read from and write to the system clipboard"
+    is_side_effecting = True
 
     async def execute(self, **kwargs: Any) -> Any:
         action = kwargs.get("action")
@@ -32,6 +33,20 @@ class ClipboardTool(ToolBase):
                         "enum": ["read", "write"],
                     },
                     "content": {"type": "string", "description": "Content to write to clipboard"},
+                },
+                "required": ["action"],
+            },
+        }
+
+    def core_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": "Read or write clipboard.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["read", "write"]},
+                    "content": {"type": "string"},
                 },
                 "required": ["action"],
             },

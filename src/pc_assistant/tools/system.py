@@ -41,6 +41,21 @@ class SystemTool(ToolBase):
             },
         }
 
+    def core_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": "System info, screenshots, disk usage.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["info", "screenshot", "disk_usage"]},
+                    "path": {"type": "string"},
+                    "drive": {"type": "string"},
+                },
+                "required": ["action"],
+            },
+        }
+
     def _info(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         try:
             import psutil

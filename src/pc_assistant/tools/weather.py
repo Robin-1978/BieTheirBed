@@ -78,3 +78,17 @@ class WeatherTool(ToolBase):
                 "required": ["location"],
             },
         }
+
+    def core_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": "Weather for a location. Optional forecast.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string"},
+                    "forecast": {"type": "string", "enum": ["current", "forecast"], "default": "current"},
+                },
+                "required": ["location"],
+            },
+        }

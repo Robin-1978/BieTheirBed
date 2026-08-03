@@ -665,3 +665,105 @@ class TestLLMProviderCancel:
                 raise AssertionError("stream did not unblock within 3s after cancel")
         finally:
             server.close()
+
+    @pytest.mark.asyncio
+    async def test_cancel_targets_only_one_session(self):
+        """Cancelling session A must not interrupt session B's stream."""
+        import asyncio
+        import json as _json
+
+        async def handle(reader, writer):
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n")
+            await writer.drain()
+            chunk = {"choices": [{"delta": {"content": "hi"}}]}
+            writer.write(("data: " + _json.dumps(chunk) + "\n\n").encode())
+            await writer.drain()
+            await asyncio.sleep(30)
+            writer.close()
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            p = LLMProvider(server_url=f"http://127.0.0.1:{port}", model_name="test", provider="llamacpp")
+            gen_a = p.chat_stream([{"role": "user", "content": "a"}], cancel_key="s1")
+            gen_b = p.chat_stream([{"role": "user", "content": "b"}], cancel_key="s2")
+            assert (await gen_a.__anext__()).delta_content == "hi"
+            assert (await gen_b.__anext__()).delta_content == "hi"
+
+            blocked_a = asyncio.get_running_loop().create_task(gen_a.__anext__())
+            blocked_b = asyncio.get_running_loop().create_task(gen_b.__anext__())
+            await asyncio.sleep(0.2)
+
+            p.cancel("s1")
+            try:
+                await asyncio.wait_for(blocked_a, timeout=3.0)
+                raise AssertionError("session A stream yielded an unexpected value after cancel")
+            except StopAsyncIteration:
+                pass  # session A ended promptly — expected
+
+            # Session B must still be streaming (untouched by A's cancel).
+            assert not blocked_b.done(), "session B must not be cancelled by session A's cancel"
+
+            p.cancel("s2")
+            try:
+                await asyncio.wait_for(blocked_b, timeout=3.0)
+                raise AssertionError("session B stream yielded an unexpected value after cancel")
+            except StopAsyncIteration:
+                pass  # session B ended after its own cancel
+        finally:
+            server.close()
+
+    @pytest.mark.asyncio
+    async def test_session_cancel_does_not_set_global_flag(self):
+        p = LLMProvider()
+        p.cancel("s1")
+        assert p._session_cancel.get("s1") is True
+        assert p._cancelled is False
+        p.reset_cancelled("s1")
+        assert p._session_cancel.get("s1") is None
+
+    @pytest.mark.asyncio
+    async def test_cancel_without_session_is_global(self):
+        p = LLMProvider()
+        p.cancel()
+        assert p._cancelled is True
+
+    @pytest.mark.asyncio
+    async def test_stream_clears_session_cancel_flag(self):
+        p = LLMProvider()
+        p.cancel("s1")
+        assert p._session_cancel.get("s1") is True
+
+        sse_lines = [
+            'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":""}]}',
+            'data: [DONE]',
+        ]
+
+        async def mock_aiter_lines():
+            for line in sse_lines:
+                yield line
+
+        class MockStreamResponse:
+            def raise_for_status(self):
+                pass
+            def aiter_lines(self):
+                return mock_aiter_lines()
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+
+        class MockClient:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+            def stream(self, *args, **kwargs):
+                return MockStreamResponse()
+
+        with patch("pc_assistant.llm_provider.httpx.AsyncClient", return_value=MockClient()):
+            chunks = []
+            async for chunk in p.chat_stream([{"role": "user", "content": "hi"}], cancel_key="s1"):
+                chunks.append(chunk)
+            assert p._session_cancel.get("s1") is None
+            assert any(c.delta_content == "ok" for c in chunks)

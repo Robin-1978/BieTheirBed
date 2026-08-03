@@ -10,6 +10,7 @@ from pc_assistant.tools.base import ToolBase
 class NotificationTool(ToolBase):
     name = "notification"
     description = "Send system notifications, alerts, and desktop notifications"
+    is_side_effecting = True
 
     async def execute(self, **kwargs: Any) -> Any:
         action = kwargs.get("action", "show")
@@ -66,6 +67,22 @@ class NotificationTool(ToolBase):
                         "type": "string",
                         "description": "Icon name or path",
                     },
+                },
+                "required": ["action", "title", "message"],
+            },
+        }
+
+    def core_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": "Show notifications, alerts, and reminders.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["show", "alert", "reminder", "list", "cancel"]},
+                    "title": {"type": "string"},
+                    "message": {"type": "string"},
+                    "delay": {"type": "integer"},
                 },
                 "required": ["action", "title", "message"],
             },

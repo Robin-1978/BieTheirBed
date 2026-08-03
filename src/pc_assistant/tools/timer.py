@@ -498,3 +498,21 @@ class TimerTool(ToolBase):
                 "required": ["action"],
             },
         }
+
+    def core_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": "Timers and reminders: set, list, cancel, pause, resume.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["set", "list", "cancel", "status", "pause", "resume", "modify", "change"]},
+                    "seconds": {"type": "integer"},
+                    "minutes": {"type": "integer"},
+                    "hours": {"type": "integer"},
+                    "message": {"type": "string"},
+                    "timer_id": {"type": "string"},
+                },
+                "required": ["action"],
+            },
+        }

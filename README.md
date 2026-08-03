@@ -5,13 +5,21 @@ A Python desktop AI agent with ReAct reasoning, multi-LLM support, tool calling,
 ## Features
 
 - **ReAct Agent Loop** — Reasoning + Acting pattern with configurable max iterations
+- **Stochastic-Deterministic Boundary (SDB)** — Typed verifier gate between LLM proposals and tool execution
+- **Plan-Execute** — Optional planning phase for complex multi-step tasks
 - **Multi-LLM** — llama.cpp, OpenAI, Anthropic, any OpenAI-compatible API
-- **7 Built-in Tools** — Shell, Filesystem, Application, Web, System, Clipboard, Memory
-- **Safety Guardrails** — Dangerous command blocking, protected paths, user confirmation
-- **User Memory** — Auto-extracts preferences, persists across sessions
+- **16+ Built-in Tools** — Shell, Filesystem, Application, Web, System, Clipboard, Memory, Weather, Exchange, Timer, Window, Notification, Keyboard, Mouse, Scheduler, DescribeTool
+- **MCP Adapter** — Register tools from any MCP-compatible server
+- **Safety Guardrails** — Dangerous command blocking, protected paths, user confirmation, typed refusal codes
+- **Idempotency** — Side-effecting tools are protected against duplicate execution on retry
+- **Tiered Memory** — User memory (key-value), episodic memory (session summaries), procedural memory (persistent rules)
+- **Reflection** — Optional self-critique before yielding final answers
 - **Rich TUI** — Streaming output, thinking visualization, status bar, slash commands
+- **Feishu Bot** — Session-safe Feishu/Lark WebSocket integration
+- **EventBus** — Pub/sub event bus for decoupled subscribers (audit, metrics, plugins)
 - **Audit Logging** — JSONL audit trail for all tool actions
-- **Rate Limiting** — Sliding window per-key rate limits
+- **Observability** — LLM call traces, turn metrics, token calibration
+- **Benchmark** — Weighted multi-dimension scoring with rule-based and LLM-judge evaluation
 
 ## Quick Start
 
@@ -45,6 +53,8 @@ llm_temperature: 0.7
 llm_timeout: 120
 max_iterations: 8
 context_window_budget: 4096
+reflection_enabled: false
+reflection_threshold: 7
 ```
 
 ### Environment variables
@@ -96,11 +106,20 @@ Use `/config set key=value` in the chat to change settings at runtime.
 |------|---------|-------------|
 | `shell` | command | Execute shell commands with timeout |
 | `filesystem` | read, write, list, mkdir, delete, copy, move, exists | File operations |
-| `application` | launch, list_running, kill | Desktop app management |
+| `application` | launch, list_running, search, info, kill | Desktop app management |
 | `web` | fetch, search | Web page fetching and search |
 | `system` | info, screenshot, disk_usage | System info and screenshots |
 | `clipboard` | read, write | Clipboard access |
-| `memory` | store, retrieve, search, delete | Persistent user memory |
+| `memory` | store, retrieve, search, delete, store_episode, recall_episodes | Persistent user & episodic memory |
+| `weather` | current, forecast | Weather data for any location |
+| `exchange` | rate, convert, list | Currency exchange rates |
+| `timer` | set, list, cancel, status, pause, resume, modify | Countdown timers and reminders |
+| `window` | list, info, focus, move, resize, minimize, maximize, restore, close | Window management |
+| `notification` | show, alert, reminder | System notifications |
+| `keyboard` | press, type, hotkey, write, shortcut | Keyboard input control |
+| `mouse` | position, move, click, double_click, right_click, scroll, drag | Mouse control |
+| `scheduler` | create, list, run, delete, enable, disable, start, stop, status | Cron-like task scheduling |
+| `describe_tool` | describe | Meta-tool: query full schema of any tool |
 
 ## Development
 
@@ -119,24 +138,57 @@ pytest --cov=pc_assistant --cov-report=term-missing
 
 ```
 src/pc_assistant/
-├── agent.py             # ReAct agent loop
-├── llm_provider.py      # Multi-provider LLM abstraction
-├── config.py            # Pydantic config model
-├── exceptions.py        # Custom exception hierarchy
+├── agent.py             # ReAct agent loop with SDB, planning, reflection
+├── eventbus.py          # Pub/sub event bus for decoupled subscribers
+├── planner.py           # Plan-Execute layer for complex tasks
+├── reflection.py        # Self-critique before final answer
+├── llm_provider.py      # Multi-provider LLM abstraction (streaming)
+├── session.py           # Multi-session state with LRU eviction & rollback
+├── config.py            # Pydantic config model + YAML + env overrides
+├── exceptions.py        # Typed exception hierarchy
 ├── platform_.py         # Cross-platform utilities
 ├── logger.py            # Structured JSON logging
 ├── context/
-│   ├── conversation.py  # Conversation history
-│   ├── memory.py        # User memory persistence
-│   ├── system_prompt.py # System prompt builder
-│   └── truncator.py     # Context window truncation
-├── tools/               # Tool implementations
+│   ├── assembly.py      # Cache-friendly message assembly & truncation
+│   ├── conversation.py  # Conversation history management
+│   ├── memory.py        # UserMemory + EpisodicMemory + ProceduralMemory
+│   ├── prompt.py        # System prompt & session context builders
+│   ├── compact.py       # Heuristic history compression
+│   ├── llm_compact.py   # LLM-assisted compaction (optional)
+│   ├── filter.py        # Stale content trimming
+│   ├── tags.py          # XML context wrappers
+│   ├── cache.py         # Prompt cache planning
+│   ├── token_estimate.py# Token estimation with runtime calibration
+│   └── evidence.py      # Evidence policy for factual queries
+├── tools/
+│   ├── base.py          # ToolBase ABC (is_side_effecting flag)
+│   ├── registry.py      # Name→tool map with MCP server registration
+│   ├── mcp_adapter.py   # MCP protocol tool adapter
+│   └── ...              # 16 built-in tool implementations
 ├── harness/
-│   ├── safety.py        # Command/path safety checks
-│   ├── limiter.py       # Rate limiting
-│   └── audit.py         # Audit logging
+│   ├── verifier.py      # SDB: deterministic verifier (propose→verify→commit)
+│   ├── refusal.py       # Typed refusal codes & Verdict
+│   ├── safety.py        # Command/path safety policy rules
+│   ├── idempotency.py   # Side-effect dedup with hash-based keys
+│   ├── limiter.py       # Sliding-window rate limiting
+│   └── audit.py         # JSONL audit trail
+├── observability/
+│   └── trace.py         # LLM call & turn tracing
+├── channels/
+│   ├── base.py          # Channel ABC
+│   ├── feishu.py        # Feishu/Lark bot (session-safe)
+│   └── __init__.py      # Config-driven channel creation
+├── benchmark/
+│   ├── runner.py        # Benchmark executor
+│   ├── scorer.py        # Rule-based scoring
+│   ├── evaluator.py     # LLM judge scoring
+│   ├── reporter.py      # Markdown report generator
+│   ├── dataset.py       # JSONL dataset loader
+│   └── types.py         # Data models
 └── ui/
-    └── chat.py          # Rich terminal UI
+    ├── chat.py          # Full-screen Rich TUI
+    ├── state.py         # UI state management
+    └── theme.py         # Tokyo Night theme
 ```
 
 ## License
