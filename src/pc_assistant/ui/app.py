@@ -1,6 +1,7 @@
 """Textual-based chat application for PC Assistant."""
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from typing import Any, Awaitable, Callable
@@ -12,6 +13,7 @@ from textual.widgets import Header, Markdown, Static
 
 from pc_assistant.agent import Agent, AgentEvent
 from pc_assistant.config import AppConfig
+from pc_assistant.service.agent_like import AgentLike
 from pc_assistant.ui.state import UIState, MessageType
 from pc_assistant.ui.theme import get_palette, set_theme, AVAILABLE_THEMES
 from pc_assistant.ui.widgets import (
@@ -80,15 +82,16 @@ class ChatApp(App):
     def __init__(
         self,
         config: AppConfig,
-        agent: Agent | None = None,
+        agent: AgentLike | Agent | None = None,
         confirm_callback: Callable[[str, dict[str, Any]], bool | Awaitable[bool]] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._config = config
         set_theme(config.ui_theme)
-        self._agent = agent
+        self._agent: AgentLike | Agent | None = agent
         self._confirm_callback = confirm_callback
+        self._is_remote = False
         self._state = UIState()
         self._last_input = ""
         self._cancelled = False
@@ -104,8 +107,9 @@ class ChatApp(App):
     def state(self) -> UIState:
         return self._state
 
-    def set_agent(self, agent: Agent) -> None:
+    def set_agent(self, agent: AgentLike | Agent) -> None:
         self._agent = agent
+        self._is_remote = not isinstance(agent, Agent)
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -120,15 +124,39 @@ class ChatApp(App):
         log = self.query_one("#chat-log", VerticalScroll)
         log.mount(CommandOutput(_WELCOME_MD))
         self.query_one("#user-input", ChatInput).focus()
-        self._wire_scheduler_notifications()
+        self._wire_notifications()
 
-    def _wire_scheduler_notifications(self) -> None:
-        """Connect the scheduler's notification callback to Textual toasts."""
+    def _wire_notifications(self) -> None:
+        """Connect notification callbacks for both in-process and remote agents."""
         if self._agent is None:
             return
-        scheduler = self._agent.registry.get("scheduler")
-        if scheduler is not None:
-            scheduler.set_notification_callback(self._on_timer_notify)
+
+        if self._is_remote:
+            from pc_assistant.service.client import ServiceClient
+            if isinstance(self._agent, ServiceClient):
+                self._agent.set_notify_handler(self._on_timer_notify)
+                self._agent.set_confirm_handler(self._on_confirm_request)
+        else:
+            if isinstance(self._agent, Agent):
+                scheduler = self._agent.registry.get("scheduler")
+                if scheduler is not None:
+                    scheduler.set_notification_callback(self._on_timer_notify)
+
+    async def _on_confirm_request(self, data: dict[str, Any]) -> None:
+        """Handle confirm_request from the service (for dangerous tool calls)."""
+        from pc_assistant.service.client import ServiceClient
+        tool = data.get("tool", "?")
+        args = data.get("args", {})
+        code = data.get("code", "")
+        approved = False
+        if self._confirm_callback is not None:
+            result = self._confirm_callback(tool, args)
+            if asyncio.iscoroutine(result) or asyncio.isfuture(result):
+                approved = await result
+            else:
+                approved = bool(result)
+        if isinstance(self._agent, ServiceClient):
+            await self._agent.confirm(code, approved)
 
     def _on_timer_notify(self, task_id: str, message: str) -> None:
         self.notify(message, title=f"Timer: {task_id}", severity="information", timeout=8)

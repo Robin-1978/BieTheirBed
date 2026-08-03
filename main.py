@@ -66,6 +66,21 @@ def build_parser() -> argparse.ArgumentParser:
         type=str, default=None,
         help="Output file for benchmark results (requires --benchmark)",
     )
+    parser.add_argument(
+        "--serve",
+        action="store_true", default=False,
+        help="Start the background service daemon",
+    )
+    parser.add_argument(
+        "--daemon",
+        action="store_true", default=False,
+        help="Daemonize the service (detach from terminal)",
+    )
+    parser.add_argument(
+        "--stop",
+        action="store_true", default=False,
+        help="Stop a running service daemon",
+    )
     return parser
 
 
@@ -94,6 +109,13 @@ def main(argv: list[str] | None = None) -> int:
 
     from pc_assistant import async_main, async_benchmark, async_benchmark_report
 
+    if args.stop:
+        return _stop_service()
+
+    if args.serve:
+        from pc_assistant.service.server import run_server
+        return asyncio.run(run_server(config_path, daemon=args.daemon))
+
     if args.benchmark_report:
         return async_benchmark_report(args.benchmark_report)
 
@@ -111,6 +133,24 @@ def main(argv: list[str] | None = None) -> int:
         ))
     except KeyboardInterrupt:
         return 130
+
+
+def _stop_service() -> int:
+    import os
+    import signal
+    from pc_assistant.service.protocol import PID_PATH
+
+    if not PID_PATH.exists():
+        print("Service is not running (no PID file)")
+        return 1
+    try:
+        pid = int(PID_PATH.read_text().strip())
+        os.kill(pid, signal.SIGTERM)
+        print(f"Sent SIGTERM to service (pid {pid})")
+        return 0
+    except (ValueError, OSError) as e:
+        print(f"Failed to stop service: {e}")
+        return 1
 
 
 if __name__ == "__main__":

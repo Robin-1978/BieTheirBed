@@ -17,6 +17,15 @@ def build_parser() -> "argparse.ArgumentParser":
     parser.add_argument(
         "--version", action="store_true", default=False, help="Print version and exit"
     )
+    parser.add_argument(
+        "--serve", action="store_true", default=False, help="Start the background service daemon"
+    )
+    parser.add_argument(
+        "--daemon", action="store_true", default=False, help="Daemonize the service"
+    )
+    parser.add_argument(
+        "--stop", action="store_true", default=False, help="Stop a running service daemon"
+    )
     return parser
 
 
@@ -91,53 +100,57 @@ async def async_main(
         except (EOFError, KeyboardInterrupt):
             return False
 
-    agent = Agent(config=cfg, confirm_callback=agent_confirm_callback)
+    from pc_assistant.service.lifecycle import get_agent_or_client
 
-    # Auto-start scheduler if there are tasks
-    scheduler = agent.registry.get("scheduler")
-    if scheduler:
-        task_count = len(scheduler._tasks)
-        if task_count > 0:
-            await scheduler.execute(action="start")
-            logger.info("Scheduler started with %d tasks", task_count)
-        else:
-            logger.info("No scheduled tasks to run")
+    agent = await get_agent_or_client(cfg)
+    is_remote = not isinstance(agent, Agent)
 
-    logger.info("Checking LLM server health at %s", cfg.llm_server_url)
-    healthy = await agent.health_check()
-    if not healthy:
-        try:
-            from rich.console import Console
-            from rich.panel import Panel
-
-            console = Console()
-            console.print(
-                Panel(
-                    f"Could not connect to LLM server at:\n  {cfg.llm_server_url}\n\n"
-                    "Please ensure the server is running and accessible.\n"
-                    "You can change the server URL with:\n"
-                    "  --config path/to/config.yaml\n"
-                    "  or set PC_LLM_SERVER_URL environment variable.",
-                    title="[red]✗ LLM Server Unavailable[/red]",
-                    border_style="red",
-                    expand=False,
-                )
-            )
-        except ImportError:
-            print(f"ERROR: Could not connect to LLM server at {cfg.llm_server_url}")
-            print("Please ensure the server is running and accessible.")
-        return 1
-
-    logger.info("LLM server is healthy")
-
+    scheduler = None
     channel_manager = None
-    if cfg.feishu_enabled:
-        from pc_assistant.channels import create_channels_from_config
 
-        channel_manager = create_channels_from_config(cfg)
-        if channel_manager.active_channels:
-            await channel_manager.start_all(agent)
-            logger.info("Channels started: %s", channel_manager.active_channels)
+    if not is_remote:
+        scheduler = agent.registry.get("scheduler")
+        if scheduler:
+            task_count = len(scheduler._tasks)
+            if task_count > 0:
+                await scheduler.execute(action="start")
+                logger.info("Scheduler started with %d tasks", task_count)
+
+        logger.info("Checking LLM server health at %s", cfg.llm_server_url)
+        healthy = await agent.health_check()
+        if not healthy:
+            try:
+                from rich.console import Console
+                from rich.panel import Panel
+
+                console = Console()
+                console.print(
+                    Panel(
+                        f"Could not connect to LLM server at:\n  {cfg.llm_server_url}\n\n"
+                        "Please ensure the server is running and accessible.\n"
+                        "You can change the server URL with:\n"
+                        "  --config path/to/config.yaml\n"
+                        "  or set PC_LLM_SERVER_URL environment variable.",
+                        title="[red]\u2717 LLM Server Unavailable[/red]",
+                        border_style="red",
+                        expand=False,
+                    )
+                )
+            except ImportError:
+                print(f"ERROR: Could not connect to LLM server at {cfg.llm_server_url}")
+            return 1
+
+        logger.info("LLM server is healthy")
+
+        if cfg.feishu_enabled:
+            from pc_assistant.channels import create_channels_from_config
+
+            channel_manager = create_channels_from_config(cfg)
+            if channel_manager.active_channels:
+                await channel_manager.start_all(agent)
+                logger.info("Channels started: %s", channel_manager.active_channels)
+    else:
+        logger.info("Connected to service daemon")
 
     if ask is not None:
         return await _run_benchmark(agent, ask, json_output=json_output, no_tools=no_tools)
@@ -156,10 +169,15 @@ async def async_main(
         except ImportError:
             print("\nInterrupted. Goodbye!")
     finally:
-        if channel_manager:
-            await channel_manager.stop_all()
-        if scheduler:
-            await scheduler.execute(action="stop")
+        if is_remote:
+            from pc_assistant.service.client import ServiceClient
+            if isinstance(agent, ServiceClient):
+                await agent.disconnect()
+        else:
+            if channel_manager:
+                await channel_manager.stop_all()
+            if scheduler:
+                await scheduler.execute(action="stop")
 
     return 0
 
@@ -320,7 +338,32 @@ def main(argv: list[str] | None = None) -> int:
     if config_path is not None:
         config_path = str(Path(config_path).resolve())
 
+    if args.stop:
+        return _stop_service()
+
+    if args.serve:
+        from pc_assistant.service.server import run_server
+        return asyncio.run(run_server(config_path, daemon=args.daemon))
+
     try:
         return asyncio.run(async_main(config_path, args.verbose))
     except KeyboardInterrupt:
         return 130
+
+
+def _stop_service() -> int:
+    import os
+    import signal
+    from pc_assistant.service.protocol import PID_PATH
+
+    if not PID_PATH.exists():
+        print("Service is not running (no PID file)")
+        return 1
+    try:
+        pid = int(PID_PATH.read_text().strip())
+        os.kill(pid, signal.SIGTERM)
+        print(f"Sent SIGTERM to service (pid {pid})")
+        return 0
+    except (ValueError, OSError) as e:
+        print(f"Failed to stop service: {e}")
+        return 1
