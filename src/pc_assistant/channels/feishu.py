@@ -286,6 +286,10 @@ class FeishuChannel(ChannelBase):
         if not text_stripped:
             return
 
+        if text_stripped.startswith("/"):
+            if self._handle_slash_command(open_id, text_stripped):
+                return
+
         with self._pending_confirm_lock:
             pending = self._pending_confirm.get(open_id)
             if pending is not None:
@@ -303,6 +307,94 @@ class FeishuChannel(ChannelBase):
         except Exception as e:
             logger.error("[HANDLE] Agent processing failed: %s", e, exc_info=True)
             self._send_text(open_id, f"❌ 处理失败: {e}")
+
+    def _handle_slash_command(self, open_id: str, text: str) -> bool:
+        """Handle slash commands in Feishu. Returns True if handled."""
+        cmd = text.split()[0].lower()
+
+        if cmd in ("/help", "/帮助"):
+            self._send_card(open_id, {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "template": "indigo",
+                    "title": {"tag": "plain_text", "content": "📖 命令帮助"},
+                },
+                "elements": [{
+                    "tag": "div",
+                    "text": {"tag": "lark_md", "content": (
+                        "`/help` - 显示此帮助\n"
+                        "`/clear` - 清空对话历史\n"
+                        "`/status` - 查看 Agent 状态\n"
+                        "`/tools` - 列出可用工具\n"
+                        "`/config` - 查看当前配置"
+                    )},
+                }],
+            })
+            return True
+
+        if cmd == "/clear":
+            with self._conversation_lock:
+                self._conversations.pop(open_id, None)
+            if self._agent is not None:
+                session_id = f"feishu:{open_id}"
+                try:
+                    self._agent._session_manager.remove(session_id)
+                except Exception:
+                    pass
+            self._send_text(open_id, "✅ 对话历史已清空")
+            return True
+
+        if cmd == "/status":
+            if self._agent is not None:
+                status = self._agent.get_status()
+                info = (
+                    f"**Provider**: {status.get('provider', '?')}\n"
+                    f"**Model**: {status.get('model', '?')}\n"
+                    f"**Status**: {status.get('status', '?')}\n"
+                    f"**Connected**: {status.get('connected', False)}\n"
+                    f"**Sessions**: {status.get('active_sessions', 0)}\n"
+                    f"**Tokens**: {status.get('total_tokens', 0)}"
+                )
+                self._send_card(open_id, {
+                    "config": {"wide_screen_mode": True},
+                    "header": {
+                        "template": "green",
+                        "title": {"tag": "plain_text", "content": "📊 Agent Status"},
+                    },
+                    "elements": [{"tag": "div", "text": {"tag": "lark_md", "content": info}}],
+                })
+            else:
+                self._send_text(open_id, "❌ Agent 未初始化")
+            return True
+
+        if cmd == "/tools":
+            if self._agent is not None:
+                tools = self._agent.registry.list_tools()
+                tools_str = "  ".join(f"`{t}`" for t in tools)
+                self._send_card(open_id, {
+                    "config": {"wide_screen_mode": True},
+                    "header": {
+                        "template": "purple",
+                        "title": {"tag": "plain_text", "content": f"🔧 Available Tools ({len(tools)})"},
+                    },
+                    "elements": [{"tag": "div", "text": {"tag": "lark_md", "content": tools_str}}],
+                })
+            return True
+
+        if cmd == "/config":
+            if self._agent is not None:
+                from pc_assistant.config import AppConfig
+                cfg = self._agent._config
+                info = (
+                    f"**LLM**: {cfg.llm_provider} @ {cfg.llm_server_url}\n"
+                    f"**Max iterations**: {cfg.max_iterations}\n"
+                    f"**Max tokens**: {cfg.max_tokens}\n"
+                    f"**Temperature**: {cfg.llm_temperature}"
+                )
+                self._send_text(open_id, info)
+            return True
+
+        return False
 
     def _handle_confirm(
         self, open_id: str, text: str, pending: dict[str, Any]
@@ -405,6 +497,7 @@ class FeishuChannel(ChannelBase):
 
         try:
             tool_calls_info: list[str] = []
+            thinking_chunks: list[str] = []
             final_answer = ""
             error_msg = ""
 
@@ -416,6 +509,9 @@ class FeishuChannel(ChannelBase):
                     tool_calls_info.append(f"🔧 {tool_name}({args_brief})")
                 elif event.type == "tool_result":
                     pass
+                elif event.type in ("thinking", "stream_think_delta"):
+                    if event.content:
+                        thinking_chunks.append(event.content)
                 elif event.type == "final_answer":
                     final_answer = event.content
                 elif event.type == "error":
@@ -446,10 +542,12 @@ class FeishuChannel(ChannelBase):
                 if len(self._conversations.get(open_id, [])) > 40:
                     self._conversations[open_id] = self._conversations[open_id][-20:]
 
+            thinking_text = "".join(thinking_chunks).strip()
             card = self._build_response_card(
                 final_answer or plain_response,
                 tool_calls_info,
                 bool(error_msg),
+                thinking=thinking_text[:500] if thinking_text else "",
             )
             if not self._send_card(open_id, card):
                 self._send_long_text(open_id, plain_response)
@@ -463,9 +561,26 @@ class FeishuChannel(ChannelBase):
         answer: str,
         tool_calls: list[str],
         is_error: bool,
+        thinking: str = "",
     ) -> dict:
         """Build a Feishu interactive card for the agent response."""
         elements: list[dict] = []
+
+        if thinking:
+            elements.append({
+                "tag": "collapsible_panel",
+                "expanded": False,
+                "header": {
+                    "tag": "plain_text",
+                    "content": "💭 思考过程",
+                },
+                "border": {"color": "grey"},
+                "vertical_spacing": "8px",
+                "elements": [{
+                    "tag": "div",
+                    "text": {"tag": "lark_md", "content": thinking},
+                }],
+            })
 
         if tool_calls:
             tools_md = "\n".join(tool_calls[:5])
