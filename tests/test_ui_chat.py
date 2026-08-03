@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-from collections import deque
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
+from prompt_toolkit.application.current import set_app
+from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.input import DummyInput
+from prompt_toolkit.output import DummyOutput
+from prompt_toolkit.renderer import Renderer
+from prompt_toolkit.styles import Style
 
 from pc_assistant.config import AppConfig
 from pc_assistant.agent import Agent, AgentEvent
-from pc_assistant.ui.chat import ChatUI
+from pc_assistant.ui.chat import ICON_PROMPT, ChatUI
 from pc_assistant.ui.state import UIState, Message, MessageType, AppStatus
 
 
@@ -79,7 +84,8 @@ class TestChatUIInit:
         assert ui._running is False
 
     def test_init_with_confirm_callback(self):
-        cb = lambda t, d: True
+        def cb(t, d):
+            return True
         ui = ChatUI(config=AppConfig(), confirm_callback=cb)
         assert ui._confirm_callback is cb
 
@@ -232,6 +238,140 @@ class TestChatUIProcessEvents:
         tool_msgs = [m for m in ui._state.messages if m.type == MessageType.TOOL_CALL]
         assert len(tool_msgs) >= 1
         assert tool_msgs[0].tool_name == "grep"
+
+    @pytest.mark.asyncio
+    async def test_tui_renders_answer_after_turn(self):
+        ui = ChatUI(config=AppConfig())
+        agent = Agent(config=AppConfig())
+
+        async def _run_ok(*args, **kwargs):
+            yield AgentEvent(type="stream_start", content="")
+            yield AgentEvent(type="stream_delta", content="hi there")
+            yield AgentEvent(type="stream_end", content="")
+            yield AgentEvent(type="final_answer", content="hi there")
+
+        agent.run = _run_ok
+        ui._agent = agent
+        ui._app = MagicMock()
+        ui._chat_buffer = Buffer(read_only=True, multiline=True)
+
+        await ui._process_events("hello")
+
+        assert ui._state.processing is False
+        text = ui._chat_buffer.text
+        assert "hi there" in text
+        # The prompt line is drawn by the input window's BeforeInput processor,
+        # never baked into the chat history.
+        assert ICON_PROMPT not in text
+
+
+class TestTuiLayout:
+    def test_layout_input_between_chat_and_status(self):
+        ui = ChatUI(config=AppConfig())
+        ui._init_tui()
+        assert ui._app is not None
+        assert ui._input_buffer is not None
+        assert ui._chat_window is not None
+        # Input control is the focused element.
+        assert ui._app.layout.current_control is ui._input_control
+        # Chat is read-only but focusable (click to scroll history / select).
+        assert ui._chat_buffer is not None
+        assert ui._chat_buffer.read_only() is True
+        assert ui._chat_control.focusable() is True
+        assert ui._chat_control.focus_on_click() is True
+
+    def test_chat_key_bindings(self):
+        ui = ChatUI(config=AppConfig())
+        ui._init_tui()
+        keys = {tuple(b.keys) for b in ui._chat_kb.bindings}
+        assert ("c-c",) in keys
+        assert ("c-m",) in keys  # Enter
+        assert ("escape",) in keys
+
+    def test_copy_chat_selection_copies_to_clipboard(self):
+        ui = ChatUI(config=AppConfig())
+        ui._init_tui()
+        ui._chat_text = "hello world\nsecond line"
+        ui._rebuild_buffer()
+        buff = ui._chat_buffer
+        buff.start_selection()
+        buff.cursor_position = 5
+        app = MagicMock()
+        copied = ui._copy_chat_selection(app)
+        assert copied is True
+        assert app.clipboard.set_data.call_count == 1
+        assert buff.selection_state is None
+
+    def test_copy_chat_selection_no_selection_cancels_when_processing(self):
+        ui = ChatUI(config=AppConfig())
+        ui._init_tui()
+        agent = Agent(config=AppConfig())
+        ui._agent = agent
+        ui._state.processing = True
+        copied = ui._copy_chat_selection(MagicMock())
+        assert copied is False
+        assert ui._cancelled is True
+
+    def test_input_buffer_is_editable(self):
+        ui = ChatUI(config=AppConfig())
+        ui._init_tui()
+        assert ui._input_buffer.read_only() is False
+
+    def test_welcome_in_chat_buffer(self):
+        ui = ChatUI(config=AppConfig())
+        ui._init_tui()
+        ui._show_welcome_tui()
+        assert "PC Assistant" in ui._chat_buffer.text or "Type /help" in ui._chat_buffer.text
+
+    @pytest.mark.asyncio
+    async def test_chat_wheel_scrolls_to_full_history(self):
+        ui = ChatUI(config=AppConfig())
+        ui._init_tui()
+        ui._chat_text = "\n".join(f"history line {i}" for i in range(60))
+        ui._rebuild_buffer()
+
+        app = ui._app
+        app.input = DummyInput()
+        app.output = DummyOutput()
+        renderer = Renderer(style=Style([]), output=DummyOutput(), full_screen=True)
+        with set_app(app):
+            renderer.render(app, app.layout)
+
+            win = ui._chat_window
+            assert win.vertical_scroll > 0  # sitting at/near the bottom
+            for _ in range(300):
+                win._scroll_up()
+                renderer.render(app, app.layout)
+            # Reaching vertical_scroll == 0 means the very top of the history.
+            assert win.vertical_scroll == 0
+
+    @pytest.mark.asyncio
+    async def test_chat_follows_bottom_after_new_turn(self):
+        ui = ChatUI(config=AppConfig())
+        ui._init_tui()
+        ui._chat_text = "\n".join(f"old line {i}" for i in range(40))
+        ui._rebuild_buffer()
+
+        app = ui._app
+        app.input = DummyInput()
+        app.output = DummyOutput()
+        renderer = Renderer(style=Style([]), output=DummyOutput(), full_screen=True)
+        with set_app(app):
+            renderer.render(app, app.layout)
+
+            win = ui._chat_window
+            for _ in range(200):
+                win._scroll_up()
+                renderer.render(app, app.layout)
+            scrolled_up_scroll = win.vertical_scroll
+            assert scrolled_up_scroll == 0
+
+            # A new turn rebuilds the buffer with the cursor at the end, which
+            # pulls the read-only window back to the bottom.
+            ui._chat_text += "\n  ▸ new question\n  │ fresh answer\n"
+            ui._rebuild_buffer()
+            renderer.render(app, app.layout)
+            assert win.vertical_scroll > scrolled_up_scroll
 
 
 class TestChatUICancel:

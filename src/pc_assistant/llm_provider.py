@@ -45,6 +45,7 @@ class LLMProvider:
         self._timeout = timeout
         self._max_retries = max_retries
         self._cancelled = False
+        self._active_response: httpx.Response | None = None
 
         if provider == "openai":
             self._server_url = "https://api.openai.com/v1"
@@ -194,87 +195,91 @@ class LLMProvider:
                     json=payload,
                     headers=self._headers,
                 ) as response:
-                    response.raise_for_status()
-                    current_event = ""
-                    async for line in response.aiter_lines():
-                        if self._cancelled:
-                            await response.aclose()
-                            return
+                    self._active_response = response
+                    try:
+                        response.raise_for_status()
+                        current_event = ""
+                        async for line in response.aiter_lines():
+                            if self._cancelled:
+                                await response.aclose()
+                                return
 
-                        line = line.strip()
-                        if not line:
-                            continue
-                        if line.startswith("event: "):
-                            current_event = line[len("event: "):]
-                            continue
-                        if not line.startswith("data: "):
-                            continue
-                        data_str = line[len("data: "):]
+                            line = line.strip()
+                            if not line:
+                                continue
+                            if line.startswith("event: "):
+                                current_event = line[len("event: "):]
+                                continue
+                            if not line.startswith("data: "):
+                                continue
+                            data_str = line[len("data: "):]
 
-                        try:
-                            data = json.loads(data_str)
-                        except json.JSONDecodeError:
-                            continue
+                            try:
+                                data = json.loads(data_str)
+                            except json.JSONDecodeError:
+                                continue
 
-                        event_type = data.get("type", current_event)
+                            event_type = data.get("type", current_event)
 
-                        if event_type == "message_start":
-                            msg = data.get("message", {})
-                            last_usage = msg.get("usage", {})
+                            if event_type == "message_start":
+                                msg = data.get("message", {})
+                                last_usage = msg.get("usage", {})
 
-                        elif event_type == "content_block_start":
-                            idx = data.get("index", 0)
-                            block = data.get("content_block", {})
-                            content_blocks[idx] = block
+                            elif event_type == "content_block_start":
+                                idx = data.get("index", 0)
+                                block = data.get("content_block", {})
+                                content_blocks[idx] = block
 
-                        elif event_type == "content_block_delta":
-                            idx = data.get("index", 0)
-                            delta = data.get("delta", {})
-                            delta_type = delta.get("type", "")
-                            block = content_blocks.setdefault(idx, {"type": delta_type})
+                            elif event_type == "content_block_delta":
+                                idx = data.get("index", 0)
+                                delta = data.get("delta", {})
+                                delta_type = delta.get("type", "")
+                                block = content_blocks.setdefault(idx, {"type": delta_type})
 
-                            if delta_type == "text_delta":
-                                text = delta.get("text", "")
-                                block["text"] = block.get("text", "") + text
-                                yield StreamChunk(delta_content=text)
+                                if delta_type == "text_delta":
+                                    text = delta.get("text", "")
+                                    block["text"] = block.get("text", "") + text
+                                    yield StreamChunk(delta_content=text)
 
-                            elif delta_type == "input_json_delta":
-                                partial = delta.get("partial_json", "")
-                                block["partial_json"] = block.get("partial_json", "") + partial
+                                elif delta_type == "input_json_delta":
+                                    partial = delta.get("partial_json", "")
+                                    block["partial_json"] = block.get("partial_json", "") + partial
 
-                        elif event_type == "content_block_stop":
-                            idx = data.get("index", 0)
-                            block = content_blocks.get(idx, {})
+                            elif event_type == "content_block_stop":
+                                idx = data.get("index", 0)
+                                block = content_blocks.get(idx, {})
 
-                            if block.get("type") == "tool_use":
-                                raw_json = block.get("partial_json", "")
-                                try:
-                                    arguments = json.loads(raw_json) if raw_json else {}
-                                except (json.JSONDecodeError, TypeError):
-                                    arguments = {}
-                                tool_call = {
-                                    "id": block.get("id", ""),
-                                    "type": "function",
-                                    "function": {
-                                        "name": block.get("name", ""),
-                                        "arguments": arguments,
-                                    },
-                                }
-                                yield StreamChunk(delta_tool_calls=[tool_call])
+                                if block.get("type") == "tool_use":
+                                    raw_json = block.get("partial_json", "")
+                                    try:
+                                        arguments = json.loads(raw_json) if raw_json else {}
+                                    except (json.JSONDecodeError, TypeError):
+                                        arguments = {}
+                                    tool_call = {
+                                        "id": block.get("id", ""),
+                                        "type": "function",
+                                        "function": {
+                                            "name": block.get("name", ""),
+                                            "arguments": arguments,
+                                        },
+                                    }
+                                    yield StreamChunk(delta_tool_calls=[tool_call])
 
-                        elif event_type == "message_delta":
-                            delta = data.get("delta", {})
-                            last_stop_reason = delta.get("stop_reason", "")
-                            usage = data.get("usage", {})
-                            if usage:
-                                last_usage = {**last_usage, **usage}
+                            elif event_type == "message_delta":
+                                delta = data.get("delta", {})
+                                last_stop_reason = delta.get("stop_reason", "")
+                                usage = data.get("usage", {})
+                                if usage:
+                                    last_usage = {**last_usage, **usage}
 
-                        elif event_type == "message_stop":
-                            yield StreamChunk(
-                                finish_reason=last_stop_reason,
-                                usage=last_usage,
-                            )
-                            return
+                            elif event_type == "message_stop":
+                                yield StreamChunk(
+                                    finish_reason=last_stop_reason,
+                                    usage=last_usage,
+                                )
+                                return
+                    finally:
+                        self._active_response = None
 
         except httpx.HTTPError as e:
             if self._cancelled:
@@ -387,92 +392,96 @@ class LLMProvider:
                     json=payload,
                     headers=self._headers,
                 ) as response:
-                    response.raise_for_status()
-                    async for line in response.aiter_lines():
-                        if self._cancelled:
-                            await response.aclose()
-                            return
+                    self._active_response = response
+                    try:
+                        response.raise_for_status()
+                        async for line in response.aiter_lines():
+                            if self._cancelled:
+                                await response.aclose()
+                                return
 
-                        line = line.strip()
-                        if not line:
-                            continue
-                        if not line.startswith("data: "):
-                            continue
-                        data_str = line[len("data: "):]
-                        if data_str == "[DONE]":
-                            if accumulated_tool_calls:
-                                final_tool_calls = list(accumulated_tool_calls.values())
-                                for tc in final_tool_calls:
-                                    if "function" in tc and isinstance(tc["function"].get("arguments"), str):
-                                        try:
-                                            tc["function"]["arguments"] = json.loads(tc["function"]["arguments"])
-                                        except (json.JSONDecodeError, TypeError):
-                                            pass
+                            line = line.strip()
+                            if not line:
+                                continue
+                            if not line.startswith("data: "):
+                                continue
+                            data_str = line[len("data: "):]
+                            if data_str == "[DONE]":
+                                if accumulated_tool_calls:
+                                    final_tool_calls = list(accumulated_tool_calls.values())
+                                    for tc in final_tool_calls:
+                                        if "function" in tc and isinstance(tc["function"].get("arguments"), str):
+                                            try:
+                                                tc["function"]["arguments"] = json.loads(tc["function"]["arguments"])
+                                            except (json.JSONDecodeError, TypeError):
+                                                pass
+                                    yield StreamChunk(
+                                        delta_content="",
+                                        delta_tool_calls=final_tool_calls,
+                                        finish_reason=last_finish_reason,
+                                        usage=last_usage,
+                                    )
+                                else:
+                                    yield StreamChunk(
+                                        delta_content="",
+                                        delta_tool_calls=[],
+                                        finish_reason=last_finish_reason,
+                                        usage=last_usage,
+                                    )
+                                return
+
+                            try:
+                                chunk_data = json.loads(data_str)
+                            except json.JSONDecodeError:
+                                continue
+
+                            chunk_usage = chunk_data.get("usage")
+                            if chunk_usage and isinstance(chunk_usage, dict):
+                                last_usage = chunk_usage
+
+                            choices = chunk_data.get("choices", [])
+                            if not choices:
+                                continue
+                            delta = choices[0].get("delta", {})
+                            finish_reason = choices[0].get("finish_reason", "")
+                            if finish_reason:
+                                last_finish_reason = finish_reason
+
+                            delta_content = delta.get("content", "") or ""
+                            delta_thinking = delta.get("reasoning_content", "") or delta.get("thinking", "") or ""
+
+                            delta_tool_call_list = delta.get("tool_calls", [])
+                            delta_tool_calls: list[dict[str, Any]] = []
+
+                            for dtc in delta_tool_call_list:
+                                idx = dtc.get("index", 0)
+                                if idx not in accumulated_tool_calls:
+                                    accumulated_tool_calls[idx] = {
+                                        "id": dtc.get("id", ""),
+                                        "type": "function",
+                                        "function": {
+                                            "name": "",
+                                            "arguments": "",
+                                        },
+                                    }
+                                acc = accumulated_tool_calls[idx]
+                                if dtc.get("id"):
+                                    acc["id"] = dtc["id"]
+                                func_delta = dtc.get("function", {})
+                                if func_delta.get("name"):
+                                    acc["function"]["name"] += func_delta["name"]
+                                if func_delta.get("arguments"):
+                                    acc["function"]["arguments"] += func_delta["arguments"]
+
+                            if delta_content or delta_thinking or delta_tool_call_list:
                                 yield StreamChunk(
-                                    delta_content="",
-                                    delta_tool_calls=final_tool_calls,
-                                    finish_reason=last_finish_reason,
-                                    usage=last_usage,
+                                    delta_content=delta_content,
+                                    delta_thinking=delta_thinking,
+                                    delta_tool_calls=delta_tool_calls,
+                                    finish_reason="",
                                 )
-                            else:
-                                yield StreamChunk(
-                                    delta_content="",
-                                    delta_tool_calls=[],
-                                    finish_reason=last_finish_reason,
-                                    usage=last_usage,
-                                )
-                            return
-
-                        try:
-                            chunk_data = json.loads(data_str)
-                        except json.JSONDecodeError:
-                            continue
-
-                        chunk_usage = chunk_data.get("usage")
-                        if chunk_usage and isinstance(chunk_usage, dict):
-                            last_usage = chunk_usage
-
-                        choices = chunk_data.get("choices", [])
-                        if not choices:
-                            continue
-                        delta = choices[0].get("delta", {})
-                        finish_reason = choices[0].get("finish_reason", "")
-                        if finish_reason:
-                            last_finish_reason = finish_reason
-
-                        delta_content = delta.get("content", "") or ""
-                        delta_thinking = delta.get("reasoning_content", "") or delta.get("thinking", "") or ""
-
-                        delta_tool_call_list = delta.get("tool_calls", [])
-                        delta_tool_calls: list[dict[str, Any]] = []
-
-                        for dtc in delta_tool_call_list:
-                            idx = dtc.get("index", 0)
-                            if idx not in accumulated_tool_calls:
-                                accumulated_tool_calls[idx] = {
-                                    "id": dtc.get("id", ""),
-                                    "type": "function",
-                                    "function": {
-                                        "name": "",
-                                        "arguments": "",
-                                    },
-                                }
-                            acc = accumulated_tool_calls[idx]
-                            if dtc.get("id"):
-                                acc["id"] = dtc["id"]
-                            func_delta = dtc.get("function", {})
-                            if func_delta.get("name"):
-                                acc["function"]["name"] += func_delta["name"]
-                            if func_delta.get("arguments"):
-                                acc["function"]["arguments"] += func_delta["arguments"]
-
-                        if delta_content or delta_thinking or delta_tool_call_list:
-                            yield StreamChunk(
-                                delta_content=delta_content,
-                                delta_thinking=delta_thinking,
-                                delta_tool_calls=delta_tool_calls,
-                                finish_reason="",
-                            )
+                    finally:
+                        self._active_response = None
         except httpx.HTTPError as e:
             if self._cancelled:
                 return
@@ -521,6 +530,21 @@ class LLMProvider:
 
     def cancel(self) -> None:
         self._cancelled = True
+        response = self._active_response
+        if response is not None and not response.is_closed:
+            try:
+                asyncio.get_running_loop().create_task(self._abort_response(response))
+            except RuntimeError:
+                pass
+
+    async def _abort_response(self, response: httpx.Response) -> None:
+        """Force-close an in-flight streaming response so a blocked
+        ``aiter_lines()`` wakes up immediately instead of waiting for the
+        next SSE chunk (or the read timeout)."""
+        try:
+            await response.aclose()
+        except Exception:
+            pass
 
     def reset_cancelled(self) -> None:
         self._cancelled = False
