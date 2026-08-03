@@ -111,3 +111,19 @@ class ExchangeTool(ToolBase):
                 "required": ["action"],
             },
         }
+
+    def core_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": "Exchange rates and currency conversion.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["rate", "convert", "list"]},
+                    "from": {"type": "string"},
+                    "to": {"type": "string"},
+                    "amount": {"type": "number", "default": 1},
+                },
+                "required": ["action"],
+            },
+        }
