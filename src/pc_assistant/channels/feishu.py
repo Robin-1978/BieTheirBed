@@ -568,17 +568,10 @@ class FeishuChannel(ChannelBase):
 
         if thinking:
             elements.append({
-                "tag": "collapsible_panel",
-                "expanded": False,
-                "header": {
-                    "tag": "plain_text",
-                    "content": "💭 思考过程",
-                },
-                "border": {"color": "grey"},
-                "vertical_spacing": "8px",
+                "tag": "note",
                 "elements": [{
-                    "tag": "div",
-                    "text": {"tag": "lark_md", "content": thinking},
+                    "tag": "lark_md",
+                    "content": f"💭 **思考**: {thinking}",
                 }],
             })
 
