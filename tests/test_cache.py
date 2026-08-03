@@ -32,10 +32,12 @@ class TestProviderCaching:
         assert provider_supports_caching("gemini")
 
     def test_non_capable(self):
-        assert not provider_supports_caching("llamacpp")
         assert not provider_supports_caching("local")
         assert not provider_supports_caching("")
         assert not provider_supports_caching("openai-compatible")
+
+    def test_llamacpp_capable(self):
+        assert provider_supports_caching("llamacpp")
 
 
 class TestBuildCachePlan:
@@ -67,8 +69,13 @@ class TestBuildCachePlan:
         hint = plan.cache_control_hint()
         assert hint == {"cache_control": {"type": "ephemeral"}}
 
-    def test_no_hint_without_caching(self):
+    def test_cache_control_hint_llamacpp(self):
         plan = build_cache_plan(provider="llamacpp", model="m", system_prompt="sys")
+        hint = plan.cache_control_hint()
+        assert hint == {"cache_control": {"type": "ephemeral"}}
+
+    def test_no_hint_without_caching(self):
+        plan = build_cache_plan(provider="local", model="m", system_prompt="sys")
         assert plan.cache_control_hint() is None
 
     def test_to_dict(self):

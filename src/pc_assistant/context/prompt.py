@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from pc_assistant.platform_ import get_shell_name
-from pc_assistant.context.tags import format_runtime_context, format_session_context
+from pc_assistant.context.tags import escape, format_runtime_context
 
 logger = logging.getLogger(__name__)
 
@@ -84,21 +84,44 @@ def build_runtime_context(
     *,
     system_prompt: str = "",
 ) -> str:
-    """Build runtime context block injected before dialogue history."""
+    """Build runtime context block.
+
+    Kept for API compatibility; volatile memory now lives in the tail pin
+    (``build_session_context``) so the system+tools+history prefix stays
+    byte-identical across turns for prompt-cache reuse. The system prompt is
+    deliberately NOT duplicated here — it is sent once as the ``role=system``
+    message.
+    """
     blocks: list[str] = []
 
     if memory_context:
         blocks.append(f"<user_memory>\n{memory_context}\n</user_memory>")
-
-    if system_prompt:
-        blocks.append(f"<system_rules>\n{system_prompt}\n</system_rules>")
 
     if not blocks:
         return ""
     return format_runtime_context(*blocks)
 
 
-def build_session_context(*, working_directory: str = "") -> str:
-    """Build session context block pinned before the current dialogue turn."""
+def build_session_context(*, working_directory: str = "", memory_context: str = "", os_info: str = OS_INFO) -> str:
+    """Build session context block pinned before the current dialogue turn.
+
+    Memory is injected here (not at the head of the prompt) so that updating
+    ``<user_memory>`` does not invalidate the cached system+tools+history prefix.
+    Both ``<session>`` and ``<user_memory>`` share one ``<runtime_context>``
+    wrapper so the whole block is recognized as a tail-pinned session message.
+    """
     ts = time.strftime("%Y-%m-%d %H:%M %A")
-    return format_session_context(ts, working_dir=working_directory, os_info=OS_INFO)
+    session_body = [
+        "<session>",
+        f"<current_time>{escape(ts)}</current_time>",
+    ]
+    if os_info:
+        session_body.append(f"<os_info>{escape(os_info)}</os_info>")
+    if working_directory:
+        session_body.append(f"<working_directory>{escape(working_directory)}</working_directory>")
+    session_body.append("</session>")
+
+    blocks = ["\n".join(session_body)]
+    if memory_context:
+        blocks.append(f"<user_memory>\n{memory_context}\n</user_memory>")
+    return format_runtime_context(*blocks)

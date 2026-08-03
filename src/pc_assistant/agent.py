@@ -362,6 +362,7 @@ class Agent:
         iteration: int,
         prompt_tokens: int,
         completion_tokens: int,
+        cached_tokens: int = 0,
         latency_ms: float,
         ttft_ms: float,
         finish_reason: str,
@@ -374,6 +375,7 @@ class Agent:
             iteration=iteration,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
+            cached_tokens=cached_tokens,
             latency_ms=latency_ms,
             ttft_ms=ttft_ms,
             finish_reason=finish_reason,
@@ -482,8 +484,7 @@ class Agent:
         turn_tool_calls = 0
 
         system_prompt = self._system_prompt
-        if evidence_required:
-            system_prompt = system_prompt + "\n\n" + self._evidence.build_instruction()
+        turn_context = self._evidence.build_instruction() if evidence_required else ""
 
         for iteration in range(self._config.max_iterations):
             if state.cancelled:
@@ -502,6 +503,7 @@ class Agent:
                 user_input,
                 working_directory=self._config.working_directory,
                 memory_context=memory_context,
+                turn_context=turn_context,
             )
             messages = truncate_messages(
                 messages,
@@ -631,6 +633,11 @@ class Agent:
                 iteration=iteration,
                 prompt_tokens=call_usage.get("prompt_tokens") or call_usage.get("input_tokens") or 0,
                 completion_tokens=call_usage.get("completion_tokens") or call_usage.get("output_tokens") or 0,
+                cached_tokens=(
+                    call_usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
+                    or call_usage.get("input_tokens_details", {}).get("cached_tokens", 0)
+                    or 0
+                ),
                 latency_ms=(time.monotonic() - llm_start) * 1000,
                 ttft_ms=llm_ttft or 0.0,
                 finish_reason=finish_reason,

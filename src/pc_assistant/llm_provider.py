@@ -316,6 +316,8 @@ class LLMProvider:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if self._provider == "llamacpp":
+            payload["cache_prompt"] = True
         if tools:
             payload["tools"] = tools
         if tool_choice is not None:
@@ -369,6 +371,8 @@ class LLMProvider:
             "stream": True,
             "stream_options": {"include_usage": True},
         }
+        if self._provider == "llamacpp":
+            payload["cache_prompt"] = True
         if tools:
             payload["tools"] = tools
         if tool_choice is not None:
