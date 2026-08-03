@@ -13,6 +13,7 @@ from textual.widgets import Header, Markdown, Static
 from pc_assistant.agent import Agent, AgentEvent
 from pc_assistant.config import AppConfig
 from pc_assistant.ui.state import UIState, MessageType
+from pc_assistant.ui.theme import get_palette, set_theme, AVAILABLE_THEMES
 from pc_assistant.ui.widgets import (
     AssistantMessage,
     ChatInput,
@@ -57,6 +58,7 @@ _COMMANDS_HELP = """\
 | `/retry` | Retry the last user input |
 | `/export` | Export conversation to file |
 | `/compact` | Compact context (clear old messages) |
+| `/theme` | List themes or `/theme <name>` to switch |
 """
 
 
@@ -70,6 +72,11 @@ class ChatApp(App):
         ("ctrl+d", "quit", "Quit"),
     ]
 
+    def get_css_variables(self) -> dict[str, str]:
+        """Inject theme palette colors as CSS variables."""
+        palette = get_palette()
+        return {**super().get_css_variables(), **palette}
+
     def __init__(
         self,
         config: AppConfig,
@@ -79,6 +86,7 @@ class ChatApp(App):
     ) -> None:
         super().__init__(**kwargs)
         self._config = config
+        set_theme(config.ui_theme)
         self._agent = agent
         self._confirm_callback = confirm_callback
         self._state = UIState()
@@ -112,6 +120,18 @@ class ChatApp(App):
         log = self.query_one("#chat-log", VerticalScroll)
         log.mount(CommandOutput(_WELCOME_MD))
         self.query_one("#user-input", ChatInput).focus()
+        self._wire_scheduler_notifications()
+
+    def _wire_scheduler_notifications(self) -> None:
+        """Connect the scheduler's notification callback to Textual toasts."""
+        if self._agent is None:
+            return
+        scheduler = self._agent.registry.get("scheduler")
+        if scheduler is not None:
+            scheduler.set_notification_callback(self._on_timer_notify)
+
+    def _on_timer_notify(self, task_id: str, message: str) -> None:
+        self.notify(message, title=f"Timer: {task_id}", severity="information", timeout=8)
 
     # ── Input handling ─────────────────────────────────────────
 
@@ -366,6 +386,7 @@ class ChatApp(App):
             else:
                 log.mount(CommandOutput(f"{ICON_WARN} Usage: `/config set key=value`"))
         elif cmd == "/config":
+            from pc_assistant.ui.theme import get_theme_name
             rows = "\n".join([
                 f"| Provider | {self._config.llm_provider} |",
                 f"| Server | {self._config.llm_server_url} |",
@@ -373,6 +394,7 @@ class ChatApp(App):
                 f"| API Key | {self._config.masked_api_key()} |",
                 f"| Max Iterations | {self._config.max_iterations} |",
                 f"| Context Budget | {self._config.context_window_budget} |",
+                f"| Theme | {get_theme_name()} |",
             ])
             log.mount(CommandOutput(f"| Key | Value |\n|-----|-------|\n{rows}"))
         elif cmd == "/retry":
@@ -410,6 +432,29 @@ class ChatApp(App):
             else:
                 log.mount(CommandOutput(
                     f"Debug mode: **{'ON' if self._state.debug_mode else 'OFF'}**"
+                ))
+        elif cmd.startswith("/theme"):
+            parts = command.strip().split(None, 1)
+            if len(parts) >= 2:
+                name = parts[1].strip()
+                if set_theme(name):
+                    self._config.ui_theme = name
+                    self.refresh_css()
+                    log.mount(CommandOutput(f"Theme switched to **{name}**. "))
+                else:
+                    names = ", ".join(f"`{t}`" for t in AVAILABLE_THEMES)
+                    log.mount(CommandOutput(f"{ICON_WARN} Unknown theme. Available: {names}"))
+            else:
+                from pc_assistant.ui.theme import get_theme_name
+                current = get_theme_name()
+                rows = "\n".join(
+                    f"| {'**' + t + '**' if t == current else t} | {'active' if t == current else ''} |"
+                    for t in AVAILABLE_THEMES
+                )
+                log.mount(CommandOutput(
+                    f"Current: **{current}**\n\n"
+                    f"| Theme | Status |\n|-------|--------|\n{rows}\n\n"
+                    f"Use `/theme <name>` to switch."
                 ))
         else:
             log.mount(CommandOutput(f"{ICON_WARN} Unknown command: `{command}`"))

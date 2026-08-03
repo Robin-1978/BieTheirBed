@@ -41,7 +41,6 @@ from pc_assistant.tools.web import WebTool
 from pc_assistant.tools.memory_tool import MemoryTool
 from pc_assistant.tools.weather import WeatherTool
 from pc_assistant.tools.exchange import ExchangeTool
-from pc_assistant.tools.timer import TimerTool
 from pc_assistant.tools.window import WindowTool
 from pc_assistant.tools.notification import NotificationTool
 from pc_assistant.tools.keyboard import KeyboardTool
@@ -360,7 +359,6 @@ class Agent:
             MemoryTool(memory=self._memory, episodic=self._episodic_memory),
             WeatherTool(),
             ExchangeTool(),
-            TimerTool(),
             WindowTool(),
             NotificationTool(),
             KeyboardTool(),
