@@ -25,6 +25,13 @@ class AppConfig(BaseModel):
     max_tokens: int = 1024
     shell_timeout: int = 30
     context_window_budget: int = 8192
+    llm_compact_enabled: bool = False
+    token_family: str = ""
+    max_sessions: int = 100
+    trace_enabled: bool = True
+    llm_trace_log: str = "logs/llm_calls.jsonl"
+    turn_trace_log: str = "logs/turns.jsonl"
+    evidence_policy_enabled: bool = True
     dangerous_commands: list[str] = Field(default_factory=get_default_dangerous_commands)
     protected_paths: list[str] = Field(default_factory=get_default_protected_paths)
     log_file: str = "logs/pc_assistant.json"
@@ -59,6 +66,10 @@ class AppConfig(BaseModel):
             "max_total_tool_calls": int, "max_consecutive_tool_calls": int,
             "max_tokens": int, "shell_timeout": int,
             "context_window_budget": int, "log_file": str, "working_directory": str,
+            "llm_compact_enabled": bool, "token_family": str,
+            "max_sessions": int, "trace_enabled": bool,
+            "llm_trace_log": str, "turn_trace_log": str,
+            "evidence_policy_enabled": bool,
             "feishu_enabled": bool, "feishu_app_id": str, "feishu_app_secret": str,
             "feishu_receive_id": str, "feishu_receive_id_type": str,
         }
@@ -94,6 +105,13 @@ def _env_overrides() -> dict[str, Any]:
         "PC_MAX_CONSECUTIVE_TOOL_CALLS": ("max_consecutive_tool_calls", int),
         "PC_SHELL_TIMEOUT": ("shell_timeout", int),
         "PC_CONTEXT_WINDOW_BUDGET": ("context_window_budget", int),
+        "PC_LLM_COMPACT_ENABLED": ("llm_compact_enabled", bool),
+        "PC_TOKEN_FAMILY": ("token_family", str),
+        "PC_MAX_SESSIONS": ("max_sessions", int),
+        "PC_TRACE_ENABLED": ("trace_enabled", bool),
+        "PC_LLM_TRACE_LOG": ("llm_trace_log", str),
+        "PC_TURN_TRACE_LOG": ("turn_trace_log", str),
+        "PC_EVIDENCE_POLICY_ENABLED": ("evidence_policy_enabled", bool),
         "PC_LOG_FILE": ("log_file", str),
         "PC_WORKING_DIRECTORY": ("working_directory", str),
         "PC_FEISHU_ENABLED": ("feishu_enabled", bool),

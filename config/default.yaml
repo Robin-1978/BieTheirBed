@@ -9,6 +9,13 @@ max_iterations: 8
 max_tokens: 4096
 shell_timeout: 30
 context_window_budget: 8192
+token_family: "default"
+llm_compact_enabled: false
+max_sessions: 8
+trace_enabled: true
+llm_trace_log: "logs/llm_trace.jsonl"
+turn_trace_log: "logs/turn_trace.jsonl"
+evidence_policy_enabled: true
 log_file: "logs/pc_assistant.json"
 working_directory: "."
 feishu_enabled: false
