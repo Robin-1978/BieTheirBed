@@ -64,6 +64,22 @@ class WebTool(ToolBase):
             },
         }
 
+    def core_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": "Search the web and fetch pages. Use search for queries, fetch for URLs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["search", "fetch"]},
+                    "query": {"type": "string"},
+                    "url": {"type": "string"},
+                    "max_results": {"type": "integer", "default": 5},
+                },
+                "required": ["action"],
+            },
+        }
+
     async def _fetch(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         url = kwargs.get("url", "")
         if not url:

@@ -134,12 +134,19 @@ class BenchmarkRunner:
         agent = Agent(config=config)
         if q.no_tools:
             from pc_assistant.tools.registry import ToolRegistry
-            agent._registry = ToolRegistry(safety=agent._safety)
+            agent._registry = ToolRegistry()
         return agent
 
     def _create_judge(self) -> LLMJudge | None:
         try:
-            provider = LLMProvider(self._config)
+            provider = LLMProvider(
+                server_url=self._config.llm_server_url,
+                model_name=self._config.llm_model_name,
+                provider=self._config.llm_provider,
+                api_key=self._config.llm_api_key,
+                api_base=self._config.llm_api_base,
+                timeout=self._config.llm_timeout,
+            )
             return LLMJudge(provider)
         except Exception:
             return None
