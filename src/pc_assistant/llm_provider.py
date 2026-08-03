@@ -7,6 +7,8 @@ from typing import Any, AsyncGenerator
 import httpx
 from pydantic import BaseModel
 
+from pc_assistant.exceptions import LLMStreamError, LLMTimeoutError
+
 
 class LLMMessage(BaseModel):
     role: str
@@ -45,6 +47,8 @@ class LLMProvider:
         self._timeout = timeout
         self._max_retries = max_retries
         self._cancelled = False
+        self._session_cancel: dict[str, bool] = {}
+        self._streams: dict[str, httpx.Response] = {}
         self._active_response: httpx.Response | None = None
 
         if provider == "openai":
@@ -93,12 +97,15 @@ class LLMProvider:
                     raise
         raise last_error  # type: ignore[misc]
 
-    def _build_anthropic_payload(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, temperature: float = 0.7, max_tokens: int = 1024) -> dict[str, Any]:
-        system_msg = ""
+    def _build_anthropic_payload(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, temperature: float = 0.7, max_tokens: int = 1024, cache_control: dict[str, Any] | None = None) -> dict[str, Any]:
+        system_blocks: list[dict[str, Any]] = []
         filtered_msgs: list[dict[str, Any]] = []
         for m in messages:
             if m["role"] == "system":
-                system_msg += m["content"] + "\n"
+                block: dict[str, Any] = {"type": "text", "text": m["content"]}
+                if cache_control:
+                    block["cache_control"] = cache_control
+                system_blocks.append(block)
             else:
                 filtered_msgs.append(m)
 
@@ -108,21 +115,24 @@ class LLMProvider:
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-        if system_msg:
-            payload["system"] = system_msg.strip()
+        if system_blocks:
+            payload["system"] = system_blocks if cache_control else " ".join(b["text"] for b in system_blocks)
         if tools:
-            payload["tools"] = self._convert_tools_to_anthropic(tools)
+            payload["tools"] = self._convert_tools_to_anthropic(tools, cache_control)
         return payload
 
-    def _convert_tools_to_anthropic(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _convert_tools_to_anthropic(self, tools: list[dict[str, Any]], cache_control: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         anthropic_tools: list[dict[str, Any]] = []
         for t in tools:
             func = t.get("function", {})
-            anthropic_tools.append({
+            tool_def = {
                 "name": func.get("name", ""),
                 "description": func.get("description", ""),
                 "input_schema": func.get("parameters", {"type": "object", "properties": {}}),
-            })
+            }
+            if cache_control:
+                tool_def["cache_control"] = cache_control
+            anthropic_tools.append(tool_def)
         return anthropic_tools
 
     def _parse_anthropic_response(self, data: dict[str, Any]) -> LLMResponse:
@@ -147,8 +157,8 @@ class LLMProvider:
             usage=data.get("usage", {}),
         )
 
-    async def _chat_anthropic(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None, temperature: float, max_tokens: int) -> LLMResponse:
-        payload = self._build_anthropic_payload(messages, tools, temperature, max_tokens)
+    async def _chat_anthropic(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None, temperature: float, max_tokens: int, cache_control: dict[str, Any] | None = None) -> LLMResponse:
+        payload = self._build_anthropic_payload(messages, tools, temperature, max_tokens, cache_control)
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 resp = await self._request_with_retry(
@@ -170,8 +180,10 @@ class LLMProvider:
         temperature: float = 0.7,
         max_tokens: int = 1024,
         tool_choice: str | dict[str, Any] | None = None,
+        cancel_key: str | None = None,
+        cache_control: dict[str, Any] | None = None,
     ) -> AsyncGenerator[StreamChunk, None]:
-        payload = self._build_anthropic_payload(messages, tools, temperature, max_tokens)
+        payload = self._build_anthropic_payload(messages, tools, temperature, max_tokens, cache_control)
         payload["stream"] = True
         if tool_choice is not None:
             payload["tool_choice"] = tool_choice
@@ -196,11 +208,13 @@ class LLMProvider:
                     headers=self._headers,
                 ) as response:
                     self._active_response = response
+                    if cancel_key:
+                        self._streams[cancel_key] = response
                     try:
                         response.raise_for_status()
                         current_event = ""
                         async for line in response.aiter_lines():
-                            if self._cancelled:
+                            if self._cancelled or (cancel_key and self._session_cancel.get(cancel_key)):
                                 await response.aclose()
                                 return
 
@@ -280,9 +294,11 @@ class LLMProvider:
                                 return
                     finally:
                         self._active_response = None
+                        if cancel_key:
+                            self._streams.pop(cancel_key, None)
 
         except httpx.HTTPError as e:
-            if self._cancelled:
+            if self._cancelled or (cancel_key and self._session_cancel.get(cancel_key)):
                 return
             yield StreamChunk(
                 delta_content=f"LLM stream failed: {e}",
@@ -291,7 +307,7 @@ class LLMProvider:
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            if self._cancelled:
+            if self._cancelled or (cancel_key and self._session_cancel.get(cancel_key)):
                 return
             error_detail = str(e) if str(e) else type(e).__name__
             yield StreamChunk(
@@ -306,9 +322,10 @@ class LLMProvider:
         temperature: float = 0.7,
         max_tokens: int = 1024,
         tool_choice: str | dict[str, Any] | None = None,
+        cache_control: dict[str, Any] | None = None,
     ) -> LLMResponse:
         if self._provider == "anthropic":
-            return await self._chat_anthropic(messages, tools, temperature, max_tokens)
+            return await self._chat_anthropic(messages, tools, temperature, max_tokens, cache_control)
 
         payload: dict[str, Any] = {
             "model": self._model_name,
@@ -316,6 +333,12 @@ class LLMProvider:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if cache_control:
+            # Add cache_control to system message if present
+            for m in payload["messages"]:
+                if m.get("role") == "system":
+                    m["cache_control"] = cache_control
+                    break
         if self._provider == "llamacpp":
             payload["cache_prompt"] = True
         if tools:
@@ -355,11 +378,17 @@ class LLMProvider:
         temperature: float = 0.7,
         max_tokens: int = 1024,
         tool_choice: str | dict[str, Any] | None = None,
+        cancel_key: str | None = None,
+        cache_control: dict[str, Any] | None = None,
     ) -> AsyncGenerator[StreamChunk, None]:
         self._cancelled = False
+        if cancel_key:
+            self._session_cancel.pop(cancel_key, None)
 
         if self._provider == "anthropic":
-            async for chunk in self._chat_stream_anthropic(messages, tools, temperature, max_tokens, tool_choice):
+            async for chunk in self._chat_stream_anthropic(
+                messages, tools, temperature, max_tokens, tool_choice, cancel_key, cache_control,
+            ):
                 yield chunk
             return
 
@@ -371,6 +400,11 @@ class LLMProvider:
             "stream": True,
             "stream_options": {"include_usage": True},
         }
+        if cache_control:
+            for m in payload["messages"]:
+                if m.get("role") == "system":
+                    m["cache_control"] = cache_control
+                    break
         if self._provider == "llamacpp":
             payload["cache_prompt"] = True
         if tools:
@@ -397,10 +431,12 @@ class LLMProvider:
                     headers=self._headers,
                 ) as response:
                     self._active_response = response
+                    if cancel_key:
+                        self._streams[cancel_key] = response
                     try:
                         response.raise_for_status()
                         async for line in response.aiter_lines():
-                            if self._cancelled:
+                            if self._cancelled or (cancel_key and self._session_cancel.get(cancel_key)):
                                 await response.aclose()
                                 return
 
@@ -486,8 +522,10 @@ class LLMProvider:
                                 )
                     finally:
                         self._active_response = None
+                        if cancel_key:
+                            self._streams.pop(cancel_key, None)
         except httpx.HTTPError as e:
-            if self._cancelled:
+            if self._cancelled or (cancel_key and self._session_cancel.get(cancel_key)):
                 return
             yield StreamChunk(
                 delta_content=f"LLM stream failed: {e}",
@@ -497,7 +535,7 @@ class LLMProvider:
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            if self._cancelled:
+            if self._cancelled or (cancel_key and self._session_cancel.get(cancel_key)):
                 return
             error_detail = str(e) if str(e) else type(e).__name__
             yield StreamChunk(
@@ -532,10 +570,18 @@ class LLMProvider:
             "content": content,
         }
 
-    def cancel(self) -> None:
-        self._cancelled = True
-        response = self._active_response
-        if response is not None and not response.is_closed:
+    def cancel(self, session_id: str | None = None) -> None:
+        if session_id:
+            self._session_cancel[session_id] = True
+            responses = [self._streams.get(session_id)]
+        else:
+            self._cancelled = True
+            responses = [self._active_response, *self._streams.values()]
+        seen: set[int] = set()
+        for response in responses:
+            if response is None or response.is_closed or id(response) in seen:
+                continue
+            seen.add(id(response))
             try:
                 asyncio.get_running_loop().create_task(self._abort_response(response))
             except RuntimeError:
@@ -550,15 +596,14 @@ class LLMProvider:
         except Exception:
             pass
 
-    def reset_cancelled(self) -> None:
+    def reset_cancelled(self, session_id: str | None = None) -> None:
         self._cancelled = False
+        if session_id:
+            self._session_cancel.pop(session_id, None)
 
     async def health_check(self) -> bool:
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                if self._provider == "anthropic":
-                    resp = await client.get(f"{self._server_url}/", headers=self._headers)
-                    return resp.status_code == 200
                 resp = await client.get(f"{self._server_url}/v1/models", headers=self._headers)
                 return resp.status_code == 200
         except httpx.HTTPError:

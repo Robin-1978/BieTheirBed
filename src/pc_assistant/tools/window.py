@@ -70,6 +70,24 @@ class WindowTool(ToolBase):
             },
         }
 
+    def core_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": "Window management: list, focus, move, resize, minimize, maximize, close.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "info", "focus", "move", "resize", "minimize", "maximize", "restore", "close", "screenshot"]},
+                    "window_id": {"type": "string"},
+                    "x": {"type": "integer"},
+                    "y": {"type": "integer"},
+                    "width": {"type": "integer"},
+                    "height": {"type": "integer"},
+                },
+                "required": ["action"],
+            },
+        }
+
     def _get_window_by_id(self, window_id: str) -> Any | None:
         """Find window by ID (title, class, or partial match)."""
         try:

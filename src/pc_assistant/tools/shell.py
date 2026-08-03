@@ -118,6 +118,7 @@ do shell script "{escaped_cmd}" with administrator privileges
 class ShellTool(ToolBase):
     name = "shell"
     description = "Execute shell commands with full shell support (pipes, redirects, etc.)"
+    is_side_effecting = True
 
     def __init__(self, default_timeout: int = 30) -> None:
         self._default_timeout = default_timeout
@@ -152,6 +153,20 @@ class ShellTool(ToolBase):
                         "type": "object",
                         "description": "Environment variables to set for this command"
                     },
+                },
+                "required": ["command"],
+            },
+        }
+
+    def core_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": "Run shell commands. Use for CLI tasks, scripts, and system queries.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string"},
+                    "timeout": {"type": "integer", "default": 30},
                 },
                 "required": ["command"],
             },

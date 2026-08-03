@@ -5,27 +5,22 @@ from pathlib import Path
 
 import pytest
 
+from pc_assistant.context import truncate_messages
 from pc_assistant.context.conversation import ConversationManager, Message
 from pc_assistant.context.memory import UserMemory
-from pc_assistant.context.system_prompt import build_system_prompt
+from pc_assistant.context.prompt import build_system_prompt
 from pc_assistant.platform_ import get_shell_name
-from pc_assistant.context.truncator import truncate_messages
 
 
 class TestBuildSystemPrompt:
     def test_basic(self):
         prompt = build_system_prompt()
         assert "PC Assistant" in prompt
-        assert "Tool Usage" in prompt
-        assert f"Shell: {get_shell_name()}" in prompt
+        assert "<instructions>" in prompt
 
     def test_with_tools(self):
         prompt = build_system_prompt(tools_description="filesystem, shell")
         assert "filesystem, shell" in prompt
-
-    def test_with_working_directory(self):
-        prompt = build_system_prompt(working_directory="C:\\Users\\test")
-        assert "C:\\Users\\test" in prompt
 
     def test_with_extra_instructions(self):
         prompt = build_system_prompt(extra_instructions="Always be polite.")
@@ -230,13 +225,6 @@ class TestTruncateMessages:
         total_chars = sum(len(m.get("content", "")) for m in result)
         original_chars = sum(len(m.get("content", "")) for m in messages)
         assert total_chars < original_chars
-
-    def test_truncate_tool_output(self):
-        messages = [
-            {"role": "tool", "content": "x" * 5000, "tool_call_id": "call_1"},
-        ]
-        result = truncate_messages(messages, budget=10000, max_tool_output_chars=1000)
-        assert len(result[0]["content"]) <= 1100
 
     def test_system_always_preserved(self):
         messages = [

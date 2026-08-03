@@ -10,6 +10,7 @@ from pc_assistant.tools.base import ToolBase
 class ApplicationTool(ToolBase):
     name = "application"
     description = "Launch, list, search, and manage desktop applications"
+    is_side_effecting = True
 
     async def execute(self, **kwargs: Any) -> Any:
         action = kwargs.get("action")
@@ -43,6 +44,22 @@ class ApplicationTool(ToolBase):
                         "description": "Process name to search for (case-insensitive, partial match)"
                     },
                     "pid": {"type": "integer", "description": "Process ID (for info or kill)"},
+                },
+                "required": ["action"],
+            },
+        }
+
+    def core_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": "Manage applications: launch, list_running, search, info, kill.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["launch", "list_running", "search", "info", "kill"]},
+                    "command": {"type": "string"},
+                    "name": {"type": "string"},
+                    "pid": {"type": "integer"},
                 },
                 "required": ["action"],
             },

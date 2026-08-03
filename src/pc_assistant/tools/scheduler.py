@@ -121,8 +121,7 @@ class ScheduledTask:
 
 
 class SchedulerTool(ToolBase):
-    """
-    Schedule tasks to run at specific times or intervals.
+    """Schedule tasks to run at specific times or intervals.
     Supports cron expressions and simple interval notation.
 
     Examples:
@@ -135,6 +134,7 @@ class SchedulerTool(ToolBase):
 
     name = "scheduler"
     description = "Schedule tasks to run at specific times or intervals (cron-like scheduling)"
+    is_side_effecting = True
 
     def __init__(self, storage_path: str = "data/scheduled_tasks.json") -> None:
         self._tasks: dict[str, ScheduledTask] = {}
@@ -242,6 +242,23 @@ class SchedulerTool(ToolBase):
                         "type": "integer",
                         "description": "Task timeout in seconds (for create, default: 300)",
                     },
+                },
+                "required": ["action"],
+            },
+        }
+
+    def core_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": "Schedule recurring tasks with cron or intervals.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["create", "add", "list", "info", "enable", "disable", "delete", "run", "start", "stop", "status"]},
+                    "task_name": {"type": "string"},
+                    "command": {"type": "string"},
+                    "schedule": {"type": "string"},
+                    "task_id": {"type": "string"},
                 },
                 "required": ["action"],
             },

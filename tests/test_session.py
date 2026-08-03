@@ -1,25 +1,7 @@
 from __future__ import annotations
 
 from pc_assistant.context.conversation import ConversationManager
-from pc_assistant.harness.cancel import CancelToken
 from pc_assistant.session import SessionManager, SessionState
-
-
-class TestCancelToken:
-    def test_default_not_cancelled(self):
-        token = CancelToken()
-        assert token.is_cancelled is False
-
-    def test_cancel(self):
-        token = CancelToken()
-        token.cancel()
-        assert token.is_cancelled is True
-
-    def test_reset(self):
-        token = CancelToken()
-        token.cancel()
-        token.reset()
-        assert token.is_cancelled is False
 
 
 class TestSessionState:

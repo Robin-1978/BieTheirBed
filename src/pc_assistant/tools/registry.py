@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from pc_assistant.exceptions import ToolNotFoundError
 from pc_assistant.tools.base import ToolBase
 
 
@@ -35,16 +36,23 @@ class ToolRegistry:
         return schemas
 
     async def execute(self, tool_name: str, **kwargs: Any) -> Any:
-        """Execute a tool by name.
-
-        Args:
-            tool_name: The name of the tool to execute
-            **kwargs: Arguments to pass to the tool
-        """
         tool = self._tools.get(tool_name)
         if tool is None:
-            raise KeyError(f"Tool '{tool_name}' not found in registry")
+            raise ToolNotFoundError(tool_name)
         return await tool.execute(**kwargs)
+
+    async def register_mcp_server(self, server_url: str) -> list[str]:
+        """Discover and register all tools from an MCP server. Returns registered tool names."""
+        from pc_assistant.tools.mcp_adapter import MCPToolAdapter
+
+        adapter = MCPToolAdapter(server_url)
+        tools = await adapter.discover()
+        names: list[str] = []
+        for tool in tools:
+            if tool.name:
+                self._tools[tool.name] = tool
+                names.append(tool.name)
+        return names
 
     def __contains__(self, name: str) -> bool:
         return name in self._tools

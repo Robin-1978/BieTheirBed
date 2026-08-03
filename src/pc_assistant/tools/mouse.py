@@ -8,6 +8,7 @@ from pc_assistant.tools.base import ToolBase
 class MouseTool(ToolBase):
     name = "mouse"
     description = "Control mouse: move, click, scroll, drag, and get cursor position"
+    is_side_effecting = True
 
     async def execute(self, **kwargs: Any) -> Any:
         action = kwargs.get("action", "position")
@@ -72,6 +73,26 @@ class MouseTool(ToolBase):
                         "type": "number",
                         "description": "Duration in seconds for move/drag animation",
                     },
+                },
+                "required": ["action"],
+            },
+        }
+
+    def core_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": "Mouse: move, click, scroll, drag, position.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["position", "move", "click", "double_click", "right_click", "scroll", "drag", "press", "release"]},
+                    "x": {"type": "integer"},
+                    "y": {"type": "integer"},
+                    "dx": {"type": "integer"},
+                    "dy": {"type": "integer"},
+                    "button": {"type": "string", "enum": ["left", "right", "middle"]},
+                    "x2": {"type": "integer"},
+                    "y2": {"type": "integer"},
                 },
                 "required": ["action"],
             },

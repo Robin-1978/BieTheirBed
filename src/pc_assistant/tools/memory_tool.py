@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pc_assistant.context.memory import UserMemory
+from pc_assistant.context.memory import EpisodicMemory, UserMemory
 from pc_assistant.tools.base import ToolBase
 
 
@@ -10,11 +10,19 @@ class MemoryTool(ToolBase):
     name = "memory"
     description = "Store, retrieve, search, or delete user preferences and personal information for long-term memory"
 
-    def __init__(self, memory: UserMemory | None = None) -> None:
+    def __init__(
+        self,
+        memory: UserMemory | None = None,
+        episodic: EpisodicMemory | None = None,
+    ) -> None:
         self._memory = memory
+        self._episodic = episodic
 
     def set_memory(self, memory: UserMemory) -> None:
         self._memory = memory
+
+    def set_episodic(self, episodic: EpisodicMemory) -> None:
+        self._episodic = episodic
 
     async def execute(self, **kwargs: Any) -> Any:
         if self._memory is None:
@@ -25,6 +33,8 @@ class MemoryTool(ToolBase):
             "retrieve": self._retrieve,
             "search": self._search,
             "delete": self._delete,
+            "store_episode": self._store_episode,
+            "recall_episodes": self._recall_episodes,
         }
         handler = handlers.get(action)
         if handler is None:
@@ -69,6 +79,22 @@ class MemoryTool(ToolBase):
         deleted = self._memory.delete(key)
         return {"deleted": deleted, "key": key}
 
+    def _store_episode(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        if self._episodic is None:
+            return {"error": "Episodic memory not initialized"}
+        summary = kwargs.get("value", "")
+        if not summary:
+            return {"error": "'value' (summary) is required for store_episode"}
+        self._episodic.store_episode(summary)
+        return {"success": True, "summary": summary}
+
+    def _recall_episodes(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        if self._episodic is None:
+            return {"error": "Episodic memory not initialized"}
+        query = kwargs.get("key", "")
+        episodes = self._episodic.recall(query, limit=5)
+        return {"episodes": episodes, "count": len(episodes)}
+
     def schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
@@ -78,7 +104,7 @@ class MemoryTool(ToolBase):
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["store", "retrieve", "search", "delete"],
+                        "enum": ["store", "retrieve", "search", "delete", "store_episode", "recall_episodes"],
                     },
                     "key": {
                         "type": "string",
@@ -92,6 +118,22 @@ class MemoryTool(ToolBase):
                         "type": "string",
                         "description": "Category: identity, location, preference, workflow, instruction",
                     },
+                },
+                "required": ["action", "key"],
+            },
+        }
+
+    def core_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": "Long-term memory: store, retrieve, search, delete personal info.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["store", "retrieve", "search", "delete", "store_episode", "recall_episodes"]},
+                    "key": {"type": "string"},
+                    "value": {"type": "string"},
+                    "category": {"type": "string"},
                 },
                 "required": ["action", "key"],
             },

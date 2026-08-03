@@ -179,3 +179,109 @@ class UserMemory:
 
     def __len__(self) -> int:
         return len(self._items)
+
+
+class EpisodicMemory:
+    """Stores session summaries as episodic memories, persisted to disk."""
+
+    def __init__(self, storage_path: str | Path = "data/episodic_memory.json", max_episodes: int = 50) -> None:
+        self._storage_path = Path(storage_path)
+        self._episodes: list[dict[str, Any]] = []
+        self._max = max_episodes
+        self._logger = get_logger("episodic_memory")
+        self._load()
+
+    def _load(self) -> None:
+        if not self._storage_path.exists():
+            return
+        try:
+            with open(self._storage_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                self._episodes = data.get("episodes", [])
+        except (json.JSONDecodeError, OSError) as e:
+            self._logger.warning(f"Failed to load episodic memory: {e}")
+
+    def save(self) -> None:
+        self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "version": 1,
+            "updated_at": datetime.now().isoformat(),
+            "episodes": self._episodes[-self._max:],
+        }
+        with open(self._storage_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+
+    def store_episode(self, summary: str, session_id: str = "", tool_calls: int = 0) -> None:
+        self._episodes.append({
+            "summary": summary,
+            "session_id": session_id,
+            "tool_calls": tool_calls,
+            "timestamp": datetime.now().isoformat(),
+        })
+        if len(self._episodes) > self._max:
+            self._episodes = self._episodes[-self._max:]
+        self.save()
+
+    def recall(self, query: str = "", limit: int = 5) -> list[dict[str, Any]]:
+        if not query:
+            return self._episodes[-limit:]
+        query_lower = query.lower()
+        scored = []
+        for ep in self._episodes:
+            if query_lower in ep.get("summary", "").lower():
+                scored.append(ep)
+        return scored[-limit:] if scored else self._episodes[-limit:]
+
+    def build_context_string(self, limit: int = 3) -> str:
+        recent = self._episodes[-limit:]
+        if not recent:
+            return ""
+        parts = ["## Recent Session History"]
+        for ep in recent:
+            ts = ep.get("timestamp", "")[:10]
+            parts.append(f"- [{ts}] {ep.get('summary', '')}")
+        return "\n".join(parts)
+
+    def __len__(self) -> int:
+        return len(self._episodes)
+
+
+class ProceduralMemory:
+    """Loads persistent rules/playbooks from a directory of markdown files."""
+
+    def __init__(self, procedures_dir: str | Path = "data/procedures") -> None:
+        self._dir = Path(procedures_dir)
+        self._procedures: dict[str, str] = {}
+        self._load()
+
+    def _load(self) -> None:
+        if not self._dir.exists():
+            return
+        for md in sorted(self._dir.glob("*.md")):
+            try:
+                self._procedures[md.stem] = md.read_text(encoding="utf-8")
+            except OSError:
+                pass
+
+    def get(self, name: str) -> str | None:
+        return self._procedures.get(name)
+
+    def list_procedures(self) -> list[str]:
+        return sorted(self._procedures.keys())
+
+    def build_context_string(self, max_chars: int = 1500) -> str:
+        if not self._procedures:
+            return ""
+        parts = ["## Procedural Rules"]
+        total = 0
+        for name, content in self._procedures.items():
+            if total + len(content) > max_chars:
+                break
+            parts.append(f"### {name}")
+            parts.append(content.strip())
+            total += len(content)
+        return "\n".join(parts)
+
+    def __len__(self) -> int:
+        return len(self._procedures)

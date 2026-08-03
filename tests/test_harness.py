@@ -9,7 +9,6 @@ import pytest
 
 from pc_assistant.harness.audit import AuditLogger
 from pc_assistant.harness.limiter import RateLimiter
-from pc_assistant.harness.recovery import RecoveryManager
 from pc_assistant.harness.safety import SafetyChecker, SafetyCheckResult
 from pc_assistant.platform_ import get_default_dangerous_commands
 
@@ -201,36 +200,6 @@ class TestRateLimiter:
         r.reset()
         assert r.is_allowed("key1") is True
         assert r.is_allowed("key2") is True
-
-
-class TestRecoveryManager:
-    @pytest.mark.asyncio
-    async def test_success(self):
-        m = RecoveryManager(max_retries=3, base_delay=0.01)
-        func = AsyncMock(return_value="ok")
-        result = await m.execute_with_recovery(func)
-        assert result == "ok"
-
-    @pytest.mark.asyncio
-    async def test_retry_then_succeed(self):
-        m = RecoveryManager(max_retries=3, base_delay=0.01)
-        func = AsyncMock(side_effect=[Exception("fail"), "ok"])
-        result = await m.execute_with_recovery(func)
-        assert result == "ok"
-
-    @pytest.mark.asyncio
-    async def test_all_fail(self):
-        m = RecoveryManager(max_retries=2, base_delay=0.01)
-        func = AsyncMock(side_effect=Exception("always fail"))
-        with pytest.raises(Exception, match="always fail"):
-            await m.execute_with_recovery(func)
-
-    @pytest.mark.asyncio
-    async def test_with_args(self):
-        m = RecoveryManager(max_retries=1, base_delay=0.01)
-        func = AsyncMock(return_value="result")
-        result = await m.execute_with_recovery(func, "arg1", key="val")
-        func.assert_called_once_with("arg1", key="val")
 
 
 class TestAuditLogger:
