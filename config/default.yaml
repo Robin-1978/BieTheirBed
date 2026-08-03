@@ -18,6 +18,8 @@ turn_trace_log: "logs/turn_trace.jsonl"
 evidence_policy_enabled: true
 log_file: "logs/pc_assistant.json"
 working_directory: "."
+service_host: "127.0.0.1"
+service_port: 0
 feishu_enabled: false
 feishu_app_id: ""
 feishu_app_secret: ""
