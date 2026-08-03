@@ -34,10 +34,12 @@ class ServiceClient:
         *,
         host: str = "",
         port: int = 0,
+        token: str = "",
     ) -> None:
         self._socket_path = Path(socket_path) if socket_path else SOCKET_PATH
         self._host = host
         self._port = port
+        self._token = token
         self._ws: Any = None
         self._msg_id = 0
         self._pending: dict[int, asyncio.Future[ServerMessage]] = {}
@@ -53,6 +55,9 @@ class ServiceClient:
         if self._host and self._port > 0:
             uri = f"ws://{self._host}:{self._port}"
             self._ws = await websockets.connect(uri)
+            if self._token:
+                auth_msg = ClientMessage(method="auth", id=0, params={"token": self._token})
+                await self._ws.send(auth_msg.model_dump_json())
         else:
             self._ws = await websockets.unix_connect(path=str(self._socket_path))
         self._connected = True

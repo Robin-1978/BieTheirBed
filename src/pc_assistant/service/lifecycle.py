@@ -35,7 +35,11 @@ async def get_agent_or_client(config: AppConfig) -> Any:
     from pc_assistant.service.client import ServiceClient
 
     if config.service_port > 0:
-        tcp_client = ServiceClient(host=config.service_host, port=config.service_port)
+        tcp_client = ServiceClient(
+            host=config.service_host,
+            port=config.service_port,
+            token=config.service_token,
+        )
         try:
             await asyncio.wait_for(tcp_client.connect(), timeout=2.0)
             if tcp_client.is_connected:
