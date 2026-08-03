@@ -1,28 +1,28 @@
+"""Catppuccin Mocha color palette for console/Rich rendering."""
 from __future__ import annotations
 
 from rich.theme import Theme
 
 
-# Tokyo Night color palette
 COLORS = {
-    "primary": "#7aa2f7",
-    "success": "#9ece6a",
-    "warning": "#e0af68",
-    "error": "#f7768e",
-    "muted": "#565f89",
-    "text": "#c0caf5",
-    "bg": "#1a1b26",
-    "tool_name": "#7aa2f7",
-    "tool_args": "#73daca",
-    "tool_result": "#9aa5ce",
-    "tool_icon": "#73daca",
-    "think": "#3b4261",
-    "think_dim": "#3b4261",
-    "think_icon": "#3b4261",
-    "ai_label": "#7aa2f7",
-    "prompt": "#9ece6a",
-    "user": "#9ece6a",
-    "assistant": "#7aa2f7",
+    "primary": "#89b4fa",       # Blue
+    "success": "#a6e3a1",       # Green
+    "warning": "#f9e2af",       # Yellow
+    "error": "#f38ba8",         # Red
+    "muted": "#6c7086",         # Overlay0
+    "text": "#cdd6f4",          # Text
+    "bg": "#1e1e2e",            # Base
+    "tool_name": "#89b4fa",     # Blue
+    "tool_args": "#94e2d5",     # Teal
+    "tool_result": "#bac2de",   # Subtext1
+    "tool_icon": "#94e2d5",     # Teal
+    "think": "#585b70",         # Surface2
+    "think_dim": "#585b70",     # Surface2
+    "think_icon": "#585b70",    # Surface2
+    "ai_label": "#89b4fa",      # Blue
+    "prompt": "#a6e3a1",        # Green
+    "user": "#a6e3a1",          # Green
+    "assistant": "#89b4fa",     # Blue
 }
 
 
@@ -60,7 +60,7 @@ TOKYO_NIGHT = Theme({
 
 
 def get_theme() -> Theme:
-    """Get the Tokyo Night theme."""
+    """Get the Catppuccin Mocha theme."""
     return TOKYO_NIGHT
 
 

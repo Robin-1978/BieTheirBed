@@ -1,0 +1,193 @@
+/* Catppuccin Mocha themed chat TUI
+ *
+ * Palette reference:
+ *   Base:     #1e1e2e   Surface0: #313244   Surface1: #45475a   Surface2: #585b70
+ *   Overlay0: #6c7086   Overlay1: #7f849c   Overlay2: #9399b2
+ *   Text:     #cdd6f4   Subtext0: #a6adc8   Subtext1: #bac2de
+ *   Blue:     #89b4fa   Lavender: #b4befe   Sapphire: #74c7ec
+ *   Green:    #a6e3a1   Teal:     #94e2d5   Yellow:   #f9e2af
+ *   Peach:    #fab387   Red:      #f38ba8   Mauve:    #cba6f7
+ *   Pink:     #f5c2e7   Maroon:   #eba0ac   Flamingo: #f2cdcd
+ *   Rosewater:#f5e0dc   Sky:      #89dcfe
+ */
+
+ChatApp {
+    background: #1e1e2e;
+}
+
+/* ── Chat log ───────────────────────────────────────── */
+
+#chat-log {
+    padding: 0 1;
+    scrollbar-size-vertical: 1;
+    scrollbar-color: #45475a;
+    scrollbar-color-hover: #585b70;
+    scrollbar-color-active: #89b4fa;
+}
+
+/* ── User message ───────────────────────────────────── */
+
+UserMessage {
+    margin: 1 0 0 0;
+    padding: 0 1;
+    border-left: thick #a6e3a1;
+    background: #313244;
+}
+
+UserMessage .label {
+    color: #a6e3a1;
+    text-style: bold;
+}
+
+UserMessage .body {
+    color: #cdd6f4;
+}
+
+/* ── Assistant message ──────────────────────────────── */
+
+AssistantMessage {
+    margin: 1 0 0 0;
+    padding: 0 1;
+    border-left: thick #89b4fa;
+}
+
+AssistantMessage .label {
+    color: #89b4fa;
+    text-style: bold;
+}
+
+/* ── Thinking panel ─────────────────────────────────── */
+
+ThinkingPanel {
+    color: #6c7086;
+    margin: 0;
+    padding: 0 1;
+    height: auto;
+    max-height: 8;
+}
+
+ThinkingPanel CollapsibleTitle {
+    color: #585b70;
+    padding: 0;
+}
+
+ThinkingPanel #thinking-text {
+    color: #6c7086;
+    text-style: italic;
+}
+
+/* ── Tool call panel ────────────────────────────────── */
+
+ToolCallPanel {
+    margin: 0;
+    padding: 0 1;
+    height: auto;
+}
+
+ToolCallPanel .tool-header {
+    color: #94e2d5;
+    text-style: bold;
+}
+
+ToolCallPanel .tool-result-ok {
+    color: #a6e3a1;
+}
+
+ToolCallPanel .tool-result-err {
+    color: #f38ba8;
+}
+
+ToolCallPanel .tool-blocked {
+    color: #f9e2af;
+}
+
+/* ── Bottom bar ─────────────────────────────────────── */
+
+#bottom-bar {
+    dock: bottom;
+    height: auto;
+    max-height: 10;
+}
+
+#user-input {
+    height: auto;
+    min-height: 1;
+    max-height: 6;
+    border: tall #45475a;
+    background: #313244;
+    color: #cdd6f4;
+}
+
+#user-input:focus {
+    border: tall #89b4fa;
+}
+
+#status-bar {
+    height: 1;
+    background: #181825;
+    color: #6c7086;
+    padding: 0 1;
+}
+
+/* ── Markdown inside assistant messages ─────────────── */
+
+AssistantMessage Markdown {
+    margin: 0;
+    padding: 0;
+}
+
+AssistantMessage MarkdownH1 {
+    color: #89b4fa;
+    text-style: bold;
+    margin: 1 0 0 0;
+}
+
+AssistantMessage MarkdownH2 {
+    color: #b4befe;
+    margin: 1 0 0 0;
+}
+
+AssistantMessage MarkdownFence {
+    margin: 0 0;
+    padding: 0 1;
+    background: #313244;
+}
+
+/* ── Command output ─────────────────────────────────── */
+
+CommandOutput {
+    margin: 1 0;
+    padding: 0 1;
+    border-left: thick #585b70;
+    color: #bac2de;
+}
+
+CommandOutput Markdown {
+    margin: 0;
+    padding: 0;
+}
+
+/* ── Header ─────────────────────────────────────────── */
+
+Header {
+    background: #181825;
+    color: #cdd6f4;
+}
+
+/* ── Autocomplete dropdown ──────────────────────────── */
+
+#cmd-completions {
+    layer: overlay;
+    dock: bottom;
+    height: auto;
+    max-height: 10;
+    background: #313244;
+    border: tall #45475a;
+    color: #cdd6f4;
+    display: none;
+}
+
+#cmd-completions:focus OptionList > .option-list--option-highlighted {
+    background: #45475a;
+    color: #89b4fa;
+}

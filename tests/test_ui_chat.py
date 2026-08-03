@@ -1,19 +1,17 @@
+"""Tests for the chat TUI (Textual rewrite) and backward-compatible ChatUI."""
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
 import pytest
-from prompt_toolkit.application.current import set_app
-from prompt_toolkit.buffer import Buffer
-from prompt_toolkit.input import DummyInput
-from prompt_toolkit.output import DummyOutput
-from prompt_toolkit.renderer import Renderer
-from prompt_toolkit.styles import Style
 
 from pc_assistant.config import AppConfig
 from pc_assistant.agent import Agent, AgentEvent
 from pc_assistant.ui.chat import ICON_PROMPT, ChatUI
 from pc_assistant.ui.state import UIState, Message, MessageType, AppStatus
+
+
+# ── Data model tests (unchanged) ──────────────────────────────────────
 
 
 class TestMessage:
@@ -76,6 +74,9 @@ class TestAppStatus:
         assert status.token_str == "500"
 
 
+# ── ChatUI init tests ─────────────────────────────────────────────────
+
+
 class TestChatUIInit:
     def test_init(self):
         ui = ChatUI(config=AppConfig())
@@ -92,6 +93,9 @@ class TestChatUIInit:
     def test_state_initialized(self):
         ui = ChatUI(config=AppConfig())
         assert isinstance(ui._state, UIState)
+
+
+# ── ChatUI commands (console mode) ────────────────────────────────────
 
 
 class TestChatUICommands:
@@ -148,9 +152,12 @@ class TestChatUICommands:
         assert ui._state.debug_mode != initial
 
 
+# ── ChatUI event processing (console mode) ────────────────────────────
+
+
 class TestChatUIProcessEvents:
     @pytest.mark.asyncio
-    async def test_process_events_no_agent(self, capsys):
+    async def test_process_events_no_agent(self):
         ui = ChatUI(config=AppConfig())
         await ui._process_events("hello")
         error_msgs = [m for m in ui._state.messages if m.type == MessageType.ERROR]
@@ -240,7 +247,7 @@ class TestChatUIProcessEvents:
         assert tool_msgs[0].tool_name == "grep"
 
     @pytest.mark.asyncio
-    async def test_tui_renders_answer_after_turn(self):
+    async def test_final_answer_recorded(self):
         ui = ChatUI(config=AppConfig())
         agent = Agent(config=AppConfig())
 
@@ -252,126 +259,15 @@ class TestChatUIProcessEvents:
 
         agent.run = _run_ok
         ui._agent = agent
-        ui._app = MagicMock()
-        ui._chat_buffer = Buffer(read_only=True, multiline=True)
-
         await ui._process_events("hello")
 
         assert ui._state.processing is False
-        text = ui._chat_buffer.text
-        assert "hi there" in text
-        # The prompt line is drawn by the input window's BeforeInput processor,
-        # never baked into the chat history.
-        assert ICON_PROMPT not in text
+        assistant_msgs = [m for m in ui._state.messages if m.type == MessageType.ASSISTANT]
+        assert len(assistant_msgs) >= 1
+        assert "hi there" in assistant_msgs[0].content
 
 
-class TestTuiLayout:
-    def test_layout_input_between_chat_and_status(self):
-        ui = ChatUI(config=AppConfig())
-        ui._init_tui()
-        assert ui._app is not None
-        assert ui._input_buffer is not None
-        assert ui._chat_window is not None
-        # Input control is the focused element.
-        assert ui._app.layout.current_control is ui._input_control
-        # Chat is read-only but focusable (click to scroll history / select).
-        assert ui._chat_buffer is not None
-        assert ui._chat_buffer.read_only() is True
-        assert ui._chat_control.focusable() is True
-        assert ui._chat_control.focus_on_click() is True
-
-    def test_chat_key_bindings(self):
-        ui = ChatUI(config=AppConfig())
-        ui._init_tui()
-        keys = {tuple(b.keys) for b in ui._chat_kb.bindings}
-        assert ("c-c",) in keys
-        assert ("c-m",) in keys  # Enter
-        assert ("escape",) in keys
-
-    def test_copy_chat_selection_copies_to_clipboard(self):
-        ui = ChatUI(config=AppConfig())
-        ui._init_tui()
-        ui._chat_text = "hello world\nsecond line"
-        ui._rebuild_buffer()
-        buff = ui._chat_buffer
-        buff.start_selection()
-        buff.cursor_position = 5
-        app = MagicMock()
-        copied = ui._copy_chat_selection(app)
-        assert copied is True
-        assert app.clipboard.set_data.call_count == 1
-        assert buff.selection_state is None
-
-    def test_copy_chat_selection_no_selection_cancels_when_processing(self):
-        ui = ChatUI(config=AppConfig())
-        ui._init_tui()
-        agent = Agent(config=AppConfig())
-        ui._agent = agent
-        ui._state.processing = True
-        copied = ui._copy_chat_selection(MagicMock())
-        assert copied is False
-        assert ui._cancelled is True
-
-    def test_input_buffer_is_editable(self):
-        ui = ChatUI(config=AppConfig())
-        ui._init_tui()
-        assert ui._input_buffer.read_only() is False
-
-    def test_welcome_in_chat_buffer(self):
-        ui = ChatUI(config=AppConfig())
-        ui._init_tui()
-        ui._show_welcome_tui()
-        assert "PC Assistant" in ui._chat_buffer.text or "Type /help" in ui._chat_buffer.text
-
-    @pytest.mark.asyncio
-    async def test_chat_wheel_scrolls_to_full_history(self):
-        ui = ChatUI(config=AppConfig())
-        ui._init_tui()
-        ui._chat_text = "\n".join(f"history line {i}" for i in range(60))
-        ui._rebuild_buffer()
-
-        app = ui._app
-        app.input = DummyInput()
-        app.output = DummyOutput()
-        renderer = Renderer(style=Style([]), output=DummyOutput(), full_screen=True)
-        with set_app(app):
-            renderer.render(app, app.layout)
-
-            win = ui._chat_window
-            assert win.vertical_scroll > 0  # sitting at/near the bottom
-            for _ in range(300):
-                win._scroll_up()
-                renderer.render(app, app.layout)
-            # Reaching vertical_scroll == 0 means the very top of the history.
-            assert win.vertical_scroll == 0
-
-    @pytest.mark.asyncio
-    async def test_chat_follows_bottom_after_new_turn(self):
-        ui = ChatUI(config=AppConfig())
-        ui._init_tui()
-        ui._chat_text = "\n".join(f"old line {i}" for i in range(40))
-        ui._rebuild_buffer()
-
-        app = ui._app
-        app.input = DummyInput()
-        app.output = DummyOutput()
-        renderer = Renderer(style=Style([]), output=DummyOutput(), full_screen=True)
-        with set_app(app):
-            renderer.render(app, app.layout)
-
-            win = ui._chat_window
-            for _ in range(200):
-                win._scroll_up()
-                renderer.render(app, app.layout)
-            scrolled_up_scroll = win.vertical_scroll
-            assert scrolled_up_scroll == 0
-
-            # A new turn rebuilds the buffer with the cursor at the end, which
-            # pulls the read-only window back to the bottom.
-            ui._chat_text += "\n  ▸ new question\n  │ fresh answer\n"
-            ui._rebuild_buffer()
-            renderer.render(app, app.layout)
-            assert win.vertical_scroll > scrolled_up_scroll
+# ── ChatUI cancel ─────────────────────────────────────────────────────
 
 
 class TestChatUICancel:
@@ -398,9 +294,140 @@ class TestChatUICancel:
         assert ui._cancelled is True
 
 
+# ── ChatUI welcome (console mode) ─────────────────────────────────────
+
+
 class TestChatUIShowWelcome:
     def test_show_welcome(self, capsys):
         ui = ChatUI(config=AppConfig())
         ui._show_welcome()
         captured = capsys.readouterr()
         assert "help" in captured.out.lower()
+
+
+# ── Textual widget tests ──────────────────────────────────────────────
+
+
+class TestWidgets:
+    def test_user_message_stores_text(self):
+        from pc_assistant.ui.widgets import UserMessage
+        msg = UserMessage("hello world")
+        assert msg._text == "hello world"
+
+    def test_assistant_message_init(self):
+        from pc_assistant.ui.widgets import AssistantMessage
+        msg = AssistantMessage()
+        assert msg._thinking is None
+        assert msg._md is None
+
+    def test_thinking_panel_append(self):
+        from pc_assistant.ui.widgets import ThinkingPanel
+        panel = ThinkingPanel()
+        panel._chunks = []
+        panel.append("chunk1")
+        panel.append("chunk2")
+        assert panel._chunks == ["chunk1", "chunk2"]
+
+    def test_tool_call_panel_header_format(self):
+        from pc_assistant.ui.widgets import ToolCallPanel
+        panel = ToolCallPanel("grep", {"pattern": "test"})
+        header = panel._format_header()
+        assert "grep" in header
+        assert "pattern" in header
+
+    def test_tool_call_panel_blocked_format(self):
+        from pc_assistant.ui.widgets import ToolCallPanel
+        panel = ToolCallPanel("rm", {}, blocked=True, block_reason="dangerous")
+        header = panel._format_header()
+        assert "Blocked" in header
+        assert "dangerous" in header
+
+    def test_tool_call_panel_no_args(self):
+        from pc_assistant.ui.widgets import ToolCallPanel
+        panel = ToolCallPanel("list_tools", {})
+        header = panel._format_header()
+        assert "list_tools" in header
+
+    def test_chat_input_history_init(self):
+        from pc_assistant.ui.widgets import ChatInput
+        inp = ChatInput()
+        assert inp._history == []
+        assert inp._history_idx == -1
+
+    def test_command_output_stores_content(self):
+        from pc_assistant.ui.widgets import CommandOutput
+        out = CommandOutput("hello")
+        assert out._content == "hello"
+
+
+# ── ChatApp tests (async Textual pilot) ───────────────────────────────
+
+
+class TestChatApp:
+    @pytest.mark.asyncio
+    async def test_app_creates_and_shows_welcome(self):
+        from pc_assistant.ui.app import ChatApp
+        app = ChatApp(config=AppConfig())
+        async with app.run_test() as pilot:
+            log = app.query_one("#chat-log")
+            assert log is not None
+            status = app.query_one("#status-bar")
+            assert status is not None
+            inp = app.query_one("#user-input")
+            assert inp is not None
+
+    @pytest.mark.asyncio
+    async def test_app_slash_help(self):
+        from pc_assistant.ui.app import ChatApp
+        from pc_assistant.ui.widgets import CommandOutput
+        app = ChatApp(config=AppConfig())
+        async with app.run_test() as pilot:
+            app._handle_command("/help")
+            outputs = app.query(CommandOutput)
+            assert len(outputs) >= 2  # welcome + help
+
+    @pytest.mark.asyncio
+    async def test_app_slash_config(self):
+        from pc_assistant.ui.app import ChatApp
+        from pc_assistant.ui.widgets import CommandOutput
+        app = ChatApp(config=AppConfig())
+        async with app.run_test() as pilot:
+            app._handle_command("/config")
+            outputs = app.query(CommandOutput)
+            assert len(outputs) >= 2
+
+    @pytest.mark.asyncio
+    async def test_app_unknown_command(self):
+        from pc_assistant.ui.app import ChatApp
+        from pc_assistant.ui.widgets import CommandOutput
+        app = ChatApp(config=AppConfig())
+        async with app.run_test() as pilot:
+            app._handle_command("/foobar")
+            outputs = app.query(CommandOutput)
+            assert len(outputs) >= 2
+
+    @pytest.mark.asyncio
+    async def test_app_clear_command(self):
+        from pc_assistant.ui.app import ChatApp
+        app = ChatApp(config=AppConfig())
+        async with app.run_test() as pilot:
+            app._handle_command("/clear")
+            log = app.query_one("#chat-log")
+            assert log is not None
+
+    @pytest.mark.asyncio
+    async def test_app_cancel_when_not_processing(self):
+        from pc_assistant.ui.app import ChatApp
+        app = ChatApp(config=AppConfig())
+        async with app.run_test() as pilot:
+            app._processing = False
+            app.action_cancel_turn()
+
+    @pytest.mark.asyncio
+    async def test_app_debug_toggle(self):
+        from pc_assistant.ui.app import ChatApp
+        app = ChatApp(config=AppConfig())
+        async with app.run_test() as pilot:
+            initial = app._state.debug_mode
+            app._handle_command("/debug")
+            assert app._state.debug_mode != initial
