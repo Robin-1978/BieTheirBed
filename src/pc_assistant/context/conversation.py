@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Callable
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from pc_assistant.context.tags import wrap_tool_result
 
@@ -79,9 +79,6 @@ class ConversationManager:
 
     def get_messages_for_llm(self) -> list[dict[str, Any]]:
         """Build messages for LLM API call."""
-        from pc_assistant.context.assembly import assemble_llm_messages, truncate_messages, _sanitize_tool_calls
-        from pc_assistant.context.tags import normalize_message_content
-
         result: list[dict[str, Any]] = []
 
         # Build system message
@@ -179,10 +176,12 @@ class ConversationManager:
 
         compressed = compress_message_list(raw, keep_recent=keep_recent, source="user_trim")
         compressed = strip_ephemeral(compressed)
+        self.rebuild_from_messages(compressed)
 
-        # Rebuild internal messages from compressed list
+    def rebuild_from_messages(self, messages: list[dict[str, Any]]) -> None:
+        """Replace internal history with the given (already assembled) message list."""
         new_messages: list[Message] = []
-        for m in compressed:
+        for m in messages:
             role = m.get("role", "")
             content = m.get("content", "")
             if role == "system":
@@ -204,6 +203,15 @@ class ConversationManager:
     def estimate_token_count(self) -> int:
         from pc_assistant.context.assembly import _estimate_tokens
         return _estimate_tokens(self.get_messages_for_llm_raw())
+
+    def snapshot_len(self) -> int:
+        """Current message count — use as a rollback watermark."""
+        return len(self._messages)
+
+    def truncate_to(self, length: int) -> None:
+        """Drop messages beyond `length` (rollback after cancel/error)."""
+        if 0 <= length < len(self._messages):
+            del self._messages[length:]
 
     def clear(self) -> None:
         self._messages.clear()

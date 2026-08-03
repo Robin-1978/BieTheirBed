@@ -1,0 +1,99 @@
+"""Per-session agent state and an LRU session manager.
+
+Enables concurrent, isolated conversations (CLI, Feishu, benchmark) without
+sharing a single `ConversationManager`, plus per-session cancellation, rollback
+and usage accounting.
+"""
+from __future__ import annotations
+
+import threading
+import time
+from dataclasses import dataclass, field
+from typing import Any
+
+from pc_assistant.context.conversation import ConversationManager
+
+
+@dataclass
+class SessionState:
+    session_id: str
+    conversation: ConversationManager
+    cancelled: bool = False
+    tool_call_history: list[str] = field(default_factory=list)
+    total_prompt_tokens: int = 0
+    total_completion_tokens: int = 0
+    total_iterations: int = 0
+    turn_count: int = 0
+    snapshot_len: int = -1
+    last_outcome: str = "idle"
+    last_access: float = field(default_factory=time.monotonic)
+    created_at: float = field(default_factory=time.monotonic)
+
+    def touch(self) -> None:
+        self.last_access = time.monotonic()
+
+    def mark_snapshot(self) -> None:
+        self.snapshot_len = self.conversation.snapshot_len()
+
+    def rollback_if_needed(self) -> None:
+        """Truncate the conversation back to the turn snapshot (cancel/error)."""
+        if self.snapshot_len >= 0:
+            self.conversation.truncate_to(self.snapshot_len)
+        self.snapshot_len = -1
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "cancelled": self.cancelled,
+            "total_prompt_tokens": self.total_prompt_tokens,
+            "total_completion_tokens": self.total_completion_tokens,
+            "total_iterations": self.total_iterations,
+            "turn_count": self.turn_count,
+            "last_outcome": self.last_outcome,
+            "messages": len(self.conversation),
+        }
+
+
+class SessionManager:
+    """LRU-bounded collection of per-session states."""
+
+    def __init__(self, max_sessions: int = 100) -> None:
+        self._max = max(1, max_sessions)
+        self._states: dict[str, SessionState] = {}
+        self._lock = threading.Lock()
+
+    def get(self, session_id: str, system_prompt: str) -> SessionState:
+        with self._lock:
+            if session_id not in self._states:
+                self._evict_locked()
+                conv = ConversationManager()
+                conv.set_system_context(system_prompt)
+                self._states[session_id] = SessionState(
+                    session_id=session_id,
+                    conversation=conv,
+                )
+            state = self._states[session_id]
+            state.touch()
+            return state
+
+    def _evict_locked(self) -> None:
+        if len(self._states) < self._max:
+            return
+        oldest = sorted(
+            self._states.values(),
+            key=lambda s: s.last_access,
+        )
+        for state in oldest[: self._max // 2]:
+            self._states.pop(state.session_id, None)
+
+    def drop(self, session_id: str) -> None:
+        with self._lock:
+            self._states.pop(session_id, None)
+
+    def stats(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [s.to_dict() for s in self._states.values()]
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._states)

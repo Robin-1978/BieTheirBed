@@ -63,6 +63,13 @@ All config fields can be overridden with `PC_` prefix:
 | `PC_MAX_ITERATIONS` | max_iterations |
 | `PC_SHELL_TIMEOUT` | shell_timeout |
 | `PC_CONTEXT_WINDOW_BUDGET` | context_window_budget |
+| `PC_TOKEN_FAMILY` | token_family |
+| `PC_LLM_COMPACT_ENABLED` | llm_compact_enabled |
+| `PC_MAX_SESSIONS` | max_sessions |
+| `PC_TRACE_ENABLED` | trace_enabled |
+| `PC_LLM_TRACE_LOG` | llm_trace_log |
+| `PC_TURN_TRACE_LOG` | turn_trace_log |
+| `PC_EVIDENCE_POLICY_ENABLED` | evidence_policy_enabled |
 
 ### Runtime config
 

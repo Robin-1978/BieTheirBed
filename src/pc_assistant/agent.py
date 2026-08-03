@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 from typing import Any, AsyncGenerator, Awaitable, Callable
 
 from pydantic import BaseModel
@@ -10,14 +11,19 @@ from pydantic import BaseModel
 from pc_assistant.config import AppConfig, load_config
 from pc_assistant.context.assembly import assemble_llm_messages, truncate_messages
 from pc_assistant.context.conversation import ConversationManager
+from pc_assistant.context.evidence import EvidencePolicy
+from pc_assistant.context.llm_compact import compact_conversation_llm
 from pc_assistant.context.memory import UserMemory
 from pc_assistant.context.prompt import build_system_prompt
+from pc_assistant.context.token_estimate import TokenEstimator, normalize_family
 from pc_assistant.harness.audit import AuditLogger
 from pc_assistant.harness.limiter import RateLimiter
 from pc_assistant.harness.safety import SafetyChecker
 from pc_assistant.llm_provider import LLMProvider, LLMResponse
 from pc_assistant.logger import get_logger
+from pc_assistant.observability.trace import LLMTraceRecorder, TurnRecorder
 from pc_assistant.platform_ import get_platform
+from pc_assistant.session import SessionManager, SessionState
 from pc_assistant.tools.application import ApplicationTool
 from pc_assistant.tools.clipboard import ClipboardTool
 from pc_assistant.tools.filesystem import FilesystemTool
@@ -78,6 +84,11 @@ class Agent:
         registry: ToolRegistry | None = None,
         limiter: RateLimiter | None = None,
         audit: AuditLogger | None = None,
+        max_sessions: int = 100,
+        session_manager: SessionManager | None = None,
+        trace: LLMTraceRecorder | None = None,
+        turn_recorder: TurnRecorder | None = None,
+        evidence: EvidencePolicy | None = None,
     ) -> None:
         self._config = config or load_config()
         self._logger = get_logger("agent")
@@ -89,7 +100,6 @@ class Agent:
             api_base=self._config.llm_api_base,
             timeout=self._config.llm_timeout,
         )
-        self._conversation = conversation if conversation is not None else ConversationManager()
         self._memory = memory if memory is not None else UserMemory()
         self._safety = safety if safety is not None else SafetyChecker(
             dangerous_commands=self._config.dangerous_commands,
@@ -99,25 +109,61 @@ class Agent:
         self._limiter = limiter if limiter is not None else RateLimiter()
         self._audit = audit if audit is not None else AuditLogger()
         self._confirm_callback = confirm_callback
-        self._cancelled = False
         self._current_task: asyncio.Task | None = None
-        self._total_prompt_tokens = 0
-        self._total_completion_tokens = 0
-        self._total_iterations = 0
         self._current_status = "ready"
         self._connected = False
         self._system_prompt = build_system_prompt(
             working_directory=self._config.working_directory,
         )
-        self._conversation.set_system_context(self._system_prompt)
+        self._token_estimator = TokenEstimator(
+            normalize_family(self._config.token_family, self._config.llm_model_name),
+        )
+
+        # Default session state (backward compatible with `agent.conversation`).
+        self._default_state = SessionState(
+            session_id="",
+            conversation=conversation if conversation is not None else ConversationManager(),
+        )
+        self._default_state.conversation.set_system_context(self._system_prompt)
+        self._session_manager = session_manager or SessionManager(
+            max_sessions=max(max_sessions, 1),
+        )
+        self._trace = trace or LLMTraceRecorder(
+            path=self._config.llm_trace_log,
+            enabled=self._config.trace_enabled,
+        )
+        self._turn_recorder = turn_recorder or TurnRecorder(
+            path=self._config.turn_trace_log,
+            enabled=self._config.trace_enabled,
+        )
+        self._evidence = evidence or EvidencePolicy(enabled=self._config.evidence_policy_enabled)
         self._register_builtin_tools()
         # Loop detection
-        self._tool_call_history: list[str] = []
         self._max_consecutive_same_tool = self._config.max_consecutive_same_tool
+
+    # ------------------------------------------------------------------
+    # Backward-compatible attribute mirrors (default session)
+    # ------------------------------------------------------------------
 
     @property
     def conversation(self) -> ConversationManager:
-        return self._conversation
+        return self._default_state.conversation
+
+    @property
+    def _conversation(self) -> ConversationManager:
+        return self._default_state.conversation
+
+    @_conversation.setter
+    def _conversation(self, value: ConversationManager) -> None:
+        self._default_state.conversation = value
+
+    @property
+    def _cancelled(self) -> bool:
+        return self._default_state.cancelled
+
+    @_cancelled.setter
+    def _cancelled(self, value: bool) -> None:
+        self._default_state.cancelled = value
 
     @property
     def memory(self) -> UserMemory:
@@ -127,24 +173,44 @@ class Agent:
     def registry(self) -> ToolRegistry:
         return self._registry
 
-    def cancel(self) -> None:
-        self._cancelled = True
+    def _get_state(self, session_id: str) -> SessionState:
+        if not session_id:
+            return self._default_state
+        return self._session_manager.get(session_id, self._system_prompt)
+
+    # ------------------------------------------------------------------
+    # Cancellation
+    # ------------------------------------------------------------------
+
+    def cancel(self, session_id: str = "") -> None:
+        state = self._get_state(session_id)
+        state.cancelled = True
         self._llm.cancel()
         if self._current_task is not None and not self._current_task.done():
             self._current_task.cancel()
 
+    def cancel_session(self, session_id: str) -> None:
+        self.cancel(session_id)
+
     def reset_cancelled(self) -> None:
-        self._cancelled = False
+        self._default_state.cancelled = False
         self._llm.reset_cancelled()
 
-    def _check_tool_loop(self, tool_name: str, arguments: dict[str, Any]) -> tuple[bool, str]:
+    # ------------------------------------------------------------------
+    # Tool loop detection
+    # ------------------------------------------------------------------
+
+    def _check_tool_loop(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        history: list[str],
+    ) -> tuple[bool, str]:
         """Check if we're in a tool calling loop. Returns (is_loop, reason).
 
         Only detects TRUE loops - same tool + same arguments repeatedly.
         Different arguments for same tool is NOT a loop (e.g., checking weather for multiple cities).
         """
-        # Create signature based on tool name AND arguments
-        # Normalize arguments for comparison
         try:
             args_str = json.dumps(arguments, sort_keys=True)
         except Exception:
@@ -152,40 +218,29 @@ class Agent:
 
         call_sig = f"{tool_name}:{args_str[:200]}"
 
-        # Track recent tool calls
-        self._tool_call_history.append(call_sig)
-        if len(self._tool_call_history) > 20:
-            self._tool_call_history.pop(0)
+        history.append(call_sig)
+        if len(history) > 20:
+            history.pop(0)
 
-        # Only loop if EXACTLY the same call is made repeatedly (same tool + same args)
-        # This is different from calling the same tool with different arguments
-        if len(self._tool_call_history) >= self._max_consecutive_same_tool:
-            recent = self._tool_call_history[-self._max_consecutive_same_tool:]
+        if len(history) >= self._max_consecutive_same_tool:
+            recent = history[-self._max_consecutive_same_tool:]
             if all(t == call_sig for t in recent):
                 return True, f"Same tool '{tool_name}' with identical arguments called {self._max_consecutive_same_tool} times consecutively"
 
         return False, ""
 
     def _smart_truncate(self, result_str: str, tool_name: str, result: Any) -> str:
-        """Smart truncation for long tool outputs.
-
-        For process lists and similar outputs, provide a useful summary
-        instead of just head+tail truncation.
-        """
+        """Smart truncation for long tool outputs."""
         max_chars = 3000
 
         if len(result_str) <= max_chars:
             return result_str
 
-        # Handle application tool specially
         if tool_name == "application" and isinstance(result, dict):
-            # list_running action
             processes = result.get("processes", [])
             if processes:
-                # Get top processes by CPU usage
                 sorted_by_cpu = sorted(processes, key=lambda x: x.get("cpu_percent", 0) or 0, reverse=True)
                 top_cpu = sorted_by_cpu[:10]
-                # Get top processes by memory usage
                 sorted_by_mem = sorted(processes, key=lambda x: x.get("memory_percent", 0) or 0, reverse=True)
                 top_mem = sorted_by_mem[:10]
 
@@ -213,16 +268,13 @@ class Agent:
                     return summary_str + f"\n\n[Truncated: showing top processes. Total: {len(processes)}]"
                 return summary_str[:max_chars - 50] + f"\n\n[Truncated from {len(processes)} processes]"
 
-            # search action - already filtered, show all matches
             matches = result.get("matches", [])
             if matches:
                 return result_str[:max_chars] + f"\n\n[Showing {len(matches)} matching processes]"
 
-            # info action - should be small, just truncate if needed
             if result.get("process"):
                 return result_str[:max_chars]
 
-        # Default head+tail truncation for other outputs
         head_size = max_chars * 2 // 3
         tail_size = max_chars - head_size
         omitted = len(result_str) - max_chars
@@ -232,22 +284,31 @@ class Agent:
             + result_str[-tail_size:]
         )
 
+    # ------------------------------------------------------------------
+    # Status
+    # ------------------------------------------------------------------
+
     def get_status(self) -> dict[str, Any]:
+        state = self._default_state
         return {
             "provider": self._config.llm_provider,
             "model": self._config.llm_model_name or "default",
             "status": self._current_status,
             "connected": self._connected,
             "platform": get_platform(),
-            "total_prompt_tokens": self._total_prompt_tokens,
-            "total_completion_tokens": self._total_completion_tokens,
-            "total_tokens": self._total_prompt_tokens + self._total_completion_tokens,
-            "total_iterations": self._total_iterations,
-            "conversation_turns": len([m for m in self._conversation.get_messages() if m["role"] == "user"]),
+            "total_prompt_tokens": state.total_prompt_tokens,
+            "total_completion_tokens": state.total_completion_tokens,
+            "total_tokens": state.total_prompt_tokens + state.total_completion_tokens,
+            "total_iterations": state.total_iterations,
+            "conversation_turns": len([m for m in state.conversation.get_messages() if m["role"] == "user"]),
             "memory_items": len(self._memory),
             "tools": self._registry.list_tools(),
             "working_directory": self._config.working_directory,
+            "active_sessions": len(self._session_manager),
         }
+
+    def session_stats(self) -> list[dict[str, Any]]:
+        return self._session_manager.stats()
 
     async def health_check(self) -> bool:
         result = await self._llm.health_check()
@@ -275,7 +336,6 @@ class Agent:
         for tool in builtin_tools:
             self._registry.register(tool)
 
-        # Set agent reference for scheduler to enable dynamic task execution
         scheduler = self._registry.get("scheduler")
         if scheduler is not None:
             scheduler.set_agent(self)
@@ -291,7 +351,70 @@ class Agent:
         other_msgs = [m for m in messages if m.get("role") != "system"]
         return system_msgs + other_msgs
 
-    async def run(self, user_input: str) -> AsyncGenerator[AgentEvent, None]:
+    # ------------------------------------------------------------------
+    # Observability helpers
+    # ------------------------------------------------------------------
+
+    def _record_llm_call(
+        self,
+        state: SessionState,
+        *,
+        iteration: int,
+        prompt_tokens: int,
+        completion_tokens: int,
+        latency_ms: float,
+        ttft_ms: float,
+        finish_reason: str,
+        tool_calls: int,
+        error: str,
+    ) -> None:
+        self._trace.record_call(
+            session_id=state.session_id,
+            model=self._config.llm_model_name or "default",
+            iteration=iteration,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            latency_ms=latency_ms,
+            ttft_ms=ttft_ms,
+            finish_reason=finish_reason,
+            tool_calls=tool_calls,
+            error=error,
+        )
+
+    def _record_turn(
+        self,
+        state: SessionState,
+        user_input: str,
+        *,
+        outcome: str,
+        evidence_required: bool,
+        evidence_satisfied: bool,
+        elapsed_ms: float,
+    ) -> None:
+        self._turn_recorder.record_turn(
+            session_id=state.session_id,
+            user_input=user_input,
+            outcome=outcome,
+            iterations=state.total_iterations,
+            tool_calls=len(state.tool_call_history),
+            prompt_tokens=state.total_prompt_tokens,
+            completion_tokens=state.total_completion_tokens,
+            elapsed_ms=elapsed_ms,
+            evidence_required=evidence_required,
+            evidence_satisfied=evidence_satisfied,
+        )
+
+    async def _compaction_llm_call(self, messages: list[dict[str, Any]]) -> str:
+        resp: LLMResponse = await self._llm.chat(messages, tools=None, max_tokens=512)
+        if resp.finish_reason == "error" or resp.content.startswith("LLM request failed"):
+            raise RuntimeError(resp.content)
+        return resp.content
+
+    # ------------------------------------------------------------------
+    # Public entry points
+    # ------------------------------------------------------------------
+
+    async def run(self, user_input: str, *, session_id: str = "") -> AsyncGenerator[AgentEvent, None]:
         if not self._limiter.is_allowed("agent"):
             yield AgentEvent(
                 type="error",
@@ -299,14 +422,56 @@ class Agent:
             )
             return
 
-        self._cancelled = False
-        self._current_status = "thinking"
-        self._conversation.add_user(user_input)
+        state = self._get_state(session_id)
+        state.cancelled = False
+        state.tool_call_history.clear()
+        state.last_outcome = "running"
+        state.mark_snapshot()
 
-        self._tool_call_history.clear()
+        turn_start = time.monotonic()
+        evidence_required = self._evidence.requires_evidence(user_input)
+        evidence_tool_calls = 0
+        try:
+            async for event in self._run_loop(state, user_input, evidence_required=evidence_required):
+                if event.type == "tool_call" and not event.blocked:
+                    evidence_tool_calls += 1
+                yield event
+        finally:
+            outcome = state.last_outcome
+            if outcome in ("cancelled", "error"):
+                state.rollback_if_needed()
+            else:
+                state.snapshot_len = -1
+            self._record_turn(
+                state,
+                user_input,
+                outcome=outcome,
+                evidence_required=evidence_required,
+                evidence_satisfied=evidence_tool_calls > 0,
+                elapsed_ms=(time.monotonic() - turn_start) * 1000,
+            )
+
+    async def _run_loop(
+        self,
+        state: SessionState,
+        user_input: str,
+        *,
+        evidence_required: bool,
+    ) -> AsyncGenerator[AgentEvent, None]:
+        conv = state.conversation
+        conv.add_user(user_input)
 
         memory_context = self._memory.build_context_string()
-        self._conversation.set_system_context(self._system_prompt)
+        conv.set_system_context(self._system_prompt)
+
+        if self._config.llm_compact_enabled:
+            compacted = await compact_conversation_llm(
+                conv.get_messages_for_llm_raw(),
+                keep_recent=2,
+                llm_call=self._compaction_llm_call,
+            )
+            if compacted is not None:
+                conv.rebuild_from_messages(compacted)
 
         empty_response_count = 0
         max_empty_retries = 1
@@ -314,19 +479,25 @@ class Agent:
         max_total_tool_calls = self._config.max_total_tool_calls
         consecutive_tool_without_answer = 0
         max_consecutive_tool_calls = self._config.max_consecutive_tool_calls
+        turn_tool_calls = 0
+
+        system_prompt = self._system_prompt
+        if evidence_required:
+            system_prompt = system_prompt + "\n\n" + self._evidence.build_instruction()
 
         for iteration in range(self._config.max_iterations):
-            if self._cancelled:
+            if state.cancelled:
+                state.last_outcome = "cancelled"
                 yield AgentEvent(type="cancelled", content="Operation cancelled by user.", iteration=iteration)
                 self._current_status = "ready"
                 return
 
             self._current_status = "thinking"
-            self._total_iterations += 1
+            state.total_iterations += 1
 
-            raw_messages = self._conversation.get_messages_for_llm_raw()
+            raw_messages = conv.get_messages_for_llm_raw()
             messages = assemble_llm_messages(
-                self._system_prompt,
+                system_prompt,
                 raw_messages,
                 user_input,
                 working_directory=self._config.working_directory,
@@ -349,9 +520,18 @@ class Agent:
 
             yield AgentEvent(type="stream_start", iteration=iteration)
 
+            llm_start = time.monotonic()
+            llm_ttft: float | None = None
+            call_usage: dict[str, Any] = {}
+            call_error = ""
+
             try:
                 async for chunk in self._llm.chat_stream(messages, tools=tools, max_tokens=self._config.max_tokens):
-                    if self._cancelled:
+                    if llm_ttft is None:
+                        llm_ttft = (time.monotonic() - llm_start) * 1000
+
+                    if state.cancelled:
+                        state.last_outcome = "cancelled"
                         yield AgentEvent(type="cancelled", content="Operation cancelled by user.", iteration=iteration)
                         self._current_status = "ready"
                         return
@@ -423,13 +603,15 @@ class Agent:
                         finish_reason = chunk.finish_reason
 
                     if chunk.usage:
+                        call_usage = {**call_usage, **chunk.usage}
                         prompt_tokens = chunk.usage.get("prompt_tokens") or chunk.usage.get("input_tokens") or 0
                         completion_tokens = chunk.usage.get("completion_tokens") or chunk.usage.get("output_tokens") or 0
-                        self._total_prompt_tokens += int(prompt_tokens)
-                        self._total_completion_tokens += int(completion_tokens)
+                        state.total_prompt_tokens += int(prompt_tokens)
+                        state.total_completion_tokens += int(completion_tokens)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
+                call_error = str(e)
                 error_msg = str(e)
                 if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
                     error_msg = (
@@ -444,7 +626,20 @@ class Agent:
                 )
                 stream_had_error = True
 
+            self._record_llm_call(
+                state,
+                iteration=iteration,
+                prompt_tokens=call_usage.get("prompt_tokens") or call_usage.get("input_tokens") or 0,
+                completion_tokens=call_usage.get("completion_tokens") or call_usage.get("output_tokens") or 0,
+                latency_ms=(time.monotonic() - llm_start) * 1000,
+                ttft_ms=llm_ttft or 0.0,
+                finish_reason=finish_reason,
+                tool_calls=len(accumulated_tool_calls),
+                error=call_error,
+            )
+
             if stream_had_error:
+                state.last_outcome = "error"
                 self._current_status = "ready"
                 return
 
@@ -468,9 +663,10 @@ class Agent:
 
             if tool_calls_from_stream:
                 stored_content = clean_content.strip()
-                self._conversation.add_assistant(stored_content, delta_tool_calls=tool_calls_from_stream)
+                conv.add_assistant(stored_content, delta_tool_calls=tool_calls_from_stream)
                 for tool_call in tool_calls_from_stream:
-                    if self._cancelled:
+                    if state.cancelled:
+                        state.last_outcome = "cancelled"
                         yield AgentEvent(type="cancelled", content="Operation cancelled by user.", iteration=iteration)
                         self._current_status = "ready"
                         return
@@ -489,8 +685,7 @@ class Agent:
                     if not isinstance(arguments, dict):
                         arguments = {}
 
-                    # Check for tool calling loops
-                    is_loop, loop_reason = self._check_tool_loop(tool_name, arguments)
+                    is_loop, loop_reason = self._check_tool_loop(tool_name, arguments, state.tool_call_history)
                     if is_loop:
                         yield AgentEvent(
                             type="tool_result",
@@ -500,9 +695,8 @@ class Agent:
                             content=f"Stopped: {loop_reason}",
                             iteration=iteration,
                         )
-                        self._conversation.add_tool_result(tool_call_id, f"Stopped: {loop_reason}", tool_name=tool_name)
-                        # Clear history to allow recovery
-                        self._tool_call_history.clear()
+                        conv.add_tool_result(tool_call_id, f"Stopped: {loop_reason}", tool_name=tool_name)
+                        state.tool_call_history.clear()
                         break
 
                     safety_result = self._safety.check_tool_call(tool_name, arguments)
@@ -587,7 +781,7 @@ class Agent:
                             content=block_reason,
                             iteration=iteration,
                         )
-                        self._conversation.add_tool_result(
+                        conv.add_tool_result(
                             tool_call_id,
                             f"Blocked: {block_reason}",
                             tool_name=tool_name,
@@ -610,8 +804,10 @@ class Agent:
 
                     total_tool_calls += 1
                     consecutive_tool_without_answer += 1
+                    turn_tool_calls += 1
 
                     if total_tool_calls >= max_total_tool_calls:
+                        state.last_outcome = "limit"
                         yield AgentEvent(
                             type="iteration_limit",
                             content=f"Total tool call limit reached ({max_total_tool_calls}).",
@@ -621,6 +817,7 @@ class Agent:
                         return
 
                     if consecutive_tool_without_answer >= max_consecutive_tool_calls:
+                        state.last_outcome = "limit"
                         yield AgentEvent(
                             type="iteration_limit",
                             content=f"Too many tool calls ({consecutive_tool_without_answer}) without producing an answer.",
@@ -637,15 +834,16 @@ class Agent:
                         try:
                             result = await self._current_task
                         except asyncio.CancelledError:
-                            if self._cancelled:
+                            if state.cancelled:
                                 self._current_status = "ready"
+                                state.last_outcome = "cancelled"
                                 yield AgentEvent(type="cancelled", content="Operation cancelled by user.", iteration=iteration)
                                 return
                             raise
                         self._current_task = None
                         result_str = str(result)
                         result_str = self._smart_truncate(result_str, tool_name, result)
-                        self._conversation.add_tool_result(tool_call_id, result_str, tool_name=tool_name)
+                        conv.add_tool_result(tool_call_id, result_str, tool_name=tool_name)
                         self._current_status = "thinking"
                         yield AgentEvent(
                             type="tool_result",
@@ -657,10 +855,11 @@ class Agent:
                         )
                     except asyncio.CancelledError:
                         self._current_status = "ready"
+                        state.last_outcome = "cancelled"
                         return
                     except Exception as e:
                         error_msg = f"Error: {e}"
-                        self._conversation.add_tool_result(tool_call_id, error_msg, tool_name=tool_name)
+                        conv.add_tool_result(tool_call_id, error_msg, tool_name=tool_name)
                         self._current_status = "thinking"
                         yield AgentEvent(
                             type="tool_result",
@@ -674,39 +873,55 @@ class Agent:
                 consecutive_tool_without_answer = 0
 
                 if finish_reason == "length" and clean_content:
-                    self._conversation.add_assistant_final(clean_content)
+                    if evidence_required and turn_tool_calls == 0:
+                        yield AgentEvent(
+                            type="evidence_warning",
+                            content="Final answer not verified against tool results.",
+                            iteration=iteration,
+                        )
+                    conv.add_assistant_final(clean_content)
                     yield AgentEvent(
                         type="final_answer",
                         content=clean_content,
                         iteration=iteration,
                     )
+                    state.last_outcome = "answer"
                     self._current_status = "ready"
                     return
 
                 if not clean_content:
                     empty_response_count += 1
                     if empty_response_count > max_empty_retries:
-                        self._conversation.add_assistant_final("I was unable to generate a response. Please try again.")
+                        conv.add_assistant_final("I was unable to generate a response. Please try again.")
                         yield AgentEvent(
                             type="final_answer",
                             content="I was unable to generate a response. Please try again.",
                             iteration=iteration,
                         )
+                        state.last_outcome = "answer"
                         self._current_status = "ready"
                         return
-                    self._conversation.add_user("[System] You did not produce any output. Please respond to the user's question directly.")
+                    conv.add_user("[System] You did not produce any output. Please respond to the user's question directly.")
                     continue
 
                 empty_response_count = 0
-                self._conversation.add_assistant_final(clean_content)
+                if evidence_required and turn_tool_calls == 0:
+                    yield AgentEvent(
+                        type="evidence_warning",
+                        content="Final answer not verified against tool results.",
+                        iteration=iteration,
+                    )
+                conv.add_assistant_final(clean_content)
                 yield AgentEvent(
                     type="final_answer",
                     content=clean_content,
                     iteration=iteration,
                 )
+                state.last_outcome = "answer"
                 self._current_status = "ready"
                 return
 
+        state.last_outcome = "limit"
         yield AgentEvent(
             type="iteration_limit",
             content="Maximum iterations reached without a final answer.",
@@ -728,9 +943,8 @@ class Agent:
         return final_answer
 
     def reset_conversation(self) -> None:
-        self._conversation.clear()
+        self._default_state.conversation.clear()
         self._system_prompt = build_system_prompt(
             working_directory=self._config.working_directory,
         )
-        memory_context = self._memory.build_context_string()
-        self._conversation.set_system_context(self._system_prompt)
+        self._default_state.conversation.set_system_context(self._system_prompt)

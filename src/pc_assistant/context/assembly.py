@@ -5,7 +5,6 @@ import json
 import logging
 from typing import Any
 
-from pc_assistant.config import AppConfig
 from pc_assistant.context.compact import compact_dialogue_turn
 from pc_assistant.context.tags import (
     is_compacted_history,
@@ -95,26 +94,8 @@ def _sanitize_tool_calls(messages: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 
 def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
-    total = 0
-    for m in messages:
-        for field in ("content", "reasoning_content"):
-            content = m.get(field) or ""
-            if isinstance(content, list):
-                text = "".join(
-                    b.get("text", "") for b in content
-                    if isinstance(b, dict) and b.get("type") == "text"
-                )
-            elif isinstance(content, str):
-                text = content
-            else:
-                text = str(content)
-            ascii_chars = sum(1 for c in text if ord(c) < 128)
-            cjk_chars = len(text) - ascii_chars
-            total += ascii_chars // 4 + cjk_chars * 3 // 2
-        if m.get("tool_calls") or m.get("delta_tool_calls"):
-            tc_str = json.dumps(m.get("tool_calls") or m.get("delta_tool_calls"), ensure_ascii=False)
-            total += len(tc_str) // 4
-    return total
+    from pc_assistant.context.token_estimate import TokenEstimator
+    return TokenEstimator().messages_tokens(messages)
 
 
 def _context_edit(messages: list[dict[str, Any]], keep_recent_turns: int = 2) -> list[dict[str, Any]]:
