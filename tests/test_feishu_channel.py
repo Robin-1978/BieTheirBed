@@ -31,6 +31,9 @@ class _ImageAgent:
 
 
 class _ArtifactAgent:
+    def __init__(self):
+        self.delivered = []
+
     async def run(self, *args, **kwargs):
         yield AgentEvent(
             type="artifact",
@@ -55,6 +58,9 @@ class _ArtifactAgent:
             "name": "capture.png",
             "media_type": "image/png",
         }
+
+    def mark_artifact_delivered(self, session_id, artifact_id):
+        self.delivered.append((session_id, artifact_id))
 
 
 class _PlainPathAgent:
@@ -101,9 +107,9 @@ class _AttachmentAgent:
     def __init__(self):
         self.stored = []
 
-    def store_attachment(self, session_id, attachment):
+    def store_artifact(self, session_id, attachment):
         self.stored.append((session_id, attachment))
-        return {"attachment_id": "attachment-1"}
+        return {"artifact_id": "attachment-1"}
 
 
 @pytest.mark.asyncio
@@ -116,6 +122,7 @@ async def test_feishu_sends_declared_image_artifact():
     await channel._process_with_agent_locked("ou-user", "你截一下屏幕")
 
     channel._send_image.assert_called_once_with("ou-user", "/tmp/capture.png")
+    assert channel._agent.delivered == [("feishu:ou-user", "artifact-1")]
 
 
 @pytest.mark.asyncio

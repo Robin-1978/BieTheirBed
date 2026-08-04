@@ -168,7 +168,7 @@ class ServiceServer:
         while True:
             await asyncio.sleep(interval)
             if self._agent is not None:
-                await asyncio.to_thread(self._agent.cleanup_attachments)
+                await asyncio.to_thread(self._agent.cleanup_artifacts)
 
     async def serve_forever(self) -> None:
         """Block until shutdown signal."""
@@ -250,8 +250,8 @@ class ServiceServer:
             task = asyncio.create_task(self._handle_run(ws, client_id, msg))
             self._run_tasks[client_id] = task
             task.add_done_callback(self._make_run_done_cb(client_id))
-        elif msg.method == "upload_attachment":
-            await self._handle_upload_attachment(ws, client_id, msg)
+        elif msg.method == "upload_artifact":
+            await self._handle_upload_artifact(ws, client_id, msg)
         elif msg.method == "cancel":
             self._handle_cancel(msg)
         elif msg.method == "confirm":
@@ -336,7 +336,7 @@ class ServiceServer:
         await ws.send(serialize(ServerMessage.result(msg.id, {"done": True})))
         logger.info("RUN done client=%s session=%s", client_id, session_id)
 
-    async def _handle_upload_attachment(
+    async def _handle_upload_artifact(
         self,
         ws: ServerConnection,
         client_id: str,
@@ -348,8 +348,8 @@ class ServiceServer:
         session_id = msg.session_id or self._client_sessions.get(client_id) or client_id
         self._client_sessions[client_id] = session_id
         try:
-            attachment = msg.upload_attachment
-            ref = self._agent.store_attachment(session_id, attachment)
+            artifact = msg.upload_artifact
+            ref = self._agent.store_artifact(session_id, artifact)
         except (ValueError, KeyError) as exc:
             await ws.send(serialize(ServerMessage.error(msg.id, str(exc))))
             return

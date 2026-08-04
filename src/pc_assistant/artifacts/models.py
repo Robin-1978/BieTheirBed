@@ -14,5 +14,9 @@ class ArtifactRef(BaseModel):
     name: str
     media_type: str
     size: int
-    visibility: Literal["user"] = "user"
+    direction: Literal["inbound", "outbound"] = "outbound"
+    ownership: Literal["borrowed", "managed", "generated"] = "generated"
+    retention: Literal["temporary", "session", "persistent"] = "temporary"
+    status: Literal["available", "delivered"] = "available"
+    visibility: Literal["agent", "user"] = "user"
     temporary: bool = True

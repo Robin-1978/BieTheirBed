@@ -17,7 +17,7 @@ class LLMMessage(BaseModel):
 class ImageAttachment(BaseModel):
     """Image ingress: local path/data URL, or an existing store reference."""
 
-    attachment_id: str | None = None
+    artifact_id: str | None = None
     path: str | None = None
     data_url: str | None = None
     media_type: str = "image/jpeg"
@@ -28,8 +28,8 @@ class ImageAttachment(BaseModel):
         return cls(path=str(path), caption=caption)
 
     @classmethod
-    def from_ref(cls, attachment_id: str, caption: str = "") -> "ImageAttachment":
-        return cls(attachment_id=attachment_id, caption=caption)
+    def from_ref(cls, artifact_id: str, caption: str = "") -> "ImageAttachment":
+        return cls(artifact_id=artifact_id, caption=caption)
 
 
 class LLMResponse(BaseModel):

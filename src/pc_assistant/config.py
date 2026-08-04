@@ -59,7 +59,6 @@ class AppConfig(BaseModel):
     vision_api_base: str = ""
     vision_timeout: float = 120.0
     vision_max_tokens: int = 1024
-    attachment_dir: str = "attachments"
     attachment_ttl_seconds: int = 3600
     attachment_cleanup_interval_seconds: int = 300
     supports_vision: bool | None = None
@@ -168,7 +167,6 @@ def _env_overrides() -> dict[str, Any]:
         "PC_VISION_API_BASE": ("vision_api_base", str),
         "PC_VISION_TIMEOUT": ("vision_timeout", float),
         "PC_VISION_MAX_TOKENS": ("vision_max_tokens", int),
-        "PC_ATTACHMENT_DIR": ("attachment_dir", str),
         "PC_ATTACHMENT_TTL_SECONDS": ("attachment_ttl_seconds", int),
         "PC_ATTACHMENT_CLEANUP_INTERVAL_SECONDS": ("attachment_cleanup_interval_seconds", int),
         "PC_SUPPORTS_VISION": ("supports_vision", bool),

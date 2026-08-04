@@ -6,7 +6,7 @@ import base64
 import pytest
 
 from pc_assistant.agent import Agent
-from pc_assistant.attachments import AttachmentStore
+from pc_assistant.artifacts import ArtifactStore
 from pc_assistant.config import AppConfig
 from pc_assistant.context.scope import derive_memory_scope, reset_memory_scope, set_memory_scope
 from pc_assistant.llm_provider import LLMResponse, StreamChunk
@@ -51,12 +51,12 @@ def _put_png(store, session_id, path):
 async def test_broker_is_perception_only_and_never_returns_base64(tmp_path):
     image = tmp_path / "shot.png"
     _png(image)
-    store = AttachmentStore(tmp_path / "attachments")
+    store = ArtifactStore(tmp_path / "attachments")
     ref = _put_png(store, "s1", image)
     provider = FakeVisionProvider()
     broker = VisionBroker(provider, store, model_name="qwen-vl")
 
-    result = await broker.inspect("s1", ref["attachment_id"], focus="可见报错文字")
+    result = await broker.inspect("s1", ref["artifact_id"], focus="可见报错文字")
 
     assert result["visible_text"] == ["WorkerError"]
     assert result["model"] == "qwen-vl"
@@ -70,17 +70,17 @@ async def test_broker_is_perception_only_and_never_returns_base64(tmp_path):
 async def test_broker_rejects_solution_question_and_caches_same_observation(tmp_path):
     image = tmp_path / "shot.png"
     _png(image)
-    store = AttachmentStore(tmp_path / "attachments")
+    store = ArtifactStore(tmp_path / "attachments")
     ref = _put_png(store, "s1", image)
     provider = FakeVisionProvider()
     broker = VisionBroker(provider, store)
 
     with pytest.raises(ValueError, match="main model"):
-        await broker.inspect("s1", ref["attachment_id"], focus="这个报错怎么解决？")
+        await broker.inspect("s1", ref["artifact_id"], focus="这个报错怎么解决？")
 
-    first = await broker.inspect("s1", ref["attachment_id"], action="ocr", focus="报错是什么")
-    second = await broker.inspect("s1", ref["attachment_id"], action="ocr", focus="报错是什么")
-    third = await broker.inspect("s1", ref["attachment_id"], action="describe", focus="窗口布局")
+    first = await broker.inspect("s1", ref["artifact_id"], action="ocr", focus="报错是什么")
+    second = await broker.inspect("s1", ref["artifact_id"], action="ocr", focus="报错是什么")
+    third = await broker.inspect("s1", ref["artifact_id"], action="describe", focus="窗口布局")
     assert first["cached"] is False
     assert second["cached"] is True
     assert second["observation_id"] == first["observation_id"]
@@ -92,13 +92,13 @@ async def test_broker_rejects_solution_question_and_caches_same_observation(tmp_
 async def test_tool_uses_current_session_ownership(tmp_path):
     image = tmp_path / "shot.png"
     _png(image)
-    store = AttachmentStore(tmp_path / "attachments")
+    store = ArtifactStore(tmp_path / "attachments")
     ref = _put_png(store, "session-a", image)
     tool = ImageInspectTool(VisionBroker(FakeVisionProvider(), store))
 
     token = set_memory_scope(derive_memory_scope("session-b"))
     try:
-        result = await tool.execute(image_id=ref["attachment_id"])
+        result = await tool.execute(image_id=ref["artifact_id"])
     finally:
         reset_memory_scope(token)
     assert "error" in result
@@ -108,11 +108,11 @@ async def test_tool_uses_current_session_ownership(tmp_path):
 async def test_text_main_gets_manifest_and_cannot_answer_before_observation(tmp_path):
     image = tmp_path / "shot.png"
     _png(image)
-    store = AttachmentStore(tmp_path / "attachments")
+    store = ArtifactStore(tmp_path / "attachments")
     vision = FakeVisionProvider()
     agent = Agent(
         config=AppConfig(supports_vision=False, vision_enabled=True, max_iterations=4),
-        attachment_store=store,
+        artifact_store=store,
         vision_llm=vision,
     )
     main_calls: list[list[dict]] = []
@@ -172,7 +172,7 @@ def test_multimodal_main_does_not_register_fallback_vision_tool(tmp_path):
 
     agent = Agent(
         config=AppConfig(supports_vision=True, vision_enabled=True),
-        attachment_store=AttachmentStore(tmp_path / "attachments"),
+        artifact_store=ArtifactStore(tmp_path / "attachments"),
         vision_llm=MustNotBeUsed(),
     )
 
@@ -206,7 +206,7 @@ async def test_text_main_must_inspect_tool_generated_screenshot(tmp_path):
     vision = FakeVisionProvider()
     agent = Agent(
         config=AppConfig(supports_vision=False, vision_enabled=True, max_iterations=4),
-        attachment_store=AttachmentStore(tmp_path / "attachments"),
+        artifact_store=ArtifactStore(tmp_path / "attachments"),
         vision_llm=vision,
     )
     agent.register_tool(ScreenshotTool())

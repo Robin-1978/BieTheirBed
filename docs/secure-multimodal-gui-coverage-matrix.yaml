@@ -36,7 +36,7 @@ gaps:
 implemented_fixes:
   - {id: AR-003, summary: post-verification ran before tool execution, repair: explicit post_verify after successful execution, owner: C6}
   - {id: AR-009, summary: same-session turns could interleave, repair: per-session full-run serialization, owner: session-hardening}
-  - {id: AR-004, summary: provider image blocks entered durable conversation and events, repair: session-scoped AttachmentStore with image_ref history and request-only hydration, owner: C2-C3}
+  - {id: AR-004, summary: provider image blocks entered durable conversation and events, repair: session-scoped ArtifactStore with image_ref history and request-only hydration, owner: C2-C3}
   - {id: AR-002, summary: ToolRegistry exposed an unchecked public commit path, repair: VerifiedToolExecutor with opaque single-use prepared calls and internal registry commit, owner: C6}
   - {id: AR-005, summary: runtime paths and service logs were fragmented, repair: RuntimePaths with sibling logs attachments cache plus custom-root service resolution, owner: C1}
   - {id: AR-006, summary: vision support was represented as a boolean, repair: typed role MIME count byte pixel and transport capability contract, owner: C4}

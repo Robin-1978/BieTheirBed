@@ -334,13 +334,13 @@ class FeishuChannel(ChannelBase):
                 }
         return True
 
-    def _remember_image_ref(self, open_id: str, message_id: str, attachment_id: str) -> None:
+    def _remember_image_ref(self, open_id: str, message_id: str, artifact_id: str) -> None:
         expires_at = time.time() + 3600
         with self._image_refs_lock:
             if message_id:
-                self._image_refs_by_message[message_id] = (attachment_id, expires_at)
+                self._image_refs_by_message[message_id] = (artifact_id, expires_at)
             pending = self._pending_image_refs_by_user.setdefault(open_id, [])
-            pending.append((attachment_id, expires_at))
+            pending.append((artifact_id, expires_at))
             self._pending_image_refs_by_user[open_id] = pending[-4:]
             self._active_image_refs_by_user[open_id] = pending[-4:]
             self._prune_image_refs_locked()
@@ -376,32 +376,32 @@ class FeishuChannel(ChannelBase):
         with self._image_refs_lock:
             self._prune_image_refs_locked()
             reply_ids = [item for item in (parent_id, root_id) if item]
-            attachment_ids: list[str] = []
+            artifact_ids: list[str] = []
             for message_id in reply_ids:
                 stored = self._image_refs_by_message.get(message_id)
-                if stored and stored[0] not in attachment_ids:
-                    attachment_ids.append(stored[0])
+                if stored and stored[0] not in artifact_ids:
+                    artifact_ids.append(stored[0])
 
-            if not reply_ids and not attachment_ids:
+            if not reply_ids and not artifact_ids:
                 pending = self._pending_image_refs_by_user.pop(open_id, [])
-                attachment_ids = [attachment_id for attachment_id, _ in pending]
-            elif reply_ids and not attachment_ids:
+                artifact_ids = [artifact_id for artifact_id, _ in pending]
+            elif reply_ids and not artifact_ids:
                 # Replying to the bot's answer continues the active image
                 # thread even though the parent message itself isn't an image.
                 active = self._active_image_refs_by_user.get(open_id, [])
-                attachment_ids = [attachment_id for attachment_id, _ in active]
-            elif attachment_ids:
+                artifact_ids = [artifact_id for artifact_id, _ in active]
+            elif artifact_ids:
                 pending = self._pending_image_refs_by_user.get(open_id, [])
                 self._pending_image_refs_by_user[open_id] = [
-                    item for item in pending if item[0] not in attachment_ids
+                    item for item in pending if item[0] not in artifact_ids
                 ]
-            if attachment_ids:
+            if artifact_ids:
                 expires_at = time.time() + 3600
                 self._active_image_refs_by_user[open_id] = [
-                    (attachment_id, expires_at) for attachment_id in attachment_ids
+                    (artifact_id, expires_at) for artifact_id in artifact_ids
                 ]
 
-        return [ImageAttachment.from_ref(item, caption="feishu image") for item in attachment_ids] or None
+        return [ImageAttachment.from_ref(item, caption="feishu image") for item in artifact_ids] or None
 
     def _accept_image_message(
         self,
@@ -418,11 +418,11 @@ class FeishuChannel(ChannelBase):
 
             path = self._download_image(image_key, message_id)
             session_id = f"feishu:{open_id}"
-            stored = self._agent.store_attachment(
+            stored = self._agent.store_artifact(
                 session_id,
                 ImageAttachment.from_path(path, caption="feishu image"),
             )
-            self._remember_image_ref(open_id, message_id, stored["attachment_id"])
+            self._remember_image_ref(open_id, message_id, stored["artifact_id"])
             self._send_text(
                 open_id,
                 "🖼️ 图片已收到。请直接发送问题，或回复这张图片进行追问。",
@@ -1118,6 +1118,15 @@ class FeishuChannel(ChannelBase):
                 if not self._deliver_artifact(open_id, resolved):
                     logger.error("[PROCESS] Failed to deliver artifact: %s", artifact_id)
                     delivery_failures.append(str(resolved.get("name") or artifact_id))
+                    continue
+                try:
+                    self._agent.mark_artifact_delivered(feishu_session_id, artifact_id)
+                except (KeyError, AttributeError) as exc:
+                    logger.warning(
+                        "[PROCESS] Delivered artifact but failed to record acknowledgement %s: %s",
+                        artifact_id,
+                        exc,
+                    )
             response_answer = final_answer or plain_response
             if delivery_failures:
                 response_answer += "\n\n⚠️ 以下附件交付失败：" + "、".join(delivery_failures)

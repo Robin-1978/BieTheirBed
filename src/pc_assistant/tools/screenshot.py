@@ -32,10 +32,11 @@ class ScreenshotTool(ToolBase):
                 shot = sct.grab(sct.monitors[0])
                 image = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
                 image.save(save_path, format="PNG")
-            artifact = self._store.register_managed(
+            artifact = self._store.register_generated(
                 current_memory_scope().session_id,
                 save_path,
                 media_type="image/png",
+                retention="temporary",
             )
             return {"success": True, "artifact": artifact}
         except ImportError:

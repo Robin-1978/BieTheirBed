@@ -1,17 +1,30 @@
-"""Session-scoped registry for user-deliverable files."""
+"""Unified, session-scoped storage for inbound and outbound artifacts.
+
+History and public events contain only opaque IDs and bounded metadata. Paths
+and bytes stay inside this store and are exposed only to trusted in-process
+hydration or delivery adapters.
+"""
 from __future__ import annotations
 
+import base64
+import copy
 import hashlib
 import mimetypes
-import shutil
+import sqlite3
 import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+from pc_assistant.artifacts.models import ArtifactRef
+
+Direction = Literal["inbound", "outbound"]
+Ownership = Literal["borrowed", "managed", "generated"]
+Retention = Literal["temporary", "session", "persistent"]
 
 
-@dataclass(frozen=True)
+@dataclass
 class _Artifact:
     artifact_id: str
     session_key: str
@@ -20,25 +33,162 @@ class _Artifact:
     media_type: str
     kind: str
     size: int
-    expires_at: float
+    direction: Direction
+    ownership: Ownership
+    retention: Retention
+    expires_at: float | None
+    width: int = 0
+    height: int = 0
+    content_sha256: str = ""
+    delivered_at: float | None = None
 
 
 class ArtifactStore:
-    """Own temporary deliverable artifacts without exposing server paths."""
+    """One ownership-aware store for model inputs and user deliverables."""
 
     def __init__(
         self,
-        root: str | Path,
+        root: str | Path = "attachments",
         *,
+        persistent_root: str | Path | None = None,
+        db_path: str | Path | None = None,
         ttl_seconds: float = 3600,
+        delivery_grace_seconds: float = 300,
         max_bytes: int = 100 * 1024 * 1024,
         clock=time.time,
     ) -> None:
         self.root = Path(root).expanduser().resolve()
+        self.persistent_root = (
+            Path(persistent_root).expanduser().resolve()
+            if persistent_root is not None
+            else self.root.parent / "artifacts"
+        )
+        self._db_path = (
+            Path(db_path).expanduser().resolve()
+            if db_path is not None
+            else self.persistent_root.parent / "data" / "assistant.db"
+        )
         self._ttl = max(1.0, ttl_seconds)
+        self._delivery_grace = max(1.0, delivery_grace_seconds)
         self._max_bytes = max(1, max_bytes)
         self._clock = clock
         self._entries: dict[str, _Artifact] = {}
+        self._init_registry()
+        self._load_registry()
+        self.cleanup_expired()
+
+    def _connect(self) -> sqlite3.Connection:
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        return sqlite3.connect(self._db_path)
+
+    def _init_registry(self) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS artifact_registry (
+                    artifact_id TEXT PRIMARY KEY,
+                    session_key TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    media_type TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    size INTEGER NOT NULL,
+                    direction TEXT NOT NULL,
+                    ownership TEXT NOT NULL,
+                    retention TEXT NOT NULL,
+                    width INTEGER NOT NULL DEFAULT 0,
+                    height INTEGER NOT NULL DEFAULT 0,
+                    content_sha256 TEXT NOT NULL DEFAULT '',
+                    expires_at REAL,
+                    delivered_at REAL
+                )
+                """
+            )
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(artifact_registry)")
+            }
+            if "expires_at" not in columns:
+                connection.execute(
+                    "ALTER TABLE artifact_registry ADD COLUMN expires_at REAL"
+                )
+
+    def _load_registry(self) -> None:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT artifact_id, session_key, path, name, media_type, kind,
+                       size, direction, ownership, retention, width, height,
+                       content_sha256, expires_at, delivered_at
+                FROM artifact_registry
+                """
+            ).fetchall()
+        for row in rows:
+            path = Path(row[2]).expanduser().resolve()
+            ownership = row[8]
+            retention = row[9]
+            allowed_root = self.persistent_root if retention == "persistent" else self.root
+            try:
+                if ownership != "borrowed":
+                    path.relative_to(allowed_root)
+            except ValueError:
+                self._delete_registry(row[0])
+                continue
+            if not path.is_file():
+                self._delete_registry(row[0])
+                continue
+            self._entries[row[0]] = _Artifact(
+                artifact_id=row[0],
+                session_key=row[1],
+                path=path,
+                name=row[3],
+                media_type=row[4],
+                kind=row[5],
+                size=int(row[6]),
+                direction=row[7],
+                ownership=ownership,
+                retention=retention,
+                expires_at=row[13],
+                width=int(row[10]),
+                height=int(row[11]),
+                content_sha256=row[12],
+                delivered_at=row[14],
+            )
+
+    def _persist(self, entry: _Artifact) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO artifact_registry (
+                    artifact_id, session_key, path, name, media_type, kind,
+                    size, direction, ownership, retention, width, height,
+                    content_sha256, expires_at, delivered_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    entry.artifact_id,
+                    entry.session_key,
+                    str(entry.path),
+                    entry.name,
+                    entry.media_type,
+                    entry.kind,
+                    entry.size,
+                    entry.direction,
+                    entry.ownership,
+                    entry.retention,
+                    entry.width,
+                    entry.height,
+                    entry.content_sha256,
+                    entry.expires_at,
+                    entry.delivered_at,
+                ),
+            )
+
+    def _delete_registry(self, artifact_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM artifact_registry WHERE artifact_id = ?",
+                (artifact_id,),
+            )
 
     @staticmethod
     def _session_key(session_id: str) -> str:
@@ -50,133 +200,415 @@ class ArtifactStore:
 
     @staticmethod
     def _safe_name(name: str) -> str:
-        cleaned = "".join(ch for ch in Path(name).name if ch.isalnum() or ch in "._- ").strip()
+        cleaned = "".join(
+            ch for ch in Path(name).name if ch.isalnum() or ch in "._- "
+        ).strip()
         return cleaned[:160] or "artifact.bin"
 
-    def _entry(
+    @staticmethod
+    def _decode_data_url(data_url: str, fallback_media_type: str) -> tuple[bytes, str]:
+        if not data_url.startswith("data:image/") or "," not in data_url:
+            raise ValueError("Artifact must be an image data URL")
+        metadata, encoded = data_url.split(",", 1)
+        if ";base64" not in metadata:
+            raise ValueError("Artifact data URL must use base64 encoding")
+        media_type = metadata[5:].split(";", 1)[0] or fallback_media_type
+        try:
+            data = base64.b64decode(encoded, validate=True)
+        except Exception as exc:
+            raise ValueError("Artifact contains invalid base64") from exc
+        return data, media_type
+
+    @staticmethod
+    def _detect_image(data: bytes, fallback_media_type: str) -> tuple[str, str, int, int]:
+        formats = {
+            "JPEG": ("image/jpeg", ".jpg"),
+            "PNG": ("image/png", ".png"),
+            "WEBP": ("image/webp", ".webp"),
+            "GIF": ("image/gif", ".gif"),
+        }
+        try:
+            import io
+            from PIL import Image
+
+            with Image.open(io.BytesIO(data)) as image:
+                media_type, suffix = formats.get(
+                    str(image.format or "").upper(),
+                    (fallback_media_type, ".img"),
+                )
+                return media_type, suffix, int(image.width), int(image.height)
+        except Exception:
+            suffix = {
+                "image/jpeg": ".jpg",
+                "image/png": ".png",
+                "image/webp": ".webp",
+                "image/gif": ".gif",
+            }.get(fallback_media_type, ".img")
+            return fallback_media_type, suffix, 0, 0
+
+    def _expires_at(self, retention: Retention) -> float | None:
+        return None if retention == "persistent" else self._clock() + self._ttl
+
+    def _register(
         self,
         session_id: str,
-        artifact_id: str,
         path: Path,
         *,
-        name: str,
-        media_type: str,
-    ) -> dict[str, Any]:
+        direction: Direction,
+        ownership: Ownership,
+        retention: Retention,
+        name: str = "",
+        media_type: str = "",
+        width: int = 0,
+        height: int = 0,
+        content_sha256: str = "",
+    ) -> _Artifact:
+        if not path.is_file():
+            raise ValueError(f"Artifact file does not exist: {path}")
         size = path.stat().st_size
         if size <= 0 or size > self._max_bytes:
             raise ValueError(f"Artifact size must be between 1 and {self._max_bytes} bytes")
-        normalized_media_type = media_type or "application/octet-stream"
+        normalized_media_type = (
+            media_type or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        )
+        artifact_id = uuid.uuid4().hex
         entry = _Artifact(
             artifact_id=artifact_id,
             session_key=self._session_key(session_id),
             path=path,
-            name=self._safe_name(name),
+            name=self._safe_name(name or path.name),
             media_type=normalized_media_type,
             kind=self._kind(normalized_media_type),
             size=size,
-            expires_at=self._clock() + self._ttl,
+            direction=direction,
+            ownership=ownership,
+            retention=retention,
+            expires_at=self._expires_at(retention),
+            width=width,
+            height=height,
+            content_sha256=content_sha256,
         )
         self._entries[artifact_id] = entry
-        return self.public_ref(session_id, artifact_id)
+        self._persist(entry)
+        return entry
 
-    def register_managed(
+    # ------------------------------------------------------------------
+    # Inbound image artifacts
+    # ------------------------------------------------------------------
+
+    def put_data_url(
+        self,
+        session_id: str,
+        data_url: str,
+        *,
+        media_type: str = "image/jpeg",
+        source: str = "upload",
+        caption: str = "",
+    ) -> dict[str, Any]:
+        data, detected_media = self._decode_data_url(data_url, media_type)
+        if not data or len(data) > self._max_bytes:
+            raise ValueError(f"Artifact size must be between 1 and {self._max_bytes} bytes")
+        detected_media, suffix, width, height = self._detect_image(data, detected_media)
+        if width <= 0 or height <= 0:
+            raise ValueError("Artifact is not a supported image")
+        directory = self.root / self._session_key(session_id) / "inbound"
+        directory.mkdir(parents=True, exist_ok=True)
+        artifact_id = uuid.uuid4().hex
+        path = directory / f"{artifact_id}{suffix}"
+        temporary = directory / f".{artifact_id}.tmp"
+        temporary.write_bytes(data)
+        temporary.replace(path)
+        entry = self._register(
+            session_id,
+            path,
+            direction="inbound",
+            ownership="managed",
+            retention="session",
+            media_type=detected_media,
+            width=width,
+            height=height,
+            content_sha256=hashlib.sha256(data).hexdigest(),
+        )
+        return self._image_ref(entry, source=source, caption=caption)
+
+    def register_path(
+        self,
+        session_id: str,
+        path: str | Path,
+        *,
+        media_type: str = "image/png",
+        source: str,
+        caption: str = "",
+    ) -> dict[str, Any]:
+        """Register a Core-owned image path without copying it."""
+        resolved = Path(path).expanduser().resolve()
+        try:
+            resolved.relative_to(self.root)
+        except ValueError as exc:
+            raise ValueError("Managed artifact must stay below the artifact root") from exc
+        data = resolved.read_bytes()
+        if not data or len(data) > self._max_bytes:
+            raise ValueError(f"Artifact size must be between 1 and {self._max_bytes} bytes")
+        detected_media, _suffix, width, height = self._detect_image(data, media_type)
+        if width <= 0 or height <= 0:
+            raise ValueError("Artifact is not a supported image")
+        entry = self._register(
+            session_id,
+            resolved,
+            direction="inbound",
+            ownership="generated",
+            retention="session",
+            media_type=detected_media,
+            width=width,
+            height=height,
+            content_sha256=hashlib.sha256(data).hexdigest(),
+        )
+        return self._image_ref(entry, source=source, caption=caption)
+
+    @staticmethod
+    def _image_ref(entry: _Artifact, *, source: str, caption: str = "") -> dict[str, Any]:
+        ref: dict[str, Any] = {
+            "type": "image_ref",
+            "artifact_id": entry.artifact_id,
+            "kind": entry.kind,
+            "name": entry.name,
+            "media_type": entry.media_type,
+            "size": entry.size,
+            "direction": entry.direction,
+            "ownership": entry.ownership,
+            "retention": entry.retention,
+            "status": "available",
+            "visibility": "agent",
+            "width": entry.width,
+            "height": entry.height,
+            "source": source,
+        }
+        if caption:
+            ref["caption"] = caption[:200]
+        return ref
+
+    # ------------------------------------------------------------------
+    # Outbound artifacts
+    # ------------------------------------------------------------------
+
+    def prepare_path(self, session_id: str, path: str | Path) -> dict[str, Any]:
+        """Borrow an existing user file for delivery; never copy or delete it."""
+        source = Path(path).expanduser().resolve()
+        entry = self._register(
+            session_id,
+            source,
+            direction="outbound",
+            ownership="borrowed",
+            retention="temporary",
+        )
+        return self.public_ref(session_id, entry.artifact_id)
+
+    def register_generated(
         self,
         session_id: str,
         path: str | Path,
         *,
         media_type: str = "",
         name: str = "",
+        retention: Retention = "temporary",
     ) -> dict[str, Any]:
         resolved = Path(path).expanduser().resolve()
+        allowed_root = self.persistent_root if retention == "persistent" else self.root
         try:
-            resolved.relative_to(self.root.parent)
+            resolved.relative_to(allowed_root)
         except ValueError as exc:
-            raise ValueError("Managed artifact must stay below the runtime attachment root") from exc
-        if not resolved.is_file():
-            raise ValueError(f"Artifact file does not exist: {resolved}")
-        detected = media_type or mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
-        return self._entry(
+            raise ValueError(
+                f"Generated {retention} artifact must stay below {allowed_root}"
+            ) from exc
+        entry = self._register(
             session_id,
-            uuid.uuid4().hex,
             resolved,
-            name=name or resolved.name,
-            media_type=detected,
-        )
-
-    def prepare_path(self, session_id: str, path: str | Path) -> dict[str, Any]:
-        source = Path(path).expanduser().resolve()
-        if not source.is_file():
-            raise ValueError(f"File does not exist: {source}")
-        size = source.stat().st_size
-        if size <= 0 or size > self._max_bytes:
-            raise ValueError(f"Artifact size must be between 1 and {self._max_bytes} bytes")
-        artifact_id = uuid.uuid4().hex
-        directory = self.root / self._session_key(session_id)
-        directory.mkdir(parents=True, exist_ok=True)
-        safe_name = self._safe_name(source.name)
-        destination = directory / f"{artifact_id}-{safe_name}"
-        temporary = directory / f".{artifact_id}.tmp"
-        shutil.copyfile(source, temporary)
-        temporary.replace(destination)
-        media_type = mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
-        return self._entry(
-            session_id,
-            artifact_id,
-            destination,
-            name=safe_name,
+            direction="outbound",
+            ownership="generated",
+            retention=retention,
             media_type=media_type,
+            name=name,
         )
+        return self.public_ref(session_id, entry.artifact_id)
+
+    # Old call-site name retained only as an internal synonym while tools move
+    # to the ownership-explicit API.
+    register_managed = register_generated
 
     def public_ref(self, session_id: str, artifact_id: str) -> dict[str, Any]:
         entry = self._get(session_id, artifact_id)
-        return {
-            "artifact_id": entry.artifact_id,
-            "kind": entry.kind,
-            "name": entry.name,
-            "media_type": entry.media_type,
-            "size": entry.size,
-            "visibility": "user",
-            "temporary": True,
-        }
+        return ArtifactRef(
+            artifact_id=entry.artifact_id,
+            kind=entry.kind,
+            name=entry.name,
+            media_type=entry.media_type,
+            size=entry.size,
+            direction=entry.direction,
+            ownership=entry.ownership,
+            retention=entry.retention,
+            status="delivered" if entry.delivered_at else "available",
+            visibility="user",
+            temporary=entry.retention != "persistent",
+        ).model_dump()
 
     def resolve(self, session_id: str, artifact_id: str) -> dict[str, Any]:
         entry = self._get(session_id, artifact_id)
         return {**self.public_ref(session_id, artifact_id), "path": str(entry.path)}
 
+    def mark_delivered(self, session_id: str, artifact_id: str) -> dict[str, Any]:
+        """Acknowledge client delivery; Core retains cleanup authority."""
+        entry = self._get(session_id, artifact_id)
+        entry.delivered_at = self._clock()
+        if entry.retention == "temporary":
+            grace_expiry = entry.delivered_at + self._delivery_grace
+            entry.expires_at = min(entry.expires_at or grace_expiry, grace_expiry)
+        self._persist(entry)
+        return self.public_ref(session_id, artifact_id)
+
+    # ------------------------------------------------------------------
+    # Request hydration / manifests
+    # ------------------------------------------------------------------
+
     def _get(self, session_id: str, artifact_id: str) -> _Artifact:
         entry = self._entries.get(artifact_id)
         if entry is None or entry.session_key != self._session_key(session_id):
             raise KeyError(f"Artifact not found: {artifact_id}")
-        if entry.expires_at <= self._clock() or not entry.path.is_file():
-            self._entries.pop(artifact_id, None)
+        if entry.expires_at is not None and entry.expires_at <= self._clock():
+            self._discard(entry)
             raise KeyError(f"Artifact expired: {artifact_id}")
+        if not entry.path.is_file():
+            self._entries.pop(artifact_id, None)
+            self._delete_registry(artifact_id)
+            raise KeyError(f"Artifact file is unavailable: {artifact_id}")
         return entry
 
-    def cleanup_session(self, session_id: str) -> None:
-        key = self._session_key(session_id)
-        for artifact_id, entry in list(self._entries.items()):
-            if entry.session_key == key:
-                self._entries.pop(artifact_id, None)
+    @staticmethod
+    def _ref_id(ref: dict[str, Any]) -> str:
+        return str(ref.get("artifact_id") or "")
+
+    def hydrate_ref(self, session_id: str, ref: dict[str, Any]) -> dict[str, Any]:
+        entry = self._get(session_id, self._ref_id(ref))
+        encoded = base64.b64encode(entry.path.read_bytes()).decode("ascii")
+        return {
+            "type": "image",
+            "image_url": f"data:{entry.media_type};base64,{encoded}",
+            "media_type": entry.media_type,
+            "width": entry.width,
+            "height": entry.height,
+        }
+
+    def hydrate_artifact(self, session_id: str, artifact_id: str) -> dict[str, Any]:
+        return self.hydrate_ref(session_id, {"artifact_id": artifact_id})
+
+    def metadata(self, session_id: str, artifact_id: str) -> dict[str, Any]:
+        entry = self._get(session_id, artifact_id)
+        return {
+            "artifact_id": entry.artifact_id,
+            "media_type": entry.media_type,
+            "width": entry.width,
+            "height": entry.height,
+            "content_sha256": entry.content_sha256,
+            "direction": entry.direction,
+            "ownership": entry.ownership,
+            "retention": entry.retention,
+        }
+
+    def reference(self, session_id: str, artifact_id: str, *, caption: str = "") -> dict[str, Any]:
+        entry = self._get(session_id, artifact_id)
+        return self._image_ref(entry, source="service-upload", caption=caption)
+
+    def hydrate_messages(
+        self, session_id: str, messages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        hydrated = copy.deepcopy(messages)
+        latest_user_index = max(
+            (index for index, message in enumerate(hydrated) if message.get("role") == "user"),
+            default=0,
+        )
+        for index, message in enumerate(hydrated):
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            resolved: list[dict[str, Any]] = []
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "image_ref":
+                    resolved.append(block)
+                elif index >= latest_user_index:
+                    resolved.append(self.hydrate_ref(session_id, block))
+                else:
+                    resolved.append({
+                        "type": "text",
+                        "text": f"[historical image reference: {self._ref_id(block)}]",
+                    })
+            message["content"] = resolved
+        return hydrated
+
+    def manifest_messages(
+        self, session_id: str, messages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        manifested = copy.deepcopy(messages)
+        for message in manifested:
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            resolved: list[dict[str, Any]] = []
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "image_ref":
+                    resolved.append(block)
+                    continue
+                artifact_id = self._ref_id(block)
                 try:
-                    entry.path.unlink(missing_ok=True)
-                except OSError:
-                    pass
-        session_dir = self.root / key
-        try:
-            session_dir.rmdir()
-        except OSError:
-            pass
+                    metadata = self.metadata(session_id, artifact_id)
+                except KeyError:
+                    metadata = {
+                        "artifact_id": artifact_id,
+                        "media_type": block.get("media_type", "unknown"),
+                        "width": block.get("width", 0),
+                        "height": block.get("height", 0),
+                    }
+                source = str(block.get("source", "unknown"))
+                caption = str(block.get("caption", "")).strip()
+                line = (
+                    "[available image: "
+                    f"image_id={metadata['artifact_id']}; "
+                    f"media_type={metadata['media_type']}; "
+                    f"size={metadata['width']}x{metadata['height']}; source={source}"
+                )
+                if caption:
+                    line += f"; caption={caption}"
+                resolved.append({"type": "text", "text": line + "]"})
+            message["content"] = resolved
+        return manifested
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def cleanup_session(self, session_id: str) -> None:
+        session_key = self._session_key(session_id)
+        for entry in list(self._entries.values()):
+            if entry.session_key == session_key and entry.retention == "session":
+                self._discard(entry)
 
     def cleanup_expired(self) -> None:
         now = self._clock()
-        for artifact_id, entry in list(self._entries.items()):
-            if entry.expires_at <= now or not entry.path.is_file():
-                self._entries.pop(artifact_id, None)
-                try:
-                    entry.path.unlink(missing_ok=True)
-                except OSError:
-                    pass
-                try:
-                    entry.path.parent.rmdir()
-                except OSError:
-                    pass
+        for entry in list(self._entries.values()):
+            if entry.expires_at is not None and entry.expires_at <= now:
+                self._discard(entry)
+
+    def _discard(self, entry: _Artifact) -> None:
+        self._entries.pop(entry.artifact_id, None)
+        self._delete_registry(entry.artifact_id)
+        if entry.ownership == "borrowed" or entry.retention == "persistent":
+            return
+        try:
+            entry.path.unlink(missing_ok=True)
+        except OSError:
+            return
+        parent = entry.path.parent
+        while parent != self.root and self.root in parent.parents:
+            try:
+                parent.rmdir()
+            except OSError:
+                break
+            parent = parent.parent

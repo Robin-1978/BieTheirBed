@@ -6,6 +6,7 @@ Client -> Server (requests):
     {"method": "confirm", "id": 3, "params": {"code": "...", "approved": true}}
     {"method": "status",  "id": 4}
     {"method": "command", "id": 5, "params": {"cmd": "/clear", "session_id": ""}}
+    {"method": "upload_artifact", "id": 6, "params": {"artifact": {...}, "session_id": ""}}
 
 Server -> Client (responses/events):
     {"type": "event",           "run_id": 1, "data": {...AgentEvent...}}
@@ -71,18 +72,18 @@ class ClientMessage(BaseModel):
         if not raw:
             return []
         attachments = [ImageAttachment.model_validate(a) for a in raw]
-        if any(not attachment.attachment_id or attachment.data_url or attachment.path for attachment in attachments):
-            raise ValueError("Run requests accept attachment_id references only; upload images first")
+        if any(not attachment.artifact_id or attachment.data_url or attachment.path for attachment in attachments):
+            raise ValueError("Run requests accept artifact_id references only; upload images first")
         return attachments
 
     @property
-    def upload_attachment(self):
+    def upload_artifact(self):
         from pc_assistant.model_adapter.types import ImageAttachment
 
-        attachment = ImageAttachment.model_validate(self.params.get("attachment", {}))
-        if attachment.attachment_id or not attachment.data_url or attachment.path:
+        artifact = ImageAttachment.model_validate(self.params.get("artifact", {}))
+        if artifact.artifact_id or not artifact.data_url or artifact.path:
             raise ValueError("Upload requests require one image data_url")
-        return attachment
+        return artifact
 
 
 # ── Server -> Client ──────────────────────────────────────────────────

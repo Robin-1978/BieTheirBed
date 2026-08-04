@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import pytest
 
-from pc_assistant.attachments import AttachmentStore
+from pc_assistant.artifacts import ArtifactStore
 
 
-DATA_URL = "data:image/jpeg;base64,AAAA"
+DATA_URL = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+)
 
 
 def test_reference_is_small_and_hydration_is_request_only(tmp_path):
-    store = AttachmentStore(tmp_path / "attachments")
+    store = ArtifactStore(tmp_path / "attachments")
     ref = store.put_data_url("session-a", DATA_URL, caption="sample")
 
     assert ref["type"] == "image_ref"
@@ -23,7 +26,7 @@ def test_reference_is_small_and_hydration_is_request_only(tmp_path):
 
 
 def test_historical_images_are_not_rehydrated_without_explicit_reference(tmp_path):
-    store = AttachmentStore(tmp_path / "attachments")
+    store = ArtifactStore(tmp_path / "attachments")
     ref = store.put_data_url("session-a", DATA_URL)
     messages = [
         {"role": "user", "content": [{"type": "text", "text": "first"}, ref]},
@@ -38,18 +41,18 @@ def test_historical_images_are_not_rehydrated_without_explicit_reference(tmp_pat
 
 
 def test_reference_is_session_scoped(tmp_path):
-    store = AttachmentStore(tmp_path / "attachments")
+    store = ArtifactStore(tmp_path / "attachments")
     ref = store.put_data_url("session-a", DATA_URL)
 
     with pytest.raises(KeyError):
         store.hydrate_ref("session-b", ref)
 
     with pytest.raises(KeyError):
-        store.metadata("session-b", ref["attachment_id"])
+        store.metadata("session-b", ref["artifact_id"])
 
 
 def test_text_model_manifest_contains_id_without_base64(tmp_path):
-    store = AttachmentStore(tmp_path / "attachments")
+    store = ArtifactStore(tmp_path / "attachments")
     ref = store.put_data_url("session-a", DATA_URL, caption="error screenshot")
 
     manifested = store.manifest_messages(
@@ -58,7 +61,7 @@ def test_text_model_manifest_contains_id_without_base64(tmp_path):
     )
 
     rendered = str(manifested)
-    assert ref["attachment_id"] in rendered
+    assert ref["artifact_id"] in rendered
     assert "available image" in rendered
     assert "error screenshot" in rendered
     assert "base64" not in rendered
@@ -66,13 +69,13 @@ def test_text_model_manifest_contains_id_without_base64(tmp_path):
 
 def test_expired_attachment_is_deleted(tmp_path):
     now = [100.0]
-    store = AttachmentStore(
+    store = ArtifactStore(
         tmp_path / "attachments",
         ttl_seconds=10,
         clock=lambda: now[0],
     )
     ref = store.put_data_url("session-a", DATA_URL)
-    files = list((tmp_path / "attachments").rglob("*.jpg"))
+    files = list((tmp_path / "attachments").rglob("*.png"))
     assert len(files) == 1
 
     now[0] = 111.0
@@ -82,14 +85,14 @@ def test_expired_attachment_is_deleted(tmp_path):
 
 
 def test_rejects_non_image_or_invalid_base64(tmp_path):
-    store = AttachmentStore(tmp_path / "attachments")
+    store = ArtifactStore(tmp_path / "attachments")
     with pytest.raises(ValueError):
         store.put_data_url("s", "data:text/plain;base64,AAAA")
     with pytest.raises(ValueError):
         store.put_data_url("s", "data:image/jpeg;base64,***")
 
 
-def test_startup_sweep_removes_stale_files(tmp_path):
+def test_startup_never_deletes_unregistered_files(tmp_path):
     import os
 
     stale = tmp_path / "attachments" / "old-session" / "old.jpg"
@@ -97,8 +100,8 @@ def test_startup_sweep_removes_stale_files(tmp_path):
     stale.write_bytes(b"old")
     os.utime(stale, (1, 1))
 
-    AttachmentStore(tmp_path / "attachments", ttl_seconds=10, clock=lambda: 100.0)
-    assert not stale.exists()
+    ArtifactStore(tmp_path / "attachments", ttl_seconds=10, clock=lambda: 100.0)
+    assert stale.read_bytes() == b"old"
 
 
 def test_register_managed_path_does_not_copy_image(tmp_path):
@@ -108,7 +111,7 @@ def test_register_managed_path_does_not_copy_image(tmp_path):
     image = root / "screenshots" / "capture.png"
     image.parent.mkdir(parents=True)
     Image.new("RGB", (16, 12), "blue").save(image)
-    store = AttachmentStore(root)
+    store = ArtifactStore(root)
 
     ref = store.register_path("session-a", image, source="tool:screen")
 

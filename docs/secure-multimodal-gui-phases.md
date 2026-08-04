@@ -16,7 +16,7 @@
 ## 1. Scope and non-goals
 
 In scope: audit and correction of the existing implementation: unified runtime
-logs, bounded AttachmentStore, attachment-reference ingress, reference-only history and events, request-scoped provider
+logs, bounded ArtifactStore, attachment-reference ingress, reference-only history and events, request-scoped provider
 hydration, provider role/capability contracts, stable GUI targets, coordinate
 transforms, deterministic action authorization, and true post-action evidence.
 
@@ -32,8 +32,8 @@ image recall, any standalone grounding service, and a general Agent rewrite.
 
 ```text
 CLI / Feishu / screenshot / service upload
-  -> AttachmentStore.put(session, validated bytes)
-  -> attachment_id
+  -> ArtifactStore.put(session, validated bytes)
+  -> artifact_id
   -> image_ref or observation_ref in Conversation
   -> RequestAssembler bounded selection
   -> request-only hydration
@@ -86,7 +86,7 @@ C1 -> C2 -> C3 -> C4
 | Change | Owner node | Summary |
 |---|---|---|
 | C1 | runtime/observability | Implemented: one runtime resolver; application, service, audit, LLM, and turn logs under `logs/` |
-| C2 | runtime/service/channels | Implemented: TTL AttachmentStore, reference ingress, unified screenshot artifacts, and Feishu image delivery |
+| C2 | runtime/service/channels | Implemented: TTL ArtifactStore, reference ingress, unified screenshot artifacts, and Feishu image delivery |
 | C3 | context/agent | Implemented: reference-only history/events/cache and request-only hydration |
 | C4 | model adapter | Implemented: provider/role-aware vision serialization and capability enforcement |
 | C5 | tools/vision | Implemented: snapshot-bound ElementRef and service-side coordinate transforms |
@@ -103,7 +103,7 @@ preconditions consume stable target and transform contracts.
 | Change | Estimated owned paths | Size | Observable outcome | Simultaneous quality floor | Exact verification |
 |---|---|---|---|---|---|
 | C1 | `runtime.py`, `config.py`, `logger.py`, `service/server.py`, `observability/trace.py`, runtime-path tests | 5 logical files, ~170 lines | All logs resolve below one configured `logs/` | Socket/PID OS semantics preserved; no attachment files under logs | `pytest tests/test_runtime.py tests/test_service.py` |
-| C2 | attachment store module, `service/client.py`, `service/protocol.py`, Feishu/image ingress, screenshot ingress, tests | 6 logical files, ~200 lines | Every accepted history image becomes a session-owned attachment ID; screenshots use explicit temporary artifacts | Run-level `data_url` rejected; bounded store; periodic/startup/session cleanup; Feishu sends declared artifacts | `pytest tests/test_attachment_store.py tests/test_multimodal.py tests/test_service.py tests/test_tool_artifacts.py tests/test_feishu_channel.py` |
+| C2 | attachment store module, `service/client.py`, `service/protocol.py`, Feishu/image ingress, screenshot ingress, tests | 6 logical files, ~200 lines | Every accepted history image becomes a session-owned attachment ID; screenshots use explicit temporary artifacts | Run-level `data_url` rejected; bounded store; periodic/startup/session cleanup; Feishu sends declared artifacts | `pytest tests/test_artifact_store_ingress.py tests/test_multimodal.py tests/test_service.py tests/test_tool_artifacts.py tests/test_feishu_channel.py` |
 | C3 | `model_adapter/content.py`, `context/conversation.py`, `context/assembly.py`, `agent.py`, cache/idempotency integration, tests | 6 logical files, ~200 lines | Stored history and emitted events contain only references/placeholders | No binary content in history/compaction/event/trace/audit/cache/idempotency; tool groups remain atomic | `pytest tests/test_context.py tests/test_context_cache.py tests/test_agent.py tests/test_multimodal.py` |
 | C4 | provider profiles, OpenAI/Anthropic parsers, provider facade, tests | 5 files, ~170 lines | Each supported provider/role receives legal image content | No silent drop; unsupported role/MIME/count/size returns typed error; fallback never writes synthetic content into Conversation | `pytest tests/test_model_adapter.py tests/test_llm_provider.py tests/test_multimodal.py` |
 | C5 | `vision/a11y.py`, `vision/grid.py`, `tools/ui.py`, `tools/screen.py`, window integration, tests | 5 files, ~190 lines | Target and image coordinates map to a fresh desktop target | Duplicate/stale/hidden targets fail closed; negative origin, DPI, rotation, and crop transforms tested | `pytest tests/test_layer2_gui.py tests/test_window.py` |
@@ -130,7 +130,7 @@ runtime owner, rollback surface, observable outcome, and test suite.
 - All application/service/audit/trace recorders consume `RuntimePaths.logs`.
 - Socket and PID files retain OS runtime placement.
 
-#### C2 — AttachmentStore and ingress
+#### C2 — ArtifactStore and ingress
 
 - IDs are non-guessable and scoped to session/owner.
 - Writes are atomic; metadata records hash, MIME, dimensions, source, trust, and expiry.
@@ -180,19 +180,19 @@ runtime owner, rollback surface, observable outcome, and test suite.
 |---|---|---|
 | `runtime-config-resolve` | AppConfig -> RuntimePaths | C1 |
 | `runtime-log-resolve` | RuntimePaths -> all log/audit/trace sinks | C1 |
-| `runtime-attachment-resolve` | RuntimePaths -> AttachmentStore | C2 |
-| `attachment-ingress-store` | CLI/Feishu/screenshot/service upload -> AttachmentStore | C2 |
-| `attachment-ref-wire` | AttachmentStore -> new service run request | C2 |
-| `attachment-session-delete` | Session drop -> AttachmentStore | C2 |
-| `attachment-periodic-expire` | periodic/startup sweeper -> AttachmentStore deletion | C2 |
+| `runtime-attachment-resolve` | RuntimePaths -> ArtifactStore | C2 |
+| `attachment-ingress-store` | CLI/Feishu/screenshot/service upload -> ArtifactStore | C2 |
+| `attachment-ref-wire` | ArtifactStore -> new service run request | C2 |
+| `attachment-session-delete` | Session drop -> ArtifactStore | C2 |
+| `attachment-periodic-expire` | periodic/startup sweeper -> ArtifactStore deletion | C2 |
 
 #### `multimodal-context`
 
 | Edge ID | Producer -> Consumer | Owner |
 |---|---|---|
-| `reference-history-store` | AttachmentStore metadata -> Conversation refs | C3 |
+| `reference-history-store` | ArtifactStore metadata -> Conversation refs | C3 |
 | `reference-request-select` | Conversation -> RequestAssembler | C3 |
-| `reference-request-hydrate` | RequestAssembler -> AttachmentStore -> request bytes | C3 |
+| `reference-request-hydrate` | RequestAssembler -> ArtifactStore -> request bytes | C3 |
 | `provider-role-serialize` | hydrated request -> ProviderSerializer | C4 |
 | `provider-request-release` | provider request completion -> temporary data release | C4 |
 

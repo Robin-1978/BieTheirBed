@@ -39,6 +39,10 @@ class RuntimePaths:
         return self.root / "attachments"
 
     @property
+    def artifacts(self) -> Path:
+        return self.root / "artifacts"
+
+    @property
     def cache(self) -> Path:
         return self.root / "cache"
 

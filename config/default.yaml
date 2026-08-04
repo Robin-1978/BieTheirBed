@@ -37,7 +37,6 @@ vision_api_key: ""
 vision_api_base: ""
 vision_timeout: 120
 vision_max_tokens: 1024
-attachment_dir: "attachments"
 attachment_ttl_seconds: 3600
 attachment_cleanup_interval_seconds: 300
 supports_vision: null

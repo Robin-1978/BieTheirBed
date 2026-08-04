@@ -114,7 +114,8 @@ By default, mutable application state is kept outside the source tree under
 ```text
 ~/.pc-assistant/
 ├── logs/          # application, service, audit, and trace logs
-├── attachments/   # temporary uploads and screenshots
+├── attachments/   # temporary inbound and generated artifacts
+├── artifacts/     # persistent user-requested generated files
 ├── cache/         # idempotency and other rebuildable state
 └── data/          # assistant.db and procedural memory
 ```
@@ -158,7 +159,7 @@ socket and PID files use the operating system runtime directory.
 | `scheduler` | create, list, run, delete, enable, disable, start, stop, status | Cron-like task scheduling |
 | `image_inspect` | describe, ocr, locate, compare | Observe visible image content by `image_id`; diagnosis and solutions remain with the main model |
 | `screenshot` | — | Capture a full-desktop PNG for delivery to the current conversation |
-| `artifact_prepare` | path | Prepare an existing file for client delivery; protected paths are blocked and out-of-workspace paths require confirmation |
+| `artifact_prepare` | path | Borrow an existing file for client delivery without copying or deleting it; protected paths are blocked and out-of-workspace paths require confirmation |
 | `describe_tool` | tool_name | Meta-tool: query the full JSON schema of any registered tool |
 
 ## Development

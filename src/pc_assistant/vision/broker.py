@@ -7,7 +7,7 @@ import re
 import uuid
 from typing import Any
 
-from pc_assistant.attachments import AttachmentStore
+from pc_assistant.artifacts import ArtifactStore
 from pc_assistant.llm_provider import LLMProvider
 
 
@@ -35,7 +35,7 @@ class VisionBroker:
     def __init__(
         self,
         provider: LLMProvider,
-        attachment_store: AttachmentStore,
+        artifact_store: ArtifactStore,
         *,
         model_name: str = "",
         max_tokens: int = 1024,
@@ -43,7 +43,7 @@ class VisionBroker:
         if not provider.supports_vision:
             raise ValueError("Dedicated vision provider must support image input")
         self._provider = provider
-        self._store = attachment_store
+        self._store = artifact_store
         self._model_name = model_name or "default"
         self._max_tokens = max(64, max_tokens)
         self._cache: dict[str, dict[str, Any]] = {}
@@ -122,11 +122,11 @@ class VisionBroker:
                 f"Region of interest: {json.dumps(region, ensure_ascii=False) if region else 'entire image'}.\n"
                 "Return visual observations only. Do not answer how to solve, fix, or act on anything shown."
             ),
-        }, self._store.hydrate_attachment(session_id, image_id)]
+        }, self._store.hydrate_artifact(session_id, image_id)]
         if compare_image_id:
             content.extend([
                 {"type": "text", "text": "Second image for visible comparison:"},
-                self._store.hydrate_attachment(session_id, compare_image_id),
+                self._store.hydrate_artifact(session_id, compare_image_id),
             ])
 
         response = await self._provider.chat(
