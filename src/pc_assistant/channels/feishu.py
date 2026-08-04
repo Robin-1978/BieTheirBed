@@ -317,6 +317,22 @@ class FeishuChannel(ChannelBase):
         except Exception as e:
             logger.warning("Failed to save open_id: %s", e)
 
+    def _claim_message(self, message_id: str) -> bool:
+        """Atomically claim an inbound message across WS and poll recovery."""
+        if not message_id:
+            return True
+        now = time.time()
+        with self._msg_seen_lock:
+            if message_id in self._msg_seen:
+                return False
+            self._msg_seen[message_id] = now
+            if len(self._msg_seen) > 1000:
+                self._msg_seen = {
+                    key: seen_at for key, seen_at in self._msg_seen.items()
+                    if now - seen_at <= 300
+                }
+        return True
+
     def _remember_image_ref(self, open_id: str, message_id: str, attachment_id: str) -> None:
         expires_at = time.time() + 3600
         with self._image_refs_lock:
@@ -392,6 +408,9 @@ class FeishuChannel(ChannelBase):
         message_id: str,
         image_key: str,
     ) -> bool:
+        if not self._claim_message(message_id):
+            logger.info("[IMAGE] Duplicate message_id=%s, skip", message_id)
+            return False
         reaction_id = self._add_reaction(message_id, "Typing")
         try:
             from pc_assistant.model_adapter.types import ImageAttachment
@@ -403,9 +422,6 @@ class FeishuChannel(ChannelBase):
                 ImageAttachment.from_path(path, caption="feishu image"),
             )
             self._remember_image_ref(open_id, message_id, stored["attachment_id"])
-            if message_id:
-                with self._msg_seen_lock:
-                    self._msg_seen[message_id] = time.time()
             self._send_text(
                 open_id,
                 "🖼️ 图片已收到。请直接发送问题，或回复这张图片进行追问。",
@@ -414,9 +430,6 @@ class FeishuChannel(ChannelBase):
             return True
         except Exception as exc:
             logger.error("[IMAGE] Failed to accept image: %s", exc, exc_info=True)
-            if message_id:
-                with self._msg_seen_lock:
-                    self._msg_seen[message_id] = time.time()
             self._send_text(open_id, "❌ 图片下载失败，请稍后重试或重新发送图片。")
             return False
         finally:
@@ -1135,21 +1148,6 @@ class FeishuChannel(ChannelBase):
                     break
                 open_id, text, msg_id, attachments = item
 
-                if msg_id:
-                    with self._msg_seen_lock:
-                        if msg_id in self._msg_seen:
-                            logger.info("[WORKER] Duplicate msg_id=%s, skip", msg_id)
-                            self._msg_queue.task_done()
-                            continue
-                        self._msg_seen[msg_id] = time.time()
-                        if len(self._msg_seen) > 1000:
-                            now = time.time()
-                            expired = [
-                                k for k, v in self._msg_seen.items() if now - v > 300
-                            ]
-                            for k in expired:
-                                del self._msg_seen[k]
-
                 if open_id and not self._receive_id:
                     self._save_open_id(open_id)
 
@@ -1243,6 +1241,9 @@ class FeishuChannel(ChannelBase):
                         parent_id=parent_id,
                         root_id=root_id,
                     )
+                    if not channel._claim_message(msg_id):
+                        logger.info("[WS-RECV#%d] Duplicate msg_id=%s, skip", recv_seq, msg_id)
+                        return
                 else:  # image
                     image_key = content.get("image_key", "")
                     if not image_key:
@@ -1428,8 +1429,8 @@ class FeishuChannel(ChannelBase):
                     image_key = content.get("image_key", "")
                     if not image_key:
                         continue
-                    self._accept_image_message(receive_id, msg_id, image_key)
-                    recovered += 1
+                    if self._accept_image_message(receive_id, msg_id, image_key):
+                        recovered += 1
                     continue
                 else:
                     text = content.get("text", "").strip() if content else content_str.strip()
@@ -1443,6 +1444,9 @@ class FeishuChannel(ChannelBase):
                 if not text:
                     with self._msg_seen_lock:
                         self._msg_seen[msg_id] = now
+                    continue
+
+                if not self._claim_message(msg_id):
                     continue
 
                 logger.info(
