@@ -583,11 +583,15 @@ class ChatApp(App):
                 log.mount(CommandOutput(f"{ICON_WARN} Usage: `/config set key=value`"))
         elif cmd == "/config":
             from pc_assistant.ui.theme import get_theme_name
+            model = self._config.resolve_model()
             rows = "\n".join([
-                f"| Provider | {self._config.llm_provider} |",
-                f"| Server | {self._config.llm_server_url} |",
-                f"| Model | {self._config.llm_model_name or '(default)'} |",
-                f"| API Key | {self._config.masked_api_key()} |",
+                f"| Provider | {model.provider_name} |",
+                f"| Driver | {model.driver} |",
+                f"| Server | {model.server_url} |",
+                f"| Model | {model.alias} |",
+                f"| Upstream Model | {model.model or '(default)'} |",
+                f"| Configured Models | {', '.join(self._config.models) or model.alias} |",
+                f"| API Key | {'configured' if model.api_key else ''} |",
                 f"| Max Iterations | {self._config.max_iterations} |",
                 f"| Context Budget | {self._config.context_window_budget} |",
                 f"| Theme | {get_theme_name()} |",

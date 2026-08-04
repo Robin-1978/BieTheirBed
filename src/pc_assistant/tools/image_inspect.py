@@ -11,8 +11,10 @@ from pc_assistant.vision.broker import VisionBroker
 class ImageInspectTool(ToolBase):
     name = "image_inspect"
     description = (
-        "Observe an available image by image_id. It describes visible content, reads text, "
-        "locates visible items, or compares images; it does not diagnose or propose solutions."
+        "Ask the local vision model one question about visible content in an available image. "
+        "The main model must provide both image_id and a question derived from the user's request. "
+        "The question may ask for description, visible text, location, or comparison of visible "
+        "evidence, but must not ask for diagnosis or solutions."
     )
     is_side_effecting = False
 
@@ -23,14 +25,14 @@ class ImageInspectTool(ToolBase):
         image_id = str(kwargs.get("image_id", "")).strip()
         if not image_id:
             return {"error": "image_id is required"}
+        question = str(kwargs.get("question", "")).strip()
+        if not question:
+            return {"error": "question is required and must be supplied by the main model"}
         try:
             return await self._broker.inspect(
                 current_memory_scope().session_id,
                 image_id,
-                action=str(kwargs.get("action", "describe")),
-                focus=str(kwargs.get("focus", "")),
-                region=kwargs.get("region"),
-                compare_image_id=str(kwargs.get("compare_image_id", "")).strip(),
+                question=question,
             )
         except (KeyError, ValueError, RuntimeError) as exc:
             return {"error": str(exc), "image_id": image_id}
@@ -42,30 +44,17 @@ class ImageInspectTool(ToolBase):
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["describe", "ocr", "locate", "compare"],
-                        "default": "describe",
-                    },
                     "image_id": {"type": "string"},
-                    "focus": {
+                    "question": {
                         "type": "string",
-                        "description": "Visible detail to observe, such as 'the error dialog text'. Do not ask for advice or solutions.",
+                        "description": (
+                            "A visual question dynamically written by the main model from the "
+                            "user's current request and conversation context. "
+                            "Do not ask for diagnosis, recommendations, or solutions."
+                        ),
                     },
-                    "region": {
-                        "type": "object",
-                        "properties": {
-                            "x": {"type": "number"},
-                            "y": {"type": "number"},
-                            "width": {"type": "number"},
-                            "height": {"type": "number"},
-                        },
-                        "required": ["x", "y", "width", "height"],
-                        "additionalProperties": False,
-                    },
-                    "compare_image_id": {"type": "string"},
                 },
-                "required": ["image_id"],
+                "required": ["image_id", "question"],
                 "additionalProperties": False,
             },
         }

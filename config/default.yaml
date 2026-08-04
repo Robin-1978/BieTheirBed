@@ -1,3 +1,24 @@
+# Named API accounts/endpoints. Cloud accounts and their keys belong in the
+# per-user ~/.pc-assistant/config/local.yaml file, outside the source tree.
+providers:
+  local_llama:
+    driver: "llamacpp"
+    server_url: "http://127.0.0.1:8192"
+    requires_api_key: false
+    timeout: 120
+
+# Stable application aliases mapped to upstream model identifiers.
+models:
+  local_default:
+    provider: "local_llama"
+    model: ""
+    supports_vision: true
+    token_family: "default"
+
+default_model: "local_default"
+vision_model: ""
+
+# Single-model fallback fields used only when providers/models are absent.
 llm_provider: "llamacpp"
 llm_server_url: "http://127.0.0.1:8192"
 llm_model_name: ""

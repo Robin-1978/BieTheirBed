@@ -82,7 +82,10 @@ class ServiceServer:
 
         healthy = await self._agent.health_check()
         if not healthy:
-            logger.warning("LLM server at %s is not healthy", self._config.llm_server_url)
+            logger.warning(
+                "LLM server at %s is not healthy",
+                self._config.resolve_model().server_url,
+            )
 
         if self._config.feishu_enabled:
             try:

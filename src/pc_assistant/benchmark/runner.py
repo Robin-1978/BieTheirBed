@@ -135,13 +135,15 @@ class BenchmarkRunner:
 
     def _create_judge(self) -> LLMJudge | None:
         try:
+            model = self._config.resolve_model()
             provider = LLMProvider(
-                server_url=self._config.llm_server_url,
-                model_name=self._config.llm_model_name,
-                provider=self._config.llm_provider,
-                api_key=self._config.llm_api_key,
-                api_base=self._config.llm_api_base,
-                timeout=self._config.llm_timeout,
+                server_url=model.server_url,
+                model_name=model.model,
+                provider=model.driver,
+                api_key=model.api_key,
+                api_base=model.api_base,
+                timeout=model.timeout,
+                thinking=(model.thinking.model_dump() if model.thinking is not None else None),
             )
             return LLMJudge(provider)
         except Exception:

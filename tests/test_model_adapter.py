@@ -57,6 +57,14 @@ class TestResolveProfile:
         assert p.server_url == "http://fallback:8080"
         assert p.chat_url == "http://fallback:8080/v1/chat/completions"
 
+    def test_openai_compatible_explicit_vendor_base_is_authoritative(self):
+        p = resolve_profile(
+            "openai_compatible",
+            api_base="https://ark.example/api/coding/v3",
+        )
+        assert p.chat_url == "https://ark.example/api/coding/v3/chat/completions"
+        assert p.health_url == "https://ark.example/api/coding/v3/models"
+
 
 class TestTypes:
     def test_normalize_tool_calls_parses_json_arguments(self):
@@ -124,6 +132,14 @@ class TestOpenAIParser:
         )
         assert payload["cache_prompt"] is True
         assert payload["stream_options"] == {"include_usage": True}
+
+    def test_build_chat_payload_includes_model_thinking_mode(self):
+        payload = build_chat_payload(
+            "ark-code-latest",
+            [{"role": "user", "content": "hi"}],
+            thinking={"type": "enabled"},
+        )
+        assert payload["thinking"] == {"type": "enabled"}
 
     def test_parse_chat_response(self):
         resp = parse_chat_response({

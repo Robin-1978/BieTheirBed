@@ -25,11 +25,7 @@ class FakeVisionProvider:
     async def chat(self, messages, **kwargs):
         self.calls.append(messages)
         return LLMResponse(
-            content=(
-                '{"description":"A dialog shows an error.",'
-                '"visible_text":["WorkerError"],"entities":["dialog"],'
-                '"regions":[],"confidence":0.94,"uncertainty":""}'
-            ),
+            content="A dialog shows the visible text WorkerError.",
             finish_reason="stop",
         )
 
@@ -56,9 +52,10 @@ async def test_broker_is_perception_only_and_never_returns_base64(tmp_path):
     provider = FakeVisionProvider()
     broker = VisionBroker(provider, store, model_name="qwen-vl")
 
-    result = await broker.inspect("s1", ref["artifact_id"], focus="可见报错文字")
+    result = await broker.inspect("s1", ref["artifact_id"], question="这张图中可见的报错文字是什么？")
 
-    assert result["visible_text"] == ["WorkerError"]
+    assert result["observation"] == "A dialog shows the visible text WorkerError."
+    assert result["question"] == "这张图中可见的报错文字是什么？"
     assert result["model"] == "qwen-vl"
     assert "base64" not in str(result)
     assert "not a problem-solving assistant" in provider.calls[0][0]["content"]
@@ -76,11 +73,11 @@ async def test_broker_rejects_solution_question_and_caches_same_observation(tmp_
     broker = VisionBroker(provider, store)
 
     with pytest.raises(ValueError, match="main model"):
-        await broker.inspect("s1", ref["artifact_id"], focus="这个报错怎么解决？")
+        await broker.inspect("s1", ref["artifact_id"], question="这个报错怎么解决？")
 
-    first = await broker.inspect("s1", ref["artifact_id"], action="ocr", focus="报错是什么")
-    second = await broker.inspect("s1", ref["artifact_id"], action="ocr", focus="报错是什么")
-    third = await broker.inspect("s1", ref["artifact_id"], action="describe", focus="窗口布局")
+    first = await broker.inspect("s1", ref["artifact_id"], question="图中可见的报错是什么？")
+    second = await broker.inspect("s1", ref["artifact_id"], question="图中可见的报错是什么？")
+    third = await broker.inspect("s1", ref["artifact_id"], question="图中的窗口如何布局？")
     assert first["cached"] is False
     assert second["cached"] is True
     assert second["observation_id"] == first["observation_id"]
@@ -98,7 +95,7 @@ async def test_tool_uses_current_session_ownership(tmp_path):
 
     token = set_memory_scope(derive_memory_scope("session-b"))
     try:
-        result = await tool.execute(image_id=ref["artifact_id"])
+        result = await tool.execute(image_id=ref["artifact_id"], question="图中有什么？")
     finally:
         reset_memory_scope(token)
     assert "error" in result
@@ -133,7 +130,7 @@ async def test_text_main_gets_manifest_and_cannot_answer_before_observation(tmp_
                 "type": "function",
                 "function": {
                     "name": "image_inspect",
-                    "arguments": {"image_id": match.group(1), "action": "ocr", "focus": "可见报错是什么"},
+                    "arguments": {"image_id": match.group(1), "question": "用户这张截图中可见的报错是什么？"},
                 },
             }], finish_reason="tool_calls")
             return
@@ -155,10 +152,13 @@ async def test_text_main_gets_manifest_and_cannot_answer_before_observation(tmp_
     assert vision.calls
 
 
-def test_image_inspect_schema_has_bounded_observation_operations():
+def test_image_inspect_schema_requires_main_model_question_only():
     schema = ImageInspectTool.schema(object.__new__(ImageInspectTool))
-    actions = schema["parameters"]["properties"]["action"]["enum"]
-    assert actions == ["describe", "ocr", "locate", "compare"]
+    parameters = schema["parameters"]
+    assert set(parameters["properties"]) == {"image_id", "question"}
+    assert parameters["required"] == ["image_id", "question"]
+    assert parameters["additionalProperties"] is False
+    assert "dynamically written by the main model" in parameters["properties"]["question"]["description"]
     assert "solve" not in str(schema).lower()
     assert "do not diagnose causes" in VISION_SYSTEM_PROMPT.lower()
     assert "do not propose fixes" in VISION_SYSTEM_PROMPT.lower()
@@ -229,7 +229,7 @@ async def test_text_main_must_inspect_tool_generated_screenshot(tmp_path):
                 "type": "function",
                 "function": {
                     "name": "image_inspect",
-                    "arguments": {"image_id": match.group(1), "focus": "描述可见内容"},
+                    "arguments": {"image_id": match.group(1), "question": "用户要求截取的画面中可见什么？"},
                 },
             }], finish_reason="tool_calls")
         else:

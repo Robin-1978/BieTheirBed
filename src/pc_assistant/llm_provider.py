@@ -47,12 +47,14 @@ class LLMProvider:
         api_key: str = "",
         api_base: str = "",
         supports_vision: bool | None = None,
+        thinking: dict[str, Any] | None = None,
     ) -> None:
         self._provider = provider
         self._api_key = api_key
         self._model_name = model_name
         self._timeout = timeout
         self._max_retries = max_retries
+        self._thinking = dict(thinking) if thinking is not None else None
         self._cancelled = False
         self._session_cancel: dict[str, bool] = {}
         self._streams: dict[str, httpx.Response] = {}
@@ -218,6 +220,7 @@ class LLMProvider:
             tool_choice,
             cache_prompt=self._profile.cache_prompt,
             stream_options=False,
+            thinking=self._thinking,
         )
         apply_cache_control(payload["messages"], cache_control)
         try:
@@ -268,6 +271,7 @@ class LLMProvider:
             tool_choice,
             cache_prompt=self._profile.cache_prompt,
             stream_options=True,
+            thinking=self._thinking,
         )
         payload["stream"] = True
         apply_cache_control(payload["messages"], cache_control)

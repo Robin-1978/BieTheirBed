@@ -8,6 +8,7 @@ from pc_assistant.context.assembly import assemble_llm_messages, truncate_messag
 from pc_assistant.context.conversation import ConversationManager
 from pc_assistant.context.prompt import (
     build_runtime_context,
+    build_session_context,
     build_system_prompt,
 )
 from pc_assistant.observability.trace import LLMTraceRecorder
@@ -97,6 +98,19 @@ class TestCacheFriendlyLayout:
         )
         assert session_idx == len(truncated) - 2
         assert truncated[-1]["content"] == "final question"
+
+    def test_runtime_context_orders_stable_fields_before_current_time(self):
+        context = build_session_context(
+            working_directory="/workspace",
+            memory_context="preferred_language=zh",
+            os_info="Linux test",
+        )
+        os_pos = context.index("<os_info>")
+        cwd_pos = context.index("<working_directory>")
+        memory_pos = context.index("<user_memory>")
+        time_pos = context.index("<current_time>")
+        assert os_pos < cwd_pos < memory_pos < time_pos
+        assert context.rindex("</current_time>") < context.rindex("</session>")
 
 
 class TestTurnContextPlacement:
