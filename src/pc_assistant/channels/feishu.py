@@ -149,13 +149,17 @@ class FeishuChannel(ChannelBase):
         app_secret: str = "",
         receive_id: str = "",
         receive_id_type: str = "open_id",
+        runtime_root: str = "",
     ) -> None:
+        from pc_assistant.runtime import RuntimePaths
+
         self._app_id = app_id or os.environ.get("FEISHU_APP_ID", "")
         self._app_secret = app_secret or os.environ.get("FEISHU_APP_SECRET", "")
         self._receive_id = receive_id or os.environ.get("FEISHU_RECEIVE_ID", "")
         self._receive_id_type = receive_id_type or os.environ.get(
             "FEISHU_RECEIVE_ID_TYPE", "open_id"
         )
+        self._inbox_dir = RuntimePaths.from_root(runtime_root or None).attachments / "feishu-inbox"
 
         self._lark_client = None
         self._lark_lock = threading.RLock()
@@ -180,6 +184,14 @@ class FeishuChannel(ChannelBase):
         self._pending_confirm_lock = threading.Lock()
 
         self._user_locks: dict[str, asyncio.Lock] = {}
+
+        # Feishu image messages don't carry a natural-language question.
+        # Store them first, then bind the next message or an explicit reply to
+        # the exact attachment rather than inventing a fixed prompt.
+        self._image_refs_lock = threading.Lock()
+        self._image_refs_by_message: dict[str, tuple[str, float]] = {}
+        self._pending_image_refs_by_user: dict[str, list[tuple[str, float]]] = {}
+        self._active_image_refs_by_user: dict[str, list[tuple[str, float]]] = {}
 
         self._running = False
 
@@ -256,27 +268,46 @@ class FeishuChannel(ChannelBase):
         """Get the most recently active Feishu user open_id."""
         return self._get_receive_id()
 
-    def _download_image(self, image_key: str) -> str:
-        """Download a Feishu image message into a temp file and return its path."""
+    def _download_image(self, image_key: str, message_id: str) -> str:
+        """Download an image attached to a specific Feishu message."""
+        if not message_id:
+            raise ValueError("message_id is required to download a Feishu message image")
         client = self._get_lark_client()
-        from lark_oapi.api.im.v1 import GetImageRequest
-        from lark_oapi.core.const import FILE_STREAM_TYPE, JSON
+        from lark_oapi.api.im.v1 import GetMessageResourceRequest
 
         request = (
-            GetImageRequest.builder()
-            .image_key(image_key)
-            .extra({FILE_STREAM_TYPE: JSON})
+            GetMessageResourceRequest.builder()
+            .message_id(message_id)
+            .file_key(image_key)
+            .type("image")
             .build()
         )
-        resp = client.im.v1.image.get(request)
+        with self._lark_lock:
+            resp = client.im.v1.message_resource.get(request)
         if not resp.success() or not resp.file:
             raise RuntimeError(f"Feishu image download failed: {resp.code} {resp.msg}")
-        import tempfile
+        import uuid
 
-        fd, path = tempfile.mkstemp(suffix=".png", prefix="pcassist_feishu_")
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(resp.file.read())
-        return path
+        data = resp.file.read()
+        suffix = ".img"
+        try:
+            import io
+            from PIL import Image
+
+            with Image.open(io.BytesIO(data)) as image:
+                suffix = {
+                    "PNG": ".png",
+                    "JPEG": ".jpg",
+                    "WEBP": ".webp",
+                    "GIF": ".gif",
+                }.get(str(image.format or "").upper(), ".img")
+        except Exception:
+            pass
+        self._inbox_dir.mkdir(parents=True, exist_ok=True)
+        path = self._inbox_dir / f"feishu-{uuid.uuid4().hex}{suffix}"
+        with path.open("wb") as fh:
+            fh.write(data)
+        return str(path)
 
     def _save_open_id(self, open_id: str) -> None:
         try:
@@ -286,13 +317,118 @@ class FeishuChannel(ChannelBase):
         except Exception as e:
             logger.warning("Failed to save open_id: %s", e)
 
+    def _remember_image_ref(self, open_id: str, message_id: str, attachment_id: str) -> None:
+        expires_at = time.time() + 3600
+        with self._image_refs_lock:
+            if message_id:
+                self._image_refs_by_message[message_id] = (attachment_id, expires_at)
+            pending = self._pending_image_refs_by_user.setdefault(open_id, [])
+            pending.append((attachment_id, expires_at))
+            self._pending_image_refs_by_user[open_id] = pending[-4:]
+            self._active_image_refs_by_user[open_id] = pending[-4:]
+            self._prune_image_refs_locked()
+
+    def _prune_image_refs_locked(self) -> None:
+        now = time.time()
+        self._image_refs_by_message = {
+            key: value for key, value in self._image_refs_by_message.items()
+            if value[1] > now
+        }
+        for open_id, refs in list(self._pending_image_refs_by_user.items()):
+            live = [ref for ref in refs if ref[1] > now]
+            if live:
+                self._pending_image_refs_by_user[open_id] = live
+            else:
+                self._pending_image_refs_by_user.pop(open_id, None)
+        for open_id, refs in list(self._active_image_refs_by_user.items()):
+            live = [ref for ref in refs if ref[1] > now]
+            if live:
+                self._active_image_refs_by_user[open_id] = live
+            else:
+                self._active_image_refs_by_user.pop(open_id, None)
+
+    def _attachments_for_text(
+        self,
+        open_id: str,
+        *,
+        parent_id: str = "",
+        root_id: str = "",
+    ) -> list | None:
+        from pc_assistant.model_adapter.types import ImageAttachment
+
+        with self._image_refs_lock:
+            self._prune_image_refs_locked()
+            reply_ids = [item for item in (parent_id, root_id) if item]
+            attachment_ids: list[str] = []
+            for message_id in reply_ids:
+                stored = self._image_refs_by_message.get(message_id)
+                if stored and stored[0] not in attachment_ids:
+                    attachment_ids.append(stored[0])
+
+            if not reply_ids and not attachment_ids:
+                pending = self._pending_image_refs_by_user.pop(open_id, [])
+                attachment_ids = [attachment_id for attachment_id, _ in pending]
+            elif reply_ids and not attachment_ids:
+                # Replying to the bot's answer continues the active image
+                # thread even though the parent message itself isn't an image.
+                active = self._active_image_refs_by_user.get(open_id, [])
+                attachment_ids = [attachment_id for attachment_id, _ in active]
+            elif attachment_ids:
+                pending = self._pending_image_refs_by_user.get(open_id, [])
+                self._pending_image_refs_by_user[open_id] = [
+                    item for item in pending if item[0] not in attachment_ids
+                ]
+            if attachment_ids:
+                expires_at = time.time() + 3600
+                self._active_image_refs_by_user[open_id] = [
+                    (attachment_id, expires_at) for attachment_id in attachment_ids
+                ]
+
+        return [ImageAttachment.from_ref(item, caption="feishu image") for item in attachment_ids] or None
+
+    def _accept_image_message(
+        self,
+        open_id: str,
+        message_id: str,
+        image_key: str,
+    ) -> bool:
+        reaction_id = self._add_reaction(message_id, "Typing")
+        try:
+            from pc_assistant.model_adapter.types import ImageAttachment
+
+            path = self._download_image(image_key, message_id)
+            session_id = f"feishu:{open_id}"
+            stored = self._agent.store_attachment(
+                session_id,
+                ImageAttachment.from_path(path, caption="feishu image"),
+            )
+            self._remember_image_ref(open_id, message_id, stored["attachment_id"])
+            if message_id:
+                with self._msg_seen_lock:
+                    self._msg_seen[message_id] = time.time()
+            self._send_text(
+                open_id,
+                "🖼️ 图片已收到。请直接发送问题，或回复这张图片进行追问。",
+            )
+            logger.info("[IMAGE] Stored feishu image message=%s path=%s", message_id, path)
+            return True
+        except Exception as exc:
+            logger.error("[IMAGE] Failed to accept image: %s", exc, exc_info=True)
+            if message_id:
+                with self._msg_seen_lock:
+                    self._msg_seen[message_id] = time.time()
+            self._send_text(open_id, "❌ 图片下载失败，请稍后重试或重新发送图片。")
+            return False
+        finally:
+            self._remove_reaction(message_id, reaction_id)
+
     # ================================================================
     # Message Sending
     # ================================================================
 
-    def _add_reaction(self, msg_id: str, emoji_type: str = "OK") -> None:
+    def _add_reaction(self, msg_id: str, emoji_type: str = "Typing") -> str:
         if not msg_id:
-            return
+            return ""
         try:
             from lark_oapi.api.im.v1 import CreateMessageReactionRequest
             from lark_oapi.api.im.v1.model.create_message_reaction_request_body import (
@@ -312,13 +448,49 @@ class FeishuChannel(ChannelBase):
             )
             client = self._get_lark_client()
             if not self._lark_lock.acquire(timeout=3):
-                return
+                return ""
             try:
-                client.im.v1.message_reaction.create(request)
+                response = client.im.v1.message_reaction.create(request)
             finally:
                 self._lark_lock.release()
+            if response.success() and response.data:
+                return response.data.reaction_id or ""
+            logger.debug(
+                "Reaction create failed (non-critical): code=%s msg=%s",
+                response.code,
+                response.msg,
+            )
         except Exception as e:
             logger.debug("Reaction failed (non-critical): %s", e)
+        return ""
+
+    def _remove_reaction(self, msg_id: str, reaction_id: str) -> None:
+        if not msg_id or not reaction_id:
+            return
+        try:
+            from lark_oapi.api.im.v1 import DeleteMessageReactionRequest
+
+            request = (
+                DeleteMessageReactionRequest.builder()
+                .message_id(msg_id)
+                .reaction_id(reaction_id)
+                .build()
+            )
+            client = self._get_lark_client()
+            if not self._lark_lock.acquire(timeout=3):
+                return
+            try:
+                response = client.im.v1.message_reaction.delete(request)
+            finally:
+                self._lark_lock.release()
+            if not response.success():
+                logger.debug(
+                    "Reaction delete failed (non-critical): code=%s msg=%s",
+                    response.code,
+                    response.msg,
+                )
+        except Exception as e:
+            logger.debug("Reaction removal failed (non-critical): %s", e)
 
     def _send_text(self, open_id: str, text: str) -> bool:
         try:
@@ -458,41 +630,62 @@ class FeishuChannel(ChannelBase):
         path = artifact.get("path")
         return str(path) if path else ""
 
+    @staticmethod
+    def _wants_image_delivery(text: str, has_input_attachments: bool) -> bool:
+        if has_input_attachments:
+            return False
+        lowered = text.casefold()
+        markers = (
+            "截图", "截屏", "发图", "发给我", "发我", "让我看",
+            "screenshot", "screen capture", "send me the image", "send the image",
+        )
+        return any(marker in lowered for marker in markers)
+
     # ================================================================
     # Message Handling
     # ================================================================
 
-    def _handle_message(self, open_id: str, text: str, attachments: list | None = None) -> None:
-        if self._agent_loop is None:
-            self._send_text(open_id, "❌ Agent 未就绪")
-            return
-
-        text_stripped = text.strip()
-        if not text_stripped:
-            return
-
-        if text_stripped.startswith("/"):
-            if self._handle_slash_command(open_id, text_stripped):
-                return
-
-        with self._pending_confirm_lock:
-            pending = self._pending_confirm.get(open_id)
-            if pending is not None:
-                self._handle_confirm(open_id, text_stripped, pending)
-                return
-
-        future = asyncio.run_coroutine_threadsafe(
-            self._process_with_agent(open_id, text_stripped, attachments=attachments),
-            self._agent_loop,
-        )
+    def _handle_message(
+        self,
+        open_id: str,
+        text: str,
+        attachments: list | None = None,
+        msg_id: str = "",
+        reaction_id: str = "",
+    ) -> None:
         try:
-            future.result(timeout=_TURN_PROCESS_TIMEOUT)
-        except asyncio.TimeoutError:
-            future.cancel()
-            self._send_text(open_id, "❌ 处理超时，已取消，请简化问题重试")
-        except Exception as e:
-            logger.error("[HANDLE] Agent processing failed: %s", e, exc_info=True)
-            self._send_text(open_id, f"❌ 处理失败: {e}")
+            if self._agent_loop is None:
+                self._send_text(open_id, "❌ Agent 未就绪")
+                return
+
+            text_stripped = text.strip()
+            if not text_stripped:
+                return
+
+            if text_stripped.startswith("/"):
+                if self._handle_slash_command(open_id, text_stripped):
+                    return
+
+            with self._pending_confirm_lock:
+                pending = self._pending_confirm.get(open_id)
+                if pending is not None:
+                    self._handle_confirm(open_id, text_stripped, pending)
+                    return
+
+            future = asyncio.run_coroutine_threadsafe(
+                self._process_with_agent(open_id, text_stripped, attachments=attachments),
+                self._agent_loop,
+            )
+            try:
+                future.result(timeout=_TURN_PROCESS_TIMEOUT)
+            except asyncio.TimeoutError:
+                future.cancel()
+                self._send_text(open_id, "❌ 处理超时，已取消，请简化问题重试")
+            except Exception as e:
+                logger.error("[HANDLE] Agent processing failed: %s", e, exc_info=True)
+                self._send_text(open_id, f"❌ 处理失败: {e}")
+        finally:
+            self._remove_reaction(msg_id, reaction_id)
 
     def _handle_slash_command(self, open_id: str, text: str) -> bool:
         """Handle slash commands in Feishu. Returns True if handled."""
@@ -805,7 +998,7 @@ class FeishuChannel(ChannelBase):
             thinking_chunks: list[str] = []
             final_answer = ""
             error_msg = ""
-            sent_image_paths: set[str] = set()
+            image_candidates: list[tuple[str, bool]] = []
 
             async for event in self._agent.run(
                 text,
@@ -820,10 +1013,10 @@ class FeishuChannel(ChannelBase):
                     tool_calls_info.append(f"🔧 {tool_name}({args_brief})")
                 elif event.type == "tool_result":
                     image_path = self._tool_image_path(event)
-                    if image_path and image_path not in sent_image_paths:
-                        sent_image_paths.add(image_path)
-                        if not self._send_image(open_id, image_path):
-                            logger.error("[PROCESS] Failed to deliver screenshot: %s", image_path)
+                    if image_path and image_path not in {path for path, _ in image_candidates}:
+                        result = event.tool_result if isinstance(event.tool_result, dict) else {}
+                        has_grid = bool(isinstance(result.get("grid"), dict) and result["grid"].get("enabled"))
+                        image_candidates.append((image_path, has_grid))
                 elif event.type == "stream_think_delta":
                     if event.content:
                         thinking_chunks.append(event.content)
@@ -852,6 +1045,11 @@ class FeishuChannel(ChannelBase):
                 tools_summary = ""
 
             thinking_text = "".join(thinking_chunks).strip()
+            if self._wants_image_delivery(text, bool(attachments)) and image_candidates:
+                non_grid = [path for path, has_grid in image_candidates if not has_grid]
+                selected_image = non_grid[-1] if non_grid else image_candidates[-1][0]
+                if not self._send_image(open_id, selected_image):
+                    logger.error("[PROCESS] Failed to deliver screenshot: %s", selected_image)
             card = self._build_response_card(
                 final_answer or plain_response,
                 tool_calls_info,
@@ -937,8 +1135,6 @@ class FeishuChannel(ChannelBase):
                     break
                 open_id, text, msg_id, attachments = item
 
-                self._add_reaction(msg_id, "OK")
-
                 if msg_id:
                     with self._msg_seen_lock:
                         if msg_id in self._msg_seen:
@@ -983,9 +1179,10 @@ class FeishuChannel(ChannelBase):
                     open_id,
                     self._msg_queue.qsize(),
                 )
+                reaction_id = self._add_reaction(msg_id, "Typing")
                 threading.Thread(
                     target=self._handle_message,
-                    args=(open_id, text, attachments),
+                    args=(open_id, text, attachments, msg_id, reaction_id),
                     daemon=True,
                 ).start()
                 self._msg_queue.task_done()
@@ -1022,6 +1219,10 @@ class FeishuChannel(ChannelBase):
                 open_id = sender.sender_id.open_id
                 msg = ctx.event.message
                 msg_type = msg.message_type
+                msg_id = getattr(msg, "message_id", None) or ""
+                chat_id = getattr(msg, "chat_id", None) or ""
+                parent_id = getattr(msg, "parent_id", None) or ""
+                root_id = getattr(msg, "root_id", None) or ""
 
                 if msg_type not in ("text", "image"):
                     logger.info(
@@ -1037,24 +1238,23 @@ class FeishuChannel(ChannelBase):
                     if not text:
                         logger.info("[WS-RECV#%d] Empty text, skip", recv_seq)
                         return
+                    attachments = channel._attachments_for_text(
+                        open_id,
+                        parent_id=parent_id,
+                        root_id=root_id,
+                    )
                 else:  # image
                     image_key = content.get("image_key", "")
-                    text = "请看这张图片并描述/分析它的内容。"
                     if not image_key:
                         logger.info("[WS-RECV#%d] Image without image_key, skip", recv_seq)
                         return
-                    try:
-                        from pc_assistant.model_adapter.types import ImageAttachment
+                    if chat_id and open_id:
+                        channel._chat_id_cache[open_id] = chat_id
+                    if open_id and not channel._receive_id:
+                        channel._save_open_id(open_id)
+                    channel._accept_image_message(open_id, msg_id, image_key)
+                    return
 
-                        path = channel._download_image(image_key)
-                        attachments = [ImageAttachment.from_path(path, caption="feishu image")]
-                        logger.info("[WS-RECV#%d] Downloaded feishu image: %s", recv_seq, path)
-                    except Exception as e:
-                        logger.error("[WS-RECV#%d] Image download failed: %s", recv_seq, e, exc_info=True)
-                        return
-
-                msg_id = getattr(msg, "message_id", None) or ""
-                chat_id = getattr(msg, "chat_id", None) or ""
                 if chat_id and open_id:
                     channel._chat_id_cache[open_id] = chat_id
                 channel._msg_queue.put((open_id, text, msg_id, attachments))
@@ -1089,10 +1289,19 @@ class FeishuChannel(ChannelBase):
                 "toast": {"type": "error", "content": "处理失败"},
             })
 
+        def on_activity_event(_data):
+            # Read receipts and reaction events are expected side effects of
+            # the processing indicator. Registering a no-op prevents the SDK
+            # from logging them as unhandled processor errors.
+            channel._last_ws_activity = time.time()
+
         event_handler = (
             EventDispatcherHandler.builder("", "")
             .register_p2_im_message_receive_v1(on_im_message_receive)
             .register_p2_card_action_trigger(on_card_action)
+            .register_p2_im_message_message_read_v1(on_activity_event)
+            .register_p2_im_message_reaction_created_v1(on_activity_event)
+            .register_p2_im_message_reaction_deleted_v1(on_activity_event)
             .build()
         )
 
@@ -1174,7 +1383,7 @@ class FeishuChannel(ChannelBase):
                 seen_ids = set(self._msg_seen.keys())
 
             for m in reversed(messages):
-                if m.msg_type != "text":
+                if m.msg_type not in ("text", "image"):
                     continue
                 if not m.sender or m.sender.sender_type != "user":
                     continue
@@ -1211,9 +1420,26 @@ class FeishuChannel(ChannelBase):
                 content_str = m.body.content if m.body and m.body.content else ""
                 try:
                     content = json.loads(content_str)
-                    text = content.get("text", "").strip()
                 except (json.JSONDecodeError, TypeError):
-                    text = content_str.strip()
+                    content = {}
+
+                attachments = None
+                if m.msg_type == "image":
+                    image_key = content.get("image_key", "")
+                    if not image_key:
+                        continue
+                    self._accept_image_message(receive_id, msg_id, image_key)
+                    recovered += 1
+                    continue
+                else:
+                    text = content.get("text", "").strip() if content else content_str.strip()
+                    parent_id = getattr(m, "parent_id", None) or ""
+                    root_id = getattr(m, "root_id", None) or ""
+                    attachments = self._attachments_for_text(
+                        receive_id,
+                        parent_id=parent_id,
+                        root_id=root_id,
+                    )
                 if not text:
                     with self._msg_seen_lock:
                         self._msg_seen[msg_id] = now
@@ -1225,7 +1451,7 @@ class FeishuChannel(ChannelBase):
                     msg_id,
                     msg_age,
                 )
-                self._msg_queue.put((receive_id, text, msg_id, None))
+                self._msg_queue.put((receive_id, text, msg_id, attachments))
                 recovered += 1
 
             self._last_poll_ts = now

@@ -5,7 +5,7 @@ def build_parser() -> "argparse.ArgumentParser":
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog="pc-assistant",
+        prog="pca",
         description="PC Assistant - A Python computer assistant agent",
     )
     parser.add_argument(
@@ -612,7 +612,6 @@ def _stop_service() -> int:
 
 def _start_service(config_path: str | None, log_dir: str | None) -> int:
     """Start the daemon and wait until it is ready."""
-    import shutil
     import subprocess
     import sys as _sys
     from pathlib import Path
@@ -625,13 +624,10 @@ def _start_service(config_path: str | None, log_dir: str | None) -> int:
         print(f"Log: {_service_log_path()}")
         return 0
 
-    exe = shutil.which("pc-assistant")
-    if exe is None:
-        exe = [_sys.executable, "-m", "pc_assistant.service"]
-    else:
-        exe = [exe]
-
-    cmd = [*exe, "--serve", "--daemon"]
+    # Spawn the dedicated service module directly. This avoids recursively
+    # entering the user-facing CLI and keeps restart working even before the
+    # renamed `pca` console script has been reinstalled.
+    cmd = [_sys.executable, "-m", "pc_assistant.service", "--daemon"]
     if log_dir:
         cmd += [f"--log-dir={Path(log_dir).expanduser()}"]
     if config_path:

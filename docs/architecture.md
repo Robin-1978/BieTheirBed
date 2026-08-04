@@ -140,7 +140,8 @@ the main loop.
 - Assemble cache-friendly request messages.
 - Preserve tool-call/result grouping during truncation.
 - Estimate tokens, compact old turns, and inject session/memory context.
-- Maintain user, episodic, and procedural memory.
+- Maintain principal-scoped core/relevant memory, session-scoped episodes, and
+  procedural rules.
 
 **Current fact:** `ConversationManager.Message.content` accepts strings and
 content-block lists, but durable multimodal content is restricted to bounded
@@ -311,19 +312,33 @@ assembly contains:
 |---|---|---|
 | System prompt | application | always present |
 | Conversation transcript | session | at most the latest eight dialogue turns, then token truncation |
-| UserMemory profile | global process/storage | up to ten highest-confidence items, not session/principal filtered |
-| EpisodicMemory | global process/storage | latest three episodes, currently not session filtered |
-| Procedural rules | application/workspace | bounded shared rules |
+| Core user memory | principal | at most 12 stable, confirmed items; always injected |
+| Relevant user memory | principal + current query | up to five matching SQLite records |
+| Episodic memory | principal + session | not automatically injected; explicit recall only |
+| Procedural rules | application | bounded shared rules |
 | Working-directory/session metadata | current request | always regenerated |
 | Evidence/safety instruction | current turn | only when required |
 | Image observations | session + request | durable references; request-only binary hydration |
 
-Other sessions' raw conversation messages are not copied into the current
-`SessionState`. However, global UserMemory and unfiltered EpisodicMemory mean
-facts or summaries originating in another session can currently enter the
-request. For Feishu this also means different users do not yet have isolated
-user-memory namespaces. This is a context-scope defect, not conversation-store
-interleaving.
+Feishu image messages are downloaded into the runtime attachment inbox,
+converted to an `ImageAttachment`, and registered to the session without a
+second byte-for-byte copy before provider hydration. The SQLite database stores only attachment
+metadata/references; image bytes remain in bounded temporary files.
+
+Image messages are attachment ingress, not implicit prompts. Feishu stores the
+image and asks the user for a question; the next top-level message consumes the
+pending image, an explicit reply targets that exact image message, and a reply
+to the assistant continues the active image thread. Historical image
+references remain in canonical history but are not rehydrated on unrelated
+turns. This prevents every old screenshot from repeatedly consuming the vision
+context budget.
+
+Other sessions' raw conversation messages are never copied into the current
+`SessionState`. Durable domain state is stored in `data/assistant.db`: profile
+facts are partitioned by `principal_id`, episodes by both `principal_id` and
+`session_id`, and schedules use a separate table. Feishu principals derive
+from the sender open ID; local TUI/CLI sessions share the local principal.
+Unknown channel namespaces fail closed to a session-specific principal.
 
 ### 4.5 Target complete-context design
 
@@ -331,8 +346,8 @@ Context should be assembled from typed, independently budgeted segments rather
 than one implicit prompt string. Each segment needs at least:
 
 ```text
-scope: application | principal | workspace | session | turn
-owner_id: principal/workspace/session identifier where applicable
+scope: application | principal | session | turn
+owner_id: principal/session identifier where applicable
 source: user | system | tool | memory | channel
 trust: trusted-policy | user-stated | observed | model-derived
 sensitivity: public | private | secret
@@ -344,12 +359,24 @@ provenance reference
 Recommended request order and default policy:
 
 1. Immutable system and safety policy.
-2. Workspace/project rules explicitly selected for the active workspace.
-3. Principal-scoped user preferences, never global across unrelated users.
-4. Current-session transcript and current-session summary only.
-5. Query-relevant episodic retrieval restricted to the same principal; other
-   sessions require an explicit cross-session recall policy.
+2. A small confirmed core profile for the current principal.
+3. Query-relevant memory for the current principal.
+4. Current-session transcript and optional current-session summary only.
+5. Episodic records only after explicit recall, restricted to the same
+   principal and session.
 6. Current-turn input, attachments, tool observations, and evidence directive.
+
+There is deliberately no required `workspace_id`: this is a general-purpose
+agent, and durable identity should not fragment when the working directory
+changes. Project-specific facts may carry optional tags or a context key, but
+those are retrieval metadata rather than an ownership boundary.
+
+Profile keys must name their subject and meaning. Examples include
+`user_name`, `assistant_name`, `preferred_language`,
+`preferred_answer_style`, and `delete_requires_confirmation`. Ambiguous keys
+such as `name`, `language`, `style`, `browser`, or `framework` are rejected.
+Core writes require confirmation; ordinary conversation and model inference do
+not silently become durable memory.
 
 The assembler should enforce separate budgets for policy, transcript, memory,
 retrieval, and observations. It should emit a metadata-only `ContextManifest`
@@ -361,7 +388,6 @@ Clear operations also require explicit semantics:
 
 - `/clear`: current session transcript, pending observations, and attachments.
 - `/memory clear`: current principal's durable profile and episodes.
-- Workspace-rule deletion: separate administrative operation.
 - No command should silently clear or expose another principal/session.
 
 ## 5. Architecture invariants
@@ -420,7 +446,7 @@ upload images first and run requests accept `attachment_id` references only.
 
 ### AR-005: Runtime path ownership was fragmented — high (fixed 2026-08-04)
 
-`RuntimePaths` now resolves sibling `logs/`, `attachments/`, and `cache/`
+`RuntimePaths` now resolves sibling `logs/`, `attachments/`, `cache/`, and `data/`
 directories from `runtime_root`. Application, service, audit, trace,
 idempotency, attachment, and screenshot paths consume this layout; socket/PID
 files retain OS runtime placement. Service startup failure cancels its periodic
@@ -487,15 +513,34 @@ binary content, and reject paths escaping that root. Feishu uploads and sends
 declared image artifacts while ignoring arbitrary tool paths. Filesystem paths
 expand `~` and resolve relative paths against configured `working_directory`.
 
-### AR-013: Durable memory scope is broader than session/principal — high
+### AR-013: Durable memory scope was broader than session/principal — high (fixed 2026-08-04)
 
-Session transcripts are isolated, but `UserMemory` is one global store and
-`EpisodicMemory.build_context_string()` selects recent episodes without
-filtering `session_id`. Consequently, another session's summary can enter the
-current request, and different Feishu users can share extracted profile facts.
-The repair is a principal/workspace/session scope model plus default-deny
-cross-session retrieval. This should be implemented behind a context assembler
-and memory repository boundary, not by copying more history into Conversation.
+The former global JSON stores could leak profile facts and recent episodes
+between sessions and Feishu users. The default repository is now transactional
+SQLite under the runtime data directory. Profile memory is owned by
+`principal_id`; episodic memory is owned by `principal_id + session_id` and is
+never automatically injected. Core and relevant retrieval are separate,
+ambiguous keys are rejected, and ordinary chat text is not auto-persisted.
+
+### AR-014: Durable tool state used ad-hoc files — medium (fixed 2026-08-04)
+
+Scheduler tasks previously used `data/scheduled_tasks.json`, relative to the
+process working directory. They now use a dedicated `scheduled_tasks` table in
+`~/.pc-assistant/data/assistant.db`. SQLite is the shared transactional store
+for durable domain state. Logs remain append-only files, attachments remain
+files, configuration remains YAML/environment input, and caches remain
+rebuildable files; not every byte belongs in a database.
+
+### AR-015: Visual artifacts leaked internal observations to channels — medium (fixed 2026-08-04)
+
+The Feishu channel previously sent every image-producing tool result
+immediately. A single turn could therefore expose both an intended screenshot
+and a later internal grid observation. Channel delivery is now deferred until
+the turn completes, requires an explicit user request for an image, emits at
+most one artifact, and prefers a non-grid capture. Screen observations use PNG
+and default to no grid; coordinate grids require an explicit tool argument.
+Managed image paths are registered directly by `AttachmentStore` instead of
+copying identical bytes into a second session file.
 
 ## 7. Defect-hardening matrix
 
@@ -510,7 +555,7 @@ and memory repository boundary, not by copying more history into Conversation.
 | P2 | Vision compatibility is a boolean | Provider/model/role/MIME limits are collapsed into `supports_vision` | Typed provider capability contract | fixed; provider limits and role serialization tested |
 | P2 | TUI selection copy was shadowed by cancellation and popup behavior | App-level key override and GUI-style root popup | Restore Textual copy semantics, move cancellation to Esc, use OSC52 plus local clipboard | fixed |
 | P2 | Screenshot files and Feishu delivery are implicit | Generic CWD filenames and ignored tool-result image paths | Unified temporary artifact allocator plus explicit channel-safe image metadata | fixed; filesystem and Feishu regressions added |
-| P1 | Durable memory crosses session/principal boundaries | Global UserMemory and unfiltered recent EpisodicMemory are injected into every request | Typed principal/workspace/session scopes with default-deny cross-session retrieval | open; architecture target recorded |
+| P1 | Durable memory crosses session/principal boundaries | Global UserMemory and unfiltered recent EpisodicMemory are injected into every request | SQLite principal/session scopes, core/relevant policy, explicit episode recall | fixed; scoped regressions added |
 
 ## 8. Hardening boundaries
 

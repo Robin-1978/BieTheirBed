@@ -39,7 +39,7 @@ feishu = [
 ]
 
 [project.scripts]
-pc-assistant = "pc_assistant:main"
+pca = "pc_assistant:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pc_assistant"]

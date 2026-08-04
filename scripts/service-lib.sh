@@ -2,19 +2,19 @@
 # Shared helpers for the PC Assistant service scripts.
 # Source this file, then call service_start / service_stop / service_is_running.
 #
-# Runtime files live under $XDG_RUNTIME_DIR/pc-assistant (or ~/.local/run/pc-assistant):
-#   service.pid   service.sock   service.log
+# PID/socket live below the OS runtime directory. Service logs live below
+# ~/.pc-assistant/logs by default.
 
 SERVICE_RUNTIME_DIR="${XDG_RUNTIME_DIR:-$HOME/.local/run}/pc-assistant"
 SERVICE_PID_FILE="$SERVICE_RUNTIME_DIR/service.pid"
 SERVICE_SOCK_FILE="$SERVICE_RUNTIME_DIR/service.sock"
-SERVICE_LOG_FILE="$SERVICE_RUNTIME_DIR/service.log"
+SERVICE_LOG_FILE="${PC_ASSISTANT_HOME:-$HOME/.pc-assistant}/logs/service.log"
 
-SERVICE_BIN="$(command -v pc-assistant 2>/dev/null || true)"
+SERVICE_BIN="$(command -v pca 2>/dev/null || true)"
 
 service_require_bin() {
     if [ -z "$SERVICE_BIN" ]; then
-        echo "ERROR: 'pc-assistant' not found on PATH. Install with: pip install -e ." >&2
+        echo "ERROR: 'pca' not found on PATH. Install with: pip install -e ." >&2
         exit 1
     fi
 }

@@ -217,9 +217,11 @@ class TestServerLifecycle:
         unix_server.close.assert_called_once()
         unix_server.wait_closed.assert_awaited_once()
 
-    def test_service_log_uses_configured_runtime_root(self, tmp_path):
+    def test_service_log_uses_configured_runtime_root(self, tmp_path, monkeypatch):
         from pc_assistant.service.server import resolve_service_log
 
+        monkeypatch.delenv("PC_RUNTIME_ROOT", raising=False)
+        monkeypatch.delenv("PC_ASSISTANT_HOME", raising=False)
         config_path = tmp_path / "config.yaml"
         runtime_root = tmp_path / "runtime"
         config_path.write_text(f"runtime_root: {runtime_root}\n", encoding="utf-8")
@@ -417,6 +419,36 @@ class TestServerClientIntegration:
 
 
 class TestLifecycle:
+    def test_cli_start_uses_dedicated_service_module(self, tmp_path):
+        import sys
+        import pc_assistant
+
+        with (
+            patch.object(pc_assistant, "_service_state", side_effect=[(False, None), (True, 1234)]),
+            patch.object(pc_assistant, "_wait_for_running", return_value=True),
+            patch("subprocess.Popen") as popen,
+        ):
+            result = pc_assistant._start_service(
+                str(tmp_path / "config.yaml"),
+                str(tmp_path / "logs"),
+            )
+
+        assert result == 0
+        command = popen.call_args.args[0]
+        assert command[:4] == [sys.executable, "-m", "pc_assistant.service", "--daemon"]
+        assert "--serve" not in command
+        assert "--config" in command
+
+    def test_auto_start_uses_executable_service_module(self):
+        from pc_assistant.config import AppConfig
+        from pc_assistant.service import lifecycle
+
+        with patch("pc_assistant.service.lifecycle.subprocess.Popen") as popen:
+            assert lifecycle._start_daemon(AppConfig()) is True
+
+        command = popen.call_args.args[0]
+        assert command[1:4] == ["-m", "pc_assistant.service", "--daemon"]
+
     def test_is_running_no_pid(self, tmp_path):
         with patch("pc_assistant.service.server.PID_PATH", tmp_path / "nope.pid"):
             from pc_assistant.service.server import is_running

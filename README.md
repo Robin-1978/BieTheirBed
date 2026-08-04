@@ -15,7 +15,7 @@ A Python desktop AI agent with ReAct reasoning, multi-LLM support, tool calling,
 - **MCP Adapter** — Register tools from any MCP-compatible server
 - **Safety Guardrails** — Dangerous command blocking, protected paths, user confirmation, typed refusal codes
 - **Idempotency** — Side-effecting tools are protected against duplicate execution on retry
-- **Tiered Memory** — User memory (key-value), episodic memory (session summaries), procedural memory (persistent rules)
+- **Scoped Memory** — Principal-scoped core/relevant preferences plus session-scoped episodes in SQLite
 - **Reflection** — Optional self-critique before yielding final answers
 - **Rich TUI** — Streaming output, thinking visualization, status bar, slash commands
 - **Feishu Bot** — Session-safe Feishu/Lark WebSocket integration
@@ -31,16 +31,16 @@ A Python desktop AI agent with ReAct reasoning, multi-LLM support, tool calling,
 pip install -e .
 
 # Run with local llama.cpp server (default)
-pc-assistant
+pca
 
 # Run with OpenAI-compatible API
-PC_LLM_PROVIDER=openai_compatible PC_LLM_API_BASE=http://localhost:11434/v1 PC_LLM_MODEL_NAME=qwen3 pc-assistant
+PC_LLM_PROVIDER=openai_compatible PC_LLM_API_BASE=http://localhost:11434/v1 PC_LLM_MODEL_NAME=qwen3 pca
 
 # Run with Anthropic
-PC_LLM_PROVIDER=anthropic PC_LLM_API_KEY=sk-ant-... pc-assistant
+PC_LLM_PROVIDER=anthropic PC_LLM_API_KEY=sk-ant-... pca
 
 # Run with OpenAI
-PC_LLM_PROVIDER=openai PC_LLM_API_KEY=sk-... PC_LLM_MODEL_NAME=gpt-4o pc-assistant
+PC_LLM_PROVIDER=openai PC_LLM_API_KEY=sk-... PC_LLM_MODEL_NAME=gpt-4o pca
 ```
 
 ## Configuration
@@ -83,10 +83,28 @@ All config fields can be overridden with `PC_` prefix:
 | `PC_LLM_TRACE_LOG` | llm_trace_log |
 | `PC_TURN_TRACE_LOG` | turn_trace_log |
 | `PC_EVIDENCE_POLICY_ENABLED` | evidence_policy_enabled |
+| `PC_ASSISTANT_HOME` | runtime_root (friendly alias) |
+| `PC_RUNTIME_ROOT` | runtime_root |
 
 ### Runtime config
 
 Use `/config set key=value` in the chat to change settings at runtime.
+
+### Runtime data
+
+By default, mutable application state is kept outside the source tree under
+`~/.pc-assistant/`:
+
+```text
+~/.pc-assistant/
+├── logs/          # application, service, audit, and trace logs
+├── attachments/   # temporary uploads and screenshots
+├── cache/         # idempotency and other rebuildable state
+└── data/          # assistant.db and procedural memory
+```
+
+Set `PC_ASSISTANT_HOME` (or `PC_RUNTIME_ROOT`) to override this root. Service
+socket and PID files use the operating system runtime directory.
 
 ## Slash Commands
 
@@ -161,7 +179,9 @@ src/pc_assistant/
 ├── context/
 │   ├── assembly.py      # Cache-friendly message assembly & truncation
 │   ├── conversation.py  # Conversation history management
-│   ├── memory.py        # UserMemory + EpisodicMemory + ProceduralMemory
+│   ├── memory.py        # Memory value types + procedural/legacy adapters
+│   ├── memory_db.py     # Principal/session-scoped SQLite memory repository
+│   ├── scope.py         # Request-local principal_id + session_id
 │   ├── prompt.py        # System prompt & session context builders
 │   ├── compact.py       # Heuristic history compression
 │   ├── llm_compact.py   # LLM-assisted compaction (optional)

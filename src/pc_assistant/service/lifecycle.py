@@ -75,7 +75,7 @@ async def get_agent_or_client(config: AppConfig, *, no_tools: bool = False) -> A
 def _start_daemon(config: AppConfig) -> bool:
     """Fork a daemon process. Returns True if spawn succeeded."""
     try:
-        cmd = [sys.executable, "-m", "pc_assistant.service.server", "--daemon"]
+        cmd = [sys.executable, "-m", "pc_assistant.service", "--daemon"]
         if config.source_config_path:
             cmd.extend(["--config", config.source_config_path])
 

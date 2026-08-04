@@ -26,7 +26,7 @@ class ScreenTool(ToolBase):
     def __init__(
         self,
         *,
-        grid_enabled: bool = True,
+        grid_enabled: bool = False,
         max_side: int = 1280,
         jpeg_quality: int = 70,
         artifact_dir: str | Path | None = None,
@@ -105,7 +105,7 @@ class ScreenTool(ToolBase):
         try:
             save_path = self._artifacts.allocate(
                 prefix=f"screen-{action}",
-                suffix=".jpg",
+                suffix=".png",
                 requested=kwargs.get("path"),
             )
         except ValueError as exc:
@@ -159,7 +159,7 @@ class ScreenTool(ToolBase):
         result: dict[str, Any] = {
             "success": True,
             "path": str(save_path),
-            "artifact": image_artifact(save_path, "image/jpeg"),
+            "artifact": image_artifact(save_path, "image/png"),
             "image": block,
             "screen_size": {"width": screen_w, "height": screen_h},
             "image_size": {"width": image_w, "height": image_h},

@@ -6,6 +6,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def default_runtime_root() -> Path:
+    """Return the per-user application state directory."""
+    configured = os.environ.get("PC_ASSISTANT_HOME")
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / ".pc-assistant"
+
+
 def os_runtime_dir() -> Path:
     xdg = os.environ.get("XDG_RUNTIME_DIR")
     if xdg:
@@ -18,8 +26,9 @@ class RuntimePaths:
     root: Path
 
     @classmethod
-    def from_root(cls, root: str | Path = ".") -> "RuntimePaths":
-        return cls(Path(root).expanduser().resolve())
+    def from_root(cls, root: str | Path | None = None) -> "RuntimePaths":
+        selected = default_runtime_root() if root in (None, "") else Path(root)
+        return cls(selected.expanduser().resolve())
 
     @property
     def logs(self) -> Path:
@@ -32,6 +41,10 @@ class RuntimePaths:
     @property
     def cache(self) -> Path:
         return self.root / "cache"
+
+    @property
+    def data(self) -> Path:
+        return self.root / "data"
 
     @property
     def socket(self) -> Path:

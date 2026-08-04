@@ -72,6 +72,7 @@ def create_channels_from_config(config: Any) -> ChannelManager:
                 app_secret=config.feishu_app_secret,
                 receive_id=config.feishu_receive_id,
                 receive_id_type=config.feishu_receive_id_type,
+                runtime_root=config.runtime_root,
             )
             manager.add(ch)
         except ImportError:

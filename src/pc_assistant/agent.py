@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 import time
+from pathlib import Path
 from typing import Any, AsyncGenerator, Awaitable
 
 from pydantic import BaseModel
@@ -15,7 +16,13 @@ from pc_assistant.context.cache import build_cache_plan
 from pc_assistant.context.conversation import ConversationManager
 from pc_assistant.context.evidence import EvidencePolicy
 from pc_assistant.context.llm_compact import compact_conversation_llm
-from pc_assistant.context.memory import EpisodicMemory, ProceduralMemory, UserMemory
+from pc_assistant.context.memory import ProceduralMemory, UserMemory
+from pc_assistant.context.memory_db import (
+    SQLiteMemoryRepository,
+    ScopedEpisodicMemory,
+    ScopedUserMemory,
+)
+from pc_assistant.context.scope import derive_memory_scope, reset_memory_scope, set_memory_scope
 from pc_assistant.context.prompt import build_system_prompt
 from pc_assistant.context.token_estimate import TokenEstimator, normalize_family
 from pc_assistant.harness.audit import AuditLogger
@@ -123,9 +130,16 @@ class Agent:
             timeout=self._config.llm_timeout,
             supports_vision=self._config.supports_vision,
         )
-        self._memory = memory if memory is not None else UserMemory()
-        self._episodic_memory = EpisodicMemory()
-        self._procedural_memory = ProceduralMemory()
+        self._memory_repository = SQLiteMemoryRepository(
+            self._runtime_paths.data / "assistant.db",
+        )
+        self._memory = memory if memory is not None else ScopedUserMemory(
+            self._memory_repository,
+        )
+        self._episodic_memory = ScopedEpisodicMemory(self._memory_repository)
+        self._procedural_memory = ProceduralMemory(
+            self._runtime_paths.data / "procedures",
+        )
         self._safety = safety if safety is not None else SafetyChecker(
             dangerous_commands=self._config.dangerous_commands,
             protected_paths=self._config.protected_paths,
@@ -398,22 +412,35 @@ class Agent:
                 except ValueError:
                     block = None
             elif att.path:
-                image_block = image_block_from_file(
-                    att.path,
-                    max_side=self._config.vision_max_side,
-                    quality=self._config.vision_jpeg_quality,
-                )
-                if image_block is not None:
-                    try:
-                        block = self._attachment_store.put_data_url(
-                            session_id,
-                            image_block["image_url"],
-                            media_type=image_block.get("media_type", att.media_type),
-                            source="file",
-                            caption=att.caption,
-                        )
-                    except ValueError:
+                attachment_path = Path(att.path).expanduser().resolve()
+                try:
+                    attachment_path.relative_to(self._attachment_store.root.resolve())
+                    block = self._attachment_store.register_path(
+                        session_id,
+                        attachment_path,
+                        media_type=att.media_type,
+                        source="managed-file",
+                        caption=att.caption,
+                    )
+                except (ValueError, OSError):
+                    image_block = image_block_from_file(
+                        attachment_path,
+                        max_side=self._config.vision_max_side,
+                        quality=self._config.vision_jpeg_quality,
+                    )
+                    if image_block is None:
                         block = None
+                    else:
+                        try:
+                            block = self._attachment_store.put_data_url(
+                                session_id,
+                                image_block["image_url"],
+                                media_type=image_block.get("media_type", att.media_type),
+                                source="file",
+                                caption=att.caption,
+                            )
+                        except ValueError:
+                            block = None
             if block is None:
                 continue
             if att.caption:
@@ -451,14 +478,22 @@ class Agent:
             return None
         path = result.get("path", "")
         try:
-            ref = self._attachment_store.put_data_url(
+            ref = self._attachment_store.register_path(
                 session_id,
-                str(block.get("image_url", "")),
-                media_type=str(block.get("media_type", "image/jpeg")),
+                path,
+                media_type=str(block.get("media_type", "image/png")),
                 source=f"tool:{tool_name}",
             )
         except ValueError:
-            return None
+            try:
+                ref = self._attachment_store.put_data_url(
+                    session_id,
+                    str(block.get("image_url", "")),
+                    media_type=str(block.get("media_type", "image/png")),
+                    source=f"tool:{tool_name}",
+                )
+            except ValueError:
+                return None
         return [
             {"type": "text", "text": f"[inline image from {tool_name}: {path}]"},
             ref,
@@ -591,7 +626,7 @@ class Agent:
             ),
             KeyboardTool(),
             MouseTool(),
-            SchedulerTool(),
+            SchedulerTool(self._runtime_paths.data / "assistant.db"),
             DescribeTool(registry=self._registry),
         ]
         for tool in builtin_tools:
@@ -702,15 +737,19 @@ class Agent:
             return
 
         state = self._get_state(session_id)
-        async with state.run_lock:
-            async for event in self._run_serialized(
-                state,
-                user_input,
-                session_id=session_id,
-                confirm_callback=confirm_callback,
-                attachments=attachments,
-            ):
-                yield event
+        scope_token = set_memory_scope(derive_memory_scope(state.session_id))
+        try:
+            async with state.run_lock:
+                async for event in self._run_serialized(
+                    state,
+                    user_input,
+                    session_id=session_id,
+                    confirm_callback=confirm_callback,
+                    attachments=attachments,
+                ):
+                    yield event
+        finally:
+            reset_memory_scope(scope_token)
 
     async def _run_serialized(
         self,
@@ -769,15 +808,8 @@ class Agent:
                 state.rollback_if_needed()
             else:
                 state.snapshot_len = -1
-                extracted = self._memory.extract_from_text(user_input)
-                for key, value, category, source in extracted:
-                    self._memory.store(key, value, category=category, source=source)
-                if evidence_tool_calls > 0:
-                    self._episodic_memory.store_episode(
-                        summary=user_input[:200],
-                        session_id=session_id,
-                        tool_calls=evidence_tool_calls,
-                    )
+                # Long-term memory is explicit. Ordinary conversation text and
+                # tool use must not silently become durable user memory.
             self._record_turn(
                 state,
                 user_input,
@@ -816,10 +848,13 @@ class Agent:
         else:
             conv.add_user_with_blocks(user_input, attachment_blocks)
 
-        memory_parts = [self._memory.build_context_string()]
-        episodic_ctx = self._episodic_memory.build_context_string()
-        if episodic_ctx:
-            memory_parts.append(episodic_ctx)
+        if isinstance(self._memory, ScopedUserMemory):
+            user_memory_context = self._memory.build_context_string(query=user_input)
+        else:
+            # Preserve the injected legacy UserMemory seam while the default
+            # implementation uses query-aware, principal-scoped retrieval.
+            user_memory_context = self._memory.build_context_string()
+        memory_parts = [user_memory_context]
         procedural_ctx = self._procedural_memory.build_context_string()
         if procedural_ctx:
             memory_parts.append(procedural_ctx)
