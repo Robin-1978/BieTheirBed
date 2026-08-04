@@ -48,6 +48,7 @@ class ServiceServer:
         self._tcp_server: Any = None
         self._clients: dict[str, ServerConnection] = {}
         self._confirm_futures: dict[tuple[str, str], tuple[str, asyncio.Future[bool]]] = {}
+        self._run_tasks: dict[str, asyncio.Task] = {}
         self._channel_manager: Any = None
         self._running = False
 
@@ -188,6 +189,9 @@ class ServiceServer:
             logger.error("Client %s error: %s", client_id, e)
         finally:
             self._clients.pop(client_id, None)
+            run_task = self._run_tasks.pop(client_id, None)
+            if run_task is not None and not run_task.done():
+                run_task.cancel()
             self._resolve_client_confirm_futures(client_id, approved=False)
             logger.info("Client disconnected: %s", client_id)
 
@@ -212,7 +216,13 @@ class ServiceServer:
         msg: ClientMessage,
     ) -> None:
         if msg.method == "run":
-            await self._handle_run(ws, client_id, msg)
+            logger.info("RUN from %s session=%s", client_id, msg.session_id)
+            old = self._run_tasks.pop(client_id, None)
+            if old is not None and not old.done():
+                old.cancel()
+            task = asyncio.create_task(self._handle_run(ws, client_id, msg))
+            self._run_tasks[client_id] = task
+            task.add_done_callback(self._make_run_done_cb(client_id))
         elif msg.method == "cancel":
             self._handle_cancel(msg)
         elif msg.method == "confirm":
@@ -227,6 +237,17 @@ class ServiceServer:
             await ws.send(serialize(
                 ServerMessage.error(msg.id, f"Unknown method: {msg.method}")
             ))
+
+    def _make_run_done_cb(self, client_id: str):
+        """Return a done callback that drops the tracked run task on finish."""
+
+        def _on_done(task: asyncio.Task) -> None:
+            if self._run_tasks.get(client_id) is task:
+                self._run_tasks.pop(client_id, None)
+            if not task.cancelled() and task.exception() is not None:
+                logger.error("Run task error for %s: %s", client_id, task.exception())
+
+        return _on_done
 
     # ── Method handlers ───────────────────────────────────────
 
@@ -251,10 +272,14 @@ class ServiceServer:
             key = (client_id, code)
             future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
             self._confirm_futures[key] = (session_id, future)
+            logger.info("CONFIRM_REQUEST client=%s code=%s tool=%s", client_id, code, tool_name)
             await ws.send(serialize(ServerMessage.confirm_request(tool_name, tool_args, code)))
             try:
-                return await asyncio.wait_for(future, timeout=CONFIRM_TIMEOUT)
+                result = await asyncio.wait_for(future, timeout=CONFIRM_TIMEOUT)
+                logger.info("CONFIRM_RESOLVED client=%s code=%s result=%s", client_id, code, result)
+                return result
             except (asyncio.TimeoutError, asyncio.CancelledError):
+                logger.info("CONFIRM_TIMEOUT client=%s code=%s", client_id, code)
                 return False
             finally:
                 self._confirm_futures.pop(key, None)
@@ -274,6 +299,7 @@ class ServiceServer:
             self._resolve_client_confirm_futures(client_id, approved=False)
 
         await ws.send(serialize(ServerMessage.result(msg.id, {"done": True})))
+        logger.info("RUN done client=%s session=%s", client_id, session_id)
 
     def _handle_cancel(self, msg: ClientMessage) -> None:
         if self._agent is None:
@@ -289,6 +315,7 @@ class ServiceServer:
     def _handle_confirm(self, ws: ServerConnection, client_id: str, msg: ClientMessage) -> None:
         code = msg.params.get("code", "")
         approved = msg.params.get("approved", False)
+        logger.info("CONFIRM_REPLY client=%s code=%s approved=%s", client_id, code, approved)
         entry = self._confirm_futures.pop((client_id, code), None)
         if entry is not None and not entry[1].done():
             entry[1].set_result(approved)
