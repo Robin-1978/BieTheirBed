@@ -51,6 +51,14 @@ class AppConfig(BaseModel):
     feishu_receive_id_type: str = "open_id"
     vision_max_side: int = 1280
     vision_jpeg_quality: int = 70
+    vision_enabled: bool = True
+    vision_provider: str = "llamacpp"
+    vision_server_url: str = "http://127.0.0.1:8192"
+    vision_model_name: str = ""
+    vision_api_key: str = ""
+    vision_api_base: str = ""
+    vision_timeout: float = 120.0
+    vision_max_tokens: int = 1024
     attachment_dir: str = "attachments"
     attachment_ttl_seconds: int = 3600
     attachment_cleanup_interval_seconds: int = 300
@@ -67,6 +75,15 @@ class AppConfig(BaseModel):
             raise ValueError(
                 f"Provider '{self.llm_provider}' requires an API key. "
                 "Set llm_api_key in config or PC_LLM_API_KEY environment variable."
+            )
+        if (
+            self.vision_enabled
+            and self.vision_provider in providers_needing_key
+            and not self.vision_api_key
+        ):
+            raise ValueError(
+                f"Vision provider '{self.vision_provider}' requires an API key. "
+                "Set vision_api_key or PC_VISION_API_KEY."
             )
         return self
 
@@ -143,6 +160,14 @@ def _env_overrides() -> dict[str, Any]:
         "PC_FEISHU_RECEIVE_ID_TYPE": ("feishu_receive_id_type", str),
         "PC_VISION_MAX_SIDE": ("vision_max_side", int),
         "PC_VISION_JPEG_QUALITY": ("vision_jpeg_quality", int),
+        "PC_VISION_ENABLED": ("vision_enabled", bool),
+        "PC_VISION_PROVIDER": ("vision_provider", str),
+        "PC_VISION_SERVER_URL": ("vision_server_url", str),
+        "PC_VISION_MODEL_NAME": ("vision_model_name", str),
+        "PC_VISION_API_KEY": ("vision_api_key", str),
+        "PC_VISION_API_BASE": ("vision_api_base", str),
+        "PC_VISION_TIMEOUT": ("vision_timeout", float),
+        "PC_VISION_MAX_TOKENS": ("vision_max_tokens", int),
         "PC_ATTACHMENT_DIR": ("attachment_dir", str),
         "PC_ATTACHMENT_TTL_SECONDS": ("attachment_ttl_seconds", int),
         "PC_ATTACHMENT_CLEANUP_INTERVAL_SECONDS": ("attachment_cleanup_interval_seconds", int),
@@ -156,7 +181,10 @@ def _env_overrides() -> dict[str, Any]:
         raw = os.environ.get(env_key)
         if raw is not None:
             try:
-                overrides[field_name] = field_type(raw)
+                if field_type is bool:
+                    overrides[field_name] = raw.strip().lower() in ("1", "true", "yes", "y", "on")
+                else:
+                    overrides[field_name] = field_type(raw)
             except (ValueError, TypeError):
                 pass
     raw_dangerous = os.environ.get("PC_DANGEROUS_COMMANDS")

@@ -44,6 +44,25 @@ def test_reference_is_session_scoped(tmp_path):
     with pytest.raises(KeyError):
         store.hydrate_ref("session-b", ref)
 
+    with pytest.raises(KeyError):
+        store.metadata("session-b", ref["attachment_id"])
+
+
+def test_text_model_manifest_contains_id_without_base64(tmp_path):
+    store = AttachmentStore(tmp_path / "attachments")
+    ref = store.put_data_url("session-a", DATA_URL, caption="error screenshot")
+
+    manifested = store.manifest_messages(
+        "session-a",
+        [{"role": "user", "content": [{"type": "text", "text": "look"}, ref]}],
+    )
+
+    rendered = str(manifested)
+    assert ref["attachment_id"] in rendered
+    assert "available image" in rendered
+    assert "error screenshot" in rendered
+    assert "base64" not in rendered
+
 
 def test_expired_attachment_is_deleted(tmp_path):
     now = [100.0]

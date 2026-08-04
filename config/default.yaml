@@ -29,6 +29,14 @@ feishu_receive_id: ""
 feishu_receive_id_type: "open_id"
 vision_max_side: 1280
 vision_jpeg_quality: 70
+vision_enabled: true
+vision_provider: "llamacpp"
+vision_server_url: "http://127.0.0.1:8192"
+vision_model_name: ""
+vision_api_key: ""
+vision_api_base: ""
+vision_timeout: 120
+vision_max_tokens: 1024
 attachment_dir: "attachments"
 attachment_ttl_seconds: 3600
 attachment_cleanup_interval_seconds: 300
