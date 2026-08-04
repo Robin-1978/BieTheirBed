@@ -1,17 +1,95 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
-from typing import Any, get_args, get_origin, Union
+from typing import Any, get_args, get_origin, Literal, Union
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, SecretStr, model_validator
 
 from pc_assistant.platform_ import get_default_dangerous_commands, get_default_protected_paths
 from pc_assistant.runtime import default_runtime_root
 
 
+class ProviderConfig(BaseModel):
+    """A named API account/endpoint.
+
+    Provider names are user-defined (for example ``ark_coding_primary``), so
+    the same vendor may be configured more than once with different keys.
+    """
+
+    driver: str = "openai_compatible"
+    server_url: str = ""
+    api_base: str = ""
+    api_key: SecretStr = Field(default_factory=lambda: SecretStr(""))
+    api_key_env: str = ""
+    requires_api_key: bool | None = None
+    timeout: float = 120.0
+
+    def resolved_api_key(self) -> str:
+        if self.api_key_env:
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", self.api_key_env):
+                raise ValueError(
+                    "api_key_env must contain an environment variable name; "
+                    "store a literal credential in api_key instead"
+                )
+            value = os.environ.get(self.api_key_env, "")
+            if not value:
+                raise ValueError(
+                    f"API key environment variable '{self.api_key_env}' is not set"
+                )
+            return value
+        value = self.api_key.get_secret_value()
+        required = (
+            self.requires_api_key
+            if self.requires_api_key is not None
+            else self.driver in {"openai", "openai_compatible", "anthropic"}
+        )
+        if required and not value:
+            raise ValueError("API key is required for this provider account")
+        return value
+
+
+class ThinkingConfig(BaseModel):
+    """Provider-native thinking mode for compatible chat models."""
+
+    type: Literal["enabled", "disabled", "auto"] = "enabled"
+
+
+class ModelConfig(BaseModel):
+    """A model exposed by one named provider account."""
+
+    provider: str
+    model: str
+    supports_vision: bool | None = None
+    token_family: str = ""
+    thinking: ThinkingConfig | None = None
+
+
+class ResolvedModelConfig(BaseModel):
+    alias: str
+    provider_name: str
+    driver: str
+    server_url: str
+    api_base: str
+    api_key: str
+    model: str
+    supports_vision: bool | None
+    token_family: str
+    timeout: float
+    thinking: ThinkingConfig | None = None
+
+
 class AppConfig(BaseModel):
+    # Multi-provider model catalog. Provider keys identify API accounts;
+    # model keys are stable aliases used by the application.
+    providers: dict[str, ProviderConfig] = Field(default_factory=dict)
+    models: dict[str, ModelConfig] = Field(default_factory=dict)
+    default_model: str = ""
+    vision_model: str = ""
+
+    # Single-model fallback used when no model catalog is configured.
     llm_provider: str = "llamacpp"
     llm_server_url: str = "http://127.0.0.1:8080"
     llm_model_name: str = ""
@@ -69,6 +147,20 @@ class AppConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_provider(self) -> "AppConfig":
+        if self.models:
+            if not self.default_model:
+                raise ValueError("default_model is required when models are configured")
+            if self.default_model not in self.models:
+                raise ValueError(f"Unknown default_model '{self.default_model}'")
+            if self.vision_model and self.vision_model not in self.models:
+                raise ValueError(f"Unknown vision_model '{self.vision_model}'")
+            for alias, model in self.models.items():
+                if model.provider not in self.providers:
+                    raise ValueError(
+                        f"Model '{alias}' references unknown provider '{model.provider}'"
+                    )
+            return self
+
         providers_needing_key = {"openai", "anthropic"}
         if self.llm_provider in providers_needing_key and not self.llm_api_key:
             raise ValueError(
@@ -85,6 +177,58 @@ class AppConfig(BaseModel):
                 "Set vision_api_key or PC_VISION_API_KEY."
             )
         return self
+
+    def resolve_model(self, alias: str | None = None) -> ResolvedModelConfig:
+        """Resolve a model alias into one complete transport configuration."""
+        if self.models:
+            selected = alias or self.default_model
+            if selected not in self.models:
+                raise ValueError(f"Unknown model '{selected}'")
+            model = self.models[selected]
+            endpoint = self.providers[model.provider]
+            return ResolvedModelConfig(
+                alias=selected,
+                provider_name=model.provider,
+                driver=endpoint.driver,
+                server_url=endpoint.server_url or endpoint.api_base,
+                api_base=endpoint.api_base,
+                api_key=endpoint.resolved_api_key(),
+                model=model.model,
+                supports_vision=model.supports_vision,
+                token_family=model.token_family,
+                timeout=endpoint.timeout,
+                thinking=model.thinking,
+            )
+        return ResolvedModelConfig(
+            alias=alias or self.llm_model_name or "default",
+            provider_name=self.llm_provider,
+            driver=self.llm_provider,
+            server_url=self.llm_server_url,
+            api_base=self.llm_api_base,
+            api_key=self.llm_api_key,
+            model=self.llm_model_name,
+            supports_vision=self.supports_vision,
+            token_family=self.token_family,
+            timeout=self.llm_timeout,
+            thinking=None,
+        )
+
+    def resolve_vision_model(self) -> ResolvedModelConfig:
+        if self.models and self.vision_model:
+            return self.resolve_model(self.vision_model)
+        return ResolvedModelConfig(
+            alias=self.vision_model_name or "vision",
+            provider_name=self.vision_provider,
+            driver=self.vision_provider,
+            server_url=self.vision_server_url,
+            api_base=self.vision_api_base,
+            api_key=self.vision_api_key,
+            model=self.vision_model_name,
+            supports_vision=True,
+            token_family=self.token_family,
+            timeout=self.vision_timeout,
+            thinking=None,
+        )
 
     def masked_api_key(self) -> str:
         if not self.llm_api_key or len(self.llm_api_key) < 8:
@@ -127,6 +271,8 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 def _env_overrides() -> dict[str, Any]:
     mapping: dict[str, tuple[str, type]] = {
         "PC_LLM_PROVIDER": ("llm_provider", str),
+        "PC_DEFAULT_MODEL": ("default_model", str),
+        "PC_VISION_MODEL": ("vision_model", str),
         "PC_LLM_SERVER_URL": ("llm_server_url", str),
         "PC_LLM_MODEL_NAME": ("llm_model_name", str),
         "PC_LLM_API_KEY": ("llm_api_key", str),
@@ -199,22 +345,32 @@ def _env_overrides() -> dict[str, Any]:
 
 
 def load_config(config_path: str | Path | None = None) -> AppConfig:
-    if config_path is None:
-        config_path = Path("config/default.yaml")
-    else:
-        config_path = Path(config_path)
-    yaml_data = _load_yaml(config_path)
-    if not yaml_data and not config_path.exists():
-        import warnings
-        warnings.warn(f"Config file not found: {config_path}. Using defaults and environment variables.")
+    # Layering, from lowest to highest priority:
+    # project defaults -> per-user private config -> explicit --config -> env.
+    # The user config location is independent of the current working directory.
+    default_path = Path(__file__).resolve().parents[2] / "config" / "default.yaml"
+    explicit_path = Path(config_path).expanduser().resolve() if config_path is not None else None
 
-    local_path = Path("config/local.yaml")
-    if local_path.exists():
-        local_data = _load_yaml(local_path)
-        if local_data:
-            yaml_data = {**yaml_data, **local_data}
+    yaml_data = _load_yaml(default_path)
+    user_path = default_runtime_root() / "config" / "local.yaml"
+    user_data = _load_yaml(user_path)
+    if user_data:
+        yaml_data = {**yaml_data, **user_data}
+
+    if explicit_path is not None:
+        explicit_data = _load_yaml(explicit_path)
+        if explicit_data:
+            yaml_data = {**yaml_data, **explicit_data}
+    if explicit_path is not None and not explicit_path.exists():
+        import warnings
+        warnings.warn(
+            f"Config file not found: {explicit_path}. "
+            "Using defaults, user config, and environment variables."
+        )
 
     env_data = _env_overrides()
     merged: dict[str, Any] = {**yaml_data, **env_data}
-    merged["source_config_path"] = str(config_path)
+    # Only propagate a path to the daemon when the user explicitly selected
+    # one. The default daemon independently loads the same per-user config.
+    merged["source_config_path"] = str(explicit_path) if explicit_path is not None else ""
     return AppConfig(**merged)

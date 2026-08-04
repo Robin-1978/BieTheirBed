@@ -27,6 +27,7 @@ def build_chat_payload(
     *,
     cache_prompt: bool = False,
     stream_options: bool = False,
+    thinking: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     serialized = []
     for m in messages:
@@ -63,6 +64,8 @@ def build_chat_payload(
         payload["cache_prompt"] = True
     if stream_options:
         payload["stream_options"] = {"include_usage": True}
+    if thinking is not None:
+        payload["thinking"] = dict(thinking)
     if tools:
         payload["tools"] = tools
     if tool_choice is not None:

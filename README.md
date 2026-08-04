@@ -47,26 +47,64 @@ PC_LLM_PROVIDER=openai PC_LLM_API_KEY=sk-... PC_LLM_MODEL_NAME=gpt-4o pca
 
 ## Configuration
 
-### Config file (`config/default.yaml`)
+### Multiple providers and models (`~/.pc-assistant/config/local.yaml`)
+
+The private per-user config lives outside the source tree. A provider entry
+represents one API account, while a model entry references that account. This
+permits multiple keys for the same vendor as well as multiple models behind
+one key.
 
 ```yaml
-llm_provider: "llamacpp"
-llm_server_url: "http://127.0.0.1:8192"
-llm_model_name: ""
-llm_api_key: ""
-llm_temperature: 0.7
-llm_timeout: 120
+providers:
+  ark_coding_primary:
+    driver: "openai_compatible"
+    api_base: "https://ark.cn-beijing.volces.com/api/coding/v3"
+    api_key_env: "ARK_CODING_API_KEY"
+
+  ark_coding_backup:
+    driver: "openai_compatible"
+    api_base: "https://ark.cn-beijing.volces.com/api/coding/v3"
+    api_key_env: "ARK_CODING_BACKUP_API_KEY"
+
+  local_qwen:
+    driver: "llamacpp"
+    server_url: "http://127.0.0.1:8192"
+
+  keyless_openai_compatible_server:
+    driver: "openai_compatible"
+    api_base: "http://127.0.0.1:8080/v1"
+    requires_api_key: false
+
+models:
+  coding_primary:
+    provider: "ark_coding_primary"
+    model: "replace-with-ark-model-id"
+    supports_vision: false
+    thinking:
+      type: "enabled"
+
+  coding_backup:
+    provider: "ark_coding_backup"
+    model: "replace-with-ark-model-id"
+    supports_vision: false
+
+  local_vision:
+    provider: "local_qwen"
+    model: "qwen-vl"
+    supports_vision: true
+
+default_model: "coding_primary"
+vision_model: "local_vision"
 vision_enabled: true
-vision_provider: "llamacpp"
-vision_server_url: "http://127.0.0.1:8192"
-vision_model_name: ""
-vision_timeout: 120
-vision_max_tokens: 1024
-max_iterations: 8
-context_window_budget: 4096
-reflection_enabled: false
-reflection_threshold: 7
 ```
+
+Use `api_key_env` when the service receives its environment from a process
+manager. For a standalone local installation, `api_key` may instead be stored
+directly in `~/.pc-assistant/config/local.yaml`; protect that file with
+`chmod 600`.
+
+If no `providers`/`models` catalog is configured, the original single-model
+fields in `config/default.yaml` remain the fallback.
 
 ### Environment variables
 
@@ -75,6 +113,8 @@ All config fields can be overridden with `PC_` prefix:
 | Variable | Field |
 |----------|-------|
 | `PC_LLM_PROVIDER` | llm_provider |
+| `PC_DEFAULT_MODEL` | default_model |
+| `PC_VISION_MODEL` | vision_model |
 | `PC_LLM_SERVER_URL` | llm_server_url |
 | `PC_LLM_MODEL_NAME` | llm_model_name |
 | `PC_LLM_API_KEY` | llm_api_key |

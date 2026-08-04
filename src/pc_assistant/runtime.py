@@ -35,6 +35,10 @@ class RuntimePaths:
         return self.root / "logs"
 
     @property
+    def config(self) -> Path:
+        return self.root / "config"
+
+    @property
     def attachments(self) -> Path:
         return self.root / "attachments"
 

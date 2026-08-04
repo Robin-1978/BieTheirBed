@@ -118,21 +118,18 @@ def build_session_context(*, working_directory: str = "", memory_context: str = 
 
     Memory is injected here (not at the head of the prompt) so that updating
     ``<user_memory>`` does not invalidate the cached system+tools+history prefix.
-    Both ``<session>`` and ``<user_memory>`` share one ``<runtime_context>``
-    wrapper so the whole block is recognized as a tail-pinned session message.
+    Stable values lead the block and the most volatile value (current time) is
+    deliberately last. This maximizes byte-prefix reuse inside the runtime
+    context for providers that perform automatic prompt caching.
     """
     ts = time.strftime("%Y-%m-%d %H:%M %A")
-    session_body = [
-        "<session>",
-        f"<current_time>{escape(ts)}</current_time>",
-    ]
+    session_body = ["<session>"]
     if os_info:
         session_body.append(f"<os_info>{escape(os_info)}</os_info>")
     if working_directory:
         session_body.append(f"<working_directory>{escape(working_directory)}</working_directory>")
-    session_body.append("</session>")
-
-    blocks = ["\n".join(session_body)]
     if memory_context:
-        blocks.append(f"<user_memory>\n{memory_context}\n</user_memory>")
-    return format_runtime_context(*blocks)
+        session_body.append(f"<user_memory>\n{memory_context}\n</user_memory>")
+    session_body.append(f"<current_time>{escape(ts)}</current_time>")
+    session_body.append("</session>")
+    return format_runtime_context("\n".join(session_body))

@@ -839,8 +839,9 @@ class FeishuChannel(ChannelBase):
             if self._agent is not None:
                 from pc_assistant.config import AppConfig
                 cfg = self._agent.config
+                model = cfg.resolve_model()
                 info = (
-                    f"**LLM**: {cfg.llm_provider} @ {cfg.llm_server_url}\n"
+                    f"**LLM**: {model.alias} ({model.provider_name}) @ {model.server_url}\n"
                     f"**Max iterations**: {cfg.max_iterations}\n"
                     f"**Max tokens**: {cfg.max_tokens}\n"
                     f"**Temperature**: {cfg.llm_temperature}"

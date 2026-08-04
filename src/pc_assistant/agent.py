@@ -128,14 +128,20 @@ class Agent:
         self._config = config or load_config()
         self._runtime_paths = RuntimePaths.from_root(self._config.runtime_root)
         self._logger = get_logger("agent")
+        self._main_model = self._config.resolve_model()
         self._llm = llm if llm is not None else LLMProvider(
-            server_url=self._config.llm_server_url,
-            model_name=self._config.llm_model_name,
-            provider=self._config.llm_provider,
-            api_key=self._config.llm_api_key,
-            api_base=self._config.llm_api_base,
-            timeout=self._config.llm_timeout,
-            supports_vision=self._config.supports_vision,
+            server_url=self._main_model.server_url,
+            model_name=self._main_model.model,
+            provider=self._main_model.driver,
+            api_key=self._main_model.api_key,
+            api_base=self._main_model.api_base,
+            timeout=self._main_model.timeout,
+            supports_vision=self._main_model.supports_vision,
+            thinking=(
+                self._main_model.thinking.model_dump()
+                if self._main_model.thinking is not None
+                else None
+            ),
         )
         self._memory_repository = SQLiteMemoryRepository(
             self._runtime_paths.data / "assistant.db",
@@ -180,7 +186,10 @@ class Agent:
             working_directory=self._config.working_directory,
         )
         self._token_estimator = TokenEstimator(
-            normalize_family(self._config.token_family, self._config.llm_model_name),
+            normalize_family(
+                self._main_model.token_family or self._config.token_family,
+                self._main_model.model,
+            ),
         )
 
         self._session_manager = session_manager or SessionManager(
@@ -206,27 +215,33 @@ class Agent:
         )
         self._vision_broker: VisionBroker | None = None
         if self._config.vision_enabled and not self._llm.supports_vision:
+            vision_model = self._config.resolve_vision_model()
             dedicated_vision_llm = vision_llm or LLMProvider(
-                server_url=self._config.vision_server_url,
-                model_name=self._config.vision_model_name,
-                provider=self._config.vision_provider,
-                api_key=self._config.vision_api_key,
-                api_base=self._config.vision_api_base,
-                timeout=self._config.vision_timeout,
+                server_url=vision_model.server_url,
+                model_name=vision_model.model,
+                provider=vision_model.driver,
+                api_key=vision_model.api_key,
+                api_base=vision_model.api_base,
+                timeout=vision_model.timeout,
                 supports_vision=True,
+                thinking=(
+                    vision_model.thinking.model_dump()
+                    if vision_model.thinking is not None
+                    else None
+                ),
             )
             self._vision_broker = vision_broker or VisionBroker(
                 dedicated_vision_llm,
                 self._artifact_store,
-                model_name=self._config.vision_model_name,
+                model_name=vision_model.model,
                 max_tokens=self._config.vision_max_tokens,
             )
         self._session_manager.set_drop_callback(self._cleanup_session_assets)
         self._register_builtin_tools(disable_tools=disable_tools)
         self._cache_plan = build_cache_plan(
-            provider=self._config.llm_provider,
-            model=self._config.llm_model_name,
-            server_url=self._config.llm_server_url,
+            provider=self._main_model.driver,
+            model=self._main_model.model,
+            server_url=self._main_model.server_url,
             system_prompt=self._system_prompt,
             tool_schemas=[t["function"] for t in self._registry.all_schemas()],
             estimator=self._token_estimator,
@@ -565,8 +580,9 @@ class Agent:
     async def get_status(self) -> dict[str, Any]:
         state = self._default_state
         return {
-            "provider": self._config.llm_provider,
-            "model": self._config.llm_model_name or "default",
+            "provider": self._main_model.provider_name,
+            "model": self._main_model.alias,
+            "upstream_model": self._main_model.model or "default",
             "status": state.status,
             "connected": self._connected,
             "platform": get_platform(),
@@ -719,7 +735,7 @@ class Agent:
     ) -> None:
         self._trace.record_call(
             session_id=state.session_id,
-            model=self._config.llm_model_name or "default",
+            model=self._main_model.alias,
             iteration=iteration,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
@@ -949,9 +965,11 @@ class Agent:
             turn_instructions.append(
                 "## Image evidence requirement\n"
                 "The current turn contains available image manifests, but you cannot see their pixels. "
-                "Call image_inspect before making claims about visible content. Ask it only to describe, "
-                "transcribe, locate, or compare visible evidence. You remain responsible for diagnosis, "
-                "recommendations, and solutions after receiving that observation."
+                "Call image_inspect with the manifested image_id and a question that you derive from the "
+                "user's current request. The question is required and must not be generic or hard-coded. "
+                "Normally make one comprehensive observation call; call again only when a distinct visible "
+                "detail is necessary. You remain responsible for diagnosis, recommendations, and solutions "
+                "after receiving the observation."
             )
         turn_context = "\n\n".join(turn_instructions)
 
@@ -1371,7 +1389,8 @@ class Agent:
                 if vision_required and vision_observation_calls == 0:
                     conv.add_user(
                         "[System] Your draft relied on an image without visual evidence and was not delivered. "
-                        "Call image_inspect for the available image_id now. Ask only for visible observations; "
+                        "Call image_inspect for the available image_id now and supply a visual question derived "
+                        "from the user's request. Ask only for visible observations; "
                         "perform diagnosis or solution reasoning yourself after the tool result."
                     )
                     continue

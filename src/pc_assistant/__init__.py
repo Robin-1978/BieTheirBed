@@ -89,6 +89,11 @@ async def async_main(
     from pc_assistant.logger import get_logger
 
     cfg = load_config(config_path)
+    try:
+        main_model = cfg.resolve_model()
+    except ValueError as exc:
+        print(f"ERROR: Invalid model configuration: {exc}")
+        return 1
 
     if verbose:
         logging.getLogger("pc_assistant").setLevel(logging.DEBUG)
@@ -97,7 +102,7 @@ async def async_main(
     logger.info("PC Assistant starting (config=%s)", config_path or "default")
 
     providers_needing_key = {"openai", "anthropic"}
-    if cfg.llm_provider in providers_needing_key and not cfg.llm_api_key:
+    if main_model.driver in providers_needing_key and not main_model.api_key:
         try:
             from rich.console import Console
             from rich.panel import Panel
@@ -105,7 +110,7 @@ async def async_main(
             console = Console()
             console.print(
                 Panel(
-                    f"Provider '{cfg.llm_provider}' requires an API key.\n"
+                    f"Provider '{main_model.provider_name}' requires an API key.\n"
                     "Please set PC_LLM_API_KEY environment variable\n"
                     "or add llm_api_key to your config file.",
                     title="[red]✗ Missing API Key[/red]",
@@ -114,7 +119,7 @@ async def async_main(
                 )
             )
         except ImportError:
-            print(f"ERROR: Provider '{cfg.llm_provider}' requires an API key.")
+            print(f"ERROR: Provider '{main_model.provider_name}' requires an API key.")
             print("Please set PC_LLM_API_KEY environment variable or add llm_api_key to your config file.")
         return 1
 
@@ -161,7 +166,7 @@ async def async_main(
                 await scheduler.execute(action="start")
                 logger.info("Scheduler started with %d tasks", task_count)
 
-        logger.info("Checking LLM server health at %s", cfg.llm_server_url)
+        logger.info("Checking LLM server health at %s", main_model.server_url)
         healthy = await agent.health_check()
         if not healthy:
             try:
@@ -171,7 +176,7 @@ async def async_main(
                 console = Console()
                 console.print(
                     Panel(
-                        f"Could not connect to LLM server at:\n  {cfg.llm_server_url}\n\n"
+                        f"Could not connect to LLM server at:\n  {main_model.server_url}\n\n"
                         "Please ensure the server is running and accessible.\n"
                         "You can change the server URL with:\n"
                         "  --config path/to/config.yaml\n"
@@ -182,7 +187,7 @@ async def async_main(
                     )
                 )
             except ImportError:
-                print(f"ERROR: Could not connect to LLM server at {cfg.llm_server_url}")
+                print(f"ERROR: Could not connect to LLM server at {main_model.server_url}")
             return 1
 
         logger.info("LLM server is healthy")

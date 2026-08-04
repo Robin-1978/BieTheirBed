@@ -113,11 +113,19 @@ def resolve_profile(
 
     if provider == "openai_compatible":
         base = (api_base or server_url).rstrip("/")
+        # Treat an explicit API base as authoritative. Some vendors expose
+        # OpenAI-compatible routes under version paths other than /v1.
+        if api_base:
+            chat_url = f"{base}/chat/completions"
+            health_url = f"{base}/models"
+        else:
+            chat_url = _openai_style_endpoint(base, "/chat/completions")
+            health_url = _openai_style_endpoint(base, "/models")
         return ProviderProfile(
             name="openai_compatible",
             server_url=base,
-            chat_url=_openai_style_endpoint(base, "/chat/completions"),
-            health_url=_openai_style_endpoint(base, "/models"),
+            chat_url=chat_url,
+            health_url=health_url,
             headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
             stream_options=True,
             vision=_vision(True if supports_vision is None else supports_vision),
