@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from pc_assistant.llm_provider import LLMMessage, LLMProvider, LLMResponse, StreamChunk
+from pc_assistant.model_adapter.types import format_tool_result_message, normalize_tool_calls
 
 
 class TestLLMMessage:
@@ -102,36 +103,31 @@ class TestLLMProviderInit:
 
 class TestLLMProviderNormalize:
     def test_normalize_tool_calls_string_args(self):
-        p = LLMProvider()
         raw = [{"function": {"name": "test", "arguments": '{"key": "value"}'}}]
-        result = p._normalize_tool_calls(raw)
+        result = normalize_tool_calls(raw)
         assert result[0]["function"]["arguments"] == {"key": "value"}
 
     def test_normalize_tool_calls_dict_args(self):
-        p = LLMProvider()
         raw = [{"function": {"name": "test", "arguments": {"key": "value"}}}]
-        result = p._normalize_tool_calls(raw)
+        result = normalize_tool_calls(raw)
         assert result[0]["function"]["arguments"] == {"key": "value"}
 
     def test_normalize_tool_calls_invalid_json(self):
-        p = LLMProvider()
         raw = [{"function": {"name": "test", "arguments": "not json"}}]
-        result = p._normalize_tool_calls(raw)
+        result = normalize_tool_calls(raw)
         assert result[0]["function"]["arguments"] == {}
 
     def test_normalize_tool_calls_none_args(self):
-        p = LLMProvider()
         raw = [{"function": {"name": "test", "arguments": None}}]
-        result = p._normalize_tool_calls(raw)
+        result = normalize_tool_calls(raw)
         assert result[0]["function"]["arguments"] == {}
 
     def test_normalize_tool_calls_empty(self):
-        p = LLMProvider()
-        result = p._normalize_tool_calls([])
+        result = normalize_tool_calls([])
         assert result == []
 
     def test_format_tool_result_message(self):
-        msg = LLMProvider.format_tool_result_message("call_123", "result data")
+        msg = format_tool_result_message("call_123", "result data")
         assert msg["role"] == "tool"
         assert msg["tool_call_id"] == "call_123"
         assert msg["content"] == "result data"

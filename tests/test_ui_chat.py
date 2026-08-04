@@ -99,56 +99,66 @@ class TestChatUIInit:
 
 
 class TestChatUICommands:
-    def test_exit_command(self):
+    @pytest.mark.asyncio
+    async def test_exit_command(self):
         ui = ChatUI(config=AppConfig())
         ui._running = True
-        result = ui._handle_user_command("/exit")
+        result = await ui._handle_user_command("/exit")
         assert result is True
         assert ui._running is False
 
-    def test_quit_command(self):
+    @pytest.mark.asyncio
+    async def test_quit_command(self):
         ui = ChatUI(config=AppConfig())
         ui._running = True
-        result = ui._handle_user_command("/quit")
+        result = await ui._handle_user_command("/quit")
         assert result is True
         assert ui._running is False
 
-    def test_clear_command(self):
+    @pytest.mark.asyncio
+    async def test_clear_command(self):
         ui = ChatUI(config=AppConfig())
         agent = Agent(config=AppConfig())
         ui._agent = agent
-        result = ui._handle_user_command("/clear")
+        result = await ui._handle_user_command("/clear")
         assert result is True
 
-    def test_help_command(self):
+    @pytest.mark.asyncio
+    async def test_help_command(self):
         ui = ChatUI(config=AppConfig())
-        result = ui._handle_user_command("/help")
+        result = await ui._handle_user_command("/help")
         assert result is True
 
-    def test_config_command(self):
+    @pytest.mark.asyncio
+    async def test_config_command(self):
         ui = ChatUI(config=AppConfig())
-        result = ui._handle_user_command("/config")
+        result = await ui._handle_user_command("/config")
         assert result is True
 
-    def test_tools_no_agent(self):
+    @pytest.mark.asyncio
+    async def test_tools_no_agent(self):
         ui = ChatUI(config=AppConfig())
-        result = ui._handle_user_command("/tools")
+        result = await ui._handle_user_command("/tools")
         assert result is True
 
-    def test_history_no_agent(self):
+    @pytest.mark.asyncio
+    async def test_history_no_agent(self):
         ui = ChatUI(config=AppConfig())
-        result = ui._handle_user_command("/history")
+        result = await ui._handle_user_command("/history")
         assert result is True
 
-    def test_unknown_command(self):
+    @pytest.mark.asyncio
+    async def test_unknown_command(self):
         ui = ChatUI(config=AppConfig())
-        result = ui._handle_user_command("/unknown")
+        result = await ui._handle_user_command("/unknown")
         assert result is True
 
-    def test_debug_command(self):
+    @pytest.mark.asyncio
+    async def test_debug_command(self):
         ui = ChatUI(config=AppConfig())
         initial = ui._state.debug_mode
-        ui._handle_user_command("/debug")
+        result = await ui._handle_user_command("/debug")
+        assert result is True
         assert ui._state.debug_mode != initial
 
 
@@ -382,7 +392,7 @@ class TestChatApp:
         from pc_assistant.ui.widgets import CommandOutput
         app = ChatApp(config=AppConfig())
         async with app.run_test() as pilot:
-            app._handle_command("/help")
+            await app._handle_command("/help")
             outputs = app.query(CommandOutput)
             assert len(outputs) >= 2  # welcome + help
 
@@ -392,7 +402,7 @@ class TestChatApp:
         from pc_assistant.ui.widgets import CommandOutput
         app = ChatApp(config=AppConfig())
         async with app.run_test() as pilot:
-            app._handle_command("/config")
+            await app._handle_command("/config")
             outputs = app.query(CommandOutput)
             assert len(outputs) >= 2
 
@@ -402,7 +412,7 @@ class TestChatApp:
         from pc_assistant.ui.widgets import CommandOutput
         app = ChatApp(config=AppConfig())
         async with app.run_test() as pilot:
-            app._handle_command("/foobar")
+            await app._handle_command("/foobar")
             outputs = app.query(CommandOutput)
             assert len(outputs) >= 2
 
@@ -411,7 +421,7 @@ class TestChatApp:
         from pc_assistant.ui.app import ChatApp
         app = ChatApp(config=AppConfig())
         async with app.run_test() as pilot:
-            app._handle_command("/clear")
+            await app._handle_command("/clear")
             log = app.query_one("#chat-log")
             assert log is not None
 
@@ -429,5 +439,5 @@ class TestChatApp:
         app = ChatApp(config=AppConfig())
         async with app.run_test() as pilot:
             initial = app._state.debug_mode
-            app._handle_command("/debug")
+            await app._handle_command("/debug")
             assert app._state.debug_mode != initial

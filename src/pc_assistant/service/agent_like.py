@@ -32,5 +32,5 @@ class AgentLike(Protocol):
     async def health_check(self) -> bool:
         ...
 
-    def get_status(self) -> dict[str, Any]:
+    async def get_status(self) -> dict[str, Any]:
         ...

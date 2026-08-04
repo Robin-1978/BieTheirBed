@@ -41,14 +41,16 @@ logger = logging.getLogger(__name__)
 class ServiceServer:
     """WebSocket server that owns the Agent and exposes it to clients."""
 
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(self, config: AppConfig, log_path: Path | None = None) -> None:
         self._config = config
+        self._log_path = log_path
         self._agent: Agent | None = None
         self._ws_server: Any = None
         self._tcp_server: Any = None
         self._clients: dict[str, ServerConnection] = {}
         self._confirm_futures: dict[tuple[str, str], tuple[str, asyncio.Future[bool]]] = {}
         self._run_tasks: dict[str, asyncio.Task] = {}
+        self._client_sessions: dict[str, str] = {}
         self._channel_manager: Any = None
         self._running = False
 
@@ -66,9 +68,9 @@ class ServiceServer:
         if scheduler is not None:
             scheduler.set_agent(self._agent)
             scheduler.set_notification_callback(self._on_timer_notify)
-            if scheduler._tasks:
+            if scheduler.has_tasks():
                 await scheduler.execute(action="start")
-                logger.info("Scheduler started with %d tasks", len(scheduler._tasks))
+                logger.info("Scheduler started with %d tasks", scheduler.task_count())
 
         healthy = await self._agent.health_check()
         if not healthy:
@@ -103,21 +105,17 @@ class ServiceServer:
             )
 
         self._running = True
-        _write_pid()
+        _write_pid(self._log_path or resolve_service_log(None))
         logger.info("Service ready (pid %d)", os.getpid())
 
     async def stop(self) -> None:
         self._running = False
 
         if self._channel_manager is not None:
-            for ch in self._channel_manager._channels:
-                try:
-                    if hasattr(ch, "_get_last_open_id") and hasattr(ch, "_send_text"):
-                        open_id = ch._get_last_open_id()
-                        if open_id:
-                            ch._send_text(open_id, "🔴 PC Assistant 服务正在关闭...")
-                except Exception:
-                    pass
+            try:
+                self._channel_manager.broadcast("🔴 PC Assistant 服务正在关闭...")
+            except Exception:
+                pass
             await self._channel_manager.stop_all()
 
         for client_id, ws in list(self._clients.items()):
@@ -262,6 +260,7 @@ class ServiceServer:
             return
 
         session_id = msg.session_id or client_id
+        self._client_sessions[client_id] = session_id
         input_text = msg.input_text
         if not input_text:
             await ws.send(serialize(ServerMessage.error(msg.id, "Empty input")))
@@ -348,10 +347,30 @@ class ServiceServer:
         if self._agent is None:
             await ws.send(serialize(ServerMessage.error(msg.id, "Agent not initialized")))
             return
-        status = self._agent.get_status()
+        status = await self._agent.get_status()
         status["sessions"] = self._agent.session_stats()
         status["connected_clients"] = len(self._clients)
+        self._apply_client_session_status(ws, status)
         await ws.send(serialize(ServerMessage.result(msg.id, status)))
+
+    def _apply_client_session_status(
+        self, ws: ServerConnection, status: dict[str, Any]
+    ) -> None:
+        """Overlay the requesting client's run-session totals onto the status."""
+        client_id = next((cid for cid, c in self._clients.items() if c is ws), None)
+        if client_id is None:
+            return
+        session_id = self._client_sessions.get(client_id)
+        if not session_id:
+            return
+        for s in status.get("sessions", []):
+            if s.get("session_id") == session_id:
+                status["total_prompt_tokens"] = s["total_prompt_tokens"]
+                status["total_completion_tokens"] = s["total_completion_tokens"]
+                status["total_tokens"] = s["total_prompt_tokens"] + s["total_completion_tokens"]
+                status["total_iterations"] = s["total_iterations"]
+                status["status"] = s.get("last_outcome", status["status"])
+                break
 
     async def _handle_health(self, ws: ServerConnection, msg: ClientMessage) -> None:
         if self._agent is None:
@@ -403,9 +422,10 @@ def _is_unix_connection(ws: ServerConnection) -> bool:
 
 # ── PID / socket helpers ──────────────────────────────────────────────
 
-def _write_pid() -> None:
+def _write_pid(log_path: Path) -> None:
+    """Write ``<pid>\\n<log_path>`` so status/stop commands can report both."""
     PID_PATH.parent.mkdir(parents=True, exist_ok=True)
-    PID_PATH.write_text(str(os.getpid()))
+    PID_PATH.write_text(f"{os.getpid()}\n{log_path}\n")
 
 
 def _cleanup_files() -> None:
@@ -431,34 +451,59 @@ def is_running() -> bool:
 
 # ── Entry point ───────────────────────────────────────────────────────
 
-async def run_server(config_path: str | None = None, daemon: bool = False) -> None:
-    """Start the service server."""
-    if daemon:
-        _daemonize()
+def resolve_service_log(log_dir: str | None) -> Path:
+    """Log file path: ``<log_dir>/service.log`` or ``./log/service.log`` (working dir)."""
+    if log_dir:
+        return Path(log_dir).expanduser().resolve() / "service.log"
+    return (Path.cwd() / "log").resolve() / "service.log"
 
+
+def run_server(
+    config_path: str | None = None,
+    daemon: bool = False,
+    log_path: Path | None = None,
+) -> int:
+    """Start the service server.
+
+    Daemonization forks *before* the event loop starts so that asyncio
+    primitives (e.g. ``asyncio.create_task`` in the scheduler) work in the
+    child process. Returns the process exit code.
+    """
+    log_path = log_path or LOG_PATH
+    if daemon:
+        daemonize(log_path)
+    return asyncio.run(_serve(config_path, daemon, log_path))
+
+
+async def _serve(
+    config_path: str | None,
+    daemon: bool,
+    log_path: Path,
+) -> None:
+    """Async body of :func:`run_server`."""
     cfg = load_config(config_path) if config_path else load_config()
 
-    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
         handlers=[
             logging.StreamHandler(sys.stderr),
-            logging.FileHandler(str(LOG_PATH), mode="a"),
+            logging.FileHandler(str(log_path), mode="a"),
         ] if not daemon else [
-            logging.FileHandler(str(LOG_PATH), mode="a"),
+            logging.FileHandler(str(log_path), mode="a"),
         ],
     )
 
-    server = ServiceServer(cfg)
+    server = ServiceServer(cfg, log_path=log_path)
     await server.start()
     await server.serve_forever()
 
 
-def _daemonize() -> None:
-    """Double-fork to detach from the terminal."""
-    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+def daemonize(log_path: Path) -> None:
+    """Double-fork to detach from the terminal. Log output goes to ``log_path``."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
 
     if os.fork() > 0:
         sys.exit(0)
@@ -469,5 +514,5 @@ def _daemonize() -> None:
         sys.exit(0)
 
     sys.stdin.close()
-    sys.stdout = open(str(LOG_PATH), "a")  # noqa: SIM115
+    sys.stdout = open(str(log_path), "a")  # noqa: SIM115
     sys.stderr = sys.stdout

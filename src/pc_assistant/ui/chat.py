@@ -303,7 +303,7 @@ class ChatUI:
 
     # ── Slash commands (console mode) ─────────────────────────────────
 
-    def _handle_user_command(self, command: str) -> bool:
+    async def _handle_user_command(self, command: str) -> bool:
         """Execute a slash command (console mode). Returns True for test compat."""
         cmd = command.lower().strip()
 
@@ -363,7 +363,7 @@ class ChatUI:
             if self._agent is None:
                 self._console.print(f"[warning]{ICON_WARN} No agent initialized.[/warning]")
             else:
-                status = self._agent.get_status()
+                status = await self._agent.get_status()
                 table = Table(title="Agent Status", show_lines=True)
                 table.add_column("Property", style="bold")
                 table.add_column("Value")

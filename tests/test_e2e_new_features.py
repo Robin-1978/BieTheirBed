@@ -12,7 +12,6 @@ from pc_assistant.harness.idempotency import IdempotencyLog
 from pc_assistant.harness.refusal import RefusalCode, Verdict
 from pc_assistant.harness.verifier import Verifier
 from pc_assistant.context.memory import EpisodicMemory, ProceduralMemory, UserMemory
-from pc_assistant.eventbus import EventBus
 from pc_assistant.llm_provider import StreamChunk
 from pc_assistant.planner import AgentPlanner
 from pc_assistant.reflection import ReflectionChecker
@@ -185,101 +184,6 @@ class TestReflection:
 
 
 # ================================================================
-# EventBus
-# ================================================================
-
-class TestEventBus:
-    @pytest.mark.asyncio
-    async def test_on_and_emit(self):
-        bus = EventBus()
-        received = []
-        bus.on("test", lambda e: received.append(e))
-
-        class FakeEvent:
-            type = "test"
-            data = "hello"
-
-        await bus.emit(FakeEvent())
-        assert len(received) == 1
-
-    @pytest.mark.asyncio
-    async def test_wildcard_subscriber(self):
-        bus = EventBus()
-        received = []
-        bus.on("*", lambda e: received.append(e))
-
-        class E1:
-            type = "a"
-
-        class E2:
-            type = "b"
-
-        await bus.emit(E1())
-        await bus.emit(E2())
-        assert len(received) == 2
-
-    @pytest.mark.asyncio
-    async def test_off_removes_handler(self):
-        bus = EventBus()
-        received = []
-        handler = lambda e: received.append(e)
-        bus.on("x", handler)
-        bus.off("x", handler)
-
-        class E:
-            type = "x"
-
-        await bus.emit(E())
-        assert len(received) == 0
-
-    @pytest.mark.asyncio
-    async def test_handler_error_does_not_crash(self):
-        bus = EventBus()
-
-        def bad_handler(e):
-            raise RuntimeError("boom")
-
-        bus.on("x", bad_handler)
-
-        class E:
-            type = "x"
-
-        await bus.emit(E())
-
-    @pytest.mark.asyncio
-    async def test_async_handler(self):
-        bus = EventBus()
-        received = []
-
-        async def handler(e):
-            received.append(e)
-
-        bus.on("x", handler)
-
-        class E:
-            type = "x"
-
-        await bus.emit(E())
-        assert len(received) == 1
-
-    @pytest.mark.asyncio
-    async def test_agent_event_bus_integration(self):
-        config = AppConfig()
-        agent = Agent(config=config)
-        agent._llm.chat_stream = _make_stream_mock(content="Hello!", finish_reason="stop")
-
-        received = []
-        agent.event_bus.on("final_answer", lambda e: received.append(e))
-        agent.event_bus.on("stream_start", lambda e: received.append(e))
-
-        await _collect_events(agent, "hi")
-
-        event_types = [e.type for e in received]
-        assert "stream_start" in event_types
-        assert "final_answer" in event_types
-
-
-# ================================================================
 # Tiered Memory
 # ================================================================
 
@@ -418,16 +322,3 @@ class TestAgentNewFeaturesE2E:
         assert fs.is_side_effecting is True
         assert web.is_side_effecting is False
         assert weather.is_side_effecting is False
-
-    @pytest.mark.asyncio
-    async def test_event_bus_receives_all_events(self):
-        config = AppConfig()
-        agent = Agent(config=config)
-        agent._llm.chat_stream = _make_stream_mock(content="done", finish_reason="stop")
-
-        all_events = []
-        agent.event_bus.on("*", lambda e: all_events.append(e.type))
-        await _collect_events(agent, "hello")
-        assert "stream_start" in all_events
-        assert "stream_end" in all_events
-        assert "final_answer" in all_events

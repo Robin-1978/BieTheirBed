@@ -109,7 +109,7 @@ class TestSessionStatus:
         agent = Agent(config=AppConfig())
         agent._llm.chat_stream = _answer_stream()
         await _collect(agent, "hi", session_id="sess-x")
-        status = agent.get_status()
+        status = await agent.get_status()
         assert status["active_sessions"] == 1
         stats = agent.session_stats()
         assert any(s["session_id"] == "sess-x" for s in stats)

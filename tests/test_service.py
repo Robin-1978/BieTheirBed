@@ -205,7 +205,7 @@ class TestServerClientIntegration:
 
         mock_agent = AsyncMock()
         mock_agent.health_check = AsyncMock(return_value=True)
-        mock_agent.get_status = MagicMock(return_value={"status": "ok", "total_tokens": 0})
+        mock_agent.get_status = AsyncMock(return_value={"status": "ok", "total_tokens": 0})
         mock_agent.session_stats = MagicMock(return_value=[])
         mock_agent.cancel = MagicMock()
         mock_agent.conversation = MagicMock()

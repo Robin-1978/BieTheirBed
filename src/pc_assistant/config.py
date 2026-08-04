@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args, get_origin, Union
 
 import yaml
 from pydantic import BaseModel, Field, model_validator
@@ -47,6 +47,7 @@ class AppConfig(BaseModel):
     feishu_app_secret: str = ""
     feishu_receive_id: str = ""
     feishu_receive_id_type: str = "open_id"
+    source_config_path: str = ""
 
     @model_validator(mode="after")
     def _validate_provider(self) -> "AppConfig":
@@ -64,27 +65,25 @@ class AppConfig(BaseModel):
         return self.llm_api_key[:4] + "****" + self.llm_api_key[-4:]
 
     def set_field(self, field_name: str, value: str) -> bool:
-        type_map: dict[str, type] = {
-            "llm_provider": str, "llm_server_url": str, "llm_model_name": str,
-            "llm_api_key": str, "llm_api_base": str,
-            "llm_temperature": float, "llm_timeout": float,
-            "max_iterations": int, "max_consecutive_same_tool": int,
-            "max_total_tool_calls": int, "max_consecutive_tool_calls": int,
-            "max_tokens": int, "shell_timeout": int,
-            "context_window_budget": int, "log_file": str, "working_directory": str,
-            "llm_compact_enabled": bool, "token_family": str,
-            "max_sessions": int, "trace_enabled": bool,
-            "llm_trace_log": str, "turn_trace_log": str,
-            "evidence_policy_enabled": bool,
-            "reflection_enabled": bool, "reflection_threshold": int, "ui_theme": str,
-            "service_host": str, "service_port": int, "service_token": str,
-            "feishu_enabled": bool, "feishu_app_id": str, "feishu_app_secret": str,
-            "feishu_receive_id": str, "feishu_receive_id_type": str,
-        }
-        if field_name not in type_map:
+        fields = type(self).model_fields
+        if field_name not in fields:
+            return False
+        annotation = fields[field_name].annotation
+        if get_origin(annotation) is Union:
+            args = [a for a in get_args(annotation) if a is not type(None)]
+            annotation = args[0] if args else str
+        if annotation in (list, dict, set):
             return False
         try:
-            setattr(self, field_name, type_map[field_name](value))
+            if annotation is bool:
+                converted = value.strip().lower() in ("1", "true", "yes", "y", "on")
+            elif annotation is int:
+                converted = int(value)
+            elif annotation is float:
+                converted = float(value)
+            else:
+                converted = value
+            setattr(self, field_name, converted)
             return True
         except (ValueError, TypeError):
             return False
@@ -167,4 +166,5 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
 
     env_data = _env_overrides()
     merged: dict[str, Any] = {**yaml_data, **env_data}
+    merged["source_config_path"] = str(config_path)
     return AppConfig(**merged)

@@ -24,8 +24,6 @@ from pc_assistant.model_adapter.types import (
     LLMMessage,
     LLMResponse,
     StreamChunk,
-    format_tool_result_message,
-    normalize_tool_calls,
 )
 
 __all__ = ["LLMMessage", "LLMProvider", "LLMResponse", "StreamChunk"]
@@ -322,13 +320,6 @@ class LLMProvider:
                 delta_tool_calls=[],
                 finish_reason="error",
             )
-
-    def _normalize_tool_calls(self, raw_tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return normalize_tool_calls(raw_tool_calls)
-
-    @staticmethod
-    def format_tool_result_message(tool_call_id: str, content: str) -> dict[str, Any]:
-        return format_tool_result_message(tool_call_id, content)
 
     def cancel(self, session_id: str | None = None) -> None:
         if session_id:

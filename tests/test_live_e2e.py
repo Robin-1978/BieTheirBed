@@ -90,24 +90,6 @@ async def test_sdb_blocks_dangerous():
 
 
 @pytest.mark.asyncio
-async def test_event_bus_receives_events():
-    """EventBus subscribers should receive events during a live run."""
-    cfg = load_config()
-    agent = Agent(config=cfg)
-
-    received_types = []
-    agent.event_bus.on("*", lambda e: received_types.append(e.type))
-
-    events = await _collect(agent, "Say hello")
-    final = _find(events, "final_answer")
-    assert final is not None
-
-    assert "stream_start" in received_types
-    assert "final_answer" in received_types
-    print(f"\n[PASS] EventBus received {len(received_types)} events: {set(received_types)}")
-
-
-@pytest.mark.asyncio
 async def test_multi_turn_conversation():
     """Agent should maintain conversation context across turns."""
     cfg = load_config()

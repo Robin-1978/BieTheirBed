@@ -147,7 +147,7 @@ class TestAgentRun:
 
     @pytest.mark.asyncio
     async def test_tool_call_flow(self, tmp_path):
-        agent = Agent(config=AppConfig())
+        agent = Agent(config=AppConfig(), confirm_callback=lambda name, args: True)
         test_file = str(tmp_path / "test.txt")
         first_stream = _make_stream_mock(
             content="Let me write a file.",
@@ -596,9 +596,10 @@ class TestAgentMessageFormat:
 
 
 class TestAgentGetStatus:
-    def test_initial_status(self):
+    @pytest.mark.asyncio
+    async def test_initial_status(self):
         agent = Agent(config=AppConfig())
-        status = agent.get_status()
+        status = await agent.get_status()
         assert status["status"] == "ready"
         assert status["provider"] == "llamacpp"
         assert status["total_tokens"] == 0
@@ -614,7 +615,7 @@ class TestAgentGetStatus:
 
         agent._llm.chat_stream = stream_with_usage
         await _collect_events(agent, "hi")
-        status = agent.get_status()
+        status = await agent.get_status()
         assert status["total_prompt_tokens"] == 50
         assert status["total_completion_tokens"] == 20
         assert status["total_tokens"] == 70

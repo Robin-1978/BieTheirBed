@@ -10,7 +10,6 @@ from pydantic import BaseModel
 
 from pc_assistant.config import AppConfig, load_config
 from pc_assistant.context.assembly import assemble_llm_messages, truncate_messages
-from pc_assistant.eventbus import EventBus
 from pc_assistant.context.cache import CachePlan, build_cache_plan
 from pc_assistant.context.conversation import ConversationManager
 from pc_assistant.context.evidence import EvidencePolicy
@@ -97,6 +96,7 @@ class Agent:
         trace: LLMTraceRecorder | None = None,
         turn_recorder: TurnRecorder | None = None,
         evidence: EvidencePolicy | None = None,
+        disable_tools: bool = False,
     ) -> None:
         self._config = config or load_config()
         self._logger = get_logger("agent")
@@ -131,7 +131,6 @@ class Agent:
             self._llm,
             threshold=self._config.reflection_threshold,
         ) if self._config.reflection_enabled else None
-        self._current_status = "ready"
         self._connected = False
         self._system_prompt = build_system_prompt(
             working_directory=self._config.working_directory,
@@ -140,15 +139,12 @@ class Agent:
             normalize_family(self._config.token_family, self._config.llm_model_name),
         )
 
-        # Default session state (backward compatible with `agent.conversation`).
-        self._default_state = SessionState(
-            session_id="",
-            conversation=conversation if conversation is not None else ConversationManager(),
-        )
-        self._default_state.conversation.set_system_context(self._system_prompt)
         self._session_manager = session_manager or SessionManager(
             max_sessions=max(max_sessions, 1),
         )
+        self._default_state = self._session_manager.get("", self._system_prompt)
+        if conversation is not None:
+            self._default_state.conversation = conversation
         self._trace = trace or LLMTraceRecorder(
             path=self._config.llm_trace_log,
             enabled=self._config.trace_enabled,
@@ -158,14 +154,13 @@ class Agent:
             enabled=self._config.trace_enabled,
         )
         self._evidence = evidence or EvidencePolicy(enabled=self._config.evidence_policy_enabled)
-        self._event_bus = EventBus()
-        self._register_builtin_tools()
+        self._register_builtin_tools(disable_tools=disable_tools)
         self._cache_plan = build_cache_plan(
             provider=self._config.llm_provider,
             model=self._config.llm_model_name,
             server_url=self._config.llm_server_url,
             system_prompt=self._system_prompt,
-            tool_schemas=[t.core_schema() for t in self._registry._tools.values()],
+            tool_schemas=[t["function"] for t in self._registry.all_schemas()],
             estimator=self._token_estimator,
         )
         # Loop detection
@@ -196,16 +191,16 @@ class Agent:
         self._default_state.cancelled = value
 
     @property
+    def config(self) -> AppConfig:
+        return self._config
+
+    @property
     def memory(self) -> UserMemory:
         return self._memory
 
     @property
     def registry(self) -> ToolRegistry:
         return self._registry
-
-    @property
-    def event_bus(self) -> EventBus:
-        return self._event_bus
 
     def _get_state(self, session_id: str) -> SessionState:
         if not session_id:
@@ -322,12 +317,12 @@ class Agent:
     # Status
     # ------------------------------------------------------------------
 
-    def get_status(self) -> dict[str, Any]:
+    async def get_status(self) -> dict[str, Any]:
         state = self._default_state
         return {
             "provider": self._config.llm_provider,
             "model": self._config.llm_model_name or "default",
-            "status": self._current_status,
+            "status": state.status,
             "connected": self._connected,
             "platform": get_platform(),
             "total_prompt_tokens": state.total_prompt_tokens,
@@ -338,18 +333,30 @@ class Agent:
             "memory_items": len(self._memory),
             "tools": self._registry.list_tools(),
             "working_directory": self._config.working_directory,
-            "active_sessions": len(self._session_manager),
+            "active_sessions": len(self.session_stats()),
         }
 
     def session_stats(self) -> list[dict[str, Any]]:
-        return self._session_manager.stats()
+        sessions = self._session_manager.stats()
+        return [s for s in sessions if s.get("session_id")]
+
+    def drop_session(self, session_id: str) -> None:
+        """Drop a named session's state (its conversation history)."""
+        if session_id:
+            self._session_manager.drop(session_id)
+
+    def clear_tools(self) -> None:
+        """Unregister all tools (headless / benchmark no-tools mode)."""
+        self._registry.clear()
 
     async def health_check(self) -> bool:
         result = await self._llm.health_check()
         self._connected = result
         return result
 
-    def _register_builtin_tools(self) -> None:
+    def _register_builtin_tools(self, *, disable_tools: bool = False) -> None:
+        if disable_tools:
+            return
         builtin_tools = [
             FilesystemTool(),
             ShellTool(default_timeout=self._config.shell_timeout),
@@ -489,7 +496,6 @@ class Agent:
             async for event in self._run_loop(state, user_input, evidence_required=evidence_required, confirm_fn=confirm_fn):
                 if event.type == "tool_call" and not event.blocked:
                     evidence_tool_calls += 1
-                await self._event_bus.emit(event)
                 yield event
         finally:
             outcome = state.last_outcome
@@ -581,10 +587,10 @@ class Agent:
             if state.cancelled:
                 state.last_outcome = "cancelled"
                 yield AgentEvent(type="cancelled", content="Operation cancelled by user.", iteration=iteration)
-                self._current_status = "ready"
+                state.status = "ready"
                 return
 
-            self._current_status = "thinking"
+            state.status = "thinking"
             state.total_iterations += 1
 
             raw_messages = conv.get_messages_for_llm_raw()
@@ -601,10 +607,7 @@ class Agent:
                 budget=self._config.context_window_budget,
             )
             messages = self._ensure_system_first(messages)
-            tools = [
-                {"type": "function", "function": t.core_schema()}
-                for t in self._registry._tools.values()
-            ] if len(self._registry) > 0 else None
+            tools = self._registry.all_schemas() if len(self._registry) > 0 else None
 
             full_content = ""
             emitted_clean_len = 0
@@ -635,7 +638,7 @@ class Agent:
                     if state.cancelled:
                         state.last_outcome = "cancelled"
                         yield AgentEvent(type="cancelled", content="Operation cancelled by user.", iteration=iteration)
-                        self._current_status = "ready"
+                        state.status = "ready"
                         return
 
                     if chunk.finish_reason == "error":
@@ -748,7 +751,7 @@ class Agent:
 
             if stream_had_error:
                 state.last_outcome = "error"
-                self._current_status = "ready"
+                state.status = "ready"
                 return
 
             self._connected = True
@@ -776,7 +779,7 @@ class Agent:
                     if state.cancelled:
                         state.last_outcome = "cancelled"
                         yield AgentEvent(type="cancelled", content="Operation cancelled by user.", iteration=iteration)
-                        self._current_status = "ready"
+                        state.status = "ready"
                         return
 
                     func = tool_call.get("function", {})
@@ -869,7 +872,7 @@ class Agent:
                             content=f"Total tool call limit reached ({max_total_tool_calls}).",
                             iteration=iteration,
                         )
-                        self._current_status = "ready"
+                        state.status = "ready"
                         return
 
                     if consecutive_tool_without_answer >= max_consecutive_tool_calls:
@@ -879,10 +882,10 @@ class Agent:
                             content=f"Too many tool calls ({consecutive_tool_without_answer}) without producing an answer.",
                             iteration=iteration,
                         )
-                        self._current_status = "ready"
+                        state.status = "ready"
                         return
 
-                    self._current_status = f"executing_{tool_name}"
+                    state.status = f"executing_{tool_name}"
 
                     try:
                         execute_coro = self._registry.execute(tool_name, **arguments)
@@ -891,7 +894,7 @@ class Agent:
                             result = await state.tool_task
                         except asyncio.CancelledError:
                             if state.cancelled:
-                                self._current_status = "ready"
+                                state.status = "ready"
                                 state.last_outcome = "cancelled"
                                 yield AgentEvent(type="cancelled", content="Operation cancelled by user.", iteration=iteration)
                                 return
@@ -903,7 +906,7 @@ class Agent:
                         if idem_key:
                             self._idempotency.record(idem_key, result)
                         conv.add_tool_result(tool_call_id, result_str, tool_name=tool_name)
-                        self._current_status = "thinking"
+                        state.status = "thinking"
                         yield AgentEvent(
                             type="tool_result",
                             tool_name=tool_name,
@@ -913,13 +916,13 @@ class Agent:
                             iteration=iteration,
                         )
                     except asyncio.CancelledError:
-                        self._current_status = "ready"
+                        state.status = "ready"
                         state.last_outcome = "cancelled"
                         return
                     except Exception as e:
                         error_msg = f"Error: {e}"
                         conv.add_tool_result(tool_call_id, error_msg, tool_name=tool_name)
-                        self._current_status = "thinking"
+                        state.status = "thinking"
                         yield AgentEvent(
                             type="tool_result",
                             tool_name=tool_name,
@@ -945,7 +948,7 @@ class Agent:
                         iteration=iteration,
                     )
                     state.last_outcome = "answer"
-                    self._current_status = "ready"
+                    state.status = "ready"
                     return
 
                 if not clean_content:
@@ -958,7 +961,7 @@ class Agent:
                             iteration=iteration,
                         )
                         state.last_outcome = "answer"
-                        self._current_status = "ready"
+                        state.status = "ready"
                         return
                     conv.add_user("[System] You did not produce any output. Please respond to the user's question directly.")
                     continue
@@ -992,7 +995,7 @@ class Agent:
                     iteration=iteration,
                 )
                 state.last_outcome = "answer"
-                self._current_status = "ready"
+                state.status = "ready"
                 return
 
         state.last_outcome = "limit"
@@ -1001,7 +1004,7 @@ class Agent:
             content="Maximum iterations reached without a final answer.",
             iteration=self._config.max_iterations,
         )
-        self._current_status = "ready"
+        state.status = "ready"
 
     async def run_simple(self, user_input: str) -> str:
         final_answer = ""
