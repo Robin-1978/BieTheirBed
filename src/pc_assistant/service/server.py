@@ -24,6 +24,7 @@ from websockets.asyncio.server import ServerConnection
 
 from pc_assistant.agent import Agent, AgentEvent
 from pc_assistant.config import AppConfig, load_config
+from pc_assistant.harness.confirm import CONFIRM_TIMEOUT
 from pc_assistant.service.protocol import (
     SOCKET_PATH,
     PID_PATH,
@@ -46,7 +47,7 @@ class ServiceServer:
         self._ws_server: Any = None
         self._tcp_server: Any = None
         self._clients: dict[str, ServerConnection] = {}
-        self._confirm_futures: dict[str, asyncio.Future[bool]] = {}
+        self._confirm_futures: dict[tuple[str, str], tuple[str, asyncio.Future[bool]]] = {}
         self._channel_manager: Any = None
         self._running = False
 
@@ -58,10 +59,7 @@ class ServiceServer:
         if SOCKET_PATH.exists():
             SOCKET_PATH.unlink()
 
-        self._agent = Agent(
-            config=self._config,
-            confirm_callback=self._confirm_via_client,
-        )
+        self._agent = Agent(config=self._config)
 
         scheduler = self._agent.registry.get("scheduler")
         if scheduler is not None:
@@ -190,6 +188,7 @@ class ServiceServer:
             logger.error("Client %s error: %s", client_id, e)
         finally:
             self._clients.pop(client_id, None)
+            self._resolve_client_confirm_futures(client_id, approved=False)
             logger.info("Client disconnected: %s", client_id)
 
     async def _authenticate(self, ws: ServerConnection) -> bool:
@@ -217,7 +216,7 @@ class ServiceServer:
         elif msg.method == "cancel":
             self._handle_cancel(msg)
         elif msg.method == "confirm":
-            self._handle_confirm(msg)
+            self._handle_confirm(ws, client_id, msg)
         elif msg.method == "status":
             await self._handle_status(ws, msg)
         elif msg.method == "health":
@@ -247,13 +246,32 @@ class ServiceServer:
             await ws.send(serialize(ServerMessage.error(msg.id, "Empty input")))
             return
 
+        async def ws_confirm(tool_name: str, tool_args: dict[str, Any]) -> bool:
+            code = uuid.uuid4().hex[:8]
+            key = (client_id, code)
+            future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+            self._confirm_futures[key] = (session_id, future)
+            await ws.send(serialize(ServerMessage.confirm_request(tool_name, tool_args, code)))
+            try:
+                return await asyncio.wait_for(future, timeout=CONFIRM_TIMEOUT)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                return False
+            finally:
+                self._confirm_futures.pop(key, None)
+
         try:
-            async for event in self._agent.run(input_text, session_id=session_id):
+            async for event in self._agent.run(
+                input_text,
+                session_id=session_id,
+                confirm_callback=ws_confirm,
+            ):
                 frame = ServerMessage.event(msg.id, event.model_dump())
                 await ws.send(serialize(frame))
         except Exception as e:
             logger.error("Run error for %s: %s", client_id, e)
             await ws.send(serialize(ServerMessage.error(msg.id, str(e))))
+        finally:
+            self._resolve_client_confirm_futures(client_id, approved=False)
 
         await ws.send(serialize(ServerMessage.result(msg.id, {"done": True})))
 
@@ -263,15 +281,41 @@ class ServiceServer:
         session_id = msg.session_id
         if session_id:
             self._agent.cancel(session_id)
+            self._resolve_confirm_futures_for_session(session_id)
         else:
             self._agent.cancel()
+            self._resolve_all_confirm_futures(approved=False)
 
-    def _handle_confirm(self, msg: ClientMessage) -> None:
+    def _handle_confirm(self, ws: ServerConnection, client_id: str, msg: ClientMessage) -> None:
         code = msg.params.get("code", "")
         approved = msg.params.get("approved", False)
-        future = self._confirm_futures.pop(code, None)
-        if future is not None and not future.done():
-            future.set_result(approved)
+        entry = self._confirm_futures.pop((client_id, code), None)
+        if entry is not None and not entry[1].done():
+            entry[1].set_result(approved)
+
+    def _resolve_client_confirm_futures(self, client_id: str, approved: bool) -> None:
+        for key, entry in list(self._confirm_futures.items()):
+            if key[0] != client_id:
+                continue
+            self._confirm_futures.pop(key, None)
+            if not entry[1].done():
+                entry[1].set_result(approved)
+
+    def _resolve_confirm_futures_for_session(
+        self, session_id: str, approved: bool = False
+    ) -> None:
+        for key, entry in list(self._confirm_futures.items()):
+            if entry[0] != session_id:
+                continue
+            self._confirm_futures.pop(key, None)
+            if not entry[1].done():
+                entry[1].set_result(approved)
+
+    def _resolve_all_confirm_futures(self, approved: bool) -> None:
+        for key, entry in list(self._confirm_futures.items()):
+            self._confirm_futures.pop(key, None)
+            if not entry[1].done():
+                entry[1].set_result(approved)
 
     async def _handle_status(self, ws: ServerConnection, msg: ClientMessage) -> None:
         if self._agent is None:
@@ -306,34 +350,6 @@ class ServiceServer:
             await ws.send(serialize(ServerMessage.result(msg.id, {"tools": tools})))
         else:
             await ws.send(serialize(ServerMessage.error(msg.id, f"Unknown command: {cmd}")))
-
-    # ── Confirm callback (IPC round-trip) ─────────────────────
-
-    async def _confirm_via_client(
-        self,
-        tool_name: str,
-        tool_args: dict[str, Any],
-    ) -> bool:
-        if self._clients:
-            code = uuid.uuid4().hex[:8]
-            future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
-            self._confirm_futures[code] = future
-
-            frame = ServerMessage.confirm_request(tool_name, tool_args, code)
-            msg = serialize(frame)
-            for ws in self._clients.values():
-                try:
-                    await ws.send(msg)
-                except Exception:
-                    pass
-
-            try:
-                return await asyncio.wait_for(future, timeout=120.0)
-            except asyncio.TimeoutError:
-                self._confirm_futures.pop(code, None)
-                return False
-
-        return False
 
     # ── Timer / scheduler notifications ───────────────────────
 

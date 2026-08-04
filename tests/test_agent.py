@@ -107,9 +107,9 @@ async def _mock_stream(chunks: list[StreamChunk]):
         yield chunk
 
 
-async def _collect_events(agent: Agent, user_input: str) -> list[AgentEvent]:
+async def _collect_events(agent: Agent, user_input: str, **kwargs) -> list[AgentEvent]:
     events: list[AgentEvent] = []
-    async for event in agent.run(user_input):
+    async for event in agent.run(user_input, **kwargs):
         events.append(event)
     return events
 
@@ -226,7 +226,8 @@ class TestAgentRun:
         assert len(allowed_calls) >= 1
 
     @pytest.mark.asyncio
-    async def test_confirm_callback_denies(self):
+    async def test_confirm_callback_denies_feeds_back_to_llm(self):
+        """Denial feeds back as a tool result so the model can respond (no turn kill)."""
         agent = Agent(config=AppConfig(), confirm_callback=lambda n, a: False)
         dangerous_cmd = get_default_dangerous_commands()[0]
         first_stream = _make_stream_mock(
@@ -251,6 +252,45 @@ class TestAgentRun:
 
         agent._llm.chat_stream = mock_chat_stream
         events = await _collect_events(agent, "delete temp")
+        blocked = [e for e in events if e.type == "tool_call" and e.blocked]
+        assert len(blocked) >= 1
+        assert "denied" in blocked[0].content.lower(), (
+            "Blocked event should surface the denial reason to the frontend"
+        )
+        cancelled = [e for e in events if e.type == "cancelled"]
+        assert len(cancelled) == 0, "Denial is not a cancellation"
+        assert call_count == 2, "Agent should let the LLM respond after denial"
+
+    @pytest.mark.asyncio
+    async def test_per_call_confirm_callback_overrides_default(self):
+        """Per-call confirm_callback should override the default one."""
+        default_called = []
+        per_call_called = []
+
+        def default_cb(n, a):
+            default_called.append(n)
+            return True
+
+        def per_call_cb(n, a):
+            per_call_called.append(n)
+            return False
+
+        agent = Agent(config=AppConfig(), confirm_callback=default_cb)
+        dangerous_cmd = get_default_dangerous_commands()[0]
+        agent._llm.chat_stream = _make_stream_mock(
+            content="Deleting.",
+            tool_calls=[{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "shell", "arguments": {"command": dangerous_cmd}},
+            }],
+            finish_reason="tool_calls",
+        )
+        events = await _collect_events(agent, "delete", confirm_callback=per_call_cb)
+        assert len(per_call_called) >= 1, "Per-call callback should be invoked"
+        assert len(default_called) == 0, "Default callback should NOT be invoked"
+        cancelled = [e for e in events if e.type == "cancelled"]
+        assert len(cancelled) == 0, "Per-call deny feeds back, not cancels"
         blocked = [e for e in events if e.type == "tool_call" and e.blocked]
         assert len(blocked) >= 1
 

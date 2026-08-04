@@ -25,6 +25,7 @@ _INJECTION_PATTERNS: list[re.Pattern[str]] = [
 ]
 
 _CONFIRMATION_COMMAND_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"\brm\b", re.IGNORECASE),
     re.compile(r"\bdelete\b", re.IGNORECASE),
     re.compile(r"\bremove-item\b", re.IGNORECASE),
     re.compile(r"\brmdir\b", re.IGNORECASE),
@@ -37,6 +38,12 @@ _CONFIRMATION_COMMAND_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\bmv\b", re.IGNORECASE),
     re.compile(r"\bren\b", re.IGNORECASE),
     re.compile(r"\brename\b", re.IGNORECASE),
+    re.compile(r"\bchmod\b", re.IGNORECASE),
+    re.compile(r"\bchown\b", re.IGNORECASE),
+    re.compile(r"\bsudo\b", re.IGNORECASE),
+    re.compile(r"\bdd\b", re.IGNORECASE),
+    re.compile(r"\bmkfs\b", re.IGNORECASE),
+    re.compile(r"\bshred\b", re.IGNORECASE),
 ]
 
 
@@ -126,8 +133,17 @@ class SafetyChecker:
                 return (True, "Killing a process requires confirmation")
             return (False, "")
 
-        if tool_name in ("keyboard", "mouse", "clipboard", "scheduler"):
-            return (True, f"Tool '{tool_name}' can control your system and requires confirmation")
+        if tool_name == "memory":
+            action = kwargs.get("action", "")
+            if action in ("clear", "delete", "forget"):
+                return (True, f"Memory {action} requires confirmation")
+            return (False, "")
+
+        if tool_name == "scheduler":
+            action = kwargs.get("action", "")
+            if action in ("create", "delete", "clear"):
+                return (True, f"Scheduler {action} requires confirmation")
+            return (False, "")
 
         return (False, "")
 

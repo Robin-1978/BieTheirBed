@@ -13,6 +13,7 @@ from textual.widgets import Header, Markdown, Static
 
 from pc_assistant.agent import Agent, AgentEvent
 from pc_assistant.config import AppConfig
+from pc_assistant.harness.confirm import CONFIRM_TIMEOUT
 from pc_assistant.service.agent_like import AgentLike
 from pc_assistant.ui.state import UIState, MessageType
 from pc_assistant.ui.theme import get_palette, set_theme, AVAILABLE_THEMES
@@ -61,6 +62,8 @@ _COMMANDS_HELP = """\
 | `/export` | Export conversation to file |
 | `/compact` | Compact context (clear old messages) |
 | `/theme` | List themes or `/theme <name>` to switch |
+| `/confirm` | Approve a pending dangerous tool call |
+| `/deny` | Reject a pending dangerous tool call |
 """
 
 
@@ -89,7 +92,7 @@ class ChatApp(App):
         super().__init__(**kwargs)
         self._config = config
         set_theme(config.ui_theme)
-        self._agent: AgentLike | Agent | None = agent
+        self._agent: AgentLike | Agent | None = None
         self._confirm_callback = confirm_callback
         self._is_remote = False
         self._state = UIState()
@@ -102,6 +105,9 @@ class ChatApp(App):
         self._token_count = 0
         self._scroll_pending = False
         self._streamed_any = False
+        self._confirm_pending: dict[str, Any] | None = None
+        if agent is not None:
+            self.set_agent(agent)
 
     @property
     def state(self) -> UIState:
@@ -110,6 +116,28 @@ class ChatApp(App):
     def set_agent(self, agent: AgentLike | Agent) -> None:
         self._agent = agent
         self._is_remote = not isinstance(agent, Agent)
+
+    def _make_tui_confirm(self) -> Any:
+        """Create a per-turn confirm callback bound to this TUI instance."""
+        async def _tui_confirm(tool_name: str, args: dict) -> bool:
+            args_str = ", ".join(f"{k}={v}" for k, v in list(args.items())[:3])
+            future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+            self._confirm_pending = {
+                "code": "__local__",
+                "tool": tool_name,
+                "future": future,
+            }
+            self.call_later(
+                self._mount_confirm_prompt, tool_name, args_str,
+            )
+            try:
+                return await asyncio.wait_for(future, timeout=CONFIRM_TIMEOUT)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                return False
+            finally:
+                if self._confirm_pending is not None:
+                    self._confirm_pending = None
+        return _tui_confirm
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -143,20 +171,47 @@ class ChatApp(App):
                     scheduler.set_notification_callback(self._on_timer_notify)
 
     async def _on_confirm_request(self, data: dict[str, Any]) -> None:
-        """Handle confirm_request from the service (for dangerous tool calls)."""
-        from pc_assistant.service.client import ServiceClient
+        """Handle confirm_request from the service (for dangerous tool calls).
+
+        Called from ServiceClient._reader_loop via asyncio.create_task, which
+        lacks Textual's ``active_app`` ContextVar. DOM operations must be
+        scheduled via ``call_later`` to run in the app's own context.
+        """
         tool = data.get("tool", "?")
         args = data.get("args", {})
         code = data.get("code", "")
-        approved = False
-        if self._confirm_callback is not None:
-            result = self._confirm_callback(tool, args)
-            if asyncio.iscoroutine(result) or asyncio.isfuture(result):
-                approved = await result
-            else:
-                approved = bool(result)
-        if isinstance(self._agent, ServiceClient):
-            await self._agent.confirm(code, approved)
+
+        args_str = ", ".join(f"{k}={v}" for k, v in list(args.items())[:3])
+        self._confirm_pending = {"code": code, "tool": tool, "ts": time.time()}
+        self.call_later(
+            self._mount_confirm_prompt, tool, args_str,
+        )
+        self.set_timer(CONFIRM_TIMEOUT, self._expire_remote_confirm, code)
+
+    def _expire_remote_confirm(self, code: str) -> None:
+        """Clear a stale remote confirmation (server already timed out)."""
+        pending = getattr(self, "_confirm_pending", None)
+        if pending is None or pending.get("code") != code:
+            return
+        if "future" in pending:
+            return
+        self._confirm_pending = None
+        self.notify(
+            "Confirmation expired (no response within the time limit).",
+            title="Confirm",
+            severity="warning",
+            timeout=6,
+        )
+
+    def _mount_confirm_prompt(self, tool: str, args_str: str) -> None:
+        """Mount the confirmation prompt (runs in Textual's app context)."""
+        log = self.query_one("#chat-log", VerticalScroll)
+        log.mount(CommandOutput(
+            f"**\u26a0\ufe0f Dangerous operation: {tool}**\n\n"
+            f"`{args_str}`\n\n"
+            f"Type `/confirm` to approve or `/deny` to reject."
+        ))
+        self._schedule_scroll()
 
     def _on_timer_notify(self, task_id: str, message: str) -> None:
         self.notify(message, title=f"Timer: {task_id}", severity="information", timeout=8)
@@ -199,8 +254,10 @@ class ChatApp(App):
         stream = Markdown.get_stream(response.markdown)
         self._md_stream = stream
 
+        confirm_fn = self._make_tui_confirm() if not self._is_remote else None
+
         try:
-            async for event in self._agent.run(text):
+            async for event in self._agent.run(text, confirm_callback=confirm_fn):
                 if self._cancelled:
                     break
                 await self._handle_event(event, response, stream)
@@ -484,8 +541,37 @@ class ChatApp(App):
                     f"| Theme | Status |\n|-------|--------|\n{rows}\n\n"
                     f"Use `/theme <name>` to switch."
                 ))
+        elif cmd == "/confirm":
+            self._handle_confirm_reply(True, log)
+        elif cmd == "/deny":
+            self._handle_confirm_reply(False, log)
         else:
             log.mount(CommandOutput(f"{ICON_WARN} Unknown command: `{command}`"))
 
         log.scroll_end(animate=False)
         return True
+
+    def _handle_confirm_reply(self, approved: bool, log: VerticalScroll) -> None:
+        pending = getattr(self, "_confirm_pending", None)
+        if pending is None:
+            log.mount(CommandOutput(f"{ICON_WARN} No pending confirmation."))
+            return
+        ts = pending.get("ts")
+        if ts is not None and time.time() - ts > CONFIRM_TIMEOUT:
+            self._confirm_pending = None
+            log.mount(CommandOutput(f"{ICON_WARN} Confirmation expired."))
+            return
+        self._confirm_pending = None
+        code = pending["code"]
+        tool = pending["tool"]
+        status = "approved" if approved else "denied"
+        log.mount(CommandOutput(f"**{tool}**: {status}"))
+
+        future = pending.get("future")
+        if future is not None and not future.done():
+            future.set_result(approved)
+            return
+
+        from pc_assistant.service.client import ServiceClient
+        if isinstance(self._agent, ServiceClient):
+            asyncio.create_task(self._agent.confirm(code, approved))

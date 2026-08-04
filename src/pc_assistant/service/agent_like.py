@@ -6,9 +6,11 @@ like ``ChatApp`` can accept either without caring about the backend.
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Awaitable, Callable, Protocol, runtime_checkable
 
 from pc_assistant.agent import AgentEvent
+
+ConfirmFn = Callable[[str, dict[str, Any]], bool | Awaitable[bool]]
 
 
 @runtime_checkable
@@ -20,6 +22,7 @@ class AgentLike(Protocol):
         user_input: str,
         *,
         session_id: str = "",
+        confirm_callback: ConfirmFn | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         ...
 
