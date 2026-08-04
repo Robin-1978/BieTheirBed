@@ -52,6 +52,7 @@ warnings.filterwarnings("ignore", message=".*pandas only supports SQLAlchemy.*")
 logging.getLogger("asyncio").setLevel(logging.CRITICAL)
 logging.getLogger("websockets").setLevel(logging.CRITICAL)
 logging.getLogger("lark_oapi").setLevel(logging.WARNING)
+logging.getLogger("Lark").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
@@ -1541,6 +1542,10 @@ class FeishuChannel(ChannelBase):
                     event_handler=event_handler,
                     auto_reconnect=True,
                 )
+                # WSClient configures its own named logger during construction,
+                # so enforce the level afterwards. Its INFO connection message
+                # contains access_key and ticket query parameters.
+                logging.getLogger("Lark").setLevel(logging.WARNING)
                 _patch_ws_card_dispatch(client)
                 self._last_ws_activity = time.time()
                 logger.info("[WS] Starting connection (new loop)...")
