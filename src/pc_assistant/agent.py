@@ -202,7 +202,7 @@ class Agent:
             ttl_seconds=self._config.attachment_ttl_seconds,
         )
         self._vision_broker: VisionBroker | None = None
-        if self._config.vision_enabled:
+        if self._config.vision_enabled and not self._llm.supports_vision:
             dedicated_vision_llm = vision_llm or LLMProvider(
                 server_url=self._config.vision_server_url,
                 model_name=self._config.vision_model_name,

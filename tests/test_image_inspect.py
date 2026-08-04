@@ -164,6 +164,26 @@ def test_image_inspect_schema_has_bounded_observation_operations():
     assert "do not propose fixes" in VISION_SYSTEM_PROMPT.lower()
 
 
+def test_multimodal_main_does_not_register_fallback_vision_tool(tmp_path):
+    class MustNotBeUsed:
+        @property
+        def supports_vision(self):
+            raise AssertionError("fallback vision provider must not be constructed or inspected")
+
+    agent = Agent(
+        config=AppConfig(supports_vision=True, vision_enabled=True),
+        attachment_store=AttachmentStore(tmp_path / "attachments"),
+        vision_llm=MustNotBeUsed(),
+    )
+
+    assert "image_inspect" not in agent.registry.list_tools()
+    assert agent._vision_broker is None
+    assert all(
+        schema["function"]["name"] != "image_inspect"
+        for schema in agent.registry.all_schemas()
+    )
+
+
 @pytest.mark.asyncio
 async def test_text_main_must_inspect_tool_generated_screenshot(tmp_path):
     image = tmp_path / "screen.png"
