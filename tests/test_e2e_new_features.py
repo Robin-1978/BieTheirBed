@@ -241,9 +241,9 @@ class TestTypedExceptions:
     async def test_tool_not_found_is_key_error(self):
         registry = ToolRegistry()
         with pytest.raises(KeyError):
-            await registry.execute("nope")
+            await registry._commit("nope")
         with pytest.raises(ToolNotFoundError):
-            await registry.execute("nope")
+            await registry._commit("nope")
 
     def test_tool_not_found_has_tool_name(self):
         try:

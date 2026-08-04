@@ -5,7 +5,6 @@ Requires a running llama.cpp server at the configured URL.
 """
 from __future__ import annotations
 
-import asyncio
 import os
 
 import pytest
@@ -24,10 +23,15 @@ def _server_available() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(
-    not _server_available(),
-    reason="llama.cpp server not available",
-)
+_LIVE_ENABLED = os.environ.get("RUN_LIVE_E2E") == "1"
+
+pytestmark = [
+    pytest.mark.live,
+    pytest.mark.skipif(
+        not _LIVE_ENABLED or not _server_available(),
+        reason="set RUN_LIVE_E2E=1 and start the configured llama.cpp server",
+    ),
+]
 
 
 async def _collect(agent: Agent, text: str) -> list[AgentEvent]:

@@ -17,6 +17,7 @@ llm_trace_log: "logs/llm_trace.jsonl"
 turn_trace_log: "logs/turn_trace.jsonl"
 evidence_policy_enabled: true
 log_file: "logs/pc_assistant.json"
+runtime_root: "."
 working_directory: "."
 service_host: "127.0.0.1"
 service_port: 0
@@ -26,3 +27,12 @@ feishu_app_id: ""
 feishu_app_secret: ""
 feishu_receive_id: ""
 feishu_receive_id_type: "open_id"
+vision_max_side: 1280
+vision_jpeg_quality: 70
+attachment_dir: "attachments"
+attachment_ttl_seconds: 3600
+attachment_cleanup_interval_seconds: 300
+supports_vision: null
+screen_grid_enabled: true
+screen_verify_enabled: false
+ui_backend: "auto"

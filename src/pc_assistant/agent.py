@@ -8,9 +8,10 @@ from typing import Any, AsyncGenerator, Awaitable
 
 from pydantic import BaseModel
 
+from pc_assistant.attachments import AttachmentStore
 from pc_assistant.config import AppConfig, load_config
 from pc_assistant.context.assembly import assemble_llm_messages, truncate_messages
-from pc_assistant.context.cache import CachePlan, build_cache_plan
+from pc_assistant.context.cache import build_cache_plan
 from pc_assistant.context.conversation import ConversationManager
 from pc_assistant.context.evidence import EvidencePolicy
 from pc_assistant.context.llm_compact import compact_conversation_llm
@@ -19,6 +20,7 @@ from pc_assistant.context.prompt import build_system_prompt
 from pc_assistant.context.token_estimate import TokenEstimator, normalize_family
 from pc_assistant.harness.audit import AuditLogger
 from pc_assistant.harness.confirm import ConfirmFn
+from pc_assistant.harness.executor import VerifiedToolExecutor
 from pc_assistant.harness.idempotency import IdempotencyLog
 from pc_assistant.harness.limiter import RateLimiter
 from pc_assistant.harness.refusal import RefusalCode, Verdict
@@ -26,9 +28,11 @@ from pc_assistant.harness.safety import SafetyChecker
 from pc_assistant.harness.verifier import Verifier
 from pc_assistant.llm_provider import LLMProvider, LLMResponse
 from pc_assistant.logger import get_logger
+from pc_assistant.model_adapter.types import ImageAttachment
 from pc_assistant.observability.trace import LLMTraceRecorder, TurnRecorder
 from pc_assistant.planner import AgentPlanner, StructuredPlan
 from pc_assistant.reflection import ReflectionChecker
+from pc_assistant.runtime import RuntimePaths
 from pc_assistant.platform_ import get_platform
 from pc_assistant.session import SessionManager, SessionState
 from pc_assistant.tools.application import ApplicationTool
@@ -45,8 +49,16 @@ from pc_assistant.tools.window import WindowTool
 from pc_assistant.tools.notification import NotificationTool
 from pc_assistant.tools.keyboard import KeyboardTool
 from pc_assistant.tools.mouse import MouseTool
+from pc_assistant.tools.screen import ScreenTool
+from pc_assistant.tools.ui import UITool
 from pc_assistant.tools.scheduler import SchedulerTool
 from pc_assistant.tools.describe_tool import DescribeTool
+
+
+# Tool-result payload cap for streamed events (bytes/chars). Keeps serialized
+# websocket frames well under the protocol's WS_MAX_SIZE even when a tool
+# returns a very large blob (e.g. reading a screenshot file).
+_EVENT_RESULT_LIMIT = 100_000
 
 
 class AgentEvent(BaseModel):
@@ -96,9 +108,11 @@ class Agent:
         trace: LLMTraceRecorder | None = None,
         turn_recorder: TurnRecorder | None = None,
         evidence: EvidencePolicy | None = None,
+        attachment_store: AttachmentStore | None = None,
         disable_tools: bool = False,
     ) -> None:
         self._config = config or load_config()
+        self._runtime_paths = RuntimePaths.from_root(self._config.runtime_root)
         self._logger = get_logger("agent")
         self._llm = llm if llm is not None else LLMProvider(
             server_url=self._config.llm_server_url,
@@ -107,6 +121,7 @@ class Agent:
             api_key=self._config.llm_api_key,
             api_base=self._config.llm_api_base,
             timeout=self._config.llm_timeout,
+            supports_vision=self._config.supports_vision,
         )
         self._memory = memory if memory is not None else UserMemory()
         self._episodic_memory = EpisodicMemory()
@@ -117,15 +132,22 @@ class Agent:
         )
         self._registry = registry if registry is not None else ToolRegistry()
         self._limiter = limiter if limiter is not None else RateLimiter()
-        self._audit = audit if audit is not None else AuditLogger()
+        self._audit = audit if audit is not None else AuditLogger(
+            log_dir=str(self._runtime_paths.logs / "audit"),
+        )
         self._confirm_callback = confirm_callback
         self._verifier = Verifier(
             safety=self._safety,
             registry=self._registry,
             audit=self._audit,
             confirm_callback=confirm_callback,
+            verify_enabled=self._config.screen_verify_enabled,
+            post_verify_callback=self._post_verify_screen if self._config.screen_verify_enabled else None,
         )
-        self._idempotency = IdempotencyLog()
+        self._executor = VerifiedToolExecutor(self._verifier, self._registry)
+        self._idempotency = IdempotencyLog(
+            storage_path=self._runtime_paths.cache / "idempotency.json",
+        )
         self._planner = AgentPlanner(self._llm)
         self._reflection = ReflectionChecker(
             self._llm,
@@ -146,14 +168,22 @@ class Agent:
         if conversation is not None:
             self._default_state.conversation = conversation
         self._trace = trace or LLMTraceRecorder(
-            path=self._config.llm_trace_log,
+            path=str(self._runtime_paths.resolve(self._config.llm_trace_log)),
             enabled=self._config.trace_enabled,
         )
         self._turn_recorder = turn_recorder or TurnRecorder(
-            path=self._config.turn_trace_log,
+            path=str(self._runtime_paths.resolve(self._config.turn_trace_log)),
             enabled=self._config.trace_enabled,
         )
         self._evidence = evidence or EvidencePolicy(enabled=self._config.evidence_policy_enabled)
+        self._attachment_store = attachment_store or AttachmentStore(
+            self._runtime_paths.resolve(
+                self._config.attachment_dir,
+                default_parent=self._runtime_paths.attachments.parent,
+            ),
+            ttl_seconds=self._config.attachment_ttl_seconds,
+        )
+        self._session_manager.set_drop_callback(self._attachment_store.cleanup_session)
         self._register_builtin_tools(disable_tools=disable_tools)
         self._cache_plan = build_cache_plan(
             provider=self._config.llm_provider,
@@ -313,6 +343,156 @@ class Agent:
             + result_str[-tail_size:]
         )
 
+    def _bounded_event_result(self, result: Any, result_str: str) -> Any:
+        """Bound the ``tool_result`` payload attached to streamed events.
+
+        The conversation copy is truncated by :meth:`_smart_truncate`, but the
+        raw ``result`` rides along in the event and gets serialized into a
+        websocket frame. Oversized results (e.g. reading a screenshot file)
+        would exceed the frame limit and silently drop the connection, so cap
+        the event payload while keeping small structured results intact
+        (consumers rely on ``dict`` shape for error detection).
+        """
+        result = self._event_safe_result(result)
+        if isinstance(result, str):
+            return result if len(result) <= _EVENT_RESULT_LIMIT else result[: _EVENT_RESULT_LIMIT]
+        try:
+            size = len(str(result))
+        except Exception:
+            return result
+        if size <= _EVENT_RESULT_LIMIT:
+            return result
+        return {"truncated": True, "size": size, "content": result_str[: _EVENT_RESULT_LIMIT]}
+
+    def _resolve_attachments(
+        self,
+        session_id: str,
+        attachments: list[ImageAttachment] | None,
+    ) -> list[dict[str, Any]]:
+        """Convert user image attachments into neutral content blocks."""
+        if not attachments:
+            return []
+        from pc_assistant.vision.preprocess import image_block_from_file
+
+        blocks: list[dict[str, Any]] = []
+        for att in attachments:
+            block = None
+            if att.attachment_id:
+                try:
+                    block = self._attachment_store.reference(
+                        session_id,
+                        att.attachment_id,
+                        caption=att.caption,
+                    )
+                except KeyError:
+                    block = None
+            elif att.data_url:
+                try:
+                    block = self._attachment_store.put_data_url(
+                        session_id,
+                        att.data_url,
+                        media_type=att.media_type,
+                        source="upload",
+                        caption=att.caption,
+                    )
+                except ValueError:
+                    block = None
+            elif att.path:
+                image_block = image_block_from_file(
+                    att.path,
+                    max_side=self._config.vision_max_side,
+                    quality=self._config.vision_jpeg_quality,
+                )
+                if image_block is not None:
+                    try:
+                        block = self._attachment_store.put_data_url(
+                            session_id,
+                            image_block["image_url"],
+                            media_type=image_block.get("media_type", att.media_type),
+                            source="file",
+                            caption=att.caption,
+                        )
+                    except ValueError:
+                        block = None
+            if block is None:
+                continue
+            if att.caption:
+                blocks.append({"type": "text", "text": f"[Image: {att.caption}]"})
+            blocks.append(block)
+        return blocks
+
+    def store_attachment(self, session_id: str, attachment: ImageAttachment) -> dict[str, Any]:
+        """Store one uploaded image and return its reference metadata."""
+        blocks = self._resolve_attachments(session_id, [attachment])
+        ref = next(
+            (block for block in blocks if block.get("type") == "image_ref"),
+            None,
+        )
+        if ref is None:
+            raise ValueError("Could not store attachment")
+        return ref
+
+    def _inline_image_blocks(
+        self,
+        session_id: str,
+        tool_name: str,
+        result: Any,
+    ) -> list[dict[str, Any]] | None:
+        """Extract an inline image block from a tool result, if present.
+
+        Returns ``None`` when the result carries no image (text-only tools keep
+        their existing XML-wrapped path), or when the provider cannot see
+        images. The image is delivered to the model as a raw content block.
+        """
+        if not self._llm.supports_vision or not isinstance(result, dict):
+            return None
+        block = result.get("image")
+        if not isinstance(block, dict) or block.get("type") != "image":
+            return None
+        path = result.get("path", "")
+        try:
+            ref = self._attachment_store.put_data_url(
+                session_id,
+                str(block.get("image_url", "")),
+                media_type=str(block.get("media_type", "image/jpeg")),
+                source=f"tool:{tool_name}",
+            )
+        except ValueError:
+            return None
+        return [
+            {"type": "text", "text": f"[inline image from {tool_name}: {path}]"},
+            ref,
+        ]
+
+    @classmethod
+    def _event_safe_result(cls, value: Any) -> Any:
+        """Remove binary image encodings from events and persistence payloads."""
+        if isinstance(value, str):
+            return re.sub(
+                r"data:image/[^;\s]+;base64,[A-Za-z0-9+/=]+",
+                "[binary image omitted]",
+                value,
+            )
+        if isinstance(value, list):
+            return [cls._event_safe_result(item) for item in value]
+        if isinstance(value, dict):
+            return {key: cls._event_safe_result(item) for key, item in value.items()}
+        return value
+
+    @classmethod
+    def _contains_binary_image(cls, value: Any) -> bool:
+        if isinstance(value, str):
+            return value.startswith("data:image/")
+        if isinstance(value, list):
+            return any(cls._contains_binary_image(item) for item in value)
+        if isinstance(value, dict):
+            return any(cls._contains_binary_image(item) for item in value.values())
+        return False
+
+    def _inline_image_note(self, result: Any) -> str:
+        path = result.get("path", "") if isinstance(result, dict) else ""
+        return f"[inline image captured: {path}]"
+
     # ------------------------------------------------------------------
     # Status
     # ------------------------------------------------------------------
@@ -345,6 +525,9 @@ class Agent:
         if session_id:
             self._session_manager.drop(session_id)
 
+    def cleanup_attachments(self) -> None:
+        self._attachment_store.cleanup_expired()
+
     def clear_tools(self) -> None:
         """Unregister all tools (headless / benchmark no-tools mode)."""
         self._registry.clear()
@@ -354,21 +537,58 @@ class Agent:
         self._connected = result
         return result
 
+    def _post_verify_screen(self, tool_name: str, arguments: dict[str, Any]) -> Awaitable[str]:
+        """Advisory post-action screen capture for the verifier's post-verify rule."""
+        from pc_assistant.vision.preprocess import capture_block
+
+        async def _verify() -> str:
+            block = await asyncio.to_thread(
+                capture_block,
+                None,
+                max_side=self._config.vision_max_side,
+                quality=self._config.vision_jpeg_quality,
+            )
+            if block is None:
+                return "post-verify: screen capture unavailable"
+            w = block.get("width") or 0
+            h = block.get("height") or 0
+            return f"post-verify: captured {w}x{h} screen after {tool_name}({arguments.get('action', '?')})"
+
+        return _verify()
+
+    async def verify_tool_call(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        confirm_callback: ConfirmFn | None = None,
+    ) -> Verdict:
+        return await self._verifier.verify(tool_name, arguments, confirm_callback=confirm_callback)
+
     def _register_builtin_tools(self, *, disable_tools: bool = False) -> None:
         if disable_tools:
             return
         builtin_tools = [
-            FilesystemTool(),
+            FilesystemTool(working_directory=self._config.working_directory),
             ShellTool(default_timeout=self._config.shell_timeout),
             ApplicationTool(),
             WebTool(),
-            SystemTool(),
+            SystemTool(artifact_dir=self._attachment_store.root / "screenshots"),
             ClipboardTool(),
             MemoryTool(memory=self._memory, episodic=self._episodic_memory),
             WeatherTool(),
             ExchangeTool(),
-            WindowTool(),
+            WindowTool(artifact_dir=self._attachment_store.root / "screenshots"),
             NotificationTool(),
+            UITool(
+                ui_backend=self._config.ui_backend,
+                artifact_dir=self._attachment_store.root / "screenshots",
+            ),
+            ScreenTool(
+                grid_enabled=self._config.screen_grid_enabled,
+                max_side=self._config.vision_max_side,
+                jpeg_quality=self._config.vision_jpeg_quality,
+                artifact_dir=self._attachment_store.root / "screenshots",
+            ),
             KeyboardTool(),
             MouseTool(),
             SchedulerTool(),
@@ -426,7 +646,8 @@ class Agent:
         )
         # Calibrate token estimator with actual usage
         if messages and prompt_tokens > 0:
-            prompt_text = "\n".join(str(m.get("content", "")) for m in messages)
+            from pc_assistant.model_adapter.content import text_content
+            prompt_text = "\n".join(text_content(m.get("content", "")) for m in messages)
             self._token_estimator.calibrate(prompt_tokens, prompt_text)
 
     def _record_turn(
@@ -471,6 +692,7 @@ class Agent:
         *,
         session_id: str = "",
         confirm_callback: ConfirmFn | None = None,
+        attachments: list[ImageAttachment] | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         if not self._limiter.is_allowed("agent"):
             yield AgentEvent(
@@ -479,12 +701,50 @@ class Agent:
             )
             return
 
-        confirm_fn = confirm_callback or self._confirm_callback
         state = self._get_state(session_id)
+        async with state.run_lock:
+            async for event in self._run_serialized(
+                state,
+                user_input,
+                session_id=session_id,
+                confirm_callback=confirm_callback,
+                attachments=attachments,
+            ):
+                yield event
+
+    async def _run_serialized(
+        self,
+        state: SessionState,
+        user_input: str,
+        *,
+        session_id: str,
+        confirm_callback: ConfirmFn | None,
+        attachments: list[ImageAttachment] | None,
+    ) -> AsyncGenerator[AgentEvent, None]:
+        confirm_fn = confirm_callback or self._confirm_callback
         state.cancelled = False
         state.tool_call_history.clear()
         state.last_outcome = "running"
         state.mark_snapshot()
+
+        attachment_blocks = self._resolve_attachments(state.session_id, attachments)
+        if attachments and not attachment_blocks:
+            yield AgentEvent(
+                type="error",
+                content="Could not load the attached image(s). Make sure the paths exist and Pillow is installed.",
+            )
+            state.status = "ready"
+            return
+        if attachment_blocks and not self._llm.supports_vision:
+            yield AgentEvent(
+                type="error",
+                content=(
+                    "The active LLM provider does not support vision (supports_vision=false). "
+                    "Switch to a multimodal model to send images."
+                ),
+            )
+            state.status = "ready"
+            return
 
         turn_start = time.monotonic()
         turn_base_iterations = state.total_iterations
@@ -493,7 +753,13 @@ class Agent:
         evidence_required = self._evidence.requires_evidence(user_input)
         evidence_tool_calls = 0
         try:
-            async for event in self._run_loop(state, user_input, evidence_required=evidence_required, confirm_fn=confirm_fn):
+            async for event in self._run_loop(
+                state,
+                user_input,
+                evidence_required=evidence_required,
+                confirm_fn=confirm_fn,
+                attachment_blocks=attachment_blocks,
+            ):
                 if event.type == "tool_call" and not event.blocked:
                     evidence_tool_calls += 1
                 yield event
@@ -531,6 +797,7 @@ class Agent:
         *,
         evidence_required: bool,
         confirm_fn: ConfirmFn | None = None,
+        attachment_blocks: list[dict[str, Any]] | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         conv = state.conversation
 
@@ -543,11 +810,11 @@ class Agent:
             if plan is not None:
                 yield AgentEvent(type="plan", content=plan.to_prompt())
                 enriched = f"{user_input}\n\n{plan.to_prompt()}\n\nExecute the plan step by step."
-                conv.add_user(enriched)
+                conv.add_user_with_blocks(enriched, attachment_blocks)
             else:
-                conv.add_user(user_input)
+                conv.add_user_with_blocks(user_input, attachment_blocks)
         else:
-            conv.add_user(user_input)
+            conv.add_user_with_blocks(user_input, attachment_blocks)
 
         memory_parts = [self._memory.build_context_string()]
         episodic_ctx = self._episodic_memory.build_context_string()
@@ -560,10 +827,14 @@ class Agent:
         conv.set_system_context(self._system_prompt)
 
         if self._config.llm_compact_enabled:
+            async def _hydrate_for_compaction(messages: list[dict[str, Any]]) -> str:
+                hydrated = self._attachment_store.hydrate_messages(state.session_id, messages)
+                return await self._compaction_llm_call(hydrated)
+
             compacted = await compact_conversation_llm(
                 conv.get_messages_for_llm_raw(),
                 keep_recent=2,
-                llm_call=self._compaction_llm_call,
+                llm_call=_hydrate_for_compaction,
             )
             if compacted is not None:
                 conv.rebuild_from_messages(compacted)
@@ -607,6 +878,7 @@ class Agent:
                 budget=self._config.context_window_budget,
             )
             messages = self._ensure_system_first(messages)
+            messages = self._attachment_store.hydrate_messages(state.session_id, messages)
             tools = self._registry.all_schemas() if len(self._registry) > 0 else None
 
             full_content = ""
@@ -810,7 +1082,11 @@ class Agent:
                         state.tool_call_history.clear()
                         break
 
-                    verdict = await self._verifier.verify(tool_name, arguments, confirm_callback=confirm_fn)
+                    verdict, prepared_call = await self._executor.authorize(
+                        tool_name,
+                        arguments,
+                        confirm_callback=confirm_fn,
+                    )
 
                     if verdict.rejected:
                         denial = verdict.code == RefusalCode.CONFIRMATION_DENIED
@@ -833,6 +1109,9 @@ class Agent:
                         )
                         continue
 
+                    if prepared_call is None:
+                        raise RuntimeError("Verifier accepted without preparing a tool capability")
+
                     yield AgentEvent(
                         type="tool_call",
                         tool_name=tool_name,
@@ -854,12 +1133,16 @@ class Agent:
                         if cached is not _SENTINEL:
                             result_str = str(cached)
                             result_str = self._smart_truncate(result_str, tool_name, cached)
-                            conv.add_tool_result(tool_call_id, f"[idempotent-replay] {result_str}", tool_name=tool_name)
+                            inline_blocks = self._inline_image_blocks(state.session_id, tool_name, cached)
+                            if inline_blocks is not None:
+                                conv.add_tool_result_blocks(tool_call_id, inline_blocks, tool_name=tool_name)
+                            else:
+                                conv.add_tool_result(tool_call_id, f"[idempotent-replay] {result_str}", tool_name=tool_name)
                             yield AgentEvent(
                                 type="tool_result",
                                 tool_name=tool_name,
                                 tool_args=arguments,
-                                tool_result=cached,
+                                tool_result=self._bounded_event_result(cached, result_str),
                                 content=result_str,
                                 iteration=iteration,
                             )
@@ -888,7 +1171,7 @@ class Agent:
                     state.status = f"executing_{tool_name}"
 
                     try:
-                        execute_coro = self._registry.execute(tool_name, **arguments)
+                        execute_coro = self._executor.commit(prepared_call)
                         state.tool_task = asyncio.create_task(execute_coro)
                         try:
                             result = await state.tool_task
@@ -901,17 +1184,23 @@ class Agent:
                             raise
                         finally:
                             state.tool_task = None
-                        result_str = str(result)
+                        safe_result = self._event_safe_result(result)
+                        result_str = str(safe_result)
                         result_str = self._smart_truncate(result_str, tool_name, result)
-                        if idem_key:
+                        inline_blocks = self._inline_image_blocks(state.session_id, tool_name, result)
+                        if idem_key and not self._contains_binary_image(result):
                             self._idempotency.record(idem_key, result)
-                        conv.add_tool_result(tool_call_id, result_str, tool_name=tool_name)
+                        if inline_blocks is not None:
+                            conv.add_tool_result_blocks(tool_call_id, inline_blocks, tool_name=tool_name)
+                            result_str = self._inline_image_note(result)
+                        else:
+                            conv.add_tool_result(tool_call_id, result_str, tool_name=tool_name)
                         state.status = "thinking"
                         yield AgentEvent(
                             type="tool_result",
                             tool_name=tool_name,
                             tool_args=arguments,
-                            tool_result=result,
+                            tool_result=self._bounded_event_result(result, result_str),
                             content=result_str,
                             iteration=iteration,
                         )
@@ -1021,6 +1310,7 @@ class Agent:
 
     def reset_conversation(self) -> None:
         self._default_state.conversation.clear()
+        self._attachment_store.cleanup_session("")
         self._system_prompt = build_system_prompt(
             working_directory=self._config.working_directory,
         )

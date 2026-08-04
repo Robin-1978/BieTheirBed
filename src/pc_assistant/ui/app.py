@@ -15,6 +15,7 @@ from pc_assistant.agent import Agent, AgentEvent
 from pc_assistant.config import AppConfig
 from pc_assistant.harness.confirm import CONFIRM_TIMEOUT
 from pc_assistant.service.agent_like import AgentLike
+from pc_assistant.ui.clipboard import copy_or_save
 from pc_assistant.ui.state import UIState, MessageType
 from pc_assistant.ui.theme import get_palette, set_theme, AVAILABLE_THEMES
 from pc_assistant.ui.widgets import (
@@ -42,7 +43,7 @@ _WELCOME_MD = """\
 {art}```
 
 Type a message to chat, or use `/help` for commands.
-*Enter* to send \u2022 *Shift+Enter* for newline \u2022 *Ctrl+C* to cancel \u2022 *Ctrl+D* to quit
+*Enter* to send \u2022 *Shift+Enter* for newline \u2022 *Ctrl+C* to copy selection \u2022 *Esc* to cancel \u2022 *Ctrl+D* to quit
 """.format(art=_WELCOME_ART)
 
 _COMMANDS_HELP = """\
@@ -73,8 +74,9 @@ class ChatApp(App):
     CSS_PATH = "chat.tcss"
     TITLE = "PC Assistant"
     BINDINGS = [
-        ("ctrl+c", "cancel_turn", "Cancel"),
+        ("escape", "cancel_turn", "Cancel current turn"),
         ("ctrl+d", "quit", "Quit"),
+        ("ctrl+shift+c", "copy_last", "Copy selection / last answer"),
     ]
 
     def get_css_variables(self) -> dict[str, str]:
@@ -215,6 +217,85 @@ class ChatApp(App):
 
     def _on_timer_notify(self, task_id: str, message: str) -> None:
         self.notify(message, title=f"Timer: {task_id}", severity="information", timeout=8)
+
+    # ── Selection copy ──────────────────────────────────────────
+
+    def on_mouse_down(self, event: Any) -> None:
+        """Right-click copies the existing Textual selection directly."""
+        if getattr(event, "button", 0) != 3:
+            return
+        selected_text = self._selected_text()
+        if not selected_text:
+            return
+        try:
+            event.prevent_default()
+            event.stop()
+        except Exception:
+            pass
+        self._copy_worker(selected_text, "Copied selected text")
+
+    def _selected_text(self) -> str:
+        try:
+            text = self.screen.get_selected_text() or ""
+            return text if text.strip() else ""
+        except Exception:
+            return ""
+
+    def _last_answer_text(self) -> str:
+        if self._agent is None:
+            return ""
+        try:
+            messages = self._agent.conversation.get_messages()
+        except Exception:
+            return ""
+        for msg in reversed(messages):
+            if msg.get("role") == "assistant":
+                return self._format_content(msg.get("content", ""))
+        return ""
+
+    def _conversation_text(self) -> str:
+        if self._agent is None:
+            return ""
+        try:
+            messages = self._agent.conversation.get_messages()
+        except Exception:
+            return ""
+        lines = []
+        for msg in messages:
+            role = msg.get("role", "?")
+            content = self._format_content(msg.get("content", ""))
+            lines.append(f"## {role}\n{content}\n")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_content(content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                if not isinstance(block, dict):
+                    parts.append(str(block))
+                    continue
+                block_type = block.get("type")
+                if block_type == "text":
+                    parts.append(block.get("text", ""))
+                elif block_type == "image":
+                    parts.append("[image]")
+                else:
+                    parts.append(str(block))
+            return "".join(parts)
+        return str(content)
+
+    @work(exclusive=False)
+    async def _copy_worker(self, text: str, label: str) -> None:
+        # OSC 52 reaches the terminal/remote client clipboard; the platform
+        # helper below also updates the desktop clipboard when available.
+        self.copy_to_clipboard(text)
+        ok, detail = await copy_or_save(text)
+        detail = f"sent via terminal clipboard (OSC52); {detail}"
+        severity = "information" if ok else "warning"
+        self.notify(f"{label}: {detail}", title="Copy", severity=severity, timeout=5)
 
     # ── Input handling ─────────────────────────────────────────
 
@@ -376,11 +457,23 @@ class ChatApp(App):
             if self._agent is not None:
                 self._agent.cancel()
         else:
-            inp = self.query_one("#user-input", ChatInput)
-            if inp.text:
-                inp.clear()
-            else:
-                self.exit()
+            self.clear_selection()
+            try:
+                inp = self.query_one("#user-input", ChatInput)
+                if inp.text:
+                    inp.clear()
+            except Exception:
+                pass
+
+    def action_copy_last(self) -> None:
+        """Copy the mouse selection, falling back to the last answer."""
+        selected_text = self._selected_text()
+        text = selected_text or self._last_answer_text()
+        if text:
+            label = "Copied selected text" if selected_text else "Copied last answer"
+            self._copy_worker(text, label)
+        else:
+            self.notify("No assistant answer to copy yet.", title="Copy", severity="warning", timeout=3)
 
     # ── Error helpers ──────────────────────────────────────────
 
@@ -398,8 +491,21 @@ class ChatApp(App):
         if cmd in ("/exit", "/quit"):
             self.exit()
         elif cmd == "/clear":
-            if self._agent is not None:
-                self._agent.reset_conversation()
+            try:
+                if self._agent is not None:
+                    if self._is_remote:
+                        from pc_assistant.service.client import ServiceClient
+
+                        if not isinstance(self._agent, ServiceClient):
+                            raise RuntimeError("Remote agent does not support session commands")
+                        await self._agent.command("/clear")
+                    else:
+                        if not isinstance(self._agent, Agent):
+                            raise RuntimeError("Local agent does not support conversation reset")
+                        self._agent.reset_conversation()
+            except Exception as exc:
+                log.mount(CommandOutput(f"{ICON_ERROR} Clear failed: {exc}"))
+                return True
             self._state.clear_messages()
             log.remove_children()
             log.mount(CommandOutput("*Conversation cleared.*"))
@@ -500,6 +606,30 @@ class ChatApp(App):
                     log.mount(CommandOutput(f"Exported to `{save_path}`"))
                 except Exception as e:
                     log.mount(CommandOutput(f"{ICON_ERROR} Export failed: {e}"))
+        elif cmd.startswith("/copy"):
+            if self._agent is None:
+                log.mount(CommandOutput(f"{ICON_WARN} No agent initialized."))
+                return True
+            parts = command.strip().split(None, 1)
+            target = parts[1].strip().lower() if len(parts) > 1 else "last"
+            text, label = "", ""
+            if target == "all" or target == "conversation":
+                text, label = self._conversation_text(), "Copied conversation"
+            elif target.startswith("#"):
+                try:
+                    index = int(target[1:]) - 1
+                    messages = self._agent.conversation.get_messages()
+                    text = self._format_content(messages[index].get("content", ""))
+                    label = f"Copied message #{index + 1}"
+                except Exception:
+                    log.mount(CommandOutput(f"{ICON_WARN} Invalid message index: `{target}`"))
+            else:
+                text, label = self._last_answer_text(), "Copied last answer"
+            if text:
+                self._copy_worker(text, label)
+                log.mount(CommandOutput(f"*Copying: {label}*"))
+            else:
+                log.mount(CommandOutput(f"{ICON_WARN} Nothing to copy."))
         elif cmd == "/compact":
             if self._agent is not None:
                 self._agent.conversation.clear()

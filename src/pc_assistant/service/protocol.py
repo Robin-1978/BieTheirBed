@@ -5,7 +5,7 @@ Client -> Server (requests):
     {"method": "cancel",  "id": 2, "params": {"session_id": ""}}
     {"method": "confirm", "id": 3, "params": {"code": "...", "approved": true}}
     {"method": "status",  "id": 4}
-    {"method": "command", "id": 5, "params": {"cmd": "/clear"}}
+    {"method": "command", "id": 5, "params": {"cmd": "/clear", "session_id": ""}}
 
 Server -> Client (responses/events):
     {"type": "event",           "run_id": 1, "data": {...AgentEvent...}}
@@ -16,7 +16,6 @@ Server -> Client (responses/events):
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
@@ -25,16 +24,18 @@ from pydantic import BaseModel, Field
 
 # ── Paths ─────────────────────────────────────────────────────────────
 
-def _runtime_dir() -> Path:
-    xdg = os.environ.get("XDG_RUNTIME_DIR")
-    if xdg:
-        return Path(xdg) / "pc-assistant"
-    return Path.home() / ".local" / "run" / "pc-assistant"
+from pc_assistant.runtime import RuntimePaths
 
+_PATHS = RuntimePaths.from_root()
+SOCKET_PATH = _PATHS.socket
+PID_PATH = _PATHS.pid
+LOG_PATH = _PATHS.logs / "service.log"
 
-SOCKET_PATH = _runtime_dir() / "service.sock"
-PID_PATH = _runtime_dir() / "service.pid"
-LOG_PATH = _runtime_dir() / "service.log"
+# Upper bound for inbound/outbound websocket frames (bytes). The default
+# (1 MiB) is too small: tool results such as reading a ~1 MiB screenshot
+# produce bigger frames and silently drop the connection. 64 MiB is a safe
+# ceiling for screenshot/process payloads.
+WS_MAX_SIZE = 64 * 1024 * 1024
 
 
 # ── Client -> Server ──────────────────────────────────────────────────
@@ -61,6 +62,27 @@ class ClientMessage(BaseModel):
     @property
     def session_id(self) -> str:
         return self.params.get("session_id", "")
+
+    @property
+    def attachments(self) -> list[Any]:
+        from pc_assistant.model_adapter.types import ImageAttachment
+
+        raw = self.params.get("attachments", [])
+        if not raw:
+            return []
+        attachments = [ImageAttachment.model_validate(a) for a in raw]
+        if any(not attachment.attachment_id or attachment.data_url or attachment.path for attachment in attachments):
+            raise ValueError("Run requests accept attachment_id references only; upload images first")
+        return attachments
+
+    @property
+    def upload_attachment(self):
+        from pc_assistant.model_adapter.types import ImageAttachment
+
+        attachment = ImageAttachment.model_validate(self.params.get("attachment", {}))
+        if attachment.attachment_id or not attachment.data_url or attachment.path:
+            raise ValueError("Upload requests require one image data_url")
+        return attachment
 
 
 # ── Server -> Client ──────────────────────────────────────────────────

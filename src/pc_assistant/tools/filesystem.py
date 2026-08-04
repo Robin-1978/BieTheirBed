@@ -16,6 +16,15 @@ class FilesystemTool(ToolBase):
     description = "Read, write, list, and manage files and directories"
     is_side_effecting = True
 
+    def __init__(self, working_directory: str | Path | None = None) -> None:
+        self._working_directory = Path(working_directory or os.getcwd()).expanduser().resolve()
+
+    def _path(self, value: str) -> Path:
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = self._working_directory / path
+        return path.resolve()
+
     async def execute(self, **kwargs: Any) -> Any:
         action = kwargs.get("action")
         path = kwargs.get("path", "")
@@ -72,7 +81,7 @@ class FilesystemTool(ToolBase):
 
     def _read(self, path: str, kwargs: dict[str, Any], encoding: str = "utf-8") -> dict[str, Any]:
         try:
-            p = Path(path)
+            p = self._path(path)
             if not p.exists():
                 return {"error": f"Path does not exist: {path}"}
             if p.is_dir():
@@ -94,7 +103,7 @@ class FilesystemTool(ToolBase):
             content_bytes = content.encode(encoding)
             if len(content_bytes) > _MAX_FILE_SIZE:
                 return {"error": f"Content exceeds maximum size of {_MAX_FILE_SIZE} bytes"}
-            p = Path(path)
+            p = self._path(path)
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(content, encoding=encoding)
             return {"success": True, "bytes_written": len(content_bytes)}
@@ -105,7 +114,7 @@ class FilesystemTool(ToolBase):
 
     def _list(self, path: str, kwargs: dict[str, Any]) -> dict[str, Any]:
         try:
-            p = Path(path)
+            p = self._path(path)
             if not p.is_dir():
                 return {"error": f"Path is not a directory: {path}"}
             entries = []
@@ -121,14 +130,14 @@ class FilesystemTool(ToolBase):
 
     def _mkdir(self, path: str, kwargs: dict[str, Any]) -> dict[str, Any]:
         try:
-            Path(path).mkdir(parents=True, exist_ok=True)
+            self._path(path).mkdir(parents=True, exist_ok=True)
             return {"success": True}
         except Exception as e:
             return {"error": str(e)}
 
     def _delete(self, path: str, kwargs: dict[str, Any]) -> dict[str, Any]:
         try:
-            p = Path(path)
+            p = self._path(path)
             if p.is_dir():
                 shutil.rmtree(p)
             else:
@@ -140,8 +149,8 @@ class FilesystemTool(ToolBase):
     def _copy(self, path: str, kwargs: dict[str, Any]) -> dict[str, Any]:
         destination = kwargs.get("destination", "")
         try:
-            src = Path(path)
-            dst = Path(destination)
+            src = self._path(path)
+            dst = self._path(destination)
             if src.is_dir():
                 shutil.copytree(src, dst, dirs_exist_ok=True)
             else:
@@ -154,11 +163,11 @@ class FilesystemTool(ToolBase):
     def _move(self, path: str, kwargs: dict[str, Any]) -> dict[str, Any]:
         destination = kwargs.get("destination", "")
         try:
-            shutil.move(path, destination)
+            shutil.move(self._path(path), self._path(destination))
             return {"success": True}
         except Exception as e:
             return {"error": str(e)}
 
     def _exists(self, path: str, kwargs: dict[str, Any]) -> dict[str, Any]:
-        p = Path(path)
+        p = self._path(path)
         return {"exists": p.exists(), "is_file": p.is_file(), "is_dir": p.is_dir()}

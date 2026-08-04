@@ -47,6 +47,9 @@ packages = ["src/pc_assistant"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "live: tests requiring an explicitly enabled external LLM service",
+]
 
 [tool.coverage.run]
 source = ["pc_assistant"]

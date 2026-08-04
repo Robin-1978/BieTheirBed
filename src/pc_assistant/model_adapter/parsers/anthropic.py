@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from pc_assistant.model_adapter.content import to_anthropic_content
 from pc_assistant.model_adapter.types import LLMResponse, StreamChunk
 
 
@@ -38,7 +39,20 @@ def build_anthropic_payload(
                 block["cache_control"] = cache_control
             system_blocks.append(block)
         else:
-            filtered_msgs.append(m)
+            msg = dict(m)
+            converted = to_anthropic_content(m.get("content"))
+            if m.get("role") == "tool":
+                filtered_msgs.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": m.get("tool_call_id", ""),
+                        "content": converted,
+                    }],
+                })
+            else:
+                msg["content"] = converted
+                filtered_msgs.append(msg)
 
     payload: dict[str, Any] = {
         "model": model_name,

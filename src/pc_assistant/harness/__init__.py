@@ -5,6 +5,7 @@ from pc_assistant.harness.limiter import RateLimiter
 from pc_assistant.harness.audit import AuditLogger
 from pc_assistant.harness.refusal import RefusalCode, Verdict
 from pc_assistant.harness.verifier import Verifier
+from pc_assistant.harness.executor import PreparedToolCall, VerifiedToolExecutor
 
 __all__ = [
     "SafetyChecker",
@@ -13,4 +14,6 @@ __all__ = [
     "RefusalCode",
     "Verdict",
     "Verifier",
+    "PreparedToolCall",
+    "VerifiedToolExecutor",
 ]

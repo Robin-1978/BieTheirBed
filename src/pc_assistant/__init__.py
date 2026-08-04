@@ -30,6 +30,10 @@ def build_parser() -> "argparse.ArgumentParser":
         help="Disable tool execution (requires --ask)",
     )
     parser.add_argument(
+        "--attach", type=str, default=None, nargs="+",
+        help="Image file path(s) to attach to the ask/turn (multimodal).",
+    )
+    parser.add_argument(
         "-b", "--benchmark", type=str, default=None,
         help="Run a benchmark dataset (JSONL file or directory)",
     )
@@ -75,6 +79,7 @@ async def async_main(
     ask: str | None = None,
     json_output: bool = False,
     no_tools: bool = False,
+    attach: list[str] | None = None,
 ) -> int:
     import logging
 
@@ -193,7 +198,7 @@ async def async_main(
         logger.info("Connected to service daemon")
 
     if ask is not None:
-        return await _run_benchmark(agent, ask, json_output=json_output, no_tools=no_tools)
+        return await _run_benchmark(agent, ask, json_output=json_output, no_tools=no_tools, attach=attach)
 
     chat_ui = ChatUI(config=cfg)
     chat_ui.set_agent(agent)
@@ -227,6 +232,7 @@ async def _run_benchmark(
     question: str,
     json_output: bool = False,
     no_tools: bool = False,
+    attach: list[str] | None = None,
 ) -> int:
     import json
     import sys
@@ -242,13 +248,19 @@ async def _run_benchmark(
         if hasattr(agent, "clear_tools"):
             agent.clear_tools()
 
+    attachments = None
+    if attach:
+        from pc_assistant.model_adapter.types import ImageAttachment
+
+        attachments = [ImageAttachment.from_path(p) for p in attach]
+
     start_time = time.monotonic()
     tool_call_count = 0
     answer = None
     error_msg = None
 
     try:
-        async for event in agent.run(question):
+        async for event in agent.run(question, attachments=attachments):
             if event.type == "tool_call" and not event.blocked:
                 tool_call_count += 1
             elif event.type == "final_answer":
@@ -398,7 +410,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.serve:
         from pc_assistant.service.server import run_server, resolve_service_log
-        log_path = resolve_service_log(args.log_dir)
+        log_path = resolve_service_log(args.log_dir, config_path)
         return run_server(config_path, daemon=args.daemon, log_path=log_path)
 
     if args.benchmark_report:
@@ -415,6 +427,7 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(async_main(
             config_path, args.verbose,
             ask=args.ask, json_output=args.json, no_tools=args.no_tools,
+            attach=args.attach,
         ))
     except KeyboardInterrupt:
         return 130
@@ -633,7 +646,7 @@ def _start_service(config_path: str | None, log_dir: str | None) -> int:
 
     if not _wait_for_running(None):
         print("ERROR: Service did not become ready in time.", file=_sys.stderr)
-        print(f"Check log: {resolve_service_log(log_dir)}", file=_sys.stderr)
+        print(f"Check log: {resolve_service_log(log_dir, config_path)}", file=_sys.stderr)
         return 1
 
     _, new_pid = _service_state()

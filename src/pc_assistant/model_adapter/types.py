@@ -1,14 +1,35 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from pc_assistant.model_adapter.content import ContentBlock  # noqa: F401  (re-export: str | list[dict])
 
 
 class LLMMessage(BaseModel):
     role: str
-    content: str
+    content: str | list[dict[str, Any]]
+
+
+class ImageAttachment(BaseModel):
+    """Image ingress: local path/data URL, or an existing store reference."""
+
+    attachment_id: str | None = None
+    path: str | None = None
+    data_url: str | None = None
+    media_type: str = "image/jpeg"
+    caption: str = ""
+
+    @classmethod
+    def from_path(cls, path: str | Path, caption: str = "") -> "ImageAttachment":
+        return cls(path=str(path), caption=caption)
+
+    @classmethod
+    def from_ref(cls, attachment_id: str, caption: str = "") -> "ImageAttachment":
+        return cls(attachment_id=attachment_id, caption=caption)
 
 
 class LLMResponse(BaseModel):

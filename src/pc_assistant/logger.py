@@ -58,7 +58,9 @@ def _setup_root_logger() -> None:
         from pc_assistant.config import load_config
 
         cfg = load_config()
-        log_file = cfg.log_file
+        from pc_assistant.runtime import RuntimePaths
+
+        log_file = str(RuntimePaths.from_root(cfg.runtime_root).resolve(cfg.log_file))
     except Exception:
         log_file = "logs/pc_assistant.json"
 

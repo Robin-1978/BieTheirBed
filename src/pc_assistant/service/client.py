@@ -15,8 +15,10 @@ from typing import Any
 import websockets
 
 from pc_assistant.agent import AgentEvent
+from pc_assistant.model_adapter.types import ImageAttachment
 from pc_assistant.service.protocol import (
     SOCKET_PATH,
+    WS_MAX_SIZE,
     ClientMessage,
     ServerMessage,
     serialize,
@@ -54,12 +56,12 @@ class ServiceClient:
     async def connect(self) -> None:
         if self._host and self._port > 0:
             uri = f"ws://{self._host}:{self._port}"
-            self._ws = await websockets.connect(uri)
+            self._ws = await websockets.connect(uri, max_size=WS_MAX_SIZE)
             if self._token:
                 auth_msg = ClientMessage(method="auth", id=0, params={"token": self._token})
                 await self._ws.send(auth_msg.model_dump_json())
         else:
-            self._ws = await websockets.unix_connect(path=str(self._socket_path))
+            self._ws = await websockets.unix_connect(path=str(self._socket_path), max_size=WS_MAX_SIZE)
         self._connected = True
         self._reader_task = asyncio.create_task(self._reader_loop())
 
@@ -162,16 +164,32 @@ class ServiceClient:
         *,
         session_id: str = "",
         confirm_callback: Any = None,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """Stream agent events, matching ``Agent.run()`` signature."""
         msg_id = self._next_id()
         queue: asyncio.Queue[ServerMessage | None] = asyncio.Queue()
         self._event_queues[msg_id] = queue
 
+        params: dict[str, Any] = {"input": user_input, "session_id": session_id}
+        if attachments:
+            dumped: list[dict[str, Any]] = []
+            for att in attachments:
+                attachment = ImageAttachment.model_validate(att)
+                if attachment.attachment_id:
+                    dumped.append(attachment.model_dump(exclude_none=True))
+                    continue
+                ref = await self.upload_attachment(attachment, session_id=session_id)
+                dumped.append(ImageAttachment.from_ref(
+                    ref["attachment_id"],
+                    caption=attachment.caption,
+                ).model_dump(exclude_none=True))
+            params["attachments"] = dumped
+
         await self._send(ClientMessage(
             method="run",
             id=msg_id,
-            params={"input": user_input, "session_id": session_id},
+            params=params,
         ))
 
         try:
@@ -183,6 +201,39 @@ class ServiceClient:
                     yield AgentEvent.model_validate(item.data)
         finally:
             self._event_queues.pop(msg_id, None)
+
+    async def upload_attachment(
+        self,
+        attachment: ImageAttachment,
+        *,
+        session_id: str = "",
+    ) -> dict[str, Any]:
+        if attachment.path:
+            from pc_assistant.vision.preprocess import image_block_from_file
+
+            block = image_block_from_file(attachment.path)
+            if block is None:
+                raise ValueError(f"Could not load attachment: {attachment.path}")
+            attachment = ImageAttachment(
+                data_url=block["image_url"],
+                media_type=block.get("media_type", "image/jpeg"),
+                caption=attachment.caption,
+            )
+        if not attachment.data_url:
+            raise ValueError("Attachment upload requires a path or data URL")
+        response = await self._request(
+            "upload_attachment",
+            {
+                "session_id": session_id,
+                "attachment": attachment.model_dump(exclude_none=True),
+            },
+        )
+        if response.type == "error":
+            raise ValueError(response.data.get("message", "Attachment upload failed"))
+        ref = response.data.get("attachment")
+        if not isinstance(ref, dict) or not ref.get("attachment_id"):
+            raise ValueError("Service returned an invalid attachment reference")
+        return ref
 
     async def cancel(self, session_id: str = "") -> None:
         await self._send(ClientMessage(
@@ -215,8 +266,13 @@ class ServiceClient:
             params={"code": code, "approved": approved},
         ))
 
-    async def command(self, cmd: str) -> dict[str, Any]:
-        resp = await self._request("command", {"cmd": cmd})
+    async def command(self, cmd: str, *, session_id: str = "") -> dict[str, Any]:
+        resp = await self._request(
+            "command",
+            {"cmd": cmd, "session_id": session_id},
+        )
+        if resp.type == "error":
+            raise RuntimeError(resp.data.get("message", f"Command failed: {cmd}"))
         return resp.data
 
     # ── Callback registration ─────────────────────────────────

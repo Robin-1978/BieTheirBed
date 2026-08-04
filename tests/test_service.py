@@ -183,6 +183,50 @@ class TestServerConfirmScoping:
         assert server._confirm_futures == {}
 
 
+class TestServerLifecycle:
+    @pytest.mark.asyncio
+    async def test_start_failure_cancels_attachment_cleanup_task(self, tmp_path):
+        from pc_assistant.config import AppConfig
+        from pc_assistant.service.server import ServiceServer
+
+        cfg = AppConfig(
+            llm_provider="llamacpp",
+            llm_server_url="http://127.0.0.1:1",
+            runtime_root=str(tmp_path),
+        )
+        server = ServiceServer(cfg)
+        fake_agent = MagicMock()
+        fake_agent.health_check = AsyncMock(return_value=True)
+        fake_agent.registry.get = MagicMock(return_value=None)
+
+        unix_server = MagicMock()
+        unix_server.close = MagicMock()
+        unix_server.wait_closed = AsyncMock()
+
+        with (
+            patch("pc_assistant.service.server.Agent", return_value=fake_agent),
+            patch("pc_assistant.service.server.SOCKET_PATH", tmp_path / "service.sock"),
+            patch("pc_assistant.service.server.PID_PATH", tmp_path / "service.pid"),
+            patch("pc_assistant.service.server.websockets.unix_serve", AsyncMock(return_value=unix_server)),
+            patch("pc_assistant.service.server._write_pid", side_effect=OSError("pid write failed")),
+        ):
+            with pytest.raises(OSError, match="pid write failed"):
+                await server.start()
+
+        assert server._attachment_cleanup_task is None
+        unix_server.close.assert_called_once()
+        unix_server.wait_closed.assert_awaited_once()
+
+    def test_service_log_uses_configured_runtime_root(self, tmp_path):
+        from pc_assistant.service.server import resolve_service_log
+
+        config_path = tmp_path / "config.yaml"
+        runtime_root = tmp_path / "runtime"
+        config_path.write_text(f"runtime_root: {runtime_root}\n", encoding="utf-8")
+
+        assert resolve_service_log(None, str(config_path)) == runtime_root / "logs" / "service.log"
+
+
 # ── Server + Client integration ──────────────────────────────────────
 
 
@@ -208,6 +252,13 @@ class TestServerClientIntegration:
         mock_agent.get_status = AsyncMock(return_value={"status": "ok", "total_tokens": 0})
         mock_agent.session_stats = MagicMock(return_value=[])
         mock_agent.cancel = MagicMock()
+        mock_agent.reset_conversation = MagicMock()
+        mock_agent.drop_session = MagicMock()
+        mock_agent.store_attachment = MagicMock(return_value={
+            "type": "image_ref",
+            "attachment_id": "uploaded-ref",
+            "media_type": "image/jpeg",
+        })
         mock_agent.conversation = MagicMock()
         mock_agent.conversation.clear = MagicMock()
 
@@ -216,7 +267,8 @@ class TestServerClientIntegration:
         mock_registry.list_tools = MagicMock(return_value=["shell", "filesystem"])
         mock_agent.registry = mock_registry
 
-        async def mock_run(text, *, session_id="", confirm_callback=None):
+        async def mock_run(text, *, session_id="", confirm_callback=None, attachments=None):
+            mock_agent.last_run_attachments = attachments
             yield AgentEvent(type="stream_delta", content="Hello ")
             yield AgentEvent(type="stream_delta", content="world!")
             if confirm_callback is not None and text.startswith("delete"):
@@ -264,6 +316,24 @@ class TestServerClientIntegration:
 
         deltas = [e.content for e in events if e.type == "stream_delta"]
         assert "".join(deltas) == "Hello world!"
+
+    async def test_attachment_upload_precedes_reference_only_run(self, server_and_client):
+        from pc_assistant.model_adapter.types import ImageAttachment
+
+        server, client = server_and_client
+        events = []
+        async for event in client.run(
+            "look",
+            session_id="image-session",
+            attachments=[ImageAttachment(data_url="data:image/jpeg;base64,AAAA")],
+        ):
+            events.append(event)
+
+        server._agent.store_attachment.assert_called_once()
+        stored_session, _ = server._agent.store_attachment.call_args.args
+        assert stored_session == "image-session"
+        assert server._agent.last_run_attachments[0].attachment_id == "uploaded-ref"
+        assert any(event.type == "final_answer" for event in events)
 
     async def test_confirm_reply_processed_during_run(self, server_and_client):
         """A confirm reply must be read while a run is in flight (no deadlock).
@@ -313,8 +383,12 @@ class TestServerClientIntegration:
 
     async def test_command_clear(self, server_and_client):
         server, client = server_and_client
+        async for _ in client.run("hello", session_id="tui-session"):
+            pass
         result = await client.command("/clear")
         assert result.get("cleared") is True
+        assert result.get("session_id") == "tui-session"
+        server._agent.drop_session.assert_called_once_with("tui-session")
 
     async def test_command_tools(self, server_and_client):
         server, client = server_and_client

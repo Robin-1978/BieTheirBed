@@ -113,12 +113,31 @@ class TokenEstimator:
                         b.get("text", "") for b in content
                         if isinstance(b, dict) and b.get("type") == "text"
                     )
+                    total += self.text_tokens(text)
+                    total += self._image_tokens(content)
                 else:
                     text = str(content)
-                total += self.text_tokens(text)
+                    total += self.text_tokens(text)
             tcs = m.get("tool_calls") or m.get("delta_tool_calls")
             if tcs:
                 total += self.text_tokens(json.dumps(tcs, ensure_ascii=False))
+        return total
+
+    @staticmethod
+    def _image_tokens(content: list[dict[str, Any]]) -> int:
+        """Token cost of image blocks within a block-list message."""
+        from pc_assistant.vision.preprocess import estimate_image_tokens
+
+        total = 0
+        for b in content:
+            if not isinstance(b, dict) or b.get("type") not in ("image", "image_ref"):
+                continue
+            width = int(b.get("width", 0) or 0)
+            height = int(b.get("height", 0) or 0)
+            if width <= 0 or height <= 0:
+                total += 170
+            else:
+                total += estimate_image_tokens(width, height)
         return total
 
     def calibrate(self, observed_tokens: int, text: str) -> None:

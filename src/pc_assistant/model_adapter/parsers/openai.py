@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from pc_assistant.model_adapter.content import split_content, to_openai_content
 from pc_assistant.model_adapter.types import LLMResponse, StreamChunk, normalize_tool_calls
 
 
@@ -27,9 +28,34 @@ def build_chat_payload(
     cache_prompt: bool = False,
     stream_options: bool = False,
 ) -> dict[str, Any]:
+    serialized = []
+    for m in messages:
+        msg = dict(m)
+        content = m.get("content")
+        if m.get("role") == "tool" and isinstance(content, list):
+            blocks = split_content(content)
+            text = "".join(
+                str(block.get("text", "")) for block in blocks
+                if block.get("type") == "text"
+            ) or "[visual tool result]"
+            tool_msg = dict(msg)
+            tool_msg["content"] = text
+            serialized.append(tool_msg)
+            image_blocks = [block for block in blocks if block.get("type") == "image"]
+            if image_blocks:
+                serialized.append({
+                    "role": "user",
+                    "content": to_openai_content([
+                        {"type": "text", "text": "Visual observation returned by the preceding tool."},
+                        *image_blocks,
+                    ]),
+                })
+        else:
+            msg["content"] = to_openai_content(content)
+            serialized.append(msg)
     payload: dict[str, Any] = {
         "model": model_name,
-        "messages": messages,
+        "messages": serialized,
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
