@@ -137,6 +137,12 @@ class SafetyChecker:
             action = kwargs.get("action", "")
             if action in ("clear", "delete", "forget"):
                 return (True, f"Memory {action} requires confirmation")
+            if action == "store" and kwargs.get("importance") == "core":
+                key = kwargs.get("key", "")
+                return (
+                    True,
+                    f"Storing '{key}' as always-injected core memory requires confirmation",
+                )
             return (False, "")
 
         if tool_name == "scheduler":

@@ -62,6 +62,20 @@ def encode_jpeg(img, quality: int = 70) -> tuple[bytes, str] | None:
     return buf.getvalue(), "image/jpeg"
 
 
+def encode_png(img) -> tuple[bytes, str] | None:
+    """Losslessly PNG-encode a PIL image."""
+    if img is None:
+        return None
+    import io
+
+    buf = io.BytesIO()
+    try:
+        img.save(buf, format="PNG", optimize=True)
+    except Exception:
+        return None
+    return buf.getvalue(), "image/png"
+
+
 def to_data_url(data: bytes, media_type: str = "image/jpeg") -> str:
     b64 = base64.b64encode(data).decode("ascii")
     return f"{IMAGE_MEDIA_PREFIX}/{media_type.split('/')[-1]};base64,{b64}"
@@ -78,7 +92,7 @@ def image_block_from_file(
     if img is None:
         return None
     img = resize_image(img, max_side)
-    encoded = encode_jpeg(img, quality)
+    encoded = encode_png(img)
     if encoded is None:
         return None
     data, media_type = encoded
@@ -142,7 +156,7 @@ def capture_block(
         img = draw_grid(img, cols=grid_cols, rows=grid_rows)
 
     img = resize_image(img, max_side)
-    encoded = encode_jpeg(img, quality)
+    encoded = encode_png(img)
     if encoded is None:
         return None
     data, media_type = encoded

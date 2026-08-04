@@ -250,6 +250,16 @@ def _fake_block(width=100, height=50):
 
 class TestScreenTool:
     @pytest.mark.asyncio
+    async def test_look_defaults_to_lossless_png_without_grid(self, tmp_path):
+        with patch("pc_assistant.tools.screen.preprocess.capture_block", return_value=_fake_block()) as capture:
+            res = await ScreenTool(artifact_dir=tmp_path).execute(action="look")
+
+        assert Path(res["path"]).suffix == ".png"
+        assert res["artifact"]["media_type"] == "image/png"
+        assert "grid" not in res
+        assert capture.call_args.kwargs["grid"] is False
+
+    @pytest.mark.asyncio
     async def test_look_returns_image_and_grid_metadata(self, tmp_path):
         with patch("pc_assistant.tools.screen.preprocess.capture_block", return_value=_fake_block(100, 50)):
             res = await ScreenTool(grid_enabled=True, artifact_dir=tmp_path).execute(action="look", grid=True, cols=10, rows=10)
@@ -306,7 +316,7 @@ class TestCaptureBlock:
         assert block is not None
         assert block["type"] == "image"
         assert block.get("width", 0) > 0
-        assert block["image_url"].startswith("data:image/jpeg;base64,")
+        assert block["image_url"].startswith("data:image/png;base64,")
 
     def test_capture_region_block(self):
         block = preprocess.capture_block({"x": 0, "y": 0, "width": 64, "height": 64}, max_side=128)

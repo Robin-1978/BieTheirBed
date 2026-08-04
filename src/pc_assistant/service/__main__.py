@@ -17,7 +17,7 @@ def main() -> None:
 
     from pc_assistant.service.server import run_server, resolve_service_log
 
-    log_path = resolve_service_log(args.log_dir)
+    log_path = resolve_service_log(args.log_dir, args.config)
     sys.exit(run_server(args.config, daemon=args.daemon, log_path=log_path))
 
 

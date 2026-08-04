@@ -1,27 +1,49 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
-from pc_assistant.context.memory import EpisodicMemory, UserMemory
+from pc_assistant.context.memory import MemoryItem
 from pc_assistant.tools.base import ToolBase
+
+
+class UserMemoryPort(Protocol):
+    def store(
+        self,
+        key: str,
+        value: str,
+        category: str = "general",
+        confidence: float = 1.0,
+        source: str = "explicit",
+        importance: str | None = None,
+    ) -> None: ...
+
+    def retrieve(self, key: str) -> MemoryItem | None: ...
+    def search(self, query: str, limit: int = 5) -> list[MemoryItem]: ...
+    def delete(self, key: str) -> bool: ...
+
+
+class EpisodicMemoryPort(Protocol):
+    def store_episode(self, summary: str, session_id: str = "", tool_calls: int = 0) -> None: ...
+    def recall(self, query: str = "", limit: int = 5) -> list[dict[str, Any]]: ...
 
 
 class MemoryTool(ToolBase):
     name = "memory"
     description = "Store, retrieve, search, or delete user preferences and personal information for long-term memory"
+    is_side_effecting = True
 
     def __init__(
         self,
-        memory: UserMemory | None = None,
-        episodic: EpisodicMemory | None = None,
+        memory: UserMemoryPort | None = None,
+        episodic: EpisodicMemoryPort | None = None,
     ) -> None:
         self._memory = memory
         self._episodic = episodic
 
-    def set_memory(self, memory: UserMemory) -> None:
+    def set_memory(self, memory: UserMemoryPort) -> None:
         self._memory = memory
 
-    def set_episodic(self, episodic: EpisodicMemory) -> None:
+    def set_episodic(self, episodic: EpisodicMemoryPort) -> None:
         self._episodic = episodic
 
     async def execute(self, **kwargs: Any) -> Any:
@@ -45,10 +67,26 @@ class MemoryTool(ToolBase):
         key = kwargs.get("key", "")
         value = kwargs.get("value", "")
         category = kwargs.get("category", "general")
+        importance = kwargs.get("importance")
         if not key or not value:
             return {"error": "Both 'key' and 'value' are required for store action"}
-        self._memory.store(key, value, category=category, source="llm")
-        return {"success": True, "key": key, "value": value, "category": category}
+        try:
+            self._memory.store(
+                key,
+                value,
+                category=category,
+                source="explicit-tool",
+                importance=importance,
+            )
+        except ValueError as exc:
+            return {"error": str(exc)}
+        return {
+            "success": True,
+            "key": key,
+            "value": value,
+            "category": category,
+            "importance": importance or "policy-default",
+        }
 
     def _retrieve(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         key = kwargs.get("key", "")
@@ -108,7 +146,7 @@ class MemoryTool(ToolBase):
                     },
                     "key": {
                         "type": "string",
-                        "description": "Memory key (e.g. 'location', 'name', 'preference_editor')",
+                        "description": "Explicit snake_case key naming its subject, e.g. user_name, assistant_name, preferred_language. Ambiguous keys such as name are rejected.",
                     },
                     "value": {
                         "type": "string",
@@ -116,7 +154,12 @@ class MemoryTool(ToolBase):
                     },
                     "category": {
                         "type": "string",
-                        "description": "Category: identity, location, preference, workflow, instruction",
+                        "description": "Category: identity, communication, preference, workflow, safety, environment, instruction",
+                    },
+                    "importance": {
+                        "type": "string",
+                        "enum": ["core", "relevant"],
+                        "description": "core is small, always injected, and requires user confirmation; relevant is retrieved only for matching requests",
                     },
                 },
                 "required": ["action", "key"],
@@ -134,6 +177,7 @@ class MemoryTool(ToolBase):
                     "key": {"type": "string"},
                     "value": {"type": "string"},
                     "category": {"type": "string"},
+                    "importance": {"type": "string", "enum": ["core", "relevant"]},
                 },
                 "required": ["action", "key"],
             },

@@ -4,8 +4,8 @@ Hosts the Agent, Scheduler, and Channels on a Unix-domain WebSocket
 so that the TUI, CLI, and future clients can connect as thin frontends.
 
 Usage:
-    pc-assistant serve              # foreground
-    pc-assistant serve --daemon     # background fork
+    pca --serve              # foreground
+    pca --serve --daemon     # background fork
 """
 from __future__ import annotations
 

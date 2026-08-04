@@ -9,16 +9,21 @@ build/
 .coverage
 htmlcov/
 .pytest_cache/
-logs/
+/logs/
 *.log
 .env
 .venv/
 venv/
 *.so
 .mss/
-data/
+/data/
 config/local.yaml
 # Runtime state: last active Feishu user open_id (churns on every message)
 src/pc_assistant/channels/.feishu_open_id
 .gs-harness/
 node_modules/
+/attachments/
+/cache/
+screen_look.png
+screenshot.png
+window_screenshot.png

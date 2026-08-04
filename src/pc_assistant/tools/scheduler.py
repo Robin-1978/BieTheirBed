@@ -10,14 +10,15 @@ handles all time-based scheduling:
 from __future__ import annotations
 
 import asyncio
-import json
 import re
+import sqlite3
 from croniter import croniter
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
 from pc_assistant.tools.base import ToolBase
+from pc_assistant.runtime import RuntimePaths
 
 
 _DELAY_RE = re.compile(
@@ -202,14 +203,16 @@ class SchedulerTool(ToolBase):
     description = "Schedule recurring tasks, timers, and reminders (cron, intervals, one-shot delays)"
     is_side_effecting = True
 
-    def __init__(self, storage_path: str = "data/scheduled_tasks.json") -> None:
+    def __init__(self, storage_path: str | Path | None = None) -> None:
         self._tasks: dict[str, ScheduledTask] = {}
         self._notification_callback: Callable[[str, str], None] | None = None
-        self._storage_path = Path(storage_path)
+        self._storage_path = Path(storage_path) if storage_path is not None else None
         self._scheduler_task: asyncio.Task | None = None
         self._running = False
         self._agent: Any = None
-        self._load()
+        if self._storage_path is not None:
+            self._initialize_storage()
+            self._load()
 
     def set_agent(self, agent: Any) -> None:
         self._agent = agent
@@ -227,33 +230,97 @@ class SchedulerTool(ToolBase):
 
     # ── Persistence ───────────────────────────────────────────
 
+    def _connect(self) -> sqlite3.Connection:
+        if self._storage_path is None:
+            self._storage_path = RuntimePaths.from_root().data / "assistant.db"
+        self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(self._storage_path, timeout=5.0)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA journal_mode=WAL")
+        return connection
+
+    def _initialize_storage(self) -> None:
+        with self._connect() as db:
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS scheduled_tasks (
+                    task_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    command TEXT NOT NULL,
+                    schedule TEXT NOT NULL,
+                    enabled INTEGER NOT NULL,
+                    last_run TEXT,
+                    next_run TEXT,
+                    run_count INTEGER NOT NULL,
+                    max_runs INTEGER NOT NULL,
+                    timeout INTEGER NOT NULL,
+                    message TEXT NOT NULL,
+                    paused_remaining REAL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+
     def _load(self) -> None:
-        if not self._storage_path.exists():
-            return
         try:
-            with open(self._storage_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            for task_data in data.get("tasks", []):
-                task = ScheduledTask.from_dict(task_data)
-                if task._paused_remaining is None:
-                    task.next_run = task.calculate_next_run()
+            with self._connect() as db:
+                rows = db.execute("SELECT * FROM scheduled_tasks").fetchall()
+            for row in rows:
+                task = ScheduledTask.from_dict(dict(row))
                 self._tasks[task.task_id] = task
-        except (json.JSONDecodeError, OSError, KeyError):
+        except (sqlite3.Error, OSError, KeyError, ValueError):
             pass
 
     def _save(self) -> None:
-        self._storage_path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "version": 2,
-            "updated_at": datetime.now().isoformat(),
-            "tasks": [t.to_dict() for t in self._tasks.values()],
-        }
-        with open(self._storage_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        task_ids = list(self._tasks)
+        now = datetime.now().isoformat()
+        with self._connect() as db:
+            for task in self._tasks.values():
+                db.execute(
+                    """
+                    INSERT INTO scheduled_tasks(
+                        task_id, name, command, schedule, enabled, last_run,
+                        next_run, run_count, max_runs, timeout, message,
+                        paused_remaining, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(task_id) DO UPDATE SET
+                        name=excluded.name,
+                        command=excluded.command,
+                        schedule=excluded.schedule,
+                        enabled=excluded.enabled,
+                        last_run=excluded.last_run,
+                        next_run=excluded.next_run,
+                        run_count=excluded.run_count,
+                        max_runs=excluded.max_runs,
+                        timeout=excluded.timeout,
+                        message=excluded.message,
+                        paused_remaining=excluded.paused_remaining,
+                        updated_at=excluded.updated_at
+                    """,
+                    (
+                        task.task_id, task.name, task.command, task.schedule,
+                        int(task.enabled),
+                        task.last_run.isoformat() if task.last_run else None,
+                        task.next_run.isoformat() if task.next_run else None,
+                        task.run_count, task.max_runs, task.timeout, task.message,
+                        task._paused_remaining, now,
+                    ),
+                )
+            if task_ids:
+                placeholders = ",".join("?" for _ in task_ids)
+                db.execute(
+                    f"DELETE FROM scheduled_tasks WHERE task_id NOT IN ({placeholders})",
+                    task_ids,
+                )
+            else:
+                db.execute("DELETE FROM scheduled_tasks")
 
     # ── Execute dispatch ──────────────────────────────────────
 
     async def execute(self, **kwargs: Any) -> Any:
+        if self._storage_path is None:
+            self._initialize_storage()
+            self._load()
         action = kwargs.get("action", "list")
         handlers = {
             "create": self._create_task,

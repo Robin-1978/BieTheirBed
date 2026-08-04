@@ -74,6 +74,33 @@ class AttachmentStore:
         except Exception:
             return 0, 0
 
+    @staticmethod
+    def _detect_image(data: bytes, fallback_media_type: str) -> tuple[str, str, int, int]:
+        media_by_format = {
+            "JPEG": ("image/jpeg", ".jpg"),
+            "PNG": ("image/png", ".png"),
+            "WEBP": ("image/webp", ".webp"),
+            "GIF": ("image/gif", ".gif"),
+        }
+        try:
+            import io
+            from PIL import Image
+
+            with Image.open(io.BytesIO(data)) as image:
+                media_type, suffix = media_by_format.get(
+                    str(image.format or "").upper(),
+                    (fallback_media_type, ".img"),
+                )
+                return media_type, suffix, int(image.width), int(image.height)
+        except Exception:
+            suffix = {
+                "image/jpeg": ".jpg",
+                "image/png": ".png",
+                "image/webp": ".webp",
+                "image/gif": ".gif",
+            }.get(fallback_media_type, ".img")
+            return fallback_media_type, suffix, 0, 0
+
     def put_data_url(
         self,
         session_id: str,
@@ -106,6 +133,55 @@ class AttachmentStore:
             attachment_id=attachment_id,
             session_key=session_key,
             path=path,
+            media_type=detected_media,
+            width=width,
+            height=height,
+            expires_at=self._clock() + self._ttl,
+        )
+        self._entries[attachment_id] = entry
+        ref: dict[str, Any] = {
+            "type": "image_ref",
+            "attachment_id": attachment_id,
+            "media_type": detected_media,
+            "width": width,
+            "height": height,
+            "source": source,
+        }
+        if caption:
+            ref["caption"] = caption[:200]
+        return ref
+
+    def register_path(
+        self,
+        session_id: str,
+        path: str | Path,
+        *,
+        media_type: str = "image/png",
+        source: str,
+        caption: str = "",
+    ) -> dict[str, Any]:
+        """Register an existing managed attachment without copying its bytes."""
+        resolved = Path(path).expanduser().resolve()
+        root = self.root.expanduser().resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError as exc:
+            raise ValueError("Registered attachment path must stay below the attachment root") from exc
+        if not resolved.is_file():
+            raise ValueError(f"Attachment file does not exist: {resolved}")
+        data = resolved.read_bytes()
+        if not data or len(data) > self._max_bytes:
+            raise ValueError(f"Attachment size must be between 1 and {self._max_bytes} bytes")
+        detected_media, _suffix, width, height = self._detect_image(data, media_type)
+        if width <= 0 or height <= 0:
+            raise ValueError("Attachment file is not a supported image")
+
+        self.cleanup_expired()
+        attachment_id = uuid.uuid4().hex
+        entry = _Attachment(
+            attachment_id=attachment_id,
+            session_key=self._session_key(session_id),
+            path=resolved,
             media_type=detected_media,
             width=width,
             height=height,
@@ -171,16 +247,26 @@ class AttachmentStore:
     ) -> list[dict[str, Any]]:
         """Return a request-only hydrated copy; never mutate history."""
         hydrated = copy.deepcopy(messages)
-        for message in hydrated:
+        latest_user_index = max(
+            (index for index, message in enumerate(hydrated) if message.get("role") == "user"),
+            default=0,
+        )
+        for index, message in enumerate(hydrated):
             content = message.get("content")
             if not isinstance(content, list):
                 continue
-            message["content"] = [
-                self.hydrate_ref(session_id, block)
-                if isinstance(block, dict) and block.get("type") == "image_ref"
-                else block
-                for block in content
-            ]
+            resolved: list[dict[str, Any]] = []
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "image_ref":
+                    resolved.append(block)
+                elif index >= latest_user_index:
+                    resolved.append(self.hydrate_ref(session_id, block))
+                else:
+                    resolved.append({
+                        "type": "text",
+                        "text": f"[historical image reference: {block.get('attachment_id', '')}]",
+                    })
+            message["content"] = resolved
         return hydrated
 
     def cleanup_session(self, session_id: str) -> None:

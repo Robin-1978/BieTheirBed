@@ -8,6 +8,7 @@ import yaml
 from pydantic import BaseModel, Field, model_validator
 
 from pc_assistant.platform_ import get_default_dangerous_commands, get_default_protected_paths
+from pc_assistant.runtime import default_runtime_root
 
 
 class AppConfig(BaseModel):
@@ -35,7 +36,7 @@ class AppConfig(BaseModel):
     dangerous_commands: list[str] = Field(default_factory=get_default_dangerous_commands)
     protected_paths: list[str] = Field(default_factory=get_default_protected_paths)
     log_file: str = "logs/pc_assistant.json"
-    runtime_root: str = "."
+    runtime_root: str = Field(default_factory=lambda: str(default_runtime_root()))
     working_directory: str = Field(default_factory=os.getcwd)
     reflection_enabled: bool = False
     reflection_threshold: int = 7
@@ -54,7 +55,7 @@ class AppConfig(BaseModel):
     attachment_ttl_seconds: int = 3600
     attachment_cleanup_interval_seconds: int = 300
     supports_vision: bool | None = None
-    screen_grid_enabled: bool = True
+    screen_grid_enabled: bool = False
     screen_verify_enabled: bool = False
     ui_backend: str = "auto"
     source_config_path: str = ""
@@ -130,6 +131,9 @@ def _env_overrides() -> dict[str, Any]:
         "PC_TURN_TRACE_LOG": ("turn_trace_log", str),
         "PC_EVIDENCE_POLICY_ENABLED": ("evidence_policy_enabled", bool),
         "PC_LOG_FILE": ("log_file", str),
+        # Friendly application-home alias. PC_RUNTIME_ROOT remains the more
+        # specific config override and wins when both are present.
+        "PC_ASSISTANT_HOME": ("runtime_root", str),
         "PC_RUNTIME_ROOT": ("runtime_root", str),
         "PC_WORKING_DIRECTORY": ("working_directory", str),
         "PC_FEISHU_ENABLED": ("feishu_enabled", bool),

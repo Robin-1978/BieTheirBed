@@ -95,7 +95,7 @@ class TestVisionPreprocess:
         block = image_block_from_file(p, max_side=128)
         assert block is not None
         assert block["type"] == "image"
-        assert block["image_url"].startswith("data:image/jpeg;base64,")
+        assert block["image_url"].startswith("data:image/png;base64,")
 
     def test_image_block_from_missing_file(self, tmp_path):
         assert image_block_from_file(str(tmp_path / "nope.png")) is None
