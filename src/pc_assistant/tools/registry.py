@@ -22,9 +22,10 @@ class ToolRegistry:
         return sorted(self._tools.keys())
 
     def all_schemas(self) -> list[dict[str, Any]]:
+        """Wrapped tool schemas for LLM API injection (single source: ``core_schema``)."""
         schemas: list[dict[str, Any]] = []
         for tool in self._tools.values():
-            raw = tool.schema()
+            raw = tool.core_schema()
             schemas.append({
                 "type": "function",
                 "function": {
@@ -34,6 +35,10 @@ class ToolRegistry:
                 },
             })
         return schemas
+
+    def clear(self) -> None:
+        """Unregister all tools."""
+        self._tools.clear()
 
     async def execute(self, tool_name: str, **kwargs: Any) -> Any:
         tool = self._tools.get(tool_name)

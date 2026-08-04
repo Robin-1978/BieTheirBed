@@ -54,7 +54,7 @@ async def test_agent_returns_llm_response():
 @pytest.mark.asyncio
 async def test_agent_tool_call_flow(tmp_path):
     config = AppConfig()
-    agent = Agent(config=config)
+    agent = Agent(config=config, confirm_callback=lambda name, args: True)
     test_file = str(tmp_path / "test.txt")
     first_stream = _make_stream_mock(
         content="Let me check the file.",

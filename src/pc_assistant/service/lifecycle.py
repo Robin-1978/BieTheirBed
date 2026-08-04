@@ -22,7 +22,7 @@ from pc_assistant.service.server import is_running
 logger = logging.getLogger(__name__)
 
 
-async def get_agent_or_client(config: AppConfig) -> Any:
+async def get_agent_or_client(config: AppConfig, *, no_tools: bool = False) -> Any:
     """Get an Agent-like object: prefer connecting to the service daemon.
 
     1. Try connecting to an existing service (TCP first if configured, then Unix).
@@ -69,15 +69,15 @@ async def get_agent_or_client(config: AppConfig) -> Any:
             logger.warning("Auto-started service not ready: %s", e)
 
     logger.info("Falling back to in-process Agent")
-    return _create_inprocess_agent(config)
+    return _create_inprocess_agent(config, no_tools=no_tools)
 
 
 def _start_daemon(config: AppConfig) -> bool:
     """Fork a daemon process. Returns True if spawn succeeded."""
     try:
         cmd = [sys.executable, "-m", "pc_assistant.service.server", "--daemon"]
-        if hasattr(config, "_config_path") and config._config_path:
-            cmd.extend(["--config", config._config_path])
+        if config.source_config_path:
+            cmd.extend(["--config", config.source_config_path])
 
         subprocess.Popen(
             cmd,
@@ -106,7 +106,7 @@ async def _wait_for_socket(client: Any) -> None:
     raise TimeoutError("Service socket did not become available")
 
 
-def _create_inprocess_agent(config: AppConfig) -> Any:
+def _create_inprocess_agent(config: AppConfig, *, no_tools: bool = False) -> Any:
     """Create an in-process Agent (current monolithic behavior)."""
     from pc_assistant.agent import Agent
 
@@ -117,4 +117,4 @@ def _create_inprocess_agent(config: AppConfig) -> Any:
         except (EOFError, KeyboardInterrupt):
             return False
 
-    return Agent(config=config, confirm_callback=_confirm_stdin)
+    return Agent(config=config, confirm_callback=_confirm_stdin, disable_tools=no_tools)

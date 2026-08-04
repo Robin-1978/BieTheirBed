@@ -217,6 +217,14 @@ class SchedulerTool(ToolBase):
     def set_notification_callback(self, callback: Callable[[str, str], None]) -> None:
         self._notification_callback = callback
 
+    def has_tasks(self) -> bool:
+        """True when at least one scheduled task is registered."""
+        return bool(self._tasks)
+
+    def task_count(self) -> int:
+        """Number of registered scheduled tasks."""
+        return len(self._tasks)
+
     # ── Persistence ───────────────────────────────────────────
 
     def _load(self) -> None:

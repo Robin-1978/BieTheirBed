@@ -78,7 +78,7 @@ class ConversationManager:
         return [m.to_dict() for m in self._messages]
 
     def get_messages_for_llm(self) -> list[dict[str, Any]]:
-        """Build messages for LLM API call."""
+        """Build messages for LLM API call (system preamble + history)."""
         result: list[dict[str, Any]] = []
 
         # Build system message
@@ -93,45 +93,18 @@ class ConversationManager:
         if system_prompt:
             result.append({"role": "system", "content": system_prompt})
 
-        # Build conversation messages
-        valid_tool_ids: set[str] = set()
-        for msg in self._messages:
-            tcs = msg.tool_calls or msg.delta_tool_calls
-            if msg.role == "assistant" and tcs:
-                for tc in tcs:
-                    tc_id = tc.get("id", "")
-                    if tc_id:
-                        valid_tool_ids.add(tc_id)
-
-        for msg in self._messages:
-            if msg.role == "system":
-                continue
-            elif msg.role == "user":
-                result.append({"role": "user", "content": msg.content})
-            elif msg.role == "assistant":
-                d: dict[str, Any] = {"role": "assistant", "content": msg.content}
-                if msg.tool_calls:
-                    d["tool_calls"] = msg.tool_calls
-                if msg.reasoning_content:
-                    d["reasoning_content"] = msg.reasoning_content
-                result.append(d)
-            elif msg.role == "tool":
-                tc_id = msg.tool_call_id or ""
-                if tc_id in valid_tool_ids:
-                    result.append({
-                        "role": "tool",
-                        "content": msg.content,
-                        "tool_call_id": tc_id,
-                    })
-            else:
-                result.append({"role": msg.role, "content": msg.content})
-
+        result.extend(self._build_history_messages())
         return result
 
     def get_messages_for_llm_raw(self) -> list[dict[str, Any]]:
-        """Get raw messages suitable for the new assembly pipeline."""
+        """Raw history without the system preamble (for the assembly pipeline)."""
+        return self._build_history_messages()
+
+    def _build_history_messages(self) -> list[dict[str, Any]]:
+        """Build conversation messages shared by the LLM/raw message builders."""
         result: list[dict[str, Any]] = []
 
+        # Build conversation messages
         valid_tool_ids: set[str] = set()
         for msg in self._messages:
             tcs = msg.tool_calls or msg.delta_tool_calls

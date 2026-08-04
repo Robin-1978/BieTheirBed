@@ -18,13 +18,53 @@ def build_parser() -> "argparse.ArgumentParser":
         "--version", action="store_true", default=False, help="Print version and exit"
     )
     parser.add_argument(
+        "-a", "--ask", type=str, default=None,
+        help="Ask a single question and exit (benchmark mode). Use '-' to read from stdin.",
+    )
+    parser.add_argument(
+        "--json", action="store_true", default=False,
+        help="Output result as JSON (requires --ask)",
+    )
+    parser.add_argument(
+        "--no-tools", action="store_true", default=False,
+        help="Disable tool execution (requires --ask)",
+    )
+    parser.add_argument(
+        "-b", "--benchmark", type=str, default=None,
+        help="Run a benchmark dataset (JSONL file or directory)",
+    )
+    parser.add_argument(
+        "--benchmark-report", type=str, default=None,
+        help="Generate report from benchmark results directory",
+    )
+    parser.add_argument(
+        "--categories", type=str, default=None,
+        help="Comma-separated benchmark categories to run (requires --benchmark)",
+    )
+    parser.add_argument(
+        "--output", type=str, default=None,
+        help="Output file for benchmark results (requires --benchmark)",
+    )
+    parser.add_argument(
         "--serve", action="store_true", default=False, help="Start the background service daemon"
     )
     parser.add_argument(
         "--daemon", action="store_true", default=False, help="Daemonize the service"
     )
     parser.add_argument(
+        "--log-dir", type=str, default=None,
+        help="Directory for the service log file (default: runtime dir)",
+    )
+    parser.add_argument(
         "--stop", action="store_true", default=False, help="Stop a running service daemon"
+    )
+    parser.add_argument(
+        "--restart", action="store_true", default=False,
+        help="Stop the service daemon (if running), then start it again",
+    )
+    parser.add_argument(
+        "--status", action="store_true", default=False,
+        help="Show whether the service daemon is running",
     )
     return parser
 
@@ -102,7 +142,7 @@ async def async_main(
 
     from pc_assistant.service.lifecycle import get_agent_or_client
 
-    agent = await get_agent_or_client(cfg)
+    agent = await get_agent_or_client(cfg, no_tools=no_tools)
     is_remote = not isinstance(agent, Agent)
 
     scheduler = None
@@ -111,7 +151,7 @@ async def async_main(
     if not is_remote:
         scheduler = agent.registry.get("scheduler")
         if scheduler:
-            task_count = len(scheduler._tasks)
+            task_count = scheduler.task_count()
             if task_count > 0:
                 await scheduler.execute(action="start")
                 logger.info("Scheduler started with %d tasks", task_count)
@@ -199,8 +239,8 @@ async def _run_benchmark(
             return 1
 
     if no_tools:
-        from pc_assistant.tools.registry import ToolRegistry
-        agent._registry = ToolRegistry()
+        if hasattr(agent, "clear_tools"):
+            agent.clear_tools()
 
     start_time = time.monotonic()
     tool_call_count = 0
@@ -223,7 +263,7 @@ async def _run_benchmark(
         error_msg = str(e)
 
     elapsed = time.monotonic() - start_time
-    status = agent.get_status()
+    status = await agent.get_status()
 
     metrics = {
         "elapsed_seconds": round(elapsed, 3),
@@ -334,36 +374,278 @@ def main(argv: list[str] | None = None) -> int:
         print(f"pc_assistant {__version__}")
         return 0
 
+    if args.json and not args.ask:
+        parser.error("--json requires --ask")
+    if args.no_tools and not args.ask:
+        parser.error("--no-tools requires --ask")
+    if args.categories and not args.benchmark:
+        parser.error("--categories requires --benchmark")
+    if args.output and not args.benchmark:
+        parser.error("--output requires --benchmark")
+
     config_path = args.config
     if config_path is not None:
         config_path = str(Path(config_path).resolve())
 
+    if args.status:
+        return _service_status()
+
     if args.stop:
         return _stop_service()
 
+    if args.restart:
+        return _restart_service(config_path, args.log_dir)
+
     if args.serve:
-        from pc_assistant.service.server import run_server
-        return asyncio.run(run_server(config_path, daemon=args.daemon))
+        from pc_assistant.service.server import run_server, resolve_service_log
+        log_path = resolve_service_log(args.log_dir)
+        return run_server(config_path, daemon=args.daemon, log_path=log_path)
+
+    if args.benchmark_report:
+        return async_benchmark_report(args.benchmark_report)
+
+    if args.benchmark:
+        categories = args.categories.split(",") if args.categories else None
+        return asyncio.run(async_benchmark(
+            config_path, args.verbose, args.benchmark,
+            categories=categories, output_path=args.output,
+        ))
 
     try:
-        return asyncio.run(async_main(config_path, args.verbose))
+        return asyncio.run(async_main(
+            config_path, args.verbose,
+            ask=args.ask, json_output=args.json, no_tools=args.no_tools,
+        ))
     except KeyboardInterrupt:
         return 130
+
+
+def _service_state() -> tuple[bool, int | None]:
+    """Return ``(running, pid)`` for the service daemon.
+
+    Uses the PID file when valid; otherwise falls back to scanning the
+    configured service TCP port so an orphaned daemon (no/ stale PID file)
+    is still detected and can be stopped by ``--stop`` / ``--restart``.
+    """
+    import os
+
+    from pc_assistant.service.protocol import PID_PATH
+
+    pid: int | None = None
+    if PID_PATH.exists():
+        try:
+            pid = int(PID_PATH.read_text().split()[0])
+        except (ValueError, IndexError, OSError):
+            pid = None
+    if pid is not None:
+        try:
+            os.kill(pid, 0)
+            return True, pid
+        except OSError:
+            pid = None
+
+    port = _service_port()
+    if port > 0:
+        owners = _pids_listening_on_port(port)
+        if owners:
+            return True, owners[0]
+
+    if PID_PATH.exists():
+        try:
+            PID_PATH.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return False, None
+
+
+def _service_port() -> int:
+    """The configured service TCP port (0 means TCP disabled)."""
+    try:
+        from pc_assistant.config import load_config
+
+        return int(load_config().service_port)
+    except Exception:
+        return 0
+
+
+def _pids_listening_on_port(port: int) -> list[int]:
+    """Find PIDs listening on a TCP port via a Linux ``/proc`` scan."""
+    import os
+    import re
+
+    if port <= 0 or not os.path.isdir("/proc"):
+        return []
+
+    target_inodes: set[int] = set()
+    for netfile in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(netfile, encoding="utf-8") as fh:
+                for line in fh:
+                    parts = line.split()
+                    if len(parts) < 10 or parts[3] != "0A":  # 0A = LISTEN
+                        continue
+                    try:
+                        if int(parts[1].split(":")[1], 16) == port:
+                            target_inodes.add(int(parts[9]))
+                    except (IndexError, ValueError):
+                        continue
+        except OSError:
+            continue
+    if not target_inodes:
+        return []
+
+    pids: set[int] = set()
+    try:
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            fd_dir = f"/proc/{entry}/fd"
+            try:
+                for fd in os.listdir(fd_dir):
+                    link = os.readlink(f"{fd_dir}/{fd}")
+                    m = re.fullmatch(r"socket:\[(\d+)\]", link)
+                    if m and int(m.group(1)) in target_inodes:
+                        pids.add(int(entry))
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return sorted(pids)
+
+
+def _service_log_path() -> str:
+    """The log path recorded by the daemon (from the PID file), else the default."""
+    from pc_assistant.service.protocol import LOG_PATH, PID_PATH
+
+    if PID_PATH.exists():
+        try:
+            lines = PID_PATH.read_text().splitlines()
+            if len(lines) >= 2 and lines[1].strip():
+                return lines[1].strip()
+        except OSError:
+            pass
+    return str(LOG_PATH)
+
+
+def _wait_for_stopped(pid: int | None, timeout: float = 15.0) -> bool:
+    import os
+    import time
+
+    if pid is None:
+        return True
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return True
+        time.sleep(1)
+    return False
+
+
+def _wait_for_running(pid: int | None, timeout: float = 30.0) -> bool:
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        running, alive_pid = _service_state()
+        if running and (pid is None or alive_pid == pid):
+            return True
+        time.sleep(1)
+    return False
+
+
+def _service_status() -> int:
+    running, pid = _service_state()
+    if running:
+        print(f"Service is running (pid {pid}).")
+        print(f"Log: {_service_log_path()}")
+        return 0
+    print("Service is not running.")
+    return 1
 
 
 def _stop_service() -> int:
     import os
     import signal
+    import sys as _sys
+
     from pc_assistant.service.protocol import PID_PATH
 
-    if not PID_PATH.exists():
-        print("Service is not running (no PID file)")
-        return 1
-    try:
-        pid = int(PID_PATH.read_text().strip())
-        os.kill(pid, signal.SIGTERM)
-        print(f"Sent SIGTERM to service (pid {pid})")
+    running, pid = _service_state()
+    if not running:
+        print("Service is not running.")
+        PID_PATH.unlink(missing_ok=True)
         return 0
-    except (ValueError, OSError) as e:
-        print(f"Failed to stop service: {e}")
+
+    print(f"Stopping service (pid {pid})...")
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        pass
+    if not _wait_for_stopped(pid):
+        print("Service did not stop gracefully; sending SIGKILL...", file=_sys.stderr)
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+    try:
+        PID_PATH.unlink(missing_ok=True)
+    except OSError:
+        pass
+    print("Service stopped.")
+    return 0
+
+
+def _start_service(config_path: str | None, log_dir: str | None) -> int:
+    """Start the daemon and wait until it is ready."""
+    import shutil
+    import subprocess
+    import sys as _sys
+    from pathlib import Path
+
+    from pc_assistant.service.server import resolve_service_log
+
+    running, pid = _service_state()
+    if running:
+        print(f"Service already running (pid {pid}).")
+        print(f"Log: {_service_log_path()}")
+        return 0
+
+    exe = shutil.which("pc-assistant")
+    if exe is None:
+        exe = [_sys.executable, "-m", "pc_assistant.service"]
+    else:
+        exe = [exe]
+
+    cmd = [*exe, "--serve", "--daemon"]
+    if log_dir:
+        cmd += [f"--log-dir={Path(log_dir).expanduser()}"]
+    if config_path:
+        cmd += ["--config", config_path]
+
+    print("Starting PC Assistant service (daemon)...")
+    try:
+        subprocess.Popen(cmd)  # daemon double-forks; parent process exits on its own
+    except Exception as e:
+        print(f"Failed to start service: {e}", file=_sys.stderr)
         return 1
+
+    if not _wait_for_running(None):
+        print("ERROR: Service did not become ready in time.", file=_sys.stderr)
+        print(f"Check log: {resolve_service_log(log_dir)}", file=_sys.stderr)
+        return 1
+
+    _, new_pid = _service_state()
+    print(f"Service started (pid {new_pid}).")
+    print(f"Log: {_service_log_path()}")
+    return 0
+
+
+def _restart_service(config_path: str | None, log_dir: str | None) -> int:
+    print("--- restarting service ---")
+    rc = _stop_service()
+    if rc != 0:
+        return rc
+    print("---")
+    return _start_service(config_path, log_dir)

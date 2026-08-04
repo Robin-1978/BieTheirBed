@@ -77,7 +77,7 @@ class BenchmarkRunner:
             error_msg = str(e)
 
         elapsed = time.monotonic() - start_time
-        status = agent.get_status()
+        status = await agent.get_status()
         actual_tools = list(dict.fromkeys(
             e.tool_name for e in events if e.type == "tool_call" and not e.blocked
         ))
@@ -131,11 +131,7 @@ class BenchmarkRunner:
         config = self._config.model_copy()
         if q.max_iterations is not None:
             config.max_iterations = q.max_iterations
-        agent = Agent(config=config)
-        if q.no_tools:
-            from pc_assistant.tools.registry import ToolRegistry
-            agent._registry = ToolRegistry()
-        return agent
+        return Agent(config=config, disable_tools=q.no_tools)
 
     def _create_judge(self) -> LLMJudge | None:
         try:

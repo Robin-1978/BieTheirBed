@@ -106,8 +106,16 @@ class ServiceClient:
                         await queue.put(None)
 
                 elif msg.type == "confirm_request":
+                    code = msg.data.get("code", "")
                     if self._confirm_handler is not None:
-                        asyncio.create_task(self._confirm_handler(msg.data))
+                        try:
+                            await self._confirm_handler(msg.data)
+                        except Exception:
+                            pass
+                    else:
+                        # Fail closed: without an interactive handler, auto-deny
+                        # so the server never blocks the run for CONFIRM_TIMEOUT.
+                        await self.confirm(code, approved=False)
 
                 elif msg.type == "notify":
                     if self._notify_handler is not None:
@@ -190,12 +198,15 @@ class ServiceClient:
         except Exception:
             return False
 
-    def get_status(self) -> dict[str, Any]:
-        return {"connected": self._connected, "service": True}
+    async def get_status(self) -> dict[str, Any]:
+        """Fetch real agent status from the service (mirrors ``Agent.get_status``)."""
+        resp = await self._request("status")
+        if resp.type == "error":
+            return {"connected": self._connected, "service": True, "error": resp.data.get("message", "")}
+        return resp.data
 
     async def get_status_async(self) -> dict[str, Any]:
-        resp = await self._request("status")
-        return resp.data
+        return await self.get_status()
 
     async def confirm(self, code: str, approved: bool) -> None:
         await self._send(ClientMessage(

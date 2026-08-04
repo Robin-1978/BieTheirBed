@@ -425,7 +425,7 @@ class FeishuChannel(ChannelBase):
             if self._agent is not None:
                 session_id = f"feishu:{open_id}"
                 try:
-                    self._agent._session_manager.remove(session_id)
+                    self._agent.drop_session(session_id)
                 except Exception:
                     pass
             self._send_text(open_id, "✅ 对话历史已清空")
@@ -433,7 +433,9 @@ class FeishuChannel(ChannelBase):
 
         if cmd == "/status":
             if self._agent is not None:
-                status = self._agent.get_status()
+                status = asyncio.run_coroutine_threadsafe(
+                    self._agent.get_status(), self._agent_loop
+                ).result(timeout=_TURN_PROCESS_TIMEOUT)
                 session_id = f"feishu:{open_id}"
                 session_stats = [s for s in self._agent.session_stats() if s.get("session_id") == session_id]
                 session_info = session_stats[0] if session_stats else {}
@@ -486,7 +488,7 @@ class FeishuChannel(ChannelBase):
         if cmd == "/config":
             if self._agent is not None:
                 from pc_assistant.config import AppConfig
-                cfg = self._agent._config
+                cfg = self._agent.config
                 info = (
                     f"**LLM**: {cfg.llm_provider} @ {cfg.llm_server_url}\n"
                     f"**Max iterations**: {cfg.max_iterations}\n"
@@ -719,7 +721,7 @@ class FeishuChannel(ChannelBase):
                     tool_calls_info.append(f"🔧 {tool_name}({args_brief})")
                 elif event.type == "tool_result":
                     pass
-                elif event.type in ("thinking", "stream_think_delta"):
+                elif event.type == "stream_think_delta":
                     if event.content:
                         thinking_chunks.append(event.content)
                 elif event.type == "final_answer":

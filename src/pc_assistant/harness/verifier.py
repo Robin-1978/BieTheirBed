@@ -117,12 +117,18 @@ class Verifier:
                     reason=f"User confirmed: {confirm_reason}",
                 )
             else:
+                # Fail closed: no confirmation gate available => treat as denied.
                 self._audit.log(
-                    action="tool_call",
+                    action="tool_call_blocked",
                     tool=tool_name,
                     parameters=arguments,
-                    allowed=True,
-                    reason=f"No confirmation callback; proceeding with: {confirm_reason}",
+                    allowed=False,
+                    reason=f"Confirmation required but no confirmation gate is available: {confirm_reason}",
+                )
+                return Verdict.reject(
+                    RefusalCode.CONFIRMATION_REQUIRED,
+                    confirm_reason,
+                    retry_hint="No confirmation mechanism is configured; run this in an interactive client with a confirmation gate.",
                 )
 
         self._audit.log(

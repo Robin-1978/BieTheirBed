@@ -221,7 +221,7 @@ class ChatApp(App):
     def on_chat_input_submitted(self, event: ChatInput.Submitted) -> None:
         text = event.value
         if text.startswith("/"):
-            self._handle_command(text)
+            self.run_worker(self._handle_command(text))
         else:
             self._last_input = text
             self._run_agent_turn(text)
@@ -337,7 +337,7 @@ class ChatApp(App):
             await stream.write(f"\n\n*Cancelled.*\n")
 
         if self._agent is not None:
-            status = self._agent.get_status()
+            status = await self._agent.get_status()
             self._token_count = status.get("total_tokens", 0)
 
         self._request_scroll()
@@ -391,7 +391,7 @@ class ChatApp(App):
 
     # ── Slash commands ─────────────────────────────────────────
 
-    def _handle_command(self, command: str) -> bool:
+    async def _handle_command(self, command: str) -> bool:
         cmd = command.lower().strip()
         log = self.query_one("#chat-log", VerticalScroll)
 
@@ -434,7 +434,7 @@ class ChatApp(App):
             if self._agent is None:
                 log.mount(CommandOutput(f"{ICON_WARN} No agent initialized."))
             else:
-                status = self._agent.get_status()
+                status = await self._agent.get_status()
                 rows = "\n".join(f"| {k} | {v} |" for k, v in status.items()
                                  if not isinstance(v, list))
                 log.mount(CommandOutput(f"| Property | Value |\n|----------|-------|\n{rows}"))
@@ -507,7 +507,7 @@ class ChatApp(App):
         elif cmd == "/debug":
             self._state.debug_mode = not self._state.debug_mode
             if self._agent is not None:
-                status = self._agent.get_status()
+                status = await self._agent.get_status()
                 rows = "\n".join(f"| {k} | {v} |" for k, v in status.items()
                                  if not isinstance(v, list))
                 log.mount(CommandOutput(

@@ -20,6 +20,7 @@ class SessionState:
     session_id: str
     conversation: ConversationManager
     cancelled: bool = False
+    status: str = "ready"
     tool_call_history: list[str] = field(default_factory=list)
     tool_task: asyncio.Task | None = None
     total_prompt_tokens: int = 0
@@ -86,6 +87,10 @@ class SessionManager:
             key=lambda s: s.last_access,
         )
         for state in oldest[: self._max // 2]:
+            # The default (empty-id) session is pinned so its conversation is
+            # never evicted out from under the CLI/TUI that owns it.
+            if state.session_id == "":
+                continue
             self._states.pop(state.session_id, None)
 
     def drop(self, session_id: str) -> None:
