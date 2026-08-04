@@ -11,6 +11,11 @@ import warnings
 from typing import Any
 
 from pc_assistant.channels.base import ChannelBase
+from pc_assistant.harness.confirm import CONFIRM_TIMEOUT
+
+#: Bound for a full turn (confirm prompt + agent response). Must exceed
+#: CONFIRM_TIMEOUT so a pending confirmation can still complete.
+_TURN_PROCESS_TIMEOUT = 180.0
 
 if not os.environ.get("SSL_CERT_FILE"):
     try:
@@ -54,6 +59,86 @@ logger = logging.getLogger(__name__)
 _RECEIVED_OPEN_ID_FILE = os.path.join(os.path.dirname(__file__), ".feishu_open_id")
 
 
+def _patch_ws_card_dispatch(ws_client: Any) -> None:
+    """Monkey-patch lark_oapi WS client to dispatch CARD frames.
+
+    The upstream SDK (<=1.6.5) silently drops MessageType.CARD frames in
+    ``_handle_data_frame``, breaking all interactive card button callbacks
+    over WebSocket. This patch routes CARD frames through the same
+    ``_event_handler._do_without_validation`` path used for EVENT frames.
+    See: https://github.com/larksuite/oapi-sdk-python/issues/126
+    """
+    try:
+        import types
+        from lark_oapi.ws.client import MessageType
+        import base64
+        import http
+
+        original = ws_client._handle_data_frame
+
+        from lark_oapi.ws.const import (
+            HEADER_TYPE, HEADER_MESSAGE_ID,
+            HEADER_SUM, HEADER_SEQ, HEADER_BIZ_RT,
+        )
+        from lark_oapi.ws.model import Response
+        from lark_oapi import JSON as LarkJSON
+
+        async def _patched_handle_data_frame(self, frame):
+            hs = frame.headers
+            type_ = ""
+            for h in hs:
+                if h.key == HEADER_TYPE:
+                    type_ = h.value
+                    break
+
+            if type_ and MessageType(type_) == MessageType.CARD:
+                pl = frame.payload
+                sum_val = "1"
+                seq_val = "1"
+                msg_id = ""
+                for h in hs:
+                    if h.key == HEADER_SUM:
+                        sum_val = h.value
+                    elif h.key == HEADER_SEQ:
+                        seq_val = h.value
+                    elif h.key == HEADER_MESSAGE_ID:
+                        msg_id = h.value
+
+                if int(sum_val) > 1:
+                    pl = self._combine(msg_id, int(sum_val), int(seq_val), pl)
+                    if pl is None:
+                        return
+
+                resp = Response(code=http.HTTPStatus.OK)
+                try:
+                    import time as _time
+                    start = int(round(_time.time() * 1000))
+                    result = self._event_handler._do_without_validation(pl)
+                    end = int(round(_time.time() * 1000))
+                    header = hs.add()
+                    header.key = HEADER_BIZ_RT
+                    header.value = str(end - start)
+                    if result is not None:
+                        resp.data = base64.b64encode(
+                            LarkJSON.marshal(result).encode("utf-8")
+                        )
+                except Exception as e:
+                    logger.error("[WS-CARD] dispatch error: %s", e, exc_info=True)
+                    resp = Response(code=http.HTTPStatus.INTERNAL_SERVER_ERROR)
+
+                frame.payload = LarkJSON.marshal(resp).encode("utf-8")
+                await self._write_message(frame.SerializeToString())
+            else:
+                await original(frame)
+
+        ws_client._handle_data_frame = types.MethodType(
+            _patched_handle_data_frame, ws_client
+        )
+        logger.info("[WS] CARD frame dispatch patch applied")
+    except Exception as e:
+        logger.warning("[WS] Could not patch CARD dispatch: %s", e)
+
+
 class FeishuChannel(ChannelBase):
     name = "feishu"
 
@@ -90,11 +175,10 @@ class FeishuChannel(ChannelBase):
         self._agent: Any = None
         self._agent_loop: asyncio.AbstractEventLoop | None = None
 
-        self._conversations: dict[str, list[dict[str, Any]]] = {}
-        self._conversation_lock = threading.Lock()
-
         self._pending_confirm: dict[str, dict[str, Any]] = {}
         self._pending_confirm_lock = threading.Lock()
+
+        self._user_locks: dict[str, asyncio.Lock] = {}
 
         self._running = False
 
@@ -305,9 +389,10 @@ class FeishuChannel(ChannelBase):
             self._agent_loop,
         )
         try:
-            future.result(timeout=180)
+            future.result(timeout=_TURN_PROCESS_TIMEOUT)
         except asyncio.TimeoutError:
-            self._send_text(open_id, "❌ 处理超时，请简化问题重试")
+            future.cancel()
+            self._send_text(open_id, "❌ 处理超时，已取消，请简化问题重试")
         except Exception as e:
             logger.error("[HANDLE] Agent processing failed: %s", e, exc_info=True)
             self._send_text(open_id, f"❌ 处理失败: {e}")
@@ -337,8 +422,6 @@ class FeishuChannel(ChannelBase):
             return True
 
         if cmd == "/clear":
-            with self._conversation_lock:
-                self._conversations.pop(open_id, None)
             if self._agent is not None:
                 session_id = f"feishu:{open_id}"
                 try:
@@ -428,8 +511,8 @@ class FeishuChannel(ChannelBase):
                 return
             with self._pending_confirm_lock:
                 self._pending_confirm.pop(open_id, None)
-            if time.time() - pending["ts"] > 300:
-                self._send_text(open_id, "❌ 确认码已过期(5分钟)，请重新操作")
+            if time.time() - pending["ts"] > CONFIRM_TIMEOUT:
+                self._send_text(open_id, "❌ 确认码已过期，请重新操作")
                 return
             if code != pending["code"]:
                 with self._pending_confirm_lock:
@@ -445,18 +528,19 @@ class FeishuChannel(ChannelBase):
         elif cmd in ("取消", "cancel", "no", "n"):
             with self._pending_confirm_lock:
                 self._pending_confirm.pop(open_id, None)
+            cancel_fn = pending.get("cancel_fn")
+            if cancel_fn:
+                try:
+                    cancel_fn()
+                except Exception:
+                    pass
             self._send_text(open_id, "✅ 操作已取消")
         else:
-            with self._pending_confirm_lock:
-                self._pending_confirm.pop(open_id, None)
-            future = asyncio.run_coroutine_threadsafe(
-                self._process_with_agent(open_id, text),
-                self._agent_loop,
+            self._send_text(
+                open_id,
+                f"⚠️ 有操作等待确认(验证码 `{pending['code']}`)。\n"
+                f"请回复 `确认 {pending['code']}` 或 `取消`，其他内容不会处理。",
             )
-            try:
-                future.result(timeout=180)
-            except Exception as e:
-                self._send_text(open_id, f"❌ 处理失败: {e}")
 
     def _request_confirm(
         self, open_id: str, action_desc: str, action_fn: Any
@@ -473,7 +557,7 @@ class FeishuChannel(ChannelBase):
             }
             if len(self._pending_confirm) > 100:
                 now = time.time()
-                expired = [k for k, v in self._pending_confirm.items() if now - v["ts"] > 300]
+                expired = [k for k, v in self._pending_confirm.items() if now - v["ts"] > CONFIRM_TIMEOUT]
                 for k in expired:
                     del self._pending_confirm[k]
         card = {
@@ -489,54 +573,133 @@ class FeishuChannel(ChannelBase):
                 },
                 {"tag": "hr"},
                 {
-                    "tag": "div",
-                    "text": {
-                        "tag": "lark_md",
-                        "content": f"发送 `确认 {code}` 执行，`取消` 放弃\n⏱ 5分钟内有效",
-                    },
+                    "tag": "action",
+                    "actions": [
+                        {
+                            "tag": "button",
+                            "text": {"tag": "plain_text", "content": "✅ 批准执行"},
+                            "type": "primary",
+                            "value": {"confirm_code": code, "approved": True},
+                        },
+                        {
+                            "tag": "button",
+                            "text": {"tag": "plain_text", "content": "❌ 拒绝"},
+                            "type": "danger",
+                            "value": {"confirm_code": code, "approved": False},
+                        },
+                    ],
+                },
+                {
+                    "tag": "note",
+                    "elements": [{
+                        "tag": "plain_text",
+                        "content": f"⏱ {int(CONFIRM_TIMEOUT)}秒内有效 | 也可发送: 确认 {code} / 取消",
+                    }],
                 },
             ],
         }
         if not self._send_card(open_id, card):
             return self._send_text(
                 open_id,
-                f"⚠️ **请确认操作**\n{action_desc}\n\n发送 `确认 {code}` 执行，`取消` 放弃，5分钟内有效",
+                f"⚠️ **请确认操作**\n{action_desc}\n\n"
+                f"发送 `确认 {code}` 执行，`取消` 放弃，{int(CONFIRM_TIMEOUT)}秒内有效",
             )
         return True
+
+    def _handle_card_confirm(
+        self, open_id: str, confirm_code: str, approved: bool
+    ) -> None:
+        """Handle button click from a confirmation card."""
+        with self._pending_confirm_lock:
+            pending = self._pending_confirm.get(open_id)
+            if pending is None:
+                return
+            if pending["code"] != confirm_code:
+                return
+            self._pending_confirm.pop(open_id, None)
+
+        if time.time() - pending["ts"] > CONFIRM_TIMEOUT:
+            self._send_text(open_id, "❌ 确认已过期，请重新操作")
+            return
+
+        if approved:
+            try:
+                result = pending["fn"]()
+                if isinstance(result, str):
+                    self._send_text(open_id, result)
+            except Exception as e:
+                self._send_text(open_id, f"❌ 操作执行失败: {e}")
+        else:
+            pending_fn = pending.get("cancel_fn")
+            if pending_fn:
+                try:
+                    pending_fn()
+                except Exception:
+                    pass
+            self._send_text(open_id, "✅ 操作已取消")
 
     async def _process_with_agent(self, open_id: str, text: str) -> None:
         if self._agent is None:
             self._send_text(open_id, "❌ Agent 未初始化")
             return
 
-        conv = self._get_conversation(open_id)
-        conv.append({"role": "user", "content": text})
+        lock = self._get_user_lock(open_id)
+        async with lock:
+            await self._process_with_agent_locked(open_id, text)
 
+    def _get_user_lock(self, open_id: str) -> asyncio.Lock:
+        """Return the per-user lock, evicting idle entries to bound memory."""
+        lock = self._user_locks.get(open_id)
+        if lock is not None:
+            return lock
+        if len(self._user_locks) >= 100:
+            for old_id, old_lock in list(self._user_locks.items()):
+                if not old_lock.locked():
+                    del self._user_locks[old_id]
+                    break
+        lock = asyncio.Lock()
+        self._user_locks[open_id] = lock
+        return lock
+
+    async def _process_with_agent_locked(self, open_id: str, text: str) -> None:
         feishu_session_id = f"feishu:{open_id}"
+        agent_loop = asyncio.get_running_loop()
 
-        original_cb = self._agent._confirm_callback
-        confirm_event = asyncio.Event()
-        confirm_result = [False]
-
-        async def feishu_confirm(tool_name: str, args: dict) -> bool:
+        async def feishu_confirm(tool_name: str, args: dict[str, Any]) -> bool:
             args_brief = json.dumps(args, ensure_ascii=False)[:120]
-            action_desc = f"🔧 **{tool_name}**\n`{args_brief}`"
+            action_desc = f"\U0001f527 **{tool_name}**\n`{args_brief}`"
+
+            confirm_event = asyncio.Event()
+            confirm_result = [False]
+
+            def _set_result(approved: bool) -> str:
+                confirm_result[0] = approved
+                agent_loop.call_soon_threadsafe(confirm_event.set)
+                return "\u2705 \u64cd\u4f5c\u5df2\u6267\u884c" if approved else ""
 
             def on_confirmed():
-                confirm_result[0] = True
-                confirm_event.set()
-                return "✅ 操作已执行"
+                return _set_result(True)
 
+            def on_cancelled():
+                _set_result(False)
+
+            with self._pending_confirm_lock:
+                old = self._pending_confirm.get(open_id)
+                if old:
+                    del self._pending_confirm[open_id]
             self._request_confirm(open_id, action_desc, on_confirmed)
+            with self._pending_confirm_lock:
+                if open_id in self._pending_confirm:
+                    self._pending_confirm[open_id]["cancel_fn"] = on_cancelled
 
             try:
-                await asyncio.wait_for(confirm_event.wait(), timeout=300.0)
+                await asyncio.wait_for(confirm_event.wait(), timeout=CONFIRM_TIMEOUT)
                 return confirm_result[0]
-            except asyncio.TimeoutError:
+            except (asyncio.TimeoutError, asyncio.CancelledError):
                 return False
-
-        self._agent._confirm_callback = feishu_confirm
-        self._agent._verifier._confirm_callback = feishu_confirm
+            finally:
+                with self._pending_confirm_lock:
+                    self._pending_confirm.pop(open_id, None)
 
         try:
             tool_calls_info: list[str] = []
@@ -544,7 +707,11 @@ class FeishuChannel(ChannelBase):
             final_answer = ""
             error_msg = ""
 
-            async for event in self._agent.run(text, session_id=feishu_session_id):
+            async for event in self._agent.run(
+                text,
+                session_id=feishu_session_id,
+                confirm_callback=feishu_confirm,
+            ):
                 if event.type == "tool_call" and not event.blocked:
                     tool_name = event.tool_name
                     tool_args = event.tool_args
@@ -579,12 +746,6 @@ class FeishuChannel(ChannelBase):
                 plain_response = "⚠️ 未获得有效回复，请重试"
                 tools_summary = ""
 
-            conv.append({"role": "assistant", "content": plain_response})
-
-            with self._conversation_lock:
-                if len(self._conversations.get(open_id, [])) > 40:
-                    self._conversations[open_id] = self._conversations[open_id][-20:]
-
             thinking_text = "".join(thinking_chunks).strip()
             card = self._build_response_card(
                 final_answer or plain_response,
@@ -598,9 +759,6 @@ class FeishuChannel(ChannelBase):
         except Exception as e:
             logger.error("[PROCESS] Agent error: %s", e, exc_info=True)
             self._send_text(open_id, f"❌ 处理出错: {e}")
-        finally:
-            self._agent._confirm_callback = original_cb
-            self._agent._verifier._confirm_callback = original_cb
 
     def _build_response_card(
         self,
@@ -658,12 +816,6 @@ class FeishuChannel(ChannelBase):
         else:
             for i in range(0, len(text), max_len):
                 self._send_text(open_id, text[i : i + max_len])
-
-    def _get_conversation(self, open_id: str) -> list[dict[str, Any]]:
-        with self._conversation_lock:
-            if open_id not in self._conversations:
-                self._conversations[open_id] = []
-            return self._conversations[open_id]
 
     # ================================================================
     # Message Queue + Worker
@@ -749,6 +901,10 @@ class FeishuChannel(ChannelBase):
 
     def _create_event_handler(self):
         from lark_oapi.event.dispatcher_handler import EventDispatcherHandler
+        from lark_oapi.event.callback.model.p2_card_action_trigger import (
+            P2CardActionTrigger,
+            P2CardActionTriggerResponse,
+        )
 
         channel = self
 
@@ -789,9 +945,31 @@ class FeishuChannel(ChannelBase):
             except Exception as e:
                 logger.error("[WS-RECV#%d] Error: %s", recv_seq, e, exc_info=True)
 
+        def on_card_action(data: P2CardActionTrigger) -> P2CardActionTriggerResponse:
+            channel._last_ws_activity = time.time()
+            try:
+                action = data.event.action
+                value = action.value or {}
+                confirm_code = value.get("confirm_code", "")
+                approved = value.get("approved", False)
+                open_id = data.event.operator.open_id if data.event.operator else ""
+
+                if confirm_code and open_id:
+                    channel._handle_card_confirm(open_id, confirm_code, approved)
+                    toast_msg = "已批准" if approved else "已拒绝"
+                    return P2CardActionTriggerResponse({
+                        "toast": {"type": "info", "content": toast_msg},
+                    })
+            except Exception as e:
+                logger.error("[CARD-ACTION] Error: %s", e, exc_info=True)
+            return P2CardActionTriggerResponse({
+                "toast": {"type": "error", "content": "处理失败"},
+            })
+
         event_handler = (
             EventDispatcherHandler.builder("", "")
             .register_p2_im_message_receive_v1(on_im_message_receive)
+            .register_p2_card_action_trigger(on_card_action)
             .build()
         )
 
@@ -953,6 +1131,7 @@ class FeishuChannel(ChannelBase):
                     event_handler=event_handler,
                     auto_reconnect=True,
                 )
+                _patch_ws_card_dispatch(client)
                 self._last_ws_activity = time.time()
                 logger.info("[WS] Starting connection (new loop)...")
                 client.start()

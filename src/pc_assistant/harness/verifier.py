@@ -6,10 +6,10 @@ gate, and returns a typed ``Verdict`` (accept / reject with refusal code).
 """
 from __future__ import annotations
 
-import asyncio
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from pc_assistant.harness.audit import AuditLogger
+from pc_assistant.harness.confirm import ConfirmFn, resolve_confirm
 from pc_assistant.harness.refusal import RefusalCode, Verdict
 from pc_assistant.harness.safety import SafetyChecker
 from pc_assistant.tools.registry import ToolRegistry
@@ -23,7 +23,7 @@ class Verifier:
         safety: SafetyChecker,
         registry: ToolRegistry,
         audit: AuditLogger,
-        confirm_callback: Callable[[str, dict[str, Any]], bool | Awaitable[bool]] | None = None,
+        confirm_callback: ConfirmFn | None = None,
     ) -> None:
         self._safety = safety
         self._registry = registry
@@ -34,7 +34,10 @@ class Verifier:
         self,
         tool_name: str,
         arguments: dict[str, Any],
+        confirm_callback: ConfirmFn | None = None,
     ) -> Verdict:
+        cb = confirm_callback or self._confirm_callback
+
         if tool_name not in self._registry:
             self._audit.log(
                 action="tool_call_blocked",
@@ -53,8 +56,8 @@ class Verifier:
         need_confirm, confirm_reason = self._safety.needs_confirmation(tool_name, arguments)
 
         if not safety_result:
-            if self._confirm_callback is not None:
-                confirmed = await self._invoke_callback(tool_name, arguments)
+            if cb is not None:
+                confirmed = await resolve_confirm(cb, tool_name, arguments)
                 if confirmed:
                     self._audit.log(
                         action="tool_call_confirmed",
@@ -64,6 +67,18 @@ class Verifier:
                         reason=f"User confirmed override of: {safety_result.reason}",
                     )
                     return Verdict.accept()
+                self._audit.log(
+                    action="tool_call_blocked",
+                    tool=tool_name,
+                    parameters=arguments,
+                    allowed=False,
+                    reason=f"User denied: {safety_result.reason}",
+                )
+                return Verdict.reject(
+                    RefusalCode.CONFIRMATION_DENIED,
+                    safety_result.reason,
+                    retry_hint="User denied the operation. Ask before retrying.",
+                )
             self._audit.log(
                 action="tool_call_blocked",
                 tool=tool_name,
@@ -79,8 +94,8 @@ class Verifier:
             )
 
         if need_confirm:
-            if self._confirm_callback is not None:
-                confirmed = await self._invoke_callback(tool_name, arguments)
+            if cb is not None:
+                confirmed = await resolve_confirm(cb, tool_name, arguments)
                 if not confirmed:
                     self._audit.log(
                         action="tool_call_blocked",
@@ -117,19 +132,6 @@ class Verifier:
             allowed=True,
         )
         return Verdict.accept()
-
-    async def _invoke_callback(
-        self,
-        tool_name: str,
-        arguments: dict[str, Any],
-    ) -> bool:
-        try:
-            result = self._confirm_callback(tool_name, arguments)  # type: ignore[misc]
-            if asyncio.iscoroutine(result):
-                return await result  # type: ignore[misc]
-            return bool(result)
-        except Exception:
-            return False
 
     @staticmethod
     def _classify_safety_reason(reason: str) -> RefusalCode:

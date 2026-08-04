@@ -162,6 +162,9 @@ async def test_agent_confirm_callback_denies():
     events = await _collect_events(agent, "delete temp")
     blocked_events = [e for e in events if e.type == "tool_call" and e.blocked]
     assert len(blocked_events) >= 1
+    cancelled_events = [e for e in events if e.type == "cancelled"]
+    assert len(cancelled_events) == 0, "Denial feeds back to the LLM, not cancels"
+    assert call_count == 2, "Agent should let the LLM respond after user denial"
 
 
 @pytest.mark.asyncio

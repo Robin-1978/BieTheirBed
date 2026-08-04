@@ -111,6 +111,78 @@ class TestAgentLikeProtocol:
         assert isinstance(client, AgentLike)
 
 
+# ── Server confirm futures (scoped + fail-closed) ────────────────────
+
+
+class TestServerConfirmScoping:
+    """Confirm futures are scoped by client and always resolve (fail closed)."""
+
+    def _make_server(self):
+        from pc_assistant.config import AppConfig
+        from pc_assistant.service.server import ServiceServer
+
+        server = ServiceServer(AppConfig(llm_provider="llamacpp"))
+        server._agent = MagicMock()
+        return server
+
+    def _pending_future(self, server, client_id, code, session_id="session-x"):
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        server._confirm_futures[(client_id, code)] = (session_id, future)
+        return future
+
+    @pytest.mark.asyncio
+    async def test_confirm_scoped_by_client(self):
+        server = self._make_server()
+        f_a = self._pending_future(server, "clientA", "code1")
+        f_b = self._pending_future(server, "clientB", "code1")
+
+        server._handle_confirm(MagicMock(), "clientB", ClientMessage(
+            method="confirm", id=3, params={"code": "code1", "approved": True}
+        ))
+
+        assert f_a.done() is False, "Other client's future must not be touched"
+        assert f_b.result() is True
+
+    @pytest.mark.asyncio
+    async def test_client_disconnect_resolves_pending_futures_fail_closed(self):
+        server = self._make_server()
+        f_a = self._pending_future(server, "clientA", "code1")
+        self._pending_future(server, "clientB", "code2")
+
+        server._resolve_client_confirm_futures("clientA", approved=False)
+
+        assert f_a.done() and f_a.result() is False, "Disconnect must deny"
+        assert ("clientB", "code2") in server._confirm_futures, (
+            "Other client's futures must survive"
+        )
+
+    @pytest.mark.asyncio
+    async def test_cancel_scoped_by_session(self):
+        server = self._make_server()
+        f_target = self._pending_future(server, "clientA", "code1", session_id="feishu:u1")
+        f_other = self._pending_future(server, "clientB", "code2", session_id="feishu:u2")
+
+        server._handle_cancel(ClientMessage(
+            method="cancel", id=4, params={"session_id": "feishu:u1"}
+        ))
+
+        assert f_target.result() is False, "Cancelled session must fail closed"
+        assert f_other.done() is False, "Other session's confirm must survive"
+        assert ("clientA", "code1") not in server._confirm_futures
+
+    @pytest.mark.asyncio
+    async def test_cancel_without_session_resolves_all_pending_futures(self):
+        server = self._make_server()
+        f_a = self._pending_future(server, "clientA", "code1")
+        f_b = self._pending_future(server, "clientB", "code2")
+
+        server._handle_cancel(ClientMessage(method="cancel", id=4))
+
+        assert f_a.result() is False and f_b.result() is False
+        assert server._confirm_futures == {}
+
+
 # ── Server + Client integration ──────────────────────────────────────
 
 
@@ -144,7 +216,7 @@ class TestServerClientIntegration:
         mock_registry.list_tools = MagicMock(return_value=["shell", "filesystem"])
         mock_agent.registry = mock_registry
 
-        async def mock_run(text, *, session_id=""):
+        async def mock_run(text, *, session_id="", confirm_callback=None):
             yield AgentEvent(type="stream_delta", content="Hello ")
             yield AgentEvent(type="stream_delta", content="world!")
             yield AgentEvent(type="final_answer", content="Hello world!")

@@ -8,6 +8,9 @@ A Python desktop AI agent with ReAct reasoning, multi-LLM support, tool calling,
 - **Stochastic-Deterministic Boundary (SDB)** — Typed verifier gate between LLM proposals and tool execution
 - **Plan-Execute** — Optional planning phase for complex multi-step tasks
 - **Multi-LLM** — llama.cpp, OpenAI, Anthropic, any OpenAI-compatible API
+- **Model Adapter Layer** — Canonical IR + per-provider payload/response parsers + provider profiles (endpoint, headers, capabilities)
+- **Prompt Caching** — Cache-friendly static prefix (system + tool schemas + history); Anthropic `cache_control` blocks for prompt caching
+- **Token Calibration** — Per-call token estimation calibrated against real usage
 - **16+ Built-in Tools** — Shell, Filesystem, Application, Web, System, Clipboard, Memory, Weather, Exchange, Timer, Window, Notification, Keyboard, Mouse, Scheduler, DescribeTool
 - **MCP Adapter** — Register tools from any MCP-compatible server
 - **Safety Guardrails** — Dangerous command blocking, protected paths, user confirmation, typed refusal codes
@@ -119,7 +122,7 @@ Use `/config set key=value` in the chat to change settings at runtime.
 | `keyboard` | press, type, hotkey, write, shortcut | Keyboard input control |
 | `mouse` | position, move, click, double_click, right_click, scroll, drag | Mouse control |
 | `scheduler` | create, list, run, delete, enable, disable, start, stop, status | Cron-like task scheduling |
-| `describe_tool` | describe | Meta-tool: query full schema of any tool |
+| `describe_tool` | tool_name | Meta-tool: query the full JSON schema of any registered tool |
 
 ## Development
 
@@ -142,7 +145,14 @@ src/pc_assistant/
 ├── eventbus.py          # Pub/sub event bus for decoupled subscribers
 ├── planner.py           # Plan-Execute layer for complex tasks
 ├── reflection.py        # Self-critique before final answer
-├── llm_provider.py      # Multi-provider LLM abstraction (streaming)
+├── llm_provider.py      # Facade: transport, per-session cancel, retry
+├── model_adapter/
+│   ├── types.py         # Canonical IR (LLMResponse, StreamChunk)
+│   ├── profiles.py      # Per-provider endpoint/header/capability profiles
+│   ├── retry.py         # Retry with backoff for transient HTTP failures
+│   └── parsers/
+│       ├── openai.py    # OpenAI-style payload & stream parsing
+│       └── anthropic.py # Anthropic messages & SSE parsing
 ├── session.py           # Multi-session state with LRU eviction & rollback
 ├── config.py            # Pydantic config model + YAML + env overrides
 ├── exceptions.py        # Typed exception hierarchy
@@ -164,6 +174,7 @@ src/pc_assistant/
 │   ├── base.py          # ToolBase ABC (is_side_effecting flag)
 │   ├── registry.py      # Name→tool map with MCP server registration
 │   ├── mcp_adapter.py   # MCP protocol tool adapter
+│   ├── describe_tool.py # Meta-tool: full schema for any registered tool
 │   └── ...              # 16 built-in tool implementations
 ├── harness/
 │   ├── verifier.py      # SDB: deterministic verifier (propose→verify→commit)

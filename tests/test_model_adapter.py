@@ -1,0 +1,145 @@
+from __future__ import annotations
+
+import pytest
+
+from pc_assistant.model_adapter.parsers.anthropic import (
+    AnthropicStreamAccumulator,
+    build_anthropic_payload,
+    convert_tools_to_anthropic,
+    parse_anthropic_response,
+)
+from pc_assistant.model_adapter.parsers.openai import (
+    OpenAIStreamAccumulator,
+    build_chat_payload,
+    parse_chat_response,
+)
+from pc_assistant.model_adapter.profiles import resolve_profile
+from pc_assistant.model_adapter.types import (
+    format_tool_result_message,
+    normalize_tool_calls,
+)
+
+
+class TestResolveProfile:
+    def test_llamacpp_defaults(self):
+        p = resolve_profile("llamacpp", server_url="http://localhost:8080/")
+        assert p.server_url == "http://localhost:8080"
+        assert p.chat_url == "http://localhost:8080/v1/chat/completions"
+        assert p.health_url == "http://localhost:8080/v1/models"
+        assert p.cache_prompt is True
+        assert p.stream_options is True
+        assert p.headers == {}
+
+    def test_openai_no_double_v1(self):
+        p = resolve_profile("openai", api_key="sk-test")
+        assert p.server_url == "https://api.openai.com/v1"
+        assert p.chat_url == "https://api.openai.com/v1/chat/completions"
+        assert p.health_url == "https://api.openai.com/v1/models"
+        assert p.headers == {"Authorization": "Bearer sk-test"}
+        assert p.requires_api_key is True
+
+    def test_anthropic(self):
+        p = resolve_profile("anthropic", api_key="sk-ant")
+        assert p.server_url == "https://api.anthropic.com"
+        assert p.chat_url == "https://api.anthropic.com/v1/messages"
+        assert p.health_url == "https://api.anthropic.com/v1/models"
+        assert p.anthropic_style is True
+        assert p.headers["x-api-key"] == "sk-ant"
+
+    def test_openai_compatible_v1_base_no_double_v1(self):
+        p = resolve_profile("openai_compatible", api_base="http://my-server:8000/v1")
+        assert p.server_url == "http://my-server:8000/v1"
+        assert p.chat_url == "http://my-server:8000/v1/chat/completions"
+        assert p.health_url == "http://my-server:8000/v1/models"
+
+    def test_openai_compatible_plain_base(self):
+        p = resolve_profile("openai_compatible", server_url="http://fallback:8080")
+        assert p.server_url == "http://fallback:8080"
+        assert p.chat_url == "http://fallback:8080/v1/chat/completions"
+
+
+class TestTypes:
+    def test_normalize_tool_calls_parses_json_arguments(self):
+        raw = [{"id": "1", "type": "function", "function": {"name": "web_search", "arguments": '{"query": "42"}'}}]
+        result = normalize_tool_calls(raw)
+        assert result[0]["function"]["arguments"] == {"query": "42"}
+
+    def test_normalize_tool_calls_invalid_json(self):
+        raw = [{"id": "1", "function": {"name": "x", "arguments": "{oops"}}]
+        result = normalize_tool_calls(raw)
+        assert result[0]["function"]["arguments"] == {}
+
+    def test_format_tool_result_message(self):
+        msg = format_tool_result_message("call_123", "ok")
+        assert msg == {"role": "tool", "tool_call_id": "call_123", "content": "ok"}
+
+
+class TestAnthropicParser:
+    def test_build_payload_system_as_blocks_with_cache_control(self):
+        payload = build_anthropic_payload(
+            "claude-3",
+            [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}],
+            cache_control={"type": "ephemeral"},
+        )
+        assert payload["system"] == [{"type": "text", "text": "sys", "cache_control": {"type": "ephemeral"}}]
+        assert payload["messages"] == [{"role": "user", "content": "hi"}]
+
+    def test_build_payload_system_plain_string_without_cache(self):
+        payload = build_anthropic_payload("claude-3", [{"role": "system", "content": "sys"}])
+        assert payload["system"] == "sys"
+
+    def test_convert_tools_to_anthropic_with_cache_control(self):
+        tools = [{"function": {"name": "web_search", "description": "d", "parameters": {"type": "object", "properties": {}}}}]
+        converted = convert_tools_to_anthropic(tools, {"type": "ephemeral"})
+        assert converted[0]["name"] == "web_search"
+        assert converted[0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_parse_response_tool_use(self):
+        resp = parse_anthropic_response({
+            "content": [
+                {"type": "text", "text": "thinking"},
+                {"type": "tool_use", "id": "t1", "name": "web_search", "input": {"query": "x"}},
+            ],
+            "stop_reason": "tool_use",
+            "usage": {"input_tokens": 10},
+        })
+        assert resp.content == "thinking"
+        assert resp.tool_calls[0]["function"]["name"] == "web_search"
+        assert resp.finish_reason == "tool_use"
+
+    def test_stream_accumulator_text_and_stop(self):
+        acc = AnthropicStreamAccumulator()
+        assert acc.process("content_block_start", {"index": 0, "content_block": {"type": "text"}}) == []
+        chunks = acc.process("content_block_delta", {"index": 0, "delta": {"type": "text_delta", "text": "hel"}})
+        assert chunks[0].delta_content == "hel"
+        final = acc.process("message_stop", {})
+        assert final[0].finish_reason == ""
+
+
+class TestOpenAIParser:
+    def test_build_chat_payload_flags(self):
+        payload = build_chat_payload(
+            "qwen", [{"role": "user", "content": "hi"}],
+            cache_prompt=True, stream_options=True,
+        )
+        assert payload["cache_prompt"] is True
+        assert payload["stream_options"] == {"include_usage": True}
+
+    def test_parse_chat_response(self):
+        resp = parse_chat_response({
+            "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+            "usage": {"total_tokens": 5},
+        })
+        assert resp.content == "hi"
+        assert resp.usage["total_tokens"] == 5
+
+    def test_stream_accumulator_tool_calls_and_finish(self):
+        acc = OpenAIStreamAccumulator()
+        acc.process_chunk({
+            "choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c1", "function": {"name": "web_search", "arguments": '{"q"'}}]}}],
+        })
+        acc.process_chunk({
+            "choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": ':"x"}'}}]}}],
+        })
+        final = acc.finish()
+        assert final.delta_tool_calls[0]["function"]["arguments"] == {"q": "x"}

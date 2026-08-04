@@ -153,6 +153,7 @@ class ServiceClient:
         user_input: str,
         *,
         session_id: str = "",
+        confirm_callback: Any = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """Stream agent events, matching ``Agent.run()`` signature."""
         msg_id = self._next_id()

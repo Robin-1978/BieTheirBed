@@ -4,7 +4,7 @@ import asyncio
 import json
 import re
 import time
-from typing import Any, AsyncGenerator, Awaitable, Callable
+from typing import Any, AsyncGenerator, Awaitable
 
 from pydantic import BaseModel
 
@@ -19,6 +19,7 @@ from pc_assistant.context.memory import EpisodicMemory, ProceduralMemory, UserMe
 from pc_assistant.context.prompt import build_system_prompt
 from pc_assistant.context.token_estimate import TokenEstimator, normalize_family
 from pc_assistant.harness.audit import AuditLogger
+from pc_assistant.harness.confirm import ConfirmFn
 from pc_assistant.harness.idempotency import IdempotencyLog
 from pc_assistant.harness.limiter import RateLimiter
 from pc_assistant.harness.refusal import RefusalCode, Verdict
@@ -82,7 +83,7 @@ class Agent:
     def __init__(
         self,
         config: AppConfig | None = None,
-        confirm_callback: Callable[[str, dict[str, Any]], bool | Awaitable[bool]] | None = None,
+        confirm_callback: ConfirmFn | None = None,
         *,
         llm: LLMProvider | None = None,
         conversation: ConversationManager | None = None,
@@ -457,7 +458,13 @@ class Agent:
     # Public entry points
     # ------------------------------------------------------------------
 
-    async def run(self, user_input: str, *, session_id: str = "") -> AsyncGenerator[AgentEvent, None]:
+    async def run(
+        self,
+        user_input: str,
+        *,
+        session_id: str = "",
+        confirm_callback: ConfirmFn | None = None,
+    ) -> AsyncGenerator[AgentEvent, None]:
         if not self._limiter.is_allowed("agent"):
             yield AgentEvent(
                 type="error",
@@ -465,6 +472,7 @@ class Agent:
             )
             return
 
+        confirm_fn = confirm_callback or self._confirm_callback
         state = self._get_state(session_id)
         state.cancelled = False
         state.tool_call_history.clear()
@@ -478,7 +486,7 @@ class Agent:
         evidence_required = self._evidence.requires_evidence(user_input)
         evidence_tool_calls = 0
         try:
-            async for event in self._run_loop(state, user_input, evidence_required=evidence_required):
+            async for event in self._run_loop(state, user_input, evidence_required=evidence_required, confirm_fn=confirm_fn):
                 if event.type == "tool_call" and not event.blocked:
                     evidence_tool_calls += 1
                 await self._event_bus.emit(event)
@@ -516,6 +524,7 @@ class Agent:
         user_input: str,
         *,
         evidence_required: bool,
+        confirm_fn: ConfirmFn | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         conv = state.conversation
 
@@ -798,15 +807,20 @@ class Agent:
                         state.tool_call_history.clear()
                         break
 
-                    verdict = await self._verifier.verify(tool_name, arguments)
+                    verdict = await self._verifier.verify(tool_name, arguments, confirm_callback=confirm_fn)
 
                     if verdict.rejected:
+                        denial = verdict.code == RefusalCode.CONFIRMATION_DENIED
                         yield AgentEvent(
                             type="tool_call",
                             tool_name=tool_name,
                             tool_args=arguments,
                             blocked=True,
-                            content=verdict.reason,
+                            content=(
+                                f"User denied: {tool_name}"
+                                if denial
+                                else verdict.reason
+                            ),
                             iteration=iteration,
                         )
                         conv.add_tool_result(
