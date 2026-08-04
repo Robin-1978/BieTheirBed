@@ -19,8 +19,8 @@ from pc_assistant.vision.coordinates import CoordinateTransform
 class ScreenTool(ToolBase):
     name = "screen"
     description = (
-        "Visual screen understanding: look (screenshot with optional grid), "
-        "verify (re-capture after an action), info (resolution / DPI)."
+        "Internal visual observation for GUI understanding: look, verify, info. "
+        "Do not use this to send a screenshot to the user; use screenshot instead."
     )
 
     def __init__(
@@ -76,16 +76,11 @@ class ScreenTool(ToolBase):
     def core_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "Visual screen: look, verify, info.",
+            "description": "Internal GUI observation: look, verify, info. Not for user delivery.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["look", "verify", "info"]},
-                    "region": {"type": "object"},
-                    "grid": {"type": "boolean"},
-                    "path": {"type": "string"},
-                    "cols": {"type": "integer"},
-                    "rows": {"type": "integer"},
                 },
                 "required": ["action"],
             },

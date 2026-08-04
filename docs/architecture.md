@@ -67,9 +67,15 @@ AgentLike boundary ----> Service client ----> daemon transport
                            |
                    Verifier / Safety
                            |
-                     Tool Registry
+                   Tool Registry
                            |
               Built-in tools / MCP / GUI
+                           |
+                 ArtifactStore (when produced)
+                           |
+                  core artifact event
+                           |
+                    client delivery
 ```
 
 The principal production invariant is:
@@ -97,6 +103,10 @@ authority merely by entering the context window.
 
 **Boundary:** presentation code consumes an Agent-like streaming interface. It
 must not execute side-effecting tools directly or reinterpret verifier verdicts.
+Clients also own channel-specific delivery of standard `artifact` events:
+Feishu uploads the referenced image/file, terminal clients render a bounded
+artifact reference, and future clients may present it using their own transport.
+The model and Agent never receive channel identifiers such as a Feishu `open_id`.
 
 ### 3.2 Service and transport
 
@@ -189,6 +199,18 @@ diagnosable error; image content is never silently dropped.
 separate deterministic concern. Direct registry execution is an internal commit
 primitive and must not become a public bypass around the verifier.
 
+Tools may produce managed artifacts, but delivery is not itself a model tool.
+The `screenshot` tool creates a user-visible PNG artifact; `artifact_prepare`
+copies an existing file into managed temporary storage. The Agent converts
+their safe public references into a standard `AgentEvent(type="artifact")`, and
+the active client adapts that event to its channel. Internal `screen` captures
+remain GUI observations and are never automatically delivered.
+
+Local opening and conversation delivery are intentionally separate operations.
+`application`/shell launch (including `xdg-open`) opens a file on the Agent host;
+an artifact event delivers a file to the current conversation. Neither implies
+the other.
+
 **GUI invariant:** an action target is bound to a current snapshot and a complete
 coordinate transform. Partial-name matching or model-computed desktop
 coordinates cannot be described as guaranteed-precision execution.
@@ -234,7 +256,8 @@ must not share misleading lifecycle names.
 ```text
 <runtime-root>/
 ├── logs/          application, service, audit, LLM and turn logs
-├── attachments/   session-scoped temporary binary observations
+├── attachments/   session-scoped observations and deliverable artifacts
+├── data/          SQLite state and procedural memory
 └── cache/         reconstructable non-authoritative data
 ```
 
@@ -294,7 +317,27 @@ The MVP does not expose model-initiated recall: RequestAssembler automatically
 hydrates only the bounded references selected for the current request. An
 expired reference requires a new upload or capture.
 
-### 4.3 GUI action target
+### 4.3 User-visible artifact delivery
+
+```text
+user asks to send/capture a file
+  -> verified artifact-producing tool
+  -> ArtifactStore(session, temporary managed file)
+  -> public artifact reference (ID + bounded metadata, no path/bytes)
+  -> AgentEvent(type="artifact")
+  -> active client/channel adapter
+  -> image/file delivery to that conversation
+```
+
+`ArtifactStore.resolve()` is an in-process delivery capability, not model
+context. Only the trusted client adapter resolves an owned, unexpired artifact
+ID to its internal file path. Conversation history, public events, logs, and
+SQLite contain neither the path nor file bytes. Artifact ownership is
+session-scoped, size-bounded, TTL-bounded, and cleaned with the session.
+Delivering a protected path is rejected; delivering a file outside the
+configured working directory requires confirmation.
+
+### 4.4 GUI action target
 
 ```text
 screen/a11y observation
@@ -307,7 +350,7 @@ screen/a11y observation
   -> structured postcondition verification
 ```
 
-### 4.4 Current context composition and scope
+### 4.5 Current context composition and scope
 
 The provider request is not simply the current session transcript. Current
 assembly contains:

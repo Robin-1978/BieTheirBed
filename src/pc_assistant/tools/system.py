@@ -1,26 +1,20 @@
 from __future__ import annotations
 
 import platform
-from pathlib import Path
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
 from pc_assistant.tools.base import ToolBase
-from pc_assistant.tools.artifacts import ArtifactPaths, image_artifact
 
 
 class SystemTool(ToolBase):
     name = "system"
-    description = "Get system information and capture screenshots"
-
-    def __init__(self, artifact_dir: str | Path | None = None) -> None:
-        self._artifacts = ArtifactPaths(artifact_dir)
+    description = "Get system information and disk usage"
 
     async def execute(self, **kwargs: Any) -> Any:
         action = kwargs.get("action")
         handlers = {
             "info": self._info,
-            "screenshot": self._screenshot,
             "disk_usage": self._disk_usage,
         }
         handler = handlers.get(action)
@@ -37,10 +31,8 @@ class SystemTool(ToolBase):
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["info", "screenshot", "disk_usage"],
+                        "enum": ["info", "disk_usage"],
                     },
-                    "path": {"type": "string", "description": "Save path for screenshot"},
-                    "inline": {"type": "boolean", "description": "Return the screenshot as an inline image block so the model can see it"},
                     "drive": {"type": "string", "description": "Drive letter for disk usage (Windows)"},
                 },
                 "required": ["action"],
@@ -50,13 +42,11 @@ class SystemTool(ToolBase):
     def core_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "System info, screenshots, disk usage.",
+            "description": "System information and disk usage. Use screenshot for user screenshots.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["info", "screenshot", "disk_usage"]},
-                    "path": {"type": "string"},
-                    "inline": {"type": "boolean"},
+                    "action": {"type": "string", "enum": ["info", "disk_usage"]},
                     "drive": {"type": "string"},
                 },
                 "required": ["action"],
@@ -88,46 +78,6 @@ class SystemTool(ToolBase):
                 "architecture": platform.machine(),
                 "processor": platform.processor(),
             }
-
-    def _screenshot(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        try:
-            save_path = self._artifacts.allocate(
-                prefix="system-screenshot",
-                suffix=".png",
-                requested=kwargs.get("path"),
-            )
-        except ValueError as exc:
-            return {"error": str(exc)}
-        inline = bool(kwargs.get("inline", False))
-        try:
-            import mss
-
-            with mss.mss() as sct:
-                monitor = sct.monitors[0]
-                shot = sct.grab(monitor)
-                from PIL import Image
-
-                img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
-                img.save(save_path)
-                result: dict[str, Any] = {
-                    "success": True,
-                    "path": str(save_path),
-                    "size": shot.size,
-                    "artifact": image_artifact(save_path, "image/png"),
-                }
-                if inline:
-                    from pc_assistant.vision.preprocess import image_block_from_file
-
-                    block = image_block_from_file(str(save_path))
-                    if block is not None:
-                        block["width"] = shot.size.width
-                        block["height"] = shot.size.height
-                        result["image"] = block
-                return result
-        except ImportError:
-            return {"error": "mss or Pillow not installed"}
-        except Exception as e:
-            return {"error": str(e)}
 
     def _disk_usage(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         try:

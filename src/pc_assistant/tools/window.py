@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
-from pc_assistant.tools.artifacts import ArtifactPaths, image_artifact
 from pc_assistant.tools.base import ToolBase
 
 
@@ -20,9 +18,6 @@ class WindowTool(ToolBase):
     name = "window"
     description = "Manage windows: list, focus, move, resize, minimize, maximize, close"
 
-    def __init__(self, artifact_dir: str | Path | None = None) -> None:
-        self._artifacts = ArtifactPaths(artifact_dir)
-
     async def execute(self, **kwargs: Any) -> Any:
         action = kwargs.get("action", "list")
         handlers = {
@@ -35,11 +30,10 @@ class WindowTool(ToolBase):
             "maximize": self._maximize_window,
             "restore": self._restore_window,
             "close": self._close_window,
-            "screenshot": self._window_screenshot,
         }
         handler = handlers.get(action)
         if handler is None:
-            return {"error": f"Unknown action: {action}. Use: list, info, focus, move, resize, minimize, maximize, restore, close, screenshot."}
+            return {"error": f"Unknown action: {action}. Use: list, info, focus, move, resize, minimize, maximize, restore, close."}
         return await handler(kwargs)
 
     def schema(self) -> dict[str, Any]:
@@ -51,7 +45,7 @@ class WindowTool(ToolBase):
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["list", "info", "focus", "move", "resize", "minimize", "maximize", "restore", "close", "screenshot"],
+                        "enum": ["list", "info", "focus", "move", "resize", "minimize", "maximize", "restore", "close"],
                         "description": "Action to perform on windows",
                     },
                     "window_id": {
@@ -74,10 +68,6 @@ class WindowTool(ToolBase):
                         "type": "integer",
                         "description": "Height (for resize action)",
                     },
-                    "save_path": {
-                        "type": "string",
-                        "description": "Path to save screenshot (for screenshot action)",
-                    },
                 },
                 "required": ["action"],
             },
@@ -86,11 +76,11 @@ class WindowTool(ToolBase):
     def core_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "Window management: list, focus, move, resize, minimize, maximize, close.",
+            "description": "Window management: list, focus, move, resize, minimize, maximize, close. Use screenshot for a user-visible screen capture.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["list", "info", "focus", "move", "resize", "minimize", "maximize", "restore", "close", "screenshot"]},
+                    "action": {"type": "string", "enum": ["list", "info", "focus", "move", "resize", "minimize", "maximize", "restore", "close"]},
                     "window_id": {"type": "string"},
                     "x": {"type": "integer"},
                     "y": {"type": "integer"},
@@ -428,55 +418,3 @@ class WindowTool(ToolBase):
             }
         except Exception as e:
             return {"error": f"Failed to close window: {e}"}
-
-    async def _window_screenshot(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        window_id = kwargs.get("window_id", "")
-        try:
-            save_path = self._artifacts.allocate(
-                prefix="window-screenshot",
-                suffix=".png",
-                requested=kwargs.get("save_path"),
-            )
-        except ValueError as exc:
-            return {"error": str(exc)}
-
-        pwc = _import_pywinctl()
-        if pwc is None:
-            return {"error": "pywinctl not installed"}
-
-        window = self._get_window_by_id(window_id) if window_id else None
-
-        try:
-            import mss
-            from PIL import Image
-
-            with mss.mss() as sct:
-                if window:
-                    # Get window bounds
-                    box = self._box(window)
-                    if box is None:
-                        return {"error": f"Window has no geometry: {window_id}"}
-                    monitor = {
-                        "left": box["x"],
-                        "top": box["y"],
-                        "width": box["width"],
-                        "height": box["height"],
-                    }
-                else:
-                    # Full screen
-                    monitor = sct.monitors[0]
-
-                shot = sct.grab(monitor)
-                img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
-                img.save(str(save_path))
-                return {
-                    "success": True,
-                    "path": str(save_path),
-                    "artifact": image_artifact(save_path, "image/png"),
-                    "size": shot.size,
-                    "window": getattr(window, "title", None) if window else "full_screen",
-                }
-        except ImportError:
-            return {"error": "mss or Pillow not installed"}
-        except Exception as e:
-            return {"error": f"Failed to capture screenshot: {e}"}

@@ -30,6 +30,33 @@ class _ImageAgent:
         yield AgentEvent(type="final_answer", content="截图已发送")
 
 
+class _ArtifactAgent:
+    async def run(self, *args, **kwargs):
+        yield AgentEvent(
+            type="artifact",
+            tool_name="screenshot",
+            artifact={
+                "artifact_id": "artifact-1",
+                "kind": "image",
+                "name": "capture.png",
+                "media_type": "image/png",
+                "size": 123,
+                "visibility": "user",
+            },
+        )
+        yield AgentEvent(type="final_answer", content="截图已生成")
+
+    def resolve_artifact(self, session_id, artifact_id):
+        assert session_id == "feishu:ou-user"
+        assert artifact_id == "artifact-1"
+        return {
+            "artifact_id": artifact_id,
+            "path": "/tmp/capture.png",
+            "name": "capture.png",
+            "media_type": "image/png",
+        }
+
+
 class _PlainPathAgent:
     async def run(self, *args, **kwargs):
         yield AgentEvent(
@@ -43,21 +70,31 @@ class _PlainPathAgent:
 class _TwoImageAgent:
     async def run(self, *args, **kwargs):
         yield AgentEvent(
-            type="tool_result",
-            tool_name="window",
-            tool_result={
-                "artifact": {"kind": "image", "path": "/tmp/window.png"},
+            type="artifact",
+            artifact={
+                "artifact_id": "window",
+                "kind": "image",
+                "name": "window.png",
+                "media_type": "image/png",
+                "size": 123,
             },
         )
         yield AgentEvent(
-            type="tool_result",
-            tool_name="screen",
-            tool_result={
-                "artifact": {"kind": "image", "path": "/tmp/grid.png"},
-                "grid": {"enabled": True},
+            type="artifact",
+            artifact={
+                "artifact_id": "report",
+                "kind": "file",
+                "name": "report.pdf",
+                "media_type": "application/pdf",
+                "size": 456,
             },
         )
         yield AgentEvent(type="final_answer", content="done")
+
+    def resolve_artifact(self, session_id, artifact_id):
+        if artifact_id == "window":
+            return {"path": "/tmp/window.png", "name": "window.png", "media_type": "image/png"}
+        return {"path": "/tmp/report.pdf", "name": "report.pdf", "media_type": "application/pdf"}
 
 
 class _AttachmentAgent:
@@ -72,11 +109,11 @@ class _AttachmentAgent:
 @pytest.mark.asyncio
 async def test_feishu_sends_declared_image_artifact():
     channel = FeishuChannel()
-    channel._agent = _ImageAgent()
+    channel._agent = _ArtifactAgent()
     channel._send_image = MagicMock(return_value=True)
     channel._send_card = MagicMock(return_value=True)
 
-    await channel._process_with_agent_locked("ou-user", "截屏发我")
+    await channel._process_with_agent_locked("ou-user", "你截一下屏幕")
 
     channel._send_image.assert_called_once_with("ou-user", "/tmp/capture.png")
 
@@ -123,6 +160,31 @@ def test_feishu_download_image_uses_installed_sdk_contract(tmp_path):
     assert request.type == "image"
 
 
+def test_feishu_send_file_uses_installed_sdk_contract(tmp_path):
+    source = tmp_path / "report.txt"
+    source.write_text("hello", encoding="utf-8")
+    upload_response = MagicMock()
+    upload_response.success.return_value = True
+    upload_response.data.file_key = "file-key"
+    message_response = MagicMock(code=0)
+    client = MagicMock()
+    client.im.v1.file.create.return_value = upload_response
+    client.im.v1.message.create.return_value = message_response
+    channel = FeishuChannel(runtime_root=str(tmp_path))
+    channel._get_lark_client = MagicMock(return_value=client)
+
+    assert channel._send_file("ou-user", str(source), "renamed.txt") is True
+
+    upload_request = client.im.v1.file.create.call_args.args[0]
+    assert upload_request.request_body.file_type == "stream"
+    assert upload_request.request_body.file_name == "renamed.txt"
+    message_request = client.im.v1.message.create.call_args.args[0]
+    assert message_request.receive_id_type == "open_id"
+    assert message_request.request_body.receive_id == "ou-user"
+    assert message_request.request_body.msg_type == "file"
+    assert message_request.request_body.content == '{"file_key": "file-key"}'
+
+
 def test_feishu_reaction_is_removed_even_when_agent_is_not_ready():
     channel = FeishuChannel()
     channel._send_text = MagicMock(return_value=True)
@@ -139,15 +201,17 @@ def test_feishu_reaction_is_removed_even_when_agent_is_not_ready():
 
 
 @pytest.mark.asyncio
-async def test_feishu_delivers_at_most_one_non_grid_screenshot():
+async def test_feishu_delivers_each_explicit_core_artifact():
     channel = FeishuChannel()
     channel._agent = _TwoImageAgent()
     channel._send_image = MagicMock(return_value=True)
+    channel._send_file = MagicMock(return_value=True)
     channel._send_card = MagicMock(return_value=True)
 
     await channel._process_with_agent_locked("ou-user", "截个图发我")
 
     channel._send_image.assert_called_once_with("ou-user", "/tmp/window.png")
+    channel._send_file.assert_called_once_with("ou-user", "/tmp/report.pdf", "report.pdf")
 
 
 @pytest.mark.asyncio

@@ -153,6 +153,13 @@ class _ConsoleView:
             style = "error" if is_error else "tool_result"
             self.console.print(RichText(f"    {icon} {truncated}", style=style))
 
+        elif event.type == "artifact" and event.artifact:
+            name = event.artifact.name
+            artifact_id = event.artifact.artifact_id
+            self.console.print(
+                RichText(f"    {ICON_SUCCESS} Artifact: {name} ({artifact_id})", style="tool_result")
+            )
+
         elif event.type == "final_answer":
             if not self.streaming_text and event.content:
                 self.console.print(Markdown(event.content))
@@ -296,6 +303,9 @@ class ChatUI:
                 MessageType.TOOL_RESULT, result_str[:200],
                 tool_name=event.tool_name,
             )
+        elif event.type == "artifact" and event.artifact:
+            name = event.artifact.name
+            self._state.add_message(MessageType.TOOL_RESULT, f"Artifact: {name}")
         elif event.type == "final_answer":
             self._state.add_message(MessageType.ASSISTANT, event.content)
         elif event.type == "error":

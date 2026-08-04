@@ -12,7 +12,8 @@ A Python desktop AI agent with ReAct reasoning, multi-LLM support, tool calling,
 - **Model Adapter Layer** — Canonical IR + per-provider payload/response parsers + provider profiles (endpoint, headers, capabilities)
 - **Prompt Caching** — Cache-friendly static prefix (system + tool schemas + history); Anthropic `cache_control` blocks for prompt caching
 - **Token Calibration** — Per-call token estimation calibrated against real usage
-- **16+ Built-in Tools** — Shell, Filesystem, Application, Web, System, Clipboard, Memory, Weather, Exchange, Timer, Window, Notification, Keyboard, Mouse, Scheduler, DescribeTool
+- **Built-in Tools** — Local automation, memory, scheduling, vision observation, screenshots, and managed file preparation
+- **Core Artifact Delivery** — Tools produce opaque artifacts; Feishu/TUI/service clients adapt standard artifact events without channel logic in the Agent
 - **MCP Adapter** — Register tools from any MCP-compatible server
 - **Safety Guardrails** — Dangerous command blocking, protected paths, user confirmation, typed refusal codes
 - **Idempotency** — Side-effecting tools are protected against duplicate execution on retry
@@ -144,7 +145,7 @@ socket and PID files use the operating system runtime directory.
 | `filesystem` | read, write, list, mkdir, delete, copy, move, exists | File operations |
 | `application` | launch, list_running, search, info, kill | Desktop app management |
 | `web` | fetch, search | Web page fetching and search |
-| `system` | info, screenshot, disk_usage | System info and screenshots |
+| `system` | info, disk_usage | System information |
 | `clipboard` | read, write | Clipboard access |
 | `memory` | store, retrieve, search, delete, store_episode, recall_episodes | Persistent user & episodic memory |
 | `weather` | current, forecast | Weather data for any location |
@@ -156,6 +157,8 @@ socket and PID files use the operating system runtime directory.
 | `mouse` | position, move, click, double_click, right_click, scroll, drag | Mouse control |
 | `scheduler` | create, list, run, delete, enable, disable, start, stop, status | Cron-like task scheduling |
 | `image_inspect` | describe, ocr, locate, compare | Observe visible image content by `image_id`; diagnosis and solutions remain with the main model |
+| `screenshot` | — | Capture a full-desktop PNG for delivery to the current conversation |
+| `artifact_prepare` | path | Prepare an existing file for client delivery; protected paths are blocked and out-of-workspace paths require confirmation |
 | `describe_tool` | tool_name | Meta-tool: query the full JSON schema of any registered tool |
 
 ## Development
@@ -190,6 +193,8 @@ src/pc_assistant/
 ├── vision/
 │   ├── broker.py        # Dedicated perception-only vision provider boundary
 │   └── preprocess.py    # Image resize/encoding helpers
+├── artifacts/
+│   └── store.py         # Session-scoped user-deliverable artifact registry
 ├── session.py           # Multi-session state with LRU eviction & rollback
 ├── config.py            # Pydantic config model + YAML + env overrides
 ├── exceptions.py        # Typed exception hierarchy

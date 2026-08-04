@@ -60,6 +60,12 @@ class SafetyChecker:
         self._protected_paths = [Path(p).resolve() for p in (protected_paths or get_default_protected_paths())]
         self._working_directory = Path(working_directory).resolve() if working_directory else None
 
+    def _resolve_tool_path(self, path: str) -> Path:
+        candidate = Path(path).expanduser()
+        if candidate.is_absolute() or self._working_directory is None:
+            return candidate.resolve()
+        return (self._working_directory / candidate).resolve()
+
     def check_command(self, command: str) -> SafetyCheckResult:
         cmd_lower = command.lower().strip()
         for dangerous in self._dangerous_commands:
@@ -72,7 +78,7 @@ class SafetyChecker:
 
     def check_path(self, path: str, write: bool = False) -> SafetyCheckResult:
         try:
-            resolved = Path(path).resolve()
+            resolved = self._resolve_tool_path(path)
         except (OSError, ValueError):
             return SafetyCheckResult(False, f"Invalid path: {path}")
         for protected in self._protected_paths:
@@ -98,6 +104,11 @@ class SafetyChecker:
             if action == "delete":
                 return self.check_path(path, write=True)
             return SafetyCheckResult(True)
+        if tool_name == "artifact_prepare":
+            path = str(kwargs.get("path", ""))
+            if not path:
+                return SafetyCheckResult(False, "Artifact path is required")
+            return self.check_path(path)
         if tool_name in ("application", "system", "process", "task"):
             action = kwargs.get("action", "")
             if action == "kill":
@@ -125,6 +136,19 @@ class SafetyChecker:
                     resolved.relative_to(self._working_directory)
                 except (ValueError, OSError):
                     return (True, f"Path {path} is outside working directory {self._working_directory}")
+            return (False, "")
+
+        if tool_name == "artifact_prepare":
+            path = str(kwargs.get("path", ""))
+            if self._working_directory:
+                try:
+                    self._resolve_tool_path(path).relative_to(self._working_directory)
+                except (ValueError, OSError):
+                    return (
+                        True,
+                        f"Delivering {path} from outside working directory "
+                        f"{self._working_directory} requires confirmation",
+                    )
             return (False, "")
 
         if tool_name in ("application", "system", "process", "task"):
