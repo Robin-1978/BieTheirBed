@@ -85,3 +85,43 @@ class TestSafetyChecker:
         checker = SafetyChecker()
         result = checker.check_tool_call("shell", {"command": "rm -rf /"})
         assert result.allowed is False
+
+    def test_artifact_prepare_allows_file_inside_working_directory(self, tmp_path):
+        checker = SafetyChecker(
+            working_directory=str(tmp_path),
+            protected_paths=[str(tmp_path / "protected")],
+        )
+
+        assert checker.check_tool_call(
+            "artifact_prepare", {"path": "report.txt"}
+        ).allowed
+        needs, _ = checker.needs_confirmation(
+            "artifact_prepare", {"path": "report.txt"}
+        )
+        assert needs is False
+
+    def test_artifact_prepare_outside_working_directory_requires_confirmation(self, tmp_path):
+        checker = SafetyChecker(
+            working_directory=str(tmp_path / "workspace"),
+            protected_paths=[str(tmp_path / "protected")],
+        )
+
+        needs, reason = checker.needs_confirmation(
+            "artifact_prepare", {"path": str(tmp_path / "outside.txt")}
+        )
+
+        assert needs is True
+        assert "outside working directory" in reason
+
+    def test_artifact_prepare_blocks_protected_path(self, tmp_path):
+        protected = tmp_path / "protected"
+        checker = SafetyChecker(
+            working_directory=str(tmp_path),
+            protected_paths=[str(protected)],
+        )
+
+        result = checker.check_tool_call(
+            "artifact_prepare", {"path": str(protected / "secret.txt")}
+        )
+
+        assert result.allowed is False

@@ -402,6 +402,11 @@ class ChatApp(App):
                 tool_name=event.tool_name,
             )
 
+        elif event.type == "artifact" and event.artifact:
+            name = event.artifact.name
+            artifact_id = event.artifact.artifact_id
+            await stream.write(f"\n\n*Artifact available: `{name}` (`{artifact_id}`)*\n")
+
         elif event.type == "final_answer":
             if not self._streamed_any and event.content:
                 await stream.write(event.content)

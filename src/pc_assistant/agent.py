@@ -10,6 +10,7 @@ from typing import Any, AsyncGenerator, Awaitable
 from pydantic import BaseModel
 
 from pc_assistant.attachments import AttachmentStore
+from pc_assistant.artifacts import ArtifactRef, ArtifactStore
 from pc_assistant.config import AppConfig, load_config
 from pc_assistant.context.assembly import assemble_llm_messages, truncate_messages
 from pc_assistant.context.cache import build_cache_plan
@@ -61,6 +62,8 @@ from pc_assistant.tools.ui import UITool
 from pc_assistant.tools.scheduler import SchedulerTool
 from pc_assistant.tools.describe_tool import DescribeTool
 from pc_assistant.tools.image_inspect import ImageInspectTool
+from pc_assistant.tools.artifact_prepare import ArtifactPrepareTool
+from pc_assistant.tools.screenshot import ScreenshotTool
 from pc_assistant.vision.broker import VisionBroker
 
 
@@ -76,6 +79,7 @@ class AgentEvent(BaseModel):
     tool_name: str = ""
     tool_args: dict[str, Any] = {}
     tool_result: Any = None
+    artifact: ArtifactRef | None = None
     blocked: bool = False
     iteration: int = 0
 
@@ -147,6 +151,7 @@ class Agent:
         self._safety = safety if safety is not None else SafetyChecker(
             dangerous_commands=self._config.dangerous_commands,
             protected_paths=self._config.protected_paths,
+            working_directory=self._config.working_directory,
         )
         self._registry = registry if registry is not None else ToolRegistry()
         self._limiter = limiter if limiter is not None else RateLimiter()
@@ -201,6 +206,10 @@ class Agent:
             ),
             ttl_seconds=self._config.attachment_ttl_seconds,
         )
+        self._artifact_store = ArtifactStore(
+            self._attachment_store.root / "artifacts",
+            ttl_seconds=self._config.attachment_ttl_seconds,
+        )
         self._vision_broker: VisionBroker | None = None
         if self._config.vision_enabled and not self._llm.supports_vision:
             dedicated_vision_llm = vision_llm or LLMProvider(
@@ -218,7 +227,7 @@ class Agent:
                 model_name=self._config.vision_model_name,
                 max_tokens=self._config.vision_max_tokens,
             )
-        self._session_manager.set_drop_callback(self._attachment_store.cleanup_session)
+        self._session_manager.set_drop_callback(self._cleanup_session_assets)
         self._register_builtin_tools(disable_tools=disable_tools)
         self._cache_plan = build_cache_plan(
             provider=self._config.llm_provider,
@@ -589,6 +598,15 @@ class Agent:
 
     def cleanup_attachments(self) -> None:
         self._attachment_store.cleanup_expired()
+        self._artifact_store.cleanup_expired()
+
+    def _cleanup_session_assets(self, session_id: str) -> None:
+        self._attachment_store.cleanup_session(session_id)
+        self._artifact_store.cleanup_session(session_id)
+
+    def resolve_artifact(self, session_id: str, artifact_id: str) -> dict[str, Any]:
+        """Resolve an opaque artifact ID for an in-process delivery adapter."""
+        return self._artifact_store.resolve(session_id, artifact_id)
 
     def clear_tools(self) -> None:
         """Unregister all tools (headless / benchmark no-tools mode)."""
@@ -634,12 +652,12 @@ class Agent:
             ShellTool(default_timeout=self._config.shell_timeout),
             ApplicationTool(),
             WebTool(),
-            SystemTool(artifact_dir=self._attachment_store.root / "screenshots"),
+            SystemTool(),
             ClipboardTool(),
             MemoryTool(memory=self._memory, episodic=self._episodic_memory),
             WeatherTool(),
             ExchangeTool(),
-            WindowTool(artifact_dir=self._attachment_store.root / "screenshots"),
+            WindowTool(),
             NotificationTool(),
             UITool(
                 ui_backend=self._config.ui_backend,
@@ -654,6 +672,14 @@ class Agent:
             KeyboardTool(),
             MouseTool(),
             SchedulerTool(self._runtime_paths.data / "assistant.db"),
+            ScreenshotTool(
+                self._artifact_store,
+                self._attachment_store.root / "screenshots",
+            ),
+            ArtifactPrepareTool(
+                self._artifact_store,
+                working_directory=self._config.working_directory,
+            ),
         ]
         if self._vision_broker is not None:
             builtin_tools.append(ImageInspectTool(self._vision_broker))
@@ -1228,6 +1254,22 @@ class Agent:
                                 content=result_str,
                                 iteration=iteration,
                             )
+                            cached_artifact = (
+                                cached.get("artifact")
+                                if isinstance(cached, dict)
+                                else None
+                            )
+                            if (
+                                isinstance(cached_artifact, dict)
+                                and cached_artifact.get("visibility") == "user"
+                                and cached_artifact.get("artifact_id")
+                            ):
+                                yield AgentEvent(
+                                    type="artifact",
+                                    tool_name=tool_name,
+                                    artifact=cached_artifact,
+                                    iteration=iteration,
+                                )
                             continue
 
                     if total_tool_calls >= max_total_tool_calls:
@@ -1295,6 +1337,22 @@ class Agent:
                             content=result_str,
                             iteration=iteration,
                         )
+                        artifact = (
+                            safe_result.get("artifact")
+                            if isinstance(safe_result, dict)
+                            else None
+                        )
+                        if (
+                            isinstance(artifact, dict)
+                            and artifact.get("visibility") == "user"
+                            and artifact.get("artifact_id")
+                        ):
+                            yield AgentEvent(
+                                type="artifact",
+                                tool_name=tool_name,
+                                artifact=artifact,
+                                iteration=iteration,
+                            )
                     except asyncio.CancelledError:
                         state.status = "ready"
                         state.last_outcome = "cancelled"

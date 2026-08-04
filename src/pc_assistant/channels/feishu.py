@@ -631,28 +631,74 @@ class FeishuChannel(ChannelBase):
             logger.error("[SEND-IMAGE] Exception: %s", e, exc_info=True)
             return False
 
-    @staticmethod
-    def _tool_image_path(event: Any) -> str:
-        """Extract only explicitly declared image artifacts from tool events."""
-        result = getattr(event, "tool_result", None)
-        if not isinstance(result, dict):
-            return ""
-        artifact = result.get("artifact")
-        if not isinstance(artifact, dict) or artifact.get("kind") != "image":
-            return ""
-        path = artifact.get("path")
-        return str(path) if path else ""
-
-    @staticmethod
-    def _wants_image_delivery(text: str, has_input_attachments: bool) -> bool:
-        if has_input_attachments:
+    def _send_file(self, open_id: str, path: str, name: str = "") -> bool:
+        """Upload a generic local file and send it as a Feishu file message."""
+        file_path = Path(path).expanduser()
+        if not file_path.is_file():
+            logger.error("[SEND-FILE] File does not exist: %s", file_path)
             return False
-        lowered = text.casefold()
-        markers = (
-            "截图", "截屏", "发图", "发给我", "发我", "让我看",
-            "screenshot", "screen capture", "send me the image", "send the image",
-        )
-        return any(marker in lowered for marker in markers)
+        try:
+            from lark_oapi.api.im.v1 import CreateFileRequest, CreateMessageRequest
+            from lark_oapi.api.im.v1.model.create_file_request_body import (
+                CreateFileRequestBody,
+            )
+            from lark_oapi.api.im.v1.model.create_message_request_body import (
+                CreateMessageRequestBody,
+            )
+
+            with file_path.open("rb") as file_handle:
+                upload_request = (
+                    CreateFileRequest.builder()
+                    .request_body(
+                        CreateFileRequestBody.builder()
+                        .file_type("stream")
+                        .file_name(name or file_path.name)
+                        .file(file_handle)
+                        .build()
+                    )
+                    .build()
+                )
+                client = self._get_lark_client()
+                with self._lark_lock:
+                    upload_response = client.im.v1.file.create(upload_request)
+
+            if not upload_response.success() or not upload_response.data:
+                logger.error(
+                    "[SEND-FILE] Upload failed code=%s msg=%s",
+                    upload_response.code,
+                    upload_response.msg,
+                )
+                return False
+
+            message_request = (
+                CreateMessageRequest.builder()
+                .receive_id_type("open_id")
+                .request_body(
+                    CreateMessageRequestBody.builder()
+                    .receive_id(open_id)
+                    .msg_type("file")
+                    .content(json.dumps({"file_key": upload_response.data.file_key}))
+                    .build()
+                )
+                .build()
+            )
+            with self._lark_lock:
+                response = client.im.v1.message.create(message_request)
+            if response.code == 0:
+                logger.info("[SEND-FILE] OK to %s: %s", open_id, file_path.name)
+                return True
+            logger.error("[SEND-FILE] Send failed code=%s msg=%s", response.code, response.msg)
+            return False
+        except Exception as exc:
+            logger.error("[SEND-FILE] Exception: %s", exc, exc_info=True)
+            return False
+
+    def _deliver_artifact(self, open_id: str, artifact: dict[str, Any]) -> bool:
+        media_type = str(artifact.get("media_type", ""))
+        path = str(artifact.get("path", ""))
+        if media_type.startswith("image/"):
+            return self._send_image(open_id, path)
+        return self._send_file(open_id, path, str(artifact.get("name", "")))
 
     # ================================================================
     # Message Handling
@@ -1011,7 +1057,8 @@ class FeishuChannel(ChannelBase):
             thinking_chunks: list[str] = []
             final_answer = ""
             error_msg = ""
-            image_candidates: list[tuple[str, bool]] = []
+            artifact_refs: list[dict[str, Any]] = []
+            artifact_ids: set[str] = set()
 
             async for event in self._agent.run(
                 text,
@@ -1024,12 +1071,12 @@ class FeishuChannel(ChannelBase):
                     tool_args = event.tool_args
                     args_brief = json.dumps(tool_args, ensure_ascii=False)[:80]
                     tool_calls_info.append(f"🔧 {tool_name}({args_brief})")
-                elif event.type == "tool_result":
-                    image_path = self._tool_image_path(event)
-                    if image_path and image_path not in {path for path, _ in image_candidates}:
-                        result = event.tool_result if isinstance(event.tool_result, dict) else {}
-                        has_grid = bool(isinstance(result.get("grid"), dict) and result["grid"].get("enabled"))
-                        image_candidates.append((image_path, has_grid))
+                elif event.type == "artifact" and event.artifact is not None:
+                    artifact_ref = event.artifact.model_dump()
+                    artifact_id = event.artifact.artifact_id
+                    if artifact_id and artifact_id not in artifact_ids:
+                        artifact_ids.add(artifact_id)
+                        artifact_refs.append(artifact_ref)
                 elif event.type == "stream_think_delta":
                     if event.content:
                         thinking_chunks.append(event.content)
@@ -1058,19 +1105,29 @@ class FeishuChannel(ChannelBase):
                 tools_summary = ""
 
             thinking_text = "".join(thinking_chunks).strip()
-            if self._wants_image_delivery(text, bool(attachments)) and image_candidates:
-                non_grid = [path for path, has_grid in image_candidates if not has_grid]
-                selected_image = non_grid[-1] if non_grid else image_candidates[-1][0]
-                if not self._send_image(open_id, selected_image):
-                    logger.error("[PROCESS] Failed to deliver screenshot: %s", selected_image)
+            delivery_failures: list[str] = []
+            for artifact_ref in artifact_refs[:5]:
+                artifact_id = str(artifact_ref.get("artifact_id", ""))
+                try:
+                    resolved = self._agent.resolve_artifact(feishu_session_id, artifact_id)
+                except (KeyError, ValueError, AttributeError) as exc:
+                    logger.error("[PROCESS] Failed to resolve artifact %s: %s", artifact_id, exc)
+                    delivery_failures.append(str(artifact_ref.get("name") or artifact_id))
+                    continue
+                if not self._deliver_artifact(open_id, resolved):
+                    logger.error("[PROCESS] Failed to deliver artifact: %s", artifact_id)
+                    delivery_failures.append(str(resolved.get("name") or artifact_id))
+            response_answer = final_answer or plain_response
+            if delivery_failures:
+                response_answer += "\n\n⚠️ 以下附件交付失败：" + "、".join(delivery_failures)
             card = self._build_response_card(
-                final_answer or plain_response,
+                response_answer,
                 tool_calls_info,
-                bool(error_msg),
+                bool(error_msg or delivery_failures),
                 thinking=thinking_text[:500] if thinking_text else "",
             )
             if not self._send_card(open_id, card):
-                self._send_long_text(open_id, plain_response)
+                self._send_long_text(open_id, response_answer)
 
         except Exception as e:
             logger.error("[PROCESS] Agent error: %s", e, exc_info=True)
