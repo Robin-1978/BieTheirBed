@@ -46,6 +46,7 @@ class LLMProvider:
         provider: str = "llamacpp",
         api_key: str = "",
         api_base: str = "",
+        supports_vision: bool | None = None,
     ) -> None:
         self._provider = provider
         self._api_key = api_key
@@ -57,9 +58,20 @@ class LLMProvider:
         self._streams: dict[str, httpx.Response] = {}
         self._active_response: httpx.Response | None = None
 
-        self._profile = resolve_profile(provider, server_url, api_key, api_base)
+        self._profile = resolve_profile(provider, server_url, api_key, api_base, supports_vision=supports_vision)
         self._server_url = self._profile.server_url
         self._headers = self._profile.headers
+
+    @property
+    def supports_vision(self) -> bool:
+        return self._profile.supports_vision
+
+    @property
+    def vision_capabilities(self):
+        return self._profile.vision
+
+    def _vision_error(self, messages: list[dict[str, Any]]) -> str:
+        return self._profile.vision.validate(messages)
 
     async def _request_with_retry(
         self,
@@ -192,6 +204,8 @@ class LLMProvider:
         tool_choice: str | dict[str, Any] | None = None,
         cache_control: dict[str, Any] | None = None,
     ) -> LLMResponse:
+        if error := self._vision_error(messages):
+            return LLMResponse(content=f"LLM request failed: {error}", finish_reason="error")
         if self._provider == "anthropic":
             return await self._chat_anthropic(messages, tools, temperature, max_tokens, cache_control)
 
@@ -233,6 +247,10 @@ class LLMProvider:
         self._cancelled = False
         if cancel_key:
             self._session_cancel.pop(cancel_key, None)
+
+        if error := self._vision_error(messages):
+            yield StreamChunk(delta_content=f"LLM stream failed: {error}", finish_reason="error")
+            return
 
         if self._provider == "anthropic":
             async for chunk in self._chat_stream_anthropic(

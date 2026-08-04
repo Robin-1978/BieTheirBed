@@ -43,6 +43,31 @@ class TestFilesystemWriteAndRead:
         result = await t.execute(action="write", path=path, content="hello")
         assert result["bytes_written"] == 5
 
+    @pytest.mark.asyncio
+    async def test_read_expands_home_directory(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        desktop = tmp_path / "Desktop"
+        desktop.mkdir()
+        (desktop / "usable.txt").write_text("works", encoding="utf-8")
+
+        result = await FilesystemTool().execute(
+            action="read",
+            path="~/Desktop/usable.txt",
+        )
+
+        assert result["content"] == "works"
+
+    @pytest.mark.asyncio
+    async def test_relative_paths_use_configured_working_directory(self, tmp_path):
+        (tmp_path / "relative.txt").write_text("bounded", encoding="utf-8")
+
+        result = await FilesystemTool(working_directory=tmp_path).execute(
+            action="read",
+            path="relative.txt",
+        )
+
+        assert result["content"] == "bounded"
+
 
 class TestFilesystemRead:
     @pytest.mark.asyncio

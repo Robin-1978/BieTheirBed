@@ -57,8 +57,18 @@ class TestSessionManager:
         assert "s0" not in ids
 
     def test_drop(self):
-        mgr = SessionManager()
+        dropped = []
+        mgr = SessionManager(on_drop=dropped.append)
         mgr.get("a", "sys")
         assert len(mgr) == 1
         mgr.drop("a")
         assert len(mgr) == 0
+        assert dropped == ["a"]
+
+    def test_lru_eviction_notifies_cleanup(self):
+        dropped = []
+        mgr = SessionManager(max_sessions=2, on_drop=dropped.append)
+        mgr.get("a", "sys")
+        mgr.get("b", "sys")
+        mgr.get("c", "sys")
+        assert "a" in dropped

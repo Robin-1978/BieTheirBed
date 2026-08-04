@@ -40,7 +40,12 @@ class ToolRegistry:
         """Unregister all tools."""
         self._tools.clear()
 
-    async def execute(self, tool_name: str, **kwargs: Any) -> Any:
+    async def _commit(self, tool_name: str, **kwargs: Any) -> Any:
+        """Internal unchecked dispatch used only by ``VerifiedToolExecutor``.
+
+        Model-proposed calls must never receive the registry as an execution
+        capability. Discovery remains public; commit is an internal boundary.
+        """
         tool = self._tools.get(tool_name)
         if tool is None:
             raise ToolNotFoundError(tool_name)

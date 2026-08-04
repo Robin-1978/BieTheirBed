@@ -10,7 +10,6 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import signal
@@ -22,13 +21,14 @@ from typing import Any
 import websockets
 from websockets.asyncio.server import ServerConnection
 
-from pc_assistant.agent import Agent, AgentEvent
+from pc_assistant.agent import Agent
 from pc_assistant.config import AppConfig, load_config
 from pc_assistant.harness.confirm import CONFIRM_TIMEOUT
+from pc_assistant.runtime import RuntimePaths
 from pc_assistant.service.protocol import (
     SOCKET_PATH,
     PID_PATH,
-    LOG_PATH,
+    WS_MAX_SIZE,
     ClientMessage,
     ServerMessage,
     deserialize_client,
@@ -52,11 +52,19 @@ class ServiceServer:
         self._run_tasks: dict[str, asyncio.Task] = {}
         self._client_sessions: dict[str, str] = {}
         self._channel_manager: Any = None
+        self._attachment_cleanup_task: asyncio.Task | None = None
         self._running = False
 
     # ── Lifecycle ─────────────────────────────────────────────
 
     async def start(self) -> None:
+        try:
+            await self._start()
+        except BaseException:
+            await self.stop()
+            raise
+
+    async def _start(self) -> None:
         SOCKET_PATH.parent.mkdir(parents=True, exist_ok=True)
 
         if SOCKET_PATH.exists():
@@ -89,6 +97,7 @@ class ServiceServer:
         self._ws_server = await websockets.unix_serve(
             self._handle_client,
             str(SOCKET_PATH),
+            max_size=WS_MAX_SIZE,
         )
         logger.info("Unix socket listening on %s", SOCKET_PATH)
 
@@ -97,6 +106,7 @@ class ServiceServer:
                 self._handle_client,
                 self._config.service_host,
                 self._config.service_port,
+                max_size=WS_MAX_SIZE,
             )
             logger.info(
                 "TCP listening on %s:%d",
@@ -104,12 +114,24 @@ class ServiceServer:
                 self._config.service_port,
             )
 
+        self._attachment_cleanup_task = asyncio.create_task(self._attachment_cleanup_loop())
         self._running = True
-        _write_pid(self._log_path or resolve_service_log(None))
+        _write_pid(
+            self._log_path
+            or RuntimePaths.from_root(self._config.runtime_root).logs / "service.log"
+        )
         logger.info("Service ready (pid %d)", os.getpid())
 
     async def stop(self) -> None:
         self._running = False
+
+        if self._attachment_cleanup_task is not None:
+            self._attachment_cleanup_task.cancel()
+            try:
+                await self._attachment_cleanup_task
+            except asyncio.CancelledError:
+                pass
+            self._attachment_cleanup_task = None
 
         if self._channel_manager is not None:
             try:
@@ -140,6 +162,13 @@ class ServiceServer:
 
         _cleanup_files()
         logger.info("Service stopped")
+
+    async def _attachment_cleanup_loop(self) -> None:
+        interval = max(10, self._config.attachment_cleanup_interval_seconds)
+        while True:
+            await asyncio.sleep(interval)
+            if self._agent is not None:
+                await asyncio.to_thread(self._agent.cleanup_attachments)
 
     async def serve_forever(self) -> None:
         """Block until shutdown signal."""
@@ -221,6 +250,8 @@ class ServiceServer:
             task = asyncio.create_task(self._handle_run(ws, client_id, msg))
             self._run_tasks[client_id] = task
             task.add_done_callback(self._make_run_done_cb(client_id))
+        elif msg.method == "upload_attachment":
+            await self._handle_upload_attachment(ws, client_id, msg)
         elif msg.method == "cancel":
             self._handle_cancel(msg)
         elif msg.method == "confirm":
@@ -230,7 +261,7 @@ class ServiceServer:
         elif msg.method == "health":
             await self._handle_health(ws, msg)
         elif msg.method == "command":
-            await self._handle_command(ws, msg)
+            await self._handle_command(ws, client_id, msg)
         else:
             await ws.send(serialize(
                 ServerMessage.error(msg.id, f"Unknown method: {msg.method}")
@@ -266,6 +297,12 @@ class ServiceServer:
             await ws.send(serialize(ServerMessage.error(msg.id, "Empty input")))
             return
 
+        try:
+            attachments = msg.attachments
+        except ValueError as exc:
+            await ws.send(serialize(ServerMessage.error(msg.id, str(exc))))
+            return
+
         async def ws_confirm(tool_name: str, tool_args: dict[str, Any]) -> bool:
             code = uuid.uuid4().hex[:8]
             key = (client_id, code)
@@ -284,11 +321,10 @@ class ServiceServer:
                 self._confirm_futures.pop(key, None)
 
         try:
-            async for event in self._agent.run(
-                input_text,
-                session_id=session_id,
-                confirm_callback=ws_confirm,
-            ):
+            run_kwargs: dict[str, Any] = {"session_id": session_id, "confirm_callback": ws_confirm}
+            if attachments:
+                run_kwargs["attachments"] = attachments
+            async for event in self._agent.run(input_text, **run_kwargs):
                 frame = ServerMessage.event(msg.id, event.model_dump())
                 await ws.send(serialize(frame))
         except Exception as e:
@@ -299,6 +335,25 @@ class ServiceServer:
 
         await ws.send(serialize(ServerMessage.result(msg.id, {"done": True})))
         logger.info("RUN done client=%s session=%s", client_id, session_id)
+
+    async def _handle_upload_attachment(
+        self,
+        ws: ServerConnection,
+        client_id: str,
+        msg: ClientMessage,
+    ) -> None:
+        if self._agent is None:
+            await ws.send(serialize(ServerMessage.error(msg.id, "Agent not initialized")))
+            return
+        session_id = msg.session_id or self._client_sessions.get(client_id) or client_id
+        self._client_sessions[client_id] = session_id
+        try:
+            attachment = msg.upload_attachment
+            ref = self._agent.store_attachment(session_id, attachment)
+        except (ValueError, KeyError) as exc:
+            await ws.send(serialize(ServerMessage.error(msg.id, str(exc))))
+            return
+        await ws.send(serialize(ServerMessage.result(msg.id, {"attachment": ref})))
 
     def _handle_cancel(self, msg: ClientMessage) -> None:
         if self._agent is None:
@@ -379,18 +434,41 @@ class ServiceServer:
         healthy = await self._agent.health_check()
         await ws.send(serialize(ServerMessage.result(msg.id, {"healthy": healthy})))
 
-    async def _handle_command(self, ws: ServerConnection, msg: ClientMessage) -> None:
+    async def _handle_command(
+        self,
+        ws: ServerConnection,
+        client_id: str,
+        msg: ClientMessage,
+    ) -> None:
         cmd = msg.params.get("cmd", "")
         if self._agent is None:
             await ws.send(serialize(ServerMessage.error(msg.id, "Agent not initialized")))
             return
 
         if cmd == "/clear":
-            self._agent.conversation.clear()
-            await ws.send(serialize(ServerMessage.result(msg.id, {"cleared": True})))
+            session_id = (
+                msg.session_id
+                or self._client_sessions.get(client_id)
+                or client_id
+            )
+            self._agent.drop_session(session_id)
+            self._client_sessions[client_id] = session_id
+            await ws.send(serialize(ServerMessage.result(
+                msg.id,
+                {"cleared": True, "session_id": session_id},
+            )))
         elif cmd == "/compact":
-            self._agent.conversation.clear()
-            await ws.send(serialize(ServerMessage.result(msg.id, {"compacted": True})))
+            session_id = (
+                msg.session_id
+                or self._client_sessions.get(client_id)
+                or client_id
+            )
+            self._agent.drop_session(session_id)
+            self._client_sessions[client_id] = session_id
+            await ws.send(serialize(ServerMessage.result(
+                msg.id,
+                {"compacted": True, "session_id": session_id},
+            )))
         elif cmd == "/tools":
             tools = self._agent.registry.list_tools()
             await ws.send(serialize(ServerMessage.result(msg.id, {"tools": tools})))
@@ -451,11 +529,12 @@ def is_running() -> bool:
 
 # ── Entry point ───────────────────────────────────────────────────────
 
-def resolve_service_log(log_dir: str | None) -> Path:
-    """Log file path: ``<log_dir>/service.log`` or ``./log/service.log`` (working dir)."""
+def resolve_service_log(log_dir: str | None, config_path: str | None = None) -> Path:
+    """Log file path below the unified runtime ``logs/`` directory."""
     if log_dir:
         return Path(log_dir).expanduser().resolve() / "service.log"
-    return (Path.cwd() / "log").resolve() / "service.log"
+    cfg = load_config(config_path) if config_path else load_config()
+    return RuntimePaths.from_root(cfg.runtime_root).logs / "service.log"
 
 
 def run_server(
@@ -469,7 +548,7 @@ def run_server(
     primitives (e.g. ``asyncio.create_task`` in the scheduler) work in the
     child process. Returns the process exit code.
     """
-    log_path = log_path or LOG_PATH
+    log_path = log_path or resolve_service_log(None, config_path)
     if daemon:
         daemonize(log_path)
     return asyncio.run(_serve(config_path, daemon, log_path))

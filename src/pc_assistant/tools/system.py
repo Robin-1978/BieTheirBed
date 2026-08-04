@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import platform
+from pathlib import Path
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
 from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.artifacts import ArtifactPaths, image_artifact
 
 
 class SystemTool(ToolBase):
     name = "system"
     description = "Get system information and capture screenshots"
+
+    def __init__(self, artifact_dir: str | Path | None = None) -> None:
+        self._artifacts = ArtifactPaths(artifact_dir)
 
     async def execute(self, **kwargs: Any) -> Any:
         action = kwargs.get("action")
@@ -35,6 +40,7 @@ class SystemTool(ToolBase):
                         "enum": ["info", "screenshot", "disk_usage"],
                     },
                     "path": {"type": "string", "description": "Save path for screenshot"},
+                    "inline": {"type": "boolean", "description": "Return the screenshot as an inline image block so the model can see it"},
                     "drive": {"type": "string", "description": "Drive letter for disk usage (Windows)"},
                 },
                 "required": ["action"],
@@ -50,6 +56,7 @@ class SystemTool(ToolBase):
                 "properties": {
                     "action": {"type": "string", "enum": ["info", "screenshot", "disk_usage"]},
                     "path": {"type": "string"},
+                    "inline": {"type": "boolean"},
                     "drive": {"type": "string"},
                 },
                 "required": ["action"],
@@ -83,7 +90,15 @@ class SystemTool(ToolBase):
             }
 
     def _screenshot(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        save_path = kwargs.get("path", "screenshot.png")
+        try:
+            save_path = self._artifacts.allocate(
+                prefix="system-screenshot",
+                suffix=".png",
+                requested=kwargs.get("path"),
+            )
+        except ValueError as exc:
+            return {"error": str(exc)}
+        inline = bool(kwargs.get("inline", False))
         try:
             import mss
 
@@ -94,7 +109,21 @@ class SystemTool(ToolBase):
 
                 img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
                 img.save(save_path)
-                return {"success": True, "path": save_path, "size": shot.size}
+                result: dict[str, Any] = {
+                    "success": True,
+                    "path": str(save_path),
+                    "size": shot.size,
+                    "artifact": image_artifact(save_path, "image/png"),
+                }
+                if inline:
+                    from pc_assistant.vision.preprocess import image_block_from_file
+
+                    block = image_block_from_file(str(save_path))
+                    if block is not None:
+                        block["width"] = shot.size.width
+                        block["height"] = shot.size.height
+                        result["image"] = block
+                return result
         except ImportError:
             return {"error": "mss or Pillow not installed"}
         except Exception as e:

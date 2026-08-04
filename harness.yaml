@@ -1,0 +1,480 @@
+config_schema: 1
+config_validation:
+  profile: advisory
+version: "2.9.12"
+version_file: VERSION
+name: BieTheirBed
+description: >-
+  Universal LLM output consistency harness.
+  OpenSpec defines process and rules (outer framework).
+  SuperPowers provides discipline and execution (inner engine).
+  All specs and file storage follow OpenSpec conventions.
+
+collaboration_model:
+  pattern: "1 human + N LLMs"
+  human_role: "Architecture decisions, interface design, review, final approval"
+  llm_role: "Code generation, test scaffolding, doc drafting, refactoring execution"
+  session_model: "Each LLM session is stateless; harness state (state.json, campaign-state.json) provides continuity"
+  parallelism: "Multiple LLM sessions may work on independent Changes/tasks concurrently via subagents"
+
+# ═══════════════════════════════════════════════════════════
+# OpenSpec: Process & Rules (Outer Framework)
+# Defines workflow stages, artifacts, gates, and file storage
+# ═══════════════════════════════════════════════════════════
+
+openspec:
+  schema: spec-driven
+  root_path: "openspec/"  # relative to project root; OpenSpec artifacts (changes/, specs/) live here
+  state_path: ".gs-harness/state.json"
+
+  workflow:
+    explore:
+      description: "Pre-change decision phase — clarify scope, approach, integration, verification before harness new"
+      skill: harness-explore
+      gate: "Pre-change explore exit signals + user approval before propose (skill-enforced hard STOP; no CLI checkpoint)"
+      artifacts: []
+    propose:
+      description: "Turn ideas into reviewable, implementable change artifacts"
+      skill: harness-propose
+      gate: "All artifacts must be complete before implementation"
+      artifacts: [proposal.md, design.md, specs/, tasks.md]
+    implement:
+      description: "Execute tasks one by one"
+      skill: harness-implement
+      gate: "Every task must have a verification method"
+      artifacts: []
+    verify:
+      description: "Prove completion with evidence"
+      skill: harness-verify
+      gate: "No evidence = no completion claim"
+      artifacts: []
+    review:
+      description: "Final gate — OpenSpec artifacts + code coherence before archive (after verify)"
+      skill: harness-review
+      gate: "OpenSpec and implementation review complete; human judgment before archive"
+      artifacts: []
+    archive:
+      description: "Logical close — mark complete in state, merge delta specs to baseline, update campaign progress. NOT a release or Git tag."
+      skill: harness-archive
+      gate: "Delta specs must be merged back to baseline"
+      artifacts: []
+
+  fast_track:
+    conditions:
+      - "files <= 2 AND lines <= 20"
+    overrides:
+      cpp_bazel:
+        conditions:
+          - "files <= 4 AND lines <= 80"
+        rationale: "C++ changes naturally span .h + .cc + _test.cc; logical file counting applies"
+      cpp_catkin:
+        conditions:
+          - "files <= 4 AND lines <= 80"
+        rationale: "C++ changes naturally span .h + .cc + _test.cc; logical file counting applies"
+    workflow: "propose+implement merged, verify+review required"
+    rationale: "Small changes don't need full 6-stage workflow. Merge propose and implement into one step, but still require verify and review for external validation."
+    rules:
+      - "Fast-track changes MUST still create proposal.md, a minimal specs/ delta, and tasks.md (simplified)"
+      - "Fast-track tasks MUST include stable id, owned_paths, verification, and SHALL trace metadata"
+      - "Fast-track changes MUST still run verify and review"
+      - "Fast-track changes MAY skip pre-change explore when paths are confirmed in repo and user approved; explore is not an artifact gate"
+      - "If fast-track change grows beyond conditions, escalate to full workflow"
+
+  granularity_review:
+    description: "Post-propose warning when change exceeds recommended size"
+    mode: "warning"
+    thresholds:
+      task_checkboxes: 20
+      estimated_files: 8
+      estimated_lines: 600
+    action: "Present warning to user. User decides whether to proceed or split."
+
+  task_sizing:
+    format: "files:N lines:~M"
+    dimensions:
+      files: "Context breadth — how many files the LLM must hold in working memory"
+      lines: "Output depth — how much code the LLM must generate in one pass"
+    classification:
+      small: { files: "1-2", lines: "<50" }
+      medium: { files: "3-5", lines: "50-200" }
+      large: { files: "6+", lines: ">200" }
+    rules:
+      - "Large tasks MUST be split before implementation"
+      - "Line estimates are approximate (~50, ~100, ~200)"
+      - "Split by module boundary for file count, by logical step for line count"
+
+  delta_specs:
+    description: "Change specs live in changes/<name>/specs/, merged to openspec/specs/ on archive"
+    merge_strategy: "semantic"
+
+  utility_skills:
+    campaign:
+      harness-knowledge-structurer:
+        description: "Structure scattered docs into OpenSpec baseline specs and load knowledge base"
+        when: "Starting a campaign — need to create openspec/specs/ from existing docs"
+      harness-campaign-blueprint:
+        description: "Co-author campaign blueprint (full or lite) before decomposing into changes"
+        when: "Path C from explore — need docs/<campaign>-phases.md with status finalized before campaign.yaml"
+      harness-campaign-decomposer:
+        description: "Decompose a Path C goal into LLM-controllable Changes"
+        when: "Finalized blueprint (lite or full) — need campaign.yaml with phases and dependencies"
+      harness-change-graph:
+        description: "Track dependencies between multiple related OpenSpec changes"
+        when: "Campaign has 3+ related changes with cross-change dependencies"
+    tools:
+      writing-skills:
+        description: "Create new skills for gs-harness"
+        when: "Creating or modifying skill definitions"
+      using-git-worktrees:
+        description: "Branch isolation for implementation"
+        when: "implement needs branch isolation"
+
+campaign:
+  config_path: "${openspec.root_path}/campaign.yaml"  # relative to project root
+  state_path: ".gs-harness/campaigns/<slug>/state.json"
+  rollback_tag_prefix: "campaign"
+  dependency_gate:
+    enabled: true
+    min_upstream_stage: verify
+    apply_at: [implement]
+
+context_index:
+  description: "Machine-readable project facts consumed by context slicing and Agent workflows. Domain-specific facts live in gs-harness sidecar storage, not in skills or OpenSpec specs."
+  path: ".gs-harness/context/index.json"
+  command: "harness index"
+  adapters:
+    generic:
+      enabled: true
+      facts: ["files", "basic file kinds"]
+    git_diff:
+      enabled: true
+      facts: ["changed files from git diff --name-only HEAD"]
+    compile_commands:
+      enabled: true
+      paths: ["compile_commands.json", "build/compile_commands.json"]
+      facts: ["compiler command", "compile unit"]
+    cpp_bazel:
+      enabled: true
+      facts: ["BUILD cc_library/cc_binary/cc_test targets", "target sources", "target deps"]
+    cpp_catkin:
+      enabled: true
+      facts: ["package.xml", "CMakeLists.txt", "catkin gtest targets"]
+    ros1:
+      enabled: true
+      facts: ["package manifests", "msg files", "srv files", "launch files"]
+    gtest:
+      enabled: true
+      facts: ["*_test.cc files", "cc_test targets", "catkin_add_gtest targets"]
+  output_contract:
+    human: "harness context <change>"
+    agent: "harness context <change> --json"
+    fields: ["adapters", "packages", "targets", "tests", "ros", "compile_commands", "git.changed_files", "files", "relationships"]
+
+evidence:
+  description: "Sidecar verification evidence used by gs-harness gates. OpenSpec artifacts remain standard and usable without gs-harness."
+  path: ".gs-harness/changes/<change>/evidence.json"
+  command: "harness evidence <change> --task T001 -- <command>"
+
+path_decision:
+  description: "Explore exit plan for Path A/B/C routing. Not an OpenSpec gate artifact."
+  path: ".gs-harness/plans/<plan-slug>.yaml"
+  template: "references/templates/path-decision.yaml"
+  # retention:
+  #   mode: keep_all          # keep_all (default) | max_age
+  #   max_age_days: 90        # days; used when mode is max_age or CLI --max-age override
+  gate_usage:
+    implement_to_verify: "Every completed task must have passing sidecar evidence"
+    verify_to_review: "Passing sidecar evidence must still be present"
+
+explore_gate:
+  description: "CLI enforcement for pre-change explore before harness new (gs-harness dogfood: company strict)"
+  enabled: true
+  mode: block
+  allow_skip: false
+  exemptions:
+    campaign_planned_stub: true
+    fast_track: false
+    existing_change: true
+
+investigation_gate:
+  description: "Per-change proposal.md ## Investigation before implement"
+  enabled: true
+  mode: hard
+  apply_at: [implement]
+  exempt_greenfield: true
+
+# Project delivery lifecycle — separates "unpublished dev" from harness greenfield (new files)
+project:
+  release_status: null  # dev | beta | production — set in company/pilot harness.yaml
+  compatibility_policy:
+    dev:
+      default_stance: breaking_ok  # legacy fallback for internal when surfaces omitted
+      surfaces:
+        wire: backward_compatible  # ROS/HTTP field names — additive by default (C15)
+        internal: breaking_ok      # storage/routing/properties may break in dev
+      shim_requires_user_approval: true
+    production:
+      default_stance: backward_compatible
+
+forward_design_gate:
+  description: "Require ## Alternatives Considered for replace/extend/migrate/simplify changes"
+  enabled: true
+  mode: warn  # warn | hard — strict company template sets hard
+  apply_at: [propose, implement]
+  exempt_change_types: [fix]
+  exempt_greenfield: true
+
+compatibility_gate:
+  description: "Dev policy: wire backward_compatible by default; block wire rename without approval"
+  enabled: true
+  mode: warn
+  apply_at: [propose, implement]
+
+simplicity_gate:
+  description: "Review/archive diff signals for compat layers and net abstraction growth"
+  enabled: true
+  mode: warn  # warn | hard — strict templates set hard at archive
+  apply_at: [implement, verify, review, archive]
+  rules:
+    compat_diff: true
+    abstraction_net_add: 0
+  exempt_change_types: [fix]
+
+task_phase_gate:
+  description: "Numbered tasks.md phases (## 0., ## 1.) must complete in order — no skip-ahead"
+  enabled: true
+  mode: warn
+  apply_at: [verify]
+  min_phases: 2
+
+human_anchor:
+  description: >-
+    Human-reviewable authority doc upstream of OpenSpec (Lite: L1/L2 gates + contract_test;
+    optional per-SHALL ← anchor § when require_anchor_trace: true).
+  doc_root: "docs/"
+  lifecycle: [draft, under_review, finalized]
+  kinds:
+    interface:
+      signals: [cross_repo_api, message_schema_change, multi_consumer]
+    data_model:
+      signals: [storage_column_mapping, coordinate_system]
+    protocol:
+      signals: [wire_format_change]
+    catalog:
+      signals: [enum_registry_change]
+    architecture:
+      signals: [component_boundary_change, delete_subsystem, handler_registry_change, module_responsibility_shift]
+  propose_gate:
+    require_reference: true
+    min_status: under_review
+  gate:
+    enabled: true
+    mode: warn  # warn | hard (aliases: advisory, block, restrict, enforce)
+    apply_at: [new, propose, implement, verify]
+    require_anchor_trace: false  # Lite default: no per-SHALL ← anchor §; use contract_test instead
+    require_contract_evidence: false  # strict template sets true
+
+architecture_anchor_gate:
+  description: >-
+    Architecture-first: module boundary doc required before propose/implement for
+    replace/migrate/simplify (not patched mid-change like C15).
+  enabled: true
+  mode: warn
+  apply_at: [plan_approve, propose, implement]
+  require_for_change_types: [replace, migrate, simplify, extend]
+
+review_gate:
+  enabled: true
+  mode: hard
+  apply_at: [archive]
+  require_verdict: APPROVE
+  require_human_reviewer: true
+
+doctor:
+  severity_policy:
+    mode: ci
+
+smoke_test:
+  command: ""
+  timeout: 60
+
+# ═══════════════════════════════════════════════════════════
+# SuperPowers: Discipline & Execution (Inner Engine)
+# Provides test-first evidence, verification, debugging, and review discipline
+# ═══════════════════════════════════════════════════════════
+
+superpowers:
+  discipline_profile: strict
+
+  iron_laws:
+    implement: "NO PRODUCTION CODE WITHOUT TESTS"
+    verify: "NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE"
+    debug: "DIAGNOSIS BEFORE FIX. NEVER PATCH SYMPTOMS."
+
+  discipline_profiles:
+    strict:
+      description: "Tests required + full artifacts + full self-check"
+      implement: "Write tests before production behavior, then write code, run tests, and record passing evidence. Tests MUST cover every SHALL statement. A pre-implementation failure run is optional diagnostic work, not a completion gate."
+      propose: "All 4 artifacts required (proposal, design, specs, tasks)"
+      review: "Full OpenSpec + implementation review (harness-review)"
+    relaxed:
+      description: "Tests required + full artifacts + full self-check"
+      implement: "Write tests before production behavior, then write code, run tests, and record passing evidence. Tests MUST cover every SHALL statement. A pre-implementation failure run is optional diagnostic work, not a completion gate."
+      propose: "All 4 artifacts required (proposal, design, specs, tasks)"
+      review: "Full OpenSpec + implementation review (harness-review)"
+    minimal:
+      description: "Tests optional during implement but verify must still pass. Simplified artifacts."
+      implement: "May write tests after implementation. verify MUST still pass."
+      propose: "proposal.md and tasks.md required. design.md and specs/ optional."
+      review: "Simplified OpenSpec + implementation review"
+
+  batch_tdd:
+    description: "Group related test-first tasks to reduce compile cycles in compiled languages"
+    enabled_for: ["cpp_bazel", "cpp_catkin"]
+    max_batch_size: 5
+    rules:
+      - "Tasks in a batch MUST share the same test target"
+      - "Tasks in a batch MUST modify the same compilation unit"
+      - "Cross-file dependency tasks MUST NOT be batched"
+      - "If batch fails, break into individual tasks for debugging"
+
+  upstream_regression:
+    description: "Verify upstream change tests still pass when modifying their files"
+    enabled: true
+    rules:
+      - "Run upstream test target BEFORE modifying upstream files"
+      - "Run upstream test target AFTER modifying upstream files"
+      - "If regression detected, STOP and fix before proceeding"
+
+  verification:
+    principle: "Tool output takes precedence over LLM self-assessment"
+    authority:
+      - external_tool
+      - harness_cli
+      - llm_self_assessment
+
+# ═══════════════════════════════════════════════════════════
+# Project Configuration
+# ═══════════════════════════════════════════════════════════
+
+project_types:
+  cpp_bazel:
+    display: "C++ / Bazel"
+    build: "bazel build //..."
+    test: "bazel test //... --test_output=errors"
+    test_single: "bazel test {target} --test_output=all"
+    lint: ""
+    test_framework: "GoogleTest / Bazel cc_test"
+    incremental:
+      enabled: true
+      build_changed: "bazel build //{pkg}:all"
+
+  cpp_catkin:
+    display: "C++ / ROS Catkin"
+    build: "catkin_make -j4"
+    test: "catkin_make run_tests"
+    test_single: "catkin_make run_tests --pkg {pkg}"
+    lint: ""
+    test_framework: "GoogleTest / rostest"
+
+  typescript:
+    display: "TypeScript / Node"
+    build: "npm run build"
+    test: "npm test"
+    test_single: "npm test -- {path}"
+    # node --check on bin/lib/test/*.mjs (zero deps; no eslint)
+    lint: "npm run lint"
+    test_framework: "jest / vitest"
+
+  python:
+    display: "Python"
+    build: "pip install -e ."
+    test: "pytest"
+    test_single: "pytest {path} -v"
+    lint: "ruff check ."
+    test_framework: "pytest"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Test Pyramid Definition
+# Universal test distribution across 3 levels
+# ═══════════════════════════════════════════════════════════════════════════
+
+test_pyramid:
+  description: "Universal test pyramid for all project types"
+  levels:
+    unit:
+      coverage: "~80%"
+      count: "Many"
+      characteristics:
+        - "Small: Single function or class"
+        - "Fast: Milliseconds execution"
+        - "Isolated: No external dependencies"
+        - "Deterministic: Same result every run"
+      project_mapping:
+        python: "pytest tests/unit/"
+        typescript: "jest tests/unit/"
+    integration:
+      coverage: "~15%"
+      count: "Some"
+      characteristics:
+        - "Medium: Multiple components"
+        - "Localhost: Running locally"
+        - "Seconds: Execution time in seconds"
+        - "Controlled: Mock external services"
+      project_mapping:
+        python: "pytest tests/integration/"
+        typescript: "jest tests/integration/"
+    e2e:
+      coverage: "~5%"
+      count: "Few"
+      characteristics:
+        - "Large: Full application flow"
+        - "External: Real services when needed"
+        - "Minutes: Execution time in minutes"
+        - "Critical: Only for critical paths"
+      project_mapping:
+        python: "pytest tests/e2e/"
+        typescript: "playwright tests/e2e/"
+
+platforms:
+  claude_code:
+    skill_path: ".claude/skills/"
+    agent_path: ".claude/agents/"
+    hook_path: ".claude/hooks/"
+    plugin: ".claude-plugin/"
+    tool_mapping: "references/claude-tools.md"
+
+  cursor:
+    skill_path: ".cursor/skills/"
+    agent_path: ".cursor/agents/"
+    hook_path: ".cursor/hooks/"
+    plugin: ".cursor-plugin/"
+    tool_mapping: "references/cursor-tools.md"
+
+  trae:
+    skill_path: ".trae/skills/"
+    agent_path: ".trae/agents/"
+    hook_path: ""
+    plugin: ""
+    tool_mapping: "references/trae-tools.md"
+
+  codex:
+    skill_path: ".codex/skills/"
+    agent_path: ""
+    hook_path: ""
+    plugin: ".codex/"
+    tool_mapping: "references/codex-tools.md"
+
+  opencode:
+    skill_path: ".opencode/skills/"
+    agent_path: ""
+    hook_path: ""
+    plugin: ".opencode/plugins/"
+    tool_mapping: "references/opencode-tools.md"
+
+  gemini_cli:
+    skill_path: ".gemini/skills/"
+    agent_path: ""
+    hook_path: ".gemini/hooks/"
+    plugin: ""
+    tool_mapping: "references/gemini-tools.md"

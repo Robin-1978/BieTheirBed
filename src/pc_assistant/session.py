@@ -10,7 +10,7 @@ import asyncio
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from pc_assistant.context.conversation import ConversationManager
 
@@ -23,6 +23,10 @@ class SessionState:
     status: str = "ready"
     tool_call_history: list[str] = field(default_factory=list)
     tool_task: asyncio.Task | None = None
+    # A conversation is an ordered mutable transcript.  Runs for different
+    # sessions may execute concurrently, but two runs for the same session
+    # must not interleave snapshots, messages, tool state, or rollback.
+    run_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     total_prompt_tokens: int = 0
     total_completion_tokens: int = 0
     total_iterations: int = 0
@@ -60,10 +64,14 @@ class SessionState:
 class SessionManager:
     """LRU-bounded collection of per-session states."""
 
-    def __init__(self, max_sessions: int = 100) -> None:
+    def __init__(self, max_sessions: int = 100, on_drop: Callable[[str], None] | None = None) -> None:
         self._max = max(1, max_sessions)
         self._states: dict[str, SessionState] = {}
         self._lock = threading.Lock()
+        self._on_drop = on_drop
+
+    def set_drop_callback(self, callback: Callable[[str], None] | None) -> None:
+        self._on_drop = callback
 
     def get(self, session_id: str, system_prompt: str) -> SessionState:
         with self._lock:
@@ -91,11 +99,15 @@ class SessionManager:
             # never evicted out from under the CLI/TUI that owns it.
             if state.session_id == "":
                 continue
-            self._states.pop(state.session_id, None)
+            removed = self._states.pop(state.session_id, None)
+            if removed is not None and self._on_drop is not None:
+                self._on_drop(state.session_id)
 
     def drop(self, session_id: str) -> None:
         with self._lock:
-            self._states.pop(session_id, None)
+            removed = self._states.pop(session_id, None)
+            if removed is not None and self._on_drop is not None:
+                self._on_drop(session_id)
 
     def stats(self) -> list[dict[str, Any]]:
         with self._lock:

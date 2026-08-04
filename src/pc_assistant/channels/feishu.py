@@ -8,6 +8,7 @@ import queue
 import threading
 import time
 import warnings
+from pathlib import Path
 from typing import Any
 
 from pc_assistant.channels.base import ChannelBase
@@ -255,6 +256,28 @@ class FeishuChannel(ChannelBase):
         """Get the most recently active Feishu user open_id."""
         return self._get_receive_id()
 
+    def _download_image(self, image_key: str) -> str:
+        """Download a Feishu image message into a temp file and return its path."""
+        client = self._get_lark_client()
+        from lark_oapi.api.im.v1 import GetImageRequest
+        from lark_oapi.core.const import FILE_STREAM_TYPE, JSON
+
+        request = (
+            GetImageRequest.builder()
+            .image_key(image_key)
+            .extra({FILE_STREAM_TYPE: JSON})
+            .build()
+        )
+        resp = client.im.v1.image.get(request)
+        if not resp.success() or not resp.file:
+            raise RuntimeError(f"Feishu image download failed: {resp.code} {resp.msg}")
+        import tempfile
+
+        fd, path = tempfile.mkstemp(suffix=".png", prefix="pcassist_feishu_")
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(resp.file.read())
+        return path
+
     def _save_open_id(self, open_id: str) -> None:
         try:
             with open(_RECEIVED_OPEN_ID_FILE, "w") as f:
@@ -361,11 +384,85 @@ class FeishuChannel(ChannelBase):
             logger.error("[SEND-CARD] Exception: %s", e, exc_info=True)
             return False
 
+    def _send_image(self, open_id: str, path: str) -> bool:
+        """Upload a local image and send it as a Feishu image message."""
+        image_path = Path(path).expanduser()
+        if not image_path.is_file():
+            logger.error("[SEND-IMAGE] File does not exist: %s", image_path)
+            return False
+        try:
+            from lark_oapi.api.im.v1 import CreateImageRequest, CreateMessageRequest
+            from lark_oapi.api.im.v1.model.create_image_request_body import (
+                CreateImageRequestBody,
+            )
+            from lark_oapi.api.im.v1.model.create_message_request_body import (
+                CreateMessageRequestBody,
+            )
+
+            with image_path.open("rb") as image_file:
+                upload_request = (
+                    CreateImageRequest.builder()
+                    .request_body(
+                        CreateImageRequestBody.builder()
+                        .image_type("message")
+                        .image(image_file)
+                        .build()
+                    )
+                    .build()
+                )
+                client = self._get_lark_client()
+                with self._lark_lock:
+                    upload_response = client.im.v1.image.create(upload_request)
+
+            if not upload_response.success() or not upload_response.data:
+                logger.error(
+                    "[SEND-IMAGE] Upload failed code=%s msg=%s",
+                    upload_response.code,
+                    upload_response.msg,
+                )
+                return False
+
+            image_key = upload_response.data.image_key
+            message_request = (
+                CreateMessageRequest.builder()
+                .receive_id_type("open_id")
+                .request_body(
+                    CreateMessageRequestBody.builder()
+                    .receive_id(open_id)
+                    .msg_type("image")
+                    .content(json.dumps({"image_key": image_key}))
+                    .build()
+                )
+                .build()
+            )
+            with self._lark_lock:
+                response = client.im.v1.message.create(message_request)
+            if response.code == 0:
+                logger.info("[SEND-IMAGE] OK to %s: %s", open_id, image_path)
+                return True
+            logger.error("[SEND-IMAGE] Send failed code=%s msg=%s", response.code, response.msg)
+            return False
+        except Exception as e:
+            logger.error("[SEND-IMAGE] Exception: %s", e, exc_info=True)
+            return False
+
+    @staticmethod
+    def _tool_image_path(event: Any) -> str:
+        """Extract only explicitly declared image artifacts from tool events."""
+        result = getattr(event, "tool_result", None)
+        if not isinstance(result, dict):
+            return ""
+        artifact = result.get("artifact")
+        if not isinstance(artifact, dict) or artifact.get("kind") != "image":
+            return ""
+        path = artifact.get("path")
+        return str(path) if path else ""
+
     # ================================================================
     # Message Handling
     # ================================================================
 
-    def _handle_message(self, open_id: str, text: str) -> None:
+    def _handle_message(self, open_id: str, text: str, attachments: list | None = None) -> None:
         if self._agent_loop is None:
             self._send_text(open_id, "❌ Agent 未就绪")
             return
@@ -385,7 +482,7 @@ class FeishuChannel(ChannelBase):
                 return
 
         future = asyncio.run_coroutine_threadsafe(
-            self._process_with_agent(open_id, text_stripped),
+            self._process_with_agent(open_id, text_stripped, attachments=attachments),
             self._agent_loop,
         )
         try:
@@ -640,14 +737,14 @@ class FeishuChannel(ChannelBase):
                     pass
             self._send_text(open_id, "✅ 操作已取消")
 
-    async def _process_with_agent(self, open_id: str, text: str) -> None:
+    async def _process_with_agent(self, open_id: str, text: str, attachments: list | None = None) -> None:
         if self._agent is None:
             self._send_text(open_id, "❌ Agent 未初始化")
             return
 
         lock = self._get_user_lock(open_id)
         async with lock:
-            await self._process_with_agent_locked(open_id, text)
+            await self._process_with_agent_locked(open_id, text, attachments=attachments)
 
     def _get_user_lock(self, open_id: str) -> asyncio.Lock:
         """Return the per-user lock, evicting idle entries to bound memory."""
@@ -663,7 +760,7 @@ class FeishuChannel(ChannelBase):
         self._user_locks[open_id] = lock
         return lock
 
-    async def _process_with_agent_locked(self, open_id: str, text: str) -> None:
+    async def _process_with_agent_locked(self, open_id: str, text: str, attachments: list | None = None) -> None:
         feishu_session_id = f"feishu:{open_id}"
         agent_loop = asyncio.get_running_loop()
 
@@ -708,11 +805,13 @@ class FeishuChannel(ChannelBase):
             thinking_chunks: list[str] = []
             final_answer = ""
             error_msg = ""
+            sent_image_paths: set[str] = set()
 
             async for event in self._agent.run(
                 text,
                 session_id=feishu_session_id,
                 confirm_callback=feishu_confirm,
+                attachments=attachments,
             ):
                 if event.type == "tool_call" and not event.blocked:
                     tool_name = event.tool_name
@@ -720,7 +819,11 @@ class FeishuChannel(ChannelBase):
                     args_brief = json.dumps(tool_args, ensure_ascii=False)[:80]
                     tool_calls_info.append(f"🔧 {tool_name}({args_brief})")
                 elif event.type == "tool_result":
-                    pass
+                    image_path = self._tool_image_path(event)
+                    if image_path and image_path not in sent_image_paths:
+                        sent_image_paths.add(image_path)
+                        if not self._send_image(open_id, image_path):
+                            logger.error("[PROCESS] Failed to deliver screenshot: %s", image_path)
                 elif event.type == "stream_think_delta":
                     if event.content:
                         thinking_chunks.append(event.content)
@@ -832,7 +935,7 @@ class FeishuChannel(ChannelBase):
                 if item is None:
                     logger.info("[WORKER] Received shutdown signal")
                     break
-                open_id, text, msg_id = item
+                open_id, text, msg_id, attachments = item
 
                 self._add_reaction(msg_id, "OK")
 
@@ -882,7 +985,7 @@ class FeishuChannel(ChannelBase):
                 )
                 threading.Thread(
                     target=self._handle_message,
-                    args=(open_id, text),
+                    args=(open_id, text, attachments),
                     daemon=True,
                 ).start()
                 self._msg_queue.task_done()
@@ -920,23 +1023,41 @@ class FeishuChannel(ChannelBase):
                 msg = ctx.event.message
                 msg_type = msg.message_type
 
-                if msg_type != "text":
+                if msg_type not in ("text", "image"):
                     logger.info(
-                        "[WS-RECV#%d] Skipping non-text: %s", recv_seq, msg_type
+                        "[WS-RECV#%d] Skipping unsupported type: %s", recv_seq, msg_type
                     )
                     return
 
                 content = json.loads(msg.content)
-                text = content.get("text", "").strip()
-                if not text:
-                    logger.info("[WS-RECV#%d] Empty text, skip", recv_seq)
-                    return
+                attachments: list | None = None
+
+                if msg_type == "text":
+                    text = content.get("text", "").strip()
+                    if not text:
+                        logger.info("[WS-RECV#%d] Empty text, skip", recv_seq)
+                        return
+                else:  # image
+                    image_key = content.get("image_key", "")
+                    text = "请看这张图片并描述/分析它的内容。"
+                    if not image_key:
+                        logger.info("[WS-RECV#%d] Image without image_key, skip", recv_seq)
+                        return
+                    try:
+                        from pc_assistant.model_adapter.types import ImageAttachment
+
+                        path = channel._download_image(image_key)
+                        attachments = [ImageAttachment.from_path(path, caption="feishu image")]
+                        logger.info("[WS-RECV#%d] Downloaded feishu image: %s", recv_seq, path)
+                    except Exception as e:
+                        logger.error("[WS-RECV#%d] Image download failed: %s", recv_seq, e, exc_info=True)
+                        return
 
                 msg_id = getattr(msg, "message_id", None) or ""
                 chat_id = getattr(msg, "chat_id", None) or ""
                 if chat_id and open_id:
                     channel._chat_id_cache[open_id] = chat_id
-                channel._msg_queue.put((open_id, text, msg_id))
+                channel._msg_queue.put((open_id, text, msg_id, attachments))
                 logger.info(
                     "[WS-RECV#%d] Queued: '%s' from %s (qsize=%d)",
                     recv_seq,
@@ -1104,7 +1225,7 @@ class FeishuChannel(ChannelBase):
                     msg_id,
                     msg_age,
                 )
-                self._msg_queue.put((receive_id, text, msg_id))
+                self._msg_queue.put((receive_id, text, msg_id, None))
                 recovered += 1
 
             self._last_poll_ts = now

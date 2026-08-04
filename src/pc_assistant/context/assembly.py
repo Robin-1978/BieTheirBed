@@ -12,6 +12,7 @@ from pc_assistant.context.tags import (
     is_strategy_context_message,
 )
 from pc_assistant.context.prompt import build_session_context
+from pc_assistant.model_adapter.content import text_block
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +70,12 @@ def assemble_llm_messages(
         current_turn = [{"role": "user", "content": last_user_msg}]
 
     if turn_context and current_turn and current_turn[-1].get("role") == "user":
-        current_turn[-1] = {
-            **current_turn[-1],
-            "content": current_turn[-1]["content"] + "\n\n" + turn_context,
-        }
+        last = current_turn[-1]
+        if isinstance(last["content"], list):
+            last = {**last, "content": [*last["content"], text_block("\n\n" + turn_context)]}
+        else:
+            last = {**last, "content": last["content"] + "\n\n" + turn_context}
+        current_turn[-1] = last
 
     messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
 

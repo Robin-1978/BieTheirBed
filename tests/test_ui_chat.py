@@ -1,7 +1,7 @@
 """Tests for the chat TUI (Textual rewrite) and backward-compatible ChatUI."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -424,6 +424,20 @@ class TestChatApp:
             await app._handle_command("/clear")
             log = app.query_one("#chat-log")
             assert log is not None
+
+    @pytest.mark.asyncio
+    async def test_app_clear_command_uses_remote_service_command(self):
+        from pc_assistant.service.client import ServiceClient
+        from pc_assistant.ui.app import ChatApp
+
+        client = ServiceClient()
+        client.command = AsyncMock(return_value={"cleared": True, "session_id": "ws:test"})
+        app = ChatApp(config=AppConfig(), agent=client)
+
+        async with app.run_test():
+            await app._handle_command("/clear")
+
+        client.command.assert_awaited_once_with("/clear")
 
     @pytest.mark.asyncio
     async def test_app_cancel_when_not_processing(self):

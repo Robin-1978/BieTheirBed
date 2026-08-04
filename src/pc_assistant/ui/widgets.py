@@ -32,6 +32,10 @@ class UserMessage(Widget):
         yield Static("You", classes="label")
         yield Static(self._text, classes="body")
 
+    @property
+    def copy_text(self) -> str:
+        return self._text
+
 
 class ThinkingPanel(Widget):
     """Collapsible panel showing LLM thinking/reasoning text."""
@@ -104,6 +108,16 @@ class ToolCallPanel(Widget):
         css_class = "tool-result-err" if is_error else "tool-result-ok"
         self.mount(Static(f"  {icon} {truncated}", classes=css_class))
 
+    @property
+    def copy_text(self) -> str:
+        lines = [self._format_header()]
+        for child in self.children:
+            if isinstance(child, Static):
+                text = str(child.renderable)
+                if text:
+                    lines.append(text)
+        return "\n".join(lines)
+
 
 class AssistantMessage(Widget):
     """Container for an assistant turn: thinking + tool calls + markdown answer."""
@@ -149,6 +163,20 @@ class AssistantMessage(Widget):
         self.mount(panel, before=md)
         return panel
 
+    @property
+    def copy_text(self) -> str:
+        parts: list[str] = []
+        if self._thinking is not None:
+            parts.append("".join(self._thinking._chunks))
+        for child in self.children:
+            if isinstance(child, ToolCallPanel):
+                parts.append(child.copy_text)
+            else:
+                source = getattr(child, "source", "")
+                if source:
+                    parts.append(str(source))
+        return "\n\n".join(p for p in parts if p).strip()
+
 
 class CommandOutput(Widget):
     """Renders slash-command output as markdown inside a subtle panel."""
@@ -162,11 +190,15 @@ class CommandOutput(Widget):
     def compose(self) -> ComposeResult:
         yield Markdown(self._content)
 
+    @property
+    def copy_text(self) -> str:
+        return self._content
+
 
 SLASH_COMMANDS = [
     "/help", "/exit", "/quit", "/clear", "/tools", "/history",
     "/status", "/config", "/config set ", "/memory", "/memory clear",
-    "/retry", "/debug", "/export", "/compact", "/theme",
+    "/retry", "/debug", "/export", "/compact", "/theme", "/copy",
     "/confirm", "/deny",
 ]
 

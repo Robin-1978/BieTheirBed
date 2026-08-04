@@ -20,3 +20,5 @@ data/
 config/local.yaml
 # Runtime state: last active Feishu user open_id (churns on every message)
 src/pc_assistant/channels/.feishu_open_id
+.gs-harness/
+node_modules/

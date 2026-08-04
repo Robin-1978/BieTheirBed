@@ -1,14 +1,27 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
+from pc_assistant.tools.artifacts import ArtifactPaths, image_artifact
 from pc_assistant.tools.base import ToolBase
+
+
+def _import_pywinctl():
+    try:
+        import pywinctl
+    except ImportError:
+        return None
+    return pywinctl
 
 
 class WindowTool(ToolBase):
     name = "window"
     description = "Manage windows: list, focus, move, resize, minimize, maximize, close"
+
+    def __init__(self, artifact_dir: str | Path | None = None) -> None:
+        self._artifacts = ArtifactPaths(artifact_dir)
 
     async def execute(self, **kwargs: Any) -> Any:
         action = kwargs.get("action", "list")
@@ -89,32 +102,87 @@ class WindowTool(ToolBase):
         }
 
     def _get_window_by_id(self, window_id: str) -> Any | None:
-        """Find window by ID (title, class, or partial match)."""
-        try:
-            import pywinctl as pwc
-        except ImportError:
+        """Find one unambiguous window by title/app name; fail closed otherwise."""
+        pwc = _import_pywinctl()
+        if pwc is None:
             return None
 
-        # Try exact match first
+        windows = list(pwc.getAllWindows())
+        needle = window_id.casefold()
+        exact = [
+            window for window in windows
+            if str(window.title).casefold() == needle
+            or self._app_name(window).casefold() == needle
+        ]
+        if len(exact) == 1:
+            return exact[0]
+        if len(exact) > 1:
+            return None
+
+        partial = [window for window in windows if needle in str(window.title).casefold()]
+        return partial[0] if len(partial) == 1 else None
+
+    def _box(self, window: Any) -> dict[str, Any] | None:
+        """Cross-platform geometry. pywinctl exposes `box` on Linux/macOS and
+        `bounds` on Windows; both are a Box(left, top, width, height)."""
+        box = getattr(window, "box", None) or getattr(window, "bounds", None)
+        if box is None:
+            return None
+        return {
+            "x": box.left,
+            "y": box.top,
+            "width": box.width,
+            "height": box.height,
+        }
+
+    def _app_name(self, window: Any) -> str:
+        getter = getattr(window, "getAppName", None)
+        if callable(getter):
+            try:
+                return str(getter())
+            except Exception:
+                pass
+        for attr in ("className", "appName"):
+            val = getattr(window, attr, None)
+            if val:
+                return str(val)
+        return ""
+
+    def _pid(self, window: Any) -> int:
+        getter = getattr(window, "getPID", None)
+        if callable(getter):
+            try:
+                return int(getter())
+            except Exception:
+                pass
+        return getattr(window, "processID", 0)
+
+    def _window_record(self, window: Any) -> dict[str, Any] | None:
+        box = self._box(window)
+        if box is None:
+            return None
+        return {
+            "title": window.title,
+            "class_name": self._app_name(window),
+            "is_visible": bool(getattr(window, "isVisible", False)),
+            "is_minimized": bool(getattr(window, "isMinimized", False)),
+            "is_maximized": bool(getattr(window, "isMaximized", False)),
+            "pid": self._pid(window),
+            **box,
+        }
+
+    def _enumerate_windows(self) -> list[dict[str, Any]]:
+        import pywinctl as pwc
+
+        records = []
         for window in pwc.getAllWindows():
-            if window.title == window_id or window.title.lower() == window_id.lower():
-                return window
-            if window.className and window.className.lower() == window_id.lower():
-                return window
-
-        # Try partial match
-        window_id_lower = window_id.lower()
-        matches = []
-        for window in pwc.getAllWindows():
-            if window_id_lower in window.title.lower():
-                matches.append(window)
-
-        if len(matches) == 1:
-            return matches[0]
-        elif len(matches) > 1:
-            return matches[0]  # Return first match, user can be more specific
-
-        return None
+            if not getattr(window, "title", ""):
+                continue
+            record = self._window_record(window)
+            if record is not None:
+                records.append(record)
+        records.sort(key=lambda r: r["title"].lower())
+        return records
 
     async def _list_windows(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         plat = get_platform()
@@ -126,94 +194,35 @@ class WindowTool(ToolBase):
             return await self._list_windows_linux(kwargs)
 
     async def _list_windows_win32(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        try:
-            import pywinctl as pwc
-        except ImportError:
+        pwc = _import_pywinctl()
+        if pwc is None:
             return {"error": "pywinctl not installed. Run: pip install pywinctl"}
 
         try:
-            windows = []
-            for window in pwc.getAllWindows():
-                if window.title:  # Skip untitled windows
-                    bounds = window.bounds
-                    windows.append({
-                        "title": window.title,
-                        "class_name": window.className or "",
-                        "is_visible": window.isVisible,
-                        "is_minimized": window.isMinimized,
-                        "is_maximized": window.isMaximized,
-                        "x": bounds.x,
-                        "y": bounds.y,
-                        "width": bounds.width,
-                        "height": bounds.height,
-                        "process_id": window.processID,
-                    })
-
-            # Sort by title
-            windows.sort(key=lambda w: w["title"].lower())
-
-            return {
-                "windows": windows,
-                "count": len(windows),
-            }
+            windows = self._enumerate_windows()
+            return {"windows": windows, "count": len(windows)}
         except Exception as e:
             return {"error": f"Failed to list windows: {e}"}
 
     async def _list_windows_macos(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        try:
-            import pywinctl as pwc
-        except ImportError:
+        pwc = _import_pywinctl()
+        if pwc is None:
             return {"error": "pywinctl not installed. Run: pip install pywinctl"}
 
         try:
-            windows = []
-            for window in pwc.getAllWindows():
-                if window.title:
-                    bounds = window.bounds
-                    windows.append({
-                        "title": window.title,
-                        "is_visible": window.isVisible,
-                        "is_minimized": window.isMinimized,
-                        "x": bounds.x,
-                        "y": bounds.y,
-                        "width": bounds.width,
-                        "height": bounds.height,
-                    })
-
-            windows.sort(key=lambda w: w["title"].lower())
-            return {
-                "windows": windows,
-                "count": len(windows),
-            }
+            windows = self._enumerate_windows()
+            return {"windows": windows, "count": len(windows)}
         except Exception as e:
             return {"error": f"Failed to list windows: {e}"}
 
     async def _list_windows_linux(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        try:
-            import pywinctl as pwc
-        except ImportError:
+        pwc = _import_pywinctl()
+        if pwc is None:
             return {"error": "pywinctl not installed. Run: pip install pywinctl"}
 
         try:
-            windows = []
-            for window in pwc.getAllWindows():
-                if window.title:
-                    bounds = window.bounds
-                    windows.append({
-                        "title": window.title,
-                        "is_visible": window.isVisible,
-                        "is_minimized": window.isMinimized,
-                        "x": bounds.x,
-                        "y": bounds.y,
-                        "width": bounds.width,
-                        "height": bounds.height,
-                    })
-
-            windows.sort(key=lambda w: w["title"].lower())
-            return {
-                "windows": windows,
-                "count": len(windows),
-            }
+            windows = self._enumerate_windows()
+            return {"windows": windows, "count": len(windows)}
         except Exception as e:
             return {"error": f"Failed to list windows: {e}"}
 
@@ -222,28 +231,27 @@ class WindowTool(ToolBase):
         if not window_id:
             return {"error": "window_id is required for info action"}
 
-        try:
-            import pywinctl as pwc
-        except ImportError:
+        pwc = _import_pywinctl()
+        if pwc is None:
             return {"error": "pywinctl not installed"}
 
         window = self._get_window_by_id(window_id)
         if window is None:
             return {"error": f"Window not found: {window_id}"}
 
-        bounds = window.bounds
+        box = self._box(window)
+        if box is None:
+            return {"error": f"Window has no geometry: {window_id}"}
+
         return {
             "title": window.title,
-            "class_name": getattr(window, 'className', '') or "",
-            "is_visible": window.isVisible,
-            "is_minimized": window.isMinimized,
-            "is_maximized": window.isMaximized,
-            "is_active": window.isActive,
-            "x": bounds.x,
-            "y": bounds.y,
-            "width": bounds.width,
-            "height": bounds.height,
-            "process_id": getattr(window, 'processID', 0),
+            "class_name": self._app_name(window),
+            "is_visible": bool(getattr(window, "isVisible", False)),
+            "is_minimized": bool(getattr(window, "isMinimized", False)),
+            "is_maximized": bool(getattr(window, "isMaximized", False)),
+            "is_active": bool(getattr(window, "isActive", False)),
+            "process_id": self._pid(window),
+            **box,
         }
 
     async def _focus_window(self, kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -251,9 +259,8 @@ class WindowTool(ToolBase):
         if not window_id:
             return {"error": "window_id is required for focus action"}
 
-        try:
-            import pywinctl as pwc
-        except ImportError:
+        pwc = _import_pywinctl()
+        if pwc is None:
             return {"error": "pywinctl not installed"}
 
         window = self._get_window_by_id(window_id)
@@ -280,9 +287,8 @@ class WindowTool(ToolBase):
         if x is None or y is None:
             return {"error": "x and y coordinates are required for move action"}
 
-        try:
-            import pywinctl as pwc
-        except ImportError:
+        pwc = _import_pywinctl()
+        if pwc is None:
             return {"error": "pywinctl not installed"}
 
         window = self._get_window_by_id(window_id)
@@ -311,9 +317,8 @@ class WindowTool(ToolBase):
         if width is None or height is None:
             return {"error": "width and height are required for resize action"}
 
-        try:
-            import pywinctl as pwc
-        except ImportError:
+        pwc = _import_pywinctl()
+        if pwc is None:
             return {"error": "pywinctl not installed"}
 
         window = self._get_window_by_id(window_id)
@@ -337,9 +342,8 @@ class WindowTool(ToolBase):
         if not window_id:
             return {"error": "window_id is required"}
 
-        try:
-            import pywinctl as pwc
-        except ImportError:
+        pwc = _import_pywinctl()
+        if pwc is None:
             return {"error": "pywinctl not installed"}
 
         window = self._get_window_by_id(window_id)
@@ -361,9 +365,8 @@ class WindowTool(ToolBase):
         if not window_id:
             return {"error": "window_id is required"}
 
-        try:
-            import pywinctl as pwc
-        except ImportError:
+        pwc = _import_pywinctl()
+        if pwc is None:
             return {"error": "pywinctl not installed"}
 
         window = self._get_window_by_id(window_id)
@@ -385,9 +388,8 @@ class WindowTool(ToolBase):
         if not window_id:
             return {"error": "window_id is required"}
 
-        try:
-            import pywinctl as pwc
-        except ImportError:
+        pwc = _import_pywinctl()
+        if pwc is None:
             return {"error": "pywinctl not installed"}
 
         window = self._get_window_by_id(window_id)
@@ -409,9 +411,8 @@ class WindowTool(ToolBase):
         if not window_id:
             return {"error": "window_id is required"}
 
-        try:
-            import pywinctl as pwc
-        except ImportError:
+        pwc = _import_pywinctl()
+        if pwc is None:
             return {"error": "pywinctl not installed"}
 
         window = self._get_window_by_id(window_id)
@@ -430,11 +431,17 @@ class WindowTool(ToolBase):
 
     async def _window_screenshot(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         window_id = kwargs.get("window_id", "")
-        save_path = kwargs.get("save_path", "window_screenshot.png")
-
         try:
-            import pywinctl as pwc
-        except ImportError:
+            save_path = self._artifacts.allocate(
+                prefix="window-screenshot",
+                suffix=".png",
+                requested=kwargs.get("save_path"),
+            )
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+        pwc = _import_pywinctl()
+        if pwc is None:
             return {"error": "pywinctl not installed"}
 
         window = self._get_window_by_id(window_id) if window_id else None
@@ -446,12 +453,14 @@ class WindowTool(ToolBase):
             with mss.mss() as sct:
                 if window:
                     # Get window bounds
-                    bounds = window.bounds
+                    box = self._box(window)
+                    if box is None:
+                        return {"error": f"Window has no geometry: {window_id}"}
                     monitor = {
-                        "left": bounds.x,
-                        "top": bounds.y,
-                        "width": bounds.width,
-                        "height": bounds.height,
+                        "left": box["x"],
+                        "top": box["y"],
+                        "width": box["width"],
+                        "height": box["height"],
                     }
                 else:
                     # Full screen
@@ -459,12 +468,13 @@ class WindowTool(ToolBase):
 
                 shot = sct.grab(monitor)
                 img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
-                img.save(save_path)
+                img.save(str(save_path))
                 return {
                     "success": True,
-                    "path": save_path,
+                    "path": str(save_path),
+                    "artifact": image_artifact(save_path, "image/png"),
                     "size": shot.size,
-                    "window": window.title if window else "full_screen",
+                    "window": getattr(window, "title", None) if window else "full_screen",
                 }
         except ImportError:
             return {"error": "mss or Pillow not installed"}

@@ -68,15 +68,15 @@ def test_registry_empty_name():
 
 
 @pytest.mark.asyncio
-async def test_registry_execute():
+async def test_registry_internal_commit():
     registry = ToolRegistry()
     registry.register(DummyTool())
-    result = await registry.execute("dummy", input="test")
+    result = await registry._commit("dummy", input="test")
     assert result == {"result": "test"}
 
 
 @pytest.mark.asyncio
-async def test_registry_execute_missing():
+async def test_registry_internal_commit_missing():
     registry = ToolRegistry()
     with pytest.raises(KeyError):
-        await registry.execute("nonexistent")
+        await registry._commit("nonexistent")

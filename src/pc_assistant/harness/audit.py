@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from pc_assistant.redaction import redact
+
 
 class AuditLogger:
     def __init__(self, log_dir: str = "logs/audit") -> None:
@@ -27,8 +29,8 @@ class AuditLogger:
             "session_id": self._session_id,
             "action": action,
             "tool": tool,
-            "parameters": parameters,
-            "result_summary": str(result)[:500] if result is not None else None,
+            "parameters": redact(parameters),
+            "result_summary": str(redact(result))[:500] if result is not None else None,
             "allowed": allowed,
             "reason": reason,
         }

@@ -35,6 +35,7 @@ class AppConfig(BaseModel):
     dangerous_commands: list[str] = Field(default_factory=get_default_dangerous_commands)
     protected_paths: list[str] = Field(default_factory=get_default_protected_paths)
     log_file: str = "logs/pc_assistant.json"
+    runtime_root: str = "."
     working_directory: str = Field(default_factory=os.getcwd)
     reflection_enabled: bool = False
     reflection_threshold: int = 7
@@ -47,6 +48,15 @@ class AppConfig(BaseModel):
     feishu_app_secret: str = ""
     feishu_receive_id: str = ""
     feishu_receive_id_type: str = "open_id"
+    vision_max_side: int = 1280
+    vision_jpeg_quality: int = 70
+    attachment_dir: str = "attachments"
+    attachment_ttl_seconds: int = 3600
+    attachment_cleanup_interval_seconds: int = 300
+    supports_vision: bool | None = None
+    screen_grid_enabled: bool = True
+    screen_verify_enabled: bool = False
+    ui_backend: str = "auto"
     source_config_path: str = ""
 
     @model_validator(mode="after")
@@ -120,12 +130,22 @@ def _env_overrides() -> dict[str, Any]:
         "PC_TURN_TRACE_LOG": ("turn_trace_log", str),
         "PC_EVIDENCE_POLICY_ENABLED": ("evidence_policy_enabled", bool),
         "PC_LOG_FILE": ("log_file", str),
+        "PC_RUNTIME_ROOT": ("runtime_root", str),
         "PC_WORKING_DIRECTORY": ("working_directory", str),
         "PC_FEISHU_ENABLED": ("feishu_enabled", bool),
         "PC_FEISHU_APP_ID": ("feishu_app_id", str),
         "PC_FEISHU_APP_SECRET": ("feishu_app_secret", str),
         "PC_FEISHU_RECEIVE_ID": ("feishu_receive_id", str),
         "PC_FEISHU_RECEIVE_ID_TYPE": ("feishu_receive_id_type", str),
+        "PC_VISION_MAX_SIDE": ("vision_max_side", int),
+        "PC_VISION_JPEG_QUALITY": ("vision_jpeg_quality", int),
+        "PC_ATTACHMENT_DIR": ("attachment_dir", str),
+        "PC_ATTACHMENT_TTL_SECONDS": ("attachment_ttl_seconds", int),
+        "PC_ATTACHMENT_CLEANUP_INTERVAL_SECONDS": ("attachment_cleanup_interval_seconds", int),
+        "PC_SUPPORTS_VISION": ("supports_vision", bool),
+        "PC_SCREEN_GRID_ENABLED": ("screen_grid_enabled", bool),
+        "PC_SCREEN_VERIFY_ENABLED": ("screen_verify_enabled", bool),
+        "PC_UI_BACKEND": ("ui_backend", str),
     }
     overrides: dict[str, Any] = {}
     for env_key, (field_name, field_type) in mapping.items():

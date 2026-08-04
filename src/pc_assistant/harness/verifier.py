@@ -3,16 +3,30 @@
 Sits between the LLM (proposer) and tool execution (commit).  For every
 proposed tool call it runs: schema validation → safety policy → confirmation
 gate, and returns a typed ``Verdict`` (accept / reject with refusal code).
+
+It also carries an optional post-verify strategy for GUI automation.  The
+caller must invoke :meth:`post_verify` only after a verified tool execution has
+completed; authorization and postcondition evidence are deliberately separate
+lifecycle steps.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from pc_assistant.harness.audit import AuditLogger
 from pc_assistant.harness.confirm import ConfirmFn, resolve_confirm
 from pc_assistant.harness.refusal import RefusalCode, Verdict
 from pc_assistant.harness.safety import SafetyChecker
 from pc_assistant.tools.registry import ToolRegistry
+
+# High-risk GUI actions that warrant a post-action screen verification.
+RISKY_GUI_ACTIONS: dict[str, set[str]] = {
+    "mouse": {"click", "double_click", "right_click", "drag"},
+    "keyboard": {"hotkey", "press", "write"},
+    "ui": {"click", "type"},
+}
+
+PostVerifyFn = Callable[[str, dict[str, Any]], Awaitable[str]]
 
 
 class Verifier:
@@ -24,11 +38,41 @@ class Verifier:
         registry: ToolRegistry,
         audit: AuditLogger,
         confirm_callback: ConfirmFn | None = None,
+        *,
+        verify_enabled: bool = False,
+        post_verify_callback: PostVerifyFn | None = None,
     ) -> None:
         self._safety = safety
         self._registry = registry
         self._audit = audit
         self._confirm_callback = confirm_callback
+        self._verify_enabled = verify_enabled
+        self._post_verify_callback = post_verify_callback
+
+    @staticmethod
+    def _needs_post_verify(tool_name: str, arguments: dict[str, Any]) -> bool:
+        risky_actions = RISKY_GUI_ACTIONS.get(tool_name)
+        if risky_actions is None:
+            return False
+        return arguments.get("action") in risky_actions
+
+    async def post_verify(self, tool_name: str, arguments: dict[str, Any]) -> None:
+        """Collect advisory postcondition evidence after tool execution."""
+        if not self._verify_enabled or self._post_verify_callback is None:
+            return
+        if not self._needs_post_verify(tool_name, arguments):
+            return
+        try:
+            summary = await self._post_verify_callback(tool_name, arguments)
+        except Exception as e:  # post-verify is advisory; never fail the turn
+            summary = f"post-verify failed: {e}"
+        self._audit.log(
+            action="tool_call_verified",
+            tool=tool_name,
+            parameters=arguments,
+            allowed=True,
+            reason=summary,
+        )
 
     async def verify(
         self,

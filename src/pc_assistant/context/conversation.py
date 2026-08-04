@@ -8,9 +8,26 @@ from pydantic import BaseModel
 from pc_assistant.context.tags import wrap_tool_result
 
 
+def _assert_reference_only(content: Any) -> None:
+    """Fail closed if provider image payloads reach durable conversation state."""
+    if isinstance(content, str):
+        if "data:image/" in content and ";base64," in content:
+            raise ValueError("Binary image data cannot be stored in conversation history")
+        return
+    if isinstance(content, list):
+        for block in content:
+            _assert_reference_only(block)
+        return
+    if isinstance(content, dict):
+        if content.get("type") in ("image", "image_url") or "image_url" in content:
+            raise ValueError("Provider image blocks cannot be stored in conversation history")
+        for value in content.values():
+            _assert_reference_only(value)
+
+
 class Message(BaseModel):
     role: str
-    content: str
+    content: str | list[dict[str, Any]] = ""
     tool_calls: list[dict[str, Any]] | None = None
     delta_tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
@@ -46,9 +63,10 @@ class ConversationManager:
         if date_context_provider is not None:
             self._date_context_provider = date_context_provider
 
-    def add(self, role: str, content: str, **kwargs: Any) -> Message:
+    def add(self, role: str, content: str | list[dict[str, Any]], **kwargs: Any) -> Message:
         if role == "system":
             raise ValueError("System messages must be set via set_system_context(), not add()")
+        _assert_reference_only(content)
         # Normalize tool_calls/delta_tool_calls
         if "delta_tool_calls" in kwargs and "tool_calls" not in kwargs:
             kwargs["tool_calls"] = kwargs["delta_tool_calls"]
@@ -56,8 +74,21 @@ class ConversationManager:
         self._messages.append(msg)
         return msg
 
-    def add_user(self, content: str) -> Message:
+    def add_user(self, content: str | list[dict[str, Any]]) -> Message:
         return self.add("user", content)
+
+    def add_user_with_blocks(
+        self,
+        text: str,
+        blocks: list[dict[str, Any]] | None = None,
+    ) -> Message:
+        """Add a user turn that carries multimodal blocks (text + images)."""
+        if blocks:
+            content: list[dict[str, Any]] = list(blocks)
+            if text:
+                content.insert(0, {"type": "text", "text": text})
+            return self.add("user", content)
+        return self.add("user", text)
 
     def add_assistant(self, content: str, tool_calls: list[dict[str, Any]] | None = None, delta_tool_calls: list[dict[str, Any]] | None = None, reasoning_content: str | None = None) -> Message:
         tcs = tool_calls or delta_tool_calls
@@ -73,6 +104,18 @@ class ConversationManager:
             wrapped = wrap_tool_result(tool_name, content)
             return self.add("tool", wrapped, tool_call_id=tool_call_id)
         return self.add("tool", content, tool_call_id=tool_call_id)
+
+    def add_tool_result_blocks(
+        self,
+        tool_call_id: str,
+        blocks: list[dict[str, Any]],
+        tool_name: str = "",
+    ) -> Message:
+        """Store a tool result as raw content blocks (e.g. an inline image).
+
+        No XML wrapping — vision blocks must reach the provider untouched.
+        """
+        return self.add("tool", blocks, tool_call_id=tool_call_id)
 
     def get_messages(self) -> list[dict[str, Any]]:
         return [m.to_dict() for m in self._messages]
@@ -157,6 +200,7 @@ class ConversationManager:
         for m in messages:
             role = m.get("role", "")
             content = m.get("content", "")
+            _assert_reference_only(content)
             if role == "system":
                 continue
             tc_id = m.get("tool_call_id")

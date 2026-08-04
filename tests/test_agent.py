@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -130,6 +131,29 @@ def _make_stream_mock(content: str = "", tool_calls: list[dict] | None = None, f
 
 
 class TestAgentRun:
+    @pytest.mark.asyncio
+    async def test_same_session_runs_are_serialized(self):
+        agent = Agent(config=AppConfig())
+        active = 0
+        max_active = 0
+
+        async def slow_stream(*args, **kwargs):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0.02)
+            yield StreamChunk(delta_content="ok")
+            yield StreamChunk(finish_reason="stop")
+            active -= 1
+
+        agent._llm.chat_stream = slow_stream
+        await asyncio.gather(
+            _collect_events(agent, "first", session_id="shared"),
+            _collect_events(agent, "second", session_id="shared"),
+        )
+
+        assert max_active == 1
+
     @pytest.mark.asyncio
     async def test_direct_answer(self):
         agent = Agent(config=AppConfig())
@@ -488,7 +512,7 @@ class TestAgentRun:
     @pytest.mark.asyncio
     async def test_tool_exception(self):
         agent = Agent(config=AppConfig())
-        agent._registry.execute = AsyncMock(side_effect=RuntimeError("tool failed"))
+        agent._executor.commit = AsyncMock(side_effect=RuntimeError("tool failed"))
         first_stream = _make_stream_mock(
             content="Using tool.",
             tool_calls=[{

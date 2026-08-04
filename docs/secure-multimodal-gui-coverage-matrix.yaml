@@ -1,0 +1,48 @@
+campaign: secure-multimodal-gui
+blueprint: docs/secure-multimodal-gui-phases.md
+plan_mode: existing-implementation-defect-hardening
+rejected_path_decision: .gs-harness/plans/secure-multimodal-gui-v2.yaml
+updated: 2026-08-04
+implementation_status: implemented
+verification_status: functional-tests-passing-coverage-gate-blocked-by-repository-baseline
+functional_test_result: 701-passed-4-live-skipped
+changes:
+  - {id: C1, slug: runtime-layout-and-logs, status: implemented, sections: [2, 3, 5.1, 5.3, 5.4, 5.5, 10]}
+  - {id: C2, slug: attachment-store-and-ingress, status: implemented, sections: [2, 3, 5.1, 5.3, 5.4, 5.5, 10]}
+  - {id: C3, slug: image-reference-message-pipeline, status: implemented, sections: [2, 3, 5.1, 5.3, 5.4, 5.5, 10]}
+  - {id: C4, slug: provider-role-aware-vision, status: implemented, sections: [2, 3, 5.1, 5.3, 5.4, 5.5, 10]}
+  - {id: C5, slug: gui-targeting-coordinate-transform, status: implemented, sections: [2, 3, 5.1, 5.3, 5.4, 5.5, 10]}
+  - {id: C6, slug: verified-execution-postcondition, status: implemented, sections: [2, 3, 5.1, 5.3, 5.4, 5.5, 10]}
+critic_findings:
+  - {id: CRIT-001, source: independent-design-critic, summary: unstable name-only GUI target, disposition: close-in-c5, owner: C5}
+  - {id: CRIT-002, source: independent-design-critic, summary: incomplete coordinate transform, disposition: close-in-c5, owner: C5}
+  - {id: CRIT-003, source: independent-design-critic, summary: post-action screenshot is not pre-action safety, disposition: close-in-c6, owner: C6}
+  - {id: CRIT-004, source: independent-design-critic, summary: visual prompt injection trust boundary, disposition: close-in-c6, owner: C6}
+  - {id: CRIT-005, source: independent-design-critic, summary: base64 persistence and lifecycle leak, disposition: close-in-c2-c3, owner: C3}
+  - {id: CRIT-006, source: independent-design-critic, summary: provider role-specific tool image formats, disposition: close-in-c4, owner: C4}
+  - {id: CRIT-007, source: independent-design-critic, summary: image budget and atomic truncation, disposition: close-in-c3-c4, owner: C3}
+  - {id: CRIT-008, source: independent-design-critic, summary: boolean vision capability insufficient, disposition: close-in-c4, owner: C4}
+  - {id: CRIT-009, source: independent-design-critic, summary: unsafe and lossy preprocessing, disposition: close-in-c2, owner: C2}
+  - {id: CRIT-010, source: independent-design-critic, summary: grounding endpoint security, disposition: rejected-with-feature, owner: null}
+  - {id: CBP-CRIT-001, source: blueprint-critic, summary: wire compatibility contradicted target, disposition: breaking-repair-approved-development-stage, owner: C2}
+  - {id: CBP-CRIT-002, source: blueprint-critic, summary: recall and fallback lacked closure, disposition: removed-from-mvp, owner: C3}
+  - {id: CBP-CRIT-003, source: blueprint-critic, summary: GUI change exceeded controllability, disposition: split-c5-c6, owner: null}
+  - {id: CBP-CRIT-004, source: blueprint-critic, summary: TTL trigger undefined, disposition: periodic-startup-session-cleanup, owner: C2}
+  - {id: CBP-CRIT-005, source: blueprint-critic, summary: findings and overlaps not independently traceable, disposition: matrix-and-paths-added, owner: null}
+  - {id: CBP-CRIT-006, source: blueprint-critic, summary: verification commands not executable, disposition: exact-commands-added, owner: null}
+  - {id: CBP-CRIT-007, source: blueprint-critic, summary: architecture anchor path mismatch, disposition: corrected-in-v2-plan, owner: null}
+gaps:
+  - {id: TEST-COVERAGE-001, summary: repository-wide coverage is 61.31 percent against an 80 percent configured gate, disposition: existing cross-module test debt; do not lower threshold, owner: test-hardening}
+implemented_fixes:
+  - {id: AR-003, summary: post-verification ran before tool execution, repair: explicit post_verify after successful execution, owner: C6}
+  - {id: AR-009, summary: same-session turns could interleave, repair: per-session full-run serialization, owner: session-hardening}
+  - {id: AR-004, summary: provider image blocks entered durable conversation and events, repair: session-scoped AttachmentStore with image_ref history and request-only hydration, owner: C2-C3}
+  - {id: AR-002, summary: ToolRegistry exposed an unchecked public commit path, repair: VerifiedToolExecutor with opaque single-use prepared calls and internal registry commit, owner: C6}
+  - {id: AR-005, summary: runtime paths and service logs were fragmented, repair: RuntimePaths with sibling logs attachments cache plus custom-root service resolution, owner: C1}
+  - {id: AR-006, summary: vision support was represented as a boolean, repair: typed role MIME count byte pixel and transport capability contract, owner: C4}
+  - {id: AR-007, summary: GUI targets were ambiguous and stale, repair: snapshot-bound ElementRef with fail-closed freshness and identity checks plus CoordinateTransform, owner: C5}
+  - {id: AR-011, summary: TUI copy and cancellation conflicted, repair: Ctrl-C selection copy Esc cancellation direct right-click copy and OSC52/local clipboard, owner: tui-hardening}
+  - {id: AR-012, summary: screenshots used generic CWD paths and Feishu ignored generated images, repair: unified collision-resistant artifact paths and explicit Feishu image delivery, owner: C2}
+explicit_non_goals:
+  - {feature: grounding-service, disposition: rejected, reason: accessibility plus direct provider vision fallback is sufficient}
+  - {feature: model-image-recall, disposition: rejected, reason: bounded automatic current-request hydration is sufficient}
