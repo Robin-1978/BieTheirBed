@@ -183,6 +183,21 @@ def test_feishu_image_waits_for_user_question(tmp_path):
     assert channel._attachments_for_text("ou-user") is None
 
 
+def test_feishu_duplicate_image_message_is_acknowledged_once(tmp_path):
+    channel = FeishuChannel(runtime_root=str(tmp_path))
+    channel._agent = _AttachmentAgent()
+    channel._download_image = MagicMock(return_value=str(tmp_path / "attachments" / "image.png"))
+    channel._add_reaction = MagicMock(return_value="reaction-id")
+    channel._remove_reaction = MagicMock()
+    channel._send_text = MagicMock(return_value=True)
+
+    assert channel._accept_image_message("ou-user", "same-message", "image-key") is True
+    assert channel._accept_image_message("ou-user", "same-message", "image-key") is False
+
+    channel._download_image.assert_called_once()
+    channel._send_text.assert_called_once()
+
+
 def test_feishu_reply_targets_exact_image():
     channel = FeishuChannel()
     channel._remember_image_ref("ou-user", "image-a", "attachment-a")
