@@ -219,7 +219,11 @@ class TestServerClientIntegration:
         async def mock_run(text, *, session_id="", confirm_callback=None):
             yield AgentEvent(type="stream_delta", content="Hello ")
             yield AgentEvent(type="stream_delta", content="world!")
-            yield AgentEvent(type="final_answer", content="Hello world!")
+            if confirm_callback is not None and text.startswith("delete"):
+                approved = await confirm_callback("shell", {"command": "rm -rf /"})
+                yield AgentEvent(type="final_answer", content=f"approved={approved}")
+            else:
+                yield AgentEvent(type="final_answer", content="Hello world!")
 
         mock_agent.run = mock_run
         server._agent = mock_agent
@@ -260,6 +264,46 @@ class TestServerClientIntegration:
 
         deltas = [e.content for e in events if e.type == "stream_delta"]
         assert "".join(deltas) == "Hello world!"
+
+    async def test_confirm_reply_processed_during_run(self, server_and_client):
+        """A confirm reply must be read while a run is in flight (no deadlock).
+
+        Regression: the server used to block its read loop inside the run, so
+        the client's ``confirm`` message sat unread until the 120s timeout.
+        """
+        server, client = server_and_client
+        received_code = []
+
+        async def handle_confirm(data):
+            received_code.append(data.get("code", ""))
+            await client.confirm(data["code"], True)
+
+        client.set_confirm_handler(handle_confirm)
+
+        events = []
+        async for event in client.run("delete temp"):
+            events.append(event)
+
+        assert received_code, "Server must emit a confirm_request"
+        final = [e for e in events if e.type == "final_answer"]
+        assert final and final[0].content == "approved=True", (
+            "Server must process the confirm reply mid-run"
+        )
+
+    async def test_confirm_deny_processed_during_run(self, server_and_client):
+        server, client = server_and_client
+
+        async def handle_confirm(data):
+            await client.confirm(data["code"], False)
+
+        client.set_confirm_handler(handle_confirm)
+
+        events = []
+        async for event in client.run("delete temp"):
+            events.append(event)
+
+        final = [e for e in events if e.type == "final_answer"]
+        assert final and final[0].content == "approved=False"
 
     async def test_cancel(self, server_and_client):
         server, client = server_and_client

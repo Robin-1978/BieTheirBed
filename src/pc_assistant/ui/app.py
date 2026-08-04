@@ -211,7 +211,7 @@ class ChatApp(App):
             f"`{args_str}`\n\n"
             f"Type `/confirm` to approve or `/deny` to reject."
         ))
-        self._schedule_scroll()
+        self._request_scroll()
 
     def _on_timer_notify(self, task_id: str, message: str) -> None:
         self.notify(message, title=f"Timer: {task_id}", severity="information", timeout=8)
