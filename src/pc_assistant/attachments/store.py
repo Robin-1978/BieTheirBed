@@ -25,6 +25,7 @@ class _Attachment:
     width: int
     height: int
     expires_at: float
+    content_sha256: str
 
 
 class AttachmentStore:
@@ -137,6 +138,7 @@ class AttachmentStore:
             width=width,
             height=height,
             expires_at=self._clock() + self._ttl,
+            content_sha256=hashlib.sha256(data).hexdigest(),
         )
         self._entries[attachment_id] = entry
         ref: dict[str, Any] = {
@@ -186,6 +188,7 @@ class AttachmentStore:
             width=width,
             height=height,
             expires_at=self._clock() + self._ttl,
+            content_sha256=hashlib.sha256(data).hexdigest(),
         )
         self._entries[attachment_id] = entry
         ref: dict[str, Any] = {
@@ -218,6 +221,24 @@ class AttachmentStore:
             "media_type": entry.media_type,
             "width": entry.width,
             "height": entry.height,
+        }
+
+    def hydrate_attachment(self, session_id: str, attachment_id: str) -> dict[str, Any]:
+        """Hydrate one owned attachment for a single provider request."""
+        return self.hydrate_ref(
+            session_id,
+            {"type": "image_ref", "attachment_id": attachment_id},
+        )
+
+    def metadata(self, session_id: str, attachment_id: str) -> dict[str, Any]:
+        """Return safe metadata without exposing the managed file path."""
+        entry = self._get(session_id, attachment_id)
+        return {
+            "attachment_id": entry.attachment_id,
+            "media_type": entry.media_type,
+            "width": entry.width,
+            "height": entry.height,
+            "content_sha256": entry.content_sha256,
         }
 
     def reference(
@@ -268,6 +289,48 @@ class AttachmentStore:
                     })
             message["content"] = resolved
         return hydrated
+
+    def manifest_messages(
+        self,
+        session_id: str,
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Replace image references with text manifests for text-only models."""
+        manifested = copy.deepcopy(messages)
+        for message in manifested:
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            resolved: list[dict[str, Any]] = []
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "image_ref":
+                    resolved.append(block)
+                    continue
+                attachment_id = str(block.get("attachment_id", ""))
+                try:
+                    metadata = self.metadata(session_id, attachment_id)
+                except KeyError:
+                    metadata = {
+                        "attachment_id": attachment_id,
+                        "media_type": block.get("media_type", "unknown"),
+                        "width": block.get("width", 0),
+                        "height": block.get("height", 0),
+                    }
+                source = str(block.get("source", "unknown"))
+                caption = str(block.get("caption", "")).strip()
+                line = (
+                    "[available image: "
+                    f"image_id={metadata['attachment_id']}; "
+                    f"media_type={metadata['media_type']}; "
+                    f"size={metadata['width']}x{metadata['height']}; "
+                    f"source={source}"
+                )
+                if caption:
+                    line += f"; caption={caption}"
+                line += "]"
+                resolved.append({"type": "text", "text": line})
+            message["content"] = resolved
+        return manifested
 
     def cleanup_session(self, session_id: str) -> None:
         session_key = self._session_key(session_id)

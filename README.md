@@ -8,6 +8,7 @@ A Python desktop AI agent with ReAct reasoning, multi-LLM support, tool calling,
 - **Stochastic-Deterministic Boundary (SDB)** — Typed verifier gate between LLM proposals and tool execution
 - **Plan-Execute** — Optional planning phase for complex multi-step tasks
 - **Multi-LLM** — llama.cpp, OpenAI, Anthropic, any OpenAI-compatible API
+- **Split Vision Runtime** — text-only main models can inspect images through a dedicated local Qwen-VL/llama.cpp perception tool
 - **Model Adapter Layer** — Canonical IR + per-provider payload/response parsers + provider profiles (endpoint, headers, capabilities)
 - **Prompt Caching** — Cache-friendly static prefix (system + tool schemas + history); Anthropic `cache_control` blocks for prompt caching
 - **Token Calibration** — Per-call token estimation calibrated against real usage
@@ -49,11 +50,17 @@ PC_LLM_PROVIDER=openai PC_LLM_API_KEY=sk-... PC_LLM_MODEL_NAME=gpt-4o pca
 
 ```yaml
 llm_provider: "llamacpp"
-llm_server_url: "http://127.0.0.1:8080"
+llm_server_url: "http://127.0.0.1:8192"
 llm_model_name: ""
 llm_api_key: ""
 llm_temperature: 0.7
 llm_timeout: 120
+vision_enabled: true
+vision_provider: "llamacpp"
+vision_server_url: "http://127.0.0.1:8192"
+vision_model_name: ""
+vision_timeout: 120
+vision_max_tokens: 1024
 max_iterations: 8
 context_window_budget: 4096
 reflection_enabled: false
@@ -73,6 +80,14 @@ All config fields can be overridden with `PC_` prefix:
 | `PC_LLM_API_BASE` | llm_api_base |
 | `PC_LLM_TEMPERATURE` | llm_temperature |
 | `PC_LLM_TIMEOUT` | llm_timeout |
+| `PC_VISION_ENABLED` | vision_enabled |
+| `PC_VISION_PROVIDER` | vision_provider |
+| `PC_VISION_SERVER_URL` | vision_server_url |
+| `PC_VISION_MODEL_NAME` | vision_model_name |
+| `PC_VISION_API_KEY` | vision_api_key |
+| `PC_VISION_API_BASE` | vision_api_base |
+| `PC_VISION_TIMEOUT` | vision_timeout |
+| `PC_VISION_MAX_TOKENS` | vision_max_tokens |
 | `PC_MAX_ITERATIONS` | max_iterations |
 | `PC_SHELL_TIMEOUT` | shell_timeout |
 | `PC_CONTEXT_WINDOW_BUDGET` | context_window_budget |
@@ -140,6 +155,7 @@ socket and PID files use the operating system runtime directory.
 | `keyboard` | press, type, hotkey, write, shortcut | Keyboard input control |
 | `mouse` | position, move, click, double_click, right_click, scroll, drag | Mouse control |
 | `scheduler` | create, list, run, delete, enable, disable, start, stop, status | Cron-like task scheduling |
+| `image_inspect` | describe, ocr, locate, compare | Observe visible image content by `image_id`; diagnosis and solutions remain with the main model |
 | `describe_tool` | tool_name | Meta-tool: query the full JSON schema of any registered tool |
 
 ## Development
@@ -171,6 +187,9 @@ src/pc_assistant/
 │   └── parsers/
 │       ├── openai.py    # OpenAI-style payload & stream parsing
 │       └── anthropic.py # Anthropic messages & SSE parsing
+├── vision/
+│   ├── broker.py        # Dedicated perception-only vision provider boundary
+│   └── preprocess.py    # Image resize/encoding helpers
 ├── session.py           # Multi-session state with LRU eviction & rollback
 ├── config.py            # Pydantic config model + YAML + env overrides
 ├── exceptions.py        # Typed exception hierarchy
@@ -195,6 +214,7 @@ src/pc_assistant/
 │   ├── registry.py      # Name→tool map with MCP server registration
 │   ├── mcp_adapter.py   # MCP protocol tool adapter
 │   ├── describe_tool.py # Meta-tool: full schema for any registered tool
+│   ├── image_inspect.py # Structured image observation by attachment ID
 │   └── ...              # 16 built-in tool implementations
 ├── harness/
 │   ├── verifier.py      # SDB: deterministic verifier (propose→verify→commit)

@@ -60,6 +60,8 @@ from pc_assistant.tools.screen import ScreenTool
 from pc_assistant.tools.ui import UITool
 from pc_assistant.tools.scheduler import SchedulerTool
 from pc_assistant.tools.describe_tool import DescribeTool
+from pc_assistant.tools.image_inspect import ImageInspectTool
+from pc_assistant.vision.broker import VisionBroker
 
 
 # Tool-result payload cap for streamed events (bytes/chars). Keeps serialized
@@ -116,6 +118,8 @@ class Agent:
         turn_recorder: TurnRecorder | None = None,
         evidence: EvidencePolicy | None = None,
         attachment_store: AttachmentStore | None = None,
+        vision_llm: LLMProvider | None = None,
+        vision_broker: VisionBroker | None = None,
         disable_tools: bool = False,
     ) -> None:
         self._config = config or load_config()
@@ -197,6 +201,23 @@ class Agent:
             ),
             ttl_seconds=self._config.attachment_ttl_seconds,
         )
+        self._vision_broker: VisionBroker | None = None
+        if self._config.vision_enabled:
+            dedicated_vision_llm = vision_llm or LLMProvider(
+                server_url=self._config.vision_server_url,
+                model_name=self._config.vision_model_name,
+                provider=self._config.vision_provider,
+                api_key=self._config.vision_api_key,
+                api_base=self._config.vision_api_base,
+                timeout=self._config.vision_timeout,
+                supports_vision=True,
+            )
+            self._vision_broker = vision_broker or VisionBroker(
+                dedicated_vision_llm,
+                self._attachment_store,
+                model_name=self._config.vision_model_name,
+                max_tokens=self._config.vision_max_tokens,
+            )
         self._session_manager.set_drop_callback(self._attachment_store.cleanup_session)
         self._register_builtin_tools(disable_tools=disable_tools)
         self._cache_plan = build_cache_plan(
@@ -467,11 +488,10 @@ class Agent:
     ) -> list[dict[str, Any]] | None:
         """Extract an inline image block from a tool result, if present.
 
-        Returns ``None`` when the result carries no image (text-only tools keep
-        their existing XML-wrapped path), or when the provider cannot see
-        images. The image is delivered to the model as a raw content block.
+        Returns ``None`` when the result carries no image. The stored reference
+        is hydrated for a multimodal main model or manifested for a text model.
         """
-        if not self._llm.supports_vision or not isinstance(result, dict):
+        if not isinstance(result, dict):
             return None
         block = result.get("image")
         if not isinstance(block, dict) or block.get("type") != "image":
@@ -495,7 +515,14 @@ class Agent:
             except ValueError:
                 return None
         return [
-            {"type": "text", "text": f"[inline image from {tool_name}: {path}]"},
+            {
+                "type": "text",
+                "text": (
+                    f"[inline image from {tool_name}: {path}. "
+                    "If the main model is text-only, call image_inspect with the manifested image_id "
+                    "before making claims about visible content.]"
+                ),
+            },
             ref,
         ]
 
@@ -627,8 +654,10 @@ class Agent:
             KeyboardTool(),
             MouseTool(),
             SchedulerTool(self._runtime_paths.data / "assistant.db"),
-            DescribeTool(registry=self._registry),
         ]
+        if self._vision_broker is not None:
+            builtin_tools.append(ImageInspectTool(self._vision_broker))
+        builtin_tools.append(DescribeTool(registry=self._registry))
         for tool in builtin_tools:
             self._registry.register(tool)
 
@@ -774,12 +803,12 @@ class Agent:
             )
             state.status = "ready"
             return
-        if attachment_blocks and not self._llm.supports_vision:
+        if attachment_blocks and not self._llm.supports_vision and self._vision_broker is None:
             yield AgentEvent(
                 type="error",
                 content=(
-                    "The active LLM provider does not support vision (supports_vision=false). "
-                    "Switch to a multimodal model to send images."
+                    "The active LLM provider does not support vision and the dedicated "
+                    "vision service is disabled. Enable vision_enabled or use a multimodal model."
                 ),
             )
             state.status = "ready"
@@ -790,12 +819,14 @@ class Agent:
         turn_base_prompt_tokens = state.total_prompt_tokens
         turn_base_completion_tokens = state.total_completion_tokens
         evidence_required = self._evidence.requires_evidence(user_input)
+        vision_required = bool(attachment_blocks and not self._llm.supports_vision)
         evidence_tool_calls = 0
         try:
             async for event in self._run_loop(
                 state,
                 user_input,
                 evidence_required=evidence_required,
+                vision_required=vision_required,
                 confirm_fn=confirm_fn,
                 attachment_blocks=attachment_blocks,
             ):
@@ -828,6 +859,7 @@ class Agent:
         user_input: str,
         *,
         evidence_required: bool,
+        vision_required: bool = False,
         confirm_fn: ConfirmFn | None = None,
         attachment_blocks: list[dict[str, Any]] | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
@@ -863,8 +895,8 @@ class Agent:
 
         if self._config.llm_compact_enabled:
             async def _hydrate_for_compaction(messages: list[dict[str, Any]]) -> str:
-                hydrated = self._attachment_store.hydrate_messages(state.session_id, messages)
-                return await self._compaction_llm_call(hydrated)
+                prepared = self._prepare_model_messages(state.session_id, messages)
+                return await self._compaction_llm_call(prepared)
 
             compacted = await compact_conversation_llm(
                 conv.get_messages_for_llm_raw(),
@@ -885,9 +917,21 @@ class Agent:
         consecutive_tool_without_answer = 0
         max_consecutive_tool_calls = self._config.max_consecutive_tool_calls
         turn_tool_calls = 0
+        vision_observation_calls = 0
 
         system_prompt = self._system_prompt
-        turn_context = self._evidence.build_instruction() if evidence_required else ""
+        turn_instructions: list[str] = []
+        if evidence_required:
+            turn_instructions.append(self._evidence.build_instruction())
+        if vision_required:
+            turn_instructions.append(
+                "## Image evidence requirement\n"
+                "The current turn contains available image manifests, but you cannot see their pixels. "
+                "Call image_inspect before making claims about visible content. Ask it only to describe, "
+                "transcribe, locate, or compare visible evidence. You remain responsible for diagnosis, "
+                "recommendations, and solutions after receiving that observation."
+            )
+        turn_context = "\n\n".join(turn_instructions)
 
         for iteration in range(self._config.max_iterations):
             if state.cancelled:
@@ -913,7 +957,7 @@ class Agent:
                 budget=self._config.context_window_budget,
             )
             messages = self._ensure_system_first(messages)
-            messages = self._attachment_store.hydrate_messages(state.session_id, messages)
+            messages = self._prepare_model_messages(state.session_id, messages)
             tools = self._registry.all_schemas() if len(self._registry) > 0 else None
 
             full_content = ""
@@ -923,6 +967,7 @@ class Agent:
             accumulated_tool_calls: dict[int, dict[str, Any]] = {}
             finish_reason = ""
             stream_had_error = False
+            suppress_unobserved_visual_answer = vision_required and vision_observation_calls == 0
 
             yield AgentEvent(type="stream_start", iteration=iteration)
 
@@ -962,7 +1007,7 @@ class Agent:
                         clean_part, think_part = _strip_think_tags(full_content)
 
                         new_content = clean_part[emitted_clean_len:]
-                        if new_content:
+                        if new_content and not suppress_unobserved_visual_answer:
                             yield AgentEvent(type="stream_delta", content=new_content, iteration=iteration)
                             emitted_clean_len = len(clean_part)
 
@@ -1171,6 +1216,8 @@ class Agent:
                             inline_blocks = self._inline_image_blocks(state.session_id, tool_name, cached)
                             if inline_blocks is not None:
                                 conv.add_tool_result_blocks(tool_call_id, inline_blocks, tool_name=tool_name)
+                                if not self._llm.supports_vision:
+                                    vision_required = True
                             else:
                                 conv.add_tool_result(tool_call_id, f"[idempotent-replay] {result_str}", tool_name=tool_name)
                             yield AgentEvent(
@@ -1220,6 +1267,13 @@ class Agent:
                         finally:
                             state.tool_task = None
                         safe_result = self._event_safe_result(result)
+                        if (
+                            tool_name == "image_inspect"
+                            and isinstance(safe_result, dict)
+                            and safe_result.get("observation_id")
+                            and not safe_result.get("error")
+                        ):
+                            vision_observation_calls += 1
                         result_str = str(safe_result)
                         result_str = self._smart_truncate(result_str, tool_name, result)
                         inline_blocks = self._inline_image_blocks(state.session_id, tool_name, result)
@@ -1227,6 +1281,8 @@ class Agent:
                             self._idempotency.record(idem_key, result)
                         if inline_blocks is not None:
                             conv.add_tool_result_blocks(tool_call_id, inline_blocks, tool_name=tool_name)
+                            if not self._llm.supports_vision:
+                                vision_required = True
                             result_str = self._inline_image_note(result)
                         else:
                             conv.add_tool_result(tool_call_id, result_str, tool_name=tool_name)
@@ -1257,6 +1313,14 @@ class Agent:
                         )
             else:
                 consecutive_tool_without_answer = 0
+
+                if vision_required and vision_observation_calls == 0:
+                    conv.add_user(
+                        "[System] Your draft relied on an image without visual evidence and was not delivered. "
+                        "Call image_inspect for the available image_id now. Ask only for visible observations; "
+                        "perform diagnosis or solution reasoning yourself after the tool result."
+                    )
+                    continue
 
                 if finish_reason == "length" and clean_content:
                     if evidence_required and turn_tool_calls == 0:
@@ -1329,6 +1393,16 @@ class Agent:
             iteration=self._config.max_iterations,
         )
         state.status = "ready"
+
+    def _prepare_model_messages(
+        self,
+        session_id: str,
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Keep image bytes request-local and away from text-only main models."""
+        if self._llm.supports_vision:
+            return self._attachment_store.hydrate_messages(session_id, messages)
+        return self._attachment_store.manifest_messages(session_id, messages)
 
     async def run_simple(self, user_input: str) -> str:
         final_answer = ""

@@ -318,12 +318,12 @@ assembly contains:
 | Procedural rules | application | bounded shared rules |
 | Working-directory/session metadata | current request | always regenerated |
 | Evidence/safety instruction | current turn | only when required |
-| Image observations | session + request | durable references; request-only binary hydration |
+| Image observations | session + request | temporary references; request-only binary hydration |
 
 Feishu image messages are downloaded into the runtime attachment inbox,
 converted to an `ImageAttachment`, and registered to the session without a
-second byte-for-byte copy before provider hydration. The SQLite database stores only attachment
-metadata/references; image bytes remain in bounded temporary files.
+second byte-for-byte copy before provider hydration. Attachment metadata and bytes
+remain in the bounded temporary attachment store and are not persisted in SQLite.
 
 Image messages are attachment ingress, not implicit prompts. Feishu stores the
 image and asks the user for a question; the next top-level message consumes the
@@ -332,6 +332,21 @@ to the assistant continues the active image thread. Historical image
 references remain in canonical history but are not rehydrated on unrelated
 turns. This prevents every old screenshot from repeatedly consuming the vision
 context budget.
+
+Main-model vision and image perception are separate capabilities. If the main
+model supports images, the current-turn reference may be hydrated directly for
+that one provider request. If the main model is text-only, every reference is
+converted to a metadata manifest containing `image_id`, MIME type, dimensions,
+and source. The deterministic image-evidence gate prevents delivery of a visual
+claim until the main model calls `image_inspect`.
+
+`image_inspect` delegates to an independently configured vision provider. Its
+contract is deliberately perceptual: `describe`, `ocr`, `locate`, and `compare`.
+The optional `focus` names a visible detail to observe; obvious diagnosis or
+solution questions are rejected. The vision model returns structured visible
+evidence and uncertainty, while the main model owns diagnosis, recommendations,
+and task reasoning. Base64 exists only in the broker's provider request and is
+never returned by the tool or written into conversation history.
 
 Other sessions' raw conversation messages are never copied into the current
 `SessionState`. Durable domain state is stored in `data/assistant.db`: profile
@@ -407,6 +422,8 @@ Clear operations also require explicit semantics:
    provider request bodies.
 10. Optional platform dependencies degrade explicitly without disabling unrelated
     application capabilities.
+11. A vision model observes pixels only; diagnosis, recommendations, and action
+    selection remain responsibilities of the main agent model.
 
 ## 6. Architecture review findings
 
@@ -542,6 +559,18 @@ and default to no grid; coordinate grids require an explicit tool argument.
 Managed image paths are registered directly by `AttachmentStore` instead of
 copying identical bytes into a second session file.
 
+### AR-016: Main-model multimodality was coupled to image ingress — high (fixed 2026-08-04)
+
+A text-only main model previously rejected every image before the ReAct loop,
+which prevented deployments such as DeepSeek for reasoning plus local Qwen-VL
+for perception. The agent now exposes attachment manifests to text models and
+provides a dedicated `image_inspect` tool backed by an independently configured
+vision provider. Its prompt and schema restrict it to visible description,
+OCR, location, and comparison; solution-seeking focus values are rejected.
+Repeated identical observations are cached by image hash, model, operation,
+focus, region, and comparison image. A deterministic gate suppresses and rejects
+an unsupported visual answer until a successful structured observation exists.
+
 ## 7. Defect-hardening matrix
 
 | Priority | Verified defect | Root cause | Minimal repair | State |
@@ -556,6 +585,7 @@ copying identical bytes into a second session file.
 | P2 | TUI selection copy was shadowed by cancellation and popup behavior | App-level key override and GUI-style root popup | Restore Textual copy semantics, move cancellation to Esc, use OSC52 plus local clipboard | fixed |
 | P2 | Screenshot files and Feishu delivery are implicit | Generic CWD filenames and ignored tool-result image paths | Unified temporary artifact allocator plus explicit channel-safe image metadata | fixed; filesystem and Feishu regressions added |
 | P1 | Durable memory crosses session/principal boundaries | Global UserMemory and unfiltered recent EpisodicMemory are injected into every request | SQLite principal/session scopes, core/relevant policy, explicit episode recall | fixed; scoped regressions added |
+| P1 | Text-only main model cannot process image tasks safely | Image ingress is coupled directly to main-provider multimodality | Attachment manifest + dedicated perception-only `image_inspect` provider + evidence gate | fixed; isolation, caching, ownership, and no-base64 regressions added |
 
 ## 8. Hardening boundaries
 
@@ -583,7 +613,7 @@ web-tool improvements.
 - Full `pytest` with the configured coverage policy before completion claims.
 
 Current verification record (2026-08-04): default non-live regression is
-`701 passed, 4 skipped`; the skipped tests require explicit `RUN_LIVE_E2E=1`.
+`738 passed, 4 skipped`; the skipped tests require explicit `RUN_LIVE_E2E=1`.
 Repository-wide statement coverage is 61.31%, below the pre-existing 80% gate.
 The threshold has not been lowered; closing that cross-module test debt remains
 separate from the completed functional hardening repairs above.

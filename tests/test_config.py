@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import pytest
-from pc_assistant.config import AppConfig
+from pc_assistant.config import AppConfig, load_config
 
 
 class TestAppConfig:
@@ -49,3 +48,22 @@ class TestAppConfig:
         cfg = AppConfig()
         assert cfg.set_field("llm_model_name", "gpt-4") is True
         assert cfg.llm_model_name == "gpt-4"
+
+    def test_vision_provider_is_independent_from_main_provider(self):
+        cfg = AppConfig(
+            llm_provider="openai_compatible",
+            llm_server_url="http://deepseek:8000",
+            supports_vision=False,
+            vision_provider="llamacpp",
+            vision_server_url="http://127.0.0.1:8192",
+            vision_model_name="qwen-vl",
+        )
+        assert cfg.llm_server_url == "http://deepseek:8000"
+        assert cfg.vision_server_url == "http://127.0.0.1:8192"
+        assert cfg.vision_model_name == "qwen-vl"
+
+    def test_false_boolean_environment_override(self, monkeypatch, tmp_path):
+        config = tmp_path / "config.yaml"
+        config.write_text("vision_enabled: true\n", encoding="utf-8")
+        monkeypatch.setenv("PC_VISION_ENABLED", "false")
+        assert load_config(config).vision_enabled is False

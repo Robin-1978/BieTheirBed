@@ -278,7 +278,7 @@ class TestAgentAttachments:
         Image.new("RGB", (32, 32)).save(img)
 
         agent = Agent(
-            config=AppConfig(supports_vision=False),
+            config=AppConfig(supports_vision=False, vision_enabled=False),
             attachment_store=AttachmentStore(tmp_path / "attachments"),
         )
         agent._llm.chat_stream = _capture_stream([])
