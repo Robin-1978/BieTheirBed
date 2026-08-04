@@ -12,8 +12,9 @@ from pc_assistant.tools.base import ToolBase
 class ArtifactPrepareTool(ToolBase):
     name = "artifact_prepare"
     description = (
-        "Prepare an existing local file or image for delivery to the current user. "
-        "This does not open the file locally; it emits a client-deliverable artifact."
+        "Borrow an existing local file or image for delivery to the current user. "
+        "The source is not copied, modified, or deleted. This does not open the file "
+        "locally; it emits a client-deliverable artifact."
     )
     # Preparing this artifact causes the active client to disclose a copy to
     # the current conversation, so it belongs on the verified side-effect

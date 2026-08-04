@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from pc_assistant.agent import Agent, AgentEvent
-from pc_assistant.attachments import AttachmentStore
+from pc_assistant.artifacts import ArtifactStore
 from pc_assistant.config import AppConfig
 from pc_assistant.context.conversation import ConversationManager
 from pc_assistant.llm_provider import StreamChunk
@@ -22,6 +22,10 @@ from pc_assistant.tools.base import ToolBase
 from pc_assistant.vision.preprocess import estimate_image_tokens, image_block_from_file
 
 DATA_URL = "data:image/jpeg;base64,AAAA"
+VALID_IMAGE_DATA_URL = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+)
 
 
 # ── Content IR + provider serialization ────────────────────────────────
@@ -107,7 +111,7 @@ class TestVisionPreprocess:
 class TestConversationBlocks:
     def test_add_user_with_reference_blocks(self):
         conv = ConversationManager()
-        ref = {"type": "image_ref", "attachment_id": "img-1", "media_type": "image/jpeg"}
+        ref = {"type": "image_ref", "artifact_id": "img-1", "media_type": "image/jpeg"}
         msg = conv.add_user_with_blocks("look at this", [ref])
         assert msg.role == "user"
         assert msg.content[0]["type"] == "text"
@@ -120,7 +124,7 @@ class TestConversationBlocks:
 
     def test_add_tool_result_reference_blocks(self):
         conv = ConversationManager()
-        ref = {"type": "image_ref", "attachment_id": "img-1", "media_type": "image/jpeg"}
+        ref = {"type": "image_ref", "artifact_id": "img-1", "media_type": "image/jpeg"}
         msg = conv.add_tool_result_blocks("tc-1", [ref], tool_name="system")
         assert msg.role == "tool"
         assert isinstance(msg.content, list)
@@ -128,7 +132,7 @@ class TestConversationBlocks:
 
     def test_history_preserves_references_without_base64(self):
         conv = ConversationManager()
-        conv.add_user_with_blocks("hi", [{"type": "image_ref", "attachment_id": "img-1"}])
+        conv.add_user_with_blocks("hi", [{"type": "image_ref", "artifact_id": "img-1"}])
         msgs = conv.get_messages_for_llm_raw()
         assert isinstance(msgs[0]["content"], list)
         assert msgs[0]["content"][-1]["type"] == "image_ref"
@@ -249,7 +253,7 @@ class TestAgentAttachments:
         captured: list = []
         agent = Agent(
             config=AppConfig(),
-            attachment_store=AttachmentStore(tmp_path / "attachments"),
+            artifact_store=ArtifactStore(tmp_path / "attachments"),
         )
         agent._llm.chat_stream = _capture_stream(captured)
 
@@ -281,7 +285,7 @@ class TestAgentAttachments:
 
         agent = Agent(
             config=AppConfig(supports_vision=False, vision_enabled=False),
-            attachment_store=AttachmentStore(tmp_path / "attachments"),
+            artifact_store=ArtifactStore(tmp_path / "attachments"),
         )
         agent._llm.chat_stream = _capture_stream([])
         events = await _collect(agent, "hi", attachments=[ImageAttachment.from_path(str(img))])
@@ -321,7 +325,7 @@ class _InlineImageTool(ToolBase):
         return {
             "success": True,
             "path": "/tmp/out.png",
-            "image": build_image_block(DATA_URL, "image/jpeg"),
+            "image": build_image_block(VALID_IMAGE_DATA_URL, "image/png"),
         }
 
     def schema(self):
@@ -333,7 +337,7 @@ class TestInlineImageToolResult:
     async def test_inline_image_hydrated_for_request_but_stored_as_reference(self, tmp_path):
         agent = Agent(
             config=AppConfig(),
-            attachment_store=AttachmentStore(tmp_path / "attachments"),
+            artifact_store=ArtifactStore(tmp_path / "attachments"),
         )
         agent.register_tool(_InlineImageTool())
 

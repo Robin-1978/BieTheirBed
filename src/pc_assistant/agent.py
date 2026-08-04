@@ -9,7 +9,6 @@ from typing import Any, AsyncGenerator, Awaitable
 
 from pydantic import BaseModel
 
-from pc_assistant.attachments import AttachmentStore
 from pc_assistant.artifacts import ArtifactRef, ArtifactStore
 from pc_assistant.config import AppConfig, load_config
 from pc_assistant.context.assembly import assemble_llm_messages, truncate_messages
@@ -121,7 +120,7 @@ class Agent:
         trace: LLMTraceRecorder | None = None,
         turn_recorder: TurnRecorder | None = None,
         evidence: EvidencePolicy | None = None,
-        attachment_store: AttachmentStore | None = None,
+        artifact_store: ArtifactStore | None = None,
         vision_llm: LLMProvider | None = None,
         vision_broker: VisionBroker | None = None,
         disable_tools: bool = False,
@@ -199,15 +198,10 @@ class Agent:
             enabled=self._config.trace_enabled,
         )
         self._evidence = evidence or EvidencePolicy(enabled=self._config.evidence_policy_enabled)
-        self._attachment_store = attachment_store or AttachmentStore(
-            self._runtime_paths.resolve(
-                self._config.attachment_dir,
-                default_parent=self._runtime_paths.attachments.parent,
-            ),
-            ttl_seconds=self._config.attachment_ttl_seconds,
-        )
-        self._artifact_store = ArtifactStore(
-            self._attachment_store.root / "artifacts",
+        self._artifact_store = artifact_store or ArtifactStore(
+            self._runtime_paths.attachments,
+            persistent_root=self._runtime_paths.artifacts,
+            db_path=self._runtime_paths.data / "assistant.db",
             ttl_seconds=self._config.attachment_ttl_seconds,
         )
         self._vision_broker: VisionBroker | None = None
@@ -223,7 +217,7 @@ class Agent:
             )
             self._vision_broker = vision_broker or VisionBroker(
                 dedicated_vision_llm,
-                self._attachment_store,
+                self._artifact_store,
                 model_name=self._config.vision_model_name,
                 max_tokens=self._config.vision_max_tokens,
             )
@@ -421,18 +415,18 @@ class Agent:
         blocks: list[dict[str, Any]] = []
         for att in attachments:
             block = None
-            if att.attachment_id:
+            if att.artifact_id:
                 try:
-                    block = self._attachment_store.reference(
+                    block = self._artifact_store.reference(
                         session_id,
-                        att.attachment_id,
+                        att.artifact_id,
                         caption=att.caption,
                     )
                 except KeyError:
                     block = None
             elif att.data_url:
                 try:
-                    block = self._attachment_store.put_data_url(
+                    block = self._artifact_store.put_data_url(
                         session_id,
                         att.data_url,
                         media_type=att.media_type,
@@ -444,8 +438,8 @@ class Agent:
             elif att.path:
                 attachment_path = Path(att.path).expanduser().resolve()
                 try:
-                    attachment_path.relative_to(self._attachment_store.root.resolve())
-                    block = self._attachment_store.register_path(
+                    attachment_path.relative_to(self._artifact_store.root.resolve())
+                    block = self._artifact_store.register_path(
                         session_id,
                         attachment_path,
                         media_type=att.media_type,
@@ -462,7 +456,7 @@ class Agent:
                         block = None
                     else:
                         try:
-                            block = self._attachment_store.put_data_url(
+                            block = self._artifact_store.put_data_url(
                                 session_id,
                                 image_block["image_url"],
                                 media_type=image_block.get("media_type", att.media_type),
@@ -478,8 +472,8 @@ class Agent:
             blocks.append(block)
         return blocks
 
-    def store_attachment(self, session_id: str, attachment: ImageAttachment) -> dict[str, Any]:
-        """Store one uploaded image and return its reference metadata."""
+    def store_artifact(self, session_id: str, attachment: ImageAttachment) -> dict[str, Any]:
+        """Store one inbound image artifact and return reference metadata."""
         blocks = self._resolve_attachments(session_id, [attachment])
         ref = next(
             (block for block in blocks if block.get("type") == "image_ref"),
@@ -507,7 +501,7 @@ class Agent:
             return None
         path = result.get("path", "")
         try:
-            ref = self._attachment_store.register_path(
+            ref = self._artifact_store.register_path(
                 session_id,
                 path,
                 media_type=str(block.get("media_type", "image/png")),
@@ -515,7 +509,7 @@ class Agent:
             )
         except ValueError:
             try:
-                ref = self._attachment_store.put_data_url(
+                ref = self._artifact_store.put_data_url(
                     session_id,
                     str(block.get("image_url", "")),
                     media_type=str(block.get("media_type", "image/png")),
@@ -596,17 +590,19 @@ class Agent:
         if session_id:
             self._session_manager.drop(session_id)
 
-    def cleanup_attachments(self) -> None:
-        self._attachment_store.cleanup_expired()
+    def cleanup_artifacts(self) -> None:
         self._artifact_store.cleanup_expired()
 
     def _cleanup_session_assets(self, session_id: str) -> None:
-        self._attachment_store.cleanup_session(session_id)
         self._artifact_store.cleanup_session(session_id)
 
     def resolve_artifact(self, session_id: str, artifact_id: str) -> dict[str, Any]:
         """Resolve an opaque artifact ID for an in-process delivery adapter."""
         return self._artifact_store.resolve(session_id, artifact_id)
+
+    def mark_artifact_delivered(self, session_id: str, artifact_id: str) -> dict[str, Any]:
+        """Record successful client delivery without delegating cleanup authority."""
+        return self._artifact_store.mark_delivered(session_id, artifact_id)
 
     def clear_tools(self) -> None:
         """Unregister all tools (headless / benchmark no-tools mode)."""
@@ -661,20 +657,20 @@ class Agent:
             NotificationTool(),
             UITool(
                 ui_backend=self._config.ui_backend,
-                artifact_dir=self._attachment_store.root / "screenshots",
+                artifact_dir=self._artifact_store.root / "screenshots",
             ),
             ScreenTool(
                 grid_enabled=self._config.screen_grid_enabled,
                 max_side=self._config.vision_max_side,
                 jpeg_quality=self._config.vision_jpeg_quality,
-                artifact_dir=self._attachment_store.root / "screenshots",
+                artifact_dir=self._artifact_store.root / "screenshots",
             ),
             KeyboardTool(),
             MouseTool(),
             SchedulerTool(self._runtime_paths.data / "assistant.db"),
             ScreenshotTool(
                 self._artifact_store,
-                self._attachment_store.root / "screenshots",
+                self._artifact_store.root / "screenshots",
             ),
             ArtifactPrepareTool(
                 self._artifact_store,
@@ -1459,8 +1455,8 @@ class Agent:
     ) -> list[dict[str, Any]]:
         """Keep image bytes request-local and away from text-only main models."""
         if self._llm.supports_vision:
-            return self._attachment_store.hydrate_messages(session_id, messages)
-        return self._attachment_store.manifest_messages(session_id, messages)
+            return self._artifact_store.hydrate_messages(session_id, messages)
+        return self._artifact_store.manifest_messages(session_id, messages)
 
     async def run_simple(self, user_input: str) -> str:
         final_answer = ""
@@ -1477,7 +1473,7 @@ class Agent:
 
     def reset_conversation(self) -> None:
         self._default_state.conversation.clear()
-        self._attachment_store.cleanup_session("")
+        self._artifact_store.cleanup_session("")
         self._system_prompt = build_system_prompt(
             working_directory=self._config.working_directory,
         )

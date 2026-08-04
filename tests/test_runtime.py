@@ -9,8 +9,9 @@ def test_runtime_layout_has_sibling_directories(tmp_path):
     paths = RuntimePaths.from_root(tmp_path)
     assert paths.logs.parent == paths.root
     assert paths.attachments.parent == paths.root
+    assert paths.artifacts.parent == paths.root
     assert paths.cache.parent == paths.root
-    assert len({paths.logs, paths.attachments, paths.cache}) == 3
+    assert len({paths.logs, paths.attachments, paths.artifacts, paths.cache}) == 4
     assert paths.data.parent == paths.root
 
 

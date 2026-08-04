@@ -176,12 +176,12 @@ class ServiceClient:
             dumped: list[dict[str, Any]] = []
             for att in attachments:
                 attachment = ImageAttachment.model_validate(att)
-                if attachment.attachment_id:
+                if attachment.artifact_id:
                     dumped.append(attachment.model_dump(exclude_none=True))
                     continue
-                ref = await self.upload_attachment(attachment, session_id=session_id)
+                ref = await self.upload_artifact(attachment, session_id=session_id)
                 dumped.append(ImageAttachment.from_ref(
-                    ref["attachment_id"],
+                    ref["artifact_id"],
                     caption=attachment.caption,
                 ).model_dump(exclude_none=True))
             params["attachments"] = dumped
@@ -202,7 +202,7 @@ class ServiceClient:
         finally:
             self._event_queues.pop(msg_id, None)
 
-    async def upload_attachment(
+    async def upload_artifact(
         self,
         attachment: ImageAttachment,
         *,
@@ -222,16 +222,16 @@ class ServiceClient:
         if not attachment.data_url:
             raise ValueError("Attachment upload requires a path or data URL")
         response = await self._request(
-            "upload_attachment",
+            "upload_artifact",
             {
                 "session_id": session_id,
-                "attachment": attachment.model_dump(exclude_none=True),
+                "artifact": attachment.model_dump(exclude_none=True),
             },
         )
         if response.type == "error":
             raise ValueError(response.data.get("message", "Attachment upload failed"))
         ref = response.data.get("attachment")
-        if not isinstance(ref, dict) or not ref.get("attachment_id"):
+        if not isinstance(ref, dict) or not ref.get("artifact_id"):
             raise ValueError("Service returned an invalid attachment reference")
         return ref
 

@@ -256,9 +256,9 @@ class TestServerClientIntegration:
         mock_agent.cancel = MagicMock()
         mock_agent.reset_conversation = MagicMock()
         mock_agent.drop_session = MagicMock()
-        mock_agent.store_attachment = MagicMock(return_value={
+        mock_agent.store_artifact = MagicMock(return_value={
             "type": "image_ref",
-            "attachment_id": "uploaded-ref",
+            "artifact_id": "uploaded-ref",
             "media_type": "image/jpeg",
         })
         mock_agent.conversation = MagicMock()
@@ -331,10 +331,10 @@ class TestServerClientIntegration:
         ):
             events.append(event)
 
-        server._agent.store_attachment.assert_called_once()
-        stored_session, _ = server._agent.store_attachment.call_args.args
+        server._agent.store_artifact.assert_called_once()
+        stored_session, _ = server._agent.store_artifact.call_args.args
         assert stored_session == "image-session"
-        assert server._agent.last_run_attachments[0].attachment_id == "uploaded-ref"
+        assert server._agent.last_run_attachments[0].artifact_id == "uploaded-ref"
         assert any(event.type == "final_answer" for event in events)
 
     async def test_confirm_reply_processed_during_run(self, server_and_client):

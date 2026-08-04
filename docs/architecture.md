@@ -71,7 +71,7 @@ AgentLike boundary ----> Service client ----> daemon transport
                            |
               Built-in tools / MCP / GUI
                            |
-                 ArtifactStore (when produced)
+       inbound <---- unified ArtifactStore ----> outbound
                            |
                   core artifact event
                            |
@@ -201,7 +201,7 @@ primitive and must not become a public bypass around the verifier.
 
 Tools may produce managed artifacts, but delivery is not itself a model tool.
 The `screenshot` tool creates a user-visible PNG artifact; `artifact_prepare`
-copies an existing file into managed temporary storage. The Agent converts
+borrows an existing file without copying or taking deletion ownership. The Agent converts
 their safe public references into a standard `AgentEvent(type="artifact")`, and
 the active client adapts that event to its channel. Internal `screen` captures
 remain GUI observations and are never automatically delivered.
@@ -256,15 +256,16 @@ must not share misleading lifecycle names.
 ```text
 <runtime-root>/
 ├── logs/          application, service, audit, LLM and turn logs
-├── attachments/   session-scoped observations and deliverable artifacts
+├── attachments/   temporary inbound and generated artifacts
+├── artifacts/     persistent generated artifacts
 ├── data/          SQLite state and procedural memory
 └── cache/         reconstructable non-authoritative data
 ```
 
-`attachments/` is a sibling of `logs/`, never a child of it. Socket and PID
+`attachments/` and `artifacts/` are siblings of `logs/`, never children of it. Socket and PID
 files may remain under an OS-appropriate ephemeral runtime location, while
-durable logs and bounded attachments use the configured application runtime
-root.
+durable logs, bounded temporary artifacts, and persistent generated artifacts
+use the configured application runtime root.
 
 ### 3.9 Benchmark and tests
 
@@ -302,10 +303,10 @@ The implemented multimodal path is:
 
 ```text
 upload or screen capture
-  -> AttachmentStore.put(session, bytes, metadata)
+  -> ArtifactStore.put(session, direction=inbound, ownership=managed)
   -> image_ref / observation_ref in conversation
   -> RequestAssembler selects references needed for this call
-  -> AttachmentStore.resolve(ref)
+  -> ArtifactStore hydrates artifact_id for this request only
   -> provider-specific temporary encoding
   -> request completes
   -> encoded payload released; reference remains bounded
@@ -322,7 +323,7 @@ expired reference requires a new upload or capture.
 ```text
 user asks to send/capture a file
   -> verified artifact-producing tool
-  -> ArtifactStore(session, temporary managed file)
+  -> ArtifactStore(session, direction=outbound, ownership + retention)
   -> public artifact reference (ID + bounded metadata, no path/bytes)
   -> AgentEvent(type="artifact")
   -> active client/channel adapter
@@ -330,12 +331,25 @@ user asks to send/capture a file
 ```
 
 `ArtifactStore.resolve()` is an in-process delivery capability, not model
-context. Only the trusted client adapter resolves an owned, unexpired artifact
-ID to its internal file path. Conversation history, public events, logs, and
-SQLite contain neither the path nor file bytes. Artifact ownership is
-session-scoped, size-bounded, TTL-bounded, and cleaned with the session.
-Delivering a protected path is rejected; delivering a file outside the
-configured working directory requires confirmation.
+context. Only the trusted client adapter resolves an owned, unexpired
+`artifact_id` to its internal path. Conversation history, public events, and
+logs contain neither paths nor bytes. SQLite stores only the internal metadata
+needed to recover persistent Artifact IDs after restart; it never stores file
+bytes or base64. Delivering a protected path is rejected, and delivering a file
+outside the configured working directory requires confirmation.
+
+Artifact direction and lifecycle are explicit:
+
+| Ownership / retention | Typical use | Cleanup rule |
+|---|---|---|
+| `borrowed / temporary` | Existing user file sent to a channel | Registry expires; source file is never copied or deleted |
+| `managed / session` | Uploaded inbound image | Core-owned bytes are deleted when the session ends or TTL expires |
+| `generated / temporary` | Screenshot sent to the user | Client acknowledges delivery; Core deletes after a grace period |
+| `generated / persistent` | User-requested saved output | Stored under `artifacts/`, registered in SQLite, never session-cleaned |
+
+Clients report successful delivery through `mark_artifact_delivered`; clients
+never delete files directly. Session deletion only removes `retention=session`
+entries.
 
 ### 4.4 GUI action target
 
@@ -505,15 +519,15 @@ after the tool completes successfully; regression tests assert the
 ### AR-004: Inline image payload contaminated durable context — high (fixed 2026-08-04)
 
 The former attachment and screenshot paths appended data URLs to
-`ConversationManager`. `AttachmentStore` now writes session-scoped temporary
+`ConversationManager`. The unified `ArtifactStore` now writes session-scoped temporary
 files; Conversation accepts `image_ref` blocks and rejects provider image
 payloads; request assembly hydrates only a copied provider request. Events are
 redacted and binary results are not persisted in idempotency. Service clients
-upload images first and run requests accept `attachment_id` references only.
+upload images first and run requests accept `artifact_id` references only.
 
 ### AR-005: Runtime path ownership was fragmented — high (fixed 2026-08-04)
 
-`RuntimePaths` now resolves sibling `logs/`, `attachments/`, `cache/`, and `data/`
+`RuntimePaths` now resolves sibling `logs/`, `attachments/`, `artifacts/`, `cache/`, and `data/`
 directories from `runtime_root`. Application, service, audit, trace,
 idempotency, attachment, and screenshot paths consume this layout; socket/PID
 files retain OS runtime placement. Service startup failure cancels its periodic
@@ -594,20 +608,19 @@ ambiguous keys are rejected, and ordinary chat text is not auto-persisted.
 Scheduler tasks previously used `data/scheduled_tasks.json`, relative to the
 process working directory. They now use a dedicated `scheduled_tasks` table in
 `~/.pc-assistant/data/assistant.db`. SQLite is the shared transactional store
-for durable domain state. Logs remain append-only files, attachments remain
-files, configuration remains YAML/environment input, and caches remain
-rebuildable files; not every byte belongs in a database.
+for durable domain state and Artifact registry metadata. Logs remain
+append-only files, Artifact bytes remain files, configuration remains
+YAML/environment input, and caches remain rebuildable files; binary content
+does not belong in the database.
 
 ### AR-015: Visual artifacts leaked internal observations to channels — medium (fixed 2026-08-04)
 
-The Feishu channel previously sent every image-producing tool result
-immediately. A single turn could therefore expose both an intended screenshot
-and a later internal grid observation. Channel delivery is now deferred until
-the turn completes, requires an explicit user request for an image, emits at
-most one artifact, and prefers a non-grid capture. Screen observations use PNG
-and default to no grid; coordinate grids require an explicit tool argument.
-Managed image paths are registered directly by `AttachmentStore` instead of
-copying identical bytes into a second session file.
+The Feishu channel previously inferred delivery from keywords and image-shaped
+tool results, which exposed internal grid observations and produced duplicate
+screenshots. Delivery now consumes only typed Core `artifact` events after the
+turn. The dedicated `screenshot` tool produces one PNG; internal `screen`
+observations never become outbound artifacts. Managed paths are registered in
+the unified `ArtifactStore` without duplicate copies.
 
 ### AR-016: Main-model multimodality was coupled to image ingress — high (fixed 2026-08-04)
 
@@ -688,10 +701,10 @@ bounded recent transcript plus an optional summary/reference archive.
 |---|---|---|---|---|
 | P0 | Post-verify captured pre-action state | Verifier finalized before registry execution | Separate authorization from `post_verify`; invoke only after successful execution | fixed, targeted tests passing |
 | P0 | Same-session state can interleave | No run-scoped lock on mutable session transcript | Serialize full runs per session | fixed, targeted test added |
-| P0 | Base64/data URLs enter history and persistence paths | Provider payload block doubles as canonical history block | AttachmentStore + reference-only history + request-scoped hydration | fixed; service ingress is reference-only |
+| P0 | Base64/data URLs enter history and persistence paths | Provider payload block doubles as canonical history block | ArtifactStore + reference-only history + request-scoped hydration | fixed; service ingress is reference-only |
 | P1 | Tool execution can bypass verifier | Public registry dispatch is also the commit capability | Bind authorization and single commit behind a verified executor/internal capability | fixed; opaque single-use prepared call |
 | P1 | GUI target selection is ambiguous/stale | Partial-name match returns first element without snapshot identity | Snapshot-bound `ElementRef`, uniqueness/freshness checks | fixed; ambiguity/staleness/identity tests added |
-| P1 | Logs/runtime data use unrelated roots | Paths are resolved independently by config, service, audit and idempotency | One `RuntimePaths` resolver with sibling `logs/`, `attachments/`, `cache/` | fixed; custom runtime root and cleanup lifecycle tested |
+| P1 | Logs/runtime data use unrelated roots | Paths are resolved independently by config, service, audit and idempotency | One `RuntimePaths` resolver with sibling `logs/`, `attachments/`, `artifacts/`, `data/`, `cache/` | fixed; custom runtime root and cleanup lifecycle tested |
 | P2 | Vision compatibility is a boolean | Provider/model/role/MIME limits are collapsed into `supports_vision` | Typed provider capability contract | fixed; provider limits and role serialization tested |
 | P2 | TUI selection copy was shadowed by cancellation and popup behavior | App-level key override and GUI-style root popup | Restore Textual copy semantics, move cancellation to Esc, use OSC52 plus local clipboard | fixed |
 | P2 | Screenshot files and Feishu delivery are implicit | Generic CWD filenames and ignored tool-result image paths | Unified temporary artifact allocator plus explicit channel-safe image metadata | fixed; filesystem and Feishu regressions added |
