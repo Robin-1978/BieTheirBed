@@ -228,7 +228,7 @@ pc-assistant --status
     assert "`pc-assistant --status`" in rendered
 
 
-def test_response_card_uses_adapted_markdown():
+def test_response_card_uses_json20_markdown_for_tables_and_inline_formatting():
     channel = FeishuChannel()
     card = channel._build_response_card(
         "# 标题\n\n| **A** | B |\n|---|---|\n| **1** | [`two`](https://example.com) |",
@@ -241,10 +241,9 @@ def test_response_card_uses_adapted_markdown():
     content = elements[0]["content"]
     assert "# 标题" not in content
     assert "**标题**" in content
-    table = elements[1]
-    assert table["tag"] == "table"
-    assert [column["display_name"] for column in table["columns"]] == ["A", "B"]
-    assert table["rows"] == [{"c0": "1", "c1": "two"}]
+    assert len(elements) == 1
+    assert "| **A** | B |" in content
+    assert "| **1** | [`two`](https://example.com) |" in content
 
 
 def test_feishu_reaction_is_removed_even_when_agent_is_not_ready():

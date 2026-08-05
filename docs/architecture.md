@@ -780,21 +780,21 @@ models and `16384` for the local Qwen-VL perception model.
 
 ### AR-029: Feishu cards rendered CommonMark as plain text — medium (fixed 2026-08-05)
 
-Feishu cards use a `div.text` element with `tag: "lark_md"`. The official
-references are [Card JSON 2.0 structure](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/card-json-v2-structure)
-and [Markdown content](https://open.feishu.cn/document/common-capabilities/message-card/message-card-components/content-components/markdown).
+Feishu cards use the Card JSON 2.0 rich-text component (`tag: "markdown"`).
+The official references are [Card JSON 2.0 structure](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/card-json-v2-structure)
+and [rich-text Markdown content](https://open.feishu.cn/document/feishu-cards/card-json-v2-components/content-components/rich-text).
 The channel preserves the documented pipe-table syntax verbatim and only
 adapts constructs that need a stable fallback, such as headings and fenced
 code blocks, at the delivery boundary. Supported emphasis, links, lists, and
 tables remain intact.
 
 Free-form Agent reply cards use Card JSON 2.0 (`schema: "2.0"`,
-`body.elements`) and the native `markdown` component for prose. Markdown tables are parsed into the native `table` component
-(`columns` + `rows`) instead of relying on the renderer to interpret a pipe
-table inside `lark_md`. This matches the working implementation in the
-per-staging Feishu client and avoids Card JSON 1.0 rendering differences.
-The canonical conversation still stores the model's original Markdown; only
-the external card representation is transformed.
+`body.elements`) with a single `markdown` rich-text component. The component
+itself natively renders pipe tables, emphasis, links, lists, and code blocks,
+so the channel does not parse tables into the separate `table` component or
+flatten formatted cells to plain text. The canonical conversation still stores
+the model's original Markdown; only headings and fenced code receive the
+minimal delivery-boundary adaptation described above.
 
 ### AR-030: Scheduled Agent runs were notification-only — high (fixed 2026-08-05)
 
