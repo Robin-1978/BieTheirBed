@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import hashlib
 import json
 import logging
@@ -71,11 +72,11 @@ def _principal_for_log(open_id: str) -> str:
 
 
 def render_feishu_markdown(text: str) -> str:
-    """Adapt common Markdown to the intentionally smaller ``lark_md`` dialect.
+    """Adapt only the Markdown constructs needing a stable card fallback.
 
-    Feishu cards do not render CommonMark headings and tables consistently.
-    Convert headings to bold blocks and tables to compact labelled rows while
-    retaining ordinary emphasis, links, lists, and inline code.
+    Feishu's ``lark_md`` supports pipe tables, so table rows are deliberately
+    passed through unchanged.  The model's canonical transcript remains the
+    original Markdown; this function is only a delivery-boundary adapter.
     """
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     rendered: list[str] = []
@@ -102,23 +103,6 @@ def render_feishu_markdown(text: str) -> str:
         if heading:
             rendered.append(f"**{heading.group(1).strip()}**")
             i += 1
-            continue
-
-        if (
-            i + 1 < len(lines)
-            and "|" in line
-            and re.match(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$", lines[i + 1])
-        ):
-            headers = [cell.strip() for cell in line.strip().strip("|").split("|")]
-            i += 2
-            while i < len(lines) and "|" in lines[i] and lines[i].strip():
-                values = [cell.strip() for cell in lines[i].strip().strip("|").split("|")]
-                pairs = [
-                    f"**{header}**: {values[pos] if pos < len(values) else ''}"
-                    for pos, header in enumerate(headers)
-                ]
-                rendered.append("• " + " · ".join(pairs))
-                i += 1
             continue
 
         rendered.append(line)
@@ -830,7 +814,7 @@ class FeishuChannel(ChannelBase):
             )
             try:
                 future.result(timeout=_TURN_PROCESS_TIMEOUT)
-            except asyncio.TimeoutError:
+            except (asyncio.TimeoutError, concurrent.futures.TimeoutError):
                 future.cancel()
                 self._send_text(open_id, "❌ 处理超时，已取消，请简化问题重试")
             except Exception as e:

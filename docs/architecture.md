@@ -780,9 +780,13 @@ models and `16384` for the local Qwen-VL perception model.
 
 ### AR-029: Feishu cards rendered CommonMark as plain text — medium (fixed 2026-08-05)
 
-Feishu `lark_md` is a Markdown-like dialect, not a full CommonMark renderer.
-The channel now adapts model headings, tables, and fenced code blocks at the
-delivery boundary while leaving supported emphasis, links, and lists intact.
+Feishu cards use a `div.text` element with `tag: "lark_md"`. The official
+references are [Card JSON 2.0 structure](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/card-json-v2-structure)
+and [Markdown content](https://open.feishu.cn/document/common-capabilities/message-card/message-card-components/content-components/markdown).
+The channel preserves the documented pipe-table syntax verbatim and only
+adapts constructs that need a stable fallback, such as headings and fenced
+code blocks, at the delivery boundary. Supported emphasis, links, lists, and
+tables remain intact.
 The canonical conversation still stores the model's original Markdown; only
 the external card representation is transformed.
 

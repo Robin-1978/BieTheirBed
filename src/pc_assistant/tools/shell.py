@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import signal
 import subprocess
 from typing import Any
 
@@ -240,12 +242,22 @@ class ShellTool(ToolBase):
                 shell_exe = "/bin/bash"
                 shell_args = ["-c", command]
 
+            # Put each command in its own process group.  A shell command may
+            # spawn descendants (for example ``find``); killing only bash on
+            # timeout leaves those descendants holding our pipes open and can
+            # make the whole agent turn hang until the channel times out.
+            isolated_process_group = plat != "windows"
+            process_kwargs: dict[str, Any] = {
+                "stdout": asyncio.subprocess.PIPE,
+                "stderr": asyncio.subprocess.PIPE,
+                "cwd": cwd,
+                "env": env,
+            }
+            if isolated_process_group:
+                process_kwargs["start_new_session"] = True
             proc = await asyncio.create_subprocess_exec(
                 shell_exe, *shell_args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env=env,
+                **process_kwargs,
             )
 
             try:
@@ -253,10 +265,16 @@ class ShellTool(ToolBase):
                     proc.communicate(), timeout=timeout
                 )
             except asyncio.TimeoutError:
-                try:
-                    proc.kill()
-                except ProcessLookupError:
-                    pass
+                if isolated_process_group:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    try:
+                        proc.kill()
+                    except ProcessLookupError:
+                        pass
                 await proc.communicate()
                 return {
                     "error": f"Command timed out after {timeout}s",
