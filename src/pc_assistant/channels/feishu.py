@@ -146,11 +146,18 @@ def _markdown_to_card_elements(text: str) -> list[dict[str, Any]]:
         buffer = []
         headers, rows, i = parsed
         columns = [
-            {"name": f"c{idx}", "display_name": header or f"列 {idx + 1}", "data_type": "text"}
+            {
+                "name": f"c{idx}",
+                "display_name": _markdown_cell_to_text(header) or f"列 {idx + 1}",
+                "data_type": "text",
+            }
             for idx, header in enumerate(headers)
         ]
         table_rows = [
-            {f"c{idx}": row[idx] if idx < len(row) else "" for idx in range(len(headers))}
+            {
+                f"c{idx}": _markdown_cell_to_text(row[idx] if idx < len(row) else "")
+                for idx in range(len(headers))
+            }
             for row in rows
         ]
         elements.append({
@@ -165,14 +172,19 @@ def _markdown_to_card_elements(text: str) -> list[dict[str, Any]]:
     return elements
 
 
-_SCREENSHOT_PREAMBLE_RE = re.compile(
-    r"^\s*\[当前画面截图已生成[，,。]?下文为纯文字回复\]\s*[-—\s]*\n*",
-)
-
-
-def _strip_transport_preamble(text: str) -> str:
-    """Remove an internal artifact-status sentence hallucinated by a model."""
-    return _SCREENSHOT_PREAMBLE_RE.sub("", text or "", count=1).strip()
+def _markdown_cell_to_text(value: str) -> str:
+    """Render inline Markdown as plain text for native table text cells."""
+    text = value.strip()
+    text = re.sub(r"!\[([^]]*)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"\[([^]]+)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"`([^`]*)`", r"\1", text)
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
+    text = re.sub(r"__([^_]+)__", r"\1", text)
+    text = re.sub(r"~~([^~]+)~~", r"\1", text)
+    text = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"\1", text)
+    text = re.sub(r"(?<!_)_([^_]+)_(?!_)", r"\1", text)
+    text = re.sub(r"</?font\b[^>]*>", "", text, flags=re.IGNORECASE)
+    return text.replace(r"\|", "|")
 
 
 def _patch_ws_card_dispatch(ws_client: Any) -> None:
@@ -1359,7 +1371,7 @@ class FeishuChannel(ChannelBase):
             })
             elements.append({"tag": "hr"})
 
-        content = _strip_transport_preamble(render_feishu_markdown(answer))[:3800]
+        content = render_feishu_markdown(answer)[:3800]
         if len(answer) > 3800:
             content += "\n\n... (内容过长已截断)"
         elements.extend(_markdown_to_card_elements(content))
