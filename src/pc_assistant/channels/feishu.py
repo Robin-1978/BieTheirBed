@@ -10,6 +10,7 @@ import queue
 import re
 import threading
 import time
+import uuid
 import warnings
 from pathlib import Path
 from typing import Any
@@ -267,6 +268,7 @@ class FeishuChannel(ChannelBase):
         self._image_refs_by_message: dict[str, tuple[str, float]] = {}
         self._pending_image_refs_by_user: dict[str, list[tuple[str, float]]] = {}
         self._active_image_refs_by_user: dict[str, list[tuple[str, float]]] = {}
+        self._session_ids_by_user: dict[str, str] = {}
 
         self._running = False
 
@@ -319,7 +321,10 @@ class FeishuChannel(ChannelBase):
         """Deliver a background Agent run to its Feishu conversation."""
         if not session_id.startswith("feishu:"):
             return False
-        open_id = session_id.removeprefix("feishu:")
+        parts = session_id.split(":", 2)
+        open_id = parts[1] if len(parts) > 1 else ""
+        if not open_id:
+            return False
         answer = result.get("result") or result.get("error") or result.get("message") or "任务已完成"
         if not isinstance(answer, str):
             answer = json.dumps(answer, ensure_ascii=False, default=str)
@@ -528,7 +533,7 @@ class FeishuChannel(ChannelBase):
             from pc_assistant.model_adapter.types import ImageAttachment
 
             path = self._download_image(image_key, message_id)
-            session_id = f"feishu:{open_id}"
+            session_id = self._session_for_user(open_id)
             stored = self._agent.store_artifact(
                 session_id,
                 ImageAttachment.from_path(path, caption="feishu image"),
@@ -849,11 +854,16 @@ class FeishuChannel(ChannelBase):
                 if self._handle_slash_command(open_id, text_stripped):
                     return
 
+            # Read the pending request under the lock, then handle it after
+            # releasing the lock.  _handle_confirm() mutates the same map and
+            # acquires this lock itself; calling it while holding the
+            # non-reentrant Lock deadlocks every text confirmation and leaves
+            # the Feishu turn waiting until its timeout.
             with self._pending_confirm_lock:
                 pending = self._pending_confirm.get(open_id)
-                if pending is not None:
-                    self._handle_confirm(open_id, text_stripped, pending)
-                    return
+            if pending is not None:
+                self._handle_confirm(open_id, text_stripped, pending)
+                return
 
             future = asyncio.run_coroutine_threadsafe(
                 self._process_with_agent(open_id, text_stripped, attachments=attachments),
@@ -892,24 +902,21 @@ class FeishuChannel(ChannelBase):
                     "tag": "div",
                     "text": {"tag": "lark_md", "content": (
                         "`/help` - 显示此帮助\n"
-                        "`/clear` - 清空对话历史\n"
+                        "`/new` - 开启新对话（保留旧对话）\n"
                         "`/unlock <验证码>` - 使用本地TOTP解锁桌面\n"
                         "`/status` - 查看 Agent 状态\n"
                         "`/tools` - 列出可用工具\n"
+                        "`/models` - 列出可热切换模型\n"
+                        "`/model <alias>` - 热切换模型\n"
                         "`/config` - 查看当前配置"
                     )},
                 }],
             })
             return True
 
-        if cmd == "/clear":
-            if self._agent is not None:
-                session_id = f"feishu:{open_id}"
-                try:
-                    self._agent.drop_session(session_id)
-                except Exception:
-                    pass
-            self._send_text(open_id, "✅ 对话历史已清空")
+        if cmd == "/new":
+            session_id = self._new_session_for_user(open_id)
+            self._send_text(open_id, "✅ 已开启新对话，旧对话仍保留。")
             return True
 
         if cmd == "/status":
@@ -917,7 +924,7 @@ class FeishuChannel(ChannelBase):
                 status = asyncio.run_coroutine_threadsafe(
                     self._agent.get_status(), self._agent_loop
                 ).result(timeout=_TURN_PROCESS_TIMEOUT)
-                session_id = f"feishu:{open_id}"
+                session_id = self._session_for_user(open_id)
                 session_stats = [s for s in self._agent.session_stats() if s.get("session_id") == session_id]
                 session_info = session_stats[0] if session_stats else {}
 
@@ -966,7 +973,35 @@ class FeishuChannel(ChannelBase):
                 })
             return True
 
-        if cmd == "/config":
+        if cmd == "/models":
+            if self._agent is not None:
+                models = getattr(self._agent.config, "models", {})
+                if not models:
+                    self._send_text(open_id, "No model catalog is configured.")
+                else:
+                    current = self._agent.config.resolve_model().alias
+                    lines = [
+                        f"- `{alias}`{' (active)' if alias == current else ''}"
+                        for alias in sorted(models)
+                    ]
+                    self._send_text(open_id, "Available models:\n" + "\n".join(lines))
+            return True
+
+        if cmd == "/model":
+            parts = text.split(maxsplit=1)
+            if self._agent is None:
+                self._send_text(open_id, "Agent is not ready.")
+            elif len(parts) != 2 or not parts[1].strip():
+                self._send_text(open_id, "Usage: `/model <alias>`. Use `/models` to list aliases.")
+            else:
+                result = self._agent.switch_model(parts[1].strip())
+                if result.get("applied"):
+                    self._send_text(open_id, f"Model switched to `{result['model']}`.")
+                else:
+                    self._send_text(open_id, result.get("error", "Model switch failed."))
+            return True
+
+        if cmd == "/config" and text.strip().lower() == "/config":
             if self._agent is not None:
                 cfg = self._agent.config
                 model = cfg.resolve_model()
@@ -977,6 +1012,25 @@ class FeishuChannel(ChannelBase):
                     f"**Temperature**: {cfg.llm_temperature}"
                 )
                 self._send_text(open_id, info)
+            return True
+
+        if cmd == "/config" and text.lower().startswith("/config set "):
+            assignment = text[len("/config set "):].strip()
+            if "=" not in assignment:
+                self._send_text(open_id, "Usage: `/config set key=value`")
+                return True
+            field_name, field_value = (part.strip() for part in assignment.split("=", 1))
+            if self._agent is None:
+                self._send_text(open_id, "Agent is not ready.")
+                return True
+            if not self._agent.config.set_field(field_name, field_value):
+                self._send_text(open_id, f"Unknown or invalid config field: {field_name}")
+                return True
+            result = self._agent.apply_config_change(field_name)
+            if result.get("applied"):
+                self._send_text(open_id, f"Applied `{field_name}` without restart.")
+            else:
+                self._send_text(open_id, f"`{field_name}` needs a service restart.")
             return True
 
         return False
@@ -1144,8 +1198,32 @@ class FeishuChannel(ChannelBase):
         self._user_locks[open_id] = lock
         return lock
 
+    def _session_for_user(self, open_id: str) -> str:
+        current = self._session_ids_by_user.get(open_id)
+        if current:
+            return current
+        owner_id = f"feishu:{open_id}"
+        active_session_for = getattr(self._agent, "active_session_for", None) if self._agent is not None else None
+        latest_new_session_for = getattr(self._agent, "latest_new_session_for", None) if self._agent is not None else None
+        persisted = active_session_for(owner_id) if callable(active_session_for) else None
+        recovered = latest_new_session_for(owner_id) if callable(latest_new_session_for) else None
+        current = persisted or recovered or owner_id
+        self._session_ids_by_user[open_id] = current
+        set_active_session = getattr(self._agent, "set_active_session", None) if self._agent is not None else None
+        if callable(set_active_session) and persisted is None:
+            set_active_session(owner_id, current)
+        return current
+
+    def _new_session_for_user(self, open_id: str) -> str:
+        previous = self._session_for_user(open_id)
+        current = f"{previous}:new:{uuid.uuid4().hex[:12]}"
+        self._session_ids_by_user[open_id] = current
+        if self._agent is not None:
+            self._agent.set_active_session(f"feishu:{open_id}", current)
+        return current
+
     async def _process_with_agent_locked(self, open_id: str, text: str, attachments: list | None = None) -> None:
-        feishu_session_id = f"feishu:{open_id}"
+        feishu_session_id = self._session_for_user(open_id)
         agent_loop = asyncio.get_running_loop()
 
         async def feishu_confirm(tool_name: str, args: dict[str, Any]) -> bool:
@@ -1225,6 +1303,8 @@ class FeishuChannel(ChannelBase):
                     error_msg = event.content
                 elif event.type == "iteration_limit":
                     error_msg = event.content
+                elif event.type == "context_compacted":
+                    tool_calls_info.append("💡 较早对话已整理为简短工作摘要。")
 
             if tool_calls_info and final_answer:
                 tools_summary = "\n".join(tool_calls_info[:5])

@@ -217,7 +217,7 @@ class TestUITool:
         with patch("pc_assistant.tools.ui.a11y.list_elements", return_value=([_fake_element()], "")):
             res = await UITool(ui_backend="atspi").execute(action="find", name="Save")
         assert res["found"] is True
-        assert res["element_ref"]["snapshot_id"]
+        assert res["element_id"]
         assert res["bbox"] == {"x": 10, "y": 20, "width": 100, "height": 30}
         assert res["center"] == (60, 35)
 
@@ -227,7 +227,7 @@ class TestUITool:
             tool = UITool(ui_backend="atspi")
             found = await tool.execute(action="find", name="Save")
             with patch("pyautogui.click") as mock_click:
-                res = await tool.execute(action="click", element_ref=found["element_ref"])
+                res = await tool.execute(action="click", element_id=found["element_id"])
         assert res["success"] is True
         mock_click.assert_called_once_with(60, 35)
 
@@ -243,7 +243,7 @@ class TestUITool:
             tool = UITool(ui_backend="atspi")
             found = await tool.execute(action="find", name="Save")
             with patch("pyautogui.click") as mock_click, patch("pyautogui.write") as mock_write:
-                res = await tool.execute(action="type", element_ref=found["element_ref"], text="hello")
+                res = await tool.execute(action="type", element_id=found["element_id"], text="hello")
         assert res["success"] is True
         mock_click.assert_called_once_with(60, 35)
         mock_write.assert_called_once()
@@ -262,7 +262,7 @@ class TestUITool:
             tool = UITool(ui_backend="atspi", snapshot_ttl_seconds=1, clock=lambda: now[0])
             found = await tool.execute(action="find", name="Save")
             now[0] = 12.0
-            res = await tool.execute(action="click", element_ref=found["element_ref"])
+            res = await tool.execute(action="click", element_id=found["element_id"])
         assert "stale" in res["error"].lower()
 
 

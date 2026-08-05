@@ -5,7 +5,7 @@ import subprocess
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, parameter, tool
 
 
 def _import_pywinctl():
@@ -16,9 +16,15 @@ def _import_pywinctl():
     return pywinctl
 
 
+@parameter("height", skim=True, skim_hint="resize height")
+@parameter("width", skim=True, skim_hint="resize width")
+@parameter("y", skim=True, skim_hint="move y")
+@parameter("x", skim=True, skim_hint="move x")
+@parameter("window_id", skim=True, skim_hint="window id; not list")
+@tool(name="windows", description="List, focus, move, resize, or close windows.", skim_description="Window control.")
 class WindowTool(ToolBase):
     name = "window"
-    description = "Manage windows: list, focus, move, resize, minimize, maximize, close"
+    description = "List, focus, move, resize, minimize, maximize, or close windows"
 
     async def execute(self, **kwargs: Any) -> Any:
         action = kwargs.get("action", "list")

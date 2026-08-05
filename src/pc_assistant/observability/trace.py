@@ -72,6 +72,9 @@ class LLMTraceRecorder(JsonlRecorder):
         finish_reason: str = "",
         tool_calls: int = 0,
         error: str = "",
+        requested_max_tokens: int = 0,
+        message_budget: int = 0,
+        schema_tokens: int = 0,
     ) -> None:
         self.record({
             "kind": "llm_call",
@@ -89,6 +92,9 @@ class LLMTraceRecorder(JsonlRecorder):
             "finish_reason": finish_reason,
             "tool_calls": tool_calls,
             "error": error,
+            "requested_max_tokens": requested_max_tokens,
+            "message_budget": message_budget,
+            "schema_tokens": schema_tokens,
         })
 
 

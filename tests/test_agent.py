@@ -658,6 +658,26 @@ class TestAgentGetStatus:
 
 
 class TestAgentHotConfig:
+    def test_switch_model_allows_vision_capability_change(self, tmp_path):
+        cfg = AppConfig(
+            runtime_root=str(tmp_path),
+            providers={"local": {"driver": "llamacpp", "server_url": "http://127.0.0.1:8192", "requires_api_key": False}},
+            models={
+                "vision": {"provider": "local", "model": "vision", "supports_vision": True},
+                "text": {"provider": "local", "model": "text", "supports_vision": False},
+            },
+            default_model="vision",
+            vision_model="vision",
+        )
+        agent = Agent(config=cfg)
+
+        result = agent.switch_model("text")
+
+        assert result["applied"] is True
+        assert agent.config.default_model == "text"
+        assert agent._llm.supports_vision is False
+        assert agent.registry.get("image") is not None
+
     def test_dynamic_limit_applies_without_restart(self):
         cfg = AppConfig(max_tokens=1024)
         agent = Agent(config=cfg)

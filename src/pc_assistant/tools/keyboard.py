@@ -4,9 +4,15 @@ import asyncio
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, parameter, tool
 
 
+@parameter("text", skim=True, skim_hint="text for type/write")
+@parameter("keys", skim=True, skim_hint="key list for hotkey/shortcut")
+@parameter("key", skim=True, skim_hint="key for press")
+@parameter("delay", public_name="delay_seconds")
+@parameter("hold_duration", public_name="hold_seconds")
+@tool(name="keyboard", description="Press keys, type text, or use shortcuts.", skim_description="Keyboard input.")
 class KeyboardTool(ToolBase):
     name = "keyboard"
     description = "Control keyboard: send key presses, hotkeys, and text input"

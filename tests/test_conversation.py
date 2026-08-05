@@ -6,6 +6,16 @@ from pc_assistant.context.conversation import ConversationManager
 
 
 class TestConversationManager:
+    def test_repeated_manual_compression_does_not_compress_a_lossy_summary(self):
+        cm = ConversationManager()
+        for index in range(6):
+            cm.add_user(f"q{index}")
+            cm.add_assistant(f"a{index}")
+        cm.compress(keep_recent=2)
+        once = cm.get_messages()
+        cm.compress(keep_recent=2)
+        assert cm.get_messages() == once
+
     def test_add_user(self):
         cm = ConversationManager()
         cm.set_system_context("You are helpful.")
@@ -148,13 +158,24 @@ class TestConversationManager:
         cm.add_tool_result("tc1", "x" * 20000)
         cm.add_assistant_final("done")
 
-        assert cm.compact_completed_tool_results(max_chars=1000) == 1
+        assert cm.compact_completed_tool_results(max_chars=1000, keep_recent_turns=0) == 1
         tool = next(m for m in cm.get_messages() if m["role"] == "tool")
         assert "tool_result_omitted" in tool["content"]
         assert len(tool["content"]) < 300
 
-    def test_completed_small_tool_result_is_also_omitted(self):
+    def test_completed_small_tool_result_is_preserved(self):
         cm = ConversationManager()
         cm.add_tool_result("tc1", "small")
-        assert cm.compact_completed_tool_results(max_chars=1000) == 1
-        assert "tool_result_omitted" in cm.get_messages()[0]["content"]
+        assert cm.compact_completed_tool_results(max_chars=1000) == 0
+        assert "small" in cm.get_messages()[0]["content"]
+
+    def test_schema_text_containing_error_is_not_marked_as_error(self):
+        cm = ConversationManager()
+        cm.add_tool_result(
+            "tc1",
+            str({"tool": "scheduler", "schema": {"properties": {"error": {"type": "string"}}}}),
+            tool_name="describe_tool",
+        )
+        assert cm.compact_completed_tool_results(max_chars=40, keep_recent_turns=0) == 1
+        content = cm.get_messages()[0]["content"]
+        assert "prior tool result ok" in content

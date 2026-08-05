@@ -26,7 +26,7 @@ from pc_assistant.model_adapter.types import (
     StreamChunk,
 )
 
-__all__ = ["LLMMessage", "LLMProvider", "LLMResponse", "StreamChunk"]
+__all__ = ["LLMMessage", "LLMProvider", "FailoverLLMProvider", "LLMResponse", "StreamChunk"]
 
 
 class LLMProvider:
@@ -381,3 +381,68 @@ class LLMProvider:
                 return resp.status_code == 200
         except httpx.HTTPError:
             return False
+
+
+class FailoverLLMProvider:
+    """Try a primary provider, then a local provider when it fails."""
+
+    def __init__(self, primary: LLMProvider, fallback: LLMProvider | None = None) -> None:
+        self.primary = primary
+        self.fallback = fallback
+
+    @property
+    def supports_vision(self) -> bool:
+        # Prompt preparation must match the provider that receives the first
+        # request. Advertising fallback-only vision here made Agent hydrate
+        # image references into a text-only primary request, so the model could
+        # silently miss the image instead of routing through image_inspect.
+        return self.primary.supports_vision
+
+    @property
+    def vision_capabilities(self):
+        return self.primary.vision_capabilities
+
+    async def chat(self, *args: Any, **kwargs: Any) -> LLMResponse:
+        response = await self.primary.chat(*args, **kwargs)
+        if response.finish_reason != "error" or self.fallback is None:
+            return response
+        return await self.fallback.chat(*args, **kwargs)
+
+    async def chat_stream(self, *args: Any, **kwargs: Any) -> AsyncGenerator[StreamChunk, None]:
+        if self.fallback is None:
+            async for chunk in self.primary.chat_stream(*args, **kwargs):
+                yield chunk
+            return
+
+        emitted = False
+        failed = False
+        error_chunk: StreamChunk | None = None
+        async for chunk in self.primary.chat_stream(*args, **kwargs):
+            if chunk.finish_reason == "error":
+                failed = True
+                error_chunk = chunk
+                break
+            if chunk.delta_content or chunk.delta_thinking or chunk.delta_tool_calls:
+                emitted = True
+            yield chunk
+
+        # Do not replay a turn after partial primary output; that could duplicate
+        # text or tool calls. Fallback is intended for failures before output.
+        if failed and not emitted:
+            async for chunk in self.fallback.chat_stream(*args, **kwargs):
+                yield chunk
+        elif error_chunk is not None:
+            yield error_chunk
+
+    def cancel(self, session_id: str | None = None) -> None:
+        self.primary.cancel(session_id)
+        if self.fallback:
+            self.fallback.cancel(session_id)
+
+    def reset_cancelled(self, session_id: str | None = None) -> None:
+        self.primary.reset_cancelled(session_id)
+        if self.fallback:
+            self.fallback.reset_cancelled(session_id)
+
+    async def health_check(self) -> bool:
+        return await self.primary.health_check()

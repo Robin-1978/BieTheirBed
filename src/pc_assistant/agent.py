@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 import time
+import uuid
 from pathlib import Path
 from typing import Any, AsyncGenerator, Awaitable
 
@@ -15,7 +16,7 @@ from pc_assistant.context.assembly import assemble_llm_messages, truncate_messag
 from pc_assistant.context.cache import build_cache_plan
 from pc_assistant.context.conversation import ConversationManager
 from pc_assistant.context.evidence import EvidencePolicy
-from pc_assistant.context.llm_compact import compact_conversation_llm
+from pc_assistant.context.llm_compact import summarize_prompt_history
 from pc_assistant.context.memory import ProceduralMemory, UserMemory
 from pc_assistant.context.memory_db import (
     SQLiteMemoryRepository,
@@ -28,13 +29,13 @@ from pc_assistant.context.prompt import build_system_prompt
 from pc_assistant.context.token_estimate import TokenEstimator, normalize_family
 from pc_assistant.harness.audit import AuditLogger
 from pc_assistant.harness.confirm import ConfirmFn
-from pc_assistant.harness.executor import VerifiedToolExecutor
+from pc_assistant.harness.executor import VerifiedToolExecutor, _error_result
 from pc_assistant.harness.idempotency import IdempotencyLog
 from pc_assistant.harness.limiter import RateLimiter
 from pc_assistant.harness.refusal import RefusalCode, Verdict
 from pc_assistant.harness.safety import SafetyChecker
 from pc_assistant.harness.verifier import Verifier
-from pc_assistant.llm_provider import LLMProvider, LLMResponse
+from pc_assistant.llm_provider import FailoverLLMProvider, LLMProvider, LLMResponse
 from pc_assistant.logger import get_logger
 from pc_assistant.model_adapter.types import ImageAttachment
 from pc_assistant.observability.trace import LLMTraceRecorder, TurnRecorder
@@ -164,7 +165,7 @@ class Agent:
         self._logger = get_logger("agent")
         self._main_model = self._config.resolve_model()
         self._llm_injected = llm is not None
-        self._llm = llm if llm is not None else LLMProvider(
+        primary_llm = LLMProvider(
             server_url=self._main_model.server_url,
             model_name=self._main_model.model,
             provider=self._main_model.driver,
@@ -178,6 +179,24 @@ class Agent:
                 else None
             ),
         )
+        fallback_model = self._config.resolve_fallback_model()
+        fallback_llm = None
+        if fallback_model is not None and fallback_model.alias != self._main_model.alias:
+            fallback_llm = LLMProvider(
+                server_url=fallback_model.server_url,
+                model_name=fallback_model.model,
+                provider=fallback_model.driver,
+                api_key=fallback_model.api_key,
+                api_base=fallback_model.api_base,
+                timeout=fallback_model.timeout,
+                supports_vision=fallback_model.supports_vision,
+                thinking=(
+                    fallback_model.thinking.model_dump()
+                    if fallback_model.thinking is not None
+                    else None
+                ),
+            )
+        self._llm = llm if llm is not None else FailoverLLMProvider(primary_llm, fallback_llm)
         self._memory_repository = SQLiteMemoryRepository(
             self._runtime_paths.data / "assistant.db",
         )
@@ -234,6 +253,7 @@ class Agent:
             max_sessions=max(max_sessions, 1),
         )
         self._default_state = self._session_manager.get("", self._system_prompt)
+        self._active_session_id = ""
         if conversation is not None:
             self._default_state.conversation = conversation
         else:
@@ -295,23 +315,43 @@ class Agent:
 
     @property
     def conversation(self) -> ConversationManager:
-        return self._default_state.conversation
+        return self._get_state(self._active_session_id).conversation
 
     @property
     def _conversation(self) -> ConversationManager:
-        return self._default_state.conversation
+        return self._get_state(self._active_session_id).conversation
 
     @_conversation.setter
     def _conversation(self, value: ConversationManager) -> None:
-        self._default_state.conversation = value
+        self._get_state(self._active_session_id).conversation = value
+
+    @property
+    def active_session_id(self) -> str:
+        return self._active_session_id
+
+    def new_session(self, session_id: str = "") -> str:
+        """Start a new conversation while preserving the previous transcript."""
+        base = session_id or "local"
+        self._active_session_id = f"{base}:new:{uuid.uuid4().hex[:12]}"
+        self._get_state(self._active_session_id)
+        return self._active_session_id
+
+    def active_session_for(self, owner_id: str) -> str | None:
+        return self._session_transcripts.get_active(owner_id)
+
+    def set_active_session(self, owner_id: str, session_id: str) -> None:
+        self._session_transcripts.set_active(owner_id, session_id)
+
+    def latest_new_session_for(self, owner_id: str) -> str | None:
+        return self._session_transcripts.latest_new(owner_id)
 
     @property
     def _cancelled(self) -> bool:
-        return self._default_state.cancelled
+        return self._get_state(self._active_session_id).cancelled
 
     @_cancelled.setter
     def _cancelled(self, value: bool) -> None:
-        self._default_state.cancelled = value
+        self._get_state(self._active_session_id).cancelled = value
 
     @property
     def config(self) -> AppConfig:
@@ -338,11 +378,23 @@ class Agent:
         messages = self._session_transcripts.load(state.session_id)
         if messages:
             state.conversation.rebuild_from_messages(messages)
+        context = self._session_transcripts.load_context(state.session_id)
+        if context and context["source_message_count"] <= len(messages):
+            state.conversation.set_context_summary(
+                context["summary"],
+                covered_turns=context["covered_turns"],
+            )
 
     def _persist_session_transcript(self, state: SessionState) -> None:
         self._session_transcripts.save(
             state.session_id,
             state.conversation.get_messages(),
+        )
+        self._session_transcripts.save_context(
+            state.session_id,
+            state.conversation.context_summary,
+            state.conversation.context_summary_turns,
+            len(state.conversation.get_messages()),
         )
 
     # ------------------------------------------------------------------
@@ -350,7 +402,8 @@ class Agent:
     # ------------------------------------------------------------------
 
     def cancel(self, session_id: str = "") -> None:
-        state = self._get_state(session_id)
+        resolved_session_id = session_id or self._active_session_id
+        state = self._get_state(resolved_session_id)
         state.cancelled = True
         self._llm.cancel(session_id or None)
         if state.tool_task is not None and not state.tool_task.done():
@@ -360,7 +413,7 @@ class Agent:
         self.cancel(session_id)
 
     def reset_cancelled(self) -> None:
-        self._default_state.cancelled = False
+        self._get_state(self._active_session_id).cancelled = False
         self._llm.reset_cancelled()
 
     # ------------------------------------------------------------------
@@ -592,7 +645,7 @@ class Agent:
                 "type": "text",
                 "text": (
                     f"[inline image from {tool_name}: {path}. "
-                    "If the main model is text-only, call image_inspect with the manifested image_id "
+                    "If the main model is text-only, call image with the manifested image_id "
                     "before making claims about visible content.]"
                 ),
             },
@@ -633,7 +686,7 @@ class Agent:
     # ------------------------------------------------------------------
 
     async def get_status(self) -> dict[str, Any]:
-        state = self._default_state
+        state = self._get_state(self._active_session_id)
         return {
             "provider": self._main_model.provider_name,
             "model": self._main_model.alias,
@@ -663,9 +716,9 @@ class Agent:
             self._session_transcripts.delete(session_id)
 
     def compact_session(self, session_id: str = "", *, keep_recent: int = 4) -> None:
-        """Mechanically compact one session without deleting its history."""
-        state = self._get_state(session_id)
-        state.conversation.compress(keep_recent=keep_recent)
+        """Persist context state without rewriting canonical transcript."""
+        resolved_session_id = session_id or self._active_session_id
+        state = self._get_state(resolved_session_id)
         self._persist_session_transcript(state)
 
     def apply_config_change(self, field_name: str = "") -> dict[str, Any]:
@@ -686,6 +739,7 @@ class Agent:
         provider_fields = {
             "llm_provider", "llm_server_url", "llm_model_name", "llm_api_key",
             "llm_api_base", "default_model", "token_family",
+            "fallback_enabled", "fallback_model",
         }
         if field_name in dynamic:
             return {"applied": True, "field": field_name, "restart_required": False}
@@ -695,7 +749,7 @@ class Agent:
             return {"applied": False, "field": field_name, "restart_required": True}
 
         model = self._config.resolve_model()
-        candidate = LLMProvider(
+        primary_candidate = LLMProvider(
             server_url=model.server_url,
             model_name=model.model,
             provider=model.driver,
@@ -705,8 +759,20 @@ class Agent:
             supports_vision=model.supports_vision,
             thinking=model.thinking.model_dump() if model.thinking is not None else None,
         )
-        if candidate.supports_vision != self._llm.supports_vision:
-            return {"applied": False, "field": field_name, "restart_required": True}
+        fallback_model = self._config.resolve_fallback_model()
+        fallback_candidate = None
+        if fallback_model is not None and fallback_model.alias != model.alias:
+            fallback_candidate = LLMProvider(
+                server_url=fallback_model.server_url,
+                model_name=fallback_model.model,
+                provider=fallback_model.driver,
+                api_key=fallback_model.api_key,
+                api_base=fallback_model.api_base,
+                timeout=fallback_model.timeout,
+                supports_vision=fallback_model.supports_vision,
+                thinking=(fallback_model.thinking.model_dump() if fallback_model.thinking else None),
+            )
+        candidate = FailoverLLMProvider(primary_candidate, fallback_candidate)
         self._main_model = model
         self._llm = candidate
         self._token_estimator = TokenEstimator(
@@ -721,12 +787,52 @@ class Agent:
             estimator=self._token_estimator,
         )
         self._planner = AgentPlanner(self._llm)
+        # A text-only main model needs the dedicated vision broker for image
+        # attachments. Create it lazily so switching between visual and text
+        # models does not require a service restart.
+        if self._config.vision_enabled and not self._llm.supports_vision and self._vision_broker is None:
+            vision_model = self._config.resolve_vision_model()
+            vision_llm = LLMProvider(
+                server_url=vision_model.server_url,
+                model_name=vision_model.model,
+                provider=vision_model.driver,
+                api_key=vision_model.api_key,
+                api_base=vision_model.api_base,
+                timeout=vision_model.timeout,
+                supports_vision=True,
+                thinking=vision_model.thinking.model_dump() if vision_model.thinking else None,
+            )
+            self._vision_broker = VisionBroker(
+                vision_llm,
+                self._artifact_store,
+                model_name=vision_model.model,
+                max_tokens=self._config.vision_max_tokens,
+            )
+            if self._registry.get("image") is None:
+                self._registry.register(ImageInspectTool(self._vision_broker))
         if self._reflection is not None:
             self._reflection = ReflectionChecker(
                 self._llm,
                 threshold=self._config.reflection_threshold,
             )
         return {"applied": True, "field": field_name, "restart_required": False}
+
+    def switch_model(self, alias: str) -> dict[str, Any]:
+        """Switch the active catalog model between turns without a restart."""
+        alias = alias.strip()
+        if not self._config.models:
+            return {"applied": False, "error": "No model catalog is configured"}
+        if alias not in self._config.models:
+            return {
+                "applied": False,
+                "error": f"Unknown model '{alias}'",
+                "allowed_models": sorted(self._config.models),
+                "instruction": "Choose one allowed model alias and retry.",
+            }
+        self._config.default_model = alias
+        result = self.apply_config_change("default_model")
+        result["model"] = alias
+        return result
 
     def session_messages(self, session_id: str = "") -> list[dict[str, Any]]:
         return self._get_state(session_id).conversation.get_messages()
@@ -858,6 +964,9 @@ class Agent:
         tool_calls: int,
         error: str,
         messages: list[dict[str, Any]] | None = None,
+        requested_max_tokens: int = 0,
+        message_budget: int = 0,
+        schema_tokens: int = 0,
     ) -> None:
         self._trace.record_call(
             session_id=state.session_id,
@@ -871,6 +980,9 @@ class Agent:
             finish_reason=finish_reason,
             tool_calls=tool_calls,
             error=error,
+            requested_max_tokens=requested_max_tokens,
+            message_budget=message_budget,
+            schema_tokens=schema_tokens,
         )
         # Calibrate token estimator with actual usage
         if messages and prompt_tokens > 0:
@@ -905,7 +1017,10 @@ class Agent:
         )
 
     async def _compaction_llm_call(self, messages: list[dict[str, Any]]) -> str:
-        resp: LLMResponse = await self._llm.chat(messages, tools=None, max_tokens=512, cache_control=None)
+        # Prefer the dedicated local vision-model provider when configured; it
+        # is used here as a small text summarizer and receives no tools/images.
+        provider = getattr(self._vision_broker, "_provider", None) or self._llm
+        resp: LLMResponse = await provider.chat(messages, tools=None, max_tokens=400, cache_control=None)
         if resp.finish_reason == "error" or resp.content.startswith("LLM request failed"):
             raise RuntimeError(resp.content)
         return resp.content
@@ -929,14 +1044,15 @@ class Agent:
             )
             return
 
-        state = self._get_state(session_id)
+        resolved_session_id = session_id or self._active_session_id
+        state = self._get_state(resolved_session_id)
         scope_token = set_memory_scope(derive_memory_scope(state.session_id))
         try:
             async with state.run_lock:
                 async for event in self._run_serialized(
                     state,
                     user_input,
-                    session_id=session_id,
+                    session_id=resolved_session_id,
                     confirm_callback=confirm_callback,
                     attachments=attachments,
                 ):
@@ -957,8 +1073,6 @@ class Agent:
         state.cancelled = False
         state.tool_call_history.clear()
         state.last_outcome = "running"
-        if self._config.auto_compact_enabled:
-            state.conversation.compact_completed_tool_results()
         state.mark_snapshot()
 
         attachment_blocks = self._resolve_attachments(state.session_id, attachments)
@@ -1010,7 +1124,6 @@ class Agent:
                 state.snapshot_len = -1
                 # Long-term memory is explicit. Ordinary conversation text and
                 # tool use must not silently become durable user memory.
-            state.conversation.compact_completed_tool_results()
             self._persist_session_transcript(state)
             self._record_turn(
                 state,
@@ -1064,29 +1177,46 @@ class Agent:
         memory_context = "\n\n".join(p for p in memory_parts if p)
         conv.set_system_context(self._system_prompt)
 
-        # Persist a deterministic summary before the request becomes too large.
-        # This is the default path; LLM rewriting remains an explicit opt-in.
+        # Automatic compaction changes only the prompt view.  The canonical
+        # transcript remains intact for persistence, export, and later review.
         effective_budget = self._config.effective_context_window_budget()
-        if (
+        compaction_event: AgentEvent | None = None
+        canonical_messages = conv.get_canonical_messages_for_llm_raw()
+        from pc_assistant.context.tags import (
+            is_compacted_history,
+            is_context_summary,
+            is_dialogue_user_turn,
+        )
+        dialogue_turns = sum(1 for m in canonical_messages if is_dialogue_user_turn(m))
+        canonical_is_lossy = any(
+            is_compacted_history(m.get("content")) or is_context_summary(m.get("content"))
+            for m in canonical_messages
+        )
+        should_summarize = (
             self._config.auto_compact_enabled
+            and self._config.llm_compact_enabled
             and effective_budget > 0
+            and dialogue_turns > 6
             and conv.estimate_token_count() >= effective_budget * self._config.auto_compact_threshold
-        ):
-            conv.compress(keep_recent=4)
-
-        if self._config.llm_compact_enabled:
+            and dialogue_turns - 3 > conv.context_summary_turns
+            and not canonical_is_lossy
+        )
+        if should_summarize:
             async def _hydrate_for_compaction(messages: list[dict[str, Any]]) -> str:
                 prepared = self._prepare_model_messages(state.session_id, messages)
                 return await self._compaction_llm_call(prepared)
 
-            compacted = await compact_conversation_llm(
-                conv.get_messages_for_llm_raw(),
-                keep_recent=2,
+            summarized = await summarize_prompt_history(
+                canonical_messages, keep_recent_turns=3,
                 llm_call=_hydrate_for_compaction,
             )
-            if compacted is not None:
-                conv.rebuild_from_messages(compacted)
-
+            if summarized is not None:
+                summary, covered_turns = summarized
+                conv.set_context_summary(summary, covered_turns=covered_turns)
+                compaction_event = AgentEvent(
+                    type="context_compacted",
+                    content="Earlier conversation was condensed into a short working summary.",
+                )
         import uuid as _uuid
         run_id = _uuid.uuid4().hex[:16]
         step_counter = 0
@@ -1097,6 +1227,8 @@ class Agent:
         max_total_tool_calls = self._config.max_total_tool_calls
         consecutive_tool_without_answer = 0
         max_consecutive_tool_calls = self._config.max_consecutive_tool_calls
+        if compaction_event is not None:
+            yield compaction_event
         turn_tool_calls = 0
         successful_tool_results = 0
         vision_observation_calls = 0
@@ -1109,7 +1241,7 @@ class Agent:
             turn_instructions.append(
                 "## Image evidence requirement\n"
                 "The current turn contains available image manifests, but you cannot see their pixels. "
-                "Call image_inspect with the manifested image_id and a question that you derive from the "
+                "Call image with the manifested image_id and a question that you derive from the "
                 "user's current request. The question is required and must not be generic or hard-coded. "
                 "Normally make one comprehensive observation call; call again only when a distinct visible "
                 "detail is necessary. You remain responsible for diagnosis, recommendations, and solutions "
@@ -1323,6 +1455,9 @@ class Agent:
                 tool_calls=len(accumulated_tool_calls),
                 error=call_error,
                 messages=messages,
+                requested_max_tokens=request_max_tokens,
+                message_budget=message_budget,
+                schema_tokens=schema_tokens,
             )
 
             if stream_had_error:
@@ -1372,14 +1507,28 @@ class Agent:
                     if not isinstance(arguments, dict):
                         arguments = {}
 
+                    # The model-facing tool vocabulary is intentionally
+                    # semantic; normalize it to stable internal names before
+                    # safety checks, idempotency, and execution.
+                    tool_name, arguments = self._registry.normalize_call(tool_name, arguments)
+
                     is_loop, loop_reason = self._check_tool_loop(tool_name, arguments, state.tool_call_history)
                     if is_loop:
+                        loop_result = _error_result(
+                            tool_name,
+                            arguments,
+                            {
+                                "error": f"Loop detected: {loop_reason}",
+                                "code": "loop_detected",
+                            },
+                            self._registry,
+                        )
                         yield AgentEvent(
                             type="tool_result",
                             tool_name=tool_name,
                             tool_args=arguments,
-                            tool_result={"error": f"Loop detected: {loop_reason}"},
-                            content=f"Stopped: {loop_reason}",
+                            tool_result=loop_result,
+                            content=loop_result["error"],
                             iteration=iteration,
                         )
                         conv.add_tool_result(tool_call_id, f"Stopped: {loop_reason}", tool_name=tool_name)
@@ -1515,6 +1664,13 @@ class Agent:
                             if scheduler_context is not None:
                                 reset_scheduler_session(scheduler_context)
                         safe_result = self._event_safe_result(result)
+                        result_image_id = (
+                            str(safe_result.get("image_id", "")).strip()
+                            if isinstance(safe_result, dict)
+                            else ""
+                        )
+                        if result_image_id and not self._llm.supports_vision:
+                            vision_required = True
                         if (
                             tool_name == "image_inspect"
                             and isinstance(safe_result, dict)
@@ -1523,6 +1679,11 @@ class Agent:
                         ):
                             vision_observation_calls += 1
                         result_str = str(safe_result)
+                        if result_image_id and not self._llm.supports_vision:
+                            result_str += (
+                                f"\n[Image available as image_id={result_image_id}. "
+                                "Call image to inspect pixels. Do not use files or run_command.]"
+                            )
                         result_str = self._smart_truncate(result_str, tool_name, result)
                         inline_blocks = self._inline_image_blocks(state.session_id, tool_name, result)
                         if idem_key and not self._contains_binary_image(result):
@@ -1567,13 +1728,19 @@ class Agent:
                         return
                     except Exception as e:
                         error_msg = f"Error: {e}"
-                        conv.add_tool_result(tool_call_id, error_msg, tool_name=tool_name)
+                        error_result = _error_result(
+                            tool_name,
+                            arguments,
+                            {"error": error_msg, "exception_type": type(e).__name__},
+                            self._registry,
+                        )
+                        conv.add_tool_result(tool_call_id, json.dumps(error_result, ensure_ascii=False), tool_name=tool_name)
                         state.status = "thinking"
                         yield AgentEvent(
                             type="tool_result",
                             tool_name=tool_name,
                             tool_args=arguments,
-                            tool_result={"error": str(e)},
+                            tool_result=error_result,
                             content=error_msg,
                             iteration=iteration,
                         )
@@ -1583,7 +1750,7 @@ class Agent:
                 if vision_required and vision_observation_calls == 0:
                     conv.add_user(
                         "[System] Your draft relied on an image without visual evidence and was not delivered. "
-                        "Call image_inspect for the available image_id now and supply a visual question derived "
+                        "Call image for the available image_id now and supply a visual question derived "
                         "from the user's request. Ask only for visible observations; "
                         "perform diagnosis or solution reasoning yourself after the tool result."
                     )

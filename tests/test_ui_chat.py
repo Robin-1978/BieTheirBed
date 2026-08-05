@@ -116,11 +116,11 @@ class TestChatUICommands:
         assert ui._running is False
 
     @pytest.mark.asyncio
-    async def test_clear_command(self):
+    async def test_new_command(self):
         ui = ChatUI(config=AppConfig())
         agent = Agent(config=AppConfig())
         ui._agent = agent
-        result = await ui._handle_user_command("/clear")
+        result = await ui._handle_user_command("/new")
         assert result is True
 
     @pytest.mark.asyncio
@@ -417,27 +417,27 @@ class TestChatApp:
             assert len(outputs) >= 2
 
     @pytest.mark.asyncio
-    async def test_app_clear_command(self):
+    async def test_app_new_command(self):
         from pc_assistant.ui.app import ChatApp
         app = ChatApp(config=AppConfig())
         async with app.run_test() as pilot:
-            await app._handle_command("/clear")
+            await app._handle_command("/new")
             log = app.query_one("#chat-log")
             assert log is not None
 
     @pytest.mark.asyncio
-    async def test_app_clear_command_uses_remote_service_command(self):
+    async def test_app_new_command_uses_remote_service_command(self):
         from pc_assistant.service.client import ServiceClient
         from pc_assistant.ui.app import ChatApp
 
         client = ServiceClient()
-        client.command = AsyncMock(return_value={"cleared": True, "session_id": "ws:test"})
+        client.command = AsyncMock(return_value={"new_session": True, "session_id": "ws:test:new:abc"})
         app = ChatApp(config=AppConfig(), agent=client)
 
         async with app.run_test():
-            await app._handle_command("/clear")
+            await app._handle_command("/new")
 
-        client.command.assert_awaited_once_with("/clear")
+        client.command.assert_awaited_once_with("/new")
 
     @pytest.mark.asyncio
     async def test_app_cancel_when_not_processing(self):

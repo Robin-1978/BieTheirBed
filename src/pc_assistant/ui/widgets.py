@@ -195,9 +195,9 @@ class CommandOutput(Widget):
 
 
 SLASH_COMMANDS = [
-    "/help", "/exit", "/quit", "/clear", "/tools", "/history",
+    "/help", "/exit", "/quit", "/new", "/tools", "/history",
     "/status", "/config", "/config set ", "/memory", "/memory clear",
-    "/retry", "/debug", "/export", "/compact", "/theme", "/copy",
+    "/retry", "/debug", "/export", "/theme", "/copy",
     "/confirm", "/deny",
 ]
 

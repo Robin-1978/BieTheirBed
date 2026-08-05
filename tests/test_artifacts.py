@@ -155,5 +155,5 @@ def test_core_tools_explain_open_is_not_delivery(tmp_path):
         for schema in agent.registry.all_schemas()
     }
     assert "screenshot" in schemas
-    assert "artifact_prepare" in schemas
-    assert "current user" in schemas["artifact_prepare"]["description"]
+    assert "attach_file" in schemas
+    assert "Attach" in schemas["attach_file"]["description"]

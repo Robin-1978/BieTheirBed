@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from pc_assistant.context.memory import MemoryItem
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, parameter, tool
 
 
 class UserMemoryPort(Protocol):
@@ -27,6 +27,9 @@ class EpisodicMemoryPort(Protocol):
     def recall(self, query: str = "", limit: int = 5) -> list[dict[str, Any]]: ...
 
 
+@parameter("value", skim=True, skim_hint="store")
+@parameter("key", skim=True, skim_hint="fact/search")
+@tool(name="memory", description="Save, read, search, or delete saved user facts.", skim_description="User memory.")
 class MemoryTool(ToolBase):
     name = "memory"
     description = "Store, retrieve, search, or delete user preferences and personal information for long-term memory"
@@ -162,7 +165,7 @@ class MemoryTool(ToolBase):
                         "description": "core is small, always injected, and requires user confirmation; relevant is retrieved only for matching requests",
                     },
                 },
-                "required": ["action", "key"],
+                "required": ["action"],
             },
         }
 
@@ -179,6 +182,6 @@ class MemoryTool(ToolBase):
                     "category": {"type": "string"},
                     "importance": {"type": "string", "enum": ["core", "relevant"]},
                 },
-                "required": ["action", "key"],
+                "required": ["action"],
             },
         }

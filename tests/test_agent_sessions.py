@@ -124,22 +124,30 @@ class TestSessionStatus:
 class TestLlmCompaction:
     @pytest.mark.asyncio
     async def test_compacts_when_enabled(self):
-        agent = Agent(config=AppConfig(llm_compact_enabled=True))
+        agent = Agent(config=AppConfig(
+            llm_compact_enabled=True,
+            context_window_budget=4096,
+            auto_compact_threshold=0.01,
+            vision_enabled=False,
+        ))
         agent._llm.chat = AsyncMock(
             return_value=LLMResponse(content="EARLIER: three turns summarized", finish_reason="stop")
         )
         agent._llm.chat_stream = _answer_stream("hello back")
 
         conv = agent.conversation
-        for i in range(3):
-            conv.add_user(f"q{i}")
-            conv.add_assistant(f"a{i}")
+        for i in range(7):
+            conv.add_user(f"q{i} " + "details " * 30)
+            conv.add_assistant(f"a{i} " + "result " * 30)
 
-        await _collect(agent, "q3")
+        events = await _collect(agent, "q7")
 
-        # Compaction rebuilds to summary + ack + recent pair (kept_recent=2),
-        # then the new assistant answer is appended.
-        assert len(conv.get_messages()) == 5
+        # Automatic compaction changes only the prompt view; the canonical
+        # transcript remains complete.
+        assert len(conv.get_messages()) == 16
+        assert conv.has_context_summary
+        assert conv.get_messages_for_llm_raw()[0]["content"].startswith("<context_summary")
+        assert any(e.type == "context_compacted" for e in events)
         agent._llm.chat.assert_called_once()
 
     @pytest.mark.asyncio

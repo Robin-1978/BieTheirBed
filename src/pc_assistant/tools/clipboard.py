@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, parameter, tool
 
 
+@parameter("content", skim=True, skim_hint="write")
+@tool(name="clipboard", description="Read or write the clipboard.", skim_description="Clipboard read/write.")
 class ClipboardTool(ToolBase):
     name = "clipboard"
     description = "Read from and write to the system clipboard"

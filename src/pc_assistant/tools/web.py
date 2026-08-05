@@ -5,7 +5,7 @@ import ipaddress
 from typing import Any
 from urllib.parse import urlparse
 
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, parameter, tool
 
 
 def _is_safe_url(url: str) -> tuple[bool, str]:
@@ -30,6 +30,9 @@ def _is_safe_url(url: str) -> tuple[bool, str]:
     return True, ""
 
 
+@parameter("url", skim=True, skim_hint="fetch")
+@parameter("query", skim=True, skim_hint="search")
+@tool(name="web", description="Search the web or fetch a URL.", skim_description="Web search and fetch.")
 class WebTool(ToolBase):
     name = "web"
     description = "Search the web and fetch web pages"

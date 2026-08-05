@@ -2,9 +2,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, parameter, tool
 
 
+@parameter("button", skim=True, skim_hint="left/right/middle")
+@parameter("y2", skim=True, skim_hint="drag end y")
+@parameter("x2", skim=True, skim_hint="drag end x")
+@parameter("dy", skim=True, skim_hint="scroll y")
+@parameter("dx", skim=True, skim_hint="scroll x")
+@parameter("y", skim=True, skim_hint="move/click/drag y")
+@parameter("x", skim=True, skim_hint="move/click/drag x")
+@parameter("duration", public_name="duration_seconds")
+@tool(name="mouse", description="Move, click, scroll, drag, or read the pointer.", skim_description="Mouse control.")
 class MouseTool(ToolBase):
     name = "mouse"
     description = "Control mouse: move, click, scroll, drag, and get cursor position"

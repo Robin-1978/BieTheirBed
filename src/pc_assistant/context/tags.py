@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import re
 import time
+import ast
+import xml.etree.ElementTree as ET
 from typing import Any
 from xml.sax.saxutils import escape
 
@@ -11,6 +13,7 @@ TAG_COMPACTED_HISTORY = "compacted_history"
 TAG_RUNTIME_CONTEXT = "runtime_context"
 TAG_TOOL_RESULT = "tool_result"
 TAG_USER_REQUEST = "user_request"
+TAG_CONTEXT_SUMMARY = "context_summary"
 
 _COMPACTED_META_RE = re.compile(
     rf'^<{TAG_COMPACTED_HISTORY}\s+([^>]+)>',
@@ -91,6 +94,25 @@ def is_compacted_history(content: Any) -> bool:
     c = _content_text(content).strip()
     return c.startswith(f"<{TAG_COMPACTED_HISTORY}")
 
+def format_context_summary(body: str, *, covered_turns: int) -> str:
+    # The body is intentionally Markdown, but it lives inside a tagged prompt
+    # region. Prevent model-generated delimiter text from closing or nesting
+    # the protocol envelope.
+    safe_body = (body or "").strip()
+    safe_body = re.sub(
+        rf"</?{TAG_CONTEXT_SUMMARY}\b[^>]*>",
+        lambda m: m.group(0).replace("<", "&lt;").replace(">", "&gt;"),
+        safe_body,
+        flags=re.IGNORECASE,
+    )
+    return (
+        f'<{TAG_CONTEXT_SUMMARY} lossy="true" covered_turns="{int(covered_turns)}">\n'
+        f'{safe_body}\n</{TAG_CONTEXT_SUMMARY}>'
+    )
+
+def is_context_summary(content: Any) -> bool:
+    return _content_text(content).strip().startswith(f"<{TAG_CONTEXT_SUMMARY}")
+
 
 def parse_compacted_history_meta(content: Any) -> dict[str, str]:
     c = _content_text(content).strip()
@@ -111,15 +133,15 @@ def wrap_tool_result(tool_name: str, payload: str, **attrs: Any) -> str:
     name = _xml_attr(tool_name)
     body = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, default=str)
     if "status" not in attrs:
+        parsed: Any = None
         try:
             parsed = json.loads(body)
-            if isinstance(parsed, dict):
-                if parsed.get("error"):
-                    attrs["status"] = "error"
-                else:
-                    attrs["status"] = "ok"
         except (json.JSONDecodeError, TypeError):
-            attrs["status"] = "ok"
+            try:
+                parsed = ast.literal_eval(body)
+            except (SyntaxError, ValueError, TypeError):
+                parsed = None
+        attrs["status"] = "error" if isinstance(parsed, dict) and parsed.get("error") else "ok"
     extra = "".join(f' {_xml_attr(k)}="{_xml_attr(str(v))}"' for k, v in attrs.items())
     return f'<tool_result tool="{name}"{extra}>\n{body}\n</tool_result>'
 
@@ -134,6 +156,34 @@ def unwrap_tool_result(content: Any) -> str:
     return c[c.find(">") + 1:end].strip()
 
 
+def tool_result_status(content: Any) -> str:
+    """Read the explicit status marker from a wrapped tool result.
+
+    This intentionally does not search result text for words like ``error``:
+    schemas and ordinary output may contain those words while succeeding.
+    """
+    c = _content_text(content).strip()
+    if not c.startswith(f"<{TAG_TOOL_RESULT}"):
+        return "ok"
+    try:
+        root = ET.fromstring(c)
+    except ET.ParseError:
+        return "ok"
+    return "error" if root.attrib.get("status") == "error" else "ok"
+
+
+def parse_tool_result_payload(content: Any) -> Any:
+    """Parse a wrapped result without interpreting arbitrary text."""
+    body = unwrap_tool_result(content)
+    try:
+        return json.loads(body)
+    except (json.JSONDecodeError, TypeError):
+        try:
+            return ast.literal_eval(body)
+        except (SyntaxError, ValueError, TypeError):
+            return None
+
+
 # ---------------------------------------------------------------------------
 # Turn detection
 # ---------------------------------------------------------------------------
@@ -143,7 +193,7 @@ def is_dialogue_user_turn(msg: dict[str, Any]) -> bool:
     if msg.get("role") != "user":
         return False
     c = _content_text(msg.get("content")).strip()
-    if is_compacted_history(c):
+    if is_compacted_history(c) or is_context_summary(c):
         return False
     if c.startswith(f"<{TAG_RUNTIME_CONTEXT}"):
         return False

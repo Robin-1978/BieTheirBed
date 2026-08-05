@@ -5,7 +5,7 @@ Client -> Server (requests):
     {"method": "cancel",  "id": 2, "params": {"session_id": ""}}
     {"method": "confirm", "id": 3, "params": {"code": "...", "approved": true}}
     {"method": "status",  "id": 4}
-    {"method": "command", "id": 5, "params": {"cmd": "/clear", "session_id": ""}}
+    {"method": "command", "id": 5, "params": {"cmd": "/new", "session_id": ""}}
     {"method": "upload_artifact", "id": 6, "params": {"artifact": {...}, "session_id": ""}}
 
 Server -> Client (responses/events):

@@ -17,6 +17,7 @@ from pc_assistant.tools.system import SystemTool
 from pc_assistant.tools.weather import WeatherTool
 from pc_assistant.tools.web import WebTool
 from pc_assistant.tools.window import WindowTool
+from pc_assistant.tools.registry import ToolRegistry
 
 
 def _extract_action_enums(schema: dict) -> set[str]:
@@ -61,3 +62,15 @@ def test_core_schema_actions_subset_of_schema(tool):
 @pytest.mark.parametrize("tool", ALL_TOOLS, ids=lambda t: t.name)
 def test_core_schema_has_same_name(tool):
     assert tool.schema()["name"] == tool.core_schema()["name"]
+
+
+def test_scheduler_skim_contains_create_inputs_without_tool_help():
+    registry = ToolRegistry()
+    registry.register(SchedulerTool())
+
+    skim = registry.llm_schema("tasks", skim=True)
+    properties = skim["parameters"]["properties"]
+
+    assert set(properties) == {"action", "task", "when", "task_id"}
+    assert "description" not in properties["task"]
+    assert properties["when"]["description"] == "delay/interval/cron"

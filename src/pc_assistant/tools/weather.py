@@ -3,9 +3,10 @@ from __future__ import annotations
 import httpx
 from typing import Any
 
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, tool
 
 
+@tool(name="weather", description="Get weather for a place.", skim_description="Weather and forecast.")
 class WeatherTool(ToolBase):
     name = "weather"
     description = "Get current weather and forecast for any city or location"

@@ -3,12 +3,16 @@ from __future__ import annotations
 import httpx
 from typing import Any
 
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, parameter, tool
 
 
 _API_BASE = "https://api.frankfurter.dev/v1"
 
 
+@parameter("amount", skim=True, skim_hint="convert")
+@parameter("target", public_name="to", skim=True, skim_hint="target")
+@parameter("base", public_name="from", skim=True, skim_hint="source")
+@tool(name="currency", description="Get exchange rates or convert money.", skim_description="Rates and conversion.")
 class ExchangeTool(ToolBase):
     name = "exchange"
     description = "Get currency exchange rates and convert between currencies"
@@ -120,8 +124,8 @@ class ExchangeTool(ToolBase):
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["rate", "convert", "list"]},
-                    "from": {"type": "string"},
-                    "to": {"type": "string"},
+                    "base": {"type": "string"},
+                    "target": {"type": "string"},
                     "amount": {"type": "number", "default": 1},
                 },
                 "required": ["action"],

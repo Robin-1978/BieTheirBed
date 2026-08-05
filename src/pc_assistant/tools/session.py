@@ -4,9 +4,10 @@ import os
 import subprocess
 from typing import Any
 
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, tool
 
 
+@tool(name="desktop_session", description="Show desktop session status or lock the desktop.", skim_description="Desktop session.")
 class SessionTool(ToolBase):
     """Inspect or lock the current local graphical session.
 
@@ -15,7 +16,7 @@ class SessionTool(ToolBase):
     """
 
     name = "session"
-    description = "Inspect or lock the current local graphical desktop session"
+    description = "Show or lock the current desktop session"
 
     async def execute(self, **kwargs: Any) -> Any:
         action = str(kwargs.get("action", "status"))

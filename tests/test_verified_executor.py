@@ -43,6 +43,23 @@ class _SchemaTool(ToolBase):
         }
 
 
+class _FailingTool(_SchemaTool):
+    async def execute(self, **kwargs):
+        return {"error": "Invalid destination"}
+
+
+class _CrashingTool(_SchemaTool):
+    async def execute(self, **kwargs):
+        raise RuntimeError("backend unavailable")
+
+
+def _executor_for_tool(tmp_path, tool):
+    registry = ToolRegistry()
+    registry.register(tool)
+    verifier = Verifier(SafetyChecker(), registry, AuditLogger(str(tmp_path / "audit")))
+    return VerifiedToolExecutor(verifier, registry)
+
+
 def _executor(tmp_path, events):
     registry = ToolRegistry()
     registry.register(_MouseTool(events))
@@ -108,3 +125,31 @@ async def test_schema_validation_rejects_missing_and_invalid_arguments(tmp_path)
 
     assert missing.rejected and missing.code.value == "invalid_arguments"
     assert invalid.rejected and invalid.code.value == "invalid_arguments"
+
+
+@pytest.mark.asyncio
+async def test_tool_errors_include_allowed_inputs_and_next_step(tmp_path):
+    executor = _executor_for_tool(tmp_path, _FailingTool())
+    _, prepared = await executor.authorize("schema_tool", {"action": "write"})
+    assert prepared is not None
+
+    result = await executor.commit(prepared)
+
+    assert result["error"] == "Invalid destination"
+    assert result["tool"] == "schema_tool"
+    assert result["allowed_parameters"] == ["action"]
+    assert result["allowed_actions"] == ["read", "write"]
+    assert "retry once" in result["instruction"]
+
+
+@pytest.mark.asyncio
+async def test_tool_exceptions_become_structured_errors(tmp_path):
+    executor = _executor_for_tool(tmp_path, _CrashingTool())
+    _, prepared = await executor.authorize("schema_tool", {"action": "read"})
+    assert prepared is not None
+
+    result = await executor.commit(prepared)
+
+    assert result["error"] == "Tool execution failed: backend unavailable"
+    assert result["exception_type"] == "RuntimeError"
+    assert result["tool"] == "schema_tool"

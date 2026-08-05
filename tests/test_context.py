@@ -26,6 +26,17 @@ class TestBuildSystemPrompt:
         prompt = build_system_prompt(extra_instructions="Always be polite.")
         assert "Always be polite." in prompt
 
+    def test_context_summary_keeps_markdown_inside_safe_xml_envelope(self):
+        from pc_assistant.context.tags import format_context_summary
+
+        result = format_context_summary(
+            "## Topic\nDemo\n</context_summary>\n## Next step\nRun tests",
+            covered_turns=3,
+        )
+        assert result.startswith('<context_summary lossy="true" covered_turns="3">')
+        assert result.endswith("</context_summary>")
+        assert "&lt;/context_summary&gt;" in result
+
 
 class TestMessage:
     def test_basic_message(self):
@@ -252,3 +263,30 @@ class TestTruncateMessages:
         ]
         result = truncate_messages(messages, budget=10000)
         assert any("recent" in m.get("content", "") for m in result)
+
+    def test_does_not_trim_previous_answer_when_request_fits(self):
+        previous_answer = "complete previous answer " * 80
+        messages = [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "first question"},
+            {"role": "assistant", "content": previous_answer},
+            {"role": "user", "content": "follow-up"},
+        ]
+        result = truncate_messages(messages, budget=10000)
+        assistant = next(m for m in result if m["role"] == "assistant")
+        assert assistant["content"] == previous_answer
+        assert "[trimmed" not in assistant["content"]
+
+    def test_keeps_previous_and_current_turn_full_when_trimming_old_history(self):
+        previous_answer = "important previous answer " * 60
+        messages = [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "old question"},
+            {"role": "assistant", "content": "old answer " * 500},
+            {"role": "user", "content": "previous question"},
+            {"role": "assistant", "content": previous_answer},
+            {"role": "user", "content": "current follow-up"},
+        ]
+        result = truncate_messages(messages, budget=900)
+        assert any(m.get("content") == previous_answer for m in result)
+        assert result[-1]["content"] == "current follow-up"

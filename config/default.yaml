@@ -18,6 +18,8 @@ models:
 
 default_model: "local_default"
 vision_model: ""
+fallback_enabled: true
+fallback_model: ""
 
 # Single-model fallback fields used only when providers/models are absent.
 llm_provider: "llamacpp"
@@ -32,9 +34,9 @@ max_tokens: 4096
 shell_timeout: 30
 context_window_budget: 8192
 auto_compact_enabled: true
-auto_compact_threshold: 0.80
+auto_compact_threshold: 0.50
 token_family: "default"
-llm_compact_enabled: false
+llm_compact_enabled: true
 max_sessions: 8
 trace_enabled: true
 llm_trace_log: "logs/llm_trace.jsonl"

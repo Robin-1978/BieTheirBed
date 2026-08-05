@@ -11,11 +11,13 @@ from pathlib import Path
 from typing import Any
 
 from pc_assistant.tools.artifacts import ArtifactPaths, image_artifact
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, parameter, tool
 from pc_assistant.vision import preprocess
 from pc_assistant.vision.coordinates import CoordinateTransform
 
 
+@parameter("path", public_name="save_path")
+@tool(name="screen", description="Look at the screen or verify a screen change.", skim_description="Inspect the screen.")
 class ScreenTool(ToolBase):
     name = "screen"
     description = (
@@ -60,10 +62,10 @@ class ScreenTool(ToolBase):
                         "enum": ["look", "verify", "info"],
                         "description": "look: screenshot (with grid); verify: re-capture to confirm a change; info: resolution",
                     },
-                    "region": {
-                        "type": "object",
-                        "description": "Optional crop region {x, y, width, height} in screen pixels",
-                    },
+                    "region_x": {"type": "integer", "description": "Crop left (with region_y/width/height)"},
+                    "region_y": {"type": "integer", "description": "Crop top (with region_x/width/height)"},
+                    "region_width": {"type": "integer", "description": "Crop width"},
+                    "region_height": {"type": "integer", "description": "Crop height"},
                     "grid": {"type": "boolean", "description": "Overlay a coordinate grid (columns A.., rows 1..)"},
                     "path": {"type": "string", "description": "Save path for the screenshot"},
                     "cols": {"type": "integer", "description": "Grid columns (default 10)"},
@@ -94,7 +96,14 @@ class ScreenTool(ToolBase):
         *,
         grid_default: bool,
     ) -> dict[str, Any]:
-        region = kwargs.get("region")
+        region = None
+        if any(kwargs.get(key) is not None for key in ("region_x", "region_y", "region_width", "region_height")):
+            region = {
+                "x": kwargs.get("region_x"),
+                "y": kwargs.get("region_y"),
+                "width": kwargs.get("region_width"),
+                "height": kwargs.get("region_height"),
+            }
         use_grid = bool(kwargs.get("grid", grid_default))
         action = str(kwargs.get("action", "look"))
         try:
