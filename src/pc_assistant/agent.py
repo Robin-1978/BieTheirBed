@@ -606,6 +606,13 @@ class Agent:
         if session_id:
             self._session_manager.drop(session_id)
 
+    def compact_session(self, session_id: str = "", *, keep_recent: int = 4) -> None:
+        """Mechanically compact one session without deleting its history."""
+        self._get_state(session_id).conversation.compress(keep_recent=keep_recent)
+
+    def session_messages(self, session_id: str = "") -> list[dict[str, Any]]:
+        return self._get_state(session_id).conversation.get_messages()
+
     def cleanup_artifacts(self) -> None:
         self._artifact_store.cleanup_expired()
 
@@ -983,6 +990,21 @@ class Agent:
             state.status = "thinking"
             state.total_iterations += 1
 
+            # Tool schemas are sent outside the message list, but still consume
+            # the provider context window. Keep the static core schemas in the
+            # request (and therefore cacheable) while reserving room for them
+            # and for the requested completion before trimming history.
+            tools = self._registry.all_schemas() if len(self._registry) > 0 else None
+            schema_tokens = 0
+            if tools:
+                schema_tokens = self._token_estimator.text_tokens(
+                    json.dumps(tools, ensure_ascii=False, sort_keys=True),
+                )
+            message_budget = max(
+                256,
+                self._config.context_window_budget - schema_tokens - self._config.max_tokens,
+            )
+
             raw_messages = conv.get_messages_for_llm_raw()
             messages = assemble_llm_messages(
                 system_prompt,
@@ -994,11 +1016,10 @@ class Agent:
             )
             messages = truncate_messages(
                 messages,
-                budget=self._config.context_window_budget,
+                budget=message_budget,
             )
             messages = self._ensure_system_first(messages)
             messages = self._prepare_model_messages(state.session_id, messages)
-            tools = self._registry.all_schemas() if len(self._registry) > 0 else None
 
             full_content = ""
             emitted_clean_len = 0

@@ -130,7 +130,7 @@ async def test_agent_confirm_callback_allows():
 
     agent._llm.chat_stream = mock_chat_stream
     events = await _collect_events(agent, "delete temp")
-    tool_call_events = [e for e in events if e.type == "tool_call" and not e.blocked]
+    tool_call_events = [e for e in events if e.type == "tool_call" and e.blocked]
     assert len(tool_call_events) >= 1
 
 

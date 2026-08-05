@@ -16,7 +16,7 @@ import sys
 from typing import Any
 
 from pc_assistant.config import AppConfig
-from pc_assistant.service.protocol import SOCKET_PATH, PID_PATH
+from pc_assistant.service.protocol import SOCKET_PATH
 from pc_assistant.service.server import is_running
 
 logger = logging.getLogger(__name__)

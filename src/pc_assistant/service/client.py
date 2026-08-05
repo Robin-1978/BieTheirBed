@@ -21,7 +21,6 @@ from pc_assistant.service.protocol import (
     WS_MAX_SIZE,
     ClientMessage,
     ServerMessage,
-    serialize,
 )
 
 logger = logging.getLogger(__name__)

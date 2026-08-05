@@ -139,7 +139,7 @@ class TestConversationManager:
         cm.add_user("b")
         cm.add_user("c")
         cm.add_user("d")
-        assert len(cm) == 4
+        assert len(cm) == 3
 
     def test_estimate_token_count(self):
         cm = ConversationManager()

@@ -79,7 +79,7 @@ async def copy_to_clipboard(text: str) -> tuple[bool, str]:
     return False, "No clipboard tool found (install xclip, wl-clipboard or pbcopy)."
 
 
-async def copy_or_save(text: str, fallback_path: str = "clipboard.txt") -> tuple[bool, str]:
+async def copy_or_save(text: str, fallback_path: str = "") -> tuple[bool, str]:
     """Copy to the clipboard; if unavailable, write to a file instead.
 
     Returns ``(ok, detail)`` — ``ok`` is True when the text reached somewhere
@@ -89,6 +89,10 @@ async def copy_or_save(text: str, fallback_path: str = "clipboard.txt") -> tuple
     if ok:
         return True, detail
     try:
+        if not fallback_path:
+            from pc_assistant.runtime import RuntimePaths
+            fallback_path = str(RuntimePaths.from_root().cache / "clipboard.txt")
+        os.makedirs(os.path.dirname(os.path.abspath(fallback_path)), exist_ok=True)
         with open(fallback_path, "w", encoding="utf-8") as fh:
             fh.write(text)
         return True, f"clipboard unavailable ({detail}); saved to {fallback_path}"

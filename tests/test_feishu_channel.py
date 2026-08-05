@@ -207,6 +207,26 @@ def test_feishu_reaction_is_removed_even_when_agent_is_not_ready():
     channel._remove_reaction.assert_called_once_with("message-id", "reaction-id")
 
 
+def test_feishu_unlock_is_handled_before_agent_dispatch():
+    channel = FeishuChannel()
+    channel._agent_loop = object()
+    channel._unlock_broker.verify_and_unlock = MagicMock(
+        return_value=(True, "Desktop unlock requested")
+    )
+    channel._send_text = MagicMock(return_value=True)
+    channel._process_with_agent = MagicMock()
+
+    channel._handle_message("ou-user", "/unlock 123456")
+
+    channel._unlock_broker.verify_and_unlock.assert_called_once_with(
+        "ou-user", "123456"
+    )
+    channel._send_text.assert_called_once_with(
+        "ou-user", "✅ Desktop unlock requested"
+    )
+    channel._process_with_agent.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_feishu_delivers_each_explicit_core_artifact():
     channel = FeishuChannel()

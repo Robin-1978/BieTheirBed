@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from pc_assistant.model_adapter.content import ContentBlock  # noqa: F401  (re-export: str | list[dict])
 

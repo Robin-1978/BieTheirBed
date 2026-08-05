@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 
 class PCAssistantError(Exception):
     """Base exception for all pc_assistant errors."""

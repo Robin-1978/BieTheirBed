@@ -221,7 +221,7 @@ class TestAgentRun:
         assert len(blocked) >= 1
 
     @pytest.mark.asyncio
-    async def test_confirm_callback_allows(self):
+    async def test_confirm_callback_cannot_override_hard_block(self):
         agent = Agent(config=AppConfig(), confirm_callback=lambda n, a: True)
         dangerous_cmd = get_default_dangerous_commands()[0]
         first_stream = _make_stream_mock(
@@ -246,14 +246,14 @@ class TestAgentRun:
 
         agent._llm.chat_stream = mock_chat_stream
         events = await _collect_events(agent, "delete temp")
-        allowed_calls = [e for e in events if e.type == "tool_call" and not e.blocked]
-        assert len(allowed_calls) >= 1
+        blocked_calls = [e for e in events if e.type == "tool_call" and e.blocked]
+        assert len(blocked_calls) >= 1
 
     @pytest.mark.asyncio
     async def test_confirm_callback_denies_feeds_back_to_llm(self):
         """Denial feeds back as a tool result so the model can respond (no turn kill)."""
         agent = Agent(config=AppConfig(), confirm_callback=lambda n, a: False)
-        dangerous_cmd = get_default_dangerous_commands()[0]
+        dangerous_cmd = "mv /tmp/source /tmp/destination"
         first_stream = _make_stream_mock(
             content="Deleting.",
             tool_calls=[{
@@ -300,7 +300,7 @@ class TestAgentRun:
             return False
 
         agent = Agent(config=AppConfig(), confirm_callback=default_cb)
-        dangerous_cmd = get_default_dangerous_commands()[0]
+        dangerous_cmd = "mv /tmp/source /tmp/destination"
         agent._llm.chat_stream = _make_stream_mock(
             content="Deleting.",
             tool_calls=[{

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
-from typing import Any
-
 
 class RateLimiter:
     def __init__(self, max_calls: int = 60, window_seconds: int = 60) -> None:

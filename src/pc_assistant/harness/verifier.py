@@ -96,10 +96,37 @@ class Verifier:
                 retry_hint="Use describe_tool to list available tools.",
             )
 
+        schema_error = self._validate_arguments(tool_name, arguments)
+        if schema_error:
+            self._audit.log(
+                action="tool_call_blocked",
+                tool=tool_name,
+                parameters=arguments,
+                allowed=False,
+                reason=schema_error,
+            )
+            return Verdict.reject(
+                RefusalCode.INVALID_ARGUMENTS,
+                schema_error,
+                retry_hint="Call describe_tool and retry with arguments matching the schema.",
+            )
         safety_result = self._safety.check_tool_call(tool_name, arguments)
         need_confirm, confirm_reason = self._safety.needs_confirmation(tool_name, arguments)
 
         if not safety_result:
+            if not safety_result.overridable:
+                self._audit.log(
+                    action="tool_call_blocked",
+                    tool=tool_name,
+                    parameters=arguments,
+                    allowed=False,
+                    reason=safety_result.reason,
+                )
+                return Verdict.reject(
+                    self._classify_safety_reason(safety_result.reason),
+                    safety_result.reason,
+                    retry_hint="This operation is hard-blocked by the safety policy.",
+                )
             if cb is not None:
                 confirmed = await resolve_confirm(cb, tool_name, arguments)
                 if confirmed:
@@ -182,6 +209,59 @@ class Verifier:
             allowed=True,
         )
         return Verdict.accept()
+
+    def _validate_arguments(self, tool_name: str, arguments: dict[str, Any]) -> str:
+        """Validate the model call against the tool's JSON schema.
+
+        This intentionally implements the stable JSON-schema subset used by
+        built-in tools without adding a runtime dependency. Unknown schema
+        keywords are ignored so MCP tools can still provide richer schemas.
+        """
+        tool = self._registry.get(tool_name)
+        if tool is None:
+            return ""
+        schema = tool.schema().get("parameters", {})
+        if not isinstance(schema, dict):
+            return ""
+        if not isinstance(arguments, dict):
+            return "Tool arguments must be a JSON object"
+        required = schema.get("required", [])
+        for key in required:
+            if key not in arguments:
+                return f"Missing required argument: {key}"
+        properties = schema.get("properties", {})
+        if not isinstance(properties, dict):
+            return ""
+        for key, value in arguments.items():
+            rule = properties.get(key)
+            if not isinstance(rule, dict):
+                continue
+            if "enum" in rule and value not in rule["enum"]:
+                return f"Invalid value for '{key}'; expected one of {rule['enum']}"
+            expected = rule.get("type")
+            if expected and not self._matches_type(value, expected):
+                return f"Invalid type for '{key}'; expected {expected}"
+            if expected == "array" and isinstance(rule.get("items"), dict):
+                item_type = rule["items"].get("type")
+                if item_type and any(not self._matches_type(item, item_type) for item in value):
+                    return f"Invalid item type for '{key}'; expected {item_type}"
+        return ""
+
+    @staticmethod
+    def _matches_type(value: Any, expected: str) -> bool:
+        if expected == "object":
+            return isinstance(value, dict)
+        if expected == "array":
+            return isinstance(value, list)
+        if expected == "string":
+            return isinstance(value, str)
+        if expected == "integer":
+            return isinstance(value, int) and not isinstance(value, bool)
+        if expected == "number":
+            return isinstance(value, (int, float)) and not isinstance(value, bool)
+        if expected == "boolean":
+            return isinstance(value, bool)
+        return True
 
     @staticmethod
     def _classify_safety_reason(reason: str) -> RefusalCode:

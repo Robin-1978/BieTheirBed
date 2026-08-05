@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from pc_assistant.redaction import redact_message
+
 
 class JsonlRecorder:
     """Thread-safe append-only JSONL sink with in-memory ring buffer."""
@@ -114,7 +116,7 @@ class TurnRecorder(JsonlRecorder):
             "kind": "turn",
             "ts": datetime.now(tz=timezone.utc).isoformat(),
             "session_id": session_id,
-            "user_input": user_input[:200],
+            "user_input": redact_message(user_input)[:200],
             "outcome": outcome,
             "iterations": iterations,
             "tool_calls": tool_calls,
