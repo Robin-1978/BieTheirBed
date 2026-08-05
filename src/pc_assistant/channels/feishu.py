@@ -113,6 +113,68 @@ def render_feishu_markdown(text: str) -> str:
     return "\n".join(rendered)
 
 
+def _parse_markdown_table(lines: list[str], start: int) -> tuple[list[str], list[list[str]], int] | None:
+    """Parse a GFM table for the native Card JSON 2.0 table component."""
+    if start + 2 > len(lines) or not re.match(r"^\s*\|.+\|\s*$", lines[start]):
+        return None
+    if not re.match(r"^\s*\|[\s\-:|]+\|\s*$", lines[start + 1]):
+        return None
+    headers = [cell.strip() for cell in lines[start].strip().strip("|").split("|")]
+    rows: list[list[str]] = []
+    i = start + 2
+    while i < len(lines) and re.match(r"^\s*\|.+\|\s*$", lines[i]):
+        rows.append([cell.strip() for cell in lines[i].strip().strip("|").split("|")])
+        i += 1
+    return (headers, rows, i) if headers and rows else None
+
+
+def _markdown_to_card_elements(text: str) -> list[dict[str, Any]]:
+    """Convert Markdown sections to lark_md blocks plus native tables."""
+    lines = text.split("\n")
+    elements: list[dict[str, Any]] = []
+    buffer: list[str] = []
+    i = 0
+    while i < len(lines):
+        parsed = _parse_markdown_table(lines, i)
+        if parsed is None:
+            buffer.append(lines[i])
+            i += 1
+            continue
+        block = "\n".join(buffer).strip()
+        if block:
+            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": block}})
+        buffer = []
+        headers, rows, i = parsed
+        columns = [
+            {"name": f"c{idx}", "display_name": header or f"列 {idx + 1}", "data_type": "text"}
+            for idx, header in enumerate(headers)
+        ]
+        table_rows = [
+            {f"c{idx}": row[idx] if idx < len(row) else "" for idx in range(len(headers))}
+            for row in rows
+        ]
+        elements.append({
+            "tag": "table",
+            "page_size": min(max(len(table_rows), 1), 10),
+            "columns": columns,
+            "rows": table_rows,
+        })
+    block = "\n".join(buffer).strip()
+    if block:
+        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": block}})
+    return elements
+
+
+_SCREENSHOT_PREAMBLE_RE = re.compile(
+    r"^\s*\[当前画面截图已生成[，,。]?下文为纯文字回复\]\s*[-—\s]*\n*",
+)
+
+
+def _strip_transport_preamble(text: str) -> str:
+    """Remove an internal artifact-status sentence hallucinated by a model."""
+    return _SCREENSHOT_PREAMBLE_RE.sub("", text or "", count=1).strip()
+
+
 def _patch_ws_card_dispatch(ws_client: Any) -> None:
     """Monkey-patch lark_oapi WS client to dispatch CARD frames.
 
@@ -1297,24 +1359,21 @@ class FeishuChannel(ChannelBase):
             })
             elements.append({"tag": "hr"})
 
-        content = render_feishu_markdown(answer)[:3800]
+        content = _strip_transport_preamble(render_feishu_markdown(answer))[:3800]
         if len(answer) > 3800:
             content += "\n\n... (内容过长已截断)"
-        elements.append({
-            "tag": "div",
-            "text": {"tag": "lark_md", "content": content},
-        })
+        elements.extend(_markdown_to_card_elements(content))
 
         header_color = "red" if is_error else "blue"
         header_title = "❌ 处理出错" if is_error else "💬 PC Assistant"
 
         return {
-            "config": {"wide_screen_mode": True},
+            "schema": "2.0",
             "header": {
                 "template": header_color,
                 "title": {"tag": "plain_text", "content": header_title},
             },
-            "elements": elements,
+            "body": {"elements": elements},
         }
 
     def _send_long_text(self, open_id: str, text: str) -> None:
