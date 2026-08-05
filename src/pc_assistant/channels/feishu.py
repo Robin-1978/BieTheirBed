@@ -113,78 +113,16 @@ def render_feishu_markdown(text: str) -> str:
     return "\n".join(rendered)
 
 
-def _parse_markdown_table(lines: list[str], start: int) -> tuple[list[str], list[list[str]], int] | None:
-    """Parse a GFM table for the native Card JSON 2.0 table component."""
-    if start + 2 > len(lines) or not re.match(r"^\s*\|.+\|\s*$", lines[start]):
-        return None
-    if not re.match(r"^\s*\|[\s\-:|]+\|\s*$", lines[start + 1]):
-        return None
-    headers = [cell.strip() for cell in lines[start].strip().strip("|").split("|")]
-    rows: list[list[str]] = []
-    i = start + 2
-    while i < len(lines) and re.match(r"^\s*\|.+\|\s*$", lines[i]):
-        rows.append([cell.strip() for cell in lines[i].strip().strip("|").split("|")])
-        i += 1
-    return (headers, rows, i) if headers and rows else None
-
-
 def _markdown_to_card_elements(text: str) -> list[dict[str, Any]]:
-    """Convert Markdown sections to Card 2.0 markdown blocks plus tables."""
-    lines = text.split("\n")
-    elements: list[dict[str, Any]] = []
-    buffer: list[str] = []
-    i = 0
-    while i < len(lines):
-        parsed = _parse_markdown_table(lines, i)
-        if parsed is None:
-            buffer.append(lines[i])
-            i += 1
-            continue
-        block = "\n".join(buffer).strip()
-        if block:
-            elements.append({"tag": "markdown", "content": block})
-        buffer = []
-        headers, rows, i = parsed
-        columns = [
-            {
-                "name": f"c{idx}",
-                "display_name": _markdown_cell_to_text(header) or f"列 {idx + 1}",
-                "data_type": "text",
-            }
-            for idx, header in enumerate(headers)
-        ]
-        table_rows = [
-            {
-                f"c{idx}": _markdown_cell_to_text(row[idx] if idx < len(row) else "")
-                for idx in range(len(headers))
-            }
-            for row in rows
-        ]
-        elements.append({
-            "tag": "table",
-            "page_size": min(max(len(table_rows), 1), 10),
-            "columns": columns,
-            "rows": table_rows,
-        })
-    block = "\n".join(buffer).strip()
-    if block:
-        elements.append({"tag": "markdown", "content": block})
-    return elements
+    """Build one Card JSON 2.0 Markdown component.
 
-
-def _markdown_cell_to_text(value: str) -> str:
-    """Render inline Markdown as plain text for native table text cells."""
-    text = value.strip()
-    text = re.sub(r"!\[([^]]*)\]\([^)]+\)", r"\1", text)
-    text = re.sub(r"\[([^]]+)\]\([^)]+\)", r"\1", text)
-    text = re.sub(r"`([^`]*)`", r"\1", text)
-    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
-    text = re.sub(r"__([^_]+)__", r"\1", text)
-    text = re.sub(r"~~([^~]+)~~", r"\1", text)
-    text = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"\1", text)
-    text = re.sub(r"(?<!_)_([^_]+)_(?!_)", r"\1", text)
-    text = re.sub(r"</?font\b[^>]*>", "", text, flags=re.IGNORECASE)
-    return text.replace(r"\|", "|")
+    The JSON 2.0 rich-text Markdown component natively renders pipe tables,
+    emphasis, links, code, and other supported Markdown syntax. Keeping the
+    complete document in one component avoids flattening table cells to plain
+    text and preserves the model's formatting at the delivery boundary.
+    """
+    content = text.strip()
+    return [{"tag": "markdown", "content": content}] if content else []
 
 
 def _patch_ws_card_dispatch(ws_client: Any) -> None:
