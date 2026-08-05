@@ -137,7 +137,7 @@ class TestConversationManager:
         tool_msgs = [m for m in messages if m["role"] == "tool"]
         assert len(tool_msgs) == 0
 
-    def test_completed_large_tool_result_is_bounded(self):
+    def test_completed_tool_result_is_omitted(self):
         cm = ConversationManager()
         cm.add_user("read it")
         cm.add_assistant("", delta_tool_calls=[{
@@ -150,11 +150,11 @@ class TestConversationManager:
 
         assert cm.compact_completed_tool_results(max_chars=1000) == 1
         tool = next(m for m in cm.get_messages() if m["role"] == "tool")
-        assert "tool_result_truncated" in tool["content"]
-        assert len(tool["content"]) < 1100
+        assert "tool_result_omitted" in tool["content"]
+        assert len(tool["content"]) < 300
 
-    def test_small_tool_result_is_preserved(self):
+    def test_completed_small_tool_result_is_also_omitted(self):
         cm = ConversationManager()
         cm.add_tool_result("tc1", "small")
-        assert cm.compact_completed_tool_results(max_chars=1000) == 0
-        assert "small" in cm.get_messages()[0]["content"]
+        assert cm.compact_completed_tool_results(max_chars=1000) == 1
+        assert "tool_result_omitted" in cm.get_messages()[0]["content"]
