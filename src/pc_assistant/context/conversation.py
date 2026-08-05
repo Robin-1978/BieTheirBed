@@ -215,27 +215,28 @@ class ConversationManager:
         compressed = strip_ephemeral(compressed)
         self.rebuild_from_messages(compressed)
 
-    def compact_completed_tool_results(self, *, max_chars: int = 12000) -> int:
-        """Bound large tool outputs before the next user turn.
+    def compact_completed_tool_results(self, *, max_chars: int = 2000) -> int:
+        """Replace completed-turn tool payloads with protocol-safe markers.
 
-        The active turn still receives the complete bounded result. Once that
-        turn is complete, oversized historical tool payloads become a preview
-        with a stable marker; artifacts remain addressable by ID and can be
-        fetched again through their owning tool.
+        The active turn still receives the complete bounded result. Before the
+        next user turn, tool-call messages remain for traceability and provider
+        pairing, while their bulky result bodies are omitted because the
+        assistant's subsequent interpretation is the durable context. Error
+        status and artifact IDs are retained when cheaply extractable.
         """
         changed = 0
         for message in self._messages:
             if message.role != "tool" or not isinstance(message.content, str):
                 continue
-            if len(message.content) <= max_chars:
+            if message.content.startswith("[tool_result_omitted:"):
                 continue
-            head = message.content[: max_chars // 2]
-            tail = message.content[-max_chars // 4 :]
             artifact_ids = re.findall(r"artifact_id['\"]?\s*[:=]\s*['\"]([^'\"]+)", message.content)
-            artifact_note = f"\nartifact_ids: {', '.join(dict.fromkeys(artifact_ids))}" if artifact_ids else ""
+            lowered = message.content.lower()
+            status = "error" if "error" in lowered or "failed" in lowered or "rejected" in lowered else "ok"
+            artifact_note = f"; artifact_ids={','.join(dict.fromkeys(artifact_ids))}" if artifact_ids else ""
             message.content = (
-                "[tool_result_truncated: full output retained outside context]\n"
-                f"{head}\n…\n{tail}{artifact_note}"
+                f"[tool_result_omitted: prior tool result {status}; "
+                f"assistant interpretation is retained{artifact_note}]"
             )
             changed += 1
         return changed

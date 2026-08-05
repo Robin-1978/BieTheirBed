@@ -68,11 +68,13 @@ explicit declaration. The request planner still reserves completion tokens and
 static tool schemas.
 
 Compaction follows the current industry baseline for personal agents: keep the
-latest turn(s) lossless, mechanically summarize older dialogue and tool results
-when a token threshold is reached, keep durable preferences in scoped memory,
-and retain raw artifacts/transcripts outside the prompt. LLM rewriting is an
-optional lossy optimization, disabled by default; it is never the only copy of
-history and never runs for safety-critical authorization data.
+active turn lossless, retain the assistant's interpretation in completed turns,
+and replace completed tool-result bodies with protocol-safe omission markers.
+Tool-call messages remain for traceability and provider pairing; raw files,
+screenshots, and large results stay outside the prompt behind artifact/tool
+references. LLM rewriting is an optional lossy optimization, disabled by
+default; it is never the only copy of history and never runs for safety-critical
+authorization data.
 
 `/config set` applies execution limits, context policy, temperature, and
 compaction settings immediately. Provider identity/credentials are rebuilt

@@ -110,7 +110,6 @@ class AppConfig(BaseModel):
     context_window_budget: int = 8192
     auto_compact_enabled: bool = True
     auto_compact_threshold: float = 0.80
-    tool_result_history_max_chars: int = 12000
     llm_compact_enabled: bool = False
     token_family: str = ""
     max_sessions: int = 100
@@ -318,7 +317,6 @@ def _env_overrides() -> dict[str, Any]:
         "PC_CONTEXT_WINDOW_BUDGET": ("context_window_budget", int),
         "PC_AUTO_COMPACT_ENABLED": ("auto_compact_enabled", bool),
         "PC_AUTO_COMPACT_THRESHOLD": ("auto_compact_threshold", float),
-        "PC_TOOL_RESULT_HISTORY_MAX_CHARS": ("tool_result_history_max_chars", int),
         "PC_LLM_COMPACT_ENABLED": ("llm_compact_enabled", bool),
         "PC_TOKEN_FAMILY": ("token_family", str),
         "PC_MAX_SESSIONS": ("max_sessions", int),
