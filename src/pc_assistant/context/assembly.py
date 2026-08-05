@@ -191,7 +191,9 @@ def truncate_messages(
     if current_turn:
         turns.append(current_turn)
 
-    while turns and len(turns) > 2:
+    # Keep the current turn, but drop older turns all the way down to one when
+    # the budget is tight. Retaining two oversized turns defeats the budget.
+    while turns and len(turns) > 1:
         total = _estimate_tokens(
             system + pin_strategy + pin_session + summary_block + [m for t in turns for m in t],
         )

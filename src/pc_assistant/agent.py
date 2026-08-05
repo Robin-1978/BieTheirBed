@@ -74,6 +74,34 @@ from pc_assistant.vision.broker import VisionBroker
 _EVENT_RESULT_LIMIT = 100_000
 
 
+def allocate_context_budget(
+    context_window: int,
+    schema_tokens: int,
+    requested_completion_tokens: int,
+) -> tuple[int, int]:
+    """Split a provider window into input-history and completion budgets.
+
+    A small context must never lose almost all of its input budget merely
+    because ``max_tokens`` was configured optimistically. The completion
+    reservation is reduced first, while retaining at least half of the
+    remaining window for input whenever possible.
+    """
+    available = max(0, int(context_window) - max(0, int(schema_tokens)))
+    if available <= 0:
+        return 0, 0
+    # Never reserve more than half of the usable window for completion. When
+    # the requested completion is modest (e.g. 4K on a 50K model), all other
+    # capacity remains available to system, memory, and conversation history.
+    completion_budget = min(
+        max(256, int(requested_completion_tokens)),
+        max(256, available // 2),
+    )
+    if completion_budget > available:
+        completion_budget = available
+    input_budget = max(0, available - completion_budget)
+    return input_budget, completion_budget
+
+
 class AgentEvent(BaseModel):
     type: str
     content: str = ""
@@ -1105,10 +1133,23 @@ class Agent:
                 schema_tokens = self._token_estimator.text_tokens(
                     json.dumps(tools, ensure_ascii=False, sort_keys=True),
                 )
-            message_budget = max(
-                256,
-                self._config.effective_context_window_budget() - schema_tokens - self._config.max_tokens,
+            message_budget, request_max_tokens = allocate_context_budget(
+                self._config.effective_context_window_budget(),
+                schema_tokens,
+                self._config.max_tokens,
             )
+            if message_budget <= 0 or request_max_tokens <= 0:
+                state.last_outcome = "error"
+                state.status = "ready"
+                yield AgentEvent(
+                    type="error",
+                    content=(
+                        "Configured context window is too small for the static tool schemas. "
+                        "Increase the active model's context_window or reduce the tool surface."
+                    ),
+                    iteration=iteration,
+                )
+                return
 
             raw_messages = conv.get_messages_for_llm_raw()
             messages = assemble_llm_messages(
@@ -1125,6 +1166,18 @@ class Agent:
             )
             messages = self._ensure_system_first(messages)
             messages = self._prepare_model_messages(state.session_id, messages)
+            if self._token_estimator.messages_tokens(messages) > message_budget:
+                state.last_outcome = "error"
+                state.status = "ready"
+                yield AgentEvent(
+                    type="error",
+                    content=(
+                        "The current turn is larger than the model's input budget after "
+                        "deterministic history trimming. Please shorten the request or use /compact."
+                    ),
+                    iteration=iteration,
+                )
+                return
 
             full_content = ""
             emitted_clean_len = 0
@@ -1147,7 +1200,7 @@ class Agent:
                     messages,
                     tools=tools,
                     temperature=self._config.llm_temperature,
-                    max_tokens=self._config.max_tokens,
+                    max_tokens=request_max_tokens,
                     cancel_key=state.session_id or None,
                     cache_control=self._cache_plan.cache_control_hint() if self._cache_plan.supports_caching else None,
                 ):

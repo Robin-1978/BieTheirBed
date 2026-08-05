@@ -766,6 +766,18 @@ Completed tool payloads are compacted to status/artifact placeholders before
 writing. Explicit `/clear` deletes both the in-memory state and its persisted
 transcript; LRU eviction does not.
 
+### AR-028: Context reservation could collapse to a 256-token floor — high (fixed 2026-08-05)
+
+The request planner previously subtracted the configured completion maximum and
+static tool schemas from the model window, then clamped the remaining history
+budget to `256`. An optimistic output setting could therefore erase nearly all
+conversation context. Input and completion budgets are now allocated together:
+completion is capped at half the usable window, and the remainder is assigned
+to history. Deterministic trimming may drop all older turns when necessary,
+while the Agent rejects a still-overlarge current request before sending it to
+the provider. The deployed configuration uses `50000` for the Volcengine main
+models and `16384` for the local Qwen-VL perception model.
+
 ## 7. Defect-hardening matrix
 
 | Priority | Verified defect | Root cause | Minimal repair | State |

@@ -226,6 +226,17 @@ class TestTruncateMessages:
         original_chars = sum(len(m.get("content", "")) for m in messages)
         assert total_chars < original_chars
 
+    def test_drops_old_turns_until_current_turn_fits(self):
+        messages = [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "old " * 300},
+            {"role": "assistant", "content": "old answer " * 300},
+            {"role": "user", "content": "current"},
+        ]
+        result = truncate_messages(messages, budget=100)
+        assert result[-1]["content"] == "current"
+        assert not any("old old" in str(m.get("content", "")) for m in result)
+
     def test_system_always_preserved(self):
         messages = [
             {"role": "system", "content": "system prompt"},
