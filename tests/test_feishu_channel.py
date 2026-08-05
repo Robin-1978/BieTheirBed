@@ -237,7 +237,8 @@ def test_response_card_uses_adapted_markdown():
     )
     assert card["schema"] == "2.0"
     elements = card["body"]["elements"]
-    content = elements[0]["text"]["content"]
+    assert elements[0]["tag"] == "markdown"
+    content = elements[0]["content"]
     assert "# 标题" not in content
     assert "**标题**" in content
     table = elements[1]
