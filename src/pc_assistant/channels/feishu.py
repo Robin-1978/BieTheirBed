@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -13,7 +14,7 @@ from typing import Any
 
 from pc_assistant.channels.base import ChannelBase
 from pc_assistant.harness.confirm import CONFIRM_TIMEOUT
-from pc_assistant.redaction import redact_message, redact_tool_parameters
+from pc_assistant.redaction import redact_tool_parameters
 from pc_assistant.security.totp import TotpUnlockBroker
 
 #: Bound for a full turn (confirm prompt + agent response). Must exceed
@@ -61,8 +62,12 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
-def _safe_message_for_log(text: str) -> str:
-    return redact_message(text)
+def _principal_for_log(open_id: str) -> str:
+    """Return a stable non-reversible identifier for operational logs."""
+    if not open_id:
+        return "unknown"
+    return hashlib.sha256(open_id.encode("utf-8")).hexdigest()[:10]
+
 
 def _patch_ws_card_dispatch(ws_client: Any) -> None:
     """Monkey-patch lark_oapi WS client to dispatch CARD frames.
@@ -544,7 +549,11 @@ class FeishuChannel(ChannelBase):
             with self._lark_lock:
                 resp = client.im.v1.message.create(request)
             if resp.code == 0:
-                logger.info("[SEND-TEXT] OK to %s (%d chars)", open_id, len(text))
+                logger.info(
+                    "[SEND-TEXT] OK principal=%s chars=%d",
+                    _principal_for_log(open_id),
+                    len(text),
+                )
                 return True
             else:
                 logger.error("[SEND-TEXT] FAILED code=%s msg=%s", resp.code, resp.msg)
@@ -576,7 +585,7 @@ class FeishuChannel(ChannelBase):
             with self._lark_lock:
                 resp = client.im.v1.message.create(request)
             if resp.code == 0:
-                logger.info("[SEND-CARD] OK to %s", open_id)
+                logger.info("[SEND-CARD] OK principal=%s", _principal_for_log(open_id))
                 return True
             else:
                 logger.error("[SEND-CARD] FAILED code=%s msg=%s", resp.code, resp.msg)
@@ -639,7 +648,11 @@ class FeishuChannel(ChannelBase):
             with self._lark_lock:
                 response = client.im.v1.message.create(message_request)
             if response.code == 0:
-                logger.info("[SEND-IMAGE] OK to %s: %s", open_id, image_path)
+                logger.info(
+                    "[SEND-IMAGE] OK principal=%s file=%s",
+                    _principal_for_log(open_id),
+                    image_path.name,
+                )
                 return True
             logger.error("[SEND-IMAGE] Send failed code=%s msg=%s", response.code, response.msg)
             return False
@@ -701,7 +714,11 @@ class FeishuChannel(ChannelBase):
             with self._lark_lock:
                 response = client.im.v1.message.create(message_request)
             if response.code == 0:
-                logger.info("[SEND-FILE] OK to %s: %s", open_id, file_path.name)
+                logger.info(
+                    "[SEND-FILE] OK principal=%s file=%s",
+                    _principal_for_log(open_id),
+                    Path(name).name if name else file_path.name,
+                )
                 return True
             logger.error("[SEND-FILE] Send failed code=%s msg=%s", response.code, response.msg)
             return False
@@ -1253,7 +1270,9 @@ class FeishuChannel(ChannelBase):
                     last_time = self._recent_texts.get(dedup_key, 0)
                     if now - last_time < 30:
                         logger.info(
-                            "[WORKER] Duplicate text within 30s: '%s', skip", text
+                            "[WORKER] Duplicate text within 30s principal=%s chars=%d, skip",
+                            _principal_for_log(open_id),
+                            len(text),
                         )
                         self._msg_queue.task_done()
                         continue
@@ -1268,9 +1287,9 @@ class FeishuChannel(ChannelBase):
                             del self._recent_texts[k]
 
                 logger.info(
-                    "[WORKER] Processing: '%s' from %s (qsize=%d)",
-                    _safe_message_for_log(text),
-                    open_id,
+                    "[WORKER] Processing principal=%s message_type=text chars=%d qsize=%d",
+                    _principal_for_log(open_id),
+                    len(text),
                     self._msg_queue.qsize(),
                 )
                 reaction_id = self._add_reaction(msg_id, "Typing")
@@ -1356,10 +1375,10 @@ class FeishuChannel(ChannelBase):
                     channel._chat_id_cache[open_id] = chat_id
                 channel._msg_queue.put((open_id, text, msg_id, attachments))
                 logger.info(
-                    "[WS-RECV#%d] Queued: '%s' from %s (qsize=%d)",
+                    "[WS-RECV#%d] Queued principal=%s message_type=text chars=%d qsize=%d",
                     recv_seq,
-                    _safe_message_for_log(text),
-                    open_id,
+                    _principal_for_log(open_id),
+                    len(text),
                     channel._msg_queue.qsize(),
                 )
             except Exception as e:

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import io
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 from pc_assistant.agent import AgentEvent
-from pc_assistant.channels.feishu import FeishuChannel
+from pc_assistant.channels.feishu import FeishuChannel, _principal_for_log
 from pc_assistant.model_adapter.types import ImageAttachment
 
 
@@ -167,7 +168,7 @@ def test_feishu_download_image_uses_installed_sdk_contract(tmp_path):
     assert request.type == "image"
 
 
-def test_feishu_send_file_uses_installed_sdk_contract(tmp_path):
+def test_feishu_send_file_uses_installed_sdk_contract(tmp_path, caplog):
     source = tmp_path / "report.txt"
     source.write_text("hello", encoding="utf-8")
     upload_response = MagicMock()
@@ -180,7 +181,8 @@ def test_feishu_send_file_uses_installed_sdk_contract(tmp_path):
     channel = FeishuChannel(runtime_root=str(tmp_path))
     channel._get_lark_client = MagicMock(return_value=client)
 
-    assert channel._send_file("ou-user", str(source), "renamed.txt") is True
+    with caplog.at_level(logging.INFO, logger="pc_assistant.channels.feishu"):
+        assert channel._send_file("ou-user", str(source), "renamed.txt") is True
 
     upload_request = client.im.v1.file.create.call_args.args[0]
     assert upload_request.request_body.file_type == "stream"
@@ -190,6 +192,16 @@ def test_feishu_send_file_uses_installed_sdk_contract(tmp_path):
     assert message_request.request_body.receive_id == "ou-user"
     assert message_request.request_body.msg_type == "file"
     assert message_request.request_body.content == '{"file_key": "file-key"}'
+    assert "ou-user" not in caplog.text
+    assert _principal_for_log("ou-user") in caplog.text
+    assert "renamed.txt" in caplog.text
+
+
+def test_feishu_principal_log_id_is_stable_and_non_reversible():
+    principal = _principal_for_log("ou-user-sensitive")
+    assert principal == _principal_for_log("ou-user-sensitive")
+    assert len(principal) == 10
+    assert "ou-user-sensitive" not in principal
 
 
 def test_feishu_reaction_is_removed_even_when_agent_is_not_ready():

@@ -131,6 +131,58 @@ class TestSafetyChecker:
         assert needs is True
         assert "text input" in reason
 
+    @pytest.mark.parametrize("action", ["hotkey", "shortcut"])
+    def test_keyboard_shortcuts_require_confirmation(self, action):
+        checker = SafetyChecker()
+        needs, _ = checker.needs_confirmation(
+            "keyboard", {"action": action, "keys": ["ctrl", "s"]}
+        )
+        assert needs is True
+
+    @pytest.mark.parametrize("key", ["enter", "delete", "backspace", "escape"])
+    def test_keyboard_execution_keys_require_confirmation(self, key):
+        checker = SafetyChecker()
+        needs, _ = checker.needs_confirmation("keyboard", {"action": "press", "key": key})
+        assert needs is True
+
+    def test_keyboard_navigation_key_does_not_require_confirmation(self):
+        checker = SafetyChecker()
+        needs, _ = checker.needs_confirmation("keyboard", {"action": "press", "key": "left"})
+        assert needs is False
+
+    @pytest.mark.parametrize(
+        "tool_name,arguments",
+        [
+            ("mouse", {"action": "click"}),
+            ("mouse", {"action": "drag"}),
+            ("ui", {"action": "click", "element_id": "button-1"}),
+            ("ui", {"action": "type", "element_id": "field-1"}),
+            ("window", {"action": "close", "window_id": "Editor"}),
+            ("session", {"action": "lock"}),
+        ],
+    )
+    def test_desktop_state_changes_require_confirmation(self, tool_name, arguments):
+        checker = SafetyChecker()
+        needs, _ = checker.needs_confirmation(tool_name, arguments)
+        assert needs is True
+
+    @pytest.mark.parametrize(
+        "tool_name,arguments",
+        [
+            ("mouse", {"action": "position"}),
+            ("mouse", {"action": "move", "x": 10, "y": 20}),
+            ("ui", {"action": "list"}),
+            ("window", {"action": "focus", "window_id": "Editor"}),
+            ("session", {"action": "status"}),
+        ],
+    )
+    def test_desktop_observation_and_positioning_do_not_require_confirmation(
+        self, tool_name, arguments
+    ):
+        checker = SafetyChecker()
+        needs, _ = checker.needs_confirmation(tool_name, arguments)
+        assert needs is False
+
     def test_artifact_prepare_blocks_protected_path(self, tmp_path):
         protected = tmp_path / "protected"
         checker = SafetyChecker(

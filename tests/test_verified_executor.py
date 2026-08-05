@@ -51,12 +51,16 @@ def _executor(tmp_path, events):
         events.append("post_verify")
         return "confirmed"
 
+    async def confirm(_tool_name, _arguments):
+        return True
+
     verifier = Verifier(
         SafetyChecker(),
         registry,
         AuditLogger(str(tmp_path / "audit")),
         verify_enabled=True,
         post_verify_callback=post_verify,
+        confirm_callback=confirm,
     )
     return VerifiedToolExecutor(verifier, registry)
 

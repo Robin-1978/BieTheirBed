@@ -158,6 +158,39 @@ class SafetyChecker:
             action = str(kwargs.get("action", "")).lower()
             if action in ("type", "write"):
                 return (True, "Keyboard text input requires explicit confirmation")
+            if action in ("hotkey", "shortcut"):
+                return (True, "Keyboard shortcuts require explicit confirmation")
+            if action == "press":
+                key = str(kwargs.get("key", "")).lower()
+                if key in {
+                    "enter", "return", "delete", "backspace", "esc", "escape",
+                    "space", "tab",
+                }:
+                    return (True, f"Keyboard key '{key}' may execute or change state")
+            return (False, "")
+
+        if tool_name == "mouse":
+            action = str(kwargs.get("action", "")).lower()
+            if action in {
+                "click", "double_click", "right_click", "drag", "press", "release",
+            }:
+                return (True, f"Mouse {action} may activate or change desktop state")
+            return (False, "")
+
+        if tool_name == "ui":
+            action = str(kwargs.get("action", "")).lower()
+            if action in ("click", "type"):
+                return (True, f"Semantic UI {action} requires explicit confirmation")
+            return (False, "")
+
+        if tool_name == "window":
+            if str(kwargs.get("action", "")).lower() == "close":
+                return (True, "Closing a window requires explicit confirmation")
+            return (False, "")
+
+        if tool_name == "session":
+            if str(kwargs.get("action", "")).lower() == "lock":
+                return (True, "Locking the graphical session requires explicit confirmation")
             return (False, "")
 
         if tool_name == "filesystem":

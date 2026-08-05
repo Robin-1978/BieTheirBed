@@ -37,6 +37,9 @@ class FakeWin:
     def activate(self):
         self.activated = True
 
+    def restore(self):
+        self.isMinimized = False
+
 
 FAKE_WINDOWS = [
     FakeWin("Terminal", "gnome-terminal-", 100, 0, 0, 800, 600),
@@ -104,10 +107,37 @@ class TestWindowInfo:
 
 class TestWindowFocus:
     def test_focus_calls_activate(self, tool):
-        with patch("pywinctl.getAllWindows", return_value=FAKE_WINDOWS):
+        with (
+            patch("pywinctl.getAllWindows", return_value=FAKE_WINDOWS),
+            patch("pywinctl.getActiveWindow", return_value=FAKE_WINDOWS[0]),
+        ):
             res = _run(tool.execute(action="focus", window_id="Terminal"))
         assert res["success"] is True
         assert FAKE_WINDOWS[0].activated is True
+
+    def test_focus_restores_minimized_window_and_verifies_active(self, tool):
+        window = FakeWin("Chat", "chat", 300, 0, 0, 800, 600, isMinimized=True)
+        with (
+            patch("pywinctl.getAllWindows", return_value=[window]),
+            patch("pywinctl.getActiveWindow", return_value=window),
+        ):
+            res = _run(tool.execute(action="focus", window_id="Chat"))
+
+        assert res["success"] is True
+        assert res["restored"] is True
+        assert res["verified_active"] is True
+        assert window.isMinimized is False
+
+    def test_focus_fails_when_activation_cannot_be_verified(self, tool):
+        window = FakeWin("Chat", "chat", 300, 0, 0, 800, 600)
+        with (
+            patch("pywinctl.getAllWindows", return_value=[window]),
+            patch("pywinctl.getActiveWindow", return_value=None),
+            patch("pc_assistant.tools.window.get_platform", return_value="windows"),
+        ):
+            res = _run(tool.execute(action="focus", window_id="Chat"))
+
+        assert "not verified" in res["error"]
 
     def test_ambiguous_partial_title_fails_closed(self, tool):
         windows = [

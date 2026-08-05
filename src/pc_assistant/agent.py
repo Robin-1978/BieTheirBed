@@ -23,6 +23,7 @@ from pc_assistant.context.memory_db import (
     ScopedUserMemory,
 )
 from pc_assistant.context.scope import derive_memory_scope, reset_memory_scope, set_memory_scope
+from pc_assistant.context.session_db import SessionTranscriptRepository
 from pc_assistant.context.prompt import build_system_prompt
 from pc_assistant.context.token_estimate import TokenEstimator, normalize_family
 from pc_assistant.harness.audit import AuditLogger
@@ -46,6 +47,7 @@ from pc_assistant.tools.application import ApplicationTool
 from pc_assistant.tools.clipboard import ClipboardTool
 from pc_assistant.tools.filesystem import FilesystemTool
 from pc_assistant.tools.registry import ToolRegistry
+from pc_assistant.tools.session import SessionTool
 from pc_assistant.tools.shell import ShellTool
 from pc_assistant.tools.system import SystemTool
 from pc_assistant.tools.web import WebTool
@@ -147,6 +149,9 @@ class Agent:
         self._memory_repository = SQLiteMemoryRepository(
             self._runtime_paths.data / "assistant.db",
         )
+        self._session_transcripts = SessionTranscriptRepository(
+            self._runtime_paths.data / "assistant.db",
+        )
         self._memory = memory if memory is not None else ScopedUserMemory(
             self._memory_repository,
         )
@@ -199,6 +204,8 @@ class Agent:
         self._default_state = self._session_manager.get("", self._system_prompt)
         if conversation is not None:
             self._default_state.conversation = conversation
+        else:
+            self._restore_session_transcript(self._default_state)
         self._trace = trace or LLMTraceRecorder(
             path=str(self._runtime_paths.resolve(self._config.llm_trace_log)),
             enabled=self._config.trace_enabled,
@@ -289,7 +296,22 @@ class Agent:
     def _get_state(self, session_id: str) -> SessionState:
         if not session_id:
             return self._default_state
-        return self._session_manager.get(session_id, self._system_prompt)
+        is_new = not self._session_manager.has(session_id)
+        state = self._session_manager.get(session_id, self._system_prompt)
+        if is_new:
+            self._restore_session_transcript(state)
+        return state
+
+    def _restore_session_transcript(self, state: SessionState) -> None:
+        messages = self._session_transcripts.load(state.session_id)
+        if messages:
+            state.conversation.rebuild_from_messages(messages)
+
+    def _persist_session_transcript(self, state: SessionState) -> None:
+        self._session_transcripts.save(
+            state.session_id,
+            state.conversation.get_messages(),
+        )
 
     # ------------------------------------------------------------------
     # Cancellation
@@ -606,10 +628,13 @@ class Agent:
         """Drop a named session's state (its conversation history)."""
         if session_id:
             self._session_manager.drop(session_id)
+            self._session_transcripts.delete(session_id)
 
     def compact_session(self, session_id: str = "", *, keep_recent: int = 4) -> None:
         """Mechanically compact one session without deleting its history."""
-        self._get_state(session_id).conversation.compress(keep_recent=keep_recent)
+        state = self._get_state(session_id)
+        state.conversation.compress(keep_recent=keep_recent)
+        self._persist_session_transcript(state)
 
     def apply_config_change(self, field_name: str = "") -> dict[str, Any]:
         """Apply runtime config changes, rebuilding provider state when needed.
@@ -733,6 +758,7 @@ class Agent:
             ApplicationTool(),
             WebTool(),
             SystemTool(),
+            SessionTool(),
             ClipboardTool(),
             MemoryTool(memory=self._memory, episodic=self._episodic_memory),
             WeatherTool(),
@@ -928,7 +954,7 @@ class Agent:
         turn_base_completion_tokens = state.total_completion_tokens
         evidence_required = self._evidence.requires_evidence(user_input)
         vision_required = bool(attachment_blocks and not self._llm.supports_vision)
-        evidence_tool_calls = 0
+        successful_evidence_results = 0
         try:
             async for event in self._run_loop(
                 state,
@@ -938,8 +964,11 @@ class Agent:
                 confirm_fn=confirm_fn,
                 attachment_blocks=attachment_blocks,
             ):
-                if event.type == "tool_call" and not event.blocked:
-                    evidence_tool_calls += 1
+                if (
+                    event.type == "tool_result"
+                    and self._evidence.successful_tool_result(event.tool_result)
+                ):
+                    successful_evidence_results += 1
                 yield event
         finally:
             outcome = state.last_outcome
@@ -949,12 +978,14 @@ class Agent:
                 state.snapshot_len = -1
                 # Long-term memory is explicit. Ordinary conversation text and
                 # tool use must not silently become durable user memory.
+            state.conversation.compact_completed_tool_results()
+            self._persist_session_transcript(state)
             self._record_turn(
                 state,
                 user_input,
                 outcome=outcome,
                 evidence_required=evidence_required,
-                evidence_satisfied=evidence_tool_calls > 0,
+                evidence_satisfied=self._evidence.satisfied(successful_evidence_results),
                 elapsed_ms=(time.monotonic() - turn_start) * 1000,
                 turn_base_iterations=turn_base_iterations,
                 turn_base_prompt_tokens=turn_base_prompt_tokens,
@@ -1035,6 +1066,7 @@ class Agent:
         consecutive_tool_without_answer = 0
         max_consecutive_tool_calls = self._config.max_consecutive_tool_calls
         turn_tool_calls = 0
+        successful_tool_results = 0
         vision_observation_calls = 0
 
         system_prompt = self._system_prompt
@@ -1363,6 +1395,8 @@ class Agent:
                                 content=result_str,
                                 iteration=iteration,
                             )
+                            if self._evidence.successful_tool_result(cached):
+                                successful_tool_results += 1
                             cached_artifact = (
                                 cached.get("artifact")
                                 if isinstance(cached, dict)
@@ -1446,6 +1480,8 @@ class Agent:
                             content=result_str,
                             iteration=iteration,
                         )
+                        if self._evidence.successful_tool_result(result):
+                            successful_tool_results += 1
                         artifact = (
                             safe_result.get("artifact")
                             if isinstance(safe_result, dict)
@@ -1491,7 +1527,7 @@ class Agent:
                     continue
 
                 if finish_reason == "length" and clean_content:
-                    if evidence_required and turn_tool_calls == 0:
+                    if evidence_required and successful_tool_results == 0:
                         yield AgentEvent(
                             type="evidence_warning",
                             content="Final answer not verified against tool results.",
@@ -1538,7 +1574,7 @@ class Agent:
                     except Exception:
                         pass
 
-                if evidence_required and turn_tool_calls == 0:
+                if evidence_required and successful_tool_results == 0:
                     yield AgentEvent(
                         type="evidence_warning",
                         content="Final answer not verified against tool results.",
@@ -1587,6 +1623,7 @@ class Agent:
 
     def reset_conversation(self) -> None:
         self._default_state.conversation.clear()
+        self._session_transcripts.delete("")
         self._artifact_store.cleanup_session("")
         self._system_prompt = build_system_prompt(
             working_directory=self._config.working_directory,
