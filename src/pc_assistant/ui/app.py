@@ -171,6 +171,7 @@ class ChatApp(App):
                 scheduler = self._agent.registry.get("scheduler")
                 if scheduler is not None:
                     scheduler.set_notification_callback(self._on_timer_notify)
+                    scheduler.set_result_callback(self._on_scheduled_result)
 
     async def _on_confirm_request(self, data: dict[str, Any]) -> None:
         """Handle confirm_request from the service (for dangerous tool calls).
@@ -217,6 +218,19 @@ class ChatApp(App):
 
     def _on_timer_notify(self, task_id: str, message: str) -> None:
         self.notify(message, title=f"Timer: {task_id}", severity="information", timeout=8)
+
+    def _on_scheduled_result(self, task: Any, result: dict[str, Any]) -> None:
+        """Show completed background Agent work in the local TUI."""
+        answer = result.get("result") or result.get("error") or result.get("message") or "任务已完成"
+        if not isinstance(answer, str):
+            answer = str(answer)
+        self.call_later(self._mount_scheduled_result, task.name, answer)
+        self.call_later(self._request_scroll)
+
+    def _mount_scheduled_result(self, task_name: str, answer: str) -> None:
+        self.query_one("#chat-log", VerticalScroll).mount(
+            CommandOutput(f"**定时任务：{task_name}**\n\n{answer}")
+        )
 
     # ── Selection copy ──────────────────────────────────────────
 

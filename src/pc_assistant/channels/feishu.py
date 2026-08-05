@@ -297,6 +297,41 @@ class FeishuChannel(ChannelBase):
             return False
         return self._send_card(rid, card)
 
+    def deliver_scheduled_result(
+        self,
+        session_id: str,
+        task_name: str,
+        result: dict[str, Any],
+        artifact_resolver: Any = None,
+    ) -> bool:
+        """Deliver a background Agent run to its Feishu conversation."""
+        if not session_id.startswith("feishu:"):
+            return False
+        open_id = session_id.removeprefix("feishu:")
+        answer = result.get("result") or result.get("error") or result.get("message") or "任务已完成"
+        if not isinstance(answer, str):
+            answer = json.dumps(answer, ensure_ascii=False, default=str)
+        delivered_artifacts = 0
+        if artifact_resolver is not None:
+            for artifact_ref in result.get("artifacts", [])[:5]:
+                artifact_id = str(artifact_ref.get("artifact_id", ""))
+                if not artifact_id:
+                    continue
+                try:
+                    artifact = artifact_resolver(session_id, artifact_id)
+                    if self._deliver_artifact(open_id, artifact):
+                        delivered_artifacts += 1
+                except Exception:
+                    logger.exception("[SCHEDULE] Failed to deliver artifact %s", artifact_id)
+        if delivered_artifacts:
+            answer += f"\n\n📎 已发送 {delivered_artifacts} 个附件"
+        card = self._build_response_card(
+            f"**定时任务：{task_name}**\n\n{answer}",
+            [],
+            bool(result.get("error") or result.get("executed") is False),
+        )
+        return self._send_card(open_id, card) or self._send_text(open_id, answer)
+
     # ================================================================
     # Lark Client
     # ================================================================

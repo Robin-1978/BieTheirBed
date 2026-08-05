@@ -3,7 +3,11 @@ from __future__ import annotations
 import pytest
 
 from pc_assistant.context.memory_db import SQLiteMemoryRepository
-from pc_assistant.tools.scheduler import SchedulerTool
+from pc_assistant.tools.scheduler import (
+    SchedulerTool,
+    bind_scheduler_session,
+    reset_scheduler_session,
+)
 
 
 @pytest.mark.asyncio
@@ -74,3 +78,35 @@ async def test_persisted_one_shot_is_reconciled_on_scheduler_start(tmp_path):
     await restored.execute(action="start")
     assert restored._tasks[created["task_id"]]._task is not None
     await restored.execute(action="stop")
+
+
+@pytest.mark.asyncio
+async def test_scheduled_agent_run_keeps_origin_session_and_delivers_result(tmp_path):
+    class FakeAgent:
+        async def run(self, prompt, *, session_id=""):
+            assert prompt == "检查状态并总结"
+            assert session_id == "feishu:ou-owner"
+            from pc_assistant.agent import AgentEvent
+
+            yield AgentEvent(type="final_answer", content="状态正常")
+
+    delivered = []
+    scheduler = SchedulerTool(tmp_path / "assistant.db")
+    scheduler.set_agent(FakeAgent())
+    scheduler.set_result_callback(lambda task, result: delivered.append((task.session_id, result)))
+    token = bind_scheduler_session("feishu:ou-owner")
+    try:
+        created = await scheduler.execute(
+            action="create",
+            task_name="状态巡检",
+            command="检查状态并总结",
+            schedule="in 1s",
+        )
+    finally:
+        reset_scheduler_session(token)
+
+    task = scheduler._tasks[created["task_id"]]
+    assert task.session_id == "feishu:ou-owner"
+    await scheduler._execute_task(task)
+    assert delivered[0][0] == "feishu:ou-owner"
+    assert delivered[0][1]["result"] == "状态正常"
