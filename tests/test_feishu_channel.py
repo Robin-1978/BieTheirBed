@@ -231,11 +231,27 @@ pc-assistant --status
 def test_response_card_uses_adapted_markdown():
     channel = FeishuChannel()
     card = channel._build_response_card("# 标题\n\n| A | B |\n|---|---|\n| 1 | 2 |", [], False)
-    content = card["elements"][-1]["text"]["content"]
+    assert card["schema"] == "2.0"
+    elements = card["body"]["elements"]
+    content = elements[0]["text"]["content"]
     assert "# 标题" not in content
     assert "**标题**" in content
-    assert "| A | B |" in content
-    assert "| 1 | 2 |" in content
+    table = elements[1]
+    assert table["tag"] == "table"
+    assert [column["display_name"] for column in table["columns"]] == ["A", "B"]
+    assert table["rows"] == [{"c0": "1", "c1": "2"}]
+
+
+def test_response_card_strips_false_screenshot_transport_preamble():
+    channel = FeishuChannel()
+    card = channel._build_response_card(
+        "[当前画面截图已生成，下文为纯文字回复]\n\n---\n\n天气晴朗",
+        [],
+        False,
+    )
+    content = card["body"]["elements"][0]["text"]["content"]
+    assert "截图已生成" not in content
+    assert content == "天气晴朗"
 
 
 def test_feishu_reaction_is_removed_even_when_agent_is_not_ready():

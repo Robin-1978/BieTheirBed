@@ -787,6 +787,12 @@ The channel preserves the documented pipe-table syntax verbatim and only
 adapts constructs that need a stable fallback, such as headings and fenced
 code blocks, at the delivery boundary. Supported emphasis, links, lists, and
 tables remain intact.
+
+Free-form Agent reply cards use Card JSON 2.0 (`schema: "2.0"`,
+`body.elements`). Markdown tables are parsed into the native `table` component
+(`columns` + `rows`) instead of relying on the renderer to interpret a pipe
+table inside `lark_md`. This matches the working implementation in the
+per-staging Feishu client and avoids Card JSON 1.0 rendering differences.
 The canonical conversation still stores the model's original Markdown; only
 the external card representation is transformed.
 
