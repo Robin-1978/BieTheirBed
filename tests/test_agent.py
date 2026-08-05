@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from pc_assistant.agent import Agent, AgentEvent, _strip_think_tags
+from pc_assistant.agent import Agent, AgentEvent, _strip_think_tags, allocate_context_budget
 from pc_assistant.config import AppConfig
 from pc_assistant.llm_provider import LLMResponse, StreamChunk
 from pc_assistant.platform_ import get_default_dangerous_commands
@@ -76,6 +76,17 @@ class TestAgentInit:
         agent = Agent(config=AppConfig())
         assert agent.conversation is not None
         assert agent.registry is not None
+
+    def test_context_budget_reduces_completion_before_input(self):
+        input_budget, completion_budget = allocate_context_budget(8192, 1956, 4096)
+        assert input_budget == 3118
+        assert completion_budget == 3118
+        assert input_budget > 256
+
+    def test_large_provider_window_keeps_requested_output_and_history(self):
+        input_budget, completion_budget = allocate_context_budget(50000, 1956, 4096)
+        assert input_budget == 43948
+        assert completion_budget == 4096
 
     def test_builtin_tools_registered(self):
         agent = Agent(config=AppConfig())
