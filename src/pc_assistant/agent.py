@@ -129,6 +129,7 @@ class Agent:
         self._runtime_paths = RuntimePaths.from_root(self._config.runtime_root)
         self._logger = get_logger("agent")
         self._main_model = self._config.resolve_model()
+        self._llm_injected = llm is not None
         self._llm = llm if llm is not None else LLMProvider(
             server_url=self._main_model.server_url,
             model_name=self._main_model.model,
@@ -610,6 +611,66 @@ class Agent:
         """Mechanically compact one session without deleting its history."""
         self._get_state(session_id).conversation.compress(keep_recent=keep_recent)
 
+    def apply_config_change(self, field_name: str = "") -> dict[str, Any]:
+        """Apply runtime config changes, rebuilding provider state when needed.
+
+        Scalar execution/context limits are read on every turn. Provider
+        identity and credentials require reconstructing the transport and
+        cache plan, which is safe between turns and avoids a daemon restart.
+        Injected test/custom providers are never replaced implicitly.
+        """
+        dynamic = {
+            "max_iterations", "max_tokens", "max_total_tool_calls",
+            "max_consecutive_tool_calls", "max_consecutive_same_tool",
+            "context_window_budget", "llm_temperature", "llm_compact_enabled",
+            "auto_compact_enabled", "auto_compact_threshold",
+            "trace_enabled", "vision_max_side", "vision_jpeg_quality",
+        }
+        provider_fields = {
+            "llm_provider", "llm_server_url", "llm_model_name", "llm_api_key",
+            "llm_api_base", "default_model", "token_family",
+        }
+        if field_name in dynamic:
+            return {"applied": True, "field": field_name, "restart_required": False}
+        if field_name not in provider_fields:
+            return {"applied": False, "field": field_name, "restart_required": True}
+        if self._llm_injected:
+            return {"applied": False, "field": field_name, "restart_required": True}
+
+        model = self._config.resolve_model()
+        candidate = LLMProvider(
+            server_url=model.server_url,
+            model_name=model.model,
+            provider=model.driver,
+            api_key=model.api_key,
+            api_base=model.api_base,
+            timeout=model.timeout,
+            supports_vision=model.supports_vision,
+            thinking=model.thinking.model_dump() if model.thinking is not None else None,
+        )
+        if candidate.supports_vision != self._llm.supports_vision:
+            return {"applied": False, "field": field_name, "restart_required": True}
+        self._main_model = model
+        self._llm = candidate
+        self._token_estimator = TokenEstimator(
+            normalize_family(model.token_family or self._config.token_family, model.model),
+        )
+        self._cache_plan = build_cache_plan(
+            provider=model.driver,
+            model=model.model,
+            server_url=model.server_url,
+            system_prompt=self._system_prompt,
+            tool_schemas=[t["function"] for t in self._registry.all_schemas()],
+            estimator=self._token_estimator,
+        )
+        self._planner = AgentPlanner(self._llm)
+        if self._reflection is not None:
+            self._reflection = ReflectionChecker(
+                self._llm,
+                threshold=self._config.reflection_threshold,
+            )
+        return {"applied": True, "field": field_name, "restart_required": False}
+
     def session_messages(self, session_id: str = "") -> list[dict[str, Any]]:
         return self._get_state(session_id).conversation.get_messages()
 
@@ -938,6 +999,16 @@ class Agent:
         memory_context = "\n\n".join(p for p in memory_parts if p)
         conv.set_system_context(self._system_prompt)
 
+        # Persist a deterministic summary before the request becomes too large.
+        # This is the default path; LLM rewriting remains an explicit opt-in.
+        effective_budget = self._config.effective_context_window_budget()
+        if (
+            self._config.auto_compact_enabled
+            and effective_budget > 0
+            and conv.estimate_token_count() >= effective_budget * self._config.auto_compact_threshold
+        ):
+            conv.compress(keep_recent=4)
+
         if self._config.llm_compact_enabled:
             async def _hydrate_for_compaction(messages: list[dict[str, Any]]) -> str:
                 prepared = self._prepare_model_messages(state.session_id, messages)
@@ -1002,7 +1073,7 @@ class Agent:
                 )
             message_budget = max(
                 256,
-                self._config.context_window_budget - schema_tokens - self._config.max_tokens,
+                self._config.effective_context_window_budget() - schema_tokens - self._config.max_tokens,
             )
 
             raw_messages = conv.get_messages_for_llm_raw()
@@ -1041,6 +1112,7 @@ class Agent:
                 async for chunk in self._llm.chat_stream(
                     messages,
                     tools=tools,
+                    temperature=self._config.llm_temperature,
                     max_tokens=self._config.max_tokens,
                     cancel_key=state.session_id or None,
                     cache_control=self._cache_plan.cache_control_hint() if self._cache_plan.supports_caching else None,

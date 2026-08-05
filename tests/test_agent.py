@@ -645,6 +645,25 @@ class TestAgentGetStatus:
         assert status["total_tokens"] == 70
 
 
+class TestAgentHotConfig:
+    def test_dynamic_limit_applies_without_restart(self):
+        cfg = AppConfig(max_tokens=1024)
+        agent = Agent(config=cfg)
+        assert cfg.set_field("max_tokens", "4096")
+        result = agent.apply_config_change("max_tokens")
+        assert result == {"applied": True, "field": "max_tokens", "restart_required": False}
+        assert agent.config.max_tokens == 4096
+
+    def test_provider_transport_is_rebuilt(self):
+        cfg = AppConfig(llm_server_url="http://127.0.0.1:8080")
+        agent = Agent(config=cfg)
+        previous = agent._llm
+        assert cfg.set_field("llm_server_url", "http://127.0.0.1:8081")
+        result = agent.apply_config_change("llm_server_url")
+        assert result["applied"] is True
+        assert agent._llm is not previous
+
+
 class TestAgentTurnMetrics:
     @pytest.mark.asyncio
     async def test_record_turn_is_per_turn_not_cumulative(self, tmp_path):

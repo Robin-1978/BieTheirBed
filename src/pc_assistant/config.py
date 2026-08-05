@@ -64,6 +64,9 @@ class ModelConfig(BaseModel):
     model: str
     supports_vision: bool | None = None
     token_family: str = ""
+    # Provider/model context capacity. When set, it replaces the global
+    # fallback budget for this model (subject to the completion reserve).
+    context_window: int | None = None
     thinking: ThinkingConfig | None = None
 
 
@@ -77,6 +80,7 @@ class ResolvedModelConfig(BaseModel):
     model: str
     supports_vision: bool | None
     token_family: str
+    context_window: int | None
     timeout: float
     thinking: ThinkingConfig | None = None
 
@@ -104,6 +108,8 @@ class AppConfig(BaseModel):
     max_tokens: int = 1024
     shell_timeout: int = 30
     context_window_budget: int = 8192
+    auto_compact_enabled: bool = True
+    auto_compact_threshold: float = 0.80
     llm_compact_enabled: bool = False
     token_family: str = ""
     max_sessions: int = 100
@@ -210,6 +216,7 @@ class AppConfig(BaseModel):
                 model=model.model,
                 supports_vision=model.supports_vision,
                 token_family=model.token_family,
+                context_window=model.context_window,
                 timeout=endpoint.timeout,
                 thinking=model.thinking,
             )
@@ -223,6 +230,7 @@ class AppConfig(BaseModel):
             model=self.llm_model_name,
             supports_vision=self.supports_vision,
             token_family=self.token_family,
+            context_window=None,
             timeout=self.llm_timeout,
             thinking=None,
         )
@@ -240,6 +248,7 @@ class AppConfig(BaseModel):
             model=self.vision_model_name,
             supports_vision=True,
             token_family=self.token_family,
+            context_window=None,
             timeout=self.vision_timeout,
             thinking=None,
         )
@@ -248,6 +257,13 @@ class AppConfig(BaseModel):
         if not self.llm_api_key or len(self.llm_api_key) < 8:
             return "***" if self.llm_api_key else ""
         return self.llm_api_key[:4] + "****" + self.llm_api_key[-4:]
+
+    def effective_context_window_budget(self) -> int:
+        """Return the active model capacity, with the global budget as fallback."""
+        model = self.resolve_model()
+        if model.context_window and model.context_window > 0:
+            return model.context_window
+        return max(256, self.context_window_budget)
 
     def set_field(self, field_name: str, value: str) -> bool:
         fields = type(self).model_fields
@@ -299,6 +315,8 @@ def _env_overrides() -> dict[str, Any]:
         "PC_MAX_CONSECUTIVE_TOOL_CALLS": ("max_consecutive_tool_calls", int),
         "PC_SHELL_TIMEOUT": ("shell_timeout", int),
         "PC_CONTEXT_WINDOW_BUDGET": ("context_window_budget", int),
+        "PC_AUTO_COMPACT_ENABLED": ("auto_compact_enabled", bool),
+        "PC_AUTO_COMPACT_THRESHOLD": ("auto_compact_threshold", float),
         "PC_LLM_COMPACT_ENABLED": ("llm_compact_enabled", bool),
         "PC_TOKEN_FAMILY": ("token_family", str),
         "PC_MAX_SESSIONS": ("max_sessions", int),

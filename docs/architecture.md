@@ -59,6 +59,26 @@ only when a task needs parameters omitted from the compact schema; its response
 is request-scoped and is not persisted into the stable cache prefix. MCP tools
 follow the same compact-core/full-schema contract.
 
+### 1.3 Context capacity, compaction, and live configuration
+
+API models may expose much larger windows than the local fallback. A model
+catalog entry may set `context_window`; that capacity is selected per active
+model, while `context_window_budget` remains the fallback for models without an
+explicit declaration. The request planner still reserves completion tokens and
+static tool schemas.
+
+Compaction follows the current industry baseline for personal agents: keep the
+latest turn(s) lossless, mechanically summarize older dialogue and tool results
+when a token threshold is reached, keep durable preferences in scoped memory,
+and retain raw artifacts/transcripts outside the prompt. LLM rewriting is an
+optional lossy optimization, disabled by default; it is never the only copy of
+history and never runs for safety-critical authorization data.
+
+`/config set` applies execution limits, context policy, temperature, and
+compaction settings immediately. Provider identity/credentials are rebuilt
+between turns when the Agent owns the provider; injected custom providers report
+restart-required instead of being replaced implicitly.
+
 ## 2. System context
 
 PC Assistant is a Python 3.10+ desktop agent that accepts requests from local
@@ -673,13 +693,12 @@ reaction state, message rendering, and Agent execution in one module. Split it
 behind `ChannelIngress`, `ChannelDelivery`, and a small persistent correlation
 store. This reduces race surfaces without changing the channel contract.
 
-### AR-020: Runtime configuration mutation has misleading semantics — medium
+### AR-020: Runtime configuration mutation has misleading semantics — medium (fixed 2026-08-05)
 
-TUI `/config set` mutates an `AppConfig` object after Agent construction, but it
-does not rebuild the main provider, vision route, cache plan, tool registry,
-token estimator, or daemon configuration. Provider and architecture-affecting
-fields should be explicitly restart-required. A future dynamic subset should
-use an atomic `ConfigManager.apply()` contract with per-field handlers.
+`/config set` now applies execution limits, temperature, context and compaction
+settings immediately. Provider transport and cache state are rebuilt between
+turns when safe; changes that alter the vision route or replace an injected
+provider explicitly report restart-required.
 
 ### AR-021: `/compact` currently means clear — medium (fixed 2026-08-05)
 

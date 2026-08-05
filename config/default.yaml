@@ -14,6 +14,7 @@ models:
     model: ""
     supports_vision: true
     token_family: "default"
+    context_window: 8192
 
 default_model: "local_default"
 vision_model: ""
@@ -30,6 +31,8 @@ max_iterations: 32
 max_tokens: 4096
 shell_timeout: 30
 context_window_budget: 8192
+auto_compact_enabled: true
+auto_compact_threshold: 0.80
 token_family: "default"
 llm_compact_enabled: false
 max_sessions: 8

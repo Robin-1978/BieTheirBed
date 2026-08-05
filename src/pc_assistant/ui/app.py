@@ -590,9 +590,25 @@ class ChatApp(App):
                 field_name, field_value = parts[2].split("=", 1)
                 field_name = field_name.strip()
                 field_value = field_value.strip()
-                if self._config.set_field(field_name, field_value):
+                if self._is_remote:
+                    try:
+                        result = await self._agent.command(
+                            f"/config set {field_name}={field_value}",
+                        )
+                    except Exception as exc:
+                        log.mount(CommandOutput(f"{ICON_WARN} {exc}"))
+                        return
+                    if result.get("applied"):
+                        display = "****" if "key" in field_name else field_value
+                        suffix = " (restart required)" if result.get("restart_required") else ""
+                        log.mount(CommandOutput(f"Set `{field_name}` = `{display}`{suffix}"))
+                    else:
+                        log.mount(CommandOutput(f"{ICON_WARN} Configuration change rejected."))
+                elif self._config.set_field(field_name, field_value):
+                    result = self._agent.apply_config_change(field_name) if self._agent is not None else {}
                     display = "****" if field_name == "llm_api_key" else field_value
-                    log.mount(CommandOutput(f"Set `{field_name}` = `{display}`"))
+                    suffix = " (restart required)" if result.get("restart_required") else ""
+                    log.mount(CommandOutput(f"Set `{field_name}` = `{display}`{suffix}"))
                 else:
                     log.mount(CommandOutput(f"{ICON_WARN} Unknown config field: `{field_name}`"))
             else:
