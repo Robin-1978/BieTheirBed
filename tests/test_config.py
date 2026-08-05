@@ -12,6 +12,15 @@ class TestAppConfig:
         assert cfg.llm_temperature == 0.7
         assert cfg.max_iterations == 8
         assert cfg.context_window_budget == 8192
+        assert cfg.auto_compact_enabled is True
+
+    def test_model_context_window_overrides_global_fallback(self):
+        cfg = AppConfig(
+            providers={"api": {"driver": "openai_compatible", "api_key": "k"}},
+            models={"main": {"provider": "api", "model": "m", "context_window": 131072}},
+            default_model="main",
+        )
+        assert cfg.effective_context_window_budget() == 131072
 
     def test_masked_api_key_empty(self):
         cfg = AppConfig()

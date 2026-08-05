@@ -397,8 +397,10 @@ class ChatUI:
                 field_name = field_name.strip()
                 field_value = field_value.strip()
                 if self._config.set_field(field_name, field_value):
+                    result = self._agent.apply_config_change(field_name) if self._agent is not None else {}
                     display = "****" if field_name == "llm_api_key" else field_value
-                    self._console.print(f"[dim]Set {field_name} = {display}[/dim]")
+                    suffix = " (restart required)" if result.get("restart_required") else ""
+                    self._console.print(f"[dim]Set {field_name} = {display}{suffix}[/dim]")
                 else:
                     self._console.print(
                         f"[warning]{ICON_WARN} Unknown config field: {field_name}[/warning]"

@@ -488,6 +488,19 @@ class ServiceServer:
         elif cmd == "/memory clear":
             self._agent.memory.clear()
             await ws.send(serialize(ServerMessage.result(msg.id, {"cleared": True})))
+        elif cmd.startswith("/config set "):
+            assignment = cmd[len("/config set "):].strip()
+            if "=" not in assignment:
+                await ws.send(serialize(ServerMessage.error(msg.id, "Usage: /config set key=value")))
+                return
+            field_name, field_value = (part.strip() for part in assignment.split("=", 1))
+            if not self._agent.config.set_field(field_name, field_value):
+                await ws.send(serialize(ServerMessage.error(msg.id, f"Unknown or invalid config field: {field_name}")))
+                return
+            result = self._agent.apply_config_change(field_name)
+            # Never echo credentials back over the protocol.
+            result["field"] = field_name
+            await ws.send(serialize(ServerMessage.result(msg.id, result)))
         else:
             await ws.send(serialize(ServerMessage.error(msg.id, f"Unknown command: {cmd}")))
 
