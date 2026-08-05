@@ -129,7 +129,7 @@ def _parse_markdown_table(lines: list[str], start: int) -> tuple[list[str], list
 
 
 def _markdown_to_card_elements(text: str) -> list[dict[str, Any]]:
-    """Convert Markdown sections to lark_md blocks plus native tables."""
+    """Convert Markdown sections to Card 2.0 markdown blocks plus tables."""
     lines = text.split("\n")
     elements: list[dict[str, Any]] = []
     buffer: list[str] = []
@@ -142,7 +142,7 @@ def _markdown_to_card_elements(text: str) -> list[dict[str, Any]]:
             continue
         block = "\n".join(buffer).strip()
         if block:
-            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": block}})
+            elements.append({"tag": "markdown", "content": block})
         buffer = []
         headers, rows, i = parsed
         columns = [
@@ -168,7 +168,7 @@ def _markdown_to_card_elements(text: str) -> list[dict[str, Any]]:
         })
     block = "\n".join(buffer).strip()
     if block:
-        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": block}})
+        elements.append({"tag": "markdown", "content": block})
     return elements
 
 
@@ -1356,7 +1356,7 @@ class FeishuChannel(ChannelBase):
             elements.append({
                 "tag": "note",
                 "elements": [{
-                    "tag": "lark_md",
+                    "tag": "markdown",
                     "content": f"💭 **思考**: {thinking}",
                 }],
             })
@@ -1366,8 +1366,8 @@ class FeishuChannel(ChannelBase):
             if len(tool_calls) > 5:
                 tools_md += f"\n... +{len(tool_calls) - 5} more"
             elements.append({
-                "tag": "div",
-                "text": {"tag": "lark_md", "content": tools_md},
+                "tag": "markdown",
+                "content": tools_md,
             })
             elements.append({"tag": "hr"})
 
