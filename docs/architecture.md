@@ -778,6 +778,14 @@ while the Agent rejects a still-overlarge current request before sending it to
 the provider. The deployed configuration uses `50000` for the Volcengine main
 models and `16384` for the local Qwen-VL perception model.
 
+### AR-029: Feishu cards rendered CommonMark as plain text — medium (fixed 2026-08-05)
+
+Feishu `lark_md` is a Markdown-like dialect, not a full CommonMark renderer.
+The channel now adapts model headings, tables, and fenced code blocks at the
+delivery boundary while leaving supported emphasis, links, and lists intact.
+The canonical conversation still stores the model's original Markdown; only
+the external card representation is transformed.
+
 ## 7. Defect-hardening matrix
 
 | Priority | Verified defect | Root cause | Minimal repair | State |

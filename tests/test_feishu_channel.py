@@ -8,7 +8,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from pc_assistant.agent import AgentEvent
-from pc_assistant.channels.feishu import FeishuChannel, _principal_for_log
+from pc_assistant.channels.feishu import (
+    FeishuChannel,
+    _principal_for_log,
+    render_feishu_markdown,
+)
 from pc_assistant.model_adapter.types import ImageAttachment
 
 
@@ -202,6 +206,35 @@ def test_feishu_principal_log_id_is_stable_and_non_reversible():
     assert principal == _principal_for_log("ou-user-sensitive")
     assert len(principal) == 10
     assert "ou-user-sensitive" not in principal
+
+
+def test_feishu_markdown_adapts_headings_tables_and_code():
+    source = """# 标题
+
+| 项目 | 状态 |
+| --- | --- |
+| 服务 | 正常 |
+
+```bash
+pc-assistant --status
+```"""
+
+    rendered = render_feishu_markdown(source)
+
+    assert "# 标题" not in rendered
+    assert "**标题**" in rendered
+    assert "**项目**: 服务" in rendered
+    assert "**状态**: 正常" in rendered
+    assert "`pc-assistant --status`" in rendered
+
+
+def test_response_card_uses_adapted_markdown():
+    channel = FeishuChannel()
+    card = channel._build_response_card("# 标题\n\n| A | B |\n|---|---|\n| 1 | 2 |", [], False)
+    content = card["elements"][-1]["text"]["content"]
+    assert "# 标题" not in content
+    assert "**标题**" in content
+    assert "**A**: 1" in content
 
 
 def test_feishu_reaction_is_removed_even_when_agent_is_not_ready():

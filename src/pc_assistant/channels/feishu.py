@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import queue
+import re
 import threading
 import time
 import warnings
@@ -67,6 +68,65 @@ def _principal_for_log(open_id: str) -> str:
     if not open_id:
         return "unknown"
     return hashlib.sha256(open_id.encode("utf-8")).hexdigest()[:10]
+
+
+def render_feishu_markdown(text: str) -> str:
+    """Adapt common Markdown to the intentionally smaller ``lark_md`` dialect.
+
+    Feishu cards do not render CommonMark headings and tables consistently.
+    Convert headings to bold blocks and tables to compact labelled rows while
+    retaining ordinary emphasis, links, lists, and inline code.
+    """
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    rendered: list[str] = []
+    in_code = False
+    code_lines: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.strip().startswith("```"):
+            if in_code:
+                rendered.extend(f"`{code}`" for code in code_lines)
+                code_lines = []
+                in_code = False
+            else:
+                in_code = True
+            i += 1
+            continue
+        if in_code:
+            code_lines.append(line)
+            i += 1
+            continue
+
+        heading = re.match(r"^\s*#{1,6}\s+(.+?)\s*#*\s*$", line)
+        if heading:
+            rendered.append(f"**{heading.group(1).strip()}**")
+            i += 1
+            continue
+
+        if (
+            i + 1 < len(lines)
+            and "|" in line
+            and re.match(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$", lines[i + 1])
+        ):
+            headers = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            i += 2
+            while i < len(lines) and "|" in lines[i] and lines[i].strip():
+                values = [cell.strip() for cell in lines[i].strip().strip("|").split("|")]
+                pairs = [
+                    f"**{header}**: {values[pos] if pos < len(values) else ''}"
+                    for pos, header in enumerate(headers)
+                ]
+                rendered.append("• " + " · ".join(pairs))
+                i += 1
+            continue
+
+        rendered.append(line)
+        i += 1
+
+    if in_code:
+        rendered.extend(f"`{code}`" for code in code_lines)
+    return "\n".join(rendered)
 
 
 def _patch_ws_card_dispatch(ws_client: Any) -> None:
@@ -1218,7 +1278,7 @@ class FeishuChannel(ChannelBase):
             })
             elements.append({"tag": "hr"})
 
-        content = answer[:3800]
+        content = render_feishu_markdown(answer)[:3800]
         if len(answer) > 3800:
             content += "\n\n... (内容过长已截断)"
         elements.append({
