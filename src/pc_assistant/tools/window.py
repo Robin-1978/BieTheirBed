@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import subprocess
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
@@ -258,10 +260,38 @@ class WindowTool(ToolBase):
             return {"error": f"Window not found: {window_id}"}
 
         try:
+            restored = bool(getattr(window, "isMinimized", False))
+            if restored:
+                window.restore()
             window.activate()
+            await asyncio.sleep(0.15)
+            active = pwc.getActiveWindow()
+            verified = active is not None and (
+                self._pid(active) == self._pid(window)
+                or str(getattr(active, "title", "")) == str(window.title)
+            )
+            if not verified and get_platform() == "linux":
+                # X11 window managers occasionally ignore the first EWMH
+                # activation request, especially for minimized Electron apps.
+                subprocess.run(
+                    ["wmctrl", "-a", str(window.title)],
+                    check=False,
+                    capture_output=True,
+                    timeout=3,
+                )
+                await asyncio.sleep(0.15)
+                active = pwc.getActiveWindow()
+                verified = active is not None and (
+                    self._pid(active) == self._pid(window)
+                    or str(getattr(active, "title", "")) == str(window.title)
+                )
+            if not verified:
+                return {"error": f"Focus request was not verified for window: {window.title}"}
             return {
                 "success": True,
                 "title": window.title,
+                "restored": restored,
+                "verified_active": True,
                 "message": f"Focused window: {window.title}",
             }
         except Exception as e:

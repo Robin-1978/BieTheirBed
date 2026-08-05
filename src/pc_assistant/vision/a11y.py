@@ -13,6 +13,7 @@ fallback.
 """
 from __future__ import annotations
 
+from collections import deque
 from typing import Any, Iterator
 
 from pc_assistant.platform_ import get_platform
@@ -27,6 +28,12 @@ def node_name(node: Any) -> str:
 
 
 def node_role(node: Any) -> str:
+    get_role_name = getattr(node, "getRoleName", None)
+    if callable(get_role_name):
+        try:
+            return str(get_role_name())
+        except Exception:
+            pass
     role = getattr(node, "role", None)
     if role is None:
         return ""
@@ -48,6 +55,15 @@ def read_bbox(node: Any) -> tuple[int, int, int, int] | None:
             r = get_extents(0)
             if r is not None and len(r) >= 4:
                 return int(r[0]), int(r[1]), int(r[2]), int(r[3])
+        except Exception:
+            pass
+    query_component = getattr(node, "queryComponent", None)
+    if callable(query_component):
+        try:
+            import pyatspi
+
+            r = query_component().getExtents(pyatspi.DESKTOP_COORDS)
+            return int(r.x), int(r.y), int(r.width), int(r.height)
         except Exception:
             pass
     box = getattr(node, "box", None) or getattr(node, "bbox", None) or getattr(node, "rectangle", None)
@@ -100,9 +116,67 @@ def _iter_children(node: Any) -> list[Any]:
             if child is not None:
                 out.append(child)
         return out
+    child_count = getattr(node, "childCount", None)
+    if child_count is not None:
+        try:
+            count = int(child_count)
+        except Exception:
+            count = 0
+        out = []
+        for i in range(count):
+            try:
+                out.append(node[i])
+            except Exception:
+                try:
+                    out.append(node.getChildAtIndex(i))
+                except Exception:
+                    pass
+        return out
     if isinstance(children, (list, tuple)):
         return list(children)
     return []
+
+
+def walk_forest_breadth_first(
+    roots: list[Any],
+    *,
+    max_elements: int = DEFAULT_MAX_ELEMENTS,
+) -> list[dict[str, Any]]:
+    """Walk all applications fairly so one large shell tree cannot starve others."""
+    # Keep one breadth-first frontier per application and rotate across them.
+    # A single application's unusually broad level must not starve descendants
+    # of another application under the global element budget.
+    forests = deque(
+        deque([(root, 0, ())]) for root in roots if root is not None
+    )
+    elements: list[dict[str, Any]] = []
+    while forests and len(elements) < max_elements:
+        frontier = forests.popleft()
+        node, depth, path = frontier.popleft()
+        name = node_name(node)
+        role = node_role(node)
+        current_path = path + ((name or role or "?"),)
+        element: dict[str, Any] = {
+            "name": name,
+            "role": role,
+            "x": None,
+            "y": None,
+            "width": None,
+            "height": None,
+            "depth": depth,
+            "path": " > ".join(current_path),
+        }
+        bbox = read_bbox(node)
+        if bbox is not None:
+            element["x"], element["y"], element["width"], element["height"] = bbox
+        elements.append(element)
+        if depth < MAX_DEPTH:
+            frontier.extend(
+                (child, depth + 1, current_path) for child in _iter_children(node)
+            )
+        if frontier:
+            forests.append(frontier)
+    return elements
 
 
 def walk(
@@ -261,14 +335,10 @@ def list_elements(
             "pywinauto (Windows) or pyobjc (macOS) to use the semantic UI layer."
         )
     try:
-        elements: list[dict[str, Any]] = []
-        for root in backend.root_nodes():
-            for element in walk(root, max_elements=max_elements):
-                elements.append(element)
-                if len(elements) >= max_elements:
-                    break
-            if len(elements) >= max_elements:
-                break
+        elements = walk_forest_breadth_first(
+            backend.root_nodes(),
+            max_elements=max_elements,
+        )
         return elements, ""
     except Exception as e:
         return [], f"Failed to read accessibility tree: {e}"

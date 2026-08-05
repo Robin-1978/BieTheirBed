@@ -534,9 +534,10 @@ class TestAgentRun:
                 return second_stream(*args, **kwargs)
 
         agent._llm.chat_stream = mock_chat_stream
-        events = await _collect_events(agent, "read file")
+        events = await _collect_events(agent, "read current file")
         error_results = [e for e in events if e.type == "tool_result" and e.tool_result and isinstance(e.tool_result, dict) and "error" in e.tool_result]
         assert len(error_results) >= 1
+        assert any(e.type == "evidence_warning" for e in events)
 
 
 class TestAgentRunSimple:

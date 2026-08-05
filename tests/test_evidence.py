@@ -38,3 +38,11 @@ class TestEvidencePolicy:
         policy = EvidencePolicy()
         assert policy.satisfied(1)
         assert not policy.satisfied(0)
+
+    def test_successful_tool_result_rejects_errors_and_denials(self):
+        policy = EvidencePolicy()
+        assert policy.successful_tool_result({"value": 42})
+        assert not policy.successful_tool_result({"error": "not found"})
+        assert not policy.successful_tool_result({"success": False})
+        assert not policy.successful_tool_result("Error: unavailable")
+        assert not policy.successful_tool_result("Rejected by user")

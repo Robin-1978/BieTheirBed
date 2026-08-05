@@ -149,6 +149,39 @@ class TestA11yWalk:
         node = SimpleNamespace(box=SimpleNamespace(left=1, top=2, width=30, height=40))
         assert a11y.read_bbox(node) == (1, 2, 30, 40)
 
+    def test_role_prefers_pyatspi_role_name(self):
+        node = FakeNode("Save", "legacy-role")
+        node.getRoleName = lambda: "push button"
+        assert a11y.node_role(node) == "push button"
+
+    def test_breadth_first_walk_is_fair_across_applications(self):
+        huge = FakeNode(
+            "Shell",
+            "application",
+            children=[FakeNode(f"shell-{i}", "panel") for i in range(20)],
+        )
+        editor = FakeNode(
+            "Editor",
+            "application",
+            children=[FakeNode("Save", "button")],
+        )
+
+        elements = a11y.walk_forest_breadth_first([huge, editor], max_elements=4)
+
+        assert [element["name"] for element in elements[:2]] == ["Shell", "Editor"]
+        assert any(element["name"] == "Save" for element in elements)
+
+    def test_read_bbox_from_pyatspi_component(self, monkeypatch):
+        import sys
+        from types import SimpleNamespace
+
+        extents = SimpleNamespace(x=1, y=2, width=30, height=40)
+        component = SimpleNamespace(getExtents=lambda _coords: extents)
+        node = SimpleNamespace(queryComponent=lambda: component)
+        monkeypatch.setitem(sys.modules, "pyatspi", SimpleNamespace(DESKTOP_COORDS=0))
+
+        assert a11y.read_bbox(node) == (1, 2, 30, 40)
+
     def test_list_elements_no_backend(self, monkeypatch):
         # Backend absence is a contract; do not depend on the test host's
         # optional AT-SPI installation state.
@@ -361,8 +394,13 @@ class TestPostVerify:
             calls.append((tool_name, arguments.get("action")))
             return "screen confirmed"
 
+        async def confirm(_tool_name, _arguments):
+            return True
+
         verifier = _make_verifier(enabled=True, callback=cb)
-        verdict = await verifier.verify("mouse", {"action": "click"})
+        verdict = await verifier.verify(
+            "mouse", {"action": "click"}, confirm_callback=confirm
+        )
         assert verdict.accepted
         assert calls == []
         await verifier.post_verify("mouse", {"action": "click"})
@@ -404,8 +442,13 @@ class TestPostVerify:
         async def cb(tool_name, arguments):
             raise RuntimeError("capture failed")
 
+        async def confirm(_tool_name, _arguments):
+            return True
+
         verifier = _make_verifier(enabled=True, callback=cb)
-        verdict = await verifier.verify("mouse", {"action": "click"})
+        verdict = await verifier.verify(
+            "mouse", {"action": "click"}, confirm_callback=confirm
+        )
         assert verdict.accepted
         await verifier.post_verify("mouse", {"action": "click"})
         verified = verifier._audit.query(action="tool_call_verified")

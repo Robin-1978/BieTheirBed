@@ -8,6 +8,7 @@ if the final answer was produced without any tool call.
 from __future__ import annotations
 
 import re
+from typing import Any
 
 # Queries that depend on live/stateful data — these require tool evidence.
 _REQUIRE_EVIDENCE = re.compile(
@@ -53,5 +54,23 @@ class EvidencePolicy:
     def build_instruction(self) -> str:
         return _INSTRUCTION
 
-    def satisfied(self, evidence_tool_calls: int) -> bool:
-        return evidence_tool_calls > 0
+    @staticmethod
+    def successful_tool_result(result: Any) -> bool:
+        """Return whether a completed tool result is usable evidence."""
+        if result is None:
+            return False
+        if isinstance(result, dict):
+            if result.get("error") or result.get("rejected"):
+                return False
+            if result.get("success") is False:
+                return False
+            return True
+        if isinstance(result, str):
+            normalized = result.strip().lower()
+            return bool(normalized) and not normalized.startswith(
+                ("error", "rejected", "denied", "stopped:")
+            )
+        return True
+
+    def satisfied(self, successful_tool_results: int) -> bool:
+        return successful_tool_results > 0

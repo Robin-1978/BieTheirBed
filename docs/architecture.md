@@ -584,12 +584,17 @@ ambiguous, changed, or non-unique targets rather than selecting the first
 partial match. `CoordinateTransform` covers crop, scale, virtual origins, and
 supported rotation values.
 
-### AR-008: Platform accessibility dependencies are incomplete — medium
+### AR-008: Linux accessibility runtime and traversal differed — medium (fixed 2026-08-05)
 
-The Python environment contains Pillow, mss, pyautogui, and pywinctl, but Linux
-AT-SPI imports (`pyatspi`, `gi`) are unavailable. Dependencies must be expressed
-as platform extras or documented system packages, with explicit fallback to the
-screen layer.
+The service intentionally runs with the system Python 3.10 runtime, where
+`python3-pyatspi`, `python3-gi`, and `gir1.2-atspi-2.0` are installed. A Conda
+Python 3.12 development shell does not see those system extensions and is not a
+valid proxy for daemon capability. The AT-SPI adapter now uses native role and
+component APIs and walks all application roots breadth-first, so a large GNOME
+Shell tree cannot consume the element budget before other applications are
+visited. Electron applications may still expose sparse semantics; UI actions
+retain the screenshot/coordinate fallback and must fail closed on ambiguous
+targets.
 
 ### AR-009: Same-session runs can interleave — critical (fixed 2026-08-04)
 
@@ -725,6 +730,42 @@ sessions therefore remain bounded without leaving orphaned tool results. The
 retention policy keeps a bounded recent transcript plus an optional
 summary/reference archive.
 
+### AR-024: Desktop mutations were under-gated — high (fixed 2026-08-05)
+
+The confirmation policy now treats semantic UI click/type, mouse activation and
+drag actions, keyboard text/shortcuts/execution keys, window close, and session
+lock as explicit user decisions. Read-only inspection, pointer movement,
+scrolling, window focus/geometry, and session status remain available without a
+confirmation prompt. Unlock is deliberately absent from the model tool surface;
+it remains an authenticated channel-broker operation. The first-party `session`
+tool exposes only verified `status` and `lock` actions.
+
+### AR-025: Tool invocation was mistaken for evidence — high (fixed 2026-08-05)
+
+Evidence accounting now advances only after a completed, usable tool result.
+Errors, rejected results, explicit `success: false` responses, and stopped calls
+cannot suppress the unverified-answer warning. Invocation count remains useful
+for loop limits and reflection heuristics, but is not proof of current state.
+
+### AR-026: First-party Feishu logs exposed message and principal data — high (fixed 2026-08-05)
+
+Normal ingress, worker, and delivery logs no longer contain message bodies or
+raw Feishu `open_id` values. They record message type, character count, queue
+size, file basename, and a stable truncated SHA-256 principal identifier. This
+closes application-owned logging leakage; AR-022 remains open for credentials
+that may be emitted inside third-party SDK transport records.
+
+### AR-027: Live session history disappeared on daemon restart — high (fixed 2026-08-05)
+
+Conversation state was previously held only in the in-memory `SessionManager`.
+Restarting the service therefore preserved durable memories but discarded the
+dialogue needed to resolve short follow-ups such as “好的” or “查一下吧”. A
+small `session_transcripts` table now restores each stable session ID at first
+use and saves the reference-only, post-turn transcript after every turn.
+Completed tool payloads are compacted to status/artifact placeholders before
+writing. Explicit `/clear` deletes both the in-memory state and its persisted
+transcript; LRU eviction does not.
+
 ## 7. Defect-hardening matrix
 
 | Priority | Verified defect | Root cause | Minimal repair | State |
@@ -743,6 +784,10 @@ summary/reference archive.
 | P1 | Context budget can be exceeded by mandatory/current segments and tool schemas | Truncation only drops older turns and does not budget the full provider request | Reserve completion and compact static tool-schema tokens before deterministic history trimming | fixed; request path accounts for schema and completion reserve |
 | P1 | Feishu can publish raw model thinking | Channel renders `stream_think_delta` as response-card content | Channel-safe progress events; discard raw reasoning outside explicit local diagnostics | fixed; Feishu only renders bounded status/final output |
 | P1 | Credentials can appear in third-party transport logs | No global redaction filter for SDK-emitted URLs and query parameters | Root-handler redaction plus sensitive-log regression tests | open |
+| P1 | Desktop actions can mutate state without confirmation | Confirmation policy covered text input but not click, shortcut, close, or lock semantics | Gate state-changing desktop actions and keep unlock outside model tools | fixed; action matrix tests added |
+| P1 | Failed tool calls satisfy evidence requirements | Evidence counted authorized invocations rather than successful results | Count only completed non-error results | fixed; failed-tool warning regression added |
+| P1 | Feishu application logs expose messages and principals | INFO records include message body and raw `open_id` | Structured metadata plus stable principal hash | fixed; delivery log regression added |
+| P1 | Session context disappears after service restart | SessionManager retained transcripts only in RAM | Persist reference-only transcripts in SQLite and restore by stable session ID | fixed; repository round-trip regression added |
 | P2 | `/config set` appears live but architecture fields are not applied | Mutable config object is detached from constructed collaborators | Mark restart-required fields; atomic apply handlers for a small dynamic subset | open |
 | P2 | `/compact` clears the session | Three client implementations duplicate command semantics | One Agent command contract invoking real conversation compression | fixed; `/clear` remains destructive and `/compact` is mechanical |
 | P2 | Live-session transcript grows without a retention bound | `max_messages` is non-functional and only request assembly is bounded | Explicit transcript retention and summary/archive policy | fixed; complete-turn retention and compaction are bounded |
@@ -785,8 +830,8 @@ web-tool improvements.
   postcondition evidence occurs after execution.
 - Full `pytest` with the configured coverage policy before completion claims.
 
-Current verification record (2026-08-04): default non-live regression is
-`739 passed, 4 skipped`; the skipped tests require explicit `RUN_LIVE_E2E=1`.
+Current verification record (2026-08-05): the exact test count is recorded with
+the release commit; the skipped tests require explicit `RUN_LIVE_E2E=1`.
 Repository-wide statement coverage is 61.31%, below the pre-existing 80% gate.
 The threshold has not been lowered; closing that cross-module test debt remains
 separate from the completed functional hardening repairs above.

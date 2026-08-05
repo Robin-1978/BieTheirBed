@@ -116,3 +116,7 @@ class SessionManager:
     def __len__(self) -> int:
         with self._lock:
             return len(self._states)
+
+    def has(self, session_id: str) -> bool:
+        with self._lock:
+            return session_id in self._states
