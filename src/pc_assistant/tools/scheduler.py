@@ -10,6 +10,7 @@ handles all time-based scheduling:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import re
 import sqlite3
 from croniter import croniter
@@ -27,6 +28,21 @@ _DELAY_RE = re.compile(
 )
 _INTERVAL_RE = re.compile(r"^every\s+(\d+)\s*([smhd])$", re.IGNORECASE)
 _INTERVAL_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+# Bound by Agent for the duration of a scheduler tool call.  This keeps
+# channel/session routing out of the model-visible schema while allowing a
+# scheduled run to return to the conversation that created it.
+_CURRENT_SESSION_ID: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "pc_assistant_scheduler_session", default=""
+)
+
+
+def bind_scheduler_session(session_id: str):
+    return _CURRENT_SESSION_ID.set(session_id or "")
+
+
+def reset_scheduler_session(token: contextvars.Token[str]) -> None:
+    _CURRENT_SESSION_ID.reset(token)
 
 
 class ScheduledTask:
@@ -46,6 +62,7 @@ class ScheduledTask:
         timeout: int = 300,
         message: str = "",
         callback: Callable[[str, str], Any] | None = None,
+        session_id: str = "",
     ) -> None:
         self.task_id = task_id
         self.name = name
@@ -59,6 +76,7 @@ class ScheduledTask:
         self.timeout = timeout
         self.message = message
         self.callback = callback
+        self.session_id = session_id
         self._task: asyncio.Task | None = None
         self._is_running: bool = False
         self._paused_remaining: float | None = None
@@ -156,6 +174,7 @@ class ScheduledTask:
             "is_running": self._is_running,
             "schedule_type": self.schedule_type,
             "paused_remaining": self._paused_remaining,
+            "session_id": self.session_id,
         }
 
     @classmethod
@@ -180,6 +199,7 @@ class ScheduledTask:
             max_runs=data.get("max_runs", 0),
             timeout=data.get("timeout", 300),
             message=data.get("message", ""),
+            session_id=data.get("session_id", ""),
         )
         task._paused_remaining = data.get("paused_remaining")
         return task
@@ -206,6 +226,7 @@ class SchedulerTool(ToolBase):
     def __init__(self, storage_path: str | Path | None = None) -> None:
         self._tasks: dict[str, ScheduledTask] = {}
         self._notification_callback: Callable[[str, str], None] | None = None
+        self._result_callback: Callable[[ScheduledTask, dict[str, Any]], Any] | None = None
         self._storage_path = Path(storage_path) if storage_path is not None else None
         self._scheduler_task: asyncio.Task | None = None
         self._running = False
@@ -219,6 +240,10 @@ class SchedulerTool(ToolBase):
 
     def set_notification_callback(self, callback: Callable[[str, str], None]) -> None:
         self._notification_callback = callback
+
+    def set_result_callback(self, callback: Callable[[ScheduledTask, dict[str, Any]], Any]) -> None:
+        """Deliver completed Agent runs to the owning channel/session."""
+        self._result_callback = callback
 
     def has_tasks(self) -> bool:
         """True when at least one scheduled task is registered."""
@@ -255,11 +280,15 @@ class SchedulerTool(ToolBase):
                     max_runs INTEGER NOT NULL,
                     timeout INTEGER NOT NULL,
                     message TEXT NOT NULL,
+                    session_id TEXT NOT NULL DEFAULT '',
                     paused_remaining REAL,
                     updated_at TEXT NOT NULL
                 )
                 """
             )
+            columns = {row[1] for row in db.execute("PRAGMA table_info(scheduled_tasks)")}
+            if "session_id" not in columns:
+                db.execute("ALTER TABLE scheduled_tasks ADD COLUMN session_id TEXT NOT NULL DEFAULT ''")
 
     def _load(self) -> None:
         try:
@@ -281,8 +310,8 @@ class SchedulerTool(ToolBase):
                     INSERT INTO scheduled_tasks(
                         task_id, name, command, schedule, enabled, last_run,
                         next_run, run_count, max_runs, timeout, message,
-                        paused_remaining, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        paused_remaining, session_id, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(task_id) DO UPDATE SET
                         name=excluded.name,
                         command=excluded.command,
@@ -295,6 +324,7 @@ class SchedulerTool(ToolBase):
                         timeout=excluded.timeout,
                         message=excluded.message,
                         paused_remaining=excluded.paused_remaining,
+                        session_id=excluded.session_id,
                         updated_at=excluded.updated_at
                     """,
                     (
@@ -303,7 +333,7 @@ class SchedulerTool(ToolBase):
                         task.last_run.isoformat() if task.last_run else None,
                         task.next_run.isoformat() if task.next_run else None,
                         task.run_count, task.max_runs, task.timeout, task.message,
-                        task._paused_remaining, now,
+                        task._paused_remaining, task.session_id, now,
                     ),
                 )
             if task_ids:
@@ -377,6 +407,7 @@ class SchedulerTool(ToolBase):
             max_runs=max_runs,
             timeout=timeout,
             message=message,
+            session_id=_CURRENT_SESSION_ID.get(),
         )
         next_run = task.calculate_next_run()
         if next_run is None:
@@ -546,17 +577,42 @@ class SchedulerTool(ToolBase):
                 except Exception:
                     pass
 
+            result_payload: dict[str, Any]
             if task.command and self._agent is not None:
                 try:
-                    result = await self._agent.run_simple(task.command)
-                    return {"executed": True, "command": task.command, "result": result}
+                    final_answer = ""
+                    errors: list[str] = []
+                    artifacts: list[dict[str, Any]] = []
+                    async for event in self._agent.run(task.command, session_id=task.session_id):
+                        if event.type == "final_answer":
+                            final_answer = event.content
+                        elif event.type in {"error", "cancelled", "iteration_limit"}:
+                            errors.append(event.content)
+                        elif event.type == "artifact" and event.artifact is not None:
+                            artifacts.append(event.artifact.model_dump())
+                    result_payload = {
+                        "executed": not bool(errors),
+                        "command": task.command,
+                        "result": final_answer or (errors[-1] if errors else ""),
+                        "artifacts": artifacts,
+                    }
                 except Exception as e:
-                    return {"executed": False, "error": str(e)}
+                    result_payload = {"executed": False, "error": str(e)}
 
-            if task.message and not task.command:
-                return {"executed": True, "notified": True, "message": task.message}
+            elif task.message and not task.command:
+                result_payload = {"executed": True, "notified": True, "message": task.message}
 
-            return {"executed": False, "message": "No agent or callback configured"}
+            else:
+                result_payload = {"executed": False, "message": "No agent or callback configured"}
+
+            if self._result_callback is not None:
+                try:
+                    delivered = self._result_callback(task, result_payload)
+                    if asyncio.iscoroutine(delivered):
+                        await delivered
+                except Exception:
+                    pass
+            return result_payload
         finally:
             task._is_running = False
 
@@ -655,12 +711,12 @@ class SchedulerTool(ToolBase):
                         "description": "Action to perform",
                     },
                     "task_name": {"type": "string", "description": "Task name"},
-                    "command": {"type": "string", "description": "Command to execute via agent"},
+                    "command": {"type": "string", "description": "Agent prompt to execute at the scheduled time; this starts a full Agent run"},
                     "schedule": {
                         "type": "string",
                         "description": "Schedule: cron ('0 9 * * *'), interval ('every 5m'), or delay ('in 30s', 'in 2h30m')",
                     },
-                    "message": {"type": "string", "description": "Notification/reminder message"},
+                    "message": {"type": "string", "description": "Notification/reminder only; does not start an Agent run"},
                     "task_id": {"type": "string", "description": "Task ID"},
                     "enabled": {"type": "boolean"},
                     "max_runs": {"type": "integer", "description": "Max runs (0=unlimited)"},
@@ -684,9 +740,9 @@ class SchedulerTool(ToolBase):
                                  "pause", "resume", "run", "start", "stop", "status"],
                     },
                     "task_name": {"type": "string"},
-                    "command": {"type": "string"},
+                    "command": {"type": "string", "description": "Agent prompt executed at the scheduled time"},
                     "schedule": {"type": "string"},
-                    "message": {"type": "string"},
+                    "message": {"type": "string", "description": "Reminder notification only"},
                     "task_id": {"type": "string"},
                 },
                 "required": ["action"],

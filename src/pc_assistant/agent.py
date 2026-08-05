@@ -60,7 +60,11 @@ from pc_assistant.tools.keyboard import KeyboardTool
 from pc_assistant.tools.mouse import MouseTool
 from pc_assistant.tools.screen import ScreenTool
 from pc_assistant.tools.ui import UITool
-from pc_assistant.tools.scheduler import SchedulerTool
+from pc_assistant.tools.scheduler import (
+    SchedulerTool,
+    bind_scheduler_session,
+    reset_scheduler_session,
+)
 from pc_assistant.tools.describe_tool import DescribeTool
 from pc_assistant.tools.image_inspect import ImageInspectTool
 from pc_assistant.tools.artifact_prepare import ArtifactPrepareTool
@@ -1490,20 +1494,26 @@ class Agent:
 
                     state.status = f"executing_{tool_name}"
 
+                    scheduler_context = None
+                    if tool_name == "scheduler":
+                        scheduler_context = bind_scheduler_session(state.session_id)
                     try:
-                        execute_coro = self._executor.commit(prepared_call)
-                        state.tool_task = asyncio.create_task(execute_coro)
                         try:
-                            result = await state.tool_task
-                        except asyncio.CancelledError:
-                            if state.cancelled:
-                                state.status = "ready"
-                                state.last_outcome = "cancelled"
-                                yield AgentEvent(type="cancelled", content="Operation cancelled by user.", iteration=iteration)
-                                return
-                            raise
+                            execute_coro = self._executor.commit(prepared_call)
+                            state.tool_task = asyncio.create_task(execute_coro)
+                            try:
+                                result = await state.tool_task
+                            except asyncio.CancelledError:
+                                if state.cancelled:
+                                    state.status = "ready"
+                                    state.last_outcome = "cancelled"
+                                    yield AgentEvent(type="cancelled", content="Operation cancelled by user.", iteration=iteration)
+                                    return
+                                raise
                         finally:
                             state.tool_task = None
+                            if scheduler_context is not None:
+                                reset_scheduler_session(scheduler_context)
                         safe_result = self._event_safe_result(result)
                         if (
                             tool_name == "image_inspect"
@@ -1661,9 +1671,9 @@ class Agent:
             return self._artifact_store.hydrate_messages(session_id, messages)
         return self._artifact_store.manifest_messages(session_id, messages)
 
-    async def run_simple(self, user_input: str) -> str:
+    async def run_simple(self, user_input: str, session_id: str = "") -> str:
         final_answer = ""
-        async for event in self.run(user_input):
+        async for event in self.run(user_input, session_id=session_id):
             if event.type == "final_answer":
                 final_answer = event.content
             elif event.type == "error":

@@ -77,6 +77,7 @@ class ServiceServer:
         if scheduler is not None:
             scheduler.set_agent(self._agent)
             scheduler.set_notification_callback(self._on_timer_notify)
+            scheduler.set_result_callback(self._on_scheduled_result)
             if scheduler.has_tasks():
                 await scheduler.execute(action="start")
                 logger.info("Scheduler started with %d tasks", scheduler.task_count())
@@ -513,6 +514,21 @@ class ServiceServer:
                 asyncio.create_task(ws.send(frame))
             except Exception:
                 pass
+
+    def _on_scheduled_result(self, task: Any, result: dict[str, Any]) -> None:
+        """Route completed scheduled Agent turns to their originating channel."""
+        session_id = getattr(task, "session_id", "")
+        if not session_id or self._channel_manager is None:
+            return
+        if session_id.startswith("feishu:"):
+            channel = self._channel_manager.get("feishu")
+            if channel is not None:
+                channel.deliver_scheduled_result(
+                    session_id,
+                    task.name,
+                    result,
+                    artifact_resolver=self._agent.resolve_artifact if self._agent is not None else None,
+                )
 
 
 def _is_unix_connection(ws: ServerConnection) -> bool:

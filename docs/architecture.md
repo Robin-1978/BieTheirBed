@@ -790,6 +790,15 @@ tables remain intact.
 The canonical conversation still stores the model's original Markdown; only
 the external card representation is transformed.
 
+### AR-030: Scheduled Agent runs were notification-only — high (fixed 2026-08-05)
+
+Scheduler tasks now distinguish a reminder `message` from an Agent `command`.
+When a task is created during a channel session, the opaque session reference
+is persisted with the task. At execution time `command` starts a full Agent
+run, and the result is delivered back through the originating channel (for
+example, to the Feishu user who created it). Session identifiers are never
+model-visible and are not accepted as tool parameters.
+
 ## 7. Defect-hardening matrix
 
 | Priority | Verified defect | Root cause | Minimal repair | State |
