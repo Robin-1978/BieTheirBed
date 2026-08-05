@@ -136,3 +136,25 @@ class TestConversationManager:
         messages = cm.get_messages_for_llm()
         tool_msgs = [m for m in messages if m["role"] == "tool"]
         assert len(tool_msgs) == 0
+
+    def test_completed_large_tool_result_is_bounded(self):
+        cm = ConversationManager()
+        cm.add_user("read it")
+        cm.add_assistant("", delta_tool_calls=[{
+            "id": "tc1",
+            "type": "function",
+            "function": {"name": "filesystem", "arguments": {"action": "read"}},
+        }])
+        cm.add_tool_result("tc1", "x" * 20000)
+        cm.add_assistant_final("done")
+
+        assert cm.compact_completed_tool_results(max_chars=1000) == 1
+        tool = next(m for m in cm.get_messages() if m["role"] == "tool")
+        assert "tool_result_truncated" in tool["content"]
+        assert len(tool["content"]) < 1100
+
+    def test_small_tool_result_is_preserved(self):
+        cm = ConversationManager()
+        cm.add_tool_result("tc1", "small")
+        assert cm.compact_completed_tool_results(max_chars=1000) == 0
+        assert "small" in cm.get_messages()[0]["content"]

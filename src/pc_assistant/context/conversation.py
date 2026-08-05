@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
 from typing import Any, Callable
 
 from pydantic import BaseModel
@@ -213,6 +214,31 @@ class ConversationManager:
         compressed = compress_message_list(raw, keep_recent=keep_recent, source="user_trim")
         compressed = strip_ephemeral(compressed)
         self.rebuild_from_messages(compressed)
+
+    def compact_completed_tool_results(self, *, max_chars: int = 12000) -> int:
+        """Bound large tool outputs before the next user turn.
+
+        The active turn still receives the complete bounded result. Once that
+        turn is complete, oversized historical tool payloads become a preview
+        with a stable marker; artifacts remain addressable by ID and can be
+        fetched again through their owning tool.
+        """
+        changed = 0
+        for message in self._messages:
+            if message.role != "tool" or not isinstance(message.content, str):
+                continue
+            if len(message.content) <= max_chars:
+                continue
+            head = message.content[: max_chars // 2]
+            tail = message.content[-max_chars // 4 :]
+            artifact_ids = re.findall(r"artifact_id['\"]?\s*[:=]\s*['\"]([^'\"]+)", message.content)
+            artifact_note = f"\nartifact_ids: {', '.join(dict.fromkeys(artifact_ids))}" if artifact_ids else ""
+            message.content = (
+                "[tool_result_truncated: full output retained outside context]\n"
+                f"{head}\n…\n{tail}{artifact_note}"
+            )
+            changed += 1
+        return changed
 
     def rebuild_from_messages(self, messages: list[dict[str, Any]]) -> None:
         """Replace internal history with the given (already assembled) message list."""

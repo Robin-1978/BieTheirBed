@@ -33,6 +33,7 @@ shell_timeout: 30
 context_window_budget: 8192
 auto_compact_enabled: true
 auto_compact_threshold: 0.80
+tool_result_history_max_chars: 12000
 token_family: "default"
 llm_compact_enabled: false
 max_sessions: 8

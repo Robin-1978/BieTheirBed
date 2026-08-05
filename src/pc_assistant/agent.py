@@ -624,6 +624,7 @@ class Agent:
             "max_consecutive_tool_calls", "max_consecutive_same_tool",
             "context_window_budget", "llm_temperature", "llm_compact_enabled",
             "auto_compact_enabled", "auto_compact_threshold",
+            "tool_result_history_max_chars",
             "trace_enabled", "vision_max_side", "vision_jpeg_quality",
         }
         provider_fields = {
@@ -899,6 +900,10 @@ class Agent:
         state.cancelled = False
         state.tool_call_history.clear()
         state.last_outcome = "running"
+        if self._config.auto_compact_enabled:
+            state.conversation.compact_completed_tool_results(
+                max_chars=self._config.tool_result_history_max_chars,
+            )
         state.mark_snapshot()
 
         attachment_blocks = self._resolve_attachments(state.session_id, attachments)
