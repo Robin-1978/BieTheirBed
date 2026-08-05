@@ -1,7 +1,7 @@
 """Semantic UI automation tool (accessibility-first).
 
 Preferred over the visual layer: the model finds an element by name, then uses
-the returned snapshot-bound ``element_ref`` for actions. Falls back to the
+the returned opaque ``element_id`` for actions. Falls back to the
 visual ``screen`` tool when the a11y backend is unavailable.
 """
 from __future__ import annotations
@@ -11,11 +11,16 @@ from pathlib import Path
 from typing import Any
 
 from pc_assistant.tools.artifacts import ArtifactPaths, image_artifact
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, parameter, tool
 from pc_assistant.vision import a11y
 from pc_assistant.vision.targets import ElementRef, build_refs
 
 
+@parameter("text", skim=True, skim_hint="for type")
+@parameter("element_id", skim=True, skim_hint="returned by find/list")
+@parameter("app_name", public_name="app_name", skim=True, skim_hint="optional app filter")
+@parameter("name", public_name="element_name", skim=True, skim_hint="for find")
+@tool(name="ui_elements", description="Find and use desktop UI elements by name.", skim_description="Find and use UI elements.")
 class UITool(ToolBase):
     name = "ui"
     description = (
@@ -66,11 +71,11 @@ class UITool(ToolBase):
                     },
                     "name": {
                         "type": "string",
-                        "description": "Element name used only by find; actions require the returned element_ref",
+                        "description": "Element name used by find",
                     },
-                    "element_ref": {
-                        "type": "object",
-                        "description": "Snapshot-bound reference returned by find/list",
+                    "element_id": {
+                        "type": "string",
+                        "description": "Opaque id returned by find/list; required by click, type, and screenshot_element",
                     },
                     "role": {"type": "string", "description": "Optional element role filter"},
                     "app_name": {
@@ -97,7 +102,7 @@ class UITool(ToolBase):
                 "properties": {
                     "action": {"type": "string", "enum": ["list", "find", "click", "type", "screenshot_element"]},
                     "name": {"type": "string"},
-                    "element_ref": {"type": "object"},
+                    "element_id": {"type": "string"},
                     "role": {"type": "string"},
                     "app_name": {"type": "string"},
                     "text": {"type": "string"},
@@ -146,21 +151,23 @@ class UITool(ToolBase):
         index = elements.index(candidates[0])
         return refs[index], ""
 
-    def _resolve_ref(self, raw_ref: Any) -> tuple[ElementRef | None, str]:
-        if not isinstance(raw_ref, dict):
-            return None, "element_ref from a recent find/list result is required"
-        sid = str(raw_ref.get("snapshot_id", ""))
-        element_id = str(raw_ref.get("element_id", ""))
-        snapshot = self._snapshots.get(sid)
-        if snapshot is None:
-            return None, "Element reference is unknown or expired; run ui.find again"
-        captured_at, refs = snapshot
+    def _resolve_id(self, raw_id: Any) -> tuple[ElementRef | None, str]:
+        element_id = str(raw_id or "")
+        if not element_id:
+            return None, "element_id from a recent find/list result is required"
+        match = next(
+            ((sid, snapshot) for sid, snapshot in self._snapshots.items() if element_id in snapshot[1]),
+            None,
+        )
+        if match is None:
+            return None, "element_id is unknown or expired; run find again"
+        sid, (captured_at, refs) = match
         if self._clock() - captured_at > self._snapshot_ttl:
             self._snapshots.pop(sid, None)
-            return None, "Element reference is stale; run ui.find again"
+            return None, "element_id is stale; run find again"
         ref = refs.get(element_id)
         if ref is None:
-            return None, "Element reference does not belong to this snapshot"
+            return None, "element_id does not belong to this snapshot"
 
         current, error = self._elements()
         if error:
@@ -172,13 +179,13 @@ class UITool(ToolBase):
             and str(element.get("name") or "") == ref.name
         ]
         if len(matches) != 1:
-            return None, "Element reference is no longer unique; run ui.find again"
+            return None, "element_id is no longer unique; run find again"
         current_bbox = {
             "x": matches[0].get("x"), "y": matches[0].get("y"),
             "width": matches[0].get("width"), "height": matches[0].get("height"),
         }
         if current_bbox != ref.bbox:
-            return None, "Element geometry changed after observation; run ui.find again"
+            return None, "Element geometry changed; run find again"
         return ref, ""
 
     def _resolved_center(self, element: ElementRef) -> tuple[int, int] | None:
@@ -207,7 +214,7 @@ class UITool(ToolBase):
             elements = [element for element, _ in pairs]
             refs = [ref for _, ref in pairs]
         enriched = [
-            {**element, "element_ref": ref.to_dict()}
+            {**element, "element_id": ref.element_id}
             for element, ref in zip(elements[:200], refs[:200])
         ]
         return {"elements": enriched, "count": len(elements), "backend": self._ui_backend}
@@ -222,13 +229,13 @@ class UITool(ToolBase):
             return {"error": error}
         return {
             "found": True,
-            "element_ref": element.to_dict(),
+            "element_id": element.element_id,
             "bbox": dict(element.bbox),
             "center": self._resolved_center(element),
         }
 
     def _click(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        element, error = self._resolve_ref(kwargs.get("element_ref"))
+        element, error = self._resolve_id(kwargs.get("element_id"))
         if error:
             return {"error": error}
         center = self._resolved_center(element)
@@ -280,7 +287,7 @@ class UITool(ToolBase):
         }
 
     def _screenshot_element(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        element, error = self._resolve_ref(kwargs.get("element_ref"))
+        element, error = self._resolve_id(kwargs.get("element_id"))
         if error:
             return {"error": error}
         x, y = element.bbox.get("x"), element.bbox.get("y")

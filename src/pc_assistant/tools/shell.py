@@ -8,7 +8,7 @@ import subprocess
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, parameter, tool
 
 
 _DEFAULT_TIMEOUT = 30
@@ -116,6 +116,10 @@ do shell script "{escaped_cmd}" with administrator privileges
             return {"error": str(e), "returncode": -1}
 
 
+@parameter("env", public_name="environment")
+@parameter("cwd", public_name="working_directory")
+@parameter("timeout", public_name="timeout_seconds")
+@tool(name="run_command", description="Run a local command, script, or system query.", skim_description="Run a shell command.")
 class ShellTool(ToolBase):
     name = "shell"
     description = "Execute shell commands with full shell support (pipes, redirects, etc.)"

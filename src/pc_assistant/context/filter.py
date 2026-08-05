@@ -23,26 +23,33 @@ def _preview(text: str, preview_chars: int, total_len: int) -> str:
     return f"{cut}\n...[trimmed from {total_len} chars]"
 
 
-def trim_stale_content(messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
-    """Trim long assistant/tool messages before the latest user turn.
+def trim_stale_content(
+    messages: list[dict[str, Any]],
+    *,
+    keep_recent_turns: int = 2,
+) -> tuple[list[dict[str, Any]], int]:
+    """Trim bulky content only outside the recent dialogue turns.
 
-    Recent turn stays intact, older bulky content replaced with compact previews.
+    The previous implementation trimmed everything before the latest user
+    message.  That made a perfectly valid follow-up request lose the complete
+    answer from the immediately preceding turn on every call.  Keep the latest
+    completed turn as well as the active turn intact; callers invoke this only
+    after the full message list no longer fits its budget.
     """
     if not messages:
         return messages, 0
 
-    last_user_idx = -1
-    for i in range(len(messages) - 1, -1, -1):
-        if messages[i].get("role") == "user":
-            last_user_idx = i
-            break
-    if last_user_idx <= 0:
+    from pc_assistant.context.tags import is_dialogue_user_turn
+
+    boundaries = [i for i, msg in enumerate(messages) if is_dialogue_user_turn(msg)]
+    if len(boundaries) <= keep_recent_turns:
         return messages, 0
+    cutoff_idx = boundaries[-keep_recent_turns]
 
     out: list[dict[str, Any]] = []
     trimmed = 0
     for i, msg in enumerate(messages):
-        if i >= last_user_idx:
+        if i >= cutoff_idx:
             out.append(msg)
             continue
 

@@ -25,6 +25,28 @@ def test_session_transcript_round_trip_and_delete(tmp_path: Path):
     assert repo.load("feishu:principal") == []
 
 
+def test_active_session_survives_restart(tmp_path: Path):
+    repo = SessionTranscriptRepository(tmp_path / "assistant.db")
+    repo.save("feishu:principal:new:abc", [{"role": "user", "content": "new"}])
+    repo.set_active("feishu:principal", "feishu:principal:new:abc")
+    restarted = SessionTranscriptRepository(tmp_path / "assistant.db")
+    assert restarted.get_active("feishu:principal") == "feishu:principal:new:abc"
+    assert restarted.latest_new("feishu:principal") == "feishu:principal:new:abc"
+
+
+def test_session_context_round_trip_and_delete(tmp_path: Path):
+    repo = SessionTranscriptRepository(tmp_path / "assistant.db")
+    repo.save("session-1", [{"role": "user", "content": "hello"}])
+    repo.save_context("session-1", "Topic: greeting", 1, 1)
+    assert repo.load_context("session-1") == {
+        "summary": "Topic: greeting",
+        "covered_turns": 1,
+        "source_message_count": 1,
+    }
+    repo.delete("session-1")
+    assert repo.load_context("session-1") is None
+
+
 @pytest.mark.asyncio
 async def test_agent_restores_named_session_after_restart(tmp_path: Path):
     config = AppConfig(runtime_root=str(tmp_path))

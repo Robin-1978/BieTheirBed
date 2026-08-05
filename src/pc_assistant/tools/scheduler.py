@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, parameter, tool
 from pc_assistant.runtime import RuntimePaths
 
 
@@ -60,8 +60,6 @@ class ScheduledTask:
         run_count: int = 0,
         max_runs: int = 0,
         timeout: int = 300,
-        message: str = "",
-        callback: Callable[[str, str], Any] | None = None,
         session_id: str = "",
     ) -> None:
         self.task_id = task_id
@@ -74,8 +72,6 @@ class ScheduledTask:
         self.run_count = run_count
         self.max_runs = max_runs
         self.timeout = timeout
-        self.message = message
-        self.callback = callback
         self.session_id = session_id
         self._task: asyncio.Task | None = None
         self._is_running: bool = False
@@ -170,7 +166,6 @@ class ScheduledTask:
             "run_count": self.run_count,
             "max_runs": self.max_runs,
             "timeout": self.timeout,
-            "message": self.message,
             "is_running": self._is_running,
             "schedule_type": self.schedule_type,
             "paused_remaining": self._paused_remaining,
@@ -198,7 +193,6 @@ class ScheduledTask:
             run_count=data.get("run_count", 0),
             max_runs=data.get("max_runs", 0),
             timeout=data.get("timeout", 300),
-            message=data.get("message", ""),
             session_id=data.get("session_id", ""),
         )
         task._paused_remaining = data.get("paused_remaining")
@@ -208,6 +202,24 @@ class ScheduledTask:
 # ── Tool ──────────────────────────────────────────────────────────────
 
 
+@parameter("task_id", skim=True, skim_hint="task id")
+@parameter("task_name", public_name="name")
+@parameter(
+    "schedule",
+    public_name="when",
+    skim=True,
+    skim_hint="delay/interval/cron",
+)
+@parameter(
+    "command",
+    public_name="task",
+    skim=True,
+)
+@tool(
+    name="tasks",
+    description="Create, list, run, pause, or cancel tasks.",
+    skim_description="Tasks: task=work; when=time.",
+)
 class SchedulerTool(ToolBase):
     """Schedule tasks: cron, intervals, and one-shot timers.
 
@@ -225,7 +237,6 @@ class SchedulerTool(ToolBase):
 
     def __init__(self, storage_path: str | Path | None = None) -> None:
         self._tasks: dict[str, ScheduledTask] = {}
-        self._notification_callback: Callable[[str, str], None] | None = None
         self._result_callback: Callable[[ScheduledTask, dict[str, Any]], Any] | None = None
         self._storage_path = Path(storage_path) if storage_path is not None else None
         self._scheduler_task: asyncio.Task | None = None
@@ -237,9 +248,6 @@ class SchedulerTool(ToolBase):
 
     def set_agent(self, agent: Any) -> None:
         self._agent = agent
-
-    def set_notification_callback(self, callback: Callable[[str, str], None]) -> None:
-        self._notification_callback = callback
 
     def set_result_callback(self, callback: Callable[[ScheduledTask, dict[str, Any]], Any]) -> None:
         """Deliver completed Agent runs to the owning channel/session."""
@@ -279,7 +287,6 @@ class SchedulerTool(ToolBase):
                     run_count INTEGER NOT NULL,
                     max_runs INTEGER NOT NULL,
                     timeout INTEGER NOT NULL,
-                    message TEXT NOT NULL,
                     session_id TEXT NOT NULL DEFAULT '',
                     paused_remaining REAL,
                     updated_at TEXT NOT NULL
@@ -287,6 +294,47 @@ class SchedulerTool(ToolBase):
                 """
             )
             columns = {row[1] for row in db.execute("PRAGMA table_info(scheduled_tasks)")}
+            if "message" in columns:
+                # Forward-only schema: discard old notification-only rows and
+                # remove the obsolete message column entirely.
+                db.execute("DROP TABLE IF EXISTS scheduled_tasks_v2")
+                db.execute(
+                    """
+                    CREATE TABLE scheduled_tasks_v2 (
+                        task_id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        command TEXT NOT NULL,
+                        schedule TEXT NOT NULL,
+                        enabled INTEGER NOT NULL,
+                        last_run TEXT,
+                        next_run TEXT,
+                        run_count INTEGER NOT NULL,
+                        max_runs INTEGER NOT NULL,
+                        timeout INTEGER NOT NULL,
+                        session_id TEXT NOT NULL DEFAULT '',
+                        paused_remaining REAL,
+                        updated_at TEXT NOT NULL
+                    )
+                    """
+                )
+                session_expr = "session_id" if "session_id" in columns else "''"
+                db.execute(
+                    f"""
+                    INSERT INTO scheduled_tasks_v2(
+                        task_id, name, command, schedule, enabled, last_run,
+                        next_run, run_count, max_runs, timeout, session_id,
+                        paused_remaining, updated_at
+                    )
+                    SELECT task_id, name, command, schedule, enabled, last_run,
+                           next_run, run_count, max_runs, timeout, {session_expr},
+                           paused_remaining, updated_at
+                    FROM scheduled_tasks
+                    WHERE trim(command) <> ''
+                    """
+                )
+                db.execute("DROP TABLE scheduled_tasks")
+                db.execute("ALTER TABLE scheduled_tasks_v2 RENAME TO scheduled_tasks")
+                columns = {row[1] for row in db.execute("PRAGMA table_info(scheduled_tasks)")}
             if "session_id" not in columns:
                 db.execute("ALTER TABLE scheduled_tasks ADD COLUMN session_id TEXT NOT NULL DEFAULT ''")
 
@@ -309,9 +357,9 @@ class SchedulerTool(ToolBase):
                     """
                     INSERT INTO scheduled_tasks(
                         task_id, name, command, schedule, enabled, last_run,
-                        next_run, run_count, max_runs, timeout, message,
+                        next_run, run_count, max_runs, timeout,
                         paused_remaining, session_id, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(task_id) DO UPDATE SET
                         name=excluded.name,
                         command=excluded.command,
@@ -322,7 +370,6 @@ class SchedulerTool(ToolBase):
                         run_count=excluded.run_count,
                         max_runs=excluded.max_runs,
                         timeout=excluded.timeout,
-                        message=excluded.message,
                         paused_remaining=excluded.paused_remaining,
                         session_id=excluded.session_id,
                         updated_at=excluded.updated_at
@@ -332,7 +379,7 @@ class SchedulerTool(ToolBase):
                         int(task.enabled),
                         task.last_run.isoformat() if task.last_run else None,
                         task.next_run.isoformat() if task.next_run else None,
-                        task.run_count, task.max_runs, task.timeout, task.message,
+                        task.run_count, task.max_runs, task.timeout,
                         task._paused_remaining, task.session_id, now,
                     ),
                 )
@@ -381,17 +428,22 @@ class SchedulerTool(ToolBase):
 
     async def _create_task(self, **kwargs: Any) -> dict[str, Any]:
         name = kwargs.get("task_name", kwargs.get("name", ""))
-        command = kwargs.get("command", "")
-        schedule = kwargs.get("schedule", "")
-        message = kwargs.get("message", "")
+        command = kwargs.get("command", kwargs.get("task", ""))
+        schedule = kwargs.get("schedule", kwargs.get("when", ""))
         enabled = kwargs.get("enabled", True)
         max_runs = kwargs.get("max_runs", 0)
         timeout = kwargs.get("timeout", 300)
 
         if not schedule:
-            return {"error": "schedule is required (cron, 'every Nm', or 'in Ns/Nm/Nh')"}
-        if not command and not message:
-            return {"error": "command or message is required"}
+            return {
+                "error": "when is required",
+                "instruction": "For create, provide task and when. Example: task='check weather', when='in 2m'.",
+            }
+        if not command:
+            return {
+                "error": "task is required",
+                "instruction": "Provide task (what the Agent should do) and when (for example: 'in 2m').",
+            }
 
         import uuid
         task_id = f"task_{uuid.uuid4().hex[:8]}"
@@ -406,7 +458,6 @@ class SchedulerTool(ToolBase):
             enabled=enabled,
             max_runs=max_runs,
             timeout=timeout,
-            message=message,
             session_id=_CURRENT_SESSION_ID.get(),
         )
         next_run = task.calculate_next_run()
@@ -429,7 +480,6 @@ class SchedulerTool(ToolBase):
             "schedule": schedule,
             "schedule_type": task.schedule_type,
             "next_run": next_run.strftime("%Y-%m-%d %H:%M:%S"),
-            "message": message,
             "description": f"Task '{name}' scheduled ({task.schedule_type}). Next: {next_run.strftime('%H:%M:%S')}",
         }
 
@@ -571,12 +621,6 @@ class SchedulerTool(ToolBase):
     async def _execute_task(self, task: ScheduledTask) -> dict[str, Any]:
         task._is_running = True
         try:
-            if task.message and self._notification_callback:
-                try:
-                    self._notification_callback(task.task_id, task.message)
-                except Exception:
-                    pass
-
             result_payload: dict[str, Any]
             if task.command and self._agent is not None:
                 try:
@@ -599,11 +643,8 @@ class SchedulerTool(ToolBase):
                 except Exception as e:
                     result_payload = {"executed": False, "error": str(e)}
 
-            elif task.message and not task.command:
-                result_payload = {"executed": True, "notified": True, "message": task.message}
-
             else:
-                result_payload = {"executed": False, "message": "No agent or callback configured"}
+                result_payload = {"executed": False, "error": "No Agent or task prompt configured"}
 
             if self._result_callback is not None:
                 try:
@@ -711,12 +752,11 @@ class SchedulerTool(ToolBase):
                         "description": "Action to perform",
                     },
                     "task_name": {"type": "string", "description": "Task name"},
-                    "command": {"type": "string", "description": "Agent prompt to execute at the scheduled time; this starts a full Agent run"},
+                    "command": {"type": "string", "description": "Agent instruction to run later; use for checks, decisions, or tools"},
                     "schedule": {
                         "type": "string",
                         "description": "Schedule: cron ('0 9 * * *'), interval ('every 5m'), or delay ('in 30s', 'in 2h30m')",
                     },
-                    "message": {"type": "string", "description": "Notification/reminder only; does not start an Agent run"},
                     "task_id": {"type": "string", "description": "Task ID"},
                     "enabled": {"type": "boolean"},
                     "max_runs": {"type": "integer", "description": "Max runs (0=unlimited)"},
@@ -729,20 +769,18 @@ class SchedulerTool(ToolBase):
     def core_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "Schedule tasks, timers, reminders: cron, intervals, one-shot delays. "
-                           "Use 'in 5m' for timers, 'every 1h' for intervals, '0 9 * * *' for cron.",
+            "description": "Create a task with task (what to do) and when (when to do it). "
+                           "Use 'in 5m', 'every 1h', or cron.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["create", "set", "list", "info", "delete", "cancel",
-                                 "pause", "resume", "run", "start", "stop", "status"],
+                        "enum": ["create", "list", "info", "delete", "run", "pause", "resume"],
                     },
                     "task_name": {"type": "string"},
-                    "command": {"type": "string", "description": "Agent prompt executed at the scheduled time"},
+                    "command": {"type": "string", "description": "Agent instruction to run later"},
                     "schedule": {"type": "string"},
-                    "message": {"type": "string", "description": "Reminder notification only"},
                     "task_id": {"type": "string"},
                 },
                 "required": ["action"],

@@ -95,8 +95,16 @@ models:
 
 default_model: "coding_primary"
 vision_model: "local_vision"
+fallback_enabled: true
+# Optional; otherwise the first llamacpp model is selected automatically.
+fallback_model: "local_vision"
 vision_enabled: true
 ```
+
+When the primary model request fails before producing any output, the agent
+automatically retries the request with the configured local `llamacpp` fallback.
+A partially streamed response is never replayed to avoid duplicated text or
+tool calls. Set `fallback_enabled: false` to disable this behavior.
 
 Use `api_key_env` when the service receives its environment from a process
 manager. For a standalone local installation, `api_key` may instead be stored
@@ -169,7 +177,7 @@ socket and PID files use the operating system runtime directory.
 |---------|-------------|
 | `/help` | Show all commands |
 | `/exit` | Exit |
-| `/clear` | Clear conversation history |
+| `/new` | Start a new conversation while preserving the old one |
 | `/memory` | Show stored user preferences |
 | `/memory clear` | Wipe all memories |
 | `/history` | Show conversation history |

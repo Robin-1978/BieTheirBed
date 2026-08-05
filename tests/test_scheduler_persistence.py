@@ -37,7 +37,7 @@ async def test_scheduler_delete_is_durable(tmp_path):
     created = await scheduler.execute(
         action="create",
         task_name="temporary",
-        message="hello",
+        command="say hello",
         schedule="0 9 * * *",
     )
 
@@ -53,7 +53,7 @@ async def test_disabled_one_shot_does_not_start_background_task(tmp_path):
     created = await scheduler.execute(
         action="create",
         task_name="disabled",
-        message="hello",
+        command="say hello",
         schedule="in 60s",
         enabled=False,
     )
@@ -68,7 +68,7 @@ async def test_persisted_one_shot_is_reconciled_on_scheduler_start(tmp_path):
     created = await scheduler.execute(
         action="create",
         task_name="restartable",
-        message="hello",
+        command="say hello",
         schedule="in 60s",
     )
     if scheduler._tasks[created["task_id"]]._task:

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime
-import re
 from typing import Any, Callable
 
 from pydantic import BaseModel
 
-from pc_assistant.context.tags import wrap_tool_result
+from pc_assistant.context.tags import (
+    parse_tool_result_payload,
+    tool_result_status,
+    unwrap_tool_result,
+    wrap_tool_result,
+)
 
 
 def _assert_reference_only(content: Any) -> None:
@@ -59,6 +63,10 @@ class ConversationManager:
         self._max_messages = max(2, int(max_messages))
         self._system_prompt: str = ""
         self._date_context_provider: Callable[[], str] = _build_date_context
+        # Lossy prompt-only view.  Canonical transcript in ``_messages`` is
+        # never replaced by automatic summarization.
+        self._context_summary: str = ""
+        self._context_summary_turns: int = 0
 
     def set_system_context(self, system_prompt: str, date_context_provider: Callable[[], str] | None = None) -> None:
         self._system_prompt = system_prompt
@@ -162,7 +170,43 @@ class ConversationManager:
 
     def get_messages_for_llm_raw(self) -> list[dict[str, Any]]:
         """Raw history without the system preamble (for the assembly pipeline)."""
+        history = self._build_history_messages()
+        if not self._context_summary:
+            return history
+        from pc_assistant.context.tags import format_context_summary, is_dialogue_user_turn
+        # Keep the latest three dialogue turns verbatim in the prompt view.
+        boundaries = [i for i, m in enumerate(history) if is_dialogue_user_turn(m)]
+        start = boundaries[-3] if len(boundaries) >= 3 else (boundaries[0] if boundaries else 0)
+        return [
+            {"role": "user", "content": format_context_summary(
+                self._context_summary, covered_turns=self._context_summary_turns,
+            )},
+            *history[start:],
+        ]
+
+    def get_canonical_messages_for_llm_raw(self) -> list[dict[str, Any]]:
+        """Full durable transcript, bypassing any lossy prompt-only summary."""
         return self._build_history_messages()
+
+    def set_context_summary(self, summary: str, *, covered_turns: int = 0) -> None:
+        self._context_summary = (summary or "").strip()
+        self._context_summary_turns = max(0, int(covered_turns))
+
+    def clear_context_summary(self) -> None:
+        self._context_summary = ""
+        self._context_summary_turns = 0
+
+    @property
+    def has_context_summary(self) -> bool:
+        return bool(self._context_summary)
+
+    @property
+    def context_summary_turns(self) -> int:
+        return self._context_summary_turns
+
+    @property
+    def context_summary(self) -> str:
+        return self._context_summary
 
     def _build_history_messages(self) -> list[dict[str, Any]]:
         """Build conversation messages shared by the LLM/raw message builders."""
@@ -206,8 +250,15 @@ class ConversationManager:
     def compress(self, *, keep_recent: int = 4) -> None:
         """Compress conversation history in-place, keeping recent messages full-fidelity."""
         from pc_assistant.context.compact import compress_message_list, strip_ephemeral
+        from pc_assistant.context.tags import is_compacted_history, is_context_summary
 
         raw = self.get_messages_for_llm_raw()
+        if any(
+            is_compacted_history(message.get("content"))
+            or is_context_summary(message.get("content"))
+            for message in raw
+        ):
+            return
         if len(raw) <= keep_recent:
             return
 
@@ -215,7 +266,12 @@ class ConversationManager:
         compressed = strip_ephemeral(compressed)
         self.rebuild_from_messages(compressed)
 
-    def compact_completed_tool_results(self, *, max_chars: int = 2000) -> int:
+    def compact_completed_tool_results(
+        self,
+        *,
+        max_chars: int = 2000,
+        keep_recent_turns: int = 1,
+    ) -> int:
         """Replace completed-turn tool payloads with protocol-safe markers.
 
         The active turn still receives the complete bounded result. Before the
@@ -224,15 +280,42 @@ class ConversationManager:
         assistant's subsequent interpretation is the durable context. Error
         status and artifact IDs are retained when cheaply extractable.
         """
+        # Keep the most recent completed dialogue turn verbatim.  A follow-up
+        # commonly refers to the immediately preceding tool result.
+        dialogue_boundaries = [
+            i for i, message in enumerate(self._messages)
+            if message.role == "user"
+            and not str(message.content).lstrip().startswith("<runtime_context")
+            and not str(message.content).lstrip().startswith("<compacted_history")
+        ]
+        if keep_recent_turns <= 0:
+            cutoff = len(self._messages)
+        elif len(dialogue_boundaries) > keep_recent_turns:
+            cutoff = dialogue_boundaries[-keep_recent_turns]
+        else:
+            cutoff = 0
+
         changed = 0
-        for message in self._messages:
+        for index, message in enumerate(self._messages):
             if message.role != "tool" or not isinstance(message.content, str):
+                continue
+            if index >= cutoff:
                 continue
             if message.content.startswith("[tool_result_omitted:"):
                 continue
-            artifact_ids = re.findall(r"artifact_id['\"]?\s*[:=]\s*['\"]([^'\"]+)", message.content)
-            lowered = message.content.lower()
-            status = "error" if "error" in lowered or "failed" in lowered or "rejected" in lowered else "ok"
+            raw_payload = unwrap_tool_result(message.content)
+            # Preserve short results.  Compaction is for oversized payloads,
+            # not a blanket replacement of every historical tool response.
+            if len(raw_payload) <= max_chars:
+                continue
+
+            parsed = parse_tool_result_payload(message.content)
+            artifact_ids: list[str] = []
+            if isinstance(parsed, dict):
+                artifact_id = parsed.get("artifact_id")
+                if artifact_id:
+                    artifact_ids.append(str(artifact_id))
+            status = tool_result_status(message.content)
             artifact_note = f"; artifact_ids={','.join(dict.fromkeys(artifact_ids))}" if artifact_ids else ""
             message.content = (
                 f"[tool_result_omitted: prior tool result {status}; "

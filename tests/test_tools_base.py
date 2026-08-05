@@ -50,6 +50,16 @@ def test_registry_list_tools():
     assert registry.list_tools() == ["dummy"]
 
 
+def test_registry_exposes_semantic_llm_schema_and_normalizes_calls():
+    registry = ToolRegistry()
+    tool = DummyTool()
+    registry.register(tool)
+    # Custom tools keep their explicit internal name unless a built-in mapping
+    # exists; the normalization seam is still available to built-ins.
+    assert registry.llm_schema("dummy")["name"] == "dummy"
+    assert registry.normalize_call("dummy", {"value": 1}) == ("dummy", {"value": 1})
+
+
 def test_registry_empty_name():
     class NoName(ToolBase):
         description = "no name"

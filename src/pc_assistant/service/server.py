@@ -76,7 +76,6 @@ class ServiceServer:
         scheduler = self._agent.registry.get("scheduler")
         if scheduler is not None:
             scheduler.set_agent(self._agent)
-            scheduler.set_notification_callback(self._on_timer_notify)
             scheduler.set_result_callback(self._on_scheduled_result)
             if scheduler.has_tasks():
                 await scheduler.execute(action="start")
@@ -450,29 +449,21 @@ class ServiceServer:
             await ws.send(serialize(ServerMessage.error(msg.id, "Agent not initialized")))
             return
 
-        if cmd == "/clear":
-            session_id = (
+        if cmd == "/new":
+            previous_session_id = (
                 msg.session_id
                 or self._client_sessions.get(client_id)
                 or client_id
             )
-            self._agent.drop_session(session_id)
+            session_id = self._agent.new_session(previous_session_id)
             self._client_sessions[client_id] = session_id
             await ws.send(serialize(ServerMessage.result(
                 msg.id,
-                {"cleared": True, "session_id": session_id},
-            )))
-        elif cmd == "/compact":
-            session_id = (
-                msg.session_id
-                or self._client_sessions.get(client_id)
-                or client_id
-            )
-            self._agent.compact_session(session_id)
-            self._client_sessions[client_id] = session_id
-            await ws.send(serialize(ServerMessage.result(
-                msg.id,
-                {"compacted": True, "session_id": session_id},
+                {
+                    "new_session": True,
+                    "previous_session_id": previous_session_id,
+                    "session_id": session_id,
+                },
             )))
         elif cmd == "/tools":
             tools = self._agent.registry.list_tools()
@@ -507,20 +498,14 @@ class ServiceServer:
 
     # ── Timer / scheduler notifications ───────────────────────
 
-    def _on_timer_notify(self, task_id: str, message: str) -> None:
-        frame = serialize(ServerMessage.notify(task_id, message))
-        for ws in self._clients.values():
-            try:
-                asyncio.create_task(ws.send(frame))
-            except Exception:
-                pass
-
     def _on_scheduled_result(self, task: Any, result: dict[str, Any]) -> None:
         """Route completed scheduled Agent turns to their originating channel."""
         session_id = getattr(task, "session_id", "")
-        if not session_id or self._channel_manager is None:
+        if not session_id:
             return
         if session_id.startswith("feishu:"):
+            if self._channel_manager is None:
+                return
             channel = self._channel_manager.get("feishu")
             if channel is not None:
                 channel.deliver_scheduled_result(
@@ -529,6 +514,24 @@ class ServiceServer:
                     result,
                     artifact_resolver=self._agent.resolve_artifact if self._agent is not None else None,
                 )
+            return
+
+        # Desktop/CLI clients receive the same task result through the
+        # protocol notify sink. The scheduler does not know this transport.
+        answer = result.get("result") or result.get("error") or result.get("message") or "Task finished"
+        if not isinstance(answer, str):
+            answer = str(answer)
+        frame = serialize(ServerMessage.notify(task.task_id, answer))
+        for client_id, client_session in self._client_sessions.items():
+            if client_session != session_id:
+                continue
+            ws = self._clients.get(client_id)
+            if ws is not None:
+                try:
+                    asyncio.create_task(ws.send(frame))
+                except Exception:
+                    pass
+
 
 
 def _is_unix_connection(ws: ServerConnection) -> bool:

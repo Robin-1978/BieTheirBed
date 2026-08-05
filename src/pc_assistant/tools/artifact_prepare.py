@@ -6,9 +6,10 @@ from typing import Any
 
 from pc_assistant.artifacts import ArtifactStore
 from pc_assistant.context.scope import current_memory_scope
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, tool
 
 
+@tool(name="attach_file", description="Attach an existing local file without changing it.", skim_description="Attach a local file.")
 class ArtifactPrepareTool(ToolBase):
     name = "artifact_prepare"
     description = (

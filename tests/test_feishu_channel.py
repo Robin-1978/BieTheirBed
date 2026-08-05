@@ -281,6 +281,24 @@ def test_feishu_unlock_is_handled_before_agent_dispatch():
     channel._process_with_agent.assert_not_called()
 
 
+def test_feishu_text_confirmation_does_not_hold_pending_lock():
+    """A text reply must reach the confirmation handler without deadlocking."""
+    channel = FeishuChannel()
+    channel._agent_loop = object()
+    channel._pending_confirm["ou-user"] = {
+        "code": "1234",
+        "fn": lambda: None,
+        "ts": 0,
+    }
+    channel._handle_confirm = MagicMock()
+    channel._remove_reaction = MagicMock()
+
+    channel._handle_message("ou-user", "确认 1234")
+
+    channel._handle_confirm.assert_called_once()
+    channel._remove_reaction.assert_called_once()
+
+
 @pytest.mark.asyncio
 async def test_feishu_delivers_each_explicit_core_artifact():
     channel = FeishuChannel()

@@ -4,12 +4,16 @@ import subprocess
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, parameter, tool
 
 
+@parameter("pid", skim=True, skim_hint="info/kill process")
+@parameter("command", skim=True, skim_hint="launch command")
+@parameter("name", public_name="app_name", skim=True, skim_hint="search name")
+@tool(name="apps", description="Start, list, find, view, or stop apps.", skim_description="Desktop apps.")
 class ApplicationTool(ToolBase):
     name = "application"
-    description = "Launch, list, search, and manage desktop applications"
+    description = "Start, list, search, view, or stop desktop applications"
     is_side_effecting = True
 
     async def execute(self, **kwargs: Any) -> Any:

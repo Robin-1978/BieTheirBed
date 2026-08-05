@@ -5,15 +5,19 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, parameter, tool
 
 
 _MAX_FILE_SIZE = 1_048_576
 
 
+@parameter("content", skim=True, skim_hint="write")
+@parameter("destination", public_name="destination_path", skim=True, skim_hint="copy/move")
+@parameter("path", public_name="file_path", required=True)
+@tool(name="files", description="Read, write, list, copy, move, or delete files and folders.", skim_description="Local files and folders.")
 class FilesystemTool(ToolBase):
     name = "filesystem"
-    description = "Read, write, list, and manage files and directories"
+    description = "Read, write, list, copy, move, or delete files and directories"
     is_side_effecting = True
 
     def __init__(self, working_directory: str | Path | None = None) -> None:
@@ -74,6 +78,7 @@ class FilesystemTool(ToolBase):
                     "action": {"type": "string", "enum": ["read", "write", "list", "mkdir", "delete", "copy", "move", "exists"]},
                     "path": {"type": "string"},
                     "content": {"type": "string"},
+                    "destination": {"type": "string"},
                 },
                 "required": ["action", "path"],
             },

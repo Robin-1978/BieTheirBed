@@ -7,6 +7,7 @@ from typing import Any
 
 from pc_assistant.context.compact import compact_dialogue_turn
 from pc_assistant.context.tags import (
+    is_context_summary,
     is_compacted_history,
     is_session_context_message,
     is_strategy_context_message,
@@ -169,17 +170,23 @@ def truncate_messages(
         and not is_session_context_message(m)
     ]
 
+    # Do not mutate/preview history merely because a new turn arrived.  The
+    # old filter ran unconditionally and therefore truncated the previous
+    # answer even when the complete request was comfortably within budget.
+    if _estimate_tokens(messages) <= budget:
+        return messages
+
     summary_block: list[dict[str, Any]] = []
     rest: list[dict[str, Any]] = others
-    if others and is_compacted_history(others[0].get("content")):
+    if others and (is_compacted_history(others[0].get("content")) or is_context_summary(others[0].get("content"))):
         summary_block = others[:2]
         rest = others[2:]
 
     if summary_block:
-        rest, _ = trim_stale_content(rest)
+        rest, _ = trim_stale_content(rest, keep_recent_turns=keep_recent_turns)
     else:
         rest = _context_edit(rest, keep_recent_turns=keep_recent_turns)
-        rest, _ = trim_stale_content(rest)
+        rest, _ = trim_stale_content(rest, keep_recent_turns=keep_recent_turns)
 
     turns: list[list[dict[str, Any]]] = []
     current_turn: list[dict[str, Any]] = []

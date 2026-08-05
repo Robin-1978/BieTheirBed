@@ -38,7 +38,7 @@ ICON_BULLET = "\u2022"       # •
 
 _COMMANDS_HELP = """\
 /exit, /quit    Save conversation and exit
-/clear          Clear conversation history
+/new            Start a new conversation (keeps the old one)
 /memory         Show remembered user preferences
 /memory clear   Clear all memories
 /history        Show conversation history summary
@@ -50,7 +50,6 @@ _COMMANDS_HELP = """\
 /retry          Retry the last user input
 /debug          Toggle debug mode
 /export         Export conversation to file
-/compact        Compact context (remove old messages)
 /theme          List or switch color themes\
 """
 
@@ -178,6 +177,10 @@ class _ConsoleView:
             self.console.print(
                 RichText(f"{ICON_CANCEL} Cancelled.", style="warning")
             )
+
+        elif event.type == "context_compacted":
+            self._stop_live()
+            self.console.print("较早对话已整理为简短工作摘要。", style="dim")
 
     def stop(self) -> None:
         self._stop_live()
@@ -309,6 +312,8 @@ class ChatUI:
             self._state.add_message(MessageType.ASSISTANT, event.content)
         elif event.type == "error":
             self._state.add_message(MessageType.ERROR, event.content)
+        elif event.type == "context_compacted":
+            self._state.add_message(MessageType.SYSTEM, "较早对话已整理为简短工作摘要。")
 
     # ── Slash commands (console mode) ─────────────────────────────────
 
@@ -318,11 +323,14 @@ class ChatUI:
 
         if cmd in ("/exit", "/quit"):
             self._running = False
-        elif cmd == "/clear":
+        elif cmd == "/new":
             if self._agent is not None:
-                self._agent.reset_conversation()
-            self._state.clear_messages()
-            self._console.print("[dim]Conversation history cleared.[/dim]")
+                if self._agent.__class__.__name__ == "ServiceClient":
+                    result = await self._agent.command("/new")
+                else:
+                    self._agent.new_session()
+                self._state.clear_messages()
+                self._console.print("[dim]Started a new conversation.[/dim]")
         elif cmd == "/help":
             self._console.print(
                 Panel(_COMMANDS_HELP, title="Commands", border_style="green", expand=False)
@@ -450,13 +458,6 @@ class ChatUI:
                     self._console.print(
                         RichText(f"{ICON_ERROR} Export failed: {e}", style="error")
                     )
-        elif cmd == "/compact":
-            if self._agent is not None:
-                if hasattr(self._agent, "command"):
-                    await self._agent.command("/compact")
-                else:
-                    self._agent.compact_session()
-            self._console.print("[dim]Context compacted.[/dim]")
         else:
             self._console.print(
                 f"[warning]{ICON_WARN} Unknown command: {command}[/warning]"

@@ -50,7 +50,7 @@ _COMMANDS_HELP = """\
 | Command | Description |
 |---------|-------------|
 | `/exit`, `/quit` | Save conversation and exit |
-| `/clear` | Clear conversation history |
+| `/new` | Start a new conversation (keeps the old one) |
 | `/memory` | Show remembered user preferences |
 | `/memory clear` | Clear all memories |
 | `/history` | Show conversation history summary |
@@ -61,7 +61,6 @@ _COMMANDS_HELP = """\
 | `/config set key=value` | Set a config field at runtime |
 | `/retry` | Retry the last user input |
 | `/export` | Export conversation to file |
-| `/compact` | Compact context (clear old messages) |
 | `/theme` | List themes or `/theme <name>` to switch |
 | `/confirm` | Approve a pending dangerous tool call |
 | `/deny` | Reject a pending dangerous tool call |
@@ -170,7 +169,6 @@ class ChatApp(App):
             if isinstance(self._agent, Agent):
                 scheduler = self._agent.registry.get("scheduler")
                 if scheduler is not None:
-                    scheduler.set_notification_callback(self._on_timer_notify)
                     scheduler.set_result_callback(self._on_scheduled_result)
 
     async def _on_confirm_request(self, data: dict[str, Any]) -> None:
@@ -434,6 +432,9 @@ class ChatApp(App):
         elif event.type == "cancelled":
             await stream.write("\n\n*Cancelled.*\n")
 
+        elif event.type == "context_compacted":
+            await stream.write("\n\n*较早对话已整理为简短工作摘要。*\n")
+
         if self._agent is not None:
             status = await self._agent.get_status()
             self._token_count = status.get("total_tokens", 0)
@@ -507,7 +508,8 @@ class ChatApp(App):
 
         if cmd in ("/exit", "/quit"):
             self.exit()
-        elif cmd == "/clear":
+        elif cmd == "/new":
+            result = {"session_id": "new session"}
             try:
                 if self._agent is not None:
                     if self._is_remote:
@@ -515,17 +517,17 @@ class ChatApp(App):
 
                         if not isinstance(self._agent, ServiceClient):
                             raise RuntimeError("Remote agent does not support session commands")
-                        await self._agent.command("/clear")
+                        result = await self._agent.command("/new")
                     else:
                         if not isinstance(self._agent, Agent):
-                            raise RuntimeError("Local agent does not support conversation reset")
-                        self._agent.reset_conversation()
+                            raise RuntimeError("Local agent does not support new sessions")
+                        result = {"session_id": self._agent.new_session()}
             except Exception as exc:
-                log.mount(CommandOutput(f"{ICON_ERROR} Clear failed: {exc}"))
+                log.mount(CommandOutput(f"{ICON_ERROR} New conversation failed: {exc}"))
                 return True
             self._state.clear_messages()
             log.remove_children()
-            log.mount(CommandOutput("*Conversation cleared.*"))
+            log.mount(CommandOutput("*Started a new conversation.*"))
         elif cmd == "/help":
             log.mount(CommandOutput(_COMMANDS_HELP))
         elif cmd == "/tools":
@@ -708,13 +710,6 @@ class ChatApp(App):
                 log.mount(CommandOutput(f"*Copying: {label}*"))
             else:
                 log.mount(CommandOutput(f"{ICON_WARN} Nothing to copy."))
-        elif cmd == "/compact":
-            if self._agent is not None:
-                if self._is_remote:
-                    await self._agent.command("/compact")
-                else:
-                    self._agent.compact_session()
-            log.mount(CommandOutput("*Context compacted.*"))
         elif cmd == "/debug":
             self._state.debug_mode = not self._state.debug_mode
             if self._agent is not None:

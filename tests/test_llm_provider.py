@@ -5,7 +5,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from pc_assistant.llm_provider import LLMMessage, LLMProvider, LLMResponse, StreamChunk
+from pc_assistant.llm_provider import (
+    FailoverLLMProvider,
+    LLMMessage,
+    LLMProvider,
+    LLMResponse,
+    StreamChunk,
+)
 from pc_assistant.model_adapter.types import format_tool_result_message, normalize_tool_calls
 
 
@@ -763,3 +769,58 @@ class TestLLMProviderCancel:
                 chunks.append(chunk)
             assert p._session_cancel.get("s1") is None
             assert any(c.delta_content == "ok" for c in chunks)
+
+
+class _FakeProvider:
+    supports_vision = True
+    vision_capabilities = None
+
+    def __init__(self, response, chunks):
+        self.response = response
+        self.chunks = chunks
+
+    async def chat(self, *args, **kwargs):
+        return self.response
+
+    async def chat_stream(self, *args, **kwargs):
+        for chunk in self.chunks:
+            yield chunk
+
+    def cancel(self, session_id=None):
+        pass
+
+    def reset_cancelled(self, session_id=None):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_failover_chat_uses_local_provider_after_primary_error():
+    primary = _FakeProvider(LLMResponse(content="primary down", finish_reason="error"), [])
+    local = _FakeProvider(LLMResponse(content="local answer", finish_reason="stop"), [])
+    provider = FailoverLLMProvider(primary, local)
+    response = await provider.chat([])
+    assert response.content == "local answer"
+
+
+@pytest.mark.asyncio
+async def test_failover_stream_uses_local_provider_before_primary_output():
+    primary = _FakeProvider(
+        LLMResponse(content="", finish_reason="error"),
+        [StreamChunk(delta_content="", finish_reason="error")],
+    )
+    local = _FakeProvider(
+        LLMResponse(content="", finish_reason="stop"),
+        [StreamChunk(delta_content="local"), StreamChunk(finish_reason="stop")],
+    )
+    provider = FailoverLLMProvider(primary, local)
+    chunks = [chunk async for chunk in provider.chat_stream([])]
+    assert [chunk.delta_content for chunk in chunks] == ["local", ""]
+
+
+def test_failover_vision_capability_matches_primary_request_provider():
+    primary = _FakeProvider(LLMResponse(content="", finish_reason="stop"), [])
+    primary.supports_vision = False
+    fallback = _FakeProvider(LLMResponse(content="", finish_reason="stop"), [])
+    fallback.supports_vision = True
+    provider = FailoverLLMProvider(primary, fallback)
+    assert provider.supports_vision is False

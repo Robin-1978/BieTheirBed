@@ -7,9 +7,10 @@ from typing import Any
 from pc_assistant.artifacts import ArtifactStore
 from pc_assistant.context.scope import current_memory_scope
 from pc_assistant.tools.artifacts import ArtifactPaths
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, tool
 
 
+@tool(name="screenshot", description="Take a screenshot for the user. The result includes image_id; call image to inspect it.", skim_description="Capture screen; returns image_id.")
 class ScreenshotTool(ToolBase):
     name = "screenshot"
     description = (
@@ -38,7 +39,13 @@ class ScreenshotTool(ToolBase):
                 media_type="image/png",
                 retention="temporary",
             )
-            return {"success": True, "artifact": artifact}
+            # Keep the public artifact for delivery and expose the same image
+            # id so the main agent can ask the vision tool to inspect it.
+            return {
+                "success": True,
+                "artifact": artifact,
+                "image_id": artifact.get("artifact_id", ""),
+            }
         except ImportError:
             save_path.unlink(missing_ok=True)
             return {"error": "Screen capture unavailable (mss or Pillow not installed)"}

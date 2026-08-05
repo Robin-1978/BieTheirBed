@@ -24,16 +24,16 @@ logger = logging.getLogger(__name__)
 LlmCallable = Callable[[list[dict[str, Any]]], Awaitable[str]]
 
 _SUMMARY_SYSTEM = (
-    "You condense an AI assistant's conversation history into a compact, lossy "
-    "summary that preserves every fact, decision, and tool action that matters for "
-    "continuing the conversation. Use bullet points. Keep it under 400 tokens."
+    "Summarize earlier conversation for a general PC assistant. Be concise and factual; "
+    "do not invent. Format the result as compact Markdown using exactly these headings: "
+    "Topic, User goal, Done, Current state, Next step, Blockers, Files/apps. "
+    "Use bullets only for Done and Files/apps. Keep under 400 tokens."
 )
 
 _SUMMARY_TMPL = (
     "Below are the earlier messages of a conversation (oldest first). "
-    "Write a compact summary of the assistant history, keeping: user goals/requests, "
-    "important facts and numbers, files touched, and tool actions with their outcomes. "
-    "Do not add new information.\n\n"
+    "Write a short working-state summary, keeping decisions, important facts, tool outcomes, "
+    "and files/apps needed to continue. Do not include chain-of-thought or new information.\n\n"
     "---\n{history}\n---"
 )
 
@@ -57,6 +57,28 @@ async def llm_summarize_facts(
     except Exception as e:  # noqa: BLE001 - compaction must never hard-fail
         logger.warning("[LLMCompact] summarization failed, falling back: %s", e)
         return None
+
+
+async def summarize_prompt_history(
+    messages: list[dict[str, Any]],
+    *,
+    keep_recent_turns: int = 3,
+    llm_call: LlmCallable | None = None,
+) -> tuple[str, int] | None:
+    """Return a prompt-only working-state summary and covered turn count."""
+    if llm_call is None:
+        return None
+    from pc_assistant.context.tags import is_dialogue_user_turn
+    boundaries = [i for i, m in enumerate(messages) if is_dialogue_user_turn(m)]
+    if len(boundaries) <= keep_recent_turns:
+        return None
+    cutoff = boundaries[-keep_recent_turns]
+    old = messages[:cutoff]
+    history = "\n".join(_message_line(m) for m in old if m.get("role") != "system")
+    summary = await llm_summarize_facts(history, llm_call)
+    if not summary:
+        return None
+    return summary, len(boundaries) - keep_recent_turns
 
 
 async def compact_conversation_llm(

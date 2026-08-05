@@ -4,9 +4,10 @@ import platform
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, tool
 
 
+@tool(name="system_info", description="Read system information or disk usage.", skim_description="System and disk info.")
 class SystemTool(ToolBase):
     name = "system"
     description = "Get system information and disk usage"

@@ -4,9 +4,12 @@ import asyncio
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, parameter, tool
 
 
+@parameter("message", required=False, skim=True, skim_hint="show/alert")
+@parameter("title", required=False, skim=True)
+@tool(name="notifications", description="Show a desktop notification or alert.", skim_description="Desktop notification.")
 class NotificationTool(ToolBase):
     name = "notification"
     description = "Send system notifications, alerts, and desktop notifications"
@@ -17,13 +20,10 @@ class NotificationTool(ToolBase):
         handlers = {
             "show": self._show_notification,
             "alert": self._show_alert,
-            "reminder": self._set_reminder,
-            "list": self._list_reminders,
-            "cancel": self._cancel_reminder,
         }
         handler = handlers.get(action)
         if handler is None:
-            return {"error": f"Unknown action: {action}. Use: show, alert, reminder, list, cancel."}
+            return {"error": f"Unknown action: {action}.", "instruction": "Use action='show' or action='alert'. Use tasks for delayed work."}
         return await handler(kwargs)
 
     def schema(self) -> dict[str, Any]:
@@ -35,8 +35,8 @@ class NotificationTool(ToolBase):
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["show", "alert", "reminder", "list", "cancel"],
-                        "description": "Action: 'show' for basic notification, 'alert' for urgent, 'reminder' for scheduled notification",
+                        "enum": ["show", "alert"],
+                        "description": "show: normal notification; alert: urgent notification",
                     },
                     "title": {
                         "type": "string",
@@ -51,14 +51,6 @@ class NotificationTool(ToolBase):
                         "enum": ["low", "normal", "critical"],
                         "description": "Urgency level (for alert action)",
                     },
-                    "delay_seconds": {
-                        "type": "integer",
-                        "description": "Delay in seconds before showing notification (for reminder action)",
-                    },
-                    "reminder_id": {
-                        "type": "string",
-                        "description": "Reminder ID to cancel (for cancel action)",
-                    },
                     "sound": {
                         "type": "boolean",
                         "description": "Play sound with notification (default: true)",
@@ -68,23 +60,22 @@ class NotificationTool(ToolBase):
                         "description": "Icon name or path",
                     },
                 },
-                "required": ["action", "title", "message"],
+                "required": ["action"],
             },
         }
 
     def core_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "Show notifications, alerts, and reminders.",
+            "description": "Show a desktop notification or alert.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["show", "alert", "reminder", "list", "cancel"]},
+                    "action": {"type": "string", "enum": ["show", "alert"]},
                     "title": {"type": "string"},
                     "message": {"type": "string"},
-                    "delay": {"type": "integer"},
                 },
-                "required": ["action", "title", "message"],
+                "required": ["action"],
             },
         }
 
@@ -278,60 +269,3 @@ class NotificationTool(ToolBase):
             return {"error": "notify-send not installed. Install with: sudo apt install libnotify-bin"}
         except Exception as e:
             return {"error": f"Failed to show notification: {e}"}
-
-    async def _set_reminder(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        title = kwargs.get("title", "Reminder")
-        message = kwargs.get("message", "")
-        delay = kwargs.get("delay_seconds", 0)
-        sound = kwargs.get("sound", True)
-
-        if delay <= 0:
-            return {"error": "delay_seconds must be greater than 0 for reminder action"}
-
-        import uuid
-        reminder_id = str(uuid.uuid4())[:8]
-
-        # Create background task for reminder
-        asyncio.create_task(self._delayed_notification(reminder_id, title, message, delay, sound))
-
-        return {
-            "success": True,
-            "reminder_id": reminder_id,
-            "title": title,
-            "message": message,
-            "delay_seconds": delay,
-            "description": f"Reminder '{reminder_id}' set for {delay} seconds from now.",
-        }
-
-    async def _delayed_notification(
-        self,
-        reminder_id: str,
-        title: str,
-        message: str,
-        delay: int,
-        sound: bool,
-    ) -> None:
-        await asyncio.sleep(delay)
-        await self._show_notification({
-            "title": title,
-            "message": message,
-            "sound": sound,
-        })
-
-    async def _list_reminders(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        # Note: For simplicity, we track reminders in memory
-        # In a real implementation, this would be persisted
-        return {
-            "message": "Reminder tracking is in-memory. Use reminder_id from set_reminder to cancel.",
-        }
-
-    async def _cancel_reminder(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        reminder_id = kwargs.get("reminder_id", "")
-        if not reminder_id:
-            return {"error": "reminder_id is required for cancel action"}
-
-        # Note: Actual cancellation would require tracking asyncio tasks
-        return {
-            "cancelled": reminder_id,
-            "message": f"Reminder '{reminder_id}' cancellation requested.",
-        }

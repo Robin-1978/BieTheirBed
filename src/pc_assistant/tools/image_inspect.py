@@ -4,10 +4,11 @@ from __future__ import annotations
 from typing import Any
 
 from pc_assistant.context.scope import current_memory_scope
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, tool
 from pc_assistant.vision.broker import VisionBroker
 
 
+@tool(name="image", description="Read visible text and objects in an attached image.", skim_description="Inspect an image.")
 class ImageInspectTool(ToolBase):
     name = "image_inspect"
     description = (

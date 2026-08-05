@@ -92,6 +92,8 @@ class AppConfig(BaseModel):
     models: dict[str, ModelConfig] = Field(default_factory=dict)
     default_model: str = ""
     vision_model: str = ""
+    fallback_enabled: bool = True
+    fallback_model: str = ""
 
     # Single-model fallback used when no model catalog is configured.
     llm_provider: str = "llamacpp"
@@ -109,8 +111,8 @@ class AppConfig(BaseModel):
     shell_timeout: int = 30
     context_window_budget: int = 8192
     auto_compact_enabled: bool = True
-    auto_compact_threshold: float = 0.80
-    llm_compact_enabled: bool = False
+    auto_compact_threshold: float = 0.50
+    llm_compact_enabled: bool = True
     token_family: str = ""
     max_sessions: int = 100
     trace_enabled: bool = True
@@ -174,6 +176,8 @@ class AppConfig(BaseModel):
                 raise ValueError(f"Unknown default_model '{self.default_model}'")
             if self.vision_model and self.vision_model not in self.models:
                 raise ValueError(f"Unknown vision_model '{self.vision_model}'")
+            if self.fallback_model and self.fallback_model not in self.models:
+                raise ValueError(f"Unknown fallback_model '{self.fallback_model}'")
             for alias, model in self.models.items():
                 if model.provider not in self.providers:
                     raise ValueError(
@@ -253,6 +257,36 @@ class AppConfig(BaseModel):
             thinking=None,
         )
 
+    def resolve_fallback_model(self) -> ResolvedModelConfig | None:
+        """Resolve the local model used after the primary provider fails."""
+        if not self.fallback_enabled:
+            return None
+        if self.models:
+            aliases = [self.fallback_model] if self.fallback_model else list(self.models)
+            for alias in aliases:
+                if not alias or alias not in self.models:
+                    continue
+                candidate = self.resolve_model(alias)
+                if candidate.driver == "llamacpp":
+                    return candidate
+            return None
+        if self.llm_provider == "llamacpp":
+            return None
+        return ResolvedModelConfig(
+            alias="local-fallback",
+            provider_name="llamacpp",
+            driver="llamacpp",
+            server_url="http://127.0.0.1:8192",
+            api_base="",
+            api_key="",
+            model="",
+            supports_vision=self.supports_vision,
+            token_family=self.token_family,
+            context_window=None,
+            timeout=self.llm_timeout,
+            thinking=None,
+        )
+
     def masked_api_key(self) -> str:
         if not self.llm_api_key or len(self.llm_api_key) < 8:
             return "***" if self.llm_api_key else ""
@@ -303,6 +337,8 @@ def _env_overrides() -> dict[str, Any]:
         "PC_LLM_PROVIDER": ("llm_provider", str),
         "PC_DEFAULT_MODEL": ("default_model", str),
         "PC_VISION_MODEL": ("vision_model", str),
+        "PC_FALLBACK_ENABLED": ("fallback_enabled", bool),
+        "PC_FALLBACK_MODEL": ("fallback_model", str),
         "PC_LLM_SERVER_URL": ("llm_server_url", str),
         "PC_LLM_MODEL_NAME": ("llm_model_name", str),
         "PC_LLM_API_KEY": ("llm_api_key", str),

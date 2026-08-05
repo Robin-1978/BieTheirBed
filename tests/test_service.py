@@ -5,6 +5,7 @@ import asyncio
 import json
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -256,6 +257,7 @@ class TestServerClientIntegration:
         mock_agent.cancel = MagicMock()
         mock_agent.reset_conversation = MagicMock()
         mock_agent.drop_session = MagicMock()
+        mock_agent.new_session = MagicMock(return_value="new-session")
         mock_agent.store_artifact = MagicMock(return_value={
             "type": "image_ref",
             "artifact_id": "uploaded-ref",
@@ -383,14 +385,16 @@ class TestServerClientIntegration:
         await asyncio.sleep(0.1)
         server._agent.cancel.assert_called()
 
-    async def test_command_clear(self, server_and_client):
+    async def test_command_new_session(self, server_and_client):
         server, client = server_and_client
         async for _ in client.run("hello", session_id="tui-session"):
             pass
-        result = await client.command("/clear")
-        assert result.get("cleared") is True
-        assert result.get("session_id") == "tui-session"
-        server._agent.drop_session.assert_called_once_with("tui-session")
+        server._agent.new_session.return_value = "tui-session:new:abc"
+        result = await client.command("/new")
+        assert result.get("new_session") is True
+        assert result.get("previous_session_id") == "tui-session"
+        assert result.get("session_id") == "tui-session:new:abc"
+        server._agent.new_session.assert_called_once_with("tui-session")
 
     async def test_command_tools(self, server_and_client):
         server, client = server_and_client
@@ -408,7 +412,10 @@ class TestServerClientIntegration:
         received = []
         client.set_notify_handler(lambda tid, msg: received.append((tid, msg)))
 
-        server._on_timer_notify("task_1", "Timer done!")
+        client_id = next(iter(server._clients))
+        server._client_sessions[client_id] = client_id
+        task = SimpleNamespace(task_id="task_1", name="walk", session_id=client_id)
+        server._on_scheduled_result(task, {"result": "Timer done!"})
         await asyncio.sleep(0.1)
 
         assert len(received) == 1

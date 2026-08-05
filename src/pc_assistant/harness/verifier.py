@@ -108,7 +108,7 @@ class Verifier:
             return Verdict.reject(
                 RefusalCode.INVALID_ARGUMENTS,
                 schema_error,
-                retry_hint="Call describe_tool and retry with arguments matching the schema.",
+                retry_hint="Fix the named argument using the allowed values/parameters in this error, then retry once.",
             )
         safety_result = self._safety.check_tool_call(tool_name, arguments)
         need_confirm, confirm_reason = self._safety.needs_confirmation(tool_name, arguments)
@@ -232,6 +232,15 @@ class Verifier:
         properties = schema.get("properties", {})
         if not isinstance(properties, dict):
             return ""
+        unknown = sorted(key for key in arguments if key not in properties)
+        # An empty properties map means the tool intentionally accepts an
+        # opaque payload (some adapters and test doubles use this form).
+        if unknown and properties:
+            allowed = ", ".join(sorted(properties)) or "(none)"
+            return (
+                f"Unknown argument(s): {', '.join(unknown)}. "
+                f"Allowed arguments: {allowed}. Remove the unknown keys and retry."
+            )
         for key, value in arguments.items():
             rule = properties.get(key)
             if not isinstance(rule, dict):
