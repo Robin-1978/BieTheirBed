@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from io import StringIO
 from typing import Any, Awaitable, Callable
 
 from rich.console import Console
@@ -451,7 +450,10 @@ class ChatUI:
                     )
         elif cmd == "/compact":
             if self._agent is not None:
-                self._agent.conversation.clear()
+                if hasattr(self._agent, "command"):
+                    await self._agent.command("/compact")
+                else:
+                    self._agent.compact_session()
             self._console.print("[dim]Context compacted.[/dim]")
         else:
             self._console.print(

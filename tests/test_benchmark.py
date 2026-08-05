@@ -87,7 +87,7 @@ class TestBenchmarkMode:
                 delta_tool_calls=[{
                     "id": "call_1",
                     "type": "function",
-                    "function": {"name": "weather", "arguments": '{"city":"Beijing"}'},
+                    "function": {"name": "weather", "arguments": '{"location":"Beijing"}'},
                 }],
                 finish_reason="",
             )

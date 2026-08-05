@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import shlex
 import subprocess
 from typing import Any
 

@@ -13,6 +13,8 @@ from typing import Any
 
 from pc_assistant.channels.base import ChannelBase
 from pc_assistant.harness.confirm import CONFIRM_TIMEOUT
+from pc_assistant.redaction import redact_message, redact_tool_parameters
+from pc_assistant.security.totp import TotpUnlockBroker
 
 #: Bound for a full turn (confirm prompt + agent response). Must exceed
 #: CONFIRM_TIMEOUT so a pending confirmation can still complete.
@@ -58,8 +60,9 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-_RECEIVED_OPEN_ID_FILE = os.path.join(os.path.dirname(__file__), ".feishu_open_id")
 
+def _safe_message_for_log(text: str) -> str:
+    return redact_message(text)
 
 def _patch_ws_card_dispatch(ws_client: Any) -> None:
     """Monkey-patch lark_oapi WS client to dispatch CARD frames.
@@ -151,6 +154,12 @@ class FeishuChannel(ChannelBase):
         receive_id: str = "",
         receive_id_type: str = "open_id",
         runtime_root: str = "",
+        remote_unlock_enabled: bool = False,
+        remote_unlock_allowed_open_ids: list[str] | None = None,
+        remote_unlock_totp_secret_file: str = "secrets/unlock.totp",
+        remote_unlock_totp_period_seconds: int = 30,
+        remote_unlock_max_attempts: int = 3,
+        remote_unlock_lockout_seconds: int = 300,
     ) -> None:
         from pc_assistant.runtime import RuntimePaths
 
@@ -161,6 +170,10 @@ class FeishuChannel(ChannelBase):
             "FEISHU_RECEIVE_ID_TYPE", "open_id"
         )
         self._inbox_dir = RuntimePaths.from_root(runtime_root or None).attachments / "feishu-inbox"
+        runtime_paths = RuntimePaths.from_root(runtime_root or None)
+        self._received_open_id_file = runtime_paths.data / "feishu_open_id"
+        secret_path = runtime_paths.resolve(remote_unlock_totp_secret_file, default_parent=runtime_paths.root / "secrets")
+        self._unlock_broker = TotpUnlockBroker(secret_path, remote_unlock_allowed_open_ids or [], enabled=remote_unlock_enabled, period=remote_unlock_totp_period_seconds, max_attempts=remote_unlock_max_attempts, lockout_seconds=remote_unlock_lockout_seconds)
 
         self._lark_client = None
         self._lark_lock = threading.RLock()
@@ -257,9 +270,9 @@ class FeishuChannel(ChannelBase):
     def _get_receive_id(self) -> str:
         if self._receive_id:
             return self._receive_id
-        if os.path.exists(_RECEIVED_OPEN_ID_FILE):
+        if self._received_open_id_file.exists():
             try:
-                with open(_RECEIVED_OPEN_ID_FILE, "r") as f:
+                with open(self._received_open_id_file, "r") as f:
                     return f.read().strip()
             except Exception:
                 pass
@@ -312,9 +325,11 @@ class FeishuChannel(ChannelBase):
 
     def _save_open_id(self, open_id: str) -> None:
         try:
-            with open(_RECEIVED_OPEN_ID_FILE, "w") as f:
+            self._received_open_id_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._received_open_id_file, "w") as f:
                 f.write(open_id)
-            logger.info("Saved open_id: %s", open_id)
+            os.chmod(self._received_open_id_file, 0o600)
+            logger.info("Saved Feishu binding")
         except Exception as e:
             logger.warning("Failed to save open_id: %s", e)
 
@@ -751,6 +766,13 @@ class FeishuChannel(ChannelBase):
         """Handle slash commands in Feishu. Returns True if handled."""
         cmd = text.split()[0].lower()
 
+        if cmd == "/unlock":
+            parts = text.split()
+            code = parts[1] if len(parts) == 2 else ""
+            ok, message = self._unlock_broker.verify_and_unlock(open_id, code)
+            self._send_text(open_id, ("✅ " if ok else "❌ ") + message)
+            return True
+
         if cmd in ("/help", "/帮助"):
             self._send_card(open_id, {
                 "config": {"wide_screen_mode": True},
@@ -763,6 +785,7 @@ class FeishuChannel(ChannelBase):
                     "text": {"tag": "lark_md", "content": (
                         "`/help` - 显示此帮助\n"
                         "`/clear` - 清空对话历史\n"
+                        "`/unlock <验证码>` - 使用本地TOTP解锁桌面\n"
                         "`/status` - 查看 Agent 状态\n"
                         "`/tools` - 列出可用工具\n"
                         "`/config` - 查看当前配置"
@@ -837,7 +860,6 @@ class FeishuChannel(ChannelBase):
 
         if cmd == "/config":
             if self._agent is not None:
-                from pc_assistant.config import AppConfig
                 cfg = self._agent.config
                 model = cfg.resolve_model()
                 info = (
@@ -1019,7 +1041,9 @@ class FeishuChannel(ChannelBase):
         agent_loop = asyncio.get_running_loop()
 
         async def feishu_confirm(tool_name: str, args: dict[str, Any]) -> bool:
-            args_brief = json.dumps(args, ensure_ascii=False)[:120]
+            args_brief = json.dumps(
+                redact_tool_parameters(tool_name, args), ensure_ascii=False
+            )[:120]
             action_desc = f"\U0001f527 **{tool_name}**\n`{args_brief}`"
 
             confirm_event = asyncio.Event()
@@ -1071,7 +1095,10 @@ class FeishuChannel(ChannelBase):
                 if event.type == "tool_call" and not event.blocked:
                     tool_name = event.tool_name
                     tool_args = event.tool_args
-                    args_brief = json.dumps(tool_args, ensure_ascii=False)[:80]
+                    args_brief = json.dumps(
+                        redact_tool_parameters(tool_name, tool_args),
+                        ensure_ascii=False,
+                    )[:80]
                     tool_calls_info.append(f"🔧 {tool_name}({args_brief})")
                 elif event.type == "artifact" and event.artifact is not None:
                     artifact_ref = event.artifact.model_dump()
@@ -1106,7 +1133,8 @@ class FeishuChannel(ChannelBase):
                 plain_response = "⚠️ 未获得有效回复，请重试"
                 tools_summary = ""
 
-            thinking_text = "".join(thinking_chunks).strip()
+            # Internal reasoning is never forwarded to an external channel.
+            thinking_text = ""
             delivery_failures: list[str] = []
             for artifact_ref in artifact_refs[:5]:
                 artifact_id = str(artifact_ref.get("artifact_id", ""))
@@ -1241,7 +1269,7 @@ class FeishuChannel(ChannelBase):
 
                 logger.info(
                     "[WORKER] Processing: '%s' from %s (qsize=%d)",
-                    text,
+                    _safe_message_for_log(text),
                     open_id,
                     self._msg_queue.qsize(),
                 )
@@ -1330,7 +1358,7 @@ class FeishuChannel(ChannelBase):
                 logger.info(
                     "[WS-RECV#%d] Queued: '%s' from %s (qsize=%d)",
                     recv_seq,
-                    text,
+                    _safe_message_for_log(text),
                     open_id,
                     channel._msg_queue.qsize(),
                 )

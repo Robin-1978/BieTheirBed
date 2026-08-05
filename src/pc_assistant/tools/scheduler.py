@@ -389,8 +389,8 @@ class SchedulerTool(ToolBase):
         self._tasks[task_id] = task
         self._save()
 
-        if task.is_one_shot:
-            task._task = asyncio.create_task(self._run_delay(task))
+        if task.is_one_shot and task.enabled:
+            self._schedule_one_shot(task)
 
         return {
             "task_id": task_id,
@@ -504,6 +504,9 @@ class SchedulerTool(ToolBase):
         if self._running:
             return {"message": "Scheduler already running", "running": True}
         self._running = True
+        for task in self._tasks.values():
+            if task.is_one_shot and task.enabled and not task.is_running:
+                self._schedule_one_shot(task)
         self._scheduler_task = asyncio.create_task(self._scheduler_loop())
         return {"success": True, "message": "Scheduler started", "running": True}
 
@@ -517,6 +520,10 @@ class SchedulerTool(ToolBase):
                 await self._scheduler_task
             except asyncio.CancelledError:
                 pass
+        for task in self._tasks.values():
+            if task.is_one_shot and task._task and not task._task.done():
+                task._task.cancel()
+                task._task = None
         return {"success": True, "message": "Scheduler stopped", "running": False}
 
     def _scheduler_status(self, **kwargs: Any) -> dict[str, Any]:
@@ -556,6 +563,8 @@ class SchedulerTool(ToolBase):
     async def _run_delay(self, task: ScheduledTask) -> None:
         """Background coroutine for one-shot delay tasks."""
         try:
+            if not task.enabled:
+                return
             sleep_time = (
                 task._paused_remaining
                 if task._paused_remaining is not None
@@ -572,6 +581,9 @@ class SchedulerTool(ToolBase):
                 self._save()
         except asyncio.CancelledError:
             pass
+        finally:
+            if task._task is asyncio.current_task():
+                task._task = None
 
     async def _scheduler_loop(self) -> None:
         while self._running:
@@ -588,6 +600,11 @@ class SchedulerTool(ToolBase):
                 break
             except Exception:
                 await asyncio.sleep(5)
+
+    def _schedule_one_shot(self, task: ScheduledTask) -> None:
+        if task._task is not None and not task._task.done():
+            return
+        task._task = asyncio.create_task(self._run_delay(task))
 
     # ── Helpers ───────────────────────────────────────────────
 

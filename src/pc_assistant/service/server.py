@@ -25,6 +25,7 @@ from pc_assistant.agent import Agent
 from pc_assistant.config import AppConfig, load_config
 from pc_assistant.harness.confirm import CONFIRM_TIMEOUT
 from pc_assistant.runtime import RuntimePaths
+from pc_assistant.redaction import redact
 from pc_assistant.service.protocol import (
     SOCKET_PATH,
     PID_PATH,
@@ -466,7 +467,7 @@ class ServiceServer:
                 or self._client_sessions.get(client_id)
                 or client_id
             )
-            self._agent.drop_session(session_id)
+            self._agent.compact_session(session_id)
             self._client_sessions[client_id] = session_id
             await ws.send(serialize(ServerMessage.result(
                 msg.id,
@@ -475,6 +476,18 @@ class ServiceServer:
         elif cmd == "/tools":
             tools = self._agent.registry.list_tools()
             await ws.send(serialize(ServerMessage.result(msg.id, {"tools": tools})))
+        elif cmd in ("/history", "/export"):
+            session_id = msg.session_id or self._client_sessions.get(client_id) or client_id
+            messages = [redact(item) for item in self._agent.session_messages(session_id)]
+            await ws.send(serialize(ServerMessage.result(
+                msg.id, {"messages": messages, "session_id": session_id}
+            )))
+        elif cmd == "/memory":
+            memories = [item.to_dict() for item in self._agent.memory.get_all()]
+            await ws.send(serialize(ServerMessage.result(msg.id, {"memories": memories})))
+        elif cmd == "/memory clear":
+            self._agent.memory.clear()
+            await ws.send(serialize(ServerMessage.result(msg.id, {"cleared": True})))
         else:
             await ws.send(serialize(ServerMessage.error(msg.id, f"Unknown command: {cmd}")))
 

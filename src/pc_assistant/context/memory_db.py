@@ -18,6 +18,14 @@ AMBIGUOUS_MEMORY_KEYS = frozenset({
 _KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
 _IMPORTANCE = frozenset({"core", "relevant"})
 _CORE_CATEGORIES = frozenset({"identity", "communication", "safety"})
+_MEMORY_CATEGORIES = frozenset({
+    "general", "identity", "communication", "preference", "workflow",
+    "safety", "environment", "instruction",
+})
+_SENSITIVE_MEMORY_KEY = re.compile(
+    r"(?:password|passwd|passcode|api[_-]?key|token|secret|totp|credential|private[_-]?key)",
+    re.IGNORECASE,
+)
 
 
 def validate_memory_key(key: str) -> str:
@@ -107,8 +115,31 @@ class SQLiteMemoryRepository:
         normalized = validate_memory_key(key)
         if importance not in _IMPORTANCE:
             raise ValueError("Memory importance must be core or relevant")
+        category = category.strip().lower()
+        if category not in _MEMORY_CATEGORIES:
+            raise ValueError(
+                "Memory category must be one of: "
+                + ", ".join(sorted(_MEMORY_CATEGORIES))
+            )
+        if _SENSITIVE_MEMORY_KEY.search(normalized):
+            raise ValueError("Credentials and authentication secrets must never be stored in memory")
+        if not value or len(value) > 2000:
+            raise ValueError("Memory value must contain 1-2000 characters")
+        if importance == "core" and len(value) > 500:
+            raise ValueError("Core memory values must be at most 500 characters")
         now = self._now()
         with self._connect() as db:
+            existing = db.execute(
+                "SELECT importance FROM memories WHERE principal_id=? AND key=?",
+                (principal_id, normalized),
+            ).fetchone()
+            if importance == "core" and (existing is None or existing[0] != "core"):
+                count = db.execute(
+                    "SELECT count(*) FROM memories WHERE principal_id=? AND importance='core'",
+                    (principal_id,),
+                ).fetchone()[0]
+                if count >= 12:
+                    raise ValueError("At most 12 core memories are allowed")
             db.execute(
                 """
                 INSERT INTO memories(
@@ -215,6 +246,8 @@ class SQLiteMemoryRepository:
         tool_calls: int = 0,
         source: str = "explicit",
     ) -> None:
+        if not summary or len(summary) > 4000:
+            raise ValueError("Episode summary must contain 1-4000 characters")
         with self._connect() as db:
             db.execute(
                 """INSERT INTO episodes(

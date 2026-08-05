@@ -127,6 +127,12 @@ class AppConfig(BaseModel):
     feishu_app_secret: str = ""
     feishu_receive_id: str = ""
     feishu_receive_id_type: str = "open_id"
+    remote_unlock_enabled: bool = False
+    remote_unlock_allowed_open_ids: list[str] = Field(default_factory=list)
+    remote_unlock_totp_secret_file: str = "secrets/unlock.totp"
+    remote_unlock_totp_period_seconds: int = 30
+    remote_unlock_max_attempts: int = 3
+    remote_unlock_lockout_seconds: int = 300
     vision_max_side: int = 1280
     vision_jpeg_quality: int = 70
     vision_enabled: bool = True
@@ -147,6 +153,14 @@ class AppConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_provider(self) -> "AppConfig":
+        if (
+            self.service_port > 0
+            and self.service_host not in {"127.0.0.1", "localhost", "::1"}
+            and not self.service_token
+        ):
+            raise ValueError(
+                "service_token is required when service_host is not loopback"
+            )
         if self.models:
             if not self.default_model:
                 raise ValueError("default_model is required when models are configured")

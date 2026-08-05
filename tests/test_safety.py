@@ -113,6 +113,24 @@ class TestSafetyChecker:
         assert needs is True
         assert "outside working directory" in reason
 
+    @pytest.mark.parametrize("command", [
+        "loginctl unlock-session 3",
+        "passwd robin",
+        "gsettings set org.gnome.desktop.screensaver lock-enabled false",
+    ])
+    def test_authentication_and_lock_commands_require_confirmation(self, command):
+        checker = SafetyChecker()
+        needs, _ = checker.needs_confirmation("shell", {"command": command})
+        assert needs is True
+
+    def test_keyboard_text_requires_confirmation(self):
+        checker = SafetyChecker()
+        needs, reason = checker.needs_confirmation(
+            "keyboard", {"action": "type", "text": "sensitive"}
+        )
+        assert needs is True
+        assert "text input" in reason
+
     def test_artifact_prepare_blocks_protected_path(self, tmp_path):
         protected = tmp_path / "protected"
         checker = SafetyChecker(

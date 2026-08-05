@@ -8,9 +8,10 @@ from pc_assistant.platform_ import get_default_dangerous_commands, get_default_p
 
 
 class SafetyCheckResult:
-    def __init__(self, allowed: bool, reason: str = "") -> None:
+    def __init__(self, allowed: bool, reason: str = "", *, overridable: bool = True) -> None:
         self.allowed = allowed
         self.reason = reason
+        self.overridable = overridable
 
     def __bool__(self) -> bool:
         return self.allowed
@@ -44,7 +45,23 @@ _CONFIRMATION_COMMAND_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\bdd\b", re.IGNORECASE),
     re.compile(r"\bmkfs\b", re.IGNORECASE),
     re.compile(r"\bshred\b", re.IGNORECASE),
+    # Authentication, account, session, and security-policy changes always
+    # require an explicit user confirmation.  These are intentionally
+    # confirmation-gated rather than model-overridable.
+    re.compile(r"\b(passwd|chpasswd|usermod|useradd|userdel|groupmod|groupadd|groupdel)\b", re.IGNORECASE),
+    re.compile(r"\bloginctl\s+(unlock-session|unlock-sessions|lock-session|lock-sessions)\b", re.IGNORECASE),
+    re.compile(r"\b(gsettings|dconf)\b.*(?:screensaver|lock|session-lock)", re.IGNORECASE),
+    re.compile(r"\b(db(u|us)-send|gdbus)\b.*(?:ScreenSaver|screensaver|unlock|Lock)", re.IGNORECASE),
+    re.compile(r"\b(systemctl)\b.*(?:display-manager|gdm|lightdm|sddm|remote-desktop)", re.IGNORECASE),
 ]
+
+_SENSITIVE_COMMAND_PATTERNS: tuple[re.Pattern[str], ...] = (
+    _CONFIRMATION_COMMAND_PATTERNS[-5],
+    _CONFIRMATION_COMMAND_PATTERNS[-4],
+    _CONFIRMATION_COMMAND_PATTERNS[-3],
+    _CONFIRMATION_COMMAND_PATTERNS[-2],
+    _CONFIRMATION_COMMAND_PATTERNS[-1],
+)
 
 
 class SafetyChecker:
@@ -70,10 +87,18 @@ class SafetyChecker:
         cmd_lower = command.lower().strip()
         for dangerous in self._dangerous_commands:
             if dangerous.lower() in cmd_lower:
-                return SafetyCheckResult(False, f"Blocked dangerous command pattern: {dangerous}")
+                return SafetyCheckResult(
+                    False,
+                    f"Blocked dangerous command pattern: {dangerous}",
+                    overridable=False,
+                )
         for pattern in _INJECTION_PATTERNS:
             if pattern.search(command):
-                return SafetyCheckResult(False, f"Blocked potential command injection: {pattern.pattern}")
+                return SafetyCheckResult(
+                    False,
+                    f"Blocked potential command injection: {pattern.pattern}",
+                    overridable=False,
+                )
         return SafetyCheckResult(True)
 
     def check_path(self, path: str, write: bool = False) -> SafetyCheckResult:
@@ -85,7 +110,9 @@ class SafetyChecker:
             try:
                 resolved.relative_to(protected)
                 return SafetyCheckResult(
-                    False, f"Access denied: path is inside protected directory {protected}"
+                    False,
+                    f"Access denied: path is inside protected directory {protected}",
+                    overridable=False,
                 )
             except ValueError:
                 pass
@@ -122,7 +149,15 @@ class SafetyChecker:
             cmd_lower = command.lower().strip()
             for pattern in _CONFIRMATION_COMMAND_PATTERNS:
                 if pattern.search(cmd_lower):
+                    if any(sensitive.search(cmd_lower) for sensitive in _SENSITIVE_COMMAND_PATTERNS):
+                        return (True, "Authentication, account, session, or security-policy command requires confirmation")
                     return (True, f"Command may be destructive: {command}")
+            return (False, "")
+
+        if tool_name == "keyboard":
+            action = str(kwargs.get("action", "")).lower()
+            if action in ("type", "write"):
+                return (True, "Keyboard text input requires explicit confirmation")
             return (False, "")
 
         if tool_name == "filesystem":

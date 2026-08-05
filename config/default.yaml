@@ -48,6 +48,12 @@ feishu_app_id: ""
 feishu_app_secret: ""
 feishu_receive_id: ""
 feishu_receive_id_type: "open_id"
+remote_unlock_enabled: false
+remote_unlock_allowed_open_ids: []
+remote_unlock_totp_secret_file: "secrets/unlock.totp"
+remote_unlock_totp_period_seconds: 30
+remote_unlock_max_attempts: 3
+remote_unlock_lockout_seconds: 300
 vision_max_side: 1280
 vision_jpeg_quality: 70
 vision_enabled: true

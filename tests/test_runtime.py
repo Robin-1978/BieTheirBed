@@ -59,3 +59,20 @@ def test_audit_redacts_secrets_and_binary_images(tmp_path):
     assert parameters["api_key"] == "[redacted]"
     assert parameters["nested"]["password"] == "[redacted]"
     assert "AAAA" not in parameters["image"]
+
+
+def test_audit_redacts_keyboard_text_and_security_commands(tmp_path):
+    audit = AuditLogger(str(tmp_path / "logs" / "audit"))
+    audit.log(
+        "tool_call",
+        tool="keyboard",
+        parameters={"action": "type", "text": "secret"},
+    )
+    audit.log(
+        "tool_call",
+        tool="shell",
+        parameters={"command": "loginctl unlock-session 3"},
+    )
+    entries = audit.get_entries()
+    assert entries[0]["parameters"]["text"] == "[redacted keyboard text]"
+    assert entries[1]["parameters"]["command"] == "[redacted sensitive command]"

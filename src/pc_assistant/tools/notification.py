@@ -109,9 +109,6 @@ class NotificationTool(ToolBase):
     async def _show_alert(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         title = kwargs.get("title", "Alert")
         message = kwargs.get("message", "")
-        urgency = kwargs.get("urgency", "critical")
-        sound = kwargs.get("sound", True)
-
         plat = get_platform()
 
         # Alerts always have sound
@@ -303,7 +300,7 @@ class NotificationTool(ToolBase):
             "title": title,
             "message": message,
             "delay_seconds": delay,
-            "message": f"Reminder '{reminder_id}' set for {delay} seconds from now.",
+            "description": f"Reminder '{reminder_id}' set for {delay} seconds from now.",
         }
 
     async def _delayed_notification(

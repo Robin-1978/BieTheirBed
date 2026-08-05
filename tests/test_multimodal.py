@@ -166,7 +166,16 @@ class TestProfilesVision:
     def test_default_llamacpp_vision(self):
         from pc_assistant.model_adapter.profiles import resolve_profile
 
-        assert resolve_profile("llamacpp").supports_vision is True
+        # OpenAI-compatible/local endpoints do not advertise capabilities
+        # reliably; unknown vision support fails closed and must be explicit.
+        assert resolve_profile("llamacpp").supports_vision is False
+        assert resolve_profile("llamacpp", supports_vision=True).supports_vision is True
+
+    def test_openai_compatible_unknown_vision_fails_closed(self):
+        from pc_assistant.model_adapter.profiles import resolve_profile
+
+        assert resolve_profile("openai_compatible").supports_vision is False
+        assert resolve_profile("openai_compatible", supports_vision=True).supports_vision is True
 
     def test_override_disable_vision(self):
         from pc_assistant.model_adapter.profiles import resolve_profile
@@ -252,7 +261,7 @@ class TestAgentAttachments:
 
         captured: list = []
         agent = Agent(
-            config=AppConfig(),
+            config=AppConfig(supports_vision=True),
             artifact_store=ArtifactStore(tmp_path / "attachments"),
         )
         agent._llm.chat_stream = _capture_stream(captured)
@@ -336,7 +345,7 @@ class TestInlineImageToolResult:
     @pytest.mark.asyncio
     async def test_inline_image_hydrated_for_request_but_stored_as_reference(self, tmp_path):
         agent = Agent(
-            config=AppConfig(),
+            config=AppConfig(supports_vision=True),
             artifact_store=ArtifactStore(tmp_path / "attachments"),
         )
         agent.register_tool(_InlineImageTool())

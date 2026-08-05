@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from pc_assistant.redaction import redact
+from pc_assistant.redaction import redact, redact_tool_parameters
 
 
 class AuditLogger:
@@ -29,7 +29,7 @@ class AuditLogger:
             "session_id": self._session_id,
             "action": action,
             "tool": tool,
-            "parameters": redact(parameters),
+            "parameters": redact_tool_parameters(tool, parameters),
             "result_summary": str(redact(result))[:500] if result is not None else None,
             "allowed": allowed,
             "reason": reason,

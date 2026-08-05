@@ -55,6 +55,7 @@ def _build_date_context() -> str:
 class ConversationManager:
     def __init__(self, max_messages: int = 100) -> None:
         self._messages: list[Message] = []
+        self._max_messages = max(2, int(max_messages))
         self._system_prompt: str = ""
         self._date_context_provider: Callable[[], str] = _build_date_context
 
@@ -72,7 +73,26 @@ class ConversationManager:
             kwargs["tool_calls"] = kwargs["delta_tool_calls"]
         msg = Message(role=role, content=content, **kwargs)
         self._messages.append(msg)
+        self._enforce_limit()
         return msg
+
+    def _enforce_limit(self) -> None:
+        while len(self._messages) > self._max_messages:
+            # Remove a complete oldest dialogue turn. This avoids leaving a
+            # tool result without its assistant tool call in retained state.
+            first_user = next(
+                (i for i, item in enumerate(self._messages) if item.role == "user"),
+                None,
+            )
+            if first_user is None:
+                del self._messages[0]
+                continue
+            next_user = next(
+                (i for i in range(first_user + 1, len(self._messages))
+                 if self._messages[i].role == "user"),
+                len(self._messages),
+            )
+            del self._messages[first_user:next_user]
 
     def add_user(self, content: str | list[dict[str, Any]]) -> Message:
         return self.add("user", content)

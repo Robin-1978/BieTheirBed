@@ -165,6 +165,10 @@ class TestSafetyChecker:
         result = s.check_tool_call("shell", {"command": dangerous_cmd})
         assert not result.allowed
 
+    def test_dangerous_result_is_hard_blocked(self):
+        result = SafetyChecker().check_command("rm -rf /")
+        assert result.overridable is False
+
 
 class TestRateLimiter:
     def test_allows_within_limit(self):

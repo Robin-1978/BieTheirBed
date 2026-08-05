@@ -6,8 +6,6 @@ injected at runtime via ``ChatApp.get_css_variables()``.
 """
 from __future__ import annotations
 
-from typing import Any
-
 from rich.theme import Theme
 
 

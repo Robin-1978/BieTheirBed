@@ -5,7 +5,6 @@ import json
 from typing import Any
 
 from textual.app import ComposeResult
-from textual.containers import Vertical
 from textual.message import Message as TMessage
 from textual.widgets import Collapsible, Markdown, Static, TextArea
 from textual.widget import Widget

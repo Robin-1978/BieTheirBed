@@ -128,7 +128,10 @@ def resolve_profile(
             health_url=health_url,
             headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
             stream_options=True,
-            vision=_vision(True if supports_vision is None else supports_vision),
+            # OpenAI-compatible endpoints do not share a reliable capability
+            # contract. Unknown must fail closed; configure true explicitly
+            # or route images through the dedicated vision model.
+            vision=_vision(bool(supports_vision)),
         )
 
     base = server_url.rstrip("/")
@@ -140,5 +143,5 @@ def resolve_profile(
         headers={},
         cache_prompt=True,
         stream_options=True,
-        vision=_vision(True if supports_vision is None else supports_vision),
+        vision=_vision(bool(supports_vision)),
     )

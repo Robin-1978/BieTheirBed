@@ -359,8 +359,6 @@ class ChatApp(App):
         response: AssistantMessage,
         stream: Any,
     ) -> None:
-        log = self.query_one("#chat-log", VerticalScroll)
-
         if event.type == "stream_delta":
             await stream.write(event.content)
             self._streamed_any = True
@@ -420,7 +418,7 @@ class ChatApp(App):
             await stream.write(f"\n\n{ICON_WARN} {event.content}\n")
 
         elif event.type == "cancelled":
-            await stream.write(f"\n\n*Cancelled.*\n")
+            await stream.write("\n\n*Cancelled.*\n")
 
         if self._agent is not None:
             status = await self._agent.get_status()
@@ -520,7 +518,11 @@ class ChatApp(App):
             if self._agent is None:
                 log.mount(CommandOutput(f"{ICON_WARN} No agent initialized."))
             else:
-                tools = self._agent.registry.list_tools()
+                if self._is_remote:
+                    result = await self._agent.command("/tools")
+                    tools = result.get("tools", [])
+                else:
+                    tools = self._agent.registry.list_tools()
                 if not tools:
                     log.mount(CommandOutput("*No tools registered.*"))
                 else:
@@ -530,7 +532,11 @@ class ChatApp(App):
             if self._agent is None:
                 log.mount(CommandOutput(f"{ICON_WARN} No agent initialized."))
             else:
-                messages = self._agent.conversation.get_messages()
+                if self._is_remote:
+                    result = await self._agent.command("/history")
+                    messages = result.get("messages", [])
+                else:
+                    messages = self._agent.conversation.get_messages()
                 if not messages:
                     log.mount(CommandOutput("*No conversation history.*"))
                 else:
@@ -551,13 +557,23 @@ class ChatApp(App):
                 log.mount(CommandOutput(f"| Property | Value |\n|----------|-------|\n{rows}"))
         elif cmd == "/memory clear":
             if self._agent is not None:
-                self._agent.memory.clear()
+                if self._is_remote:
+                    await self._agent.command("/memory clear")
+                else:
+                    self._agent.memory.clear()
             log.mount(CommandOutput("*All memories cleared.*"))
         elif cmd == "/memory":
             if self._agent is None:
                 log.mount(CommandOutput(f"{ICON_WARN} No agent initialized."))
             else:
-                items = self._agent.memory.get_all()
+                if self._is_remote:
+                    result = await self._agent.command("/memory")
+                    items = []
+                    from pc_assistant.context.memory import MemoryItem
+                    for item in result.get("memories", []):
+                        items.append(MemoryItem.from_dict(item))
+                else:
+                    items = self._agent.memory.get_all()
                 if not items:
                     log.mount(CommandOutput("*No memories stored.*"))
                 else:
@@ -608,8 +624,15 @@ class ChatApp(App):
                 log.mount(CommandOutput(f"{ICON_WARN} No agent initialized."))
             else:
                 save_path = f"conversation_{int(time.time())}.json"
-                messages = self._agent.conversation.get_messages()
                 try:
+                    if self._is_remote:
+                        result = await self._agent.command("/export")
+                        messages = result.get("messages", [])
+                    else:
+                        messages = self._agent.conversation.get_messages()
+                    from pc_assistant.runtime import RuntimePaths
+                    save_path = RuntimePaths.from_root(self._config.runtime_root).artifacts / save_path
+                    save_path.parent.mkdir(parents=True, exist_ok=True)
                     with open(save_path, "w", encoding="utf-8") as f:
                         json.dump(messages, f, ensure_ascii=False, indent=2)
                     log.mount(CommandOutput(f"Exported to `{save_path}`"))
@@ -622,18 +645,34 @@ class ChatApp(App):
             parts = command.strip().split(None, 1)
             target = parts[1].strip().lower() if len(parts) > 1 else "last"
             text, label = "", ""
+            remote_messages: list[dict[str, Any]] | None = None
+            if self._is_remote:
+                result = await self._agent.command("/history")
+                remote_messages = result.get("messages", [])
             if target == "all" or target == "conversation":
-                text, label = self._conversation_text(), "Copied conversation"
+                if remote_messages is not None:
+                    text = "\n".join(
+                        f"## {m.get('role', '?')}\n{self._format_content(m.get('content', ''))}"
+                        for m in remote_messages
+                    )
+                else:
+                    text = self._conversation_text()
+                label = "Copied conversation"
             elif target.startswith("#"):
                 try:
                     index = int(target[1:]) - 1
-                    messages = self._agent.conversation.get_messages()
+                    messages = remote_messages if remote_messages is not None else self._agent.conversation.get_messages()
                     text = self._format_content(messages[index].get("content", ""))
                     label = f"Copied message #{index + 1}"
                 except Exception:
                     log.mount(CommandOutput(f"{ICON_WARN} Invalid message index: `{target}`"))
             else:
-                text, label = self._last_answer_text(), "Copied last answer"
+                messages = remote_messages if remote_messages is not None else self._agent.conversation.get_messages()
+                text = next(
+                    (self._format_content(m.get("content", "")) for m in reversed(messages) if m.get("role") == "assistant"),
+                    "",
+                )
+                label = "Copied last answer"
             if text:
                 self._copy_worker(text, label)
                 log.mount(CommandOutput(f"*Copying: {label}*"))
@@ -641,7 +680,10 @@ class ChatApp(App):
                 log.mount(CommandOutput(f"{ICON_WARN} Nothing to copy."))
         elif cmd == "/compact":
             if self._agent is not None:
-                self._agent.conversation.clear()
+                if self._is_remote:
+                    await self._agent.command("/compact")
+                else:
+                    self._agent.compact_session()
             log.mount(CommandOutput("*Context compacted.*"))
         elif cmd == "/debug":
             self._state.debug_mode = not self._state.debug_mode

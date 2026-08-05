@@ -73,6 +73,12 @@ def create_channels_from_config(config: Any) -> ChannelManager:
                 receive_id=config.feishu_receive_id,
                 receive_id_type=config.feishu_receive_id_type,
                 runtime_root=config.runtime_root,
+                remote_unlock_enabled=config.remote_unlock_enabled,
+                remote_unlock_allowed_open_ids=config.remote_unlock_allowed_open_ids,
+                remote_unlock_totp_secret_file=config.remote_unlock_totp_secret_file,
+                remote_unlock_totp_period_seconds=config.remote_unlock_totp_period_seconds,
+                remote_unlock_max_attempts=config.remote_unlock_max_attempts,
+                remote_unlock_lockout_seconds=config.remote_unlock_lockout_seconds,
             )
             manager.add(ch)
         except ImportError:

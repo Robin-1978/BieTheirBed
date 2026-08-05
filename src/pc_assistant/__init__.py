@@ -1,9 +1,15 @@
+from __future__ import annotations
+
+import argparse
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pc_assistant.agent import Agent
+
 __version__ = "0.1.0"
 
 
-def build_parser() -> "argparse.ArgumentParser":
-    import argparse
-
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pca",
         description="PC Assistant - A Python computer assistant agent",
@@ -69,6 +75,10 @@ def build_parser() -> "argparse.ArgumentParser":
     parser.add_argument(
         "--status", action="store_true", default=False,
         help="Show whether the service daemon is running",
+    )
+    parser.add_argument(
+        "--totp-setup", action="store_true", default=False,
+        help="Generate the local TOTP secret and provisioning URI for remote unlock",
     )
     return parser
 
@@ -349,6 +359,7 @@ async def async_benchmark(
 
 def async_benchmark_report(results_dir: str) -> int:
     import json
+    import sys
     from pathlib import Path
 
     from pc_assistant.benchmark.reporter import Reporter
@@ -406,6 +417,26 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.status:
         return _service_status()
+
+    if args.totp_setup:
+        from pc_assistant.config import load_config
+        from pc_assistant.runtime import RuntimePaths
+        from pc_assistant.security.totp import TotpUnlockBroker
+
+        cfg = load_config(config_path)
+        paths = RuntimePaths.from_root(cfg.runtime_root)
+        secret_path = paths.resolve(
+            cfg.remote_unlock_totp_secret_file,
+            default_parent=paths.root / "secrets",
+        )
+        if secret_path.exists():
+            print(f"TOTP secret already exists: {secret_path}", file=sys.stderr)
+            return 1
+        _, uri = TotpUnlockBroker.write_secret(secret_path)
+        print(f"Secret file: {secret_path}")
+        print("Provisioning URI (scan/import locally; do not send via Feishu):")
+        print(uri)
+        return 0
 
     if args.stop:
         return _stop_service()

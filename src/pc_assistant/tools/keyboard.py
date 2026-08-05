@@ -290,7 +290,6 @@ class KeyboardTool(ToolBase):
             # First copy to clipboard
             import pyperclip
 
-            old_clipboard = pyperclip.paste()
             pyperclip.copy(text)
 
             # Then paste

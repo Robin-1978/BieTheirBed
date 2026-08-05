@@ -24,6 +24,25 @@ class _MouseTool(ToolBase):
         return {"name": self.name, "parameters": {"type": "object", "properties": {}}}
 
 
+class _SchemaTool(ToolBase):
+    name = "schema_tool"
+
+    async def execute(self, **kwargs):
+        return kwargs
+
+    def schema(self):
+        return {
+            "name": self.name,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["read", "write"]},
+                },
+                "required": ["action"],
+            },
+        }
+
+
 def _executor(tmp_path, events):
     registry = ToolRegistry()
     registry.register(_MouseTool(events))
@@ -72,3 +91,16 @@ async def test_forged_call_cannot_commit(tmp_path):
 
     with pytest.raises(PermissionError, match="not authorized"):
         await executor.commit(forged)
+
+
+@pytest.mark.asyncio
+async def test_schema_validation_rejects_missing_and_invalid_arguments(tmp_path):
+    registry = ToolRegistry()
+    registry.register(_SchemaTool())
+    verifier = Verifier(SafetyChecker(), registry, AuditLogger(str(tmp_path / "audit")))
+
+    missing = await verifier.verify("schema_tool", {})
+    invalid = await verifier.verify("schema_tool", {"action": "delete"})
+
+    assert missing.rejected and missing.code.value == "invalid_arguments"
+    assert invalid.rejected and invalid.code.value == "invalid_arguments"
