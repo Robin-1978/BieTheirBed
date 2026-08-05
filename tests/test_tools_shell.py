@@ -32,6 +32,19 @@ class TestShellTimeout:
         result = await t.execute(command="Start-Sleep -Seconds 30", timeout=1)
         assert result.get("returncode", 0) != 0 or "error" in result or "timeout" in str(result).lower()
 
+    @pytest.mark.asyncio
+    async def test_timeout_kills_descendants_and_returns_promptly(self):
+        """A descendant must not keep stdout open after the shell is killed."""
+        import time
+
+        t = ShellTool()
+        started = time.monotonic()
+        result = await t.execute(command="sleep 30 & wait", timeout=0.2)
+        elapsed = time.monotonic() - started
+
+        assert "timed out" in result.get("error", "").lower()
+        assert elapsed < 3
+
 
 class TestShellNoCommand:
     @pytest.mark.asyncio

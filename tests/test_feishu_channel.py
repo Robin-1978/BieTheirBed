@@ -223,8 +223,8 @@ pc-assistant --status
 
     assert "# 标题" not in rendered
     assert "**标题**" in rendered
-    assert "**项目**: 服务" in rendered
-    assert "**状态**: 正常" in rendered
+    assert "| 项目 | 状态 |" in rendered
+    assert "| 服务 | 正常 |" in rendered
     assert "`pc-assistant --status`" in rendered
 
 
@@ -234,7 +234,8 @@ def test_response_card_uses_adapted_markdown():
     content = card["elements"][-1]["text"]["content"]
     assert "# 标题" not in content
     assert "**标题**" in content
-    assert "**A**: 1" in content
+    assert "| A | B |" in content
+    assert "| 1 | 2 |" in content
 
 
 def test_feishu_reaction_is_removed_even_when_agent_is_not_ready():
