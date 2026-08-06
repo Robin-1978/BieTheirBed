@@ -126,6 +126,129 @@ def _markdown_to_card_elements(text: str) -> list[dict[str, Any]]:
     return [{"tag": "markdown", "content": content}] if content else []
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Streaming Card (real-time agent progress via PATCH updates)
+# ──────────────────────────────────────────────────────────────────────
+
+_STREAM_DEBOUNCE_SECS = 0.5
+_MAX_CARD_CONTENT_LEN = 3800
+
+
+class _StreamingCardState:
+    """Accumulates agent events and renders them into a Feishu card.
+
+    This is a pure-data/render helper with no I/O. The owning channel
+    calls ``build_card()`` whenever it decides to POST/PATCH.
+    """
+
+    __slots__ = ("_thinking", "_steps", "_answer", "_is_error", "_phase")
+
+    def __init__(self) -> None:
+        self._thinking: str = ""
+        self._steps: list[str] = []
+        self._answer: str = ""
+        self._is_error: bool = False
+        self._phase: str = "thinking"  # thinking | working | done
+
+    # ── mutation ──
+
+    def append_thinking(self, text: str) -> None:
+        self._thinking += text
+
+    def add_tool_call(self, tool_name: str, args_brief: str) -> None:
+        self._phase = "working"
+        self._steps.append(f"⚙️ `{tool_name}({args_brief})`")
+
+    def add_tool_result(self, summary: str) -> None:
+        self._steps.append(f"  ✓ {summary}")
+
+    def add_context_compacted(self) -> None:
+        self._steps.append("💡 较早对话已整理为简短工作摘要。")
+
+    def set_answer(self, text: str) -> None:
+        self._answer = text
+        self._phase = "done"
+
+    def set_error(self, text: str) -> None:
+        self._answer = text
+        self._is_error = True
+        self._phase = "done"
+
+    @property
+    def phase(self) -> str:
+        return self._phase
+
+    # ── render ──
+
+    def build_card(self) -> dict[str, Any]:
+        elements: list[dict[str, Any]] = []
+
+        if self._thinking:
+            truncated = self._thinking[:300]
+            if len(self._thinking) > 300:
+                truncated += "..."
+            elements.append({
+                "tag": "note",
+                "elements": [{
+                    "tag": "markdown",
+                    "content": f"💭 {truncated}",
+                }],
+            })
+
+        if self._steps:
+            steps_md = "\n".join(self._steps[-8:])
+            if len(self._steps) > 8:
+                steps_md = f"... +{len(self._steps) - 8} earlier steps\n" + steps_md
+            elements.append({"tag": "markdown", "content": steps_md})
+
+        if self._answer:
+            if self._steps:
+                elements.append({"tag": "hr"})
+            content = render_feishu_markdown(self._answer)[:_MAX_CARD_CONTENT_LEN]
+            if len(self._answer) > _MAX_CARD_CONTENT_LEN:
+                content += "\n\n... (内容过长已截断)"
+            elements.extend(_markdown_to_card_elements(content))
+        elif self._phase != "done":
+            if self._phase == "thinking":
+                elements.append({"tag": "markdown", "content": "⏳ 正在思考..."})
+            else:
+                elements.append({"tag": "markdown", "content": "⏳ 正在处理..."})
+
+        header_color = "red" if self._is_error else ("blue" if self._phase == "done" else "turquoise")
+        if self._is_error:
+            header_title = "❌ 处理出错"
+        elif self._phase == "done":
+            header_title = "💬 PC Assistant"
+        else:
+            header_title = "⏳ PC Assistant 处理中..."
+
+        return {
+            "schema": "2.0",
+            "header": {
+                "template": header_color,
+                "title": {"tag": "plain_text", "content": header_title},
+            },
+            "body": {"elements": elements},
+        }
+
+
+def _summarize_tool_result(result: Any) -> str:
+    """Produce a short human-readable summary of a tool result for the card."""
+    if result is None:
+        return "done"
+    if isinstance(result, dict):
+        if "error" in result:
+            return f"❌ {str(result['error'])[:60]}"
+        if "content" in result:
+            lines = str(result["content"]).count("\n") + 1
+            return f"{lines} lines"
+        if "success" in result:
+            return "✓"
+        return "done"
+    s = str(result)
+    return s[:60] if len(s) > 60 else s
+
+
 def _patch_ws_card_dispatch(ws_client: Any) -> None:
     """Monkey-patch lark_oapi WS client to dispatch CARD frames.
 
@@ -659,6 +782,11 @@ class FeishuChannel(ChannelBase):
             return False
 
     def _send_card(self, open_id: str, card: dict) -> bool:
+        """Send a card and return success flag (legacy convenience wrapper)."""
+        return self._send_card_returning_id(open_id, card) is not None
+
+    def _send_card_returning_id(self, open_id: str, card: dict) -> str | None:
+        """Send a card and return the message_id (None on failure)."""
         try:
             from lark_oapi.api.im.v1 import CreateMessageRequest
             from lark_oapi.api.im.v1.model.create_message_request_body import (
@@ -680,14 +808,45 @@ class FeishuChannel(ChannelBase):
             client = self._get_lark_client()
             with self._lark_lock:
                 resp = client.im.v1.message.create(request)
-            if resp.code == 0:
-                logger.info("[SEND-CARD] OK principal=%s", _principal_for_log(open_id))
-                return True
+            if resp.code == 0 and resp.data:
+                msg_id = getattr(resp.data, "message_id", None) or ""
+                logger.info("[SEND-CARD] OK principal=%s msg_id=%s", _principal_for_log(open_id), msg_id)
+                return msg_id or None
             else:
                 logger.error("[SEND-CARD] FAILED code=%s msg=%s", resp.code, resp.msg)
-                return False
+                return None
         except Exception as e:
             logger.error("[SEND-CARD] Exception: %s", e, exc_info=True)
+            return None
+
+    def _update_card(self, message_id: str, card: dict) -> bool:
+        """PATCH an existing interactive card by message_id."""
+        try:
+            from lark_oapi.api.im.v1 import PatchMessageRequest
+            from lark_oapi.api.im.v1.model.patch_message_request_body import (
+                PatchMessageRequestBody,
+            )
+
+            request = (
+                PatchMessageRequest.builder()
+                .message_id(message_id)
+                .request_body(
+                    PatchMessageRequestBody.builder()
+                    .content(json.dumps(card))
+                    .build()
+                )
+                .build()
+            )
+            client = self._get_lark_client()
+            with self._lark_lock:
+                resp = client.im.v1.message.patch(request)
+            if resp.code == 0:
+                return True
+            else:
+                logger.warning("[UPDATE-CARD] FAILED code=%s msg=%s", resp.code, resp.msg)
+                return False
+        except Exception as e:
+            logger.warning("[UPDATE-CARD] Exception: %s", e)
             return False
 
     def _send_image(self, open_id: str, path: str) -> bool:
@@ -1265,12 +1424,27 @@ class FeishuChannel(ChannelBase):
                     self._pending_confirm.pop(open_id, None)
 
         try:
-            tool_calls_info: list[str] = []
-            thinking_chunks: list[str] = []
-            final_answer = ""
-            error_msg = ""
+            card_state = _StreamingCardState()
+            message_id: str | None = None
+            last_patch_time = 0.0
             artifact_refs: list[dict[str, Any]] = []
             artifact_ids: set[str] = set()
+
+            def _should_patch() -> bool:
+                """True if enough time has passed since last PATCH."""
+                return (time.time() - last_patch_time) >= _STREAM_DEBOUNCE_SECS
+
+            def _do_patch(force: bool = False) -> None:
+                """PATCH the card if debounce allows or force=True."""
+                nonlocal message_id, last_patch_time
+                if message_id is None:
+                    card = card_state.build_card()
+                    message_id = self._send_card_returning_id(open_id, card)
+                    last_patch_time = time.time()
+                elif force or _should_patch():
+                    card = card_state.build_card()
+                    self._update_card(message_id, card)
+                    last_patch_time = time.time()
 
             async for event in self._agent.run(
                 text,
@@ -1278,51 +1452,49 @@ class FeishuChannel(ChannelBase):
                 confirm_callback=feishu_confirm,
                 attachments=attachments,
             ):
-                if event.type == "tool_call" and not event.blocked:
+                if event.type == "stream_think_delta":
+                    if event.content:
+                        card_state.append_thinking(event.content)
+                        if _should_patch():
+                            _do_patch()
+
+                elif event.type == "tool_call" and not event.blocked:
                     tool_name = event.tool_name
                     tool_args = event.tool_args
                     args_brief = json.dumps(
                         redact_tool_parameters(tool_name, tool_args),
                         ensure_ascii=False,
-                    )[:80]
-                    tool_calls_info.append(f"🔧 {tool_name}({args_brief})")
+                    )[:60]
+                    card_state.add_tool_call(tool_name, args_brief)
+                    _do_patch(force=True)
+
+                elif event.type == "tool_result":
+                    summary = _summarize_tool_result(event.tool_result)
+                    card_state.add_tool_result(summary)
+                    _do_patch(force=True)
+
                 elif event.type == "artifact" and event.artifact is not None:
                     artifact_ref = event.artifact.model_dump()
                     artifact_id = event.artifact.artifact_id
                     if artifact_id and artifact_id not in artifact_ids:
                         artifact_ids.add(artifact_id)
                         artifact_refs.append(artifact_ref)
-                elif event.type == "stream_think_delta":
-                    if event.content:
-                        thinking_chunks.append(event.content)
+
                 elif event.type == "final_answer":
-                    final_answer = event.content
-                elif event.type == "error":
-                    error_msg = event.content
-                elif event.type == "cancelled":
-                    error_msg = event.content
-                elif event.type == "iteration_limit":
-                    error_msg = event.content
+                    card_state.set_answer(event.content)
+
+                elif event.type in ("error", "cancelled", "iteration_limit"):
+                    card_state.set_error(event.content)
+
                 elif event.type == "context_compacted":
-                    tool_calls_info.append("💡 较早对话已整理为简短工作摘要。")
+                    card_state.add_context_compacted()
+                    if _should_patch():
+                        _do_patch()
 
-            if tool_calls_info and final_answer:
-                tools_summary = "\n".join(tool_calls_info[:5])
-                if len(tool_calls_info) > 5:
-                    tools_summary += f"\n... +{len(tool_calls_info) - 5} more"
-                plain_response = f"{tools_summary}\n\n{final_answer}"
-            elif final_answer:
-                plain_response = final_answer
-                tools_summary = ""
-            elif error_msg:
-                plain_response = f"❌ {error_msg}"
-                tools_summary = ""
-            else:
-                plain_response = "⚠️ 未获得有效回复，请重试"
-                tools_summary = ""
+            # Final PATCH with complete content
+            _do_patch(force=True)
 
-            # Internal reasoning is never forwarded to an external channel.
-            thinking_text = ""
+            # Deliver artifacts
             delivery_failures: list[str] = []
             for artifact_ref in artifact_refs[:5]:
                 artifact_id = str(artifact_ref.get("artifact_id", ""))
@@ -1344,17 +1516,13 @@ class FeishuChannel(ChannelBase):
                         artifact_id,
                         exc,
                     )
-            response_answer = final_answer or plain_response
+
             if delivery_failures:
-                response_answer += "\n\n⚠️ 以下附件交付失败：" + "、".join(delivery_failures)
-            card = self._build_response_card(
-                response_answer,
-                tool_calls_info,
-                bool(error_msg or delivery_failures),
-                thinking=thinking_text[:500] if thinking_text else "",
-            )
-            if not self._send_card(open_id, card):
-                self._send_long_text(open_id, response_answer)
+                card_state.set_error(
+                    (card_state._answer or "")
+                    + "\n\n⚠️ 以下附件交付失败：" + "、".join(delivery_failures)
+                )
+                _do_patch(force=True)
 
         except Exception as e:
             logger.error("[PROCESS] Agent error: %s", e, exc_info=True)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -122,7 +123,8 @@ async def test_feishu_sends_declared_image_artifact():
     channel = FeishuChannel()
     channel._agent = _ArtifactAgent()
     channel._send_image = MagicMock(return_value=True)
-    channel._send_card = MagicMock(return_value=True)
+    channel._send_card_returning_id = MagicMock(return_value="msg-id-1")
+    channel._update_card = MagicMock(return_value=True)
 
     await channel._process_with_agent_locked("ou-user", "你截一下屏幕")
 
@@ -135,7 +137,8 @@ async def test_feishu_does_not_send_arbitrary_tool_paths_as_images():
     channel = FeishuChannel()
     channel._agent = _PlainPathAgent()
     channel._send_image = MagicMock(return_value=True)
-    channel._send_card = MagicMock(return_value=True)
+    channel._send_card_returning_id = MagicMock(return_value="msg-id-1")
+    channel._update_card = MagicMock(return_value=True)
 
     await channel._process_with_agent_locked("ou-user", "read it")
 
@@ -305,7 +308,8 @@ async def test_feishu_delivers_each_explicit_core_artifact():
     channel._agent = _TwoImageAgent()
     channel._send_image = MagicMock(return_value=True)
     channel._send_file = MagicMock(return_value=True)
-    channel._send_card = MagicMock(return_value=True)
+    channel._send_card_returning_id = MagicMock(return_value="msg-id-1")
+    channel._update_card = MagicMock(return_value=True)
 
     await channel._process_with_agent_locked("ou-user", "截个图发我")
 
@@ -318,7 +322,8 @@ async def test_feishu_does_not_send_internal_screenshot_for_input_image():
     channel = FeishuChannel()
     channel._agent = _ImageAgent()
     channel._send_image = MagicMock(return_value=True)
-    channel._send_card = MagicMock(return_value=True)
+    channel._send_card_returning_id = MagicMock(return_value="msg-id-1")
+    channel._update_card = MagicMock(return_value=True)
 
     await channel._process_with_agent_locked(
         "ou-user",
@@ -379,3 +384,103 @@ def test_feishu_reply_to_agent_answer_keeps_active_image_context():
     attachments = channel._attachments_for_text("ou-user", parent_id="bot-answer")
 
     assert attachments == [ImageAttachment.from_ref("attachment-a", caption="feishu image")]
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Streaming card tests
+# ──────────────────────────────────────────────────────────────────────
+
+
+class _StreamingAgent:
+    """Simulates an agent that emits thinking + tool_call + tool_result + final_answer."""
+
+    async def run(self, *args, **kwargs):
+        yield AgentEvent(type="stream_think_delta", content="Let me check ")
+        yield AgentEvent(type="stream_think_delta", content="your files...")
+        yield AgentEvent(
+            type="tool_call",
+            tool_name="read_file",
+            tool_args={"path": "/etc/hosts"},
+        )
+        yield AgentEvent(
+            type="tool_result",
+            tool_name="read_file",
+            tool_args={"path": "/etc/hosts"},
+            tool_result={"content": "127.0.0.1 localhost\n::1 localhost\n"},
+        )
+        yield AgentEvent(type="final_answer", content="Your hosts file has 2 entries.")
+
+
+@pytest.mark.asyncio
+async def test_streaming_card_creates_then_patches():
+    """Verify that the streaming loop creates a card initially and PATCHes as events arrive."""
+    channel = FeishuChannel()
+    channel._agent = _StreamingAgent()
+    channel._send_card_returning_id = MagicMock(return_value="msg-stream-1")
+    channel._update_card = MagicMock(return_value=True)
+
+    await channel._process_with_agent_locked("ou-user", "看下hosts文件")
+
+    channel._send_card_returning_id.assert_called_once()
+    assert channel._update_card.call_count >= 1
+
+    last_card = channel._update_card.call_args[0][1]
+    assert last_card["header"]["template"] == "blue"
+    body_text = json.dumps(last_card["body"], ensure_ascii=False)
+    assert "2 entries" in body_text
+
+
+@pytest.mark.asyncio
+async def test_streaming_card_shows_tool_steps():
+    """Verify tool call and result are shown in the card steps."""
+    channel = FeishuChannel()
+    channel._agent = _StreamingAgent()
+    channel._send_card_returning_id = MagicMock(return_value="msg-stream-2")
+    channel._update_card = MagicMock(return_value=True)
+
+    await channel._process_with_agent_locked("ou-user", "check")
+
+    calls = channel._update_card.call_args_list
+    all_bodies = [json.dumps(c[0][1]["body"], ensure_ascii=False) for c in calls]
+    assert any("read_file" in b for b in all_bodies)
+    assert any("✓" in b for b in all_bodies)
+
+
+def test_streaming_card_state_build_initial():
+    """Verify the initial card has a spinner state."""
+    from pc_assistant.channels.feishu import _StreamingCardState
+
+    state = _StreamingCardState()
+    card = state.build_card()
+    assert card["header"]["template"] == "turquoise"
+    assert "处理中" in card["header"]["title"]["content"]
+    body_text = json.dumps(card["body"], ensure_ascii=False)
+    assert "正在思考" in body_text
+
+
+def test_streaming_card_state_with_answer():
+    """Verify the final card shows the answer."""
+    from pc_assistant.channels.feishu import _StreamingCardState
+
+    state = _StreamingCardState()
+    state.append_thinking("analyzing...")
+    state.add_tool_call("web_search", '"python"')
+    state.add_tool_result("3 results")
+    state.set_answer("Here are the results.")
+    card = state.build_card()
+    assert card["header"]["template"] == "blue"
+    assert card["header"]["title"]["content"] == "💬 PC Assistant"
+    body_text = json.dumps(card["body"], ensure_ascii=False)
+    assert "web_search" in body_text
+    assert "Here are the results" in body_text
+
+
+def test_streaming_card_state_error():
+    """Verify error cards use red template."""
+    from pc_assistant.channels.feishu import _StreamingCardState
+
+    state = _StreamingCardState()
+    state.set_error("something went wrong")
+    card = state.build_card()
+    assert card["header"]["template"] == "red"
+    assert "处理出错" in card["header"]["title"]["content"]
