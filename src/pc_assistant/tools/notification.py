@@ -4,15 +4,12 @@ import asyncio
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
-from pc_assistant.tools.base import ToolBase, parameter, tool
+from pc_assistant.tools.base import ToolBase
 
 
-@parameter("message", required=False, skim=True, skim_hint="show/alert")
-@parameter("title", required=False, skim=True)
-@tool(name="notifications", description="Show a desktop notification or alert.", skim_description="Desktop notification.")
 class NotificationTool(ToolBase):
-    name = "notification"
-    description = "Send system notifications, alerts, and desktop notifications"
+    name = "notify"
+    description = "Show a desktop notification."
     is_side_effecting = True
 
     async def execute(self, **kwargs: Any) -> Any:
@@ -64,18 +61,17 @@ class NotificationTool(ToolBase):
             },
         }
 
-    def core_schema(self) -> dict[str, Any]:
+    def skim_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "Show a desktop notification or alert.",
+            "description": self.description,
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["show", "alert"]},
                     "title": {"type": "string"},
                     "message": {"type": "string"},
                 },
-                "required": ["action"],
+                "required": ["title", "message"],
             },
         }
 

@@ -5,7 +5,8 @@ import pytest
 from pc_assistant.config import AppConfig
 from pc_assistant.agent import Agent, AgentEvent
 from pc_assistant.llm_provider import StreamChunk
-from pc_assistant.tools.filesystem import FilesystemTool
+from pc_assistant.tools.read_file import ReadFileTool
+from pc_assistant.tools.write_file import WriteFileTool
 
 
 async def _collect_events(agent: Agent, user_input: str) -> list[AgentEvent]:
@@ -61,7 +62,7 @@ async def test_agent_tool_call_flow(tmp_path):
         tool_calls=[{
             "id": "call_1",
             "type": "function",
-            "function": {"name": "filesystem", "arguments": {"action": "write", "path": test_file, "content": "hello"}},
+            "function": {"name": "write_file", "arguments": {"path": test_file, "content": "hello"}},
         }],
         finish_reason="tool_calls",
     )
@@ -95,7 +96,7 @@ async def test_agent_safety_blocked():
         tool_calls=[{
             "id": "call_1",
             "type": "function",
-            "function": {"name": "shell", "arguments": {"command": "rm -rf /"}},
+            "function": {"name": "run_command", "arguments": {"command": "rm -rf /"}},
         }],
         finish_reason="tool_calls",
     )
@@ -113,7 +114,7 @@ async def test_agent_confirm_callback_allows():
         tool_calls=[{
             "id": "call_1",
             "type": "function",
-            "function": {"name": "shell", "arguments": {"command": "del /s C:\\temp"}},
+            "function": {"name": "run_command", "arguments": {"command": "del /s C:\\temp"}},
         }],
         finish_reason="tool_calls",
     )
@@ -143,7 +144,7 @@ async def test_agent_confirm_callback_denies():
         tool_calls=[{
             "id": "call_1",
             "type": "function",
-            "function": {"name": "shell", "arguments": {"command": "del /s C:\\temp"}},
+            "function": {"name": "run_command", "arguments": {"command": "del /s C:\\temp"}},
         }],
         finish_reason="tool_calls",
     )
@@ -176,7 +177,7 @@ async def test_agent_iteration_limit():
         tool_calls=[{
             "id": "call_1",
             "type": "function",
-            "function": {"name": "filesystem", "arguments": {"action": "exists", "path": "."}},
+            "function": {"name": "read_file", "arguments": {"path": "."}},
         }],
         finish_reason="tool_calls",
     )
@@ -201,17 +202,14 @@ async def test_agent_error_response():
 
 @pytest.mark.asyncio
 async def test_file_operations_e2e(tmp_path):
-    fs_tool = FilesystemTool()
+    write_tool = WriteFileTool()
+    read_tool = ReadFileTool()
     file_path = str(tmp_path / "e2e_test.txt")
-    write_result = await fs_tool.execute(action="write", path=file_path, content="initial content")
+    write_result = await write_tool.execute(path=file_path, content="initial content")
     assert write_result["success"] is True
-    read_result = await fs_tool.execute(action="read", path=file_path)
+    read_result = await read_tool.execute(path=file_path)
     assert read_result["content"] == "initial content"
-    write_result2 = await fs_tool.execute(action="write", path=file_path, content="modified content")
+    write_result2 = await write_tool.execute(path=file_path, content="modified content")
     assert write_result2["success"] is True
-    read_result2 = await fs_tool.execute(action="read", path=file_path)
+    read_result2 = await read_tool.execute(path=file_path)
     assert read_result2["content"] == "modified content"
-    delete_result = await fs_tool.execute(action="delete", path=file_path)
-    assert delete_result["success"] is True
-    exists_result = await fs_tool.execute(action="exists", path=file_path)
-    assert exists_result["exists"] is False

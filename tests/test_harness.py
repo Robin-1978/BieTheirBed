@@ -64,30 +64,25 @@ class TestSafetyChecker:
     def test_is_blocked_shell(self):
         s = SafetyChecker()
         dangerous_cmd = get_default_dangerous_commands()[0]
-        result = s.is_blocked("shell", {"command": dangerous_cmd})
+        result = s.is_blocked("run_command", {"command": dangerous_cmd})
         assert not result.allowed
 
     def test_is_blocked_shell_safe(self):
         s = SafetyChecker()
-        result = s.is_blocked("shell", {"command": "echo hello"})
+        result = s.is_blocked("run_command", {"command": "echo hello"})
         assert result.allowed
 
     def test_is_blocked_filesystem_protected(self, tmp_path):
         protected = str(tmp_path / "secret")
         Path(protected).mkdir()
         s = SafetyChecker(protected_paths=[protected])
-        result = s.is_blocked("filesystem", {"action": "read", "path": protected})
+        result = s.is_blocked("write_file", {"path": protected})
         assert not result.allowed
 
     def test_is_blocked_filesystem_safe(self):
         s = SafetyChecker()
-        result = s.is_blocked("filesystem", {"action": "read", "path": "C:\\Users\\test.txt"})
+        result = s.is_blocked("read_file", {"path": "C:\\Users\\test.txt"})
         assert result.allowed
-
-    def test_is_blocked_process_kill(self):
-        s = SafetyChecker()
-        result = s.is_blocked("process", {"action": "kill", "pid": 123})
-        assert not result.allowed
 
     def test_is_blocked_process_list(self):
         s = SafetyChecker()
@@ -101,53 +96,49 @@ class TestSafetyChecker:
 
     def test_needs_confirmation_shell_delete(self):
         s = SafetyChecker()
-        needs, reason = s.needs_confirmation("shell", {"command": "delete file.txt"})
+        needs, reason = s.needs_confirmation("run_command", {"command": "delete file.txt"})
         assert needs is True
 
     def test_needs_confirmation_shell_safe(self):
         s = SafetyChecker()
-        needs, reason = s.needs_confirmation("shell", {"command": "echo hello"})
+        needs, reason = s.needs_confirmation("run_command", {"command": "echo hello"})
         assert needs is False
 
     def test_needs_confirmation_shell_move(self):
         s = SafetyChecker()
-        needs, reason = s.needs_confirmation("shell", {"command": "move a.txt b.txt"})
+        needs, reason = s.needs_confirmation("run_command", {"command": "move a.txt b.txt"})
         assert needs is True
 
     def test_needs_confirmation_shell_rename(self):
         s = SafetyChecker()
-        needs, reason = s.needs_confirmation("shell", {"command": "rename old.txt new.txt"})
+        needs, reason = s.needs_confirmation("run_command", {"command": "rename old.txt new.txt"})
         assert needs is True
 
     def test_needs_confirmation_filesystem_delete(self):
         s = SafetyChecker()
-        needs, reason = s.needs_confirmation("filesystem", {"action": "delete", "path": "C:\\test.txt"})
+        needs, reason = s.needs_confirmation("write_file", {"path": "C:\\test.txt"})
         assert needs is True
 
     def test_needs_confirmation_filesystem_write(self):
         s = SafetyChecker()
-        needs, reason = s.needs_confirmation("filesystem", {"action": "write", "path": "C:\\test.txt"})
+        needs, reason = s.needs_confirmation("write_file", {"path": "C:\\test.txt"})
         assert needs is True
 
     def test_needs_confirmation_filesystem_read(self):
         s = SafetyChecker()
-        needs, reason = s.needs_confirmation("filesystem", {"action": "read", "path": "C:\\test.txt"})
+        needs, reason = s.needs_confirmation("read_file", {"path": "C:\\test.txt"})
         assert needs is False
 
     def test_needs_confirmation_filesystem_outside_working_dir(self, tmp_path):
         s = SafetyChecker(working_directory=str(tmp_path))
-        needs, reason = s.needs_confirmation("filesystem", {"action": "read", "path": "C:\\outside\\file.txt"})
+        outside = str(tmp_path.parent / "outside" / "file.txt")
+        needs, reason = s.needs_confirmation("attach", {"path": outside})
         assert needs is True
 
     def test_needs_confirmation_filesystem_inside_working_dir(self, tmp_path):
         s = SafetyChecker(working_directory=str(tmp_path))
-        needs, reason = s.needs_confirmation("filesystem", {"action": "read", "path": str(tmp_path / "file.txt")})
+        needs, reason = s.needs_confirmation("read_file", {"path": str(tmp_path / "file.txt")})
         assert needs is False
-
-    def test_needs_confirmation_process_kill(self):
-        s = SafetyChecker()
-        needs, reason = s.needs_confirmation("process", {"action": "kill"})
-        assert needs is True
 
     def test_needs_confirmation_process_list(self):
         s = SafetyChecker()
@@ -162,7 +153,7 @@ class TestSafetyChecker:
     def test_check_tool_call_delegates_to_is_blocked(self):
         s = SafetyChecker()
         dangerous_cmd = get_default_dangerous_commands()[0]
-        result = s.check_tool_call("shell", {"command": dangerous_cmd})
+        result = s.check_tool_call("run_command", {"command": dangerous_cmd})
         assert not result.allowed
 
     def test_dangerous_result_is_hard_blocked(self):
@@ -232,10 +223,10 @@ class TestAuditLogger:
 
     def test_query_by_tool(self, tmp_path):
         a = AuditLogger(log_dir=str(tmp_path / "audit"))
-        a.log(action="call", tool="filesystem")
-        a.log(action="call", tool="shell")
-        a.log(action="call", tool="filesystem")
-        results = a.query(tool="filesystem")
+        a.log(action="call", tool="files")
+        a.log(action="call", tool="run_command")
+        a.log(action="call", tool="files")
+        results = a.query(tool="files")
         assert len(results) == 2
 
     def test_query_by_since(self, tmp_path):
@@ -248,13 +239,13 @@ class TestAuditLogger:
 
     def test_session_summary(self, tmp_path):
         a = AuditLogger(log_dir=str(tmp_path / "audit"))
-        a.log(action="tool_call", tool="filesystem", allowed=True)
-        a.log(action="tool_call_blocked", tool="shell", allowed=False)
-        a.log(action="tool_call", tool="filesystem", allowed=True, result="Error: something")
+        a.log(action="tool_call", tool="files", allowed=True)
+        a.log(action="tool_call_blocked", tool="run_command", allowed=False)
+        a.log(action="tool_call", tool="files", allowed=True, result="Error: something")
         summary = a.session_summary()
         assert summary["total_entries"] == 3
         assert summary["action_counts"]["tool_call"] == 2
-        assert summary["tool_counts"]["filesystem"] == 2
+        assert summary["tool_counts"]["files"] == 2
         assert summary["blocked_count"] == 1
         assert summary["error_count"] == 1
 

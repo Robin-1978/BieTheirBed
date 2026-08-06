@@ -2,21 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from pc_assistant.tools.base import ToolBase, parameter, tool
+from pc_assistant.tools.base import ToolBase
 
 
-@parameter("button", skim=True, skim_hint="left/right/middle")
-@parameter("y2", skim=True, skim_hint="drag end y")
-@parameter("x2", skim=True, skim_hint="drag end x")
-@parameter("dy", skim=True, skim_hint="scroll y")
-@parameter("dx", skim=True, skim_hint="scroll x")
-@parameter("y", skim=True, skim_hint="move/click/drag y")
-@parameter("x", skim=True, skim_hint="move/click/drag x")
-@parameter("duration", public_name="duration_seconds")
-@tool(name="mouse", description="Move, click, scroll, drag, or read the pointer.", skim_description="Mouse control.")
 class MouseTool(ToolBase):
     name = "mouse"
-    description = "Control mouse: move, click, scroll, drag, and get cursor position"
+    description = "Move, click, scroll, or drag the pointer."
     is_side_effecting = True
 
     async def execute(self, **kwargs: Any) -> Any:
@@ -87,21 +78,21 @@ class MouseTool(ToolBase):
             },
         }
 
-    def core_schema(self) -> dict[str, Any]:
+    def skim_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "Mouse: move, click, scroll, drag, position.",
+            "description": self.description,
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["position", "move", "click", "double_click", "right_click", "scroll", "drag", "press", "release"]},
+                    "action": {"type": "string", "enum": ["position", "move", "click", "double_click", "right_click", "scroll", "drag"]},
                     "x": {"type": "integer"},
                     "y": {"type": "integer"},
-                    "dx": {"type": "integer"},
-                    "dy": {"type": "integer"},
+                    "x2": {"type": "integer", "description": "drag end X"},
+                    "y2": {"type": "integer", "description": "drag end Y"},
+                    "dx": {"type": "integer", "description": "scroll horizontal"},
+                    "dy": {"type": "integer", "description": "scroll vertical (+up)"},
                     "button": {"type": "string", "enum": ["left", "right", "middle"]},
-                    "x2": {"type": "integer"},
-                    "y2": {"type": "integer"},
                 },
                 "required": ["action"],
             },

@@ -63,27 +63,22 @@ class TestSafetyChecker:
 
     def test_needs_confirmation_delete(self):
         checker = SafetyChecker()
-        needs, reason = checker.needs_confirmation("filesystem", {"action": "delete", "path": "/tmp/test"})
+        needs, reason = checker.needs_confirmation("write_file", {"path": "/tmp/test"})
         assert needs is True
 
     def test_needs_confirmation_read(self):
         checker = SafetyChecker()
-        needs, _ = checker.needs_confirmation("filesystem", {"action": "read", "path": "/tmp/test"})
+        needs, _ = checker.needs_confirmation("read_file", {"path": "/tmp/test"})
         assert needs is False
 
     def test_needs_confirmation_kill(self):
         checker = SafetyChecker()
-        needs, _ = checker.needs_confirmation("application", {"action": "kill", "pid": 1234})
-        # "kill" matches _CONFIRMATION_COMMAND_PATTERNS on shell, but application tool
-        # uses "process"/"task" as tool_name for kill confirmation
-        # ApplicationTool with action=kill is handled via "process"/"task" tool_name
-        checker2 = SafetyChecker()
-        needs2, _ = checker2.needs_confirmation("process", {"action": "kill", "pid": 1234})
-        assert needs2 is True
+        needs, _ = checker.needs_confirmation("run_command", {"command": "kill 1234"})
+        assert needs is True
 
     def test_check_tool_call_shell(self):
         checker = SafetyChecker()
-        result = checker.check_tool_call("shell", {"command": "rm -rf /"})
+        result = checker.check_tool_call("run_command", {"command": "rm -rf /"})
         assert result.allowed is False
 
     def test_artifact_prepare_allows_file_inside_working_directory(self, tmp_path):
@@ -93,10 +88,10 @@ class TestSafetyChecker:
         )
 
         assert checker.check_tool_call(
-            "artifact_prepare", {"path": "report.txt"}
+            "attach", {"path": "report.txt"}
         ).allowed
         needs, _ = checker.needs_confirmation(
-            "artifact_prepare", {"path": "report.txt"}
+            "attach", {"path": "report.txt"}
         )
         assert needs is False
 
@@ -107,7 +102,7 @@ class TestSafetyChecker:
         )
 
         needs, reason = checker.needs_confirmation(
-            "artifact_prepare", {"path": str(tmp_path / "outside.txt")}
+            "attach", {"path": str(tmp_path / "outside.txt")}
         )
 
         assert needs is True
@@ -120,34 +115,33 @@ class TestSafetyChecker:
     ])
     def test_authentication_and_lock_commands_require_confirmation(self, command):
         checker = SafetyChecker()
-        needs, _ = checker.needs_confirmation("shell", {"command": command})
+        needs, _ = checker.needs_confirmation("run_command", {"command": command})
         assert needs is True
 
     def test_keyboard_text_requires_confirmation(self):
         checker = SafetyChecker()
         needs, reason = checker.needs_confirmation(
-            "keyboard", {"action": "type", "text": "sensitive"}
+            "type_text", {"text": "sensitive"}
         )
         assert needs is True
         assert "text input" in reason
 
-    @pytest.mark.parametrize("action", ["hotkey", "shortcut"])
-    def test_keyboard_shortcuts_require_confirmation(self, action):
+    def test_keyboard_shortcuts_require_confirmation(self):
         checker = SafetyChecker()
         needs, _ = checker.needs_confirmation(
-            "keyboard", {"action": action, "keys": ["ctrl", "s"]}
+            "hotkey", {"keys": ["ctrl", "s"]}
         )
         assert needs is True
 
     @pytest.mark.parametrize("key", ["enter", "delete", "backspace", "escape"])
     def test_keyboard_execution_keys_require_confirmation(self, key):
         checker = SafetyChecker()
-        needs, _ = checker.needs_confirmation("keyboard", {"action": "press", "key": key})
+        needs, _ = checker.needs_confirmation("press_key", {"key": key})
         assert needs is True
 
     def test_keyboard_navigation_key_does_not_require_confirmation(self):
         checker = SafetyChecker()
-        needs, _ = checker.needs_confirmation("keyboard", {"action": "press", "key": "left"})
+        needs, _ = checker.needs_confirmation("press_key", {"key": "left"})
         assert needs is False
 
     @pytest.mark.parametrize(
@@ -157,8 +151,7 @@ class TestSafetyChecker:
             ("mouse", {"action": "drag"}),
             ("ui", {"action": "click", "element_id": "button-1"}),
             ("ui", {"action": "type", "element_id": "field-1"}),
-            ("window", {"action": "close", "window_id": "Editor"}),
-            ("session", {"action": "lock"}),
+            ("windows", {"action": "close", "window_id": "Editor"}),
         ],
     )
     def test_desktop_state_changes_require_confirmation(self, tool_name, arguments):
@@ -172,8 +165,7 @@ class TestSafetyChecker:
             ("mouse", {"action": "position"}),
             ("mouse", {"action": "move", "x": 10, "y": 20}),
             ("ui", {"action": "list"}),
-            ("window", {"action": "focus", "window_id": "Editor"}),
-            ("session", {"action": "status"}),
+            ("windows", {"action": "focus", "window_id": "Editor"}),
         ],
     )
     def test_desktop_observation_and_positioning_do_not_require_confirmation(
@@ -191,7 +183,7 @@ class TestSafetyChecker:
         )
 
         result = checker.check_tool_call(
-            "artifact_prepare", {"path": str(protected / "secret.txt")}
+            "attach", {"path": str(protected / "secret.txt")}
         )
 
         assert result.allowed is False

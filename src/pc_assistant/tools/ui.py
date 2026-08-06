@@ -2,7 +2,7 @@
 
 Preferred over the visual layer: the model finds an element by name, then uses
 the returned opaque ``element_id`` for actions. Falls back to the
-visual ``screen`` tool when the a11y backend is unavailable.
+visual ``inspect_screen`` tool when the a11y backend is unavailable.
 """
 from __future__ import annotations
 
@@ -11,22 +11,14 @@ from pathlib import Path
 from typing import Any
 
 from pc_assistant.tools.artifacts import ArtifactPaths, image_artifact
-from pc_assistant.tools.base import ToolBase, parameter, tool
+from pc_assistant.tools.base import ToolBase
 from pc_assistant.vision import a11y
 from pc_assistant.vision.targets import ElementRef, build_refs
 
 
-@parameter("text", skim=True, skim_hint="for type")
-@parameter("element_id", skim=True, skim_hint="returned by find/list")
-@parameter("app_name", public_name="app_name", skim=True, skim_hint="optional app filter")
-@parameter("name", public_name="element_name", skim=True, skim_hint="for find")
-@tool(name="ui_elements", description="Find and use desktop UI elements by name.", skim_description="Find and use UI elements.")
 class UITool(ToolBase):
     name = "ui"
-    description = (
-        "Semantic UI automation via the accessibility tree: list, find, click, "
-        "type, screenshot_element. Coordinates are resolved from element names."
-    )
+    description = "Find and interact with UI elements on screen."
     is_side_effecting = True
 
     def __init__(
@@ -69,18 +61,18 @@ class UITool(ToolBase):
                         "enum": ["list", "find", "click", "type", "screenshot_element"],
                         "description": "Action to perform on the accessibility tree",
                     },
-                    "name": {
+                    "element": {
                         "type": "string",
-                        "description": "Element name used by find",
+                        "description": "Element name or label used by find",
                     },
                     "element_id": {
                         "type": "string",
                         "description": "Opaque id returned by find/list; required by click, type, and screenshot_element",
                     },
                     "role": {"type": "string", "description": "Optional element role filter"},
-                    "app_name": {
+                    "app": {
                         "type": "string",
-                        "description": "Filter to a single application window (partial title match)",
+                        "description": "Target application (partial title match)",
                     },
                     "text": {"type": "string", "description": "Text to type (for type action)"},
                     "double": {"type": "boolean", "description": "Double-click instead of single (for click action)"},
@@ -93,24 +85,17 @@ class UITool(ToolBase):
             },
         }
 
-    def core_schema(self) -> dict[str, Any]:
+    def skim_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "UI automation by element name: list, find, click, type, screenshot_element.",
+            "description": self.description,
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["list", "find", "click", "type", "screenshot_element"]},
-                    "name": {"type": "string"},
-                    "element_id": {"type": "string"},
-                    "role": {"type": "string"},
-                    "app_name": {"type": "string"},
-                    "text": {"type": "string"},
-                    "double": {"type": "boolean"},
-                    "enter": {"type": "boolean"},
-                    "clear": {"type": "boolean"},
-                    "save_path": {"type": "string"},
-                    "inline": {"type": "boolean"},
+                    "action": {"type": "string", "enum": ["find", "click", "type", "list"]},
+                    "element": {"type": "string", "description": "element name or label"},
+                    "app": {"type": "string", "description": "target application"},
+                    "text": {"type": "string", "description": "for type action"},
                 },
                 "required": ["action"],
             },
@@ -200,12 +185,12 @@ class UITool(ToolBase):
     # ------------------------------------------------------------------
 
     def _list(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        app_name = kwargs.get("app_name")
+        app = kwargs.get("app")
         elements, refs, error = self._snapshot()
         if error:
-            return {"error": error, "fallback": "Use the screen tool (screen.look) for visual grounding instead."}
-        if app_name:
-            needle = app_name.lower()
+            return {"error": error, "fallback": "Use inspect_screen with action='look' for visual grounding."}
+        if app:
+            needle = app.lower()
             pairs = [
                 (element, ref) for element, ref in zip(elements, refs)
                 if needle in (element.get("name") or "").lower()
@@ -220,11 +205,11 @@ class UITool(ToolBase):
         return {"elements": enriched, "count": len(elements), "backend": self._ui_backend}
 
     def _find(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        name = kwargs.get("name")
-        if not name:
-            return {"error": "name is required for find action"}
+        element_name = kwargs.get("element")
+        if not element_name:
+            return {"error": "element is required for find action"}
         role = kwargs.get("role")
-        element, error = self._locate(name, role)
+        element, error = self._locate(element_name, role)
         if error:
             return {"error": error}
         return {

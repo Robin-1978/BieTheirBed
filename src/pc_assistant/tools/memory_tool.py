@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from pc_assistant.context.memory import MemoryItem
-from pc_assistant.tools.base import ToolBase, parameter, tool
+from pc_assistant.tools.base import ToolBase
 
 
 class UserMemoryPort(Protocol):
@@ -27,12 +27,9 @@ class EpisodicMemoryPort(Protocol):
     def recall(self, query: str = "", limit: int = 5) -> list[dict[str, Any]]: ...
 
 
-@parameter("value", skim=True, skim_hint="store")
-@parameter("key", skim=True, skim_hint="fact/search")
-@tool(name="memory", description="Save, read, search, or delete saved user facts.", skim_description="User memory.")
 class MemoryTool(ToolBase):
     name = "memory"
-    description = "Store, retrieve, search, or delete user preferences and personal information for long-term memory"
+    description = "Store, retrieve, search, or delete user facts."
     is_side_effecting = True
 
     def __init__(
@@ -58,8 +55,6 @@ class MemoryTool(ToolBase):
             "retrieve": self._retrieve,
             "search": self._search,
             "delete": self._delete,
-            "store_episode": self._store_episode,
-            "recall_episodes": self._recall_episodes,
         }
         handler = handlers.get(action)
         if handler is None:
@@ -120,22 +115,6 @@ class MemoryTool(ToolBase):
         deleted = self._memory.delete(key)
         return {"deleted": deleted, "key": key}
 
-    def _store_episode(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        if self._episodic is None:
-            return {"error": "Episodic memory not initialized"}
-        summary = kwargs.get("value", "")
-        if not summary:
-            return {"error": "'value' (summary) is required for store_episode"}
-        self._episodic.store_episode(summary)
-        return {"success": True, "summary": summary}
-
-    def _recall_episodes(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        if self._episodic is None:
-            return {"error": "Episodic memory not initialized"}
-        query = kwargs.get("key", "")
-        episodes = self._episodic.recall(query, limit=5)
-        return {"episodes": episodes, "count": len(episodes)}
-
     def schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
@@ -145,7 +124,7 @@ class MemoryTool(ToolBase):
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["store", "retrieve", "search", "delete", "store_episode", "recall_episodes"],
+                        "enum": ["store", "retrieve", "search", "delete"],
                     },
                     "key": {
                         "type": "string",
@@ -169,16 +148,16 @@ class MemoryTool(ToolBase):
             },
         }
 
-    def core_schema(self) -> dict[str, Any]:
+    def skim_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "Long-term memory: store, retrieve, search, delete personal info.",
+            "description": self.description,
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["store", "retrieve", "search", "delete", "store_episode", "recall_episodes"]},
-                    "key": {"type": "string"},
-                    "value": {"type": "string"},
+                    "action": {"type": "string", "enum": ["store", "retrieve", "search", "delete"]},
+                    "key": {"type": "string", "description": "snake_case fact key"},
+                    "value": {"type": "string", "description": "for store"},
                     "category": {"type": "string"},
                     "importance": {"type": "string", "enum": ["core", "relevant"]},
                 },

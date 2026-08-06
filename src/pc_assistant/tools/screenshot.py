@@ -7,16 +7,12 @@ from typing import Any
 from pc_assistant.artifacts import ArtifactStore
 from pc_assistant.context.scope import current_memory_scope
 from pc_assistant.tools.artifacts import ArtifactPaths
-from pc_assistant.tools.base import ToolBase, tool
+from pc_assistant.tools.base import ToolBase
 
 
-@tool(name="screenshot", description="Take a screenshot for the user. The result includes image_id; call image to inspect it.", skim_description="Capture screen; returns image_id.")
 class ScreenshotTool(ToolBase):
     name = "screenshot"
-    description = (
-        "Capture the full desktop as a PNG artifact for the current user. "
-        "Use this when the user asks to take, show, send, or attach a screenshot."
-    )
+    description = "Capture full desktop as image."
     is_side_effecting = True
 
     def __init__(self, store: ArtifactStore, artifact_dir: str | Path) -> None:
@@ -57,12 +53,5 @@ class ScreenshotTool(ToolBase):
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "additionalProperties": False,
-            },
+            "parameters": {"type": "object", "properties": {}},
         }
-
-    def core_schema(self) -> dict[str, Any]:
-        return self.schema()

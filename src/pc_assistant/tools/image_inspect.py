@@ -4,19 +4,13 @@ from __future__ import annotations
 from typing import Any
 
 from pc_assistant.context.scope import current_memory_scope
-from pc_assistant.tools.base import ToolBase, tool
+from pc_assistant.tools.base import ToolBase
 from pc_assistant.vision.broker import VisionBroker
 
 
-@tool(name="image", description="Read visible text and objects in an attached image.", skim_description="Inspect an image.")
 class ImageInspectTool(ToolBase):
-    name = "image_inspect"
-    description = (
-        "Ask the local vision model one question about visible content in an available image. "
-        "The main model must provide both image_id and a question derived from the user's request. "
-        "The question may ask for description, visible text, location, or comparison of visible "
-        "evidence, but must not ask for diagnosis or solutions."
-    )
+    name = "inspect_image"
+    description = "Ask a question about an image by its ID."
     is_side_effecting = False
 
     def __init__(self, broker: VisionBroker) -> None:
@@ -60,5 +54,16 @@ class ImageInspectTool(ToolBase):
             },
         }
 
-    def core_schema(self) -> dict[str, Any]:
-        return self.schema()
+    def skim_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "image_id": {"type": "string"},
+                    "question": {"type": "string", "description": "what to look for"},
+                },
+                "required": ["image_id", "question"],
+            },
+        }

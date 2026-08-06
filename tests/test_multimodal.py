@@ -278,7 +278,7 @@ class TestAgentAttachments:
         assert last["role"] == "user"
         assert has_image(last["content"])
         assert "Image evidence requirement" not in str(last_messages)
-        assert "image_inspect" not in agent.registry.list_tools()
+        assert "inspect_image" not in agent.registry.list_tools()
         history = agent._get_state("").conversation.get_messages_for_llm_raw()
         assert "data:image" not in str(history)
         assert "image_ref" in str(history)

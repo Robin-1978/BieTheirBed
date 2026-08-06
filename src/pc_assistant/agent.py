@@ -44,20 +44,21 @@ from pc_assistant.reflection import ReflectionChecker
 from pc_assistant.runtime import RuntimePaths
 from pc_assistant.platform_ import get_platform
 from pc_assistant.session import SessionManager, SessionState
-from pc_assistant.tools.application import ApplicationTool
 from pc_assistant.tools.clipboard import ClipboardTool
-from pc_assistant.tools.filesystem import FilesystemTool
+from pc_assistant.tools.read_file import ReadFileTool
+from pc_assistant.tools.write_file import WriteFileTool
 from pc_assistant.tools.registry import ToolRegistry
-from pc_assistant.tools.session import SessionTool
 from pc_assistant.tools.shell import ShellTool
-from pc_assistant.tools.system import SystemTool
-from pc_assistant.tools.web import WebTool
+from pc_assistant.tools.web_search import WebSearchTool
+from pc_assistant.tools.web_fetch import WebFetchTool
 from pc_assistant.tools.memory_tool import MemoryTool
 from pc_assistant.tools.weather import WeatherTool
 from pc_assistant.tools.exchange import ExchangeTool
 from pc_assistant.tools.window import WindowTool
 from pc_assistant.tools.notification import NotificationTool
-from pc_assistant.tools.keyboard import KeyboardTool
+from pc_assistant.tools.press_key import PressKeyTool
+from pc_assistant.tools.type_text import TypeTextTool
+from pc_assistant.tools.hotkey import HotkeyTool
 from pc_assistant.tools.mouse import MouseTool
 from pc_assistant.tools.screen import ScreenTool
 from pc_assistant.tools.ui import UITool
@@ -645,7 +646,7 @@ class Agent:
                 "type": "text",
                 "text": (
                     f"[inline image from {tool_name}: {path}. "
-                    "If the main model is text-only, call image with the manifested image_id "
+                    "If the main model is text-only, call inspect_image with the manifested image_id "
                     "before making claims about visible content.]"
                 ),
             },
@@ -808,7 +809,7 @@ class Agent:
                 model_name=vision_model.model,
                 max_tokens=self._config.vision_max_tokens,
             )
-            if self._registry.get("image") is None:
+            if self._registry.get("inspect_image") is None:
                 self._registry.register(ImageInspectTool(self._vision_broker))
         if self._reflection is not None:
             self._reflection = ReflectionChecker(
@@ -891,12 +892,11 @@ class Agent:
         if disable_tools:
             return
         builtin_tools = [
-            FilesystemTool(working_directory=self._config.working_directory),
+            ReadFileTool(working_directory=self._config.working_directory),
+            WriteFileTool(working_directory=self._config.working_directory),
             ShellTool(default_timeout=self._config.shell_timeout),
-            ApplicationTool(),
-            WebTool(),
-            SystemTool(),
-            SessionTool(),
+            WebSearchTool(),
+            WebFetchTool(),
             ClipboardTool(),
             MemoryTool(memory=self._memory, episodic=self._episodic_memory),
             WeatherTool(),
@@ -913,7 +913,9 @@ class Agent:
                 jpeg_quality=self._config.vision_jpeg_quality,
                 artifact_dir=self._artifact_store.root / "screenshots",
             ),
-            KeyboardTool(),
+            PressKeyTool(),
+            TypeTextTool(),
+            HotkeyTool(),
             MouseTool(),
             SchedulerTool(self._runtime_paths.data / "assistant.db"),
             ScreenshotTool(
@@ -931,7 +933,7 @@ class Agent:
         for tool in builtin_tools:
             self._registry.register(tool)
 
-        scheduler = self._registry.get("scheduler")
+        scheduler = self._registry.get("schedule")
         if scheduler is not None:
             scheduler.set_agent(self)
 
@@ -1241,7 +1243,7 @@ class Agent:
             turn_instructions.append(
                 "## Image evidence requirement\n"
                 "The current turn contains available image manifests, but you cannot see their pixels. "
-                "Call image with the manifested image_id and a question that you derive from the "
+                "Call inspect_image with the manifested image_id and a question that you derive from the "
                 "user's current request. The question is required and must not be generic or hard-coded. "
                 "Normally make one comprehensive observation call; call again only when a distinct visible "
                 "detail is necessary. You remain responsible for diagnosis, recommendations, and solutions "
@@ -1531,7 +1533,7 @@ class Agent:
                             content=loop_result["error"],
                             iteration=iteration,
                         )
-                        conv.add_tool_result(tool_call_id, f"Stopped: {loop_reason}", tool_name=tool_name)
+                        conv.add_tool_result(tool_call_id, loop_result, tool_name=tool_name)
                         state.tool_call_history.clear()
                         break
 
@@ -1557,7 +1559,7 @@ class Agent:
                         )
                         conv.add_tool_result(
                             tool_call_id,
-                            verdict.to_structured_message(),
+                            verdict.to_dict(),
                             tool_name=tool_name,
                         )
                         continue
@@ -1592,7 +1594,11 @@ class Agent:
                                 if not self._llm.supports_vision:
                                     vision_required = True
                             else:
-                                conv.add_tool_result(tool_call_id, f"[idempotent-replay] {result_str}", tool_name=tool_name)
+                                conv.add_tool_result(
+                                    tool_call_id,
+                                    {"idempotent_replay": True, "result": cached},
+                                    tool_name=tool_name,
+                                )
                             yield AgentEvent(
                                 type="tool_result",
                                 tool_name=tool_name,
@@ -1644,7 +1650,7 @@ class Agent:
                     state.status = f"executing_{tool_name}"
 
                     scheduler_context = None
-                    if tool_name == "scheduler":
+                    if tool_name == "schedule":
                         scheduler_context = bind_scheduler_session(state.session_id)
                     try:
                         try:
@@ -1672,7 +1678,7 @@ class Agent:
                         if result_image_id and not self._llm.supports_vision:
                             vision_required = True
                         if (
-                            tool_name == "image_inspect"
+                            tool_name == "inspect_image"
                             and isinstance(safe_result, dict)
                             and safe_result.get("observation_id")
                             and not safe_result.get("error")
@@ -1682,7 +1688,7 @@ class Agent:
                         if result_image_id and not self._llm.supports_vision:
                             result_str += (
                                 f"\n[Image available as image_id={result_image_id}. "
-                                "Call image to inspect pixels. Do not use files or run_command.]"
+                                "Call inspect_image to inspect pixels. Do not use files or run_command.]"
                             )
                         result_str = self._smart_truncate(result_str, tool_name, result)
                         inline_blocks = self._inline_image_blocks(state.session_id, tool_name, result)
@@ -1694,7 +1700,7 @@ class Agent:
                                 vision_required = True
                             result_str = self._inline_image_note(result)
                         else:
-                            conv.add_tool_result(tool_call_id, result_str, tool_name=tool_name)
+                            conv.add_tool_result(tool_call_id, result, tool_name=tool_name)
                         state.status = "thinking"
                         yield AgentEvent(
                             type="tool_result",
@@ -1734,7 +1740,7 @@ class Agent:
                             {"error": error_msg, "exception_type": type(e).__name__},
                             self._registry,
                         )
-                        conv.add_tool_result(tool_call_id, json.dumps(error_result, ensure_ascii=False), tool_name=tool_name)
+                        conv.add_tool_result(tool_call_id, error_result, tool_name=tool_name)
                         state.status = "thinking"
                         yield AgentEvent(
                             type="tool_result",
@@ -1750,7 +1756,7 @@ class Agent:
                 if vision_required and vision_observation_calls == 0:
                     conv.add_user(
                         "[System] Your draft relied on an image without visual evidence and was not delivered. "
-                        "Call image for the available image_id now and supply a visual question derived "
+                        "Call inspect_image for the available image_id now and supply a visual question derived "
                         "from the user's request. Ask only for visible observations; "
                         "perform diagnosis or solution reasoning yourself after the tool result."
                     )

@@ -395,7 +395,7 @@ class FailoverLLMProvider:
         # Prompt preparation must match the provider that receives the first
         # request. Advertising fallback-only vision here made Agent hydrate
         # image references into a text-only primary request, so the model could
-        # silently miss the image instead of routing through image_inspect.
+        # silently miss the image instead of routing through inspect_image.
         return self.primary.supports_vision
 
     @property

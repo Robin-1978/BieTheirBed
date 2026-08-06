@@ -20,7 +20,7 @@ class _ImageAgent:
     async def run(self, *args, **kwargs):
         yield AgentEvent(
             type="tool_result",
-            tool_name="screen",
+            tool_name="inspect_screen",
             tool_result={
                 "success": True,
                 "path": "/tmp/capture.png",
@@ -42,7 +42,7 @@ class _ArtifactAgent:
     async def run(self, *args, **kwargs):
         yield AgentEvent(
             type="artifact",
-            tool_name="screenshot",
+            tool_name="take_screenshot",
             artifact={
                 "artifact_id": "artifact-1",
                 "kind": "image",

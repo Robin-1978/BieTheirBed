@@ -1,6 +1,6 @@
 """Grid overlay for the visual layer.
 
-``screen.look`` draws a lettered/numbered coordinate grid (columns A.., rows
+``inspect_screen.look`` draws a lettered/numbered coordinate grid (columns A.., rows
 1..) over the screenshot so the model can reference cells like ``B4`` instead
 of guessing raw pixels. These helpers compute the mapping in one place so the
 agent-side coordinate math and the overlay drawing can never drift apart.

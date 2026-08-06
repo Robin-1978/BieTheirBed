@@ -60,14 +60,14 @@ class TestAgentEvent:
         e = AgentEvent(
             type="tool_call",
             content="calling tool",
-            tool_name="filesystem",
-            tool_args={"action": "read"},
+            tool_name="read_file",
+            tool_args={"path": "test.txt"},
             tool_result={"content": "file data"},
             blocked=False,
             iteration=3,
         )
         assert e.type == "tool_call"
-        assert e.tool_name == "filesystem"
+        assert e.tool_name == "read_file"
         assert e.iteration == 3
 
 
@@ -91,11 +91,11 @@ class TestAgentInit:
     def test_builtin_tools_registered(self):
         agent = Agent(config=AppConfig())
         tools = agent.registry.list_tools()
-        assert "filesystem" in tools
-        assert "shell" in tools
-        assert "application" in tools
-        assert "web" in tools
-        assert "system" in tools
+        assert "read_file" in tools
+        assert "write_file" in tools
+        assert "run_command" in tools
+        assert "web_search" in tools
+        assert "web_fetch" in tools
         assert "clipboard" in tools
 
     def test_custom_tool_registration(self):
@@ -189,7 +189,7 @@ class TestAgentRun:
             tool_calls=[{
                 "id": "call_1",
                 "type": "function",
-                "function": {"name": "filesystem", "arguments": {"action": "write", "path": test_file, "content": "hello"}},
+                "function": {"name": "write_file", "arguments": {"path": test_file, "content": "hello"}},
             }],
             finish_reason="tool_calls",
         )
@@ -223,7 +223,7 @@ class TestAgentRun:
             tool_calls=[{
                 "id": "call_1",
                 "type": "function",
-                "function": {"name": "shell", "arguments": {"command": dangerous_cmd}},
+                "function": {"name": "run_command", "arguments": {"command": dangerous_cmd}},
             }],
             finish_reason="tool_calls",
         )
@@ -240,7 +240,7 @@ class TestAgentRun:
             tool_calls=[{
                 "id": "call_1",
                 "type": "function",
-                "function": {"name": "shell", "arguments": {"command": dangerous_cmd}},
+                "function": {"name": "run_command", "arguments": {"command": dangerous_cmd}},
             }],
             finish_reason="tool_calls",
         )
@@ -270,7 +270,7 @@ class TestAgentRun:
             tool_calls=[{
                 "id": "call_1",
                 "type": "function",
-                "function": {"name": "shell", "arguments": {"command": dangerous_cmd}},
+                "function": {"name": "run_command", "arguments": {"command": dangerous_cmd}},
             }],
             finish_reason="tool_calls",
         )
@@ -317,7 +317,7 @@ class TestAgentRun:
             tool_calls=[{
                 "id": "call_1",
                 "type": "function",
-                "function": {"name": "shell", "arguments": {"command": dangerous_cmd}},
+                "function": {"name": "run_command", "arguments": {"command": dangerous_cmd}},
             }],
             finish_reason="tool_calls",
         )
@@ -337,7 +337,7 @@ class TestAgentRun:
             tool_calls=[{
                 "id": "call_1",
                 "type": "function",
-                "function": {"name": "filesystem", "arguments": {"action": "exists", "path": "."}},
+                "function": {"name": "read_file", "arguments": {"path": "."}},
             }],
             finish_reason="tool_calls",
         )
@@ -353,7 +353,7 @@ class TestAgentRun:
             tool_calls=[{
                 "id": "call_1",
                 "type": "function",
-                "function": {"name": "filesystem", "arguments": '{"action": "exists", "path": "."}'},
+                "function": {"name": "read_file", "arguments": '{"path": "."}'},
             }],
             finish_reason="tool_calls",
         )
@@ -494,7 +494,7 @@ class TestAgentRun:
                 delta_tool_calls=[{
                     "id": "call_1",
                     "type": "function",
-                    "function": {"name": "filesystem", "arguments": {"action": "exists", "path": "."}},
+                    "function": {"name": "read_file", "arguments": {"path": "."}},
                 }],
                 finish_reason="tool_calls",
             )
@@ -529,7 +529,7 @@ class TestAgentRun:
             tool_calls=[{
                 "id": "call_1",
                 "type": "function",
-                "function": {"name": "filesystem", "arguments": {"action": "read", "path": "test.txt"}},
+                "function": {"name": "read_file", "arguments": {"path": "test.txt"}},
             }],
             finish_reason="tool_calls",
         )
@@ -575,7 +575,7 @@ class TestAgentRunSimple:
         agent = Agent(config=AppConfig(max_iterations=1))
         agent._llm.chat_stream = _make_stream_mock(
             content="Thinking...",
-            tool_calls=[{"id": "c1", "type": "function", "function": {"name": "filesystem", "arguments": {"action": "exists", "path": "."}}}],
+            tool_calls=[{"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "."}}}],
             finish_reason="tool_calls",
         )
         result = await agent.run_simple("keep going")
@@ -639,7 +639,8 @@ class TestAgentGetStatus:
         assert status["status"] == "ready"
         assert status["provider"] == "llamacpp"
         assert status["total_tokens"] == 0
-        assert "filesystem" in status["tools"]
+        assert "read_file" in status["tools"]
+        assert "write_file" in status["tools"]
 
     @pytest.mark.asyncio
     async def test_token_counting(self):
@@ -676,7 +677,7 @@ class TestAgentHotConfig:
         assert result["applied"] is True
         assert agent.config.default_model == "text"
         assert agent._llm.supports_vision is False
-        assert agent.registry.get("image") is not None
+        assert agent.registry.get("inspect_image") is not None
 
     def test_dynamic_limit_applies_without_restart(self):
         cfg = AppConfig(max_tokens=1024)

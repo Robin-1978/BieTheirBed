@@ -3,13 +3,12 @@ from __future__ import annotations
 import httpx
 from typing import Any
 
-from pc_assistant.tools.base import ToolBase, tool
+from pc_assistant.tools.base import ToolBase
 
 
-@tool(name="weather", description="Get weather for a place.", skim_description="Weather and forecast.")
 class WeatherTool(ToolBase):
     name = "weather"
-    description = "Get current weather and forecast for any city or location"
+    description = "Get weather for a location."
 
     async def execute(self, **kwargs: Any) -> Any:
         location = kwargs.get("location", "")
@@ -80,15 +79,15 @@ class WeatherTool(ToolBase):
             },
         }
 
-    def core_schema(self) -> dict[str, Any]:
+    def skim_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "Weather for a location. Optional forecast.",
+            "description": self.description,
             "parameters": {
                 "type": "object",
                 "properties": {
                     "location": {"type": "string"},
-                    "forecast": {"type": "string", "enum": ["current", "forecast"], "default": "current"},
+                    "forecast": {"type": "boolean", "description": "true=multi-day"},
                 },
                 "required": ["location"],
             },

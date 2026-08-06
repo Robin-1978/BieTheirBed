@@ -8,7 +8,7 @@ import subprocess
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
-from pc_assistant.tools.base import ToolBase, parameter, tool
+from pc_assistant.tools.base import ToolBase
 
 
 _DEFAULT_TIMEOUT = 30
@@ -116,13 +116,9 @@ do shell script "{escaped_cmd}" with administrator privileges
             return {"error": str(e), "returncode": -1}
 
 
-@parameter("env", public_name="environment")
-@parameter("cwd", public_name="working_directory")
-@parameter("timeout", public_name="timeout_seconds")
-@tool(name="run_command", description="Run a local command, script, or system query.", skim_description="Run a shell command.")
 class ShellTool(ToolBase):
-    name = "shell"
-    description = "Execute shell commands with full shell support (pipes, redirects, etc.)"
+    name = "run_command"
+    description = "Execute a shell command, return stdout/stderr."
     is_side_effecting = True
 
     def __init__(self, default_timeout: int = 30) -> None:
@@ -130,9 +126,9 @@ class ShellTool(ToolBase):
 
     async def execute(self, **kwargs: Any) -> Any:
         command = kwargs.get("command", "")
-        timeout = kwargs.get("timeout")
-        cwd = kwargs.get("cwd")
-        env = kwargs.get("env")
+        timeout = kwargs.get("timeout_seconds")
+        cwd = kwargs.get("working_directory")
+        env = kwargs.get("environment")
         if not command:
             return {"error": "No command provided"}
         try:
@@ -150,28 +146,35 @@ class ShellTool(ToolBase):
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "Shell command to execute (supports pipes, redirects, etc.)"
+                        "description": "Shell command to execute (supports pipes, redirects, etc.)",
                     },
-                    "timeout": {"type": "integer", "description": "Timeout in seconds (default: 30)"},
-                    "cwd": {"type": "string", "description": "Working directory for command"},
-                    "env": {
+                    "timeout_seconds": {
+                        "type": "integer",
+                        "description": "Timeout in seconds (default: 30)",
+                    },
+                    "working_directory": {
+                        "type": "string",
+                        "description": "Working directory for command",
+                    },
+                    "environment": {
                         "type": "object",
-                        "description": "Environment variables to set for this command"
+                        "description": "Environment variables to set for this command",
                     },
                 },
                 "required": ["command"],
             },
         }
 
-    def core_schema(self) -> dict[str, Any]:
+    def skim_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "Run shell commands. Use for CLI tasks, scripts, and system queries.",
+            "description": self.description,
             "parameters": {
                 "type": "object",
                 "properties": {
                     "command": {"type": "string"},
-                    "timeout": {"type": "integer", "default": 30},
+                    "timeout_seconds": {"type": "integer", "description": "default 30"},
+                    "working_directory": {"type": "string"},
                 },
                 "required": ["command"],
             },
@@ -189,16 +192,16 @@ class ShellTool(ToolBase):
         self,
         command: str,
         timeout: int | None,
-        cwd: str | None,
-        env: dict[str, str] | None,
+        working_directory: str | None,
+        environment: dict[str, str] | None,
     ) -> dict[str, Any]:
         import os
         plat = get_platform()
 
         # Build environment
         full_env = None
-        if env:
-            full_env = {**os.environ, **env}
+        if environment:
+            full_env = {**os.environ, **environment}
 
         # Check if command needs privilege escalation
         needs_privilege = self._needs_privilege(command)
@@ -222,17 +225,17 @@ class ShellTool(ToolBase):
             else:
                 # Linux: use pkexec
                 privileged_cmd = command.replace("sudo ", "pkexec ", 1)
-                return await self._execute_simple(privileged_cmd, timeout, cwd, full_env, command)
+                return await self._execute_simple(privileged_cmd, timeout, working_directory, full_env, command)
 
         # Normal execution without privilege escalation
-        return await self._execute_simple(command, timeout, cwd, full_env, command)
+        return await self._execute_simple(command, timeout, working_directory, full_env, command)
 
     async def _execute_simple(
         self,
         command: str,
         timeout: int | None,
-        cwd: str | None,
-        env: dict[str, str] | None,
+        working_directory: str | None,
+        environment: dict[str, str] | None,
         original_command: str,
     ) -> dict[str, Any]:
         """Execute command without privilege escalation."""
@@ -254,8 +257,8 @@ class ShellTool(ToolBase):
             process_kwargs: dict[str, Any] = {
                 "stdout": asyncio.subprocess.PIPE,
                 "stderr": asyncio.subprocess.PIPE,
-                "cwd": cwd,
-                "env": env,
+                "cwd": working_directory,
+                "env": environment,
             }
             if isolated_process_group:
                 process_kwargs["start_new_session"] = True

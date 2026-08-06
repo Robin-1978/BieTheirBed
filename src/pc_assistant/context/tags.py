@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import re
 import time
-import ast
 import xml.etree.ElementTree as ET
 from typing import Any
 from xml.sax.saxutils import escape
@@ -129,19 +128,22 @@ def parse_compacted_history_meta(content: Any) -> dict[str, str]:
 # Tool result wrapping
 # ---------------------------------------------------------------------------
 
-def wrap_tool_result(tool_name: str, payload: str, **attrs: Any) -> str:
+def wrap_tool_result(tool_name: str, payload: Any, **attrs: Any) -> str:
     name = _xml_attr(tool_name)
-    body = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, default=str)
-    if "status" not in attrs:
-        parsed: Any = None
+    parsed = payload
+    if isinstance(payload, str):
         try:
-            parsed = json.loads(body)
+            parsed = json.loads(payload)
         except (json.JSONDecodeError, TypeError):
-            try:
-                parsed = ast.literal_eval(body)
-            except (SyntaxError, ValueError, TypeError):
-                parsed = None
-        attrs["status"] = "error" if isinstance(parsed, dict) and parsed.get("error") else "ok"
+            parsed = payload
+    body = json.dumps(parsed, ensure_ascii=False, default=str, separators=(",", ":"))
+    if "status" not in attrs:
+        failed = isinstance(parsed, dict) and (
+            bool(parsed.get("error"))
+            or parsed.get("success") is False
+            or (isinstance(parsed.get("returncode"), int) and parsed["returncode"] != 0)
+        )
+        attrs["status"] = "error" if failed else "ok"
     extra = "".join(f' {_xml_attr(k)}="{_xml_attr(str(v))}"' for k, v in attrs.items())
     return f'<tool_result tool="{name}"{extra}>\n{body}\n</tool_result>'
 
@@ -178,10 +180,7 @@ def parse_tool_result_payload(content: Any) -> Any:
     try:
         return json.loads(body)
     except (json.JSONDecodeError, TypeError):
-        try:
-            return ast.literal_eval(body)
-        except (SyntaxError, ValueError, TypeError):
-            return None
+        return None
 
 
 # ---------------------------------------------------------------------------

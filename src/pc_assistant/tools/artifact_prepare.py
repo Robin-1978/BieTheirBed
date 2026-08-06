@@ -6,17 +6,12 @@ from typing import Any
 
 from pc_assistant.artifacts import ArtifactStore
 from pc_assistant.context.scope import current_memory_scope
-from pc_assistant.tools.base import ToolBase, tool
+from pc_assistant.tools.base import ToolBase
 
 
-@tool(name="attach_file", description="Attach an existing local file without changing it.", skim_description="Attach a local file.")
 class ArtifactPrepareTool(ToolBase):
-    name = "artifact_prepare"
-    description = (
-        "Borrow an existing local file or image for delivery to the current user. "
-        "The source is not copied, modified, or deleted. This does not open the file "
-        "locally; it emits a client-deliverable artifact."
-    )
+    name = "attach"
+    description = "Attach an existing file for user delivery."
     # Preparing this artifact causes the active client to disclose a copy to
     # the current conversation, so it belongs on the verified side-effect
     # path even though this tool doesn't know anything about the client.
@@ -57,5 +52,15 @@ class ArtifactPrepareTool(ToolBase):
             },
         }
 
-    def core_schema(self) -> dict[str, Any]:
-        return self.schema()
+    def skim_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                },
+                "required": ["path"],
+            },
+        }

@@ -119,32 +119,21 @@ class SafetyChecker:
         return SafetyCheckResult(True)
 
     def is_blocked(self, tool_name: str, kwargs: dict[str, Any]) -> SafetyCheckResult:
-        if tool_name == "shell":
+        if tool_name == "run_command":
             command = kwargs.get("command", "")
             return self.check_command(command)
-        if tool_name == "filesystem":
+        if tool_name == "write_file":
             path = kwargs.get("path", "")
-            action = kwargs.get("action", "")
-            result = self.check_path(path, write=True)
-            if not result:
-                return result
-            if action == "delete":
-                return self.check_path(path, write=True)
-            return SafetyCheckResult(True)
-        if tool_name == "artifact_prepare":
+            return self.check_path(path, write=True)
+        if tool_name == "attach":
             path = str(kwargs.get("path", ""))
             if not path:
                 return SafetyCheckResult(False, "Artifact path is required")
             return self.check_path(path)
-        if tool_name in ("application", "system", "process", "task"):
-            action = kwargs.get("action", "")
-            if action == "kill":
-                return SafetyCheckResult(False, "Blocked: killing processes requires confirmation")
-            return SafetyCheckResult(True)
         return SafetyCheckResult(True)
 
     def needs_confirmation(self, tool_name: str, kwargs: dict[str, Any]) -> tuple[bool, str]:
-        if tool_name == "shell":
+        if tool_name == "run_command":
             command = kwargs.get("command", "")
             cmd_lower = command.lower().strip()
             for pattern in _CONFIRMATION_COMMAND_PATTERNS:
@@ -154,19 +143,19 @@ class SafetyChecker:
                     return (True, f"Command may be destructive: {command}")
             return (False, "")
 
-        if tool_name == "keyboard":
-            action = str(kwargs.get("action", "")).lower()
-            if action in ("type", "write"):
-                return (True, "Keyboard text input requires explicit confirmation")
-            if action in ("hotkey", "shortcut"):
-                return (True, "Keyboard shortcuts require explicit confirmation")
-            if action == "press":
-                key = str(kwargs.get("key", "")).lower()
-                if key in {
-                    "enter", "return", "delete", "backspace", "esc", "escape",
-                    "space", "tab",
-                }:
-                    return (True, f"Keyboard key '{key}' may execute or change state")
+        if tool_name == "type_text":
+            return (True, "Keyboard text input requires explicit confirmation")
+
+        if tool_name == "hotkey":
+            return (True, "Keyboard shortcuts require explicit confirmation")
+
+        if tool_name == "press_key":
+            key = str(kwargs.get("key", "")).lower()
+            if key in {
+                "enter", "return", "delete", "backspace", "esc", "escape",
+                "space", "tab",
+            }:
+                return (True, f"Keyboard key '{key}' may execute or change state")
             return (False, "")
 
         if tool_name == "mouse":
@@ -183,30 +172,16 @@ class SafetyChecker:
                 return (True, f"Semantic UI {action} requires explicit confirmation")
             return (False, "")
 
-        if tool_name == "window":
+        if tool_name == "windows":
             if str(kwargs.get("action", "")).lower() == "close":
                 return (True, "Closing a window requires explicit confirmation")
             return (False, "")
 
-        if tool_name == "session":
-            if str(kwargs.get("action", "")).lower() == "lock":
-                return (True, "Locking the graphical session requires explicit confirmation")
-            return (False, "")
-
-        if tool_name == "filesystem":
-            action = kwargs.get("action", "")
+        if tool_name == "write_file":
             path = kwargs.get("path", "")
-            if action in ("delete", "move", "write"):
-                return (True, f"Filesystem {action} operation on {path} requires confirmation")
-            if self._working_directory:
-                try:
-                    resolved = Path(path).resolve()
-                    resolved.relative_to(self._working_directory)
-                except (ValueError, OSError):
-                    return (True, f"Path {path} is outside working directory {self._working_directory}")
-            return (False, "")
+            return (True, f"Filesystem write operation on {path} requires confirmation")
 
-        if tool_name == "artifact_prepare":
+        if tool_name == "attach":
             path = str(kwargs.get("path", ""))
             if self._working_directory:
                 try:
@@ -217,12 +192,6 @@ class SafetyChecker:
                         f"Delivering {path} from outside working directory "
                         f"{self._working_directory} requires confirmation",
                     )
-            return (False, "")
-
-        if tool_name in ("application", "system", "process", "task"):
-            action = kwargs.get("action", "")
-            if action == "kill":
-                return (True, "Killing a process requires confirmation")
             return (False, "")
 
         if tool_name == "memory":
@@ -237,7 +206,7 @@ class SafetyChecker:
                 )
             return (False, "")
 
-        if tool_name == "scheduler":
+        if tool_name == "schedule":
             action = kwargs.get("action", "")
             if action in ("create", "delete", "clear"):
                 return (True, f"Scheduler {action} requires confirmation")

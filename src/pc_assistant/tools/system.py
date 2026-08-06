@@ -4,13 +4,12 @@ import platform
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
-from pc_assistant.tools.base import ToolBase, tool
+from pc_assistant.tools.base import ToolBase
 
 
-@tool(name="system_info", description="Read system information or disk usage.", skim_description="System and disk info.")
 class SystemTool(ToolBase):
-    name = "system"
-    description = "Get system information and disk usage"
+    name = "system_info"
+    description = "Query OS state: CPU, memory, disk, network, battery."
 
     async def execute(self, **kwargs: Any) -> Any:
         action = kwargs.get("action")
@@ -32,23 +31,25 @@ class SystemTool(ToolBase):
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["info", "disk_usage"],
+                        "enum": ["overview", "cpu", "memory", "disk", "network", "battery"],
                     },
-                    "drive": {"type": "string", "description": "Drive letter for disk usage (Windows)"},
+                    "drive": {"type": "string", "description": "Drive letter for disk query (Windows)"},
                 },
                 "required": ["action"],
             },
         }
 
-    def core_schema(self) -> dict[str, Any]:
+    def skim_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "System information and disk usage. Use screenshot for user screenshots.",
+            "description": self.description,
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["info", "disk_usage"]},
-                    "drive": {"type": "string"},
+                    "action": {
+                        "type": "string",
+                        "enum": ["overview", "cpu", "memory", "disk", "network", "battery"],
+                    },
                 },
                 "required": ["action"],
             },

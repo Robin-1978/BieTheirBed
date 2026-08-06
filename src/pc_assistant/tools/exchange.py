@@ -3,19 +3,15 @@ from __future__ import annotations
 import httpx
 from typing import Any
 
-from pc_assistant.tools.base import ToolBase, parameter, tool
+from pc_assistant.tools.base import ToolBase
 
 
 _API_BASE = "https://api.frankfurter.dev/v1"
 
 
-@parameter("amount", skim=True, skim_hint="convert")
-@parameter("target", public_name="to", skim=True, skim_hint="target")
-@parameter("base", public_name="from", skim=True, skim_hint="source")
-@tool(name="currency", description="Get exchange rates or convert money.", skim_description="Rates and conversion.")
 class ExchangeTool(ToolBase):
-    name = "exchange"
-    description = "Get currency exchange rates and convert between currencies"
+    name = "currency"
+    description = "Convert between currencies."
 
     async def execute(self, **kwargs: Any) -> Any:
         action = kwargs.get("action", "rate")
@@ -116,18 +112,17 @@ class ExchangeTool(ToolBase):
             },
         }
 
-    def core_schema(self) -> dict[str, Any]:
+    def skim_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "Exchange rates and currency conversion.",
+            "description": self.description,
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["rate", "convert", "list"]},
-                    "base": {"type": "string"},
-                    "target": {"type": "string"},
-                    "amount": {"type": "number", "default": 1},
+                    "amount": {"type": "number"},
+                    "from": {"type": "string", "description": "e.g. USD"},
+                    "to": {"type": "string", "description": "e.g. CNY"},
                 },
-                "required": ["action"],
+                "required": ["amount", "from", "to"],
             },
         }
