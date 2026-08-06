@@ -47,15 +47,17 @@ def format_tool_call_line(tc: dict[str, Any]) -> tuple[str, str]:
 
 # Per-tool key fields to preserve in compacted summaries
 _TOOL_RESULT_KEYS: dict[str, tuple[str, ...]] = {
-    "shell": ("stdout", "stderr", "exit_code"),
-    "filesystem": ("action", "path", "bytes"),
-    "web": ("url", "status"),
+    "run_command": ("stdout", "stderr", "returncode"),
+    "read_file": ("path", "bytes"),
+    "write_file": ("path", "bytes"),
+    "web_search": ("query", "results"),
+    "web_fetch": ("url", "status"),
     "weather": ("location", "temperature", "condition"),
     "exchange": ("from", "to", "rate"),
     "system": ("action",),
     "application": ("action",),
     "clipboard": ("action",),
-    "scheduler": ("action", "job_name"),
+    "schedule": ("action", "task_id", "schedule"),
     "memory": ("action", "key"),
 }
 

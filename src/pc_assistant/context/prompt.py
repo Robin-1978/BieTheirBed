@@ -61,7 +61,6 @@ def _load_system_template() -> str:
 
 def build_system_prompt(
     tools_description: str = "",
-    working_directory: str = "",
     extra_instructions: str = "",
 ) -> str:
     parts = [_load_system_template()]
@@ -84,7 +83,6 @@ OS_INFO = f"{platform.system()} {platform.release()} ({platform.machine()}) | Sh
 
 
 def build_runtime_context(
-    working_directory: str = "",
     memory_context: str = "",
     *,
     system_prompt: str = "",
@@ -107,7 +105,7 @@ def build_runtime_context(
     return format_runtime_context(*blocks)
 
 
-def build_session_context(*, working_directory: str = "", memory_context: str = "", os_info: str = OS_INFO) -> str:
+def build_session_context(*, memory_context: str = "", os_info: str = OS_INFO) -> str:
     """Build session context block pinned before the current dialogue turn.
 
     Memory is injected here (not at the head of the prompt) so that updating
@@ -120,8 +118,6 @@ def build_session_context(*, working_directory: str = "", memory_context: str = 
     session_body = ["<session>"]
     if os_info:
         session_body.append(f"<os_info>{escape(os_info)}</os_info>")
-    if working_directory:
-        session_body.append(f"<working_directory>{escape(working_directory)}</working_directory>")
     if memory_context:
         session_body.append(f"<user_memory>\n{memory_context}\n</user_memory>")
     session_body.append(f"<current_time>{escape(ts)}</current_time>")

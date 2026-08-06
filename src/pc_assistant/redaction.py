@@ -51,9 +51,14 @@ def redact_tool_parameters(tool: str | None, parameters: Any) -> Any:
     safe = redact(parameters)
     if not isinstance(safe, dict):
         return safe
+    if tool == "type_text" and "text" in safe:
+        safe["text"] = "[redacted keyboard text]"
+    # Keep redaction effective for persisted audit entries written before the
+    # single-purpose tool split; this is storage hygiene, not a model-facing
+    # tool alias.
     if tool == "keyboard" and str(safe.get("action", "")).lower() in ("type", "write"):
         if "text" in safe:
             safe["text"] = "[redacted keyboard text]"
-    if tool == "shell" and _SENSITIVE_COMMAND.search(str(safe.get("command", ""))):
+    if tool in ("run_command", "shell") and _SENSITIVE_COMMAND.search(str(safe.get("command", ""))):
         safe["command"] = "[redacted sensitive command]"
     return safe

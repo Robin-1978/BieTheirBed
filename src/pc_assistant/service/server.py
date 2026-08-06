@@ -73,7 +73,7 @@ class ServiceServer:
 
         self._agent = Agent(config=self._config)
 
-        scheduler = self._agent.registry.get("scheduler")
+        scheduler = self._agent.registry.get("schedule")
         if scheduler is not None:
             scheduler.set_agent(self._agent)
             scheduler.set_result_callback(self._on_scheduled_result)
@@ -160,7 +160,7 @@ class ServiceServer:
             await self._tcp_server.wait_closed()
 
         if self._agent is not None:
-            scheduler = self._agent.registry.get("scheduler")
+            scheduler = self._agent.registry.get("schedule")
             if scheduler is not None:
                 await scheduler.execute(action="stop")
 
@@ -522,6 +522,7 @@ class ServiceServer:
         if not isinstance(answer, str):
             answer = str(answer)
         frame = serialize(ServerMessage.notify(task.task_id, answer))
+        delivered = False
         for client_id, client_session in self._client_sessions.items():
             if client_session != session_id:
                 continue
@@ -529,8 +530,47 @@ class ServiceServer:
             if ws is not None:
                 try:
                     asyncio.create_task(ws.send(frame))
+                    delivered = True
                 except Exception:
                     pass
+
+        # A one-shot task may outlive the CLI process that created it. In that
+        # case there is no protocol client left to receive the result. Keep the
+        # local-PC channel useful by showing a desktop notification instead of
+        # silently dropping the completed task.
+        if not delivered:
+            self._notify_desktop_task_result(task, answer)
+
+    def _notify_desktop_task_result(self, task: Any, answer: str) -> None:
+        """Show a local notification when the originating client is offline."""
+        if self._agent is None:
+            return
+        tool = self._agent.registry.get("notify")
+        if tool is None:
+            logger.warning("Scheduled task result dropped: notify tool unavailable task=%s", getattr(task, "task_id", "?"))
+            return
+
+        async def _send() -> None:
+            try:
+                result = await tool.execute(
+                    action="show",
+                    title=f"Task: {getattr(task, 'name', 'scheduled task')}",
+                    message=answer[:2000],
+                )
+                if isinstance(result, dict) and result.get("error"):
+                    logger.warning(
+                        "Desktop task notification failed task=%s error=%s",
+                        getattr(task, "task_id", "?"), result["error"],
+                    )
+                else:
+                    logger.info("Desktop task notification sent task=%s", getattr(task, "task_id", "?"))
+            except Exception as exc:
+                logger.warning(
+                    "Desktop task notification failed task=%s error=%s",
+                    getattr(task, "task_id", "?"), exc,
+                )
+
+        asyncio.create_task(_send())
 
 
 

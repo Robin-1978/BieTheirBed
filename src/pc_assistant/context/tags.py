@@ -54,15 +54,13 @@ def is_strategy_context_message(msg: dict[str, Any]) -> bool:
     return is_runtime_context_message(msg) and not is_session_context_message(msg)
 
 
-def format_session_context(current_time: str, *, working_dir: str = "", os_info: str = "") -> str:
+def format_session_context(current_time: str, *, os_info: str = "") -> str:
     parts = [
         "<session>",
         f"<current_time>{escape(current_time)}</current_time>",
     ]
     if os_info:
         parts.append(f"<os_info>{escape(os_info)}</os_info>")
-    if working_dir:
-        parts.append(f"<working_directory>{escape(working_dir)}</working_directory>")
     parts.append("</session>")
     return format_runtime_context("\n".join(parts))
 
@@ -249,7 +247,7 @@ def truncate_text(text: str, max_len: int, *, suffix: str = "...[truncated]") ->
 
 def tool_result_budget(tool_name: str) -> int:
     # Query-like tools get larger budget
-    _query_tools = frozenset({"web", "shell", "filesystem"})
+    _query_tools = frozenset({"web_search", "web_fetch", "run_command", "read_file"})
     if tool_name in _query_tools:
         return TOOL_RESULT_QUERY_MAX
     return TOOL_RESULT_DEFAULT_MAX

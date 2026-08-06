@@ -80,3 +80,14 @@ class WebFetchTool(ToolBase):
                 "required": ["url"],
             },
         }
+
+    def skim_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": "object",
+                "properties": {"url": {"type": "string", "description": "http(s) URL"}},
+                "required": ["url"],
+            },
+        }

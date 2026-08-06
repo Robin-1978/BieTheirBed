@@ -44,3 +44,14 @@ class TypeTextTool(ToolBase):
                 "required": ["text"],
             },
         }
+
+    def skim_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+            },
+        }

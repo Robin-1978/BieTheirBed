@@ -15,13 +15,13 @@ from pc_assistant.observability.trace import LLMTraceRecorder
 
 
 def _sys() -> str:
-    return build_system_prompt(working_directory="/tmp")
+    return build_system_prompt()
 
 
 class TestCacheFriendlyLayout:
     def test_system_prompt_appears_exactly_once(self):
         msgs = assemble_llm_messages(
-            _sys(), [], "hi", working_directory="/tmp", memory_context="<memory>A</memory>",
+            _sys(), [], "hi", memory_context="<memory>A</memory>",
         )
         blob = "".join(m.get("content", "") for m in msgs)
         assert "<system_rules>" not in blob
@@ -29,7 +29,6 @@ class TestCacheFriendlyLayout:
 
     def test_runtime_context_has_no_system_rules(self):
         rc = build_runtime_context(
-            working_directory="/tmp",
             memory_context="<memory>M</memory>",
             system_prompt="DUPLICATE",
         )
@@ -44,7 +43,7 @@ class TestCacheFriendlyLayout:
         cm.add_user("again")
         msgs = assemble_llm_messages(
             sys_prompt, cm.get_messages_for_llm_raw(), "again",
-            working_directory="/tmp", memory_context="<memory>B</memory>",
+            memory_context="<memory>B</memory>",
         )
         head = [m.get("content", "") for m in msgs[:3]]
         assert not any("<user_memory>" in c for c in head)
@@ -60,7 +59,7 @@ class TestCacheFriendlyLayout:
 
         msgs1 = assemble_llm_messages(
             sys_prompt, cm.get_messages_for_llm_raw(), "hi",
-            working_directory="/tmp", memory_context="<memory>A</memory>",
+            memory_context="<memory>A</memory>",
         )
         cm.add_user("hi")
         cm.add_assistant_final("hello")
@@ -68,7 +67,7 @@ class TestCacheFriendlyLayout:
 
         msgs2 = assemble_llm_messages(
             sys_prompt, cm.get_messages_for_llm_raw(), "again",
-            working_directory="/tmp", memory_context="<memory>B</memory>",
+            memory_context="<memory>B</memory>",
         )
 
         # System message identical across turns.
@@ -88,7 +87,7 @@ class TestCacheFriendlyLayout:
         cm.add_user("final question")
         msgs = assemble_llm_messages(
             sys_prompt, cm.get_messages_for_llm_raw(), "final question",
-            working_directory="/tmp", memory_context="<memory>C</memory>",
+            memory_context="<memory>C</memory>",
         )
         truncated = truncate_messages(msgs, budget=100000)
         assert truncated[0]["role"] == "system"
@@ -101,15 +100,14 @@ class TestCacheFriendlyLayout:
 
     def test_runtime_context_orders_stable_fields_before_current_time(self):
         context = build_session_context(
-            working_directory="/workspace",
             memory_context="preferred_language=zh",
             os_info="Linux test",
         )
         os_pos = context.index("<os_info>")
-        cwd_pos = context.index("<working_directory>")
         memory_pos = context.index("<user_memory>")
         time_pos = context.index("<current_time>")
-        assert os_pos < cwd_pos < memory_pos < time_pos
+        assert "<working_directory>" not in context
+        assert os_pos < memory_pos < time_pos
         assert context.rindex("</current_time>") < context.rindex("</session>")
 
 
@@ -117,7 +115,7 @@ class TestTurnContextPlacement:
     def test_evidence_instruction_goes_to_current_turn_not_system(self):
         msgs = assemble_llm_messages(
             _sys(), [], "check memory",
-            working_directory="/tmp", turn_context="## Evidence requirement\nBase on tool results.",
+            turn_context="## Evidence requirement\nBase on tool results.",
         )
         assert "Evidence requirement" not in msgs[0]["content"]
         assert "Evidence requirement" in msgs[-1]["content"]
@@ -137,7 +135,7 @@ class TestToolCallStandardFormat:
         cm.add_tool_result("call_1", "ok", tool_name="shell")
         cm.add_user("now what")
         msgs = assemble_llm_messages(
-            sys_prompt, cm.get_messages_for_llm_raw(), "now what", working_directory="/tmp",
+            sys_prompt, cm.get_messages_for_llm_raw(), "now what",
         )
         for m in msgs:
             for call in m.get("tool_calls") or []:

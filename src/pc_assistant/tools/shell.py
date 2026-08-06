@@ -172,9 +172,10 @@ class ShellTool(ToolBase):
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "command": {"type": "string"},
+                    "command": {"type": "string", "description": "shell command; may require confirmation"},
                     "timeout_seconds": {"type": "integer", "description": "default 30"},
                     "working_directory": {"type": "string"},
+                    "environment": {"type": "object", "description": "extra environment variables"},
                 },
                 "required": ["command"],
             },

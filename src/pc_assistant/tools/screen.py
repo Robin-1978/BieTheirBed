@@ -18,7 +18,7 @@ from pc_assistant.vision.coordinates import CoordinateTransform
 
 class ScreenTool(ToolBase):
     name = "screen"
-    description = "Get screen resolution and display info."
+    description = "Inspect the desktop and verify screen changes."
 
     def __init__(
         self,
@@ -71,7 +71,25 @@ class ScreenTool(ToolBase):
         }
 
     def skim_schema(self) -> dict[str, Any]:
-        return self.schema()
+        return {
+            "name": self.name,
+            "description": "Inspect the desktop or verify a screen change.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["look", "verify", "info"]},
+                    "region_x": {"type": "integer"},
+                    "region_y": {"type": "integer"},
+                    "region_width": {"type": "integer"},
+                    "region_height": {"type": "integer"},
+                    "grid": {"type": "boolean"},
+                    "path": {"type": "string"},
+                    "cols": {"type": "integer"},
+                    "rows": {"type": "integer"},
+                },
+                "required": ["action"],
+            },
+        }
 
     # ------------------------------------------------------------------
 

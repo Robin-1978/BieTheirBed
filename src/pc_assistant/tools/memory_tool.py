@@ -156,7 +156,7 @@ class MemoryTool(ToolBase):
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["store", "retrieve", "search", "delete"]},
-                    "key": {"type": "string", "description": "snake_case fact key"},
+                    "key": {"type": "string", "description": "snake_case fact key, not name"},
                     "value": {"type": "string", "description": "for store"},
                     "category": {"type": "string"},
                     "importance": {"type": "string", "enum": ["core", "relevant"]},

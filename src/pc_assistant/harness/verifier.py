@@ -22,7 +22,9 @@ from pc_assistant.tools.registry import ToolRegistry
 # High-risk GUI actions that warrant a post-action screen verification.
 RISKY_GUI_ACTIONS: dict[str, set[str]] = {
     "mouse": {"click", "double_click", "right_click", "drag"},
-    "keyboard": {"hotkey", "press", "write"},
+    "press_key": {"*"},
+    "type_text": {"*"},
+    "hotkey": {"*"},
     "ui": {"click", "type"},
 }
 
@@ -54,6 +56,8 @@ class Verifier:
         risky_actions = RISKY_GUI_ACTIONS.get(tool_name)
         if risky_actions is None:
             return False
+        if "*" in risky_actions:
+            return True
         return arguments.get("action") in risky_actions
 
     async def post_verify(self, tool_name: str, arguments: dict[str, Any]) -> None:

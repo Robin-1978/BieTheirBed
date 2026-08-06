@@ -54,3 +54,17 @@ class WriteFileTool(ToolBase):
                 "required": ["path", "content"],
             },
         }
+
+    def skim_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string", "description": "text to write; empty is allowed"},
+                },
+                "required": ["path", "content"],
+            },
+        }

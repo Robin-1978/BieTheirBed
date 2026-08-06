@@ -85,7 +85,7 @@ class MouseTool(ToolBase):
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["position", "move", "click", "double_click", "right_click", "scroll", "drag"]},
+                    "action": {"type": "string", "enum": ["position", "move", "click", "double_click", "right_click", "scroll", "drag", "press", "release"]},
                     "x": {"type": "integer"},
                     "y": {"type": "integer"},
                     "x2": {"type": "integer", "description": "drag end X"},
@@ -93,6 +93,7 @@ class MouseTool(ToolBase):
                     "dx": {"type": "integer", "description": "scroll horizontal"},
                     "dy": {"type": "integer", "description": "scroll vertical (+up)"},
                     "button": {"type": "string", "enum": ["left", "right", "middle"]},
+                    "duration": {"type": "number", "description": "move/drag seconds"},
                 },
                 "required": ["action"],
             },

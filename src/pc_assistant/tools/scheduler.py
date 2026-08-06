@@ -404,12 +404,14 @@ class SchedulerTool(ToolBase):
     # ── Actions ───────────────────────────────────────────────
 
     async def _create_task(self, **kwargs: Any) -> dict[str, Any]:
-        name = kwargs.get("task_name", "")
-        command = kwargs.get("command", "")
-        schedule = kwargs.get("schedule", "")
+        name = kwargs.get("name", kwargs.get("task_name", ""))
+        # ``task`` and ``when`` are the model-facing names. Keep the older
+        # storage keys as an internal read path for persisted tasks/tests.
+        command = kwargs.get("task", kwargs.get("command", ""))
+        schedule = kwargs.get("when", kwargs.get("schedule", ""))
         enabled = kwargs.get("enabled", True)
         max_runs = kwargs.get("max_runs", 0)
-        timeout = kwargs.get("timeout", 300)
+        timeout = kwargs.get("timeout_seconds", kwargs.get("timeout", 300))
 
         if not schedule:
             return {
@@ -727,16 +729,16 @@ class SchedulerTool(ToolBase):
                         "enum": ["create", "list", "info", "delete", "run", "pause", "resume"],
                         "description": "Action to perform",
                     },
-                    "task_name": {"type": "string", "description": "Task name"},
-                    "command": {"type": "string", "description": "Agent instruction to run later; use for checks, decisions, or tools"},
-                    "schedule": {
+                    "task": {"type": "string", "description": "Agent instruction to run later"},
+                    "when": {
                         "type": "string",
                         "description": "Schedule: cron ('0 9 * * *'), interval ('every 5m'), or delay ('in 30s', 'in 2h30m')",
                     },
+                    "name": {"type": "string", "description": "Optional task name"},
                     "task_id": {"type": "string", "description": "Task ID"},
                     "enabled": {"type": "boolean"},
                     "max_runs": {"type": "integer", "description": "Max runs (0=unlimited)"},
-                    "timeout": {"type": "integer", "description": "Timeout in seconds"},
+                    "timeout_seconds": {"type": "integer", "description": "Agent timeout seconds"},
                 },
                 "required": ["action"],
             },
@@ -749,11 +751,18 @@ class SchedulerTool(ToolBase):
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["create", "list", "delete"]},
-                    "message": {"type": "string"},
-                    "delay_seconds": {"type": "integer"},
-                    "cron": {"type": "string", "description": "for recurring"},
-                    "task_id": {"type": "string", "description": "for delete"},
+                    "action": {
+                        "type": "string",
+                        "enum": ["create", "list", "info", "delete", "run", "pause", "resume"],
+                        "description": "create needs task + when; other actions use task_id",
+                    },
+                    "task": {"type": "string", "description": "Agent instruction, not a shell command"},
+                    "when": {"type": "string", "description": "in 5m | every 1h | cron"},
+                    "name": {"type": "string"},
+                    "task_id": {"type": "string", "description": "task ID"},
+                    "enabled": {"type": "boolean"},
+                    "max_runs": {"type": "integer", "description": "0 means unlimited"},
+                    "timeout_seconds": {"type": "integer", "description": "Agent timeout seconds"},
                 },
                 "required": ["action"],
             },

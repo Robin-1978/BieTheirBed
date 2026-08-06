@@ -119,10 +119,11 @@ class ExchangeTool(ToolBase):
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "amount": {"type": "number"},
-                    "from": {"type": "string", "description": "e.g. USD"},
-                    "to": {"type": "string", "description": "e.g. CNY"},
+                    "action": {"type": "string", "enum": ["rate", "convert", "list"]},
+                    "base": {"type": "string", "description": "3-letter code, e.g. USD"},
+                    "target": {"type": "string", "description": "3-letter code, e.g. CNY"},
+                    "amount": {"type": "number", "description": "for convert"},
                 },
-                "required": ["amount", "from", "to"],
+                "required": ["action"],
             },
         }

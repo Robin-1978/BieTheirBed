@@ -187,13 +187,7 @@ class _StreamingCardState:
             truncated = self._thinking[:300]
             if len(self._thinking) > 300:
                 truncated += "..."
-            elements.append({
-                "tag": "note",
-                "elements": [{
-                    "tag": "markdown",
-                    "content": f"💭 {truncated}",
-                }],
-            })
+            elements.append({"tag": "markdown", "content": f"💭 {truncated}"})
 
         if self._steps:
             steps_md = "\n".join(self._steps[-8:])
@@ -239,6 +233,9 @@ def _summarize_tool_result(result: Any) -> str:
     if isinstance(result, dict):
         if "error" in result:
             return f"❌ {str(result['error'])[:60]}"
+        if result.get("success") is False:
+            detail = result.get("message") or result.get("reason") or "tool reported failure"
+            return f"❌ {str(detail)[:60]}"
         if "content" in result:
             lines = str(result["content"]).count("\n") + 1
             return f"{lines} lines"
@@ -1426,6 +1423,7 @@ class FeishuChannel(ChannelBase):
         try:
             card_state = _StreamingCardState()
             message_id: str | None = None
+            card_failed = False
             last_patch_time = 0.0
             artifact_refs: list[dict[str, Any]] = []
             artifact_ids: set[str] = set()
@@ -1436,11 +1434,15 @@ class FeishuChannel(ChannelBase):
 
             def _do_patch(force: bool = False) -> None:
                 """PATCH the card if debounce allows or force=True."""
-                nonlocal message_id, last_patch_time
+                nonlocal message_id, card_failed, last_patch_time
+                if card_failed:
+                    return
                 if message_id is None:
                     card = card_state.build_card()
                     message_id = self._send_card_returning_id(open_id, card)
                     last_patch_time = time.time()
+                    if message_id is None:
+                        card_failed = True
                 elif force or _should_patch():
                     card = card_state.build_card()
                     self._update_card(message_id, card)
@@ -1524,6 +1526,10 @@ class FeishuChannel(ChannelBase):
                 )
                 _do_patch(force=True)
 
+            if card_failed:
+                fallback = card_state._answer or "⚠️ 未获得有效回复，请重试"
+                self._send_text(open_id, fallback)
+
         except Exception as e:
             logger.error("[PROCESS] Agent error: %s", e, exc_info=True)
             self._send_text(open_id, f"❌ 处理出错: {e}")
@@ -1539,13 +1545,7 @@ class FeishuChannel(ChannelBase):
         elements: list[dict] = []
 
         if thinking:
-            elements.append({
-                "tag": "note",
-                "elements": [{
-                    "tag": "markdown",
-                    "content": f"💭 **思考**: {thinking}",
-                }],
-            })
+            elements.append({"tag": "markdown", "content": f"💭 **思考**: {thinking}"})
 
         if tool_calls:
             tools_md = "\n".join(tool_calls[:5])

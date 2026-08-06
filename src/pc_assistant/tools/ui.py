@@ -92,10 +92,17 @@ class UITool(ToolBase):
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["find", "click", "type", "list"]},
+                    "action": {"type": "string", "enum": ["list", "find", "click", "type", "screenshot_element"]},
                     "element": {"type": "string", "description": "element name or label"},
+                    "element_id": {"type": "string", "description": "id from find/list"},
+                    "role": {"type": "string"},
                     "app": {"type": "string", "description": "target application"},
                     "text": {"type": "string", "description": "for type action"},
+                    "double": {"type": "boolean"},
+                    "enter": {"type": "boolean"},
+                    "clear": {"type": "boolean"},
+                    "save_path": {"type": "string"},
+                    "inline": {"type": "boolean"},
                 },
                 "required": ["action"],
             },

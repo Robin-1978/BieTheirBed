@@ -87,7 +87,7 @@ class WeatherTool(ToolBase):
                 "type": "object",
                 "properties": {
                     "location": {"type": "string"},
-                    "forecast": {"type": "boolean", "description": "true=multi-day"},
+                    "forecast": {"type": "string", "enum": ["current", "forecast"], "description": "forecast adds 3 days"},
                 },
                 "required": ["location"],
             },

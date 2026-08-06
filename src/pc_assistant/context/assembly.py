@@ -53,7 +53,6 @@ def assemble_llm_messages(
     conversation: list[dict[str, Any]],
     last_user_msg: str,
     *,
-    working_directory: str = "",
     memory_context: str = "",
     turn_context: str = "",
 ) -> list[dict[str, Any]]:
@@ -83,7 +82,6 @@ def assemble_llm_messages(
     messages.extend(prefix_hist)
 
     session_ctx = build_session_context(
-        working_directory=working_directory,
         memory_context=memory_context,
     )
     if session_ctx:

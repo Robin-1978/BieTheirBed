@@ -240,9 +240,7 @@ class Agent:
             threshold=self._config.reflection_threshold,
         ) if self._config.reflection_enabled else None
         self._connected = False
-        self._system_prompt = build_system_prompt(
-            working_directory=self._config.working_directory,
-        )
+        self._system_prompt = build_system_prompt()
         self._token_estimator = TokenEstimator(
             normalize_family(
                 self._main_model.token_family or self._config.token_family,
@@ -456,45 +454,6 @@ class Agent:
 
         if len(result_str) <= max_chars:
             return result_str
-
-        if tool_name == "application" and isinstance(result, dict):
-            processes = result.get("processes", [])
-            if processes:
-                sorted_by_cpu = sorted(processes, key=lambda x: x.get("cpu_percent", 0) or 0, reverse=True)
-                top_cpu = sorted_by_cpu[:10]
-                sorted_by_mem = sorted(processes, key=lambda x: x.get("memory_percent", 0) or 0, reverse=True)
-                top_mem = sorted_by_mem[:10]
-
-                summary = [
-                    f"Total processes: {len(processes)}",
-                    "",
-                    "Top 10 by CPU%:",
-                ]
-                for p in top_cpu:
-                    name = p.get("name", "unknown")
-                    cpu = p.get("cpu_percent", 0)
-                    pid = p.get("pid", "?")
-                    summary.append(f"  {pid:>6} {name:<30} {cpu:>5.1f}%")
-
-                summary.append("")
-                summary.append("Top 10 by Memory%:")
-                for p in top_mem:
-                    name = p.get("name", "unknown")
-                    mem = p.get("memory_percent", 0)
-                    pid = p.get("pid", "?")
-                    summary.append(f"  {pid:>6} {name:<30} {mem:>5.1f}%")
-
-                summary_str = "\n".join(summary)
-                if len(summary_str) <= max_chars:
-                    return summary_str + f"\n\n[Truncated: showing top processes. Total: {len(processes)}]"
-                return summary_str[:max_chars - 50] + f"\n\n[Truncated from {len(processes)} processes]"
-
-            matches = result.get("matches", [])
-            if matches:
-                return result_str[:max_chars] + f"\n\n[Showing {len(matches)} matching processes]"
-
-            if result.get("process"):
-                return result_str[:max_chars]
 
         head_size = max_chars * 2 // 3
         tail_size = max_chars - head_size
@@ -1294,7 +1253,6 @@ class Agent:
                 system_prompt,
                 raw_messages,
                 user_input,
-                working_directory=self._config.working_directory,
                 memory_context=memory_context,
                 turn_context=turn_context,
             )
@@ -1861,7 +1819,5 @@ class Agent:
         self._default_state.conversation.clear()
         self._session_transcripts.delete("")
         self._artifact_store.cleanup_session("")
-        self._system_prompt = build_system_prompt(
-            working_directory=self._config.working_directory,
-        )
+        self._system_prompt = build_system_prompt()
         self._default_state.conversation.set_system_context(self._system_prompt)
