@@ -809,6 +809,8 @@ class ShellTool(ToolBase):
 
 ## 8. 飞书卡片流式更新方案
 
+> **状态：✅ 已实现** — commit `faedc4c`
+
 ### 8.1 问题
 
 当前飞书端行为：等 agent 全部完成后一次性发送结果。用户看到"卡死→突然出现一大段"。
@@ -818,75 +820,71 @@ class ShellTool(ToolBase):
 用户看到一张**实时追加的卡片**：
 ```
 ┌─────────────────────────────────┐
-│ 💭 正在思考...                   │  ← thinking（可折叠）
+│ 💭 Let me check your files...   │  ← thinking（note 区块）
 │                                  │
 │ ⚙️ read_file("/etc/hosts")       │  ← tool_call
-│ ✓ 5 行                          │  ← tool_result（精简）
+│ ✓ 2 lines                       │  ← tool_result（精简）
 │                                  │
 │ ⚙️ run_command("grep ...")       │  ← tool_call
 │ ✓ 找到 3 条匹配                 │  ← tool_result
-│                                  │
+│ ─────────────────────────────── │
 │ 你的 hosts 文件包含以下条目：...  │  ← final answer
 └─────────────────────────────────┘
 ```
 
 ### 8.3 技术方案
 
-飞书 Interactive Card 支持 **PATCH 更新已发送卡片**。
+飞书 Interactive Card 支持 **PATCH 更新已发送卡片**（`im.v1.message.patch`）。
 
-事件映射：
+事件映射（已实现）：
 ```
-stream_start       → POST 创建卡片（"正在处理..."），保存 message_id
-stream_think_delta → 累积，debounce 500ms 后 PATCH（折叠区块）
-stream_delta       → 累积，debounce 500ms 后 PATCH（正文区块）
-tool_call          → 立即 PATCH，追加 "⚙️ tool_name(key_param)"
+首个 tool_call    → POST 创建卡片，保存 message_id
+stream_think_delta → 累积，debounce 500ms 后 PATCH（note 区块）
+tool_call          → 立即 PATCH，追加 "⚙️ tool_name(args)"
 tool_result        → 立即 PATCH，追加 "✓ 精简结果"
-stream_end         → 最终 PATCH，完整内容
+final_answer       → 标记 done，loop 结束后最终 PATCH
+error/cancelled    → 标记 error，红色卡片
 ```
 
 ### 8.4 实现要点
 
-1. **Debounce**：stream_delta 每 500ms PATCH 一次（飞书 QPS 限制 ~5/s）
-2. **tool_call/tool_result**：立即 PATCH（用户最关心 agent 在做什么）
-3. **Thinking**：放在 collapsible 区块，默认折叠
-4. **结果精简**：tool_result 只显示核心信息（行数/成功/错误），不显示完整 JSON
-5. **卡片格式**：Markdown 元素 + divider 分隔各阶段
+1. **Debounce**：`_STREAM_DEBOUNCE_SECS = 0.5`（飞书 QPS 限制 ~5/s）
+2. **tool_call/tool_result**：`force=True` 立即 PATCH
+3. **Thinking**：`note` 元素，截断 300 字符
+4. **结果精简**：`_summarize_tool_result()` 只显示行数/成功/错误
+5. **卡片状态机**：turquoise（处理中）→ blue（完成）→ red（出错）
+6. **Steps 上限**：最多显示最近 8 步，更早的折叠
 
-### 8.5 代码骨架
+### 8.5 关键实现
 
 ```python
-class FeishuStreamCard:
-    def __init__(self, client, chat_id: str):
-        self._client = client
-        self._chat_id = chat_id
-        self._message_id: str | None = None
-        self._buffer: list[str] = []
-        self._last_patch = 0.0
+# 核心类：_StreamingCardState（纯数据/渲染，无 I/O）
+#   - append_thinking(text) / add_tool_call(name, args) / add_tool_result(summary)
+#   - set_answer(text) / set_error(text)
+#   - build_card() → dict  （根据当前 phase 渲染完整卡片 JSON）
 
-    async def on_event(self, event: AgentEvent) -> None:
-        match event.type:
-            case "stream_start":
-                self._message_id = await self._create("processing...")
-            case "tool_call":
-                self._buffer.append(f"⚙️ `{event.tool_name}`")
-                await self._patch()
-            case "tool_result":
-                summary = self._summarize_result(event.tool_result)
-                self._buffer.append(f"  ✓ {summary}")
-                await self._patch()
-            case "stream_delta":
-                self._buffer.append(event.content)
-                await self._debounced_patch()
+# FeishuChannel 新增方法：
+#   - _send_card_returning_id(open_id, card) → str | None  （POST + 返回 message_id）
+#   - _update_card(message_id, card) → bool               （PATCH 已有卡片）
 
-    def _summarize_result(self, result: Any) -> str:
-        if isinstance(result, dict):
-            if "error" in result:
-                return f"❌ {result['error'][:60]}"
-            if "content" in result:
-                lines = result["content"].count("\n") + 1
-                return f"{lines} lines"
-            return "done"
-        return str(result)[:60]
+# 事件循环核心模式：
+card_state = _StreamingCardState()
+message_id = None
+
+async for event in self._agent.run(...):
+    if event.type == "tool_call":
+        card_state.add_tool_call(...)
+        _do_patch(force=True)  # 创建或更新
+    elif event.type == "tool_result":
+        card_state.add_tool_result(_summarize_tool_result(event.tool_result))
+        _do_patch(force=True)
+    elif event.type == "stream_think_delta":
+        card_state.append_thinking(event.content)
+        if _should_patch():  # debounce
+            _do_patch()
+    ...
+
+_do_patch(force=True)  # 最终完整卡片
 ```
 
 ---
