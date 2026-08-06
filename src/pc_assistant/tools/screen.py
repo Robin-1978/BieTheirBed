@@ -1,8 +1,8 @@
 """Visual layer tool: screenshot + grid overlay + post-action verification.
 
-Fallback for the semantic ``ui`` tool. ``screen.look`` returns an inline image
+Fallback for the semantic ``ui`` tool. ``inspect_screen.look`` returns an inline image
 block (optionally with a coordinate grid) plus the metadata the model needs to
-convert grid cells into pyautogui coordinates. ``screen.verify`` re-captures
+convert grid cells into pyautogui coordinates. ``inspect_screen.verify`` re-captures
 after an action so the model can self-check the result (Look → Act → Verify).
 """
 from __future__ import annotations
@@ -11,19 +11,14 @@ from pathlib import Path
 from typing import Any
 
 from pc_assistant.tools.artifacts import ArtifactPaths, image_artifact
-from pc_assistant.tools.base import ToolBase, parameter, tool
+from pc_assistant.tools.base import ToolBase
 from pc_assistant.vision import preprocess
 from pc_assistant.vision.coordinates import CoordinateTransform
 
 
-@parameter("path", public_name="save_path")
-@tool(name="screen", description="Look at the screen or verify a screen change.", skim_description="Inspect the screen.")
 class ScreenTool(ToolBase):
     name = "screen"
-    description = (
-        "Internal visual observation for GUI understanding: look, verify, info. "
-        "Do not use this to send a screenshot to the user; use screenshot instead."
-    )
+    description = "Get screen resolution and display info."
 
     def __init__(
         self,
@@ -75,18 +70,8 @@ class ScreenTool(ToolBase):
             },
         }
 
-    def core_schema(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "description": "Internal GUI observation: look, verify, info. Not for user delivery.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {"type": "string", "enum": ["look", "verify", "info"]},
-                },
-                "required": ["action"],
-            },
-        }
+    def skim_schema(self) -> dict[str, Any]:
+        return self.schema()
 
     # ------------------------------------------------------------------
 

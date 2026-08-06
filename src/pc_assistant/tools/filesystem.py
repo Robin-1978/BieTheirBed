@@ -5,19 +5,15 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from pc_assistant.tools.base import ToolBase, parameter, tool
+from pc_assistant.tools.base import ToolBase
 
 
 _MAX_FILE_SIZE = 1_048_576
 
 
-@parameter("content", skim=True, skim_hint="write")
-@parameter("destination", public_name="destination_path", skim=True, skim_hint="copy/move")
-@parameter("path", public_name="file_path", required=True)
-@tool(name="files", description="Read, write, list, copy, move, or delete files and folders.", skim_description="Local files and folders.")
 class FilesystemTool(ToolBase):
-    name = "filesystem"
-    description = "Read, write, list, copy, move, or delete files and directories"
+    name = "files"
+    description = "Read, write, list, copy, move, or delete files and folders."
     is_side_effecting = True
 
     def __init__(self, working_directory: str | Path | None = None) -> None:
@@ -68,17 +64,20 @@ class FilesystemTool(ToolBase):
             },
         }
 
-    def core_schema(self) -> dict[str, Any]:
+    def skim_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "Read and write files. Common actions: read, write, list, exists.",
+            "description": self.description,
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["read", "write", "list", "mkdir", "delete", "copy", "move", "exists"]},
+                    "action": {
+                        "type": "string",
+                        "enum": ["read", "write", "list", "mkdir", "delete", "copy", "move", "exists"],
+                    },
                     "path": {"type": "string"},
-                    "content": {"type": "string"},
-                    "destination": {"type": "string"},
+                    "content": {"type": "string", "description": "for write"},
+                    "destination": {"type": "string", "description": "for copy/move"},
                 },
                 "required": ["action", "path"],
             },

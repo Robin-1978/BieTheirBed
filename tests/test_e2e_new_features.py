@@ -98,7 +98,7 @@ class TestVerifier:
             registry=registry,
             audit=AuditLogger(),
         )
-        verdict = await verifier.verify("shell", {"command": "rm -rf /"})
+        verdict = await verifier.verify("run_command", {"command": "rm -rf /"})
         assert verdict.rejected
         assert verdict.code == RefusalCode.DANGEROUS_COMMAND
 
@@ -117,13 +117,13 @@ class TestVerifier:
 
 class TestIdempotency:
     def test_make_key_deterministic(self):
-        k1 = IdempotencyLog.make_key("run1", 1, "shell", {"command": "ls"})
-        k2 = IdempotencyLog.make_key("run1", 1, "shell", {"command": "ls"})
+        k1 = IdempotencyLog.make_key("run1", 1, "run_command", {"command": "ls"})
+        k2 = IdempotencyLog.make_key("run1", 1, "run_command", {"command": "ls"})
         assert k1 == k2
 
     def test_make_key_differs_on_args(self):
-        k1 = IdempotencyLog.make_key("run1", 1, "shell", {"command": "ls"})
-        k2 = IdempotencyLog.make_key("run1", 1, "shell", {"command": "pwd"})
+        k1 = IdempotencyLog.make_key("run1", 1, "run_command", {"command": "ls"})
+        k2 = IdempotencyLog.make_key("run1", 1, "run_command", {"command": "pwd"})
         assert k1 != k2
 
     def test_check_miss_then_hit(self, tmp_path):
@@ -293,7 +293,7 @@ class TestAgentNewFeaturesE2E:
             tool_calls=[{
                 "id": "call_1",
                 "type": "function",
-                "function": {"name": "shell", "arguments": {"command": "format c:"}},
+                "function": {"name": "run_command", "arguments": {"command": "format c:"}},
             }],
             finish_reason="tool_calls",
         )
@@ -314,11 +314,15 @@ class TestAgentNewFeaturesE2E:
     async def test_is_side_effecting_flag(self):
         config = AppConfig()
         agent = Agent(config=config)
-        shell = agent.registry.get("shell")
-        fs = agent.registry.get("filesystem")
-        web = agent.registry.get("web")
+        shell = agent.registry.get("run_command")
+        write_fs = agent.registry.get("write_file")
+        read_fs = agent.registry.get("read_file")
+        web_search = agent.registry.get("web_search")
+        web_fetch = agent.registry.get("web_fetch")
         weather = agent.registry.get("weather")
         assert shell.is_side_effecting is True
-        assert fs.is_side_effecting is True
-        assert web.is_side_effecting is False
+        assert write_fs.is_side_effecting is True
+        assert read_fs.is_side_effecting is False
+        assert web_search.is_side_effecting is False
+        assert web_fetch.is_side_effecting is False
         assert weather.is_side_effecting is False

@@ -21,7 +21,8 @@ def _error_result(tool_name: str, arguments: dict[str, Any], result: Any, regist
         return result
     enriched = dict(result)
     enriched.setdefault("tool", tool_name)
-    schema = registry.llm_schema(tool_name, skim=False)
+    tool = registry.get(tool_name)
+    schema = tool.schema() if tool is not None else {}
     params = schema.get("parameters", {}) if isinstance(schema, dict) else {}
     properties = params.get("properties", {}) if isinstance(params, dict) else {}
     allowed_parameters = list(properties) if isinstance(properties, dict) else []

@@ -68,8 +68,10 @@ class TestWindowList:
         assert first["y"] == 50
         assert first["width"] == 1200
         assert first["height"] == 900
-        assert first["pid"] == 200
-        assert first["class_name"] == "firefox"
+        assert first["process_id"] == 200
+        assert first["app_name"] == "firefox"
+        assert first["window_id"] == "200:Browser"
+        assert first["is_active"] is False
         assert first["is_maximized"] is True
 
     def test_list_errors_when_pywinctl_missing(self, tool):
@@ -103,6 +105,14 @@ class TestWindowInfo:
     def test_info_requires_window_id(self, tool):
         res = _run(tool.execute(action="info"))
         assert "window_id is required" in res["error"]
+
+    def test_active_returns_directly_usable_window(self, tool):
+        active = FakeWin("Editor", "code", 300, 5, 10, 900, 700, isActive=True)
+        with patch("pywinctl.getActiveWindow", return_value=active):
+            res = _run(tool.execute(action="active"))
+        assert res["found"] is True
+        assert res["window"]["window_id"] == "300:Editor"
+        assert res["window"]["is_active"] is True
 
 
 class TestWindowFocus:

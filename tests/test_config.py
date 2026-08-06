@@ -22,6 +22,14 @@ class TestAppConfig:
         )
         assert cfg.effective_context_window_budget() == 131072
 
+    def test_model_context_window_accepts_comma_formatted_value(self):
+        cfg = AppConfig(
+            providers={"api": {"driver": "openai_compatible", "api_key": "k"}},
+            models={"main": {"provider": "api", "model": "m", "context_window": "131,072"}},
+            default_model="main",
+        )
+        assert cfg.models["main"].context_window == 131072
+
     def test_masked_api_key_empty(self):
         cfg = AppConfig()
         assert cfg.masked_api_key() == ""

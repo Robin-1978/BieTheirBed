@@ -12,6 +12,20 @@ from pc_assistant.context.prompt import build_system_prompt
 from pc_assistant.platform_ import get_shell_name
 
 
+def test_tool_result_uses_json_and_structural_error_status():
+    from pc_assistant.context.tags import parse_tool_result_payload, tool_result_status, wrap_tool_result
+
+    wrapped = wrap_tool_result(
+        "run_command",
+        {"success": False, "returncode": 1, "stdout": "", "stderr": "failed"},
+    )
+
+    assert "'success'" not in wrapped
+    assert 'status="error"' in wrapped
+    assert tool_result_status(wrapped) == "error"
+    assert parse_tool_result_payload(wrapped)["returncode"] == 1
+
+
 class TestBuildSystemPrompt:
     def test_basic(self):
         prompt = build_system_prompt()

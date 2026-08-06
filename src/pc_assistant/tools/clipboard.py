@@ -2,14 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from pc_assistant.tools.base import ToolBase, parameter, tool
+from pc_assistant.tools.base import ToolBase
 
 
-@parameter("content", skim=True, skim_hint="write")
-@tool(name="clipboard", description="Read or write the clipboard.", skim_description="Clipboard read/write.")
 class ClipboardTool(ToolBase):
     name = "clipboard"
-    description = "Read from and write to the system clipboard"
+    description = "Read or write the system clipboard."
     is_side_effecting = True
 
     async def execute(self, **kwargs: Any) -> Any:
@@ -40,15 +38,15 @@ class ClipboardTool(ToolBase):
             },
         }
 
-    def core_schema(self) -> dict[str, Any]:
+    def skim_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "Read or write clipboard.",
+            "description": self.description,
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["read", "write"]},
-                    "content": {"type": "string"},
+                    "content": {"type": "string", "description": "for write"},
                 },
                 "required": ["action"],
             },

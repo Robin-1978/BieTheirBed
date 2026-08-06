@@ -1,22 +1,24 @@
-"""Ensure core_schema action enums are always a subset of schema action enums."""
+"""Ensure skim_schema action enums are always a subset of schema action enums."""
 from __future__ import annotations
 
 import pytest
 
-from pc_assistant.tools.application import ApplicationTool
 from pc_assistant.tools.clipboard import ClipboardTool
 from pc_assistant.tools.exchange import ExchangeTool
-from pc_assistant.tools.filesystem import FilesystemTool
-from pc_assistant.tools.keyboard import KeyboardTool
+from pc_assistant.tools.hotkey import HotkeyTool
 from pc_assistant.tools.memory_tool import MemoryTool
 from pc_assistant.tools.mouse import MouseTool
 from pc_assistant.tools.notification import NotificationTool
+from pc_assistant.tools.press_key import PressKeyTool
+from pc_assistant.tools.read_file import ReadFileTool
 from pc_assistant.tools.scheduler import SchedulerTool
 from pc_assistant.tools.shell import ShellTool
-from pc_assistant.tools.system import SystemTool
+from pc_assistant.tools.type_text import TypeTextTool
 from pc_assistant.tools.weather import WeatherTool
-from pc_assistant.tools.web import WebTool
+from pc_assistant.tools.web_fetch import WebFetchTool
+from pc_assistant.tools.web_search import WebSearchTool
 from pc_assistant.tools.window import WindowTool
+from pc_assistant.tools.write_file import WriteFileTool
 from pc_assistant.tools.registry import ToolRegistry
 
 
@@ -27,50 +29,57 @@ def _extract_action_enums(schema: dict) -> set[str]:
 
 
 ALL_TOOLS = [
-    ApplicationTool(),
     ClipboardTool(),
     ExchangeTool(),
-    FilesystemTool(),
-    KeyboardTool(),
+    ReadFileTool(),
+    WriteFileTool(),
+    PressKeyTool(),
+    TypeTextTool(),
+    HotkeyTool(),
     MemoryTool(),
     MouseTool(),
     NotificationTool(),
     SchedulerTool(),
     ShellTool(),
-    SystemTool(),
     WeatherTool(),
-    WebTool(),
+    WebSearchTool(),
+    WebFetchTool(),
     WindowTool(),
 ]
 
 
 @pytest.mark.parametrize("tool", ALL_TOOLS, ids=lambda t: t.name)
-def test_core_schema_actions_subset_of_schema(tool):
+def test_skim_schema_actions_subset_of_schema(tool):
     full_actions = _extract_action_enums(tool.schema())
-    core_actions = _extract_action_enums(tool.core_schema())
+    skim_actions = _extract_action_enums(tool.skim_schema())
 
-    if not full_actions and not core_actions:
+    if not full_actions and not skim_actions:
         return
 
-    extra = core_actions - full_actions
+    extra = skim_actions - full_actions
     assert not extra, (
-        f"Tool '{tool.name}': core_schema has actions not in schema: {extra}. "
-        f"schema={sorted(full_actions)}, core_schema={sorted(core_actions)}"
+        f"Tool '{tool.name}': skim_schema has actions not in schema: {extra}. "
+        f"schema={sorted(full_actions)}, skim_schema={sorted(skim_actions)}"
     )
 
 
 @pytest.mark.parametrize("tool", ALL_TOOLS, ids=lambda t: t.name)
-def test_core_schema_has_same_name(tool):
-    assert tool.schema()["name"] == tool.core_schema()["name"]
+def test_skim_schema_has_same_name(tool):
+    assert tool.schema()["name"] == tool.skim_schema()["name"]
 
 
-def test_scheduler_skim_contains_create_inputs_without_tool_help():
+def test_scheduler_skim_has_action_enum():
+    tool = SchedulerTool()
+    skim = tool.skim_schema()
+    props = skim["parameters"]["properties"]
+    assert "action" in props
+    assert "enum" in props["action"]
+
+
+def test_generated_tool_help_example_contains_only_required_inputs():
     registry = ToolRegistry()
-    registry.register(SchedulerTool())
+    registry.register(WindowTool())
 
-    skim = registry.llm_schema("tasks", skim=True)
-    properties = skim["parameters"]["properties"]
+    detail = registry.detailed_schema("windows")
 
-    assert set(properties) == {"action", "task", "when", "task_id"}
-    assert "description" not in properties["task"]
-    assert properties["when"]["description"] == "delay/interval/cron"
+    assert detail["examples"] == [{"action": "list"}]

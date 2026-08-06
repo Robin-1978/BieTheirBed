@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, get_args, get_origin, Literal, Union
 
 import yaml
-from pydantic import BaseModel, Field, SecretStr, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
 from pc_assistant.platform_ import get_default_dangerous_commands, get_default_protected_paths
 from pc_assistant.runtime import default_runtime_root
@@ -68,6 +68,13 @@ class ModelConfig(BaseModel):
     # fallback budget for this model (subject to the completion reserve).
     context_window: int | None = None
     thinking: ThinkingConfig | None = None
+
+    @field_validator("context_window", mode="before")
+    @classmethod
+    def _parse_context_window(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            value = value.replace(",", "").strip()
+        return value
 
 
 class ResolvedModelConfig(BaseModel):

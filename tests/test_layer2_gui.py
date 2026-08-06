@@ -215,7 +215,7 @@ class TestUITool:
     @pytest.mark.asyncio
     async def test_find_returns_bbox_and_center(self):
         with patch("pc_assistant.tools.ui.a11y.list_elements", return_value=([_fake_element()], "")):
-            res = await UITool(ui_backend="atspi").execute(action="find", name="Save")
+            res = await UITool(ui_backend="atspi").execute(action="find", element="Save")
         assert res["found"] is True
         assert res["element_id"]
         assert res["bbox"] == {"x": 10, "y": 20, "width": 100, "height": 30}
@@ -225,7 +225,7 @@ class TestUITool:
     async def test_click_clicks_element_center(self):
         with patch("pc_assistant.tools.ui.a11y.list_elements", return_value=([_fake_element()], "")):
             tool = UITool(ui_backend="atspi")
-            found = await tool.execute(action="find", name="Save")
+            found = await tool.execute(action="find", element="Save")
             with patch("pyautogui.click") as mock_click:
                 res = await tool.execute(action="click", element_id=found["element_id"])
         assert res["success"] is True
@@ -234,14 +234,14 @@ class TestUITool:
     @pytest.mark.asyncio
     async def test_click_not_found(self):
         with patch("pc_assistant.tools.ui.a11y.list_elements", return_value=([], "")):
-            res = await UITool(ui_backend="atspi").execute(action="find", name="Nope")
+            res = await UITool(ui_backend="atspi").execute(action="find", element="Nope")
         assert "No element found" in res["error"]
 
     @pytest.mark.asyncio
     async def test_type_clicks_then_writes(self):
         with patch("pc_assistant.tools.ui.a11y.list_elements", return_value=([_fake_element()], "")):
             tool = UITool(ui_backend="atspi")
-            found = await tool.execute(action="find", name="Save")
+            found = await tool.execute(action="find", element="Save")
             with patch("pyautogui.click") as mock_click, patch("pyautogui.write") as mock_write:
                 res = await tool.execute(action="type", element_id=found["element_id"], text="hello")
         assert res["success"] is True
@@ -252,7 +252,7 @@ class TestUITool:
     async def test_find_rejects_ambiguous_partial_name(self):
         elements = [_fake_element("Save"), _fake_element("Save As")]
         with patch("pc_assistant.tools.ui.a11y.list_elements", return_value=(elements, "")):
-            res = await UITool(ui_backend="atspi").execute(action="find", name="Sav")
+            res = await UITool(ui_backend="atspi").execute(action="find", element="Sav")
         assert "Ambiguous" in res["error"]
 
     @pytest.mark.asyncio
@@ -260,7 +260,7 @@ class TestUITool:
         now = [10.0]
         with patch("pc_assistant.tools.ui.a11y.list_elements", return_value=([_fake_element()], "")):
             tool = UITool(ui_backend="atspi", snapshot_ttl_seconds=1, clock=lambda: now[0])
-            found = await tool.execute(action="find", name="Save")
+            found = await tool.execute(action="find", element="Save")
             now[0] = 12.0
             res = await tool.execute(action="click", element_id=found["element_id"])
         assert "stale" in res["error"].lower()

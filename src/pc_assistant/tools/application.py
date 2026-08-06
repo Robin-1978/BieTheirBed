@@ -4,16 +4,12 @@ import subprocess
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
-from pc_assistant.tools.base import ToolBase, parameter, tool
+from pc_assistant.tools.base import ToolBase
 
 
-@parameter("pid", skim=True, skim_hint="info/kill process")
-@parameter("command", skim=True, skim_hint="launch command")
-@parameter("name", public_name="app_name", skim=True, skim_hint="search name")
-@tool(name="apps", description="Start, list, find, view, or stop apps.", skim_description="Desktop apps.")
 class ApplicationTool(ToolBase):
-    name = "application"
-    description = "Start, list, search, view, or stop desktop applications"
+    name = "apps"
+    description = "Launch, close, list, or find running applications."
     is_side_effecting = True
 
     async def execute(self, **kwargs: Any) -> Any:
@@ -39,31 +35,30 @@ class ApplicationTool(ToolBase):
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["launch", "list_running", "search", "info", "kill"],
+                        "enum": ["launch", "close", "list", "find", "info"],
                         "description": "Action to perform",
                     },
-                    "command": {"type": "string", "description": "Command to launch application"},
                     "name": {
                         "type": "string",
-                        "description": "Process name to search for (case-insensitive, partial match)"
+                        "description": "Application or process name (case-insensitive, partial match)",
                     },
-                    "pid": {"type": "integer", "description": "Process ID (for info or kill)"},
+                    "pid": {"type": "integer", "description": "Process ID (for close/info)"},
+                    "command": {"type": "string", "description": "Command to launch application"},
                 },
                 "required": ["action"],
             },
         }
 
-    def core_schema(self) -> dict[str, Any]:
+    def skim_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "Manage applications: launch, list_running, search, info, kill.",
+            "description": self.description,
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["launch", "list_running", "search", "info", "kill"]},
-                    "command": {"type": "string"},
+                    "action": {"type": "string", "enum": ["launch", "close", "list", "find", "info"]},
                     "name": {"type": "string"},
-                    "pid": {"type": "integer"},
+                    "pid": {"type": "integer", "description": "for close/info"},
                 },
                 "required": ["action"],
             },

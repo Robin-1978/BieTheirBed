@@ -4,10 +4,9 @@ import os
 import subprocess
 from typing import Any
 
-from pc_assistant.tools.base import ToolBase, tool
+from pc_assistant.tools.base import ToolBase
 
 
-@tool(name="desktop_session", description="Show desktop session status or lock the desktop.", skim_description="Desktop session.")
 class SessionTool(ToolBase):
     """Inspect or lock the current local graphical session.
 
@@ -16,7 +15,7 @@ class SessionTool(ToolBase):
     """
 
     name = "session"
-    description = "Show or lock the current desktop session"
+    description = "Lock, sleep, or logout the computer."
 
     async def execute(self, **kwargs: Any) -> Any:
         action = str(kwargs.get("action", "status"))
@@ -55,8 +54,18 @@ class SessionTool(ToolBase):
             },
         }
 
-    def core_schema(self) -> dict[str, Any]:
-        return self.schema()
+    def skim_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["lock", "sleep", "logout", "status"]},
+                },
+                "required": ["action"],
+            },
+        }
 
     @staticmethod
     def _status(session_id: str) -> dict[str, Any]:

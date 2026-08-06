@@ -127,7 +127,7 @@ class ConversationManager:
         """Store final assistant response without tool_calls."""
         return self.add("assistant", content, tool_calls=None, delta_tool_calls=None)
 
-    def add_tool_result(self, tool_call_id: str, content: str, tool_name: str = "") -> Message:
+    def add_tool_result(self, tool_call_id: str, content: Any, tool_name: str = "") -> Message:
         """Store tool result, optionally wrapped in XML tags for structured context."""
         if tool_name:
             wrapped = wrap_tool_result(tool_name, content)

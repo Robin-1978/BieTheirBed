@@ -5,7 +5,7 @@ import subprocess
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
-from pc_assistant.tools.base import ToolBase, parameter, tool
+from pc_assistant.tools.base import ToolBase
 
 
 def _import_pywinctl():
@@ -16,20 +16,15 @@ def _import_pywinctl():
     return pywinctl
 
 
-@parameter("height", skim=True, skim_hint="resize height")
-@parameter("width", skim=True, skim_hint="resize width")
-@parameter("y", skim=True, skim_hint="move y")
-@parameter("x", skim=True, skim_hint="move x")
-@parameter("window_id", skim=True, skim_hint="window id; not list")
-@tool(name="windows", description="List, focus, move, resize, or close windows.", skim_description="Window control.")
 class WindowTool(ToolBase):
-    name = "window"
-    description = "List, focus, move, resize, minimize, maximize, or close windows"
+    name = "windows"
+    description = "List, focus, move, resize, or close desktop windows."
 
     async def execute(self, **kwargs: Any) -> Any:
         action = kwargs.get("action", "list")
         handlers = {
             "list": self._list_windows,
+            "active": self._active_window,
             "info": self._window_info,
             "focus": self._focus_window,
             "move": self._move_window,
@@ -41,7 +36,7 @@ class WindowTool(ToolBase):
         }
         handler = handlers.get(action)
         if handler is None:
-            return {"error": f"Unknown action: {action}. Use: list, info, focus, move, resize, minimize, maximize, restore, close."}
+            return {"error": f"Unknown action: {action}. Use: list, active, info, focus, move, resize, minimize, maximize, restore, close."}
         return await handler(kwargs)
 
     def schema(self) -> dict[str, Any]:
@@ -53,7 +48,7 @@ class WindowTool(ToolBase):
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["list", "info", "focus", "move", "resize", "minimize", "maximize", "restore", "close"],
+                        "enum": ["list", "active", "info", "focus", "move", "resize", "minimize", "maximize", "restore", "close"],
                         "description": "Action to perform on windows",
                     },
                     "window_id": {
@@ -81,14 +76,14 @@ class WindowTool(ToolBase):
             },
         }
 
-    def core_schema(self) -> dict[str, Any]:
+    def skim_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "Window management: list, focus, move, resize, minimize, maximize, close. Use screenshot for a user-visible screen capture.",
+            "description": self.description,
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["list", "info", "focus", "move", "resize", "minimize", "maximize", "restore", "close"]},
+                    "action": {"type": "string", "enum": ["list", "focus", "move", "resize", "minimize", "maximize", "close"]},
                     "window_id": {"type": "string"},
                     "x": {"type": "integer"},
                     "y": {"type": "integer"},
@@ -106,6 +101,9 @@ class WindowTool(ToolBase):
             return None
 
         windows = list(pwc.getAllWindows())
+        by_id = [window for window in windows if self._window_id(window) == window_id]
+        if len(by_id) == 1:
+            return by_id[0]
         needle = window_id.casefold()
         exact = [
             window for window in windows
@@ -155,17 +153,26 @@ class WindowTool(ToolBase):
                 pass
         return getattr(window, "processID", 0)
 
+    def _window_id(self, window: Any) -> str:
+        for attr in ("_hWnd", "hWnd", "handle"):
+            value = getattr(window, attr, None)
+            if value not in (None, ""):
+                return str(value)
+        return f"{self._pid(window)}:{str(getattr(window, 'title', ''))}"
+
     def _window_record(self, window: Any) -> dict[str, Any] | None:
         box = self._box(window)
         if box is None:
             return None
         return {
+            "window_id": self._window_id(window),
             "title": window.title,
-            "class_name": self._app_name(window),
+            "app_name": self._app_name(window),
             "is_visible": bool(getattr(window, "isVisible", False)),
             "is_minimized": bool(getattr(window, "isMinimized", False)),
             "is_maximized": bool(getattr(window, "isMaximized", False)),
-            "pid": self._pid(window),
+            "is_active": bool(getattr(window, "isActive", False)),
+            "process_id": self._pid(window),
             **box,
         }
 
@@ -190,6 +197,22 @@ class WindowTool(ToolBase):
             return await self._list_windows_macos(kwargs)
         else:
             return await self._list_windows_linux(kwargs)
+
+    async def _active_window(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        pwc = _import_pywinctl()
+        if pwc is None:
+            return {"error": "pywinctl not installed. Run: pip install pywinctl"}
+        try:
+            window = pwc.getActiveWindow()
+            if window is None:
+                return {"found": False, "window": None}
+            record = self._window_record(window)
+            if record is None:
+                return {"error": "Active window has no usable geometry"}
+            record["is_active"] = True
+            return {"found": True, "window": record}
+        except Exception as e:
+            return {"error": f"Failed to read active window: {e}"}
 
     async def _list_windows_win32(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         pwc = _import_pywinctl()
@@ -241,16 +264,7 @@ class WindowTool(ToolBase):
         if box is None:
             return {"error": f"Window has no geometry: {window_id}"}
 
-        return {
-            "title": window.title,
-            "class_name": self._app_name(window),
-            "is_visible": bool(getattr(window, "isVisible", False)),
-            "is_minimized": bool(getattr(window, "isMinimized", False)),
-            "is_maximized": bool(getattr(window, "isMaximized", False)),
-            "is_active": bool(getattr(window, "isActive", False)),
-            "process_id": self._pid(window),
-            **box,
-        }
+        return self._window_record(window)
 
     async def _focus_window(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         window_id = kwargs.get("window_id", "")

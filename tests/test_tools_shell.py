@@ -8,12 +8,12 @@ from pc_assistant.tools.shell import ShellTool
 class TestShellToolName:
     def test_name(self):
         t = ShellTool()
-        assert t.name == "shell"
+        assert t.name == "run_command"
 
     def test_schema(self):
         t = ShellTool()
         s = t.schema()
-        assert s["name"] == "shell"
+        assert s["name"] == "run_command"
         assert "parameters" in s
 
 
@@ -39,7 +39,7 @@ class TestShellTimeout:
 
         t = ShellTool()
         started = time.monotonic()
-        result = await t.execute(command="sleep 30 & wait", timeout=0.2)
+        result = await t.execute(command="sleep 30 & wait", timeout_seconds=0.2)
         elapsed = time.monotonic() - started
 
         assert "timed out" in result.get("error", "").lower()

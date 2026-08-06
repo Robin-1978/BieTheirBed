@@ -100,9 +100,9 @@ def test_user_screenshot_schema_has_no_parameters(tmp_path):
     tool = ScreenshotTool(store, tmp_path / "attachments" / "screenshots")
     assert tool.schema()["parameters"]["properties"] == {}
 
-    internal = ScreenTool().core_schema()
-    assert set(internal["parameters"]["properties"]) == {"action"}
-    assert "Not for user delivery" in internal["description"]
+    internal = ScreenTool().schema()
+    assert "action" in internal["parameters"]["properties"]
+    assert internal["parameters"]["properties"]["action"]["enum"] == ["look", "verify", "info"]
 
 
 @pytest.mark.asyncio
@@ -123,7 +123,7 @@ async def test_agent_emits_core_artifact_event_without_server_path(tmp_path):
                 "id": "artifact-1",
                 "type": "function",
                 "function": {
-                    "name": "artifact_prepare",
+                    "name": "attach",
                     "arguments": {"path": "document.txt"},
                 },
             }], finish_reason="tool_calls")
@@ -155,5 +155,5 @@ def test_core_tools_explain_open_is_not_delivery(tmp_path):
         for schema in agent.registry.all_schemas()
     }
     assert "screenshot" in schemas
-    assert "attach_file" in schemas
-    assert "Attach" in schemas["attach_file"]["description"]
+    assert "attach" in schemas
+    assert "Attach" in schemas["attach"]["description"]

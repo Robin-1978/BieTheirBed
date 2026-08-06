@@ -7,62 +7,33 @@ from typing import Any
 
 @dataclass(frozen=True)
 class ToolParameter:
-    internal_name: str
-    public_name: str
-    required: bool | None = None
+    """Metadata for a single tool parameter visible in skim schema."""
+
+    name: str
     description: str = ""
-    example: Any = None
-    skim: bool = False
-    skim_hint: str = ""
+    required: bool | None = None
+    skim: bool = True
 
 
 def parameter(
-    internal_name: str,
+    name: str,
     *,
-    public_name: str | None = None,
-    required: bool | None = None,
     description: str = "",
-    example: Any = None,
-    skim: bool = False,
-    skim_hint: str = "",
+    required: bool | None = None,
+    skim: bool = True,
 ):
-    """Declare one model-facing parameter next to its tool."""
+    """Declare a parameter's skim-schema metadata on a tool class."""
+
     def decorate(cls):
-        current = tuple(getattr(cls, "llm_parameters", ()))
-        cls.llm_parameters = current + (
+        current = tuple(getattr(cls, "_declared_parameters", ()))
+        cls._declared_parameters = current + (
             ToolParameter(
-                internal_name=internal_name,
-                public_name=public_name or internal_name,
-                required=required,
+                name=name,
                 description=description,
-                example=example,
+                required=required,
                 skim=skim,
-                skim_hint=skim_hint,
             ),
         )
-        return cls
-
-    return decorate
-
-
-def tool(
-    *,
-    name: str,
-    description: str,
-    skim_description: str = "",
-    details: str = "",
-    examples: list[dict[str, Any]] | None = None,
-):
-    """Declare the concise name and description exposed to the model."""
-    if not name or not description:
-        raise ValueError("tool name and description are required")
-
-    def decorate(cls):
-        cls.llm_name = name
-        cls.llm_description = description
-        cls.llm_skim_description = skim_description or description
-        cls.llm_details = details
-        cls.llm_examples = list(examples or [])
         return cls
 
     return decorate
@@ -72,25 +43,17 @@ class ToolBase(ABC):
     name: str = ""
     description: str = ""
     is_side_effecting: bool = False
-    llm_name: str | None = None
-    llm_description: str | None = None
-    llm_skim_description: str | None = None
-    llm_parameters: tuple[ToolParameter, ...] = ()
-    llm_details: str = ""
-    llm_examples: list[dict[str, Any]] = []
+    _declared_parameters: tuple[ToolParameter, ...] = ()
 
     @abstractmethod
-    async def execute(self, **kwargs: Any) -> Any:
-        ...
+    async def execute(self, **kwargs: Any) -> Any: ...
 
     @abstractmethod
     def schema(self) -> dict[str, Any]:
-        """Return full JSON schema for this tool."""
+        """Full JSON schema (returned by tool_help)."""
 
-    def core_schema(self) -> dict[str, Any]:
-        """Return concise core schema for cache-friendly static injection.
-        Override to provide a minimal schema with only essential parameters.
-        """
+    def skim_schema(self) -> dict[str, Any]:
+        """Compact schema for LLM injection. Override to omit rare params."""
         return self.schema()
 
     def __repr__(self) -> str:

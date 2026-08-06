@@ -4,18 +4,12 @@ import asyncio
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
-from pc_assistant.tools.base import ToolBase, parameter, tool
+from pc_assistant.tools.base import ToolBase
 
 
-@parameter("text", skim=True, skim_hint="text for type/write")
-@parameter("keys", skim=True, skim_hint="key list for hotkey/shortcut")
-@parameter("key", skim=True, skim_hint="key for press")
-@parameter("delay", public_name="delay_seconds")
-@parameter("hold_duration", public_name="hold_seconds")
-@tool(name="keyboard", description="Press keys, type text, or use shortcuts.", skim_description="Keyboard input.")
 class KeyboardTool(ToolBase):
     name = "keyboard"
-    description = "Control keyboard: send key presses, hotkeys, and text input"
+    description = "Press keys, type text, or send shortcuts."
     is_side_effecting = True
 
     # Key name mappings for cross-platform compatibility
@@ -73,12 +67,11 @@ class KeyboardTool(ToolBase):
             "press": self._press_key,
             "type": self._type_text,
             "hotkey": self._send_hotkey,
-            "write": self._write_text,
-            "shortcut": self._send_shortcut,
+            "paste": self._paste_text,
         }
         handler = handlers.get(action)
         if handler is None:
-            return {"error": f"Unknown action: {action}. Use: press, type, hotkey, write, shortcut."}
+            return {"error": f"Unknown action: {action}. Use: press, type, hotkey, paste."}
         return await handler(kwargs)
 
     def schema(self) -> dict[str, Any]:
@@ -90,8 +83,8 @@ class KeyboardTool(ToolBase):
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["press", "type", "hotkey", "write", "shortcut"],
-                        "description": "Action: 'press' for single key, 'type' for text, 'hotkey' for modifier+key, 'write' for clipboard paste, 'shortcut' for key combination",
+                        "enum": ["press", "type", "hotkey", "paste"],
+                        "description": "press=one key; type=keystrokes; hotkey=key combination; paste=clipboard text",
                     },
                     "key": {
                         "type": "string",
@@ -100,17 +93,17 @@ class KeyboardTool(ToolBase):
                     "keys": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Keys for hotkey/shortcut (e.g., ['ctrl', 'c'] for Ctrl+C)",
+                        "description": "Keys for hotkey (e.g., ['ctrl', 'c'])",
                     },
                     "text": {
                         "type": "string",
                         "description": "Text to type (for 'type' action)",
                     },
-                    "hold_duration": {
+                    "hold_seconds": {
                         "type": "number",
                         "description": "How long to hold the key in seconds (for 'press' action)",
                     },
-                    "delay": {
+                    "delay_seconds": {
                         "type": "number",
                         "description": "Delay between keys in seconds (for 'type' action)",
                     },
@@ -119,16 +112,16 @@ class KeyboardTool(ToolBase):
             },
         }
 
-    def core_schema(self) -> dict[str, Any]:
+    def skim_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "Keyboard: press keys, type text, send hotkeys.",
+            "description": self.description,
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["press", "type", "hotkey", "write", "shortcut"]},
-                    "key": {"type": "string"},
-                    "keys": {"type": "array", "items": {"type": "string"}},
+                    "action": {"type": "string", "enum": ["press", "type", "hotkey", "paste"], "description": "press=one key, type=text, hotkey=combo, paste=via clipboard"},
+                    "key": {"type": "string", "description": "e.g. enter, tab, f1"},
+                    "keys": {"type": "array", "items": {"type": "string"}, "description": "e.g. [ctrl, c]"},
                     "text": {"type": "string"},
                 },
                 "required": ["action"],
@@ -142,7 +135,7 @@ class KeyboardTool(ToolBase):
 
     async def _press_key(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         key = kwargs.get("key", "")
-        hold_duration = kwargs.get("hold_duration", 0)
+        hold_duration = kwargs.get("hold_seconds", 0)
 
         if not key:
             return {"error": "key is required for press action"}
@@ -198,7 +191,7 @@ class KeyboardTool(ToolBase):
 
     async def _type_text(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         text = kwargs.get("text", "")
-        delay = kwargs.get("delay", 0)
+        delay = kwargs.get("delay_seconds", 0)
 
         if not text:
             return {"error": "text is required for type action"}
@@ -283,12 +276,12 @@ class KeyboardTool(ToolBase):
         except ImportError:
             return {"error": "pyautogui not installed. Run: pip install pyautogui"}
 
-    async def _write_text(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+    async def _paste_text(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Write text using clipboard paste (Ctrl+V / Cmd+V)."""
         text = kwargs.get("text", "")
 
         if not text:
-            return {"error": "text is required for write action"}
+            return {"error": "text is required for paste action"}
 
         plat = get_platform()
 
@@ -317,7 +310,3 @@ class KeyboardTool(ToolBase):
             return {"error": f"Missing dependency: {e}"}
         except Exception as e:
             return {"error": f"Failed to write text: {e}"}
-
-    async def _send_shortcut(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        """Send a keyboard shortcut (alias for hotkey)."""
-        return await self._send_hotkey(kwargs)

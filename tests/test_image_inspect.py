@@ -129,7 +129,7 @@ async def test_text_main_gets_manifest_and_cannot_answer_before_observation(tmp_
                 "id": "vision-1",
                 "type": "function",
                 "function": {
-                    "name": "image_inspect",
+                    "name": "inspect_image",
                     "arguments": {"image_id": match.group(1), "question": "用户这张截图中可见的报错是什么？"},
                 },
             }], finish_reason="tool_calls")
@@ -147,7 +147,7 @@ async def test_text_main_gets_manifest_and_cannot_answer_before_observation(tmp_
 
     assert all("data:image" not in str(call) for call in main_calls)
     assert not any("network failure" in event.content for event in events)
-    assert any(event.tool_name == "image_inspect" and event.type == "tool_result" for event in events)
+    assert any(event.tool_name == "inspect_image" and event.type == "tool_result" for event in events)
     assert any(event.type == "final_answer" and "WorkerError" in event.content for event in events)
     assert vision.calls
 
@@ -176,10 +176,10 @@ def test_multimodal_main_does_not_register_fallback_vision_tool(tmp_path):
         vision_llm=MustNotBeUsed(),
     )
 
-    assert "image_inspect" not in agent.registry.list_tools()
+    assert "inspect_image" not in agent.registry.list_tools()
     assert agent._vision_broker is None
     assert all(
-        schema["function"]["name"] != "image_inspect"
+        schema["function"]["name"] != "inspect_image"
         for schema in agent.registry.all_schemas()
     )
 
@@ -228,7 +228,7 @@ async def test_text_main_must_inspect_tool_generated_screenshot(tmp_path):
                 "id": "vision-1",
                 "type": "function",
                 "function": {
-                    "name": "image_inspect",
+                    "name": "inspect_image",
                     "arguments": {"image_id": match.group(1), "question": "用户要求截取的画面中可见什么？"},
                 },
             }], finish_reason="tool_calls")
@@ -240,6 +240,6 @@ async def test_text_main_must_inspect_tool_generated_screenshot(tmp_path):
     async for event in agent.run("截屏并告诉我画面内容", session_id="screen-session"):
         events.append(event)
 
-    assert any(event.tool_name == "image_inspect" for event in events)
+    assert any(event.tool_name == "inspect_image" for event in events)
     assert any(event.type == "final_answer" for event in events)
     assert vision.calls

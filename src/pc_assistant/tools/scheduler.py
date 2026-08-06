@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
-from pc_assistant.tools.base import ToolBase, parameter, tool
+from pc_assistant.tools.base import ToolBase
 from pc_assistant.runtime import RuntimePaths
 
 
@@ -202,24 +202,6 @@ class ScheduledTask:
 # ── Tool ──────────────────────────────────────────────────────────────
 
 
-@parameter("task_id", skim=True, skim_hint="task id")
-@parameter("task_name", public_name="name")
-@parameter(
-    "schedule",
-    public_name="when",
-    skim=True,
-    skim_hint="delay/interval/cron",
-)
-@parameter(
-    "command",
-    public_name="task",
-    skim=True,
-)
-@tool(
-    name="tasks",
-    description="Create, list, run, pause, or cancel tasks.",
-    skim_description="Tasks: task=work; when=time.",
-)
 class SchedulerTool(ToolBase):
     """Schedule tasks: cron, intervals, and one-shot timers.
 
@@ -231,8 +213,8 @@ class SchedulerTool(ToolBase):
     - ``"in 2h30m"``     -- countdown timer: 2 hours 30 minutes
     """
 
-    name = "scheduler"
-    description = "Schedule recurring tasks, timers, and reminders (cron, intervals, one-shot delays)"
+    name = "schedule"
+    description = "Set a timed reminder or recurring task."
     is_side_effecting = True
 
     def __init__(self, storage_path: str | Path | None = None) -> None:
@@ -401,14 +383,9 @@ class SchedulerTool(ToolBase):
         action = kwargs.get("action", "list")
         handlers = {
             "create": self._create_task,
-            "add": self._create_task,
-            "set": self._create_task,
             "list": self._list_tasks,
             "info": self._task_info,
-            "enable": self._enable_task,
-            "disable": self._disable_task,
             "delete": self._delete_task,
-            "cancel": self._delete_task,
             "run": self._run_task,
             "start": self._start_scheduler,
             "stop": self._stop_scheduler,
@@ -418,7 +395,7 @@ class SchedulerTool(ToolBase):
         }
         handler = handlers.get(action)
         if handler is None:
-            return {"error": f"Unknown action: {action}. Use: create/set, list, delete/cancel, pause, resume, start, stop, status."}
+            return {"error": f"Unknown action: {action}. Use: create, list, info, delete, run, pause, resume."}
         result = handler(**kwargs)
         if asyncio.iscoroutine(result):
             return await result
@@ -427,9 +404,9 @@ class SchedulerTool(ToolBase):
     # ── Actions ───────────────────────────────────────────────
 
     async def _create_task(self, **kwargs: Any) -> dict[str, Any]:
-        name = kwargs.get("task_name", kwargs.get("name", ""))
-        command = kwargs.get("command", kwargs.get("task", ""))
-        schedule = kwargs.get("schedule", kwargs.get("when", ""))
+        name = kwargs.get("task_name", "")
+        command = kwargs.get("command", "")
+        schedule = kwargs.get("schedule", "")
         enabled = kwargs.get("enabled", True)
         max_runs = kwargs.get("max_runs", 0)
         timeout = kwargs.get("timeout", 300)
@@ -747,8 +724,7 @@ class SchedulerTool(ToolBase):
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["create", "add", "set", "list", "info", "enable", "disable",
-                                 "delete", "cancel", "run", "start", "stop", "status", "pause", "resume"],
+                        "enum": ["create", "list", "info", "delete", "run", "pause", "resume"],
                         "description": "Action to perform",
                     },
                     "task_name": {"type": "string", "description": "Task name"},
@@ -766,22 +742,18 @@ class SchedulerTool(ToolBase):
             },
         }
 
-    def core_schema(self) -> dict[str, Any]:
+    def skim_schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "description": "Create a task with task (what to do) and when (when to do it). "
-                           "Use 'in 5m', 'every 1h', or cron.",
+            "description": self.description,
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["create", "list", "info", "delete", "run", "pause", "resume"],
-                    },
-                    "task_name": {"type": "string"},
-                    "command": {"type": "string", "description": "Agent instruction to run later"},
-                    "schedule": {"type": "string"},
-                    "task_id": {"type": "string"},
+                    "action": {"type": "string", "enum": ["create", "list", "delete"]},
+                    "message": {"type": "string"},
+                    "delay_seconds": {"type": "integer"},
+                    "cron": {"type": "string", "description": "for recurring"},
+                    "task_id": {"type": "string", "description": "for delete"},
                 },
                 "required": ["action"],
             },
