@@ -421,6 +421,24 @@ class TestServerClientIntegration:
         assert len(received) == 1
         assert received[0] == ("task_1", "Timer done!")
 
+    async def test_offline_scheduled_result_uses_desktop_notification(self):
+        from pc_assistant.config import AppConfig
+        from pc_assistant.service.server import ServiceServer
+
+        server = ServiceServer(AppConfig(llm_provider="llamacpp"))
+        notify = AsyncMock(return_value={"success": True})
+        server._agent = MagicMock()
+        server._agent.registry.get.return_value = SimpleNamespace(execute=notify)
+        task = SimpleNamespace(task_id="task_offline", name="walk", session_id="ws:gone")
+
+        server._on_scheduled_result(task, {"result": "Timer done!"})
+        await asyncio.sleep(0)
+        notify.assert_awaited_once_with(
+            action="show",
+            title="Task: walk",
+            message="Timer done!",
+        )
+
 
 # ── Lifecycle tests ───────────────────────────────────────────────────
 

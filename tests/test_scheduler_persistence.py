@@ -31,6 +31,21 @@ async def test_scheduler_persists_in_shared_sqlite_database(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_scheduler_uses_model_facing_name(tmp_path):
+    scheduler = SchedulerTool(tmp_path / "assistant.db")
+    created = await scheduler.execute(
+        action="create",
+        name="cli-trigger-test",
+        task="reply with TEST_TASK_OK",
+        when="in 60s",
+        enabled=False,
+    )
+
+    assert created["name"] == "cli-trigger-test"
+    assert scheduler._tasks[created["task_id"]].name == "cli-trigger-test"
+
+
+@pytest.mark.asyncio
 async def test_scheduler_delete_is_durable(tmp_path):
     database = tmp_path / "assistant.db"
     scheduler = SchedulerTool(database)

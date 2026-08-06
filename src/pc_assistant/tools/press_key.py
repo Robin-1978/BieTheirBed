@@ -36,3 +36,14 @@ class PressKeyTool(ToolBase):
                 "required": ["key"],
             },
         }
+
+    def skim_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": "object",
+                "properties": {"key": {"type": "string", "description": "e.g. enter, tab, f1, a"}},
+                "required": ["key"],
+            },
+        }

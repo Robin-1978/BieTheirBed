@@ -169,7 +169,7 @@ async def async_main(
     channel_manager = None
 
     if not is_remote:
-        scheduler = agent.registry.get("scheduler")
+        scheduler = agent.registry.get("schedule")
         if scheduler:
             task_count = scheduler.task_count()
             if task_count > 0:

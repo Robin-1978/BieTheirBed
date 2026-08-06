@@ -57,7 +57,7 @@ class NotificationTool(ToolBase):
                         "description": "Icon name or path",
                     },
                 },
-                "required": ["action"],
+                "required": ["action", "title", "message"],
             },
         }
 
@@ -68,10 +68,14 @@ class NotificationTool(ToolBase):
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "action": {"type": "string", "enum": ["show", "alert"]},
                     "title": {"type": "string"},
                     "message": {"type": "string"},
+                    "urgency": {"type": "string", "enum": ["low", "normal", "critical"]},
+                    "sound": {"type": "boolean"},
+                    "icon": {"type": "string"},
                 },
-                "required": ["title", "message"],
+                "required": ["action", "title", "message"],
             },
         }
 

@@ -83,7 +83,7 @@ class WindowTool(ToolBase):
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["list", "focus", "move", "resize", "minimize", "maximize", "close"]},
+                    "action": {"type": "string", "enum": ["list", "active", "info", "focus", "move", "resize", "minimize", "maximize", "restore", "close"]},
                     "window_id": {"type": "string"},
                     "x": {"type": "integer"},
                     "y": {"type": "integer"},

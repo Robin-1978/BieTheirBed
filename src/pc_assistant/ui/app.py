@@ -167,7 +167,7 @@ class ChatApp(App):
                 self._agent.set_confirm_handler(self._on_confirm_request)
         else:
             if isinstance(self._agent, Agent):
-                scheduler = self._agent.registry.get("scheduler")
+                scheduler = self._agent.registry.get("schedule")
                 if scheduler is not None:
                     scheduler.set_result_callback(self._on_scheduled_result)
 
