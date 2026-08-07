@@ -7,7 +7,7 @@ import pytest
 
 from pc_assistant.agent import Agent
 from pc_assistant.config import AppConfig
-from pc_assistant.llm_provider import StreamChunk
+from pc_assistant.llm_provider import LLMProvider, StreamChunk
 from pc_assistant.__init__ import _run_benchmark
 
 
@@ -107,13 +107,13 @@ class TestBenchmarkMode:
 
     @pytest.mark.asyncio
     async def test_ask_no_tools_clears_registry(self, capsys):
-        agent = Agent(config=AppConfig())
-
         async def simple_stream(*args, **kwargs):
             yield StreamChunk(delta_content="Hello", finish_reason="")
             yield StreamChunk(finish_reason="stop")
 
-        agent._llm.chat_stream = simple_stream
+        llm = LLMProvider()
+        llm.chat_stream = simple_stream
+        agent = Agent(config=AppConfig(), llm=llm)
         rc = await _run_benchmark(agent, "hi", no_tools=True)
         captured = capsys.readouterr()
         assert rc == 0

@@ -1,32 +1,32 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import re
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, AsyncGenerator, Awaitable
+from typing import Any, AsyncGenerator
 
 from pydantic import BaseModel
 
 from pc_assistant.artifacts import ArtifactRef, ArtifactStore
+from pc_assistant.agent_runtime.factory import (
+    AgentDependencies,
+    AgentFactory,
+    ExecutionDependencies,
+    FactoryOverrides,
+)
 from pc_assistant.config import AppConfig, load_config
 from pc_assistant.context.assembly import assemble_llm_messages, truncate_messages
-from pc_assistant.context.cache import build_cache_plan
 from pc_assistant.context.conversation import ConversationManager
 from pc_assistant.context.evidence import EvidencePolicy
 from pc_assistant.context.llm_compact import summarize_prompt_history
-from pc_assistant.context.memory import ProceduralMemory, UserMemory
-from pc_assistant.context.memory_db import (
-    SQLiteMemoryRepository,
-    ScopedEpisodicMemory,
-    ScopedUserMemory,
-)
+from pc_assistant.context.memory import UserMemory
+from pc_assistant.context.memory_db import ScopedUserMemory
 from pc_assistant.context.scope import derive_memory_scope, reset_memory_scope, set_memory_scope
-from pc_assistant.context.session_db import SessionTranscriptRepository
-from pc_assistant.context.prompt import build_system_prompt
-from pc_assistant.context.token_estimate import TokenEstimator, normalize_family
 from pc_assistant.harness.audit import AuditLogger
 from pc_assistant.harness.confirm import ConfirmFn
 from pc_assistant.harness.executor import VerifiedToolExecutor, _error_result
@@ -35,42 +35,18 @@ from pc_assistant.harness.limiter import RateLimiter
 from pc_assistant.harness.refusal import RefusalCode, Verdict
 from pc_assistant.harness.safety import SafetyChecker
 from pc_assistant.harness.verifier import Verifier
-from pc_assistant.llm_provider import FailoverLLMProvider, LLMProvider, LLMResponse
+from pc_assistant.llm_provider import LLMProvider, LLMResponse
 from pc_assistant.logger import get_logger
 from pc_assistant.model_adapter.types import ImageAttachment
 from pc_assistant.observability.trace import LLMTraceRecorder, TurnRecorder
 from pc_assistant.planner import AgentPlanner, StructuredPlan
-from pc_assistant.reflection import ReflectionChecker
-from pc_assistant.runtime import RuntimePaths
 from pc_assistant.platform_ import get_platform
 from pc_assistant.session import SessionManager, SessionState
-from pc_assistant.tools.clipboard import ClipboardTool
-from pc_assistant.tools.read_file import ReadFileTool
-from pc_assistant.tools.write_file import WriteFileTool
 from pc_assistant.tools.registry import ToolRegistry
-from pc_assistant.tools.shell import ShellTool
-from pc_assistant.tools.web_search import WebSearchTool
-from pc_assistant.tools.web_fetch import WebFetchTool
-from pc_assistant.tools.memory_tool import MemoryTool
-from pc_assistant.tools.weather import WeatherTool
-from pc_assistant.tools.exchange import ExchangeTool
-from pc_assistant.tools.window import WindowTool
-from pc_assistant.tools.notification import NotificationTool
-from pc_assistant.tools.press_key import PressKeyTool
-from pc_assistant.tools.type_text import TypeTextTool
-from pc_assistant.tools.hotkey import HotkeyTool
-from pc_assistant.tools.mouse import MouseTool
-from pc_assistant.tools.screen import ScreenTool
-from pc_assistant.tools.ui import UITool
 from pc_assistant.tools.scheduler import (
-    SchedulerTool,
     bind_scheduler_session,
     reset_scheduler_session,
 )
-from pc_assistant.tools.describe_tool import DescribeTool
-from pc_assistant.tools.image_inspect import ImageInspectTool
-from pc_assistant.tools.artifact_prepare import ArtifactPrepareTool
-from pc_assistant.tools.screenshot import ScreenshotTool
 from pc_assistant.vision.broker import VisionBroker
 
 
@@ -159,154 +135,69 @@ class Agent:
         artifact_store: ArtifactStore | None = None,
         vision_llm: LLMProvider | None = None,
         vision_broker: VisionBroker | None = None,
+        verifier: Verifier | None = None,
+        executor: VerifiedToolExecutor | None = None,
         disable_tools: bool = False,
     ) -> None:
-        self._config = config or load_config()
-        self._runtime_paths = RuntimePaths.from_root(self._config.runtime_root)
         self._logger = get_logger("agent")
-        self._main_model = self._config.resolve_model()
-        self._llm_injected = llm is not None
-        primary_llm = LLMProvider(
-            server_url=self._main_model.server_url,
-            model_name=self._main_model.model,
-            provider=self._main_model.driver,
-            api_key=self._main_model.api_key,
-            api_base=self._main_model.api_base,
-            timeout=self._main_model.timeout,
-            supports_vision=self._main_model.supports_vision,
-            thinking=(
-                self._main_model.thinking.model_dump()
-                if self._main_model.thinking is not None
-                else None
-            ),
-        )
-        fallback_model = self._config.resolve_fallback_model()
-        fallback_llm = None
-        if fallback_model is not None and fallback_model.alias != self._main_model.alias:
-            fallback_llm = LLMProvider(
-                server_url=fallback_model.server_url,
-                model_name=fallback_model.model,
-                provider=fallback_model.driver,
-                api_key=fallback_model.api_key,
-                api_base=fallback_model.api_base,
-                timeout=fallback_model.timeout,
-                supports_vision=fallback_model.supports_vision,
-                thinking=(
-                    fallback_model.thinking.model_dump()
-                    if fallback_model.thinking is not None
-                    else None
-                ),
-            )
-        self._llm = llm if llm is not None else FailoverLLMProvider(primary_llm, fallback_llm)
-        self._memory_repository = SQLiteMemoryRepository(
-            self._runtime_paths.data / "assistant.db",
-        )
-        self._session_transcripts = SessionTranscriptRepository(
-            self._runtime_paths.data / "assistant.db",
-        )
-        self._memory = memory if memory is not None else ScopedUserMemory(
-            self._memory_repository,
-        )
-        self._episodic_memory = ScopedEpisodicMemory(self._memory_repository)
-        self._procedural_memory = ProceduralMemory(
-            self._runtime_paths.data / "procedures",
-        )
-        self._safety = safety if safety is not None else SafetyChecker(
-            dangerous_commands=self._config.dangerous_commands,
-            protected_paths=self._config.protected_paths,
-            working_directory=self._config.working_directory,
-        )
-        self._registry = registry if registry is not None else ToolRegistry()
-        self._limiter = limiter if limiter is not None else RateLimiter()
-        self._audit = audit if audit is not None else AuditLogger(
-            log_dir=str(self._runtime_paths.logs / "audit"),
-        )
         self._confirm_callback = confirm_callback
-        self._verifier = Verifier(
-            safety=self._safety,
-            registry=self._registry,
-            audit=self._audit,
-            confirm_callback=confirm_callback,
-            verify_enabled=self._config.screen_verify_enabled,
-            post_verify_callback=self._post_verify_screen if self._config.screen_verify_enabled else None,
-        )
-        self._executor = VerifiedToolExecutor(self._verifier, self._registry)
-        self._idempotency = IdempotencyLog(
-            storage_path=self._runtime_paths.cache / "idempotency.json",
-        )
-        self._planner = AgentPlanner(self._llm)
-        self._reflection = ReflectionChecker(
-            self._llm,
-            threshold=self._config.reflection_threshold,
-        ) if self._config.reflection_enabled else None
+        self._staging_config = config or load_config()
+        self._extra_tools: list[Any] = []
+        self._tools_disabled = disable_tools
+        self._running_executions: dict[str, ExecutionDependencies] = {}
         self._connected = False
-        self._system_prompt = build_system_prompt()
-        self._token_estimator = TokenEstimator(
-            normalize_family(
-                self._main_model.token_family or self._config.token_family,
-                self._main_model.model,
-            ),
+        overrides = FactoryOverrides(
+            llm=llm,
+            conversation=conversation,
+            memory=memory,
+            safety=safety,
+            registry=registry,
+            limiter=limiter,
+            audit=audit,
+            session_manager=session_manager,
+            trace=trace,
+            turn_recorder=turn_recorder,
+            evidence=evidence,
+            artifact_store=artifact_store,
+            vision_llm=vision_llm,
+            vision_broker=vision_broker,
+            verifier=verifier,
+            executor=executor,
         )
-
-        self._session_manager = session_manager or SessionManager(
-            max_sessions=max(max_sessions, 1),
+        self._factory = AgentFactory(
+            self._staging_config,
+            confirm_callback,
+            overrides=overrides,
+            max_sessions=max_sessions,
+            disable_tools=disable_tools,
+            runtime_consumer=self,
+            cleanup_session_assets=self._cleanup_session_assets,
+            post_verify_factory=self._make_post_verify_callback,
         )
+        self._dependencies: AgentDependencies = self._factory.build()
+        self._runtime_paths = self._dependencies.runtime_paths
+        self._memory_repository = self._dependencies.memory_repository
+        self._session_transcripts = self._dependencies.session_transcripts
+        self._memory = self._dependencies.memory
+        self._episodic_memory = self._dependencies.episodic_memory
+        self._procedural_memory = self._dependencies.procedural_memory
+        self._safety = self._dependencies.safety
+        self._limiter = self._dependencies.limiter
+        self._audit = self._dependencies.audit
+        self._idempotency = self._dependencies.idempotency
+        self._session_manager = self._dependencies.session_manager
+        self._trace = self._dependencies.trace
+        self._turn_recorder = self._dependencies.turn_recorder
+        self._evidence = self._dependencies.evidence
+        self._artifact_store = self._dependencies.artifact_store
+        self._system_prompt = self._dependencies.system_prompt
         self._default_state = self._session_manager.get("", self._system_prompt)
         self._active_session_id = ""
         if conversation is not None:
             self._default_state.conversation = conversation
         else:
             self._restore_session_transcript(self._default_state)
-        self._trace = trace or LLMTraceRecorder(
-            path=str(self._runtime_paths.resolve(self._config.llm_trace_log)),
-            enabled=self._config.trace_enabled,
-        )
-        self._turn_recorder = turn_recorder or TurnRecorder(
-            path=str(self._runtime_paths.resolve(self._config.turn_trace_log)),
-            enabled=self._config.trace_enabled,
-        )
-        self._evidence = evidence or EvidencePolicy(enabled=self._config.evidence_policy_enabled)
-        self._artifact_store = artifact_store or ArtifactStore(
-            self._runtime_paths.attachments,
-            persistent_root=self._runtime_paths.artifacts,
-            db_path=self._runtime_paths.data / "assistant.db",
-            ttl_seconds=self._config.attachment_ttl_seconds,
-        )
-        self._vision_broker: VisionBroker | None = None
-        if self._config.vision_enabled and not self._llm.supports_vision:
-            vision_model = self._config.resolve_vision_model()
-            dedicated_vision_llm = vision_llm or LLMProvider(
-                server_url=vision_model.server_url,
-                model_name=vision_model.model,
-                provider=vision_model.driver,
-                api_key=vision_model.api_key,
-                api_base=vision_model.api_base,
-                timeout=vision_model.timeout,
-                supports_vision=True,
-                thinking=(
-                    vision_model.thinking.model_dump()
-                    if vision_model.thinking is not None
-                    else None
-                ),
-            )
-            self._vision_broker = vision_broker or VisionBroker(
-                dedicated_vision_llm,
-                self._artifact_store,
-                model_name=vision_model.model,
-                max_tokens=self._config.vision_max_tokens,
-            )
-        self._session_manager.set_drop_callback(self._cleanup_session_assets)
-        self._register_builtin_tools(disable_tools=disable_tools)
-        self._cache_plan = build_cache_plan(
-            provider=self._main_model.driver,
-            model=self._main_model.model,
-            server_url=self._main_model.server_url,
-            system_prompt=self._system_prompt,
-            tool_schemas=[t["function"] for t in self._registry.all_schemas()],
-            estimator=self._token_estimator,
-        )
-        # Loop detection
-        self._max_consecutive_same_tool = self._config.max_consecutive_same_tool
+        self._restore_staging_config()
 
     # ------------------------------------------------------------------
     # Backward-compatible attribute mirrors (default session)
@@ -354,7 +245,7 @@ class Agent:
 
     @property
     def config(self) -> AppConfig:
-        return self._config
+        return self._staging_config
 
     @property
     def memory(self) -> UserMemory:
@@ -362,7 +253,48 @@ class Agent:
 
     @property
     def registry(self) -> ToolRegistry:
-        return self._registry
+        return self._execution_dependencies.registry
+
+    @property
+    def _llm(self) -> LLMProvider:
+        """Compatibility mirror for the active execution generation."""
+        return self._execution_dependencies.llm
+
+    @property
+    def _registry(self) -> ToolRegistry:
+        """Compatibility mirror for the active execution generation."""
+        return self._execution_dependencies.registry
+
+    @property
+    def _executor(self) -> VerifiedToolExecutor:
+        """Compatibility mirror for the active execution generation."""
+        return self._execution_dependencies.executor
+
+    @property
+    def _vision_broker(self) -> VisionBroker | None:
+        """Compatibility mirror for the active execution generation."""
+        return self._execution_dependencies.vision_broker
+
+    @property
+    def _execution_dependencies(self) -> ExecutionDependencies:
+        return self._dependencies.execution
+
+    def _restore_staging_config(self) -> None:
+        committed = self._execution_dependencies.config
+        snapshot = committed.model_copy(deep=True)
+        for field_name in type(committed).model_fields:
+            setattr(
+                self._staging_config,
+                field_name,
+                getattr(snapshot, field_name),
+            )
+
+    def _publish_execution_dependencies(
+        self,
+        execution: ExecutionDependencies,
+    ) -> None:
+        self._dependencies = replace(self._dependencies, execution=execution)
+        self._restore_staging_config()
 
     def _get_state(self, session_id: str) -> SessionState:
         if not session_id:
@@ -404,7 +336,11 @@ class Agent:
         resolved_session_id = session_id or self._active_session_id
         state = self._get_state(resolved_session_id)
         state.cancelled = True
-        self._llm.cancel(session_id or None)
+        execution = self._running_executions.get(
+            resolved_session_id,
+            self._execution_dependencies,
+        )
+        execution.llm.cancel(session_id or None)
         if state.tool_task is not None and not state.tool_task.done():
             state.tool_task.cancel()
 
@@ -413,7 +349,7 @@ class Agent:
 
     def reset_cancelled(self) -> None:
         self._get_state(self._active_session_id).cancelled = False
-        self._llm.reset_cancelled()
+        self._execution_dependencies.llm.reset_cancelled()
 
     # ------------------------------------------------------------------
     # Tool loop detection
@@ -424,6 +360,7 @@ class Agent:
         tool_name: str,
         arguments: dict[str, Any],
         history: list[str],
+        max_consecutive_same_tool: int,
     ) -> tuple[bool, str]:
         """Check if we're in a tool calling loop. Returns (is_loop, reason).
 
@@ -441,10 +378,10 @@ class Agent:
         if len(history) > 20:
             history.pop(0)
 
-        if len(history) >= self._max_consecutive_same_tool:
-            recent = history[-self._max_consecutive_same_tool:]
+        if len(history) >= max_consecutive_same_tool:
+            recent = history[-max_consecutive_same_tool:]
             if all(t == call_sig for t in recent):
-                return True, f"Same tool '{tool_name}' with identical arguments called {self._max_consecutive_same_tool} times consecutively"
+                return True, f"Same tool '{tool_name}' with identical arguments called {max_consecutive_same_tool} times consecutively"
 
         return False, ""
 
@@ -489,12 +426,14 @@ class Agent:
         self,
         session_id: str,
         attachments: list[ImageAttachment] | None,
+        execution: ExecutionDependencies | None = None,
     ) -> list[dict[str, Any]]:
         """Convert user image attachments into neutral content blocks."""
         if not attachments:
             return []
         from pc_assistant.vision.preprocess import image_block_from_file
 
+        config = (execution or self._execution_dependencies).config
         blocks: list[dict[str, Any]] = []
         for att in attachments:
             block = None
@@ -532,8 +471,8 @@ class Agent:
                 except (ValueError, OSError):
                     image_block = image_block_from_file(
                         attachment_path,
-                        max_side=self._config.vision_max_side,
-                        quality=self._config.vision_jpeg_quality,
+                        max_side=config.vision_max_side,
+                        quality=config.vision_jpeg_quality,
                     )
                     if image_block is None:
                         block = None
@@ -647,10 +586,11 @@ class Agent:
 
     async def get_status(self) -> dict[str, Any]:
         state = self._get_state(self._active_session_id)
+        execution = self._execution_dependencies
         return {
-            "provider": self._main_model.provider_name,
-            "model": self._main_model.alias,
-            "upstream_model": self._main_model.model or "default",
+            "provider": execution.resolved_model.provider_name,
+            "model": execution.resolved_model.alias,
+            "upstream_model": execution.resolved_model.model or "default",
             "status": state.status,
             "connected": self._connected,
             "platform": get_platform(),
@@ -660,8 +600,8 @@ class Agent:
             "total_iterations": state.total_iterations,
             "conversation_turns": len([m for m in state.conversation.get_messages() if m["role"] == "user"]),
             "memory_items": len(self._memory),
-            "tools": self._registry.list_tools(),
-            "working_directory": self._config.working_directory,
+            "tools": execution.registry.list_tools(),
+            "working_directory": execution.config.working_directory,
             "active_sessions": len(self.session_stats()),
         }
 
@@ -689,107 +629,55 @@ class Agent:
         cache plan, which is safe between turns and avoids a daemon restart.
         Injected test/custom providers are never replaced implicitly.
         """
-        dynamic = {
+        supported = {
             "max_iterations", "max_tokens", "max_total_tool_calls",
             "max_consecutive_tool_calls", "max_consecutive_same_tool",
             "context_window_budget", "llm_temperature", "llm_compact_enabled",
             "auto_compact_enabled", "auto_compact_threshold",
-            "trace_enabled", "vision_max_side", "vision_jpeg_quality",
-        }
-        provider_fields = {
+            "vision_max_side", "vision_jpeg_quality",
             "llm_provider", "llm_server_url", "llm_model_name", "llm_api_key",
             "llm_api_base", "default_model", "token_family",
             "fallback_enabled", "fallback_model",
+            "reflection_enabled", "reflection_threshold",
+            "vision_enabled", "vision_model", "vision_provider",
+            "vision_server_url", "vision_model_name", "vision_api_key",
+            "vision_api_base", "vision_timeout", "vision_max_tokens",
         }
-        if field_name in dynamic:
-            return {"applied": True, "field": field_name, "restart_required": False}
-        if field_name not in provider_fields:
+        if field_name not in supported:
+            self._restore_staging_config()
             return {"applied": False, "field": field_name, "restart_required": True}
-        if self._llm_injected:
-            return {"applied": False, "field": field_name, "restart_required": True}
-
-        model = self._config.resolve_model()
-        primary_candidate = LLMProvider(
-            server_url=model.server_url,
-            model_name=model.model,
-            provider=model.driver,
-            api_key=model.api_key,
-            api_base=model.api_base,
-            timeout=model.timeout,
-            supports_vision=model.supports_vision,
-            thinking=model.thinking.model_dump() if model.thinking is not None else None,
-        )
-        fallback_model = self._config.resolve_fallback_model()
-        fallback_candidate = None
-        if fallback_model is not None and fallback_model.alias != model.alias:
-            fallback_candidate = LLMProvider(
-                server_url=fallback_model.server_url,
-                model_name=fallback_model.model,
-                provider=fallback_model.driver,
-                api_key=fallback_model.api_key,
-                api_base=fallback_model.api_base,
-                timeout=fallback_model.timeout,
-                supports_vision=fallback_model.supports_vision,
-                thinking=(fallback_model.thinking.model_dump() if fallback_model.thinking else None),
+        try:
+            candidate = self._factory.rebuild_execution_dependencies(
+                self._execution_dependencies,
+                self._staging_config,
+                self._dependencies,
+                extra_tools=tuple(self._extra_tools),
+                disable_tools=self._tools_disabled,
             )
-        candidate = FailoverLLMProvider(primary_candidate, fallback_candidate)
-        self._main_model = model
-        self._llm = candidate
-        self._token_estimator = TokenEstimator(
-            normalize_family(model.token_family or self._config.token_family, model.model),
-        )
-        self._cache_plan = build_cache_plan(
-            provider=model.driver,
-            model=model.model,
-            server_url=model.server_url,
-            system_prompt=self._system_prompt,
-            tool_schemas=[t["function"] for t in self._registry.all_schemas()],
-            estimator=self._token_estimator,
-        )
-        self._planner = AgentPlanner(self._llm)
-        # A text-only main model needs the dedicated vision broker for image
-        # attachments. Create it lazily so switching between visual and text
-        # models does not require a service restart.
-        if self._config.vision_enabled and not self._llm.supports_vision and self._vision_broker is None:
-            vision_model = self._config.resolve_vision_model()
-            vision_llm = LLMProvider(
-                server_url=vision_model.server_url,
-                model_name=vision_model.model,
-                provider=vision_model.driver,
-                api_key=vision_model.api_key,
-                api_base=vision_model.api_base,
-                timeout=vision_model.timeout,
-                supports_vision=True,
-                thinking=vision_model.thinking.model_dump() if vision_model.thinking else None,
-            )
-            self._vision_broker = VisionBroker(
-                vision_llm,
-                self._artifact_store,
-                model_name=vision_model.model,
-                max_tokens=self._config.vision_max_tokens,
-            )
-            if self._registry.get("inspect_image") is None:
-                self._registry.register(ImageInspectTool(self._vision_broker))
-        if self._reflection is not None:
-            self._reflection = ReflectionChecker(
-                self._llm,
-                threshold=self._config.reflection_threshold,
-            )
+        except Exception as exc:
+            self._restore_staging_config()
+            return {
+                "applied": False,
+                "field": field_name,
+                "restart_required": True,
+                "error": str(exc),
+            }
+        self._publish_execution_dependencies(candidate)
         return {"applied": True, "field": field_name, "restart_required": False}
 
     def switch_model(self, alias: str) -> dict[str, Any]:
         """Switch the active catalog model between turns without a restart."""
         alias = alias.strip()
-        if not self._config.models:
+        if not self._staging_config.models:
             return {"applied": False, "error": "No model catalog is configured"}
-        if alias not in self._config.models:
+        if alias not in self._staging_config.models:
             return {
                 "applied": False,
                 "error": f"Unknown model '{alias}'",
-                "allowed_models": sorted(self._config.models),
+                "allowed_models": sorted(self._staging_config.models),
                 "instruction": "Choose one allowed model alias and retry.",
             }
-        self._config.default_model = alias
+        self._staging_config.default_model = alias
         result = self.apply_config_change("default_model")
         result["model"] = alias
         return result
@@ -813,23 +701,32 @@ class Agent:
 
     def clear_tools(self) -> None:
         """Unregister all tools (headless / benchmark no-tools mode)."""
-        self._registry.clear()
+        candidate = self._factory.rebuild_execution_dependencies(
+            self._execution_dependencies,
+            self._staging_config,
+            self._dependencies,
+            extra_tools=(),
+            disable_tools=True,
+            force_registry_rebuild=True,
+        )
+        self._extra_tools.clear()
+        self._tools_disabled = True
+        self._publish_execution_dependencies(candidate)
 
     async def health_check(self) -> bool:
-        result = await self._llm.health_check()
+        result = await self._execution_dependencies.llm.health_check()
         self._connected = result
         return result
 
-    def _post_verify_screen(self, tool_name: str, arguments: dict[str, Any]) -> Awaitable[str]:
-        """Advisory post-action screen capture for the verifier's post-verify rule."""
+    def _make_post_verify_callback(self, config: AppConfig) -> Any:
         from pc_assistant.vision.preprocess import capture_block
 
-        async def _verify() -> str:
+        async def _verify(tool_name: str, arguments: dict[str, Any]) -> str:
             block = await asyncio.to_thread(
                 capture_block,
                 None,
-                max_side=self._config.vision_max_side,
-                quality=self._config.vision_jpeg_quality,
+                max_side=config.vision_max_side,
+                quality=config.vision_jpeg_quality,
             )
             if block is None:
                 return "post-verify: screen capture unavailable"
@@ -837,7 +734,7 @@ class Agent:
             h = block.get("height") or 0
             return f"post-verify: captured {w}x{h} screen after {tool_name}({arguments.get('action', '?')})"
 
-        return _verify()
+        return _verify
 
     async def verify_tool_call(
         self,
@@ -845,59 +742,24 @@ class Agent:
         arguments: dict[str, Any],
         confirm_callback: ConfirmFn | None = None,
     ) -> Verdict:
-        return await self._verifier.verify(tool_name, arguments, confirm_callback=confirm_callback)
-
-    def _register_builtin_tools(self, *, disable_tools: bool = False) -> None:
-        if disable_tools:
-            return
-        builtin_tools = [
-            ReadFileTool(working_directory=self._config.working_directory),
-            WriteFileTool(working_directory=self._config.working_directory),
-            ShellTool(default_timeout=self._config.shell_timeout),
-            WebSearchTool(),
-            WebFetchTool(),
-            ClipboardTool(),
-            MemoryTool(memory=self._memory, episodic=self._episodic_memory),
-            WeatherTool(),
-            ExchangeTool(),
-            WindowTool(),
-            NotificationTool(),
-            UITool(
-                ui_backend=self._config.ui_backend,
-                artifact_dir=self._artifact_store.root / "screenshots",
-            ),
-            ScreenTool(
-                grid_enabled=self._config.screen_grid_enabled,
-                max_side=self._config.vision_max_side,
-                jpeg_quality=self._config.vision_jpeg_quality,
-                artifact_dir=self._artifact_store.root / "screenshots",
-            ),
-            PressKeyTool(),
-            TypeTextTool(),
-            HotkeyTool(),
-            MouseTool(),
-            SchedulerTool(self._runtime_paths.data / "assistant.db"),
-            ScreenshotTool(
-                self._artifact_store,
-                self._artifact_store.root / "screenshots",
-            ),
-            ArtifactPrepareTool(
-                self._artifact_store,
-                working_directory=self._config.working_directory,
-            ),
-        ]
-        if self._vision_broker is not None:
-            builtin_tools.append(ImageInspectTool(self._vision_broker))
-        builtin_tools.append(DescribeTool(registry=self._registry))
-        for tool in builtin_tools:
-            self._registry.register(tool)
-
-        scheduler = self._registry.get("schedule")
-        if scheduler is not None:
-            scheduler.set_agent(self)
+        return await self._execution_dependencies.verifier.verify(
+            tool_name,
+            arguments,
+            confirm_callback=confirm_callback,
+        )
 
     def register_tool(self, tool: Any) -> None:
-        self._registry.register(tool)
+        extra_tools = tuple([*self._extra_tools, tool])
+        candidate = self._factory.rebuild_execution_dependencies(
+            self._execution_dependencies,
+            self._staging_config,
+            self._dependencies,
+            extra_tools=extra_tools,
+            disable_tools=self._tools_disabled,
+            force_registry_rebuild=True,
+        )
+        self._extra_tools.append(tool)
+        self._publish_execution_dependencies(candidate)
 
     @staticmethod
     def _ensure_system_first(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -915,6 +777,7 @@ class Agent:
         self,
         state: SessionState,
         *,
+        execution: ExecutionDependencies,
         iteration: int,
         prompt_tokens: int,
         completion_tokens: int,
@@ -931,7 +794,7 @@ class Agent:
     ) -> None:
         self._trace.record_call(
             session_id=state.session_id,
-            model=self._main_model.alias,
+            model=execution.resolved_model.alias,
             iteration=iteration,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
@@ -949,7 +812,7 @@ class Agent:
         if messages and prompt_tokens > 0:
             from pc_assistant.model_adapter.content import text_content
             prompt_text = "\n".join(text_content(m.get("content", "")) for m in messages)
-            self._token_estimator.calibrate(prompt_tokens, prompt_text)
+            execution.token_estimator.calibrate(prompt_tokens, prompt_text)
 
     def _record_turn(
         self,
@@ -977,10 +840,17 @@ class Agent:
             evidence_satisfied=evidence_satisfied,
         )
 
-    async def _compaction_llm_call(self, messages: list[dict[str, Any]]) -> str:
+    async def _compaction_llm_call(
+        self,
+        execution: ExecutionDependencies,
+        messages: list[dict[str, Any]],
+    ) -> str:
         # Prefer the dedicated local vision-model provider when configured; it
         # is used here as a small text summarizer and receives no tools/images.
-        provider = getattr(self._vision_broker, "_provider", None) or self._llm
+        provider = (
+            getattr(execution.vision_broker, "_provider", None)
+            or execution.llm
+        )
         resp: LLMResponse = await provider.chat(messages, tools=None, max_tokens=400, cache_control=None)
         if resp.finish_reason == "error" or resp.content.startswith("LLM request failed"):
             raise RuntimeError(resp.content)
@@ -1010,14 +880,21 @@ class Agent:
         scope_token = set_memory_scope(derive_memory_scope(state.session_id))
         try:
             async with state.run_lock:
-                async for event in self._run_serialized(
-                    state,
-                    user_input,
-                    session_id=resolved_session_id,
-                    confirm_callback=confirm_callback,
-                    attachments=attachments,
-                ):
-                    yield event
+                execution = self._execution_dependencies
+                self._running_executions[resolved_session_id] = execution
+                try:
+                    async for event in self._run_serialized(
+                        state,
+                        user_input,
+                        execution=execution,
+                        session_id=resolved_session_id,
+                        confirm_callback=confirm_callback,
+                        attachments=attachments,
+                    ):
+                        yield event
+                finally:
+                    if self._running_executions.get(resolved_session_id) is execution:
+                        self._running_executions.pop(resolved_session_id, None)
         finally:
             reset_memory_scope(scope_token)
 
@@ -1026,6 +903,7 @@ class Agent:
         state: SessionState,
         user_input: str,
         *,
+        execution: ExecutionDependencies,
         session_id: str,
         confirm_callback: ConfirmFn | None,
         attachments: list[ImageAttachment] | None,
@@ -1036,7 +914,11 @@ class Agent:
         state.last_outcome = "running"
         state.mark_snapshot()
 
-        attachment_blocks = self._resolve_attachments(state.session_id, attachments)
+        attachment_blocks = self._resolve_attachments(
+            state.session_id,
+            attachments,
+            execution,
+        )
         if attachments and not attachment_blocks:
             yield AgentEvent(
                 type="error",
@@ -1044,7 +926,11 @@ class Agent:
             )
             state.status = "ready"
             return
-        if attachment_blocks and not self._llm.supports_vision and self._vision_broker is None:
+        if (
+            attachment_blocks
+            and not execution.llm.supports_vision
+            and execution.vision_broker is None
+        ):
             yield AgentEvent(
                 type="error",
                 content=(
@@ -1060,12 +946,13 @@ class Agent:
         turn_base_prompt_tokens = state.total_prompt_tokens
         turn_base_completion_tokens = state.total_completion_tokens
         evidence_required = self._evidence.requires_evidence(user_input)
-        vision_required = bool(attachment_blocks and not self._llm.supports_vision)
+        vision_required = bool(attachment_blocks and not execution.llm.supports_vision)
         successful_evidence_results = 0
         try:
             async for event in self._run_loop(
                 state,
                 user_input,
+                execution=execution,
                 evidence_required=evidence_required,
                 vision_required=vision_required,
                 confirm_fn=confirm_fn,
@@ -1103,6 +990,7 @@ class Agent:
         state: SessionState,
         user_input: str,
         *,
+        execution: ExecutionDependencies,
         evidence_required: bool,
         vision_required: bool = False,
         confirm_fn: ConfirmFn | None = None,
@@ -1112,9 +1000,9 @@ class Agent:
 
         plan: StructuredPlan | None = None
         if AgentPlanner.should_plan(user_input):
-            plan = await self._planner.plan(
+            plan = await execution.planner.plan(
                 user_input,
-                available_tools=self._registry.list_tools(),
+                available_tools=execution.registry.list_tools(),
             )
             if plan is not None:
                 yield AgentEvent(type="plan", content=plan.to_prompt())
@@ -1140,7 +1028,8 @@ class Agent:
 
         # Automatic compaction changes only the prompt view.  The canonical
         # transcript remains intact for persistence, export, and later review.
-        effective_budget = self._config.effective_context_window_budget()
+        config = execution.config
+        effective_budget = config.effective_context_window_budget()
         compaction_event: AgentEvent | None = None
         canonical_messages = conv.get_canonical_messages_for_llm_raw()
         from pc_assistant.context.tags import (
@@ -1154,18 +1043,22 @@ class Agent:
             for m in canonical_messages
         )
         should_summarize = (
-            self._config.auto_compact_enabled
-            and self._config.llm_compact_enabled
+            config.auto_compact_enabled
+            and config.llm_compact_enabled
             and effective_budget > 0
             and dialogue_turns > 6
-            and conv.estimate_token_count() >= effective_budget * self._config.auto_compact_threshold
+            and conv.estimate_token_count() >= effective_budget * config.auto_compact_threshold
             and dialogue_turns - 3 > conv.context_summary_turns
             and not canonical_is_lossy
         )
         if should_summarize:
             async def _hydrate_for_compaction(messages: list[dict[str, Any]]) -> str:
-                prepared = self._prepare_model_messages(state.session_id, messages)
-                return await self._compaction_llm_call(prepared)
+                prepared = self._prepare_model_messages(
+                    execution,
+                    state.session_id,
+                    messages,
+                )
+                return await self._compaction_llm_call(execution, prepared)
 
             summarized = await summarize_prompt_history(
                 canonical_messages, keep_recent_turns=3,
@@ -1185,9 +1078,9 @@ class Agent:
         empty_response_count = 0
         max_empty_retries = 1
         total_tool_calls = 0
-        max_total_tool_calls = self._config.max_total_tool_calls
+        max_total_tool_calls = config.max_total_tool_calls
         consecutive_tool_without_answer = 0
-        max_consecutive_tool_calls = self._config.max_consecutive_tool_calls
+        max_consecutive_tool_calls = config.max_consecutive_tool_calls
         if compaction_event is not None:
             yield compaction_event
         turn_tool_calls = 0
@@ -1210,7 +1103,7 @@ class Agent:
             )
         turn_context = "\n\n".join(turn_instructions)
 
-        for iteration in range(self._config.max_iterations):
+        for iteration in range(config.max_iterations):
             if state.cancelled:
                 state.last_outcome = "cancelled"
                 yield AgentEvent(type="cancelled", content="Operation cancelled by user.", iteration=iteration)
@@ -1224,16 +1117,23 @@ class Agent:
             # the provider context window. Keep the static core schemas in the
             # request (and therefore cacheable) while reserving room for them
             # and for the requested completion before trimming history.
-            tools = self._registry.all_schemas() if len(self._registry) > 0 else None
+            tools = (
+                [
+                    {"type": "function", "function": copy.deepcopy(schema)}
+                    for schema in execution.tool_schemas
+                ]
+                if execution.tool_schemas
+                else None
+            )
             schema_tokens = 0
             if tools:
-                schema_tokens = self._token_estimator.text_tokens(
+                schema_tokens = execution.token_estimator.text_tokens(
                     json.dumps(tools, ensure_ascii=False, sort_keys=True),
                 )
             message_budget, request_max_tokens = allocate_context_budget(
-                self._config.effective_context_window_budget(),
+                config.effective_context_window_budget(),
                 schema_tokens,
-                self._config.max_tokens,
+                config.max_tokens,
             )
             if message_budget <= 0 or request_max_tokens <= 0:
                 state.last_outcome = "error"
@@ -1261,8 +1161,12 @@ class Agent:
                 budget=message_budget,
             )
             messages = self._ensure_system_first(messages)
-            messages = self._prepare_model_messages(state.session_id, messages)
-            if self._token_estimator.messages_tokens(messages) > message_budget:
+            messages = self._prepare_model_messages(
+                execution,
+                state.session_id,
+                messages,
+            )
+            if execution.token_estimator.messages_tokens(messages) > message_budget:
                 state.last_outcome = "error"
                 state.status = "ready"
                 yield AgentEvent(
@@ -1292,13 +1196,17 @@ class Agent:
             call_error = ""
 
             try:
-                async for chunk in self._llm.chat_stream(
+                async for chunk in execution.llm.chat_stream(
                     messages,
                     tools=tools,
-                    temperature=self._config.llm_temperature,
+                    temperature=config.llm_temperature,
                     max_tokens=request_max_tokens,
                     cancel_key=state.session_id or None,
-                    cache_control=self._cache_plan.cache_control_hint() if self._cache_plan.supports_caching else None,
+                    cache_control=(
+                        execution.cache_plan.cache_control_hint()
+                        if execution.cache_plan.supports_caching
+                        else None
+                    ),
                 ):
                     if llm_ttft is None:
                         llm_ttft = (time.monotonic() - llm_start) * 1000
@@ -1388,7 +1296,7 @@ class Agent:
                 error_msg = str(e)
                 if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
                     error_msg = (
-                        f"LLM request timed out after {self._config.llm_timeout}s. "
+                        f"LLM request timed out after {config.llm_timeout}s. "
                         "Possible causes: prompt too long, model is busy, or server overloaded. "
                         "You can increase PC_LLM_TIMEOUT in config if needed."
                     )
@@ -1401,6 +1309,7 @@ class Agent:
 
             self._record_llm_call(
                 state,
+                execution=execution,
                 iteration=iteration,
                 prompt_tokens=call_usage.get("prompt_tokens") or call_usage.get("input_tokens") or 0,
                 completion_tokens=call_usage.get("completion_tokens") or call_usage.get("output_tokens") or 0,
@@ -1470,9 +1379,14 @@ class Agent:
                     # The model-facing tool vocabulary is intentionally
                     # semantic; normalize it to stable internal names before
                     # safety checks, idempotency, and execution.
-                    tool_name, arguments = self._registry.normalize_call(tool_name, arguments)
+                    tool_name, arguments = execution.registry.normalize_call(tool_name, arguments)
 
-                    is_loop, loop_reason = self._check_tool_loop(tool_name, arguments, state.tool_call_history)
+                    is_loop, loop_reason = self._check_tool_loop(
+                        tool_name,
+                        arguments,
+                        state.tool_call_history,
+                        config.max_consecutive_same_tool,
+                    )
                     if is_loop:
                         loop_result = _error_result(
                             tool_name,
@@ -1481,7 +1395,7 @@ class Agent:
                                 "error": f"Loop detected: {loop_reason}",
                                 "code": "loop_detected",
                             },
-                            self._registry,
+                            execution.registry,
                         )
                         yield AgentEvent(
                             type="tool_result",
@@ -1495,7 +1409,7 @@ class Agent:
                         state.tool_call_history.clear()
                         break
 
-                    verdict, prepared_call = await self._executor.authorize(
+                    verdict, prepared_call = await execution.executor.authorize(
                         tool_name,
                         arguments,
                         confirm_callback=confirm_fn,
@@ -1537,7 +1451,7 @@ class Agent:
                     turn_tool_calls += 1
                     step_counter += 1
 
-                    tool_obj = self._registry.get(tool_name)
+                    tool_obj = execution.registry.get(tool_name)
                     idem_key = ""
                     if tool_obj is not None and tool_obj.is_side_effecting:
                         idem_key = IdempotencyLog.make_key(run_id, step_counter, tool_name, arguments)
@@ -1549,7 +1463,7 @@ class Agent:
                             inline_blocks = self._inline_image_blocks(state.session_id, tool_name, cached)
                             if inline_blocks is not None:
                                 conv.add_tool_result_blocks(tool_call_id, inline_blocks, tool_name=tool_name)
-                                if not self._llm.supports_vision:
+                                if not execution.llm.supports_vision:
                                     vision_required = True
                             else:
                                 conv.add_tool_result(
@@ -1612,7 +1526,7 @@ class Agent:
                         scheduler_context = bind_scheduler_session(state.session_id)
                     try:
                         try:
-                            execute_coro = self._executor.commit(prepared_call)
+                            execute_coro = execution.executor.commit(prepared_call)
                             state.tool_task = asyncio.create_task(execute_coro)
                             try:
                                 result = await state.tool_task
@@ -1633,7 +1547,7 @@ class Agent:
                             if isinstance(safe_result, dict)
                             else ""
                         )
-                        if result_image_id and not self._llm.supports_vision:
+                        if result_image_id and not execution.llm.supports_vision:
                             vision_required = True
                         if (
                             tool_name == "inspect_image"
@@ -1643,7 +1557,7 @@ class Agent:
                         ):
                             vision_observation_calls += 1
                         result_str = str(safe_result)
-                        if result_image_id and not self._llm.supports_vision:
+                        if result_image_id and not execution.llm.supports_vision:
                             result_str += (
                                 f"\n[Image available as image_id={result_image_id}. "
                                 "Call inspect_image to inspect pixels. Do not use files or run_command.]"
@@ -1654,7 +1568,7 @@ class Agent:
                             self._idempotency.record(idem_key, result)
                         if inline_blocks is not None:
                             conv.add_tool_result_blocks(tool_call_id, inline_blocks, tool_name=tool_name)
-                            if not self._llm.supports_vision:
+                            if not execution.llm.supports_vision:
                                 vision_required = True
                             result_str = self._inline_image_note(result)
                         else:
@@ -1696,7 +1610,7 @@ class Agent:
                             tool_name,
                             arguments,
                             {"error": error_msg, "exception_type": type(e).__name__},
-                            self._registry,
+                            execution.registry,
                         )
                         conv.add_tool_result(tool_call_id, error_result, tool_name=tool_name)
                         state.status = "thinking"
@@ -1755,12 +1669,19 @@ class Agent:
                 empty_response_count = 0
 
                 if (
-                    self._reflection is not None
-                    and iteration < self._config.max_iterations - 1
-                    and self._reflection.should_reflect(user_input, clean_content, turn_tool_calls)
+                    execution.reflection is not None
+                    and iteration < config.max_iterations - 1
+                    and execution.reflection.should_reflect(
+                        user_input,
+                        clean_content,
+                        turn_tool_calls,
+                    )
                 ):
                     try:
-                        passes, critique = await self._reflection.check(user_input, clean_content)
+                        passes, critique = await execution.reflection.check(
+                            user_input,
+                            clean_content,
+                        )
                         if not passes and critique:
                             conv.add_assistant(clean_content)
                             conv.add_user(f"[System reflection] Your answer may be incomplete: {critique}. Please improve it.")
@@ -1788,17 +1709,18 @@ class Agent:
         yield AgentEvent(
             type="iteration_limit",
             content="Maximum iterations reached without a final answer.",
-            iteration=self._config.max_iterations,
+            iteration=config.max_iterations,
         )
         state.status = "ready"
 
     def _prepare_model_messages(
         self,
+        execution: ExecutionDependencies,
         session_id: str,
         messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         """Keep image bytes request-local and away from text-only main models."""
-        if self._llm.supports_vision:
+        if execution.llm.supports_vision:
             return self._artifact_store.hydrate_messages(session_id, messages)
         return self._artifact_store.manifest_messages(session_id, messages)
 
@@ -1819,5 +1741,5 @@ class Agent:
         self._default_state.conversation.clear()
         self._session_transcripts.delete("")
         self._artifact_store.cleanup_session("")
-        self._system_prompt = build_system_prompt()
+        self._system_prompt = self._dependencies.system_prompt
         self._default_state.conversation.set_system_context(self._system_prompt)

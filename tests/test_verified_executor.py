@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import pytest
 
+from pc_assistant.desktop_session import DesktopSessionError
 from pc_assistant.harness.audit import AuditLogger
+from pc_assistant.harness import executor as executor_module
 from pc_assistant.harness.executor import PreparedToolCall, VerifiedToolExecutor
 from pc_assistant.harness.safety import SafetyChecker
 from pc_assistant.harness.verifier import Verifier
@@ -83,15 +85,54 @@ def _executor(tmp_path, events):
 
 
 @pytest.mark.asyncio
-async def test_commit_orders_execution_before_postcondition(tmp_path):
+async def test_commit_orders_execution_before_postcondition(tmp_path, monkeypatch):
     events: list[str] = []
     executor = _executor(tmp_path, events)
+    monkeypatch.setattr(
+        executor_module,
+        "ensure_desktop_session",
+        lambda tool_name: events.append("recover"),
+    )
     verdict, prepared = await executor.authorize("mouse", {"action": "click"})
 
     assert verdict.accepted and prepared is not None
     assert events == []
     assert await executor.commit(prepared) == "ok"
-    assert events == ["execute", "post_verify"]
+    assert events == ["recover", "execute", "post_verify"]
+
+
+@pytest.mark.asyncio
+async def test_desktop_recovery_failure_prevents_execution_and_postcondition(tmp_path, monkeypatch):
+    events: list[str] = []
+    executor = _executor(tmp_path, events)
+
+    def fail_recovery(tool_name):
+        raise DesktopSessionError("No active graphical session found")
+
+    monkeypatch.setattr(executor_module, "ensure_desktop_session", fail_recovery)
+    verdict, prepared = await executor.authorize("mouse", {"action": "click"})
+
+    assert verdict.accepted and prepared is not None
+    result = await executor.commit(prepared)
+
+    assert result["error"] == "Tool execution failed: No active graphical session found"
+    assert result["exception_type"] == "DesktopSessionError"
+    assert result["tool"] == "mouse"
+    assert events == []
+
+
+@pytest.mark.asyncio
+async def test_non_desktop_tool_does_not_request_recovery(tmp_path, monkeypatch):
+    executor = _executor_for_tool(tmp_path, _SchemaTool())
+    monkeypatch.setattr(
+        executor_module,
+        "ensure_desktop_session",
+        lambda tool_name: pytest.fail("non-desktop tool requested recovery"),
+    )
+    _, prepared = await executor.authorize("schema_tool", {"action": "read"})
+    assert prepared is not None
+
+    assert await executor.commit(prepared) == {"action": "read"}
 
 
 @pytest.mark.asyncio

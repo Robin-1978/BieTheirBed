@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from pc_assistant.desktop_session import ensure_desktop_session, is_desktop_tool
 from pc_assistant.harness.confirm import ConfirmFn
 from pc_assistant.harness.refusal import Verdict
 from pc_assistant.harness.verifier import Verifier
@@ -81,6 +82,20 @@ class VerifiedToolExecutor:
         if prepared._consumed:
             raise RuntimeError("Authorized tool call has already been committed")
         prepared._consumed = True
+        if is_desktop_tool(prepared.tool_name):
+            try:
+                ensure_desktop_session(prepared.tool_name)
+            except Exception as exc:
+                result = {
+                    "error": f"Tool execution failed: {exc}",
+                    "exception_type": type(exc).__name__,
+                }
+                return _error_result(
+                    prepared.tool_name,
+                    prepared.arguments,
+                    result,
+                    self._registry,
+                )
         try:
             result = await self._registry._commit(prepared.tool_name, **prepared.arguments)
         except Exception as exc:
