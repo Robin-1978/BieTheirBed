@@ -369,12 +369,38 @@ def test_feishu_reasoning_is_muted_but_final_answer_is_not() -> None:
     card = state.build_card(final_chunk="结论")
     reasoning, divider, final = card["body"]["elements"]
 
-    assert reasoning["content"] == (
-        "<font color='grey'>💭 **思考**\n先检查状态</font>"
-    )
+    assert reasoning["content"] == "<font color='grey'>› 先检查状态</font>"
     assert divider == {"tag": "hr"}
     assert final["content"] == "结论"
     assert "<font" not in final["content"]
+
+
+def test_feishu_progress_timeline_preserves_event_order() -> None:
+    state = _StreamingCardState()
+    state.append_reasoning("先分析", iteration=1)
+    state.append_draft("我先查询天气", iteration=1)
+    state.add_tool_call("weather", {"location": "上海"}, iteration=1)
+    state.add_tool_result(
+        "weather",
+        {"status": "completed", "output": {"success": True}},
+        blocked=False,
+        iteration=1,
+    )
+    state.append_reasoning("根据结果判断", iteration=2)
+    state.append_draft("最终答案", iteration=2)
+    state.set_final_output("最终答案", iteration=2)
+
+    timeline, divider, final = state.build_card(
+        final_chunk="最终答案"
+    )["body"]["elements"]
+    rendered = timeline["content"]
+
+    assert rendered.index("› 先分析") < rendered.index("› 我先查询天气")
+    assert rendered.index("› 我先查询天气") < rendered.index("✓ `weather`")
+    assert rendered.index("✓ `weather`") < rendered.index("› 根据结果判断")
+    assert "› 最终答案" not in rendered
+    assert divider == {"tag": "hr"}
+    assert final["content"] == "最终答案"
 
 
 @pytest.mark.asyncio
@@ -411,7 +437,7 @@ def test_feishu_card_replaces_core_artifact_image_reference() -> None:
         "操作完成\n\n![屏幕截图](https://api.artifact.local/artifact-a)"
     )
 
-    assert rendered == "操作完成\n\n🖼️ 屏幕截图（见附件）"
+    assert rendered == "操作完成\n\n图片：屏幕截图（见附件）"
     assert "api.artifact.local" not in rendered
 
 

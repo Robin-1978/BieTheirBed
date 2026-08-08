@@ -39,6 +39,11 @@ _CARD_MARKDOWN_CHARS = 3500
 _PROGRESS_REASONING_CHARS = 700
 _PROGRESS_STEPS_CHARS = 1000
 _PROGRESS_DRAFT_CHARS = 900
+_PROGRESS_TIMELINE_CHARS = (
+    _PROGRESS_REASONING_CHARS
+    + _PROGRESS_STEPS_CHARS
+    + _PROGRESS_DRAFT_CHARS
+)
 _TEXT_MESSAGE_CHARS = 4000
 
 for _proxy_name in ("NO_PROXY", "no_proxy"):
@@ -78,7 +83,7 @@ def _render_card_markdown(text: str) -> str:
 
     def replace_image(match: re.Match[str]) -> str:
         label = match.group(1).strip() or "图片"
-        return f"🖼️ {label}（见附件）"
+        return f"图片：{label}（见附件）"
 
     return _MARKDOWN_IMAGE.sub(replace_image, text)
 
@@ -170,6 +175,14 @@ class _ToolStep:
     arguments: dict[str, Any] = field(default_factory=dict)
     status: str = "running"
     detail: str = ""
+    iteration: int = 0
+
+
+@dataclass
+class _ThoughtStep:
+    source: str
+    content: str
+    iteration: int = 0
 
 
 @dataclass
@@ -365,66 +378,154 @@ class _StreamingCardState:
     """Channel-local projection of standard Core run events."""
 
     def __init__(self) -> None:
-        self.reasoning = ""
-        self.steps: list[_ToolStep] = []
-        self.draft = ""
+        self.timeline: list[_ThoughtStep | _ToolStep] = []
         self.final_output = ""
         self.error = ""
         self.phase = "thinking"
 
-    def append_reasoning(self, content: str) -> None:
-        self.reasoning += content
+    def _append_thought(
+        self,
+        source: str,
+        content: str,
+        iteration: int,
+    ) -> None:
+        if not content:
+            return
+        if self.timeline:
+            current = self.timeline[-1]
+            if (
+                isinstance(current, _ThoughtStep)
+                and current.source == source
+                and current.iteration == iteration
+            ):
+                current.content += content
+                return
+        self.timeline.append(
+            _ThoughtStep(
+                source=source,
+                content=content,
+                iteration=iteration,
+            )
+        )
 
-    def append_draft(self, content: str) -> None:
-        self.draft += content
+    def append_reasoning(self, content: str, *, iteration: int = 0) -> None:
+        self._append_thought("reasoning", content, iteration)
 
-    def set_final_output(self, content: str) -> None:
+    def append_draft(self, content: str, *, iteration: int = 0) -> None:
+        self._append_thought("content", content, iteration)
+
+    def set_final_output(self, content: str, *, iteration: int = 0) -> None:
         self.final_output = content
         self.phase = "done"
+        if not content or not self.timeline:
+            return
+        current = self.timeline[-1]
+        if not (
+            isinstance(current, _ThoughtStep)
+            and current.source == "content"
+            and current.iteration == iteration
+        ):
+            return
+        if current.content == content:
+            self.timeline.pop()
+        elif current.content.endswith(content):
+            current.content = current.content[: -len(content)].rstrip()
+            if not current.content:
+                self.timeline.pop()
 
-    def add_tool_call(self, name: str, arguments: dict[str, Any]) -> None:
+    def add_tool_call(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        iteration: int = 0,
+    ) -> None:
         self.phase = "working"
-        self.draft = ""
-        self.steps.append(_ToolStep(name=name, arguments=arguments))
+        self.timeline.append(
+            _ToolStep(
+                name=name,
+                arguments=arguments,
+                iteration=iteration,
+            )
+        )
 
-    def add_tool_result(self, name: str, result: Any, *, blocked: bool) -> None:
+    def add_tool_result(
+        self,
+        name: str,
+        result: Any,
+        *,
+        blocked: bool,
+        iteration: int = 0,
+    ) -> None:
         step = next(
             (
                 candidate
-                for candidate in reversed(self.steps)
-                if candidate.name == name and candidate.status == "running"
+                for candidate in reversed(self.timeline)
+                if isinstance(candidate, _ToolStep)
+                and candidate.name == name
+                and candidate.status == "running"
             ),
             None,
         )
         if step is None:
-            step = _ToolStep(name=name)
-            self.steps.append(step)
+            step = _ToolStep(name=name, iteration=iteration)
+            self.timeline.append(step)
         failed = _tool_result_failed(result, blocked=blocked)
         step.status = "failed" if failed else "completed"
         summary = _summarize_tool_result(result)
         step.detail = summary if failed or summary != "完成" else ""
 
-    def _render_steps(self) -> str:
-        rendered: list[str] = []
-        for step in self.steps:
-            if step.status == "running":
-                line = f"… `{step.name}`"
-                if step.arguments:
-                    line += f"\n`{_brief_json(step.arguments)}`"
-            elif step.status == "failed":
-                line = f"× `{step.name}`"
-                if step.detail:
-                    line += f" — {step.detail}"
+    @staticmethod
+    def _render_tool(step: _ToolStep) -> str:
+        if step.status == "running":
+            line = f"… `{step.name}`"
+            if step.arguments:
+                line += f"\n`{_brief_json(step.arguments)}`"
+        elif step.status == "failed":
+            line = f"× `{step.name}`"
+            if step.detail:
+                line += f" — {step.detail}"
+        else:
+            line = f"✓ `{step.name}`"
+            if step.detail:
+                line += f" — {step.detail}"
+        return line
+
+    def _render_timeline(self) -> str:
+        parts: list[str] = []
+        for entry in self.timeline:
+            if isinstance(entry, _ThoughtStep):
+                limit = (
+                    _PROGRESS_DRAFT_CHARS
+                    if entry.source == "content"
+                    else _PROGRESS_REASONING_CHARS
+                )
+                text = _tail(entry.content.strip(), limit)
+                if not text:
+                    continue
+                prefix = "" if entry.source == "notice" else "› "
+                parts.append(_render_muted_card_markdown(prefix + text))
             else:
-                line = f"✓ `{step.name}`"
-                if step.detail:
-                    line += f" — {step.detail}"
-            rendered.append(line)
-        return "\n\n".join(rendered)
+                parts.append(self._render_tool(entry))
+
+        selected: list[str] = []
+        total = 0
+        truncated = False
+        for part in reversed(parts):
+            added = len(part) + (2 if selected else 0)
+            if selected and total + added > _PROGRESS_TIMELINE_CHARS:
+                truncated = True
+                break
+            selected.append(part)
+            total += added
+        selected.reverse()
+        if truncated:
+            selected.insert(0, _render_muted_card_markdown("…"))
+        return "\n\n".join(selected)
 
     def add_notice(self, content: str) -> None:
         if content:
-            self.steps.append(f"ℹ️ {_tail(content, 220)}")
+            self._append_thought("notice", f"· {_tail(content, 220)}", 0)
 
     def set_error(self, content: str) -> None:
         self.error = content or "处理失败"
@@ -440,23 +541,12 @@ class _StreamingCardState:
         final_chunk: str | None = None,
     ) -> dict[str, Any]:
         elements: list[dict[str, Any]] = []
-        if self.reasoning:
+        timeline = self._render_timeline()
+        if timeline:
             elements.append(
                 {
                     "tag": "markdown",
-                    "content": _render_muted_card_markdown(
-                        "💭 **思考**\n"
-                        + _tail(self.reasoning, _PROGRESS_REASONING_CHARS)
-                    ),
-                }
-            )
-        if self.steps:
-            steps = self._render_steps()
-            elements.append(
-                {
-                    "tag": "markdown",
-                    "content": "**操作记录**\n"
-                    + _tail(steps, _PROGRESS_STEPS_CHARS),
+                    "content": timeline,
                 }
             )
         if final_chunk is not None:
@@ -465,41 +555,36 @@ class _StreamingCardState:
             elements.append(
                 {
                     "tag": "markdown",
-                    "content": final_chunk or "✅ 已完成",
+                    "content": final_chunk or "已完成",
                 }
             )
         elif self.error:
             if elements:
                 elements.append({"tag": "hr"})
             elements.append(
-                {"tag": "markdown", "content": f"❌ {self.error}"}
+                {"tag": "markdown", "content": f"× {self.error}"}
             )
         elif self.phase == "cancelled":
             if elements:
                 elements.append({"tag": "hr"})
             elements.append({"tag": "markdown", "content": "已停止"})
-        elif self.draft:
+        elif not timeline:
+            status = "正在调用工具…" if self.phase == "working" else "正在思考…"
             elements.append(
                 {
                     "tag": "markdown",
-                    "content": "✍️ "
-                    + _render_card_markdown(
-                        _tail(self.draft, _PROGRESS_DRAFT_CHARS)
-                    ),
+                    "content": _render_muted_card_markdown(status),
                 }
             )
-        else:
-            status = "⏳ 正在调用工具…" if self.phase == "working" else "⏳ 正在思考…"
-            elements.append({"tag": "markdown", "content": status})
 
         if self.phase == "error":
-            template, title = "red", "❌ 处理出错"
+            template, title = "red", "处理出错"
         elif self.phase == "cancelled":
             template, title = "grey", "已停止"
         elif final_chunk is not None:
-            template, title = "blue", f"💬 {ASSISTANT_NAME}"
+            template, title = "blue", ASSISTANT_NAME
         else:
-            template, title = "turquoise", f"⏳ {ASSISTANT_NAME} 处理中"
+            template, title = "turquoise", f"{ASSISTANT_NAME} · 处理中"
         return {
             "schema": "2.0",
             "header": {
@@ -846,10 +931,10 @@ class FeishuChannel:
                         _principal_for_log(open_id),
                     )
                     await asyncio.to_thread(
-                        self._send_text,
-                        open_id,
-                        f"❌ 处理失败：{type(exc).__name__}",
-                    )
+                    self._send_text,
+                    open_id,
+                    f"处理失败：{type(exc).__name__}",
+                )
         finally:
             await asyncio.to_thread(
                 self._remove_reaction,
@@ -892,7 +977,7 @@ class FeishuChannel:
         if text.strip().lower() == "/new":
             session = await client.create_session()
             self._bind_session(open_id, session)
-            await asyncio.to_thread(self._send_text, open_id, "✅ 已创建新会话")
+            await asyncio.to_thread(self._send_text, open_id, "已创建新会话")
             return
 
         session = await self._session_for(open_id)
@@ -1034,21 +1119,35 @@ class FeishuChannel:
                 start_card()
                 payload = event.payload
                 if event.event_type == "reasoning_delta":
-                    state.append_reasoning(payload.content)
+                    state.append_reasoning(
+                        payload.content,
+                        iteration=payload.iteration,
+                    )
                     update_requested.set()
                 elif event.event_type == "content_delta":
-                    state.append_draft(payload.content)
+                    state.append_draft(
+                        payload.content,
+                        iteration=payload.iteration,
+                    )
                     update_requested.set()
                 elif event.event_type == "final_output":
-                    state.set_final_output(payload.content)
+                    state.set_final_output(
+                        payload.content,
+                        iteration=payload.iteration,
+                    )
                 elif event.event_type == "tool_call":
-                    state.add_tool_call(payload.tool_name, payload.tool_args)
+                    state.add_tool_call(
+                        payload.tool_name,
+                        payload.tool_args,
+                        iteration=payload.iteration,
+                    )
                     update_requested.set()
                 elif event.event_type == "tool_result":
                     state.add_tool_result(
                         payload.tool_name,
                         payload.tool_result,
                         blocked=payload.blocked,
+                        iteration=payload.iteration,
                     )
                     update_requested.set()
                 elif event.event_type == "artifact" and payload.artifact:
@@ -1083,7 +1182,7 @@ class FeishuChannel:
             if state.phase != "done":
                 raise RuntimeError("Core completed without final_output event")
             rendered = _render_card_markdown(
-                state.final_output if state.final_output else "✅ 已完成"
+                state.final_output if state.final_output else "已完成"
             )
             chunks = _split_text(rendered)
             final_card = state.build_card(final_chunk=chunks[0])
@@ -1123,7 +1222,7 @@ class FeishuChannel:
                 await asyncio.to_thread(
                     self._send_card,
                     open_id,
-                    "已停止" if terminal == "cancelled" else f"❌ {state.error or terminal}",
+                    "已停止" if terminal == "cancelled" else f"× {state.error or terminal}",
                     "grey" if terminal == "cancelled" else "red",
                     "已停止" if terminal == "cancelled" else "处理出错",
                 )
@@ -1139,7 +1238,7 @@ class FeishuChannel:
             await asyncio.to_thread(
                 self._send_text,
                 open_id,
-                "⚠️ 附件交付失败：" + "、".join(delivery_failures),
+                "附件交付失败：" + "、".join(delivery_failures),
             )
 
     async def _handle_image(
@@ -1180,14 +1279,14 @@ class FeishuChannel:
             await asyncio.to_thread(
                 self._send_text,
                 open_id,
-                "🖼️ 图片已收到，请继续发送问题。",
+                "图片已收到，请继续发送问题。",
             )
         except Exception:
             logger.exception(
                 "Feishu image ingress failed principal=%s",
                 _principal_for_log(open_id),
             )
-            await asyncio.to_thread(self._send_text, open_id, "❌ 图片接收失败")
+            await asyncio.to_thread(self._send_text, open_id, "图片接收失败")
         finally:
             await asyncio.to_thread(
                 self._remove_reaction,
