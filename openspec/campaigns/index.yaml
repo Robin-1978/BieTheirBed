@@ -1,0 +1,11 @@
+schema: gs-harness/campaign-registry/v1
+default_campaign: agent-runtime-decomposition
+active:
+  - agent-runtime-decomposition
+campaigns:
+  agent-runtime-decomposition:
+    status: active
+    created_at: 2026-08-07
+    blueprint: docs/agent-runtime-decomposition-phases.md
+    blueprint_digest: sha256:665c9e99f4dbb85b250325f12d7de8dce730675e0f0fb817ef20615ba72bb0a8
+    campaign_digest: sha256:dbf9449eddef856c633052092ab9775c2f6faa647d57b4108ce6af28462394d4

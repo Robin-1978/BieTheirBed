@@ -1,22 +1,21 @@
 schema: spec-driven
 
 context: |
-  PC Assistant is a Python 3.10+ desktop AI agent with CLI/TUI and Feishu
-  entrypoints, an optional daemon transport, a session-isolated ReAct Agent,
+  PC Assistant is a Python 3.10+ desktop AI system with CLI/TUI and Feishu
+  clients, a service transport, session-isolated ReAct execution,
   provider-neutral model adapters, deterministic tool verification, desktop and
   MCP tools, structured context/memory, and pytest-based verification.
 
-  The architectural control path is: untrusted input -> Agent proposal ->
-  deterministic verifier/confirmation -> tool execution -> postcondition evidence.
-  Provider-native payloads and large binary encodings are request-boundary data,
-  not durable conversation content.
+  The principal control path is: untrusted input -> stochastic model proposal ->
+  deterministic verifier/confirmation -> single verified tool commit ->
+  postcondition evidence. Provider-native payloads and binary encodings are
+  request-boundary data, not durable conversation content.
 
-  The approved runtime target uses one configurable application runtime root
-  with sibling logs/, attachments/, and cache/ directories. Socket and PID files
-  may use the operating system's ephemeral runtime location.
-
-  The secure-multimodal-gui Campaign is in planning. Current inline image data
-  URLs are transitional and must not be treated as the target architecture.
+  The approved Agent Runtime Decomposition target uses thin CoreClient adapters,
+  a versioned Core API v1, CoreServer as the only production execution authority,
+  AgentRuntimePort as the Core-owned application port, AgentRuntime for session
+  lifecycle, and ReActLoop with ModelStep and ToolStep operations. The target is
+  a direct breaking cutover with no aliases, shims, or in-process client fallback.
 
 knowledge_base:
   architecture: docs/architecture.md
@@ -28,5 +27,5 @@ knowledge_base:
   historical_architecture_review: .trae/documents/full-architecture-review.md
   optimization_plan: docs/optimization-plan.md
   multimodal_vision: specs/MULTIMODAL-GUI-001.md
-  test_metadata: specs/TEST-001.md
-
+  agent_runtime_blueprint: docs/agent-runtime-decomposition-phases.md
+  agent_runtime_coverage: docs/agent-runtime-decomposition-coverage-matrix.yaml

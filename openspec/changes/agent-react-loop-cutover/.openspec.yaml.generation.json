@@ -1,0 +1,8 @@
+{
+  "schema": "gs-harness/generation-envelope/v1",
+  "generation": 1,
+  "value": {
+    "generation": 1,
+    "path": "/home/robin/ws/BieTheirBed/openspec/changes/agent-react-loop-cutover/.openspec.yaml"
+  }
+}

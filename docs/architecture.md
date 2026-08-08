@@ -31,7 +31,7 @@ semantics, and current channel/logging behavior can expose information that
 should remain internal or redacted.
 
 Mature foundations already present include a canonical provider-neutral message
-layer, provider adapters, typed configuration, an `AgentLike` service port,
+layer, provider adapters, typed configuration, an `AgentRuntimePort` service port,
 session isolation, deterministic safety/confirmation checks, tool schemas,
 idempotency, context assembly, and observability. These should not be rebuilt.
 
@@ -89,30 +89,28 @@ loop, calls one of several LLM providers, verifies proposed tool actions, and
 executes local or MCP-provided tools.
 
 ```text
-CLI / TUI / Feishu
+CLI / TUI / Feishu / App
         |
         v
-AgentLike boundary ----> Service client ----> daemon transport
-        |                                      |
-        +---------------- Agent <--------------+
-                           |
-             +-------------+--------------+
-             |             |              |
-          Session       Context        LLM Provider
-             |             |              |
-             +-------------+--------------+
-                           |
-                   Verifier / Safety
-                           |
-                   Tool Registry
-                           |
-              Built-in tools / MCP / GUI
-                           |
-       inbound <---- unified ArtifactStore ----> outbound
-                           |
-                  core artifact event
-                           |
-                    client delivery
+     CoreClient
+        |
+   versioned Core API
+        |
+    CoreServer
+        |
+   AgentRuntime
+      /       \
+ControlService  ReActLoop
+                    |
+             ModelStep / ToolStep
+                    |
+             Session / Context / LLM
+                    |
+             Verifier / ToolRegistry
+                    |
+              ArtifactStore
+                    |
+              client delivery
 ```
 
 The principal production invariant is:
@@ -134,16 +132,16 @@ authority merely by entering the context window.
 **Responsibilities:**
 
 - Parse CLI commands and configuration selection.
-- Render streaming `AgentEvent` output.
-- Translate interactive confirmation into the Agent confirmation boundary.
-- Adapt Feishu messages to session-scoped Agent requests.
+- Render streaming `RunEvent` output.
+- Translate interactive confirmation into a Core API confirmation command.
+- Adapt Feishu messages to session-scoped CoreClient requests.
 
-**Boundary:** presentation code consumes an Agent-like streaming interface. It
+**Boundary:** presentation code consumes the `CoreClient` interface. It
 must not execute side-effecting tools directly or reinterpret verifier verdicts.
 Clients also own channel-specific delivery of standard `artifact` events:
 Feishu uploads the referenced image/file, terminal clients render a bounded
 artifact reference, and future clients may present it using their own transport.
-The model and Agent never receive channel identifiers such as a Feishu `open_id`.
+The model and AgentRuntime never receive channel identifiers such as a Feishu `open_id`.
 
 ### 3.2 Service and transport
 
@@ -151,23 +149,27 @@ The model and Agent never receive channel identifiers such as a Feishu `open_id`
 
 **Responsibilities:**
 
-- Expose JSON-over-WebSocket requests and streamed events.
-- Prefer a daemon when available and fall back to an in-process Agent.
+- Expose the versioned Core API and ordered run events.
+- Keep CoreServer as the only production execution process; CoreClient never
+  falls back to an in-process Agent.
 - Scope runs, cancellation, confirmation, and status by session/client.
 
-**Public anchor:** `service/agent_like.py::AgentLike` is the intended common
-interface between local Agent and remote `ServiceClient`.
+**Target anchor:** `agent_runtime.contracts::AgentRuntimePort` is the Core-owned
+application port. `CoreClient` speaks the versioned Core API; it is not a local
+Agent facade and does not share the wire DTO type with the runtime.
 
 **Boundary:** transport serializes request and event contracts. It must not
 persist provider-native image payloads or weaken session authorization.
 
 ### 3.3 Agent and session orchestration
 
-**Paths:** `agent.py`, `session.py`, `planner.py`, `reflection.py`
+**Paths:** `agent_runtime/`, `session.py`, `planner.py`, `reflection.py`
 
 **Responsibilities:**
 
-- Own the ReAct iteration lifecycle and `AgentEvent` stream.
+- `AgentRuntime` owns session lifecycle; `ReActLoop` owns the ReAct iteration
+  lifecycle and ordered internal `RuntimeEvent` stream. CoreServer maps those
+  events to public Core API `RunEvent` envelopes.
 - Bind a request to a `SessionState`.
 - Assemble LLM messages, receive proposals, request verification, execute tools,
   and record outcomes.
@@ -238,9 +240,10 @@ primitive and must not become a public bypass around the verifier.
 
 Tools may produce managed artifacts, but delivery is not itself a model tool.
 The `screenshot` tool creates a user-visible PNG artifact; `artifact_prepare`
-borrows an existing file without copying or taking deletion ownership. The Agent converts
-their safe public references into a standard `AgentEvent(type="artifact")`, and
-the active client adapts that event to its channel. Internal `screen` captures
+borrows an existing file without copying or taking deletion ownership. AgentRuntime converts
+their safe public references into an internal `RuntimeEvent(type="artifact")`;
+CoreServer maps it to `RunEvent(type="artifact")`, and the active client adapts
+that public event to its channel. Internal `screen` captures
 remain GUI observations and are never automatically delivered.
 
 Local opening and conversation delivery are intentionally separate operations.
@@ -323,7 +326,9 @@ only happy-path helper output.
 
 ```text
 Channel/UI
-  -> AgentLike.run(input, session_id)
+  -> CoreClient.run(input, session_id)
+  -> Core API v1
+  -> CoreServer -> AgentRuntimePort.run(input, session_id)
   -> SessionManager
   -> Conversation + runtime context assembly
   -> provider adapter
@@ -331,7 +336,8 @@ Channel/UI
   -> Verifier
   -> ToolRegistry.execute
   -> tool result
-  -> next LLM iteration or final AgentEvent
+  -> next LLM iteration or final RuntimeEvent
+  -> CoreServer maps RuntimeEvent to RunEvent
 ```
 
 ### 4.2 Approved multimodal target
@@ -362,7 +368,8 @@ user asks to send/capture a file
   -> verified artifact-producing tool
   -> ArtifactStore(session, direction=outbound, ownership + retention)
   -> public artifact reference (ID + bounded metadata, no path/bytes)
-  -> AgentEvent(type="artifact")
+  -> RuntimeEvent(type="artifact")
+  -> CoreServer maps to RunEvent(type="artifact")
   -> active client/channel adapter
   -> image/file delivery to that conversation
 ```
@@ -559,7 +566,7 @@ The former attachment and screenshot paths appended data URLs to
 `ConversationManager`. The unified `ArtifactStore` now writes session-scoped temporary
 files; Conversation accepts `image_ref` blocks and rejects provider image
 payloads; request assembly hydrates only a copied provider request. Events are
-redacted and binary results are not persisted in idempotency. Service clients
+redacted and binary results are not persisted in idempotency. Core clients
 upload images first and run requests accept `artifact_id` references only.
 
 ### AR-005: Runtime path ownership was fragmented — high (fixed 2026-08-04)
@@ -840,7 +847,7 @@ model-visible and are not accepted as tool parameters.
 3. Centralize command semantics (`clear`, `compact`, configuration) behind the
    Agent/service contract so TUI, CLI, and Feishu cannot diverge.
 4. Split Feishu into ingress, correlation, delivery, and Agent bridge modules.
-5. Extract an `AgentFactory` composition root and a smaller `TurnOrchestrator`;
+5. Extract an `AgentFactory` composition root and an explicit `ReActLoop`;
    keep the verified executor, provider adapters, memory repositories, and
    attachment broker as existing boundaries rather than rewriting them.
 
