@@ -14,6 +14,7 @@ from pc_assistant.agent_runtime.contracts import (
     HealthStatus,
     RunRequest,
     RuntimeEvent,
+    RuntimeEventPayload,
     RuntimeRunContext,
     RuntimeScope,
 )
@@ -205,6 +206,13 @@ class AgentRuntime:
                             )
                             observed = True
                             raise
+                        yield RuntimeEvent(
+                            event_type="final_output",
+                            payload=RuntimeEventPayload(
+                                content=outcome.final_content,
+                                iteration=outcome.iterations,
+                            ),
+                        )
                     await self._observe_run(
                         scope,
                         context.run_id,

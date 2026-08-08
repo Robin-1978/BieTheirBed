@@ -175,6 +175,9 @@ class CoreChatApp(App):
             answer_parts.append(payload.content)
             await stream.write(payload.content)
             self._set_status("generating…")
+        elif event.event_type == "final_output":
+            answer_parts[:] = [payload.content]
+            self._last_answer = payload.content.strip()
         elif event.event_type == "reasoning_delta":
             response.add_thinking(payload.content)
             self._set_status("thinking…")

@@ -137,6 +137,7 @@ class RuntimeEventPayload(ContractModel):
 
 RuntimeEventType = Literal[
     "content_delta",
+    "final_output",
     "reasoning_delta",
     "plan",
     "tool_call",
@@ -155,6 +156,7 @@ class RuntimeEvent(ContractModel):
 RunEventType = Literal[
     "run_started",
     "content_delta",
+    "final_output",
     "reasoning_delta",
     "plan",
     "tool_call",

@@ -155,12 +155,21 @@ def test_run_events_are_strictly_ordered_and_have_one_terminal_event() -> None:
         "content_delta",
         RuntimeEventPayload(content="hello"),
     )
+    final_output = sequencer.emit(
+        "final_output",
+        RuntimeEventPayload(content="hello"),
+    )
     completed = sequencer.emit(
         "completed",
         RuntimeEventPayload(content="hello"),
     )
 
-    assert [started.event_seq, delta.event_seq, completed.event_seq] == [1, 2, 3]
+    assert [
+        started.event_seq,
+        delta.event_seq,
+        final_output.event_seq,
+        completed.event_seq,
+    ] == [1, 2, 3, 4]
     assert completed.is_terminal
     assert sequencer.terminal
     with pytest.raises(RuntimeError, match="terminal"):
