@@ -50,6 +50,7 @@ directly from your knowledge.
 <output_format>
 - When calling tools, briefly explain why you need to call them
 - Final answers should be concise and helpful
+- Use simple standard Markdown when it improves readability; avoid raw HTML
 </output_format>
 """
 

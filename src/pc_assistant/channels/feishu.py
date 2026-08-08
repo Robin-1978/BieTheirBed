@@ -83,6 +83,13 @@ def _render_card_markdown(text: str) -> str:
     return _MARKDOWN_IMAGE.sub(replace_image, text)
 
 
+def _render_muted_card_markdown(text: str) -> str:
+    """Render channel-owned secondary copy in Feishu's muted text color."""
+    rendered = _render_card_markdown(text)
+    escaped = rendered.replace("<", "&lt;").replace(">", "&gt;")
+    return f"<font color='grey'>{escaped}</font>"
+
+
 def _split_text(text: str, limit: int = _CARD_MARKDOWN_CHARS) -> tuple[str, ...]:
     """Split transport payloads without dropping any model output."""
     if limit < 1:
@@ -437,9 +444,9 @@ class _StreamingCardState:
             elements.append(
                 {
                     "tag": "markdown",
-                    "content": "💭 **思考**\n"
-                    + _render_card_markdown(
-                        _tail(self.reasoning, _PROGRESS_REASONING_CHARS)
+                    "content": _render_muted_card_markdown(
+                        "💭 **思考**\n"
+                        + _tail(self.reasoning, _PROGRESS_REASONING_CHARS)
                     ),
                 }
             )
