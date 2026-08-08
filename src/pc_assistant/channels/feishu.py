@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from pc_assistant import __version__
 from pc_assistant.config import AppConfig
 from pc_assistant.runtime import RuntimePaths
 from pc_assistant.service.core_api import (
@@ -60,6 +61,10 @@ def _principal_for_log(open_id: str) -> str:
     if not open_id:
         return "unknown"
     return hashlib.sha256(open_id.encode("utf-8")).hexdigest()[:10]
+
+
+def _service_notice(state: str) -> str:
+    return f"PC Assistant v{__version__} {state}"
 
 
 def _render_card_markdown(text: str) -> str:
@@ -159,6 +164,195 @@ class _ToolStep:
     detail: str = ""
 
 
+@dataclass
+class _PendingConfirmation:
+    confirmation_id: str
+    future: asyncio.Future[bool]
+    loop: asyncio.AbstractEventLoop
+    message: ConfirmationRequestedMessage
+    resolved: bool = False
+
+
+def _confirmation_card(
+    message: ConfirmationRequestedMessage,
+    *,
+    status: str = "pending",
+) -> dict[str, Any]:
+    """Build a Card JSON 2.0 confirmation card with native callbacks."""
+    arguments = _brief_json(message.arguments, 500)
+    reason = message.reason or "该操作可能改变系统状态"
+    elements: list[dict[str, Any]] = [
+        {
+            "tag": "markdown",
+            "content": (
+                f"**工具** `{message.tool_name}`\n"
+                f"**原因** {reason}\n"
+                f"**参数** `{arguments}`"
+            ),
+        }
+    ]
+    if status == "pending":
+        elements.append(
+            {
+                "tag": "column_set",
+                "horizontal_spacing": "8px",
+                "columns": [
+                    {
+                        "tag": "column",
+                        "width": "auto",
+                        "elements": [
+                            {
+                                "tag": "button",
+                                "name": "pc_assistant_confirm",
+                                "type": "primary",
+                                "text": {
+                                    "tag": "plain_text",
+                                    "content": "确认",
+                                },
+                                "behaviors": [
+                                    {
+                                        "type": "callback",
+                                        "value": {
+                                            "action": "confirm",
+                                            "confirmation_id": message.confirmation_id,
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "tag": "column",
+                        "width": "auto",
+                        "elements": [
+                            {
+                                "tag": "button",
+                                "name": "pc_assistant_cancel",
+                                "type": "default",
+                                "text": {
+                                    "tag": "plain_text",
+                                    "content": "取消",
+                                },
+                                "behaviors": [
+                                    {
+                                        "type": "callback",
+                                        "value": {
+                                            "action": "cancel",
+                                            "confirmation_id": message.confirmation_id,
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            }
+        )
+    else:
+        elements.extend(
+            [
+                {"tag": "hr"},
+                {
+                    "tag": "markdown",
+                    "content": "已确认" if status == "confirmed" else "已取消",
+                },
+            ]
+        )
+    return {
+        "schema": "2.0",
+        "header": {
+            "template": "orange" if status == "pending" else "grey",
+            "title": {"tag": "plain_text", "content": "操作确认"},
+        },
+        "body": {"elements": elements},
+    }
+
+
+def _patch_ws_card_dispatch(ws_client: Any) -> None:
+    """Route CARD frames dropped by lark_oapi through its callback handler."""
+    if getattr(ws_client, "_pc_assistant_card_dispatch_patched", False):
+        return
+    try:
+        import http
+        import types
+
+        from lark_oapi import JSON as LarkJSON
+        from lark_oapi.ws.const import (
+            HEADER_BIZ_RT,
+            HEADER_MESSAGE_ID,
+            HEADER_SEQ,
+            HEADER_SUM,
+            HEADER_TYPE,
+        )
+        from lark_oapi.ws.enum import MessageType
+        from lark_oapi.ws.model import Response
+
+        original = ws_client._handle_data_frame
+
+        def header_value(headers: Any, key: str, default: str = "") -> str:
+            for header in headers:
+                if header.key == key:
+                    return header.value
+            return default
+
+        async def patched(self: Any, frame: Any) -> None:
+            headers = frame.headers
+            frame_type = header_value(headers, HEADER_TYPE)
+            if not frame_type or MessageType(frame_type) != MessageType.CARD:
+                await original(frame)
+                return
+
+            payload = frame.payload
+            message_id = header_value(headers, HEADER_MESSAGE_ID)
+            total = int(header_value(headers, HEADER_SUM, "1") or "1")
+            sequence = int(header_value(headers, HEADER_SEQ, "1") or "1")
+            if total > 1:
+                if hasattr(self, "_combine"):
+                    payload = self._combine(
+                        message_id,
+                        total,
+                        sequence,
+                        payload,
+                    )
+                elif getattr(self, "_cache", None) is not None:
+                    payload = self._cache.merge(
+                        message_id,
+                        total,
+                        sequence,
+                        payload,
+                    )
+                if payload is None:
+                    return
+
+            response = Response(code=http.HTTPStatus.OK)
+            try:
+                started = int(round(time.time() * 1000))
+                handler = self._event_handler
+                dispatch = getattr(handler, "do_without_validation", None)
+                if dispatch is None:
+                    dispatch = getattr(handler, "_do_without_validation")
+                result = dispatch(payload)
+                header = headers.add()
+                header.key = HEADER_BIZ_RT
+                header.value = str(int(round(time.time() * 1000)) - started)
+                if result is not None:
+                    response.data = base64.b64encode(
+                        LarkJSON.marshal(result).encode("utf-8")
+                    )
+            except Exception:
+                logger.exception("Feishu CARD callback dispatch failed")
+                response = Response(code=http.HTTPStatus.INTERNAL_SERVER_ERROR)
+
+            frame.payload = LarkJSON.marshal(response).encode("utf-8")
+            await self._write_message(frame.SerializeToString())
+
+        ws_client._handle_data_frame = types.MethodType(patched, ws_client)
+        ws_client._pc_assistant_card_dispatch_patched = True
+        logger.info("Feishu CARD callback dispatch patch applied")
+    except Exception:
+        logger.exception("Feishu CARD callback dispatch patch failed")
+
+
 class _StreamingCardState:
     """Channel-local projection of standard Core run events."""
 
@@ -228,6 +422,10 @@ class _StreamingCardState:
         self.error = content or "处理失败"
         self.phase = "error"
 
+    def set_cancelled(self) -> None:
+        self.error = ""
+        self.phase = "cancelled"
+
     def build_card(
         self,
         *,
@@ -268,6 +466,10 @@ class _StreamingCardState:
             elements.append(
                 {"tag": "markdown", "content": f"❌ {self.error}"}
             )
+        elif self.phase == "cancelled":
+            if elements:
+                elements.append({"tag": "hr"})
+            elements.append({"tag": "markdown", "content": "已停止"})
         elif self.draft:
             elements.append(
                 {
@@ -284,6 +486,8 @@ class _StreamingCardState:
 
         if self.phase == "error":
             template, title = "red", "❌ 处理出错"
+        elif self.phase == "cancelled":
+            template, title = "grey", "已停止"
         elif final_chunk is not None:
             template, title = "blue", "💬 PC Assistant"
         else:
@@ -322,7 +526,8 @@ class FeishuChannel:
         self._session_users: dict[str, str] = {}
         self._user_locks: dict[str, asyncio.Lock] = {}
         self._pending_attachments: dict[str, list[ArtifactInputRef]] = {}
-        self._pending_confirmations: dict[str, asyncio.Future[bool]] = {}
+        self._pending_confirmations: dict[str, _PendingConfirmation] = {}
+        self._pending_confirmation_lock = threading.RLock()
         self._seen_messages: dict[str, float] = {}
 
     async def start(self) -> None:
@@ -349,15 +554,31 @@ class FeishuChannel:
             await asyncio.to_thread(
                 self._send_text,
                 receive_id,
-                "🟢 PC Assistant 已连接到新 Core 服务",
+                _service_notice("已启动"),
             )
 
     async def stop(self) -> None:
         self._running = False
-        for future in tuple(self._pending_confirmations.values()):
-            if not future.done():
-                future.set_result(False)
-        self._pending_confirmations.clear()
+        receive_id = self._current_receive_id()
+        if receive_id:
+            try:
+                await asyncio.to_thread(
+                    self._send_text,
+                    receive_id,
+                    _service_notice("已停止"),
+                )
+            except Exception:
+                logger.warning(
+                    "Feishu shutdown notification failed",
+                    exc_info=True,
+                )
+        with self._pending_confirmation_lock:
+            pending_confirmations = tuple(self._pending_confirmations.values())
+            self._pending_confirmations.clear()
+            for pending in pending_confirmations:
+                pending.resolved = True
+        for pending in pending_confirmations:
+            self._schedule_confirmation_result(pending, False)
         clients, self._clients = tuple(self._clients.values()), {}
         await asyncio.gather(
             *(client.disconnect() for client in clients),
@@ -385,6 +606,7 @@ class FeishuChannel:
                     event_handler=self._create_event_handler(),
                     auto_reconnect=True,
                 )
+                _patch_ws_card_dispatch(self._lark_ws_client)
                 logging.getLogger("Lark").setLevel(logging.WARNING)
                 logger.info("Feishu WebSocket connecting")
                 self._lark_ws_client.start()
@@ -407,6 +629,9 @@ class FeishuChannel:
                 time.sleep(3)
 
     def _create_event_handler(self) -> Any:
+        from lark_oapi.event.callback.model.p2_card_action_trigger import (
+            P2CardActionTriggerResponse,
+        )
         from lark_oapi.event.dispatcher_handler import EventDispatcherHandler
 
         def on_message(event: Any) -> None:
@@ -434,12 +659,69 @@ class FeishuChannel:
         def on_activity(_event: Any) -> None:
             return None
 
+        def on_card_action(event: Any) -> Any:
+            try:
+                action = event.event.action
+                value = action.value or {}
+                if isinstance(value, str):
+                    value = json.loads(value)
+                if not isinstance(value, dict):
+                    value = {}
+                operator = event.event.operator
+                open_id = operator.open_id if operator is not None else ""
+                action_name = str(value.get("action", ""))
+                confirmation_id = str(value.get("confirmation_id", ""))
+                if action_name not in {"confirm", "cancel"}:
+                    raise ValueError("unknown confirmation action")
+                pending = self._resolve_confirmation(
+                    open_id,
+                    confirmation_id,
+                    action_name == "confirm",
+                )
+                if pending is None:
+                    return P2CardActionTriggerResponse(
+                        {
+                            "toast": {
+                                "type": "warning",
+                                "content": "操作已处理或已过期",
+                            }
+                        }
+                    )
+                approved = action_name == "confirm"
+                return P2CardActionTriggerResponse(
+                    {
+                        "toast": {
+                            "type": "success" if approved else "info",
+                            "content": "已确认" if approved else "已取消",
+                        },
+                        "card": {
+                            "type": "raw",
+                            "data": _confirmation_card(
+                                pending.message,
+                                status="confirmed" if approved else "cancelled",
+                            ),
+                        },
+                    }
+                )
+            except Exception:
+                logger.exception("Feishu confirmation callback failed")
+                return P2CardActionTriggerResponse(
+                    {
+                        "toast": {
+                            "type": "error",
+                            "content": "处理失败",
+                        }
+                    }
+                )
+
         return (
             EventDispatcherHandler.builder("", "")
             .register_p2_im_message_receive_v1(on_message)
+            .register_p2_card_action_trigger(on_card_action)
             .register_p2_im_message_message_read_v1(on_activity)
             .register_p2_im_message_reaction_created_v1(on_activity)
             .register_p2_im_message_reaction_deleted_v1(on_activity)
+            .register_p2_im_chat_access_event_bot_p2p_chat_entered_v1(on_activity)
             .build()
         )
 
@@ -458,6 +740,43 @@ class FeishuChannel:
 
         future.add_done_callback(report_failure)
 
+    @staticmethod
+    def _set_confirmation_result(
+        future: asyncio.Future[bool],
+        approved: bool,
+    ) -> None:
+        if not future.done():
+            future.set_result(approved)
+
+    def _schedule_confirmation_result(
+        self,
+        pending: _PendingConfirmation,
+        approved: bool,
+    ) -> None:
+        pending.loop.call_soon_threadsafe(
+            self._set_confirmation_result,
+            pending.future,
+            approved,
+        )
+
+    def _resolve_confirmation(
+        self,
+        open_id: str,
+        confirmation_id: str,
+        approved: bool,
+    ) -> _PendingConfirmation | None:
+        with self._pending_confirmation_lock:
+            pending = self._pending_confirmations.get(open_id)
+            if (
+                pending is None
+                or pending.resolved
+                or pending.confirmation_id != confirmation_id
+            ):
+                return None
+            pending.resolved = True
+        self._schedule_confirmation_result(pending, approved)
+        return pending
+
     async def _handle_text(
         self,
         open_id: str,
@@ -472,28 +791,40 @@ class FeishuChannel:
         try:
             self._save_binding(open_id)
             normalized = text.strip().lower()
-            confirmation = self._pending_confirmations.get(open_id)
-            if confirmation is not None and not confirmation.done():
+            if normalized in {"/stop", "/cancel"}:
+                await self._cancel_active_run(open_id)
+                return
+            with self._pending_confirmation_lock:
+                confirmation = self._pending_confirmations.get(open_id)
+            if confirmation is not None and not confirmation.resolved:
                 if normalized in {"确认", "批准", "yes", "y", "ok"}:
-                    confirmation.set_result(True)
+                    self._resolve_confirmation(
+                        open_id,
+                        confirmation.confirmation_id,
+                        True,
+                    )
                     await asyncio.to_thread(
                         self._send_text,
                         open_id,
-                        "✅ 已批准执行",
+                        "已确认",
                     )
                     return
                 if normalized in {"取消", "拒绝", "no", "n"}:
-                    confirmation.set_result(False)
+                    self._resolve_confirmation(
+                        open_id,
+                        confirmation.confirmation_id,
+                        False,
+                    )
                     await asyncio.to_thread(
                         self._send_text,
                         open_id,
-                        "❌ 已拒绝执行",
+                        "已取消",
                     )
                     return
                 await asyncio.to_thread(
                     self._send_text,
                     open_id,
-                    "当前有操作等待确认，请回复“确认”或“取消”。",
+                    "当前有操作等待确认，请在卡片中选择“确认”或“取消”。",
                 )
                 return
 
@@ -517,6 +848,36 @@ class FeishuChannel:
                 message_id,
                 reaction_id,
             )
+
+    async def _cancel_active_run(self, open_id: str) -> None:
+        client = self._clients.get(open_id)
+        if client is None or not client.is_connected:
+            await asyncio.to_thread(
+                self._send_text,
+                open_id,
+                "当前没有正在运行的任务。",
+            )
+            return
+        try:
+            result = await client.cancel_active()
+        except Exception:
+            logger.exception(
+                "Feishu Core cancellation failed principal=%s",
+                _principal_for_log(open_id),
+            )
+            await asyncio.to_thread(
+                self._send_text,
+                open_id,
+                "停止失败，请稍后重试。",
+            )
+            return
+        if result is None or result.result.status == "not_found":
+            message = "当前没有正在运行的任务。"
+        elif result.result.accepted:
+            message = "正在停止当前任务。"
+        else:
+            message = "当前任务已经结束。"
+        await asyncio.to_thread(self._send_text, open_id, message)
 
     async def _run_text(self, open_id: str, text: str) -> None:
         client = await self._client_for(open_id)
@@ -693,9 +1054,12 @@ class FeishuChannel:
                 elif event.event_type in {"plan", "warning"}:
                     state.add_notice(payload.content)
                     update_requested.set()
-                elif event.event_type in {"failed", "cancelled"}:
-                    terminal = event.event_type
+                elif event.event_type == "failed":
+                    terminal = "failed"
                     state.set_error(payload.content or event.event_type)
+                elif event.event_type == "cancelled":
+                    terminal = "cancelled"
+                    state.set_cancelled()
                 elif event.event_type == "completed":
                     terminal = "completed"
         finally:
@@ -751,9 +1115,9 @@ class FeishuChannel:
                 await asyncio.to_thread(
                     self._send_card,
                     open_id,
-                    f"❌ {state.error or terminal}",
-                    "red",
-                    "处理出错",
+                    "已停止" if terminal == "cancelled" else f"❌ {state.error or terminal}",
+                    "grey" if terminal == "cancelled" else "red",
+                    "已停止" if terminal == "cancelled" else "处理出错",
                 )
 
         delivery_failures: list[str] = []
@@ -830,24 +1194,46 @@ class FeishuChannel:
     ) -> bool:
         if self._session_users.get(message.session_handle) != open_id:
             return False
-        current = self._pending_confirmations.get(open_id)
-        if current is not None and not current.done():
-            return False
-        future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
-        self._pending_confirmations[open_id] = future
-        arguments = json.dumps(message.arguments, ensure_ascii=False, default=str)[:500]
-        prompt = (
-            f"⚠️ 工具 `{message.tool_name}` 请求执行\n"
-            f"原因：{message.reason or '该操作可能改变系统状态'}\n"
-            f"参数：{arguments}\n\n请回复“确认”或“取消”。"
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[bool] = loop.create_future()
+        pending = _PendingConfirmation(
+            confirmation_id=message.confirmation_id,
+            future=future,
+            loop=loop,
+            message=message,
         )
-        await asyncio.to_thread(self._send_card, open_id, prompt, "orange", "操作确认")
+        with self._pending_confirmation_lock:
+            current = self._pending_confirmations.get(open_id)
+            if current is not None and not current.resolved:
+                return False
+            self._pending_confirmations[open_id] = pending
+        try:
+            message_id = await asyncio.to_thread(
+                self._send_card_returning_id,
+                open_id,
+                _confirmation_card(message),
+            )
+        except Exception:
+            logger.exception("Feishu confirmation card send failed")
+            message_id = None
+        if message_id is None:
+            await asyncio.to_thread(
+                self._send_text,
+                open_id,
+                "无法显示确认按钮，本次操作已取消。",
+            )
+            with self._pending_confirmation_lock:
+                if self._pending_confirmations.get(open_id) is pending:
+                    self._pending_confirmations.pop(open_id, None)
+            return False
         try:
             return await asyncio.wait_for(future, timeout=_CONFIRM_TIMEOUT_SECONDS)
         except asyncio.TimeoutError:
             return False
         finally:
-            self._pending_confirmations.pop(open_id, None)
+            with self._pending_confirmation_lock:
+                if self._pending_confirmations.get(open_id) is pending:
+                    self._pending_confirmations.pop(open_id, None)
 
     async def _session_for(self, open_id: str) -> str:
         session = self._sessions.get(open_id)

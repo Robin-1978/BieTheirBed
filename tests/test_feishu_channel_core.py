@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+from types import SimpleNamespace
 
 import pytest
 
 from pc_assistant.agent_runtime.contracts import (
+    CancelResult,
     RunEvent,
     RuntimeEventPayload,
     RuntimeStatus,
@@ -14,16 +16,23 @@ from pc_assistant.agent_runtime.contracts import (
 from pc_assistant.channels.feishu import (
     FeishuChannel,
     _StreamingCardState,
+    _confirmation_card,
+    _patch_ws_card_dispatch,
     _principal_for_log,
     _render_card_markdown,
+    _service_notice,
 )
 from pc_assistant.config import AppConfig
-from pc_assistant.service.core_api import ConfirmationRequestedMessage
+from pc_assistant.service.core_api import (
+    CancelResultMessage,
+    ConfirmationRequestedMessage,
+)
 
 
 class _CoreClient:
     def __init__(self) -> None:
         self.created = 0
+        self.cancelled = 0
         self.runs = []
         self.is_connected = True
 
@@ -49,6 +58,13 @@ class _CoreClient:
                 "sessions": 1,
                 "available_tools": 12,
             },
+        )
+
+    async def cancel_active(self) -> CancelResultMessage:
+        self.cancelled += 1
+        return CancelResultMessage(
+            request_id="cancel-request",
+            result=CancelResult(accepted=True, status="cancelling"),
         )
 
     async def run(self, session, text, attachments):
@@ -114,6 +130,27 @@ def _config(tmp_path) -> AppConfig:
 
 
 @pytest.mark.asyncio
+async def test_feishu_start_and_stop_notifications_include_version(
+    tmp_path,
+) -> None:
+    channel = FeishuChannel(_config(tmp_path))
+    channel._receive_id = "ou-user"
+    channel._get_lark_client = lambda: object()
+    channel._run_websocket = lambda: None
+    sent = []
+    channel._send_text = lambda *args: sent.append(args) or True
+
+    await channel.start()
+    await channel.stop()
+
+    assert sent == [
+        ("ou-user", _service_notice("已启动")),
+        ("ou-user", _service_notice("已停止")),
+    ]
+    assert "v0.1.1" in sent[0][1]
+
+
+@pytest.mark.asyncio
 async def test_feishu_routes_text_through_core_client(tmp_path) -> None:
     channel = FeishuChannel(_config(tmp_path))
     client = _CoreClient()
@@ -161,9 +198,10 @@ async def test_feishu_confirmation_round_trip_stays_in_channel(tmp_path) -> None
     channel = FeishuChannel(_config(tmp_path))
     channel._clients["ou-user"] = _CoreClient()
     channel._session_users["session-a"] = "ou-user"
-    sent = []
-    channel._send_text = lambda recipient, text: sent.append((recipient, text)) or True
-    channel._send_card = lambda recipient, text, *args: sent.append((recipient, text)) or True
+    cards = []
+    channel._send_card_returning_id = (
+        lambda recipient, card: cards.append((recipient, card)) or "card-a"
+    )
     request = ConfirmationRequestedMessage(
         request_id="confirmation-request",
         confirmation_id="confirmation-a",
@@ -175,11 +213,153 @@ async def test_feishu_confirmation_round_trip_stays_in_channel(tmp_path) -> None
 
     pending = asyncio.create_task(channel._confirm_tool("ou-user", request))
     await asyncio.sleep(0)
-    await channel._handle_text("ou-user", "确认")
+    resolved = channel._resolve_confirmation(
+        "ou-user",
+        "confirmation-a",
+        True,
+    )
+
+    assert resolved is not None
+    assert await pending is True
+    assert cards[0][0] == "ou-user"
+    card = cards[0][1]
+    assert card["schema"] == "2.0"
+    rendered = json.dumps(card, ensure_ascii=False)
+    assert "mouse" in rendered
+    assert "确认" in rendered
+    assert "取消" in rendered
+    assert "behaviors" in rendered
+    assert "请回复" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_feishu_card_callback_confirms_and_replaces_buttons(tmp_path) -> None:
+    channel = FeishuChannel(_config(tmp_path))
+    channel._session_users["session-a"] = "ou-user"
+    channel._send_card_returning_id = lambda *_args: "card-a"
+    request = ConfirmationRequestedMessage(
+        request_id="confirmation-request",
+        confirmation_id="confirmation-a",
+        session_handle="session-a",
+        tool_name="mouse",
+        arguments={"action": "click"},
+        reason="state-changing desktop action",
+    )
+    pending = asyncio.create_task(channel._confirm_tool("ou-user", request))
+    await asyncio.sleep(0)
+    handler = channel._create_event_handler()
+    processor = handler._callback_processor_map["p2.card.action.trigger"]
+    from lark_oapi.event.callback.model.p2_card_action_trigger import (
+        P2CardActionTrigger,
+    )
+
+    response = processor.do(
+        P2CardActionTrigger(
+            {
+                "event": {
+                    "operator": {"open_id": "ou-user"},
+                    "action": {
+                        "value": {
+                            "action": "confirm",
+                            "confirmation_id": "confirmation-a",
+                        }
+                    },
+                }
+            }
+        )
+    )
 
     assert await pending is True
-    assert any("mouse" in text for _recipient, text in sent)
-    assert sent[-1] == ("ou-user", "✅ 已批准执行")
+    assert response.toast.content == "已确认"
+    assert response.card.type == "raw"
+    rendered = json.dumps(response.card.data, ensure_ascii=False)
+    assert "已确认" in rendered
+    assert "behaviors" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_feishu_confirmation_rejects_wrong_user_id_and_double_click(
+    tmp_path,
+) -> None:
+    channel = FeishuChannel(_config(tmp_path))
+    channel._session_users["session-a"] = "ou-user"
+    channel._send_card_returning_id = lambda *_args: "card-a"
+    request = ConfirmationRequestedMessage(
+        request_id="confirmation-request",
+        confirmation_id="confirmation-a",
+        session_handle="session-a",
+        tool_name="mouse",
+        arguments={"action": "click"},
+        reason="state-changing desktop action",
+    )
+    pending = asyncio.create_task(channel._confirm_tool("ou-user", request))
+    await asyncio.sleep(0)
+
+    assert channel._resolve_confirmation("ou-other", "confirmation-a", True) is None
+    assert channel._resolve_confirmation("ou-user", "wrong-id", True) is None
+    assert not pending.done()
+    assert channel._resolve_confirmation("ou-user", "confirmation-a", False) is not None
+    assert channel._resolve_confirmation("ou-user", "confirmation-a", True) is None
+    assert await pending is False
+
+
+def test_feishu_confirmation_card_uses_native_v2_buttons() -> None:
+    request = ConfirmationRequestedMessage(
+        request_id="confirmation-request",
+        confirmation_id="confirmation-a",
+        session_handle="session-a",
+        tool_name="mouse",
+        arguments={"action": "click"},
+        reason="state-changing desktop action",
+    )
+
+    card = _confirmation_card(request)
+    columns = card["body"]["elements"][1]["columns"]
+    buttons = [column["elements"][0] for column in columns]
+
+    assert card["schema"] == "2.0"
+    assert [button["text"]["content"] for button in buttons] == ["确认", "取消"]
+    assert [button["behaviors"][0]["value"]["action"] for button in buttons] == [
+        "confirm",
+        "cancel",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_feishu_stop_bypasses_busy_user_lock(tmp_path) -> None:
+    channel = FeishuChannel(_config(tmp_path))
+    client = _CoreClient()
+    channel._clients["ou-user"] = client
+    sent = []
+    reactions = []
+    channel._send_text = lambda *args: sent.append(args) or True
+    channel._add_reaction = lambda *_args: "reaction-a"
+    channel._remove_reaction = lambda *args: reactions.append(args)
+    lock = channel._user_locks.setdefault("ou-user", asyncio.Lock())
+    await lock.acquire()
+    try:
+        await asyncio.wait_for(
+            channel._handle_text("ou-user", "/stop", "message-stop"),
+            timeout=0.2,
+        )
+    finally:
+        lock.release()
+
+    assert client.cancelled == 1
+    assert sent == [("ou-user", "正在停止当前任务。")]
+    assert reactions == [("message-stop", "reaction-a")]
+
+
+def test_feishu_cancelled_card_is_neutral() -> None:
+    state = _StreamingCardState()
+    state.append_reasoning("处理中")
+    state.set_cancelled()
+
+    rendered = json.dumps(state.build_card(), ensure_ascii=False)
+
+    assert "已停止" in rendered
+    assert '"template": "grey"' in rendered
+    assert "处理出错" not in rendered
 
 
 @pytest.mark.asyncio
@@ -255,6 +435,60 @@ def test_feishu_long_card_output_is_split_without_data_loss(tmp_path) -> None:
     ]
     assert len(contents) > 1
     assert "".join(contents) == _render_card_markdown(text)
+
+
+@pytest.mark.asyncio
+async def test_feishu_ws_card_patch_dispatches_card_payload() -> None:
+    class Headers(list):
+        def add(self):
+            header = SimpleNamespace(key="", value="")
+            self.append(header)
+            return header
+
+    class Frame:
+        def __init__(self) -> None:
+            self.headers = Headers(
+                [
+                    SimpleNamespace(key="type", value="card"),
+                    SimpleNamespace(key="message_id", value="message-a"),
+                    SimpleNamespace(key="sum", value="1"),
+                    SimpleNamespace(key="seq", value="1"),
+                ]
+            )
+            self.payload = b'{"event":"card"}'
+
+        def SerializeToString(self) -> bytes:
+            return b"serialized-frame"
+
+    class Handler:
+        def __init__(self) -> None:
+            self.payloads = []
+
+        def do_without_validation(self, payload):
+            self.payloads.append(payload)
+            return {"toast": {"type": "info", "content": "ok"}}
+
+    class WebSocketClient:
+        def __init__(self) -> None:
+            self._event_handler = Handler()
+            self.writes = []
+            self.original_calls = 0
+
+        async def _handle_data_frame(self, _frame) -> None:
+            self.original_calls += 1
+
+        async def _write_message(self, payload: bytes) -> None:
+            self.writes.append(payload)
+
+    client = WebSocketClient()
+    frame = Frame()
+
+    _patch_ws_card_dispatch(client)
+    await client._handle_data_frame(frame)
+
+    assert client._event_handler.payloads == [b'{"event":"card"}']
+    assert client.original_calls == 0
+    assert client.writes == [b"serialized-frame"]
 
 
 @pytest.mark.asyncio
