@@ -4,9 +4,11 @@ from __future__ import annotations
 import argparse
 import sys
 
+from pc_assistant.branding import ASSISTANT_NAME
+
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="PC Assistant Service")
+    parser = argparse.ArgumentParser(description=f"{ASSISTANT_NAME} Service")
     parser.add_argument("--daemon", action="store_true", help="Daemonize")
     parser.add_argument("--config", type=str, default=None, help="Config path")
     parser.add_argument(

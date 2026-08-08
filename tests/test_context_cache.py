@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pc_assistant.branding import ASSISTANT_IDENTITY
 from pc_assistant.context.assembly import assemble_llm_messages, truncate_messages
 from pc_assistant.context.prompt import (
     build_session_context,
@@ -21,7 +22,7 @@ def test_system_prompt_appears_exactly_once() -> None:
     blob = "".join(str(message.get("content", "")) for message in messages)
 
     assert "<system_rules>" not in blob
-    assert blob.count("PC Assistant, an intelligent AI agent") == 1
+    assert blob.count(f"{ASSISTANT_IDENTITY}, an intelligent agent") == 1
 
 
 def test_memory_lives_in_tail_pin() -> None:

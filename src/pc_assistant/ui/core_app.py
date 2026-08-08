@@ -14,6 +14,7 @@ from textual.widgets import Header, Markdown, Static
 
 from pc_assistant.agent_runtime.contracts import RunEvent
 from pc_assistant.artifacts.delivery import save_download
+from pc_assistant.branding import ASSISTANT_NAME
 from pc_assistant.config import AppConfig
 from pc_assistant.service.core_api import ConfirmationRequestedMessage
 from pc_assistant.service.core_client import CoreClient
@@ -33,8 +34,8 @@ from pc_assistant.ui.widgets import (
 
 
 _CONFIRM_TIMEOUT = 120.0
-_WELCOME = """\
-# PC Assistant
+_WELCOME = f"""\
+# {ASSISTANT_NAME}
 
 Type a message to chat, or use `/help` for commands.
 """
@@ -57,7 +58,7 @@ _HELP = """\
 
 class CoreChatApp(App):
     CSS_PATH = "chat.tcss"
-    TITLE = "PC Assistant"
+    TITLE = ASSISTANT_NAME
     BINDINGS = [
         ("escape", "cancel_turn", "Cancel current turn"),
         ("ctrl+d", "quit", "Quit"),

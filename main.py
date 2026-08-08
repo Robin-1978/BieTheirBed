@@ -5,11 +5,13 @@ import asyncio
 import sys
 from pathlib import Path
 
+from pc_assistant.branding import ASSISTANT_IDENTITY
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pc-assistant",
-        description="PC Assistant - A Python computer assistant agent",
+        description=f"{ASSISTANT_IDENTITY} - A Python computer assistant agent",
     )
     parser.add_argument(
         "-c",

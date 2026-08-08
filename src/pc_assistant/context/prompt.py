@@ -6,6 +6,7 @@ import platform
 import time
 from pathlib import Path
 
+from pc_assistant.branding import ASSISTANT_IDENTITY
 from pc_assistant.platform_ import get_shell_name
 from pc_assistant.context.tags import escape, format_runtime_context
 
@@ -15,7 +16,7 @@ _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 _SYSTEM_TEMPLATE_PATH = _PROMPTS_DIR / "system.md"
 
 _DEFAULT_SYSTEM_TEMPLATE = """<role>
-You are PC Assistant, an intelligent AI agent that helps users control their computer
+You are {{ASSISTANT_IDENTITY}}, an intelligent agent that helps users control their computer
 through natural language. You can use tools to perform actions, or answer questions
 directly from your knowledge.
 </role>
@@ -56,10 +57,14 @@ directly from your knowledge.
 def _load_system_template() -> str:
     try:
         if _SYSTEM_TEMPLATE_PATH.exists():
-            return _SYSTEM_TEMPLATE_PATH.read_text(encoding="utf-8")
+            template = _SYSTEM_TEMPLATE_PATH.read_text(encoding="utf-8")
+            return template.replace("{{ASSISTANT_IDENTITY}}", ASSISTANT_IDENTITY)
     except OSError as e:
         logger.warning("[Prompt] failed to load %s: %s", _SYSTEM_TEMPLATE_PATH, e)
-    return _DEFAULT_SYSTEM_TEMPLATE
+    return _DEFAULT_SYSTEM_TEMPLATE.replace(
+        "{{ASSISTANT_IDENTITY}}",
+        ASSISTANT_IDENTITY,
+    )
 
 
 def build_system_prompt(

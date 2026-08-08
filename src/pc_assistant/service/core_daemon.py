@@ -9,6 +9,8 @@ import signal
 import sys
 from pathlib import Path
 
+from pc_assistant.branding import ASSISTANT_NAME
+
 from pc_assistant.agent_runtime.composition import (
     CoreRuntimeComposition,
     build_core_runtime,
@@ -149,7 +151,7 @@ def daemonize(log_path: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="PC Assistant Core Service")
+    parser = argparse.ArgumentParser(description=f"{ASSISTANT_NAME} Core Service")
     parser.add_argument("--daemon", action="store_true")
     parser.add_argument("--config", type=str, default=None)
     parser.add_argument("--log-dir", type=str, default=None)

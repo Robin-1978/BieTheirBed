@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pc_assistant.branding import ASSISTANT_IDENTITY
 from pc_assistant.context.prompt import (
     _DEFAULT_SYSTEM_TEMPLATE,
     _SYSTEM_TEMPLATE_PATH,
@@ -14,7 +15,7 @@ class TestExternalPrompt:
     def test_loads_from_file(self):
         prompt = build_system_prompt()
         assert "<role>" in prompt
-        assert "PC Assistant" in prompt
+        assert ASSISTANT_IDENTITY in prompt
         assert "<instructions>" in prompt
         assert "Independent tools may be called together" in prompt
         assert "receive no intermediate feedback" in prompt
