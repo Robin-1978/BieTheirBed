@@ -18,7 +18,10 @@ from pc_assistant.agent_runtime.model_step import ProviderChunk
 from pc_assistant.config import AppConfig
 from pc_assistant.runtime import RuntimePaths
 from pc_assistant.service.core_client import CoreClient
-from pc_assistant.service.credentials import resolve_local_service_token
+from pc_assistant.service.credentials import (
+    issue_principal_credential,
+    resolve_local_service_token,
+)
 
 
 class _OfflineProvider:
@@ -122,6 +125,7 @@ async def test_tcp_endpoint_separates_local_and_remote_credentials(tmp_path: Pat
     await composition.host.start()
     local_client: CoreClient | None = None
     remote_client: CoreClient | None = None
+    channel_client: CoreClient | None = None
     try:
         uri = f"ws://127.0.0.1:{composition.host.bound_tcp_port}"
         local_client = await CoreClient.connect(
@@ -129,20 +133,35 @@ async def test_tcp_endpoint_separates_local_and_remote_credentials(tmp_path: Pat
             resolve_local_service_token(RuntimePaths.from_root(config.runtime_root)),
         )
         remote_client = await CoreClient.connect(uri, "remote-secret")
+        channel_client = await CoreClient.connect(
+            uri,
+            issue_principal_credential(
+                resolve_local_service_token(
+                    RuntimePaths.from_root(config.runtime_root)
+                ),
+                "personal:channel:user-a",
+            ),
+        )
         local_session = await local_client.create_session()
         remote_session = await remote_client.create_session()
+        channel_session = await channel_client.create_session()
 
         local_tools = set((await local_client.list_tools(local_session)).tools)
         remote_tools = set((await remote_client.list_tools(remote_session)).tools)
+        channel_tools = set((await channel_client.list_tools(channel_session)).tools)
 
         assert "screenshot" in local_tools
         assert "screenshot" not in remote_tools
         assert remote_tools == {"currency", "weather", "web_fetch", "web_search"}
+        assert "screenshot" in channel_tools
+        assert "mouse" in channel_tools
     finally:
         if local_client is not None:
             await local_client.disconnect()
         if remote_client is not None:
             await remote_client.disconnect()
+        if channel_client is not None:
+            await channel_client.disconnect()
         await composition.host.stop()
 
 

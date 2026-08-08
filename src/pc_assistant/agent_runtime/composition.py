@@ -49,7 +49,9 @@ from pc_assistant.service.core_host import (
     TcpCoreEndpoint,
 )
 from pc_assistant.service.core_server import (
+    CompositeAuthenticator,
     CoreServer,
+    SignedPrincipalAuthenticator,
     StaticTokenAuthenticator,
 )
 from pc_assistant.service.credentials import resolve_local_service_token
@@ -127,7 +129,7 @@ def _cached_usage_tokens(usage: dict) -> int:
 
 
 def capabilities_for_scope(scope: RuntimeScope) -> frozenset[ToolCapability]:
-    if scope.principal_id == "local":
+    if scope.principal_id == "local" or scope.principal_id.startswith("personal:"):
         return PERSONAL_LOCAL_CAPABILITIES
     return REMOTE_SCOPED_CAPABILITIES
 
@@ -340,7 +342,10 @@ def build_core_runtime(
         application,
         control,
         artifact_service,
-        StaticTokenAuthenticator(credentials),
+        CompositeAuthenticator(
+            StaticTokenAuthenticator(credentials),
+            SignedPrincipalAuthenticator(local_token),
+        ),
     )
     host = CoreServiceHost(
         tcp=TcpCoreEndpoint(

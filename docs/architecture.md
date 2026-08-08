@@ -143,6 +143,12 @@ Feishu uploads the referenced image/file, terminal clients render a bounded
 artifact reference, and future clients may present it using their own transport.
 The model and AgentRuntime never receive channel identifiers such as a Feishu `open_id`.
 
+`ApplicationDaemon` is the composition layer above both sides. It starts the
+independent `CoreDaemon` and `ChannelRuntime`, then stops channels before Core.
+`ChannelRuntime` mounts configured adapters; Core modules do not import it or
+any channel package. Each Feishu user receives a separate CoreClient connection
+whose short-lived HMAC credential carries a stable hashed `personal:` principal.
+
 ### 3.2 Service and transport
 
 **Paths:** `src/pc_assistant/service/`
@@ -459,8 +465,10 @@ never returned by the tool or written into conversation history.
 Other sessions' raw conversation messages are never copied into the current
 `SessionState`. Durable domain state is stored in `data/assistant.db`: profile
 facts are partitioned by `principal_id`, episodes by both `principal_id` and
-`session_id`, and schedules use a separate table. Feishu principals derive
-from the sender open ID; local TUI/CLI sessions share the local principal.
+`session_id`, and schedules use a separate table. Feishu principals derive from
+a stable hash of the sender open ID and are authenticated through a short-lived
+credential signed by the owner-only local service key; local TUI/CLI sessions
+share the local principal.
 Unknown channel namespaces fail closed to a session-specific principal.
 
 ### 4.5 Target complete-context design

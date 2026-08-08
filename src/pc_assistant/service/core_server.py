@@ -61,6 +61,7 @@ from pc_assistant.service.core_api import (
     UploadArtifactRequest,
     parse_core_request_json,
 )
+from pc_assistant.service.credentials import verify_principal_credential
 from pc_assistant.agent_runtime.tool_step import ProposedToolCall
 
 
@@ -90,6 +91,34 @@ class StaticTokenAuthenticator:
     async def authenticate(self, credential: str) -> str | None:
         for configured, principal in self._credentials:
             if hmac.compare_digest(credential, configured):
+                return principal
+        return None
+
+
+class SignedPrincipalAuthenticator:
+    """Authenticate short-lived principals issued by trusted local adapters."""
+
+    def __init__(self, signing_key: str) -> None:
+        if not signing_key.strip():
+            raise ValueError("Signed principal authentication requires a key")
+        self._signing_key = signing_key
+
+    async def authenticate(self, credential: str) -> str | None:
+        return verify_principal_credential(self._signing_key, credential)
+
+
+class CompositeAuthenticator:
+    """Try bounded authentication strategies in declared order."""
+
+    def __init__(self, *authenticators: PrincipalAuthenticator) -> None:
+        if not authenticators:
+            raise ValueError("At least one authenticator is required")
+        self._authenticators = authenticators
+
+    async def authenticate(self, credential: str) -> str | None:
+        for authenticator in self._authenticators:
+            principal = await authenticator.authenticate(credential)
+            if principal is not None:
                 return principal
         return None
 
@@ -197,7 +226,7 @@ class CoreServer:
                     timeout=self._authentication_timeout,
                 )
                 first = parse_core_request_json(first_raw)
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 return
             except (ValidationError, ValueError, TypeError):
                 await send(self._error("unknown", "invalid_request", "Invalid authentication request"))

@@ -6,6 +6,10 @@ import pytest
 
 from pc_assistant.runtime import RuntimePaths
 from pc_assistant.service.credentials import resolve_local_service_token
+from pc_assistant.service.credentials import (
+    issue_principal_credential,
+    verify_principal_credential,
+)
 
 
 def test_managed_service_token_is_persistent_and_private(tmp_path) -> None:
@@ -30,3 +34,17 @@ def test_managed_service_token_rejects_non_private_file(tmp_path) -> None:
 
     with pytest.raises(RuntimeError, match="owner-only"):
         resolve_local_service_token(paths)
+
+
+def test_signed_principal_credential_is_tamper_evident() -> None:
+    credential = issue_principal_credential("signing-secret", "personal:user-a")
+
+    assert (
+        verify_principal_credential("signing-secret", credential)
+        == "personal:user-a"
+    )
+    assert verify_principal_credential("wrong-secret", credential) is None
+    assert verify_principal_credential(
+        "signing-secret",
+        credential[:-1] + ("0" if credential[-1] != "0" else "1"),
+    ) is None

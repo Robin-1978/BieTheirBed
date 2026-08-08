@@ -197,7 +197,7 @@ class CoreClient:
                     future,
                     timeout=self._request_timeout,
                 )
-            except TimeoutError as exc:
+            except asyncio.TimeoutError as exc:
                 await self.disconnect()
                 raise CoreRequestTimeoutError(
                     f"Core request timed out: {request.method}"
