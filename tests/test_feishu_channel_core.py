@@ -17,10 +17,12 @@ from pc_assistant.channels.feishu import (
     FeishuChannel,
     _ActiveRunPresentation,
     _StreamingCardState,
+    _markdown_table_count,
     _patch_ws_card_dispatch,
     _principal_for_log,
     _render_card_markdown,
     _service_notice,
+    _split_text,
 )
 from pc_assistant.config import AppConfig
 from pc_assistant.service.core_api import (
@@ -634,6 +636,60 @@ def test_feishu_long_card_output_is_split_without_data_loss(tmp_path) -> None:
     ]
     assert len(contents) > 1
     assert "".join(contents) == _render_card_markdown(text)
+
+
+def test_feishu_short_output_with_many_tables_is_split_as_markdown() -> None:
+    tables = [
+        (
+            f"### 框架 {index}\n"
+            "| 项目 | 详情 |\n"
+            "|------|------|\n"
+            f"| 名称 | Agent {index} |\n"
+        )
+        for index in range(1, 7)
+    ]
+    text = "\n".join(tables)
+
+    assert len(text) < 3500
+    chunks = _split_text(text)
+
+    assert len(chunks) == 2
+    assert "".join(chunks) == text
+    assert all(_markdown_table_count(chunk) <= 3 for chunk in chunks)
+
+
+def test_feishu_card_failure_retries_smaller_markdown_chunks(tmp_path) -> None:
+    channel = FeishuChannel(_config(tmp_path))
+    attempted = []
+    plain_text = []
+
+    def send(_recipient, card):
+        content = card["body"]["elements"][0]["content"]
+        attempted.append(content)
+        if _markdown_table_count(content) > 1:
+            return None
+        return f"card-{len(attempted)}"
+
+    channel._send_card_returning_id = send
+    channel._send_long_text = lambda *args: plain_text.append(args) or True
+    text = (
+        "| A | B |\n|---|---|\n| 1 | 2 |\n\n"
+        "| C | D |\n|---|---|\n| 3 | 4 |\n"
+    )
+
+    assert not channel._send_card("ou-user", text)
+    assert len(attempted) == 3
+    assert [_markdown_table_count(item) for item in attempted] == [2, 1, 1]
+    assert plain_text == []
+
+
+def test_feishu_long_fenced_code_keeps_balanced_markdown() -> None:
+    text = "```python\n" + ("print('小诺')\n" * 500) + "```\n"
+
+    chunks = _split_text(text)
+
+    assert len(chunks) > 1
+    assert all(chunk.count("```") == 2 for chunk in chunks)
 
 
 @pytest.mark.asyncio
