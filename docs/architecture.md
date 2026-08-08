@@ -148,6 +148,10 @@ independent `CoreDaemon` and `ChannelRuntime`, then stops channels before Core.
 `ChannelRuntime` mounts configured adapters; Core modules do not import it or
 any channel package. Each Feishu user receives a separate CoreClient connection
 whose short-lived HMAC credential carries a stable hashed `personal:` principal.
+Core publishes only channel-neutral events (`reasoning_delta`, `content_delta`,
+`tool_call`, `tool_result`, `artifact`, `final_output`, and terminal status).
+Feishu owns typing reactions, streaming-card PATCH updates, presentation and
+lossless continuation cards; none of those concepts enter Core.
 
 ### 3.2 Service and transport
 
@@ -701,11 +705,13 @@ tool schemas before passing the remaining message budget to deterministic
 history trimming. This keeps the complete static tool surface cacheable while
 preventing schema tokens from silently consuming the completion reserve.
 
-### AR-018: External channels can expose model reasoning — high (fixed 2026-08-05)
+### AR-018: External channels can expose model reasoning — high (accepted 2026-08-08)
 
-Feishu drops `stream_think_delta` from outbound cards. Channel users receive
-bounded progress/status events and the final answer; raw reasoning remains
-available only to explicitly enabled local diagnostics.
+Core publishes the channel-neutral `reasoning_delta` event without selecting a
+presentation policy. The authenticated personal Feishu channel intentionally
+renders it in the active response card at the owner's request. Reasoning is not
+written to Channel logs, does not grant authority, and remains separate from
+the authoritative `final_output` event.
 
 ### AR-019: Feishu adapter combines too many lifecycle concerns — medium
 
@@ -836,7 +842,7 @@ model-visible and are not accepted as tool parameters.
 | P1 | Durable memory crosses session/principal boundaries | Global UserMemory and unfiltered recent EpisodicMemory are injected into every request | SQLite principal/session scopes, core/relevant policy, explicit episode recall | fixed; scoped regressions added |
 | P1 | Text-only main model cannot process image tasks safely | Image ingress is coupled directly to main-provider multimodality | Attachment manifest + dedicated perception-only `image_inspect` provider + evidence gate | fixed; isolation, caching, ownership, and no-base64 regressions added |
 | P1 | Context budget can be exceeded by mandatory/current segments and tool schemas | Truncation only drops older turns and does not budget the full provider request | Reserve completion and compact static tool-schema tokens before deterministic history trimming | fixed; request path accounts for schema and completion reserve |
-| P1 | Feishu can publish raw model thinking | Channel renders `stream_think_delta` as response-card content | Channel-safe progress events; discard raw reasoning outside explicit local diagnostics | fixed; Feishu only renders bounded status/final output |
+| P1 | External channels can publish model reasoning | Core exposes a standard reasoning event | Keep the event channel-neutral and let authenticated Channel policy decide presentation; never grant authority or log content | accepted for the personal Feishu Channel |
 | P1 | Credentials can appear in third-party transport logs | No global redaction filter for SDK-emitted URLs and query parameters | Root-handler redaction plus sensitive-log regression tests | open |
 | P1 | Desktop actions can mutate state without confirmation | Confirmation policy covered text input but not click, shortcut, close, or lock semantics | Gate state-changing desktop actions and keep unlock outside model tools | fixed; action matrix tests added |
 | P1 | Failed tool calls satisfy evidence requirements | Evidence counted authorized invocations rather than successful results | Count only completed non-error results | fixed; failed-tool warning regression added |

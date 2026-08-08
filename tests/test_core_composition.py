@@ -175,7 +175,7 @@ async def test_composition_records_correlated_model_and_turn_traces(
     )
     scope = await composition.control.create_session("local")
 
-    _events = [
+    events = [
         event
         async for event in composition.application.run(
             "local",
@@ -183,6 +183,10 @@ async def test_composition_records_correlated_model_and_turn_traces(
             RunRequest(client_request_id="request-a", input="hello"),
         )
     ]
+
+    final = [event for event in events if event.event_type == "final_output"]
+    assert len(final) == 1
+    assert final[0].payload.content == "done"
 
     model_trace = composition.llm_traces.recent(1)[0]
     turn_trace = composition.turn_traces.recent(1)[0]

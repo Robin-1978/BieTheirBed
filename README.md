@@ -132,6 +132,9 @@ feishu_app_secret: "..."
 Feishu connects to Core only through `CoreClient`; Core does not import the
 channel package. Each sender is mapped to a separate signed principal and
 opaque Core session.
+The Channel adds and removes the Feishu typing reaction, projects standard Core
+events into one live-updated card, and sends long final answers as lossless
+continuation cards instead of truncating model output.
 
 ### Environment variables
 

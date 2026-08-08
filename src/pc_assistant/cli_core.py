@@ -35,6 +35,7 @@ async def run_core_ask(
     started = time.monotonic()
     tool_calls = 0
     answer_parts: list[str] = []
+    final_answer: str | None = None
     artifacts: list[dict[str, str]] = []
     warnings: list[str] = []
     error = ""
@@ -62,6 +63,8 @@ async def run_core_ask(
             ):
                 if event.event_type == "content_delta":
                     answer_parts.append(event.payload.content)
+                elif event.event_type == "final_output":
+                    final_answer = event.payload.content
                 elif event.event_type == "tool_call":
                     tool_calls += 1
                 elif event.event_type == "artifact" and event.payload.artifact:
@@ -95,7 +98,11 @@ async def run_core_ask(
             except Exception:
                 pass
 
-    answer = "".join(answer_parts).strip()
+    answer = (
+        final_answer
+        if final_answer is not None
+        else "".join(answer_parts)
+    ).strip()
     elapsed = time.monotonic() - started
     model = config.resolve_model()
     metrics = {

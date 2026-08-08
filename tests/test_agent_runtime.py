@@ -123,7 +123,11 @@ async def test_completed_turn_commits_scoped_transcript_and_events(tmp_path: Pat
         )
     ]
 
-    assert [event.payload.content for event in events] == ["done"]
+    assert [event.event_type for event in events] == [
+        "content_delta",
+        "final_output",
+    ]
+    assert [event.payload.content for event in events] == ["done", "done"]
     assert [message["role"] for message in sessions.load(scope).messages] == [
         "user",
         "assistant",

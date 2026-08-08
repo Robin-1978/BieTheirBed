@@ -48,6 +48,8 @@ adapters:
 - Core-generated run IDs with principal-scoped cancellation, request-local
   cancellation events, opaque run handles, and immutable terminal outcomes;
 - ordered public run-event sequencing with exactly one terminal event;
+- an authoritative `final_output` event emitted after transcript persistence,
+  so clients never infer the conclusion from intermediate model deltas;
 - a scoped ControlService with separate typed operations for status, history,
   memory, tools, session creation, and local-admin configuration;
 - a transport-neutral CoreApplication that binds trusted principals to owned
@@ -406,6 +408,10 @@ Every run event carries:
 
 `event_seq` starts at one and is strictly increasing per run. The server emits
 exactly one terminal event: `completed`, `cancelled`, or `failed`.
+`content_delta` and `reasoning_delta` are live progress signals;
+`final_output` is the complete authoritative answer and precedes `completed`.
+Channels choose how to render these standard events. Core has no typing,
+reaction, card, Feishu, or other presentation concepts.
 
 An exception must not produce both an error and a successful `done` result.
 

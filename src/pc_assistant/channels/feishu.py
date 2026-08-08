@@ -31,6 +31,12 @@ from pc_assistant.service.credentials import (
 logger = logging.getLogger(__name__)
 _CONFIRM_TIMEOUT_SECONDS = 110.0
 _MARKDOWN_IMAGE = re.compile(r"!\[([^\]\n]*)\]\([^\n)]*\)")
+_STREAM_PATCH_INTERVAL_SECONDS = 0.6
+_CARD_MARKDOWN_CHARS = 3500
+_PROGRESS_REASONING_CHARS = 700
+_PROGRESS_STEPS_CHARS = 1000
+_PROGRESS_DRAFT_CHARS = 900
+_TEXT_MESSAGE_CHARS = 4000
 
 for _proxy_name in ("NO_PROXY", "no_proxy"):
     _configured = os.environ.get(_proxy_name, "")
@@ -68,6 +74,172 @@ def _render_card_markdown(text: str) -> str:
         return f"🖼️ {label}（见附件）"
 
     return _MARKDOWN_IMAGE.sub(replace_image, text)
+
+
+def _split_text(text: str, limit: int = _CARD_MARKDOWN_CHARS) -> tuple[str, ...]:
+    """Split transport payloads without dropping any model output."""
+    if limit < 1:
+        raise ValueError("Text chunk limit must be positive")
+    if not text:
+        return ("",)
+    chunks: list[str] = []
+    offset = 0
+    while offset < len(text):
+        end = min(len(text), offset + limit)
+        if end < len(text):
+            window = text[offset:end]
+            candidates = (
+                window.rfind("\n\n"),
+                window.rfind("\n"),
+                window.rfind(" "),
+            )
+            boundary = max(candidates)
+            if boundary >= limit // 2:
+                end = offset + boundary + 1
+        chunks.append(text[offset:end])
+        offset = end
+    return tuple(chunks)
+
+
+def _tail(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return "…\n" + text[-max(1, limit - 2) :]
+
+
+def _brief_json(value: Any, limit: int = 240) -> str:
+    rendered = json.dumps(value, ensure_ascii=False, default=str, sort_keys=True)
+    if len(rendered) <= limit:
+        return rendered
+    return rendered[: max(1, limit - 1)] + "…"
+
+
+def _summarize_tool_result(result: Any) -> str:
+    if not isinstance(result, dict):
+        return _tail(str(result), 220) if result is not None else "完成"
+    status = str(result.get("status", ""))
+    if status and status != "completed":
+        detail = result.get("message") or result.get("code") or status
+        return f"{status}: {_tail(str(detail), 180)}"
+    output = result.get("output")
+    if isinstance(output, dict):
+        if output.get("success") is False:
+            detail = output.get("message") or output.get("error") or "执行失败"
+            return _tail(str(detail), 180)
+        if output.get("artifact"):
+            artifact = output["artifact"]
+            if isinstance(artifact, dict):
+                return f"已生成 {artifact.get('name') or '附件'}"
+        return "完成"
+    return _tail(str(output), 220) if output not in (None, "") else "完成"
+
+
+class _StreamingCardState:
+    """Channel-local projection of standard Core run events."""
+
+    def __init__(self) -> None:
+        self.reasoning = ""
+        self.steps: list[str] = []
+        self.draft = ""
+        self.final_output = ""
+        self.error = ""
+        self.phase = "thinking"
+
+    def append_reasoning(self, content: str) -> None:
+        self.reasoning += content
+
+    def append_draft(self, content: str) -> None:
+        self.draft += content
+
+    def set_final_output(self, content: str) -> None:
+        self.final_output = content
+        self.phase = "done"
+
+    def add_tool_call(self, name: str, arguments: dict[str, Any]) -> None:
+        self.phase = "working"
+        self.draft = ""
+        self.steps.append(f"⚙️ `{name}`\n`{_brief_json(arguments)}`")
+
+    def add_tool_result(self, name: str, result: Any, *, blocked: bool) -> None:
+        icon = "❌" if blocked else "✅"
+        self.steps.append(f"{icon} `{name}` — {_summarize_tool_result(result)}")
+
+    def add_notice(self, content: str) -> None:
+        if content:
+            self.steps.append(f"ℹ️ {_tail(content, 220)}")
+
+    def set_error(self, content: str) -> None:
+        self.error = content or "处理失败"
+        self.phase = "error"
+
+    def build_card(
+        self,
+        *,
+        final_chunk: str | None = None,
+    ) -> dict[str, Any]:
+        elements: list[dict[str, Any]] = []
+        if self.reasoning:
+            elements.append(
+                {
+                    "tag": "markdown",
+                    "content": "💭 **思考**\n"
+                    + _render_card_markdown(
+                        _tail(self.reasoning, _PROGRESS_REASONING_CHARS)
+                    ),
+                }
+            )
+        if self.steps:
+            steps = "\n\n".join(self.steps)
+            elements.append(
+                {
+                    "tag": "markdown",
+                    "content": "🛠️ **工具执行**\n"
+                    + _tail(steps, _PROGRESS_STEPS_CHARS),
+                }
+            )
+        if final_chunk is not None:
+            if elements:
+                elements.append({"tag": "hr"})
+            elements.append(
+                {
+                    "tag": "markdown",
+                    "content": final_chunk or "✅ 已完成",
+                }
+            )
+        elif self.error:
+            if elements:
+                elements.append({"tag": "hr"})
+            elements.append(
+                {"tag": "markdown", "content": f"❌ {self.error}"}
+            )
+        elif self.draft:
+            elements.append(
+                {
+                    "tag": "markdown",
+                    "content": "✍️ "
+                    + _render_card_markdown(
+                        _tail(self.draft, _PROGRESS_DRAFT_CHARS)
+                    ),
+                }
+            )
+        else:
+            status = "⏳ 正在调用工具…" if self.phase == "working" else "⏳ 正在思考…"
+            elements.append({"tag": "markdown", "content": status})
+
+        if self.phase == "error":
+            template, title = "red", "❌ 处理出错"
+        elif final_chunk is not None:
+            template, title = "blue", "💬 PC Assistant"
+        else:
+            template, title = "turquoise", "⏳ PC Assistant 处理中"
+        return {
+            "schema": "2.0",
+            "header": {
+                "template": template,
+                "title": {"tag": "plain_text", "content": title},
+            },
+            "body": {"elements": elements},
+        }
 
 
 class FeishuChannel:
@@ -193,7 +365,7 @@ class FeishuChannel:
                 if message.message_type == "text":
                     text = str(content.get("text", "")).strip()
                     if text:
-                        self._submit(self._handle_text(open_id, text))
+                        self._submit(self._handle_text(open_id, text, message_id))
                 elif message.message_type == "image":
                     image_key = str(content.get("image_key", "")).strip()
                     if image_key:
@@ -230,40 +402,65 @@ class FeishuChannel:
 
         future.add_done_callback(report_failure)
 
-    async def _handle_text(self, open_id: str, text: str) -> None:
-        self._save_binding(open_id)
-        normalized = text.strip().lower()
-        confirmation = self._pending_confirmations.get(open_id)
-        if confirmation is not None and not confirmation.done():
-            if normalized in {"确认", "批准", "yes", "y", "ok"}:
-                confirmation.set_result(True)
-                await asyncio.to_thread(self._send_text, open_id, "✅ 已批准执行")
-                return
-            if normalized in {"取消", "拒绝", "no", "n"}:
-                confirmation.set_result(False)
-                await asyncio.to_thread(self._send_text, open_id, "❌ 已拒绝执行")
-                return
-            await asyncio.to_thread(
-                self._send_text,
-                open_id,
-                "当前有操作等待确认，请回复“确认”或“取消”。",
-            )
-            return
-
-        lock = self._user_locks.setdefault(open_id, asyncio.Lock())
-        async with lock:
-            try:
-                await self._run_text(open_id, text)
-            except Exception as exc:
-                logger.exception(
-                    "Feishu Core run failed principal=%s",
-                    _principal_for_log(open_id),
-                )
+    async def _handle_text(
+        self,
+        open_id: str,
+        text: str,
+        message_id: str = "",
+    ) -> None:
+        reaction_id = await asyncio.to_thread(
+            self._add_reaction,
+            message_id,
+            "Typing",
+        )
+        try:
+            self._save_binding(open_id)
+            normalized = text.strip().lower()
+            confirmation = self._pending_confirmations.get(open_id)
+            if confirmation is not None and not confirmation.done():
+                if normalized in {"确认", "批准", "yes", "y", "ok"}:
+                    confirmation.set_result(True)
+                    await asyncio.to_thread(
+                        self._send_text,
+                        open_id,
+                        "✅ 已批准执行",
+                    )
+                    return
+                if normalized in {"取消", "拒绝", "no", "n"}:
+                    confirmation.set_result(False)
+                    await asyncio.to_thread(
+                        self._send_text,
+                        open_id,
+                        "❌ 已拒绝执行",
+                    )
+                    return
                 await asyncio.to_thread(
                     self._send_text,
                     open_id,
-                    f"❌ 处理失败：{type(exc).__name__}",
+                    "当前有操作等待确认，请回复“确认”或“取消”。",
                 )
+                return
+
+            lock = self._user_locks.setdefault(open_id, asyncio.Lock())
+            async with lock:
+                try:
+                    await self._run_text(open_id, text)
+                except Exception as exc:
+                    logger.exception(
+                        "Feishu Core run failed principal=%s",
+                        _principal_for_log(open_id),
+                    )
+                    await asyncio.to_thread(
+                        self._send_text,
+                        open_id,
+                        f"❌ 处理失败：{type(exc).__name__}",
+                    )
+        finally:
+            await asyncio.to_thread(
+                self._remove_reaction,
+                message_id,
+                reaction_id,
+            )
 
     async def _run_text(self, open_id: str, text: str) -> None:
         client = await self._client_for(open_id)
@@ -292,39 +489,171 @@ class FeishuChannel:
             return
 
         attachments = tuple(self._pending_attachments.pop(open_id, []))
-        await asyncio.to_thread(self._send_text, open_id, "⏳ 正在处理...")
-        answer: list[str] = []
-        artifacts: list[str] = []
-        failed = ""
         try:
-            async for event in client.run(session, text, attachments):
-                if event.event_type == "content_delta":
-                    answer.append(event.payload.content)
-                elif event.event_type == "artifact" and event.payload.artifact:
-                    artifacts.append(event.payload.artifact.artifact_id)
-                elif event.event_type in {"failed", "cancelled"}:
-                    failed = event.payload.content or event.event_type
+            await self._stream_core_run(
+                open_id,
+                client,
+                session,
+                text,
+                attachments,
+            )
         except CoreRequestError as exc:
             if exc.code != "session_not_found":
                 raise
             session = await client.create_session()
             self._bind_session(open_id, session)
-            async for event in client.run(session, text, attachments):
-                if event.event_type == "content_delta":
-                    answer.append(event.payload.content)
-                elif event.event_type == "artifact" and event.payload.artifact:
-                    artifacts.append(event.payload.artifact.artifact_id)
-                elif event.event_type in {"failed", "cancelled"}:
-                    failed = event.payload.content or event.event_type
+            await self._stream_core_run(
+                open_id,
+                client,
+                session,
+                text,
+                attachments,
+            )
 
-        response = "".join(answer).strip()
-        if failed:
-            response = f"❌ {failed}"
-        if not response:
-            response = "✅ 已完成"
-        await asyncio.to_thread(self._send_card, open_id, response)
-        for artifact_id in artifacts[:5]:
-            await self._deliver_artifact(open_id, session, artifact_id)
+    async def _stream_core_run(
+        self,
+        open_id: str,
+        client: CoreClient,
+        session: str,
+        text: str,
+        attachments: tuple[ArtifactInputRef, ...],
+    ) -> None:
+        state = _StreamingCardState()
+        card_message_id: str | None = None
+        card_failed = False
+        last_patch = 0.0
+        terminal = ""
+        artifacts: list[str] = []
+        artifact_ids: set[str] = set()
+
+        async def ensure_card() -> None:
+            nonlocal card_message_id, card_failed, last_patch
+            if card_message_id is not None or card_failed:
+                return
+            card_message_id = await asyncio.to_thread(
+                self._send_card_returning_id,
+                open_id,
+                state.build_card(),
+            )
+            last_patch = time.monotonic()
+            card_failed = card_message_id is None
+
+        async def patch_card(*, force: bool = False) -> bool:
+            nonlocal last_patch
+            await ensure_card()
+            if card_message_id is None:
+                return False
+            now = time.monotonic()
+            if not force and now - last_patch < _STREAM_PATCH_INTERVAL_SECONDS:
+                return True
+            updated = await asyncio.to_thread(
+                self._update_card,
+                card_message_id,
+                state.build_card(),
+            )
+            last_patch = now
+            return updated
+
+        async for event in client.run(session, text, attachments):
+            await ensure_card()
+            payload = event.payload
+            if event.event_type == "reasoning_delta":
+                state.append_reasoning(payload.content)
+                await patch_card()
+            elif event.event_type == "content_delta":
+                state.append_draft(payload.content)
+                await patch_card()
+            elif event.event_type == "final_output":
+                state.set_final_output(payload.content)
+            elif event.event_type == "tool_call":
+                state.add_tool_call(payload.tool_name, payload.tool_args)
+                await patch_card(force=True)
+            elif event.event_type == "tool_result":
+                state.add_tool_result(
+                    payload.tool_name,
+                    payload.tool_result,
+                    blocked=payload.blocked,
+                )
+                await patch_card(force=True)
+            elif event.event_type == "artifact" and payload.artifact:
+                artifact_id = payload.artifact.artifact_id
+                if artifact_id not in artifact_ids:
+                    artifact_ids.add(artifact_id)
+                    artifacts.append(artifact_id)
+            elif event.event_type == "context_compacted":
+                state.add_notice("较早对话已整理为简短工作摘要。")
+                await patch_card()
+            elif event.event_type in {"plan", "warning"}:
+                state.add_notice(payload.content)
+                await patch_card()
+            elif event.event_type in {"failed", "cancelled"}:
+                terminal = event.event_type
+                state.set_error(payload.content or event.event_type)
+            elif event.event_type == "completed":
+                terminal = "completed"
+
+        if terminal == "completed":
+            if state.phase != "done":
+                raise RuntimeError("Core completed without final_output event")
+            rendered = _render_card_markdown(
+                state.final_output if state.final_output else "✅ 已完成"
+            )
+            chunks = _split_text(rendered)
+            final_card = state.build_card(final_chunk=chunks[0])
+            if card_message_id is not None:
+                updated = await asyncio.to_thread(
+                    self._update_card,
+                    card_message_id,
+                    final_card,
+                )
+            else:
+                updated = False
+            if not updated:
+                await asyncio.to_thread(
+                    self._send_card,
+                    open_id,
+                    rendered,
+                )
+            else:
+                total = len(chunks)
+                for index, chunk in enumerate(chunks[1:], start=2):
+                    await asyncio.to_thread(
+                        self._send_card,
+                        open_id,
+                        chunk,
+                        "blue",
+                        f"PC Assistant（续 {index}/{total}）",
+                    )
+        else:
+            if not terminal:
+                state.set_error("Core run ended without a terminal event")
+            final_card = state.build_card()
+            if card_message_id is None or not await asyncio.to_thread(
+                self._update_card,
+                card_message_id,
+                final_card,
+            ):
+                await asyncio.to_thread(
+                    self._send_card,
+                    open_id,
+                    f"❌ {state.error or terminal}",
+                    "red",
+                    "处理出错",
+                )
+
+        delivery_failures: list[str] = []
+        for artifact_id in artifacts:
+            try:
+                await self._deliver_artifact(open_id, session, artifact_id)
+            except Exception:
+                logger.exception("Feishu artifact delivery failed: %s", artifact_id)
+                delivery_failures.append(artifact_id)
+        if delivery_failures:
+            await asyncio.to_thread(
+                self._send_text,
+                open_id,
+                "⚠️ 附件交付失败：" + "、".join(delivery_failures),
+            )
 
     async def _handle_image(
         self,
@@ -332,8 +661,13 @@ class FeishuChannel:
         message_id: str,
         image_key: str,
     ) -> None:
-        self._save_binding(open_id)
+        reaction_id = await asyncio.to_thread(
+            self._add_reaction,
+            message_id,
+            "Typing",
+        )
         try:
+            self._save_binding(open_id)
             data, media_type = await asyncio.to_thread(
                 self._download_image,
                 message_id,
@@ -367,6 +701,12 @@ class FeishuChannel:
                 _principal_for_log(open_id),
             )
             await asyncio.to_thread(self._send_text, open_id, "❌ 图片接收失败")
+        finally:
+            await asyncio.to_thread(
+                self._remove_reaction,
+                message_id,
+                reaction_id,
+            )
 
     async def _confirm_tool(
         self,
@@ -485,6 +825,68 @@ class FeishuChannel:
                     )
         return self._lark_client
 
+    def _add_reaction(self, message_id: str, emoji_type: str = "Typing") -> str:
+        if not message_id:
+            return ""
+        try:
+            from lark_oapi.api.im.v1 import CreateMessageReactionRequest
+            from lark_oapi.api.im.v1.model.create_message_reaction_request_body import (
+                CreateMessageReactionRequestBody,
+            )
+            from lark_oapi.api.im.v1.model.emoji import Emoji
+
+            request = (
+                CreateMessageReactionRequest.builder()
+                .message_id(message_id)
+                .request_body(
+                    CreateMessageReactionRequestBody.builder()
+                    .reaction_type(
+                        Emoji.builder().emoji_type(emoji_type).build()
+                    )
+                    .build()
+                )
+                .build()
+            )
+            with self._lark_lock:
+                response = self._get_lark_client().im.v1.message_reaction.create(
+                    request
+                )
+            if response.success() and response.data:
+                return response.data.reaction_id or ""
+            logger.debug(
+                "Feishu reaction create failed code=%s msg=%s",
+                response.code,
+                response.msg,
+            )
+        except Exception:
+            logger.debug("Feishu reaction create failed", exc_info=True)
+        return ""
+
+    def _remove_reaction(self, message_id: str, reaction_id: str) -> None:
+        if not message_id or not reaction_id:
+            return
+        try:
+            from lark_oapi.api.im.v1 import DeleteMessageReactionRequest
+
+            request = (
+                DeleteMessageReactionRequest.builder()
+                .message_id(message_id)
+                .reaction_id(reaction_id)
+                .build()
+            )
+            with self._lark_lock:
+                response = self._get_lark_client().im.v1.message_reaction.delete(
+                    request
+                )
+            if not response.success():
+                logger.debug(
+                    "Feishu reaction delete failed code=%s msg=%s",
+                    response.code,
+                    response.msg,
+                )
+        except Exception:
+            logger.debug("Feishu reaction delete failed", exc_info=True)
+
     def _send_text(self, open_id: str, text: str) -> bool:
         from lark_oapi.api.im.v1 import CreateMessageRequest
         from lark_oapi.api.im.v1.model.create_message_request_body import (
@@ -515,31 +917,40 @@ class FeishuChannel:
         logger.error("Feishu text send failed code=%s msg=%s", response.code, response.msg)
         return False
 
-    def _send_card(
-        self,
-        open_id: str,
-        text: str,
-        template: str = "blue",
-        title: str = "PC Assistant",
-    ) -> bool:
-        from lark_oapi.api.im.v1 import CreateMessageRequest
-        from lark_oapi.api.im.v1.model.create_message_request_body import (
-            CreateMessageRequestBody,
-        )
+    def _send_long_text(self, open_id: str, text: str) -> bool:
+        succeeded = True
+        for chunk in _split_text(text, _TEXT_MESSAGE_CHARS):
+            if not self._send_text(open_id, chunk):
+                succeeded = False
+        return succeeded
 
-        rendered = _render_card_markdown(text)
-        card = {
+    @staticmethod
+    def _text_card(
+        text: str,
+        template: str,
+        title: str,
+    ) -> dict[str, Any]:
+        return {
             "schema": "2.0",
             "header": {
                 "template": template,
                 "title": {"tag": "plain_text", "content": title},
             },
             "body": {
-                "elements": [
-                    {"tag": "markdown", "content": rendered[:12000]}
-                ]
+                "elements": [{"tag": "markdown", "content": text}],
             },
         }
+
+    def _send_card_returning_id(
+        self,
+        open_id: str,
+        card: dict[str, Any],
+    ) -> str | None:
+        from lark_oapi.api.im.v1 import CreateMessageRequest
+        from lark_oapi.api.im.v1.model.create_message_request_body import (
+            CreateMessageRequestBody,
+        )
+
         request = (
             CreateMessageRequest.builder()
             .receive_id_type("open_id")
@@ -554,15 +965,69 @@ class FeishuChannel:
         )
         with self._lark_lock:
             response = self._get_lark_client().im.v1.message.create(request)
-        if response.code == 0:
+        if response.code == 0 and response.data:
+            message_id = getattr(response.data, "message_id", "") or ""
             logger.info(
-                "Feishu card sent principal=%s chars=%d",
+                "Feishu card sent principal=%s msg_id=%s",
                 _principal_for_log(open_id),
-                len(text),
+                message_id,
             )
-            return True
-        logger.error("Feishu card send failed code=%s msg=%s", response.code, response.msg)
-        return self._send_text(open_id, f"{title}\n\n{rendered}"[:12000])
+            return message_id or None
+        logger.error(
+            "Feishu card send failed code=%s msg=%s",
+            response.code,
+            response.msg,
+        )
+        return None
+
+    def _update_card(self, message_id: str, card: dict[str, Any]) -> bool:
+        try:
+            from lark_oapi.api.im.v1 import PatchMessageRequest
+            from lark_oapi.api.im.v1.model.patch_message_request_body import (
+                PatchMessageRequestBody,
+            )
+
+            request = (
+                PatchMessageRequest.builder()
+                .message_id(message_id)
+                .request_body(
+                    PatchMessageRequestBody.builder()
+                    .content(json.dumps(card, ensure_ascii=False))
+                    .build()
+                )
+                .build()
+            )
+            with self._lark_lock:
+                response = self._get_lark_client().im.v1.message.patch(request)
+            if response.code == 0:
+                return True
+            logger.warning(
+                "Feishu card update failed code=%s msg=%s",
+                response.code,
+                response.msg,
+            )
+        except Exception:
+            logger.warning("Feishu card update failed", exc_info=True)
+        return False
+
+    def _send_card(
+        self,
+        open_id: str,
+        text: str,
+        template: str = "blue",
+        title: str = "PC Assistant",
+    ) -> bool:
+        rendered = _render_card_markdown(text)
+        chunks = _split_text(rendered)
+        succeeded = True
+        total = len(chunks)
+        for index, chunk in enumerate(chunks, start=1):
+            chunk_title = title if total == 1 else f"{title}（{index}/{total}）"
+            card = self._text_card(chunk, template, chunk_title)
+            if self._send_card_returning_id(open_id, card) is None:
+                succeeded = False
+                self._send_long_text(open_id, f"{chunk_title}\n\n{chunk}")
+        return succeeded
 
     def _download_image(self, message_id: str, image_key: str) -> tuple[bytes, str]:
         from lark_oapi.api.im.v1 import GetMessageResourceRequest

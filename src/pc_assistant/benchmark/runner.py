@@ -83,6 +83,8 @@ class BenchmarkRunner:
                     events.append(event)
                     if event.event_type == "content_delta":
                         answer_parts.append(event.payload.content)
+                    elif event.event_type == "final_output":
+                        answer_parts[:] = [event.payload.content]
                     elif event.event_type == "tool_call":
                         tool_count += 1
                     elif event.event_type in {"failed", "cancelled"}:
