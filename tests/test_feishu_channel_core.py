@@ -5,7 +5,11 @@ import asyncio
 import pytest
 
 from pc_assistant.agent_runtime.contracts import RunEvent, RuntimeEventPayload
-from pc_assistant.channels.feishu import FeishuChannel, _principal_for_log
+from pc_assistant.channels.feishu import (
+    FeishuChannel,
+    _principal_for_log,
+    _render_card_markdown,
+)
 from pc_assistant.config import AppConfig
 from pc_assistant.service.core_api import ConfirmationRequestedMessage
 
@@ -99,3 +103,12 @@ def test_feishu_principal_log_identifier_is_not_reversible() -> None:
     assert identifier == _principal_for_log("ou-sensitive-user")
     assert len(identifier) == 10
     assert "ou-sensitive-user" not in identifier
+
+
+def test_feishu_card_replaces_core_artifact_image_reference() -> None:
+    rendered = _render_card_markdown(
+        "操作完成\n\n![屏幕截图](https://api.artifact.local/artifact-a)"
+    )
+
+    assert rendered == "操作完成\n\n🖼️ 屏幕截图（见附件）"
+    assert "api.artifact.local" not in rendered
