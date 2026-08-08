@@ -362,6 +362,21 @@ def test_feishu_cancelled_card_is_neutral() -> None:
     assert "处理出错" not in rendered
 
 
+def test_feishu_reasoning_is_muted_but_final_answer_is_not() -> None:
+    state = _StreamingCardState()
+    state.append_reasoning("先检查状态")
+
+    card = state.build_card(final_chunk="结论")
+    reasoning, divider, final = card["body"]["elements"]
+
+    assert reasoning["content"] == (
+        "<font color='grey'>💭 **思考**\n先检查状态</font>"
+    )
+    assert divider == {"tag": "hr"}
+    assert final["content"] == "结论"
+    assert "<font" not in final["content"]
+
+
 @pytest.mark.asyncio
 async def test_feishu_status_renders_core_usage_without_channel_metrics(
     tmp_path,

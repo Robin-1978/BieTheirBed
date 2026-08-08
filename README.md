@@ -1,4 +1,4 @@
-# 知栖 · Knoa
+# 小诺 · Knoa
 
 A personal computer agent with ReAct reasoning, multi-LLM support, tool calling, and a Rich terminal UI.
 
