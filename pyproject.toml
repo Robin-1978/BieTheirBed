@@ -23,7 +23,7 @@ dependencies = [
     "pywinctl>=0.0.5",
     "plyer>=2.1.0",
     "jsonschema>=4.0",
-    "websockets>=14.0",
+    "websockets>=14.0,<16",
 ]
 
 [project.optional-dependencies]

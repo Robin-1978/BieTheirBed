@@ -573,9 +573,9 @@ upload images first and run requests accept `artifact_id` references only.
 
 `RuntimePaths` now resolves sibling `logs/`, `attachments/`, `artifacts/`, `cache/`, and `data/`
 directories from `runtime_root`. Application, service, audit, trace,
-idempotency, attachment, and screenshot paths consume this layout; socket/PID
-files retain OS runtime placement. Service startup failure cancels its periodic
-attachment cleanup task.
+idempotency, attachment, screenshot, and managed local WebSocket credential
+paths consume this layout; only the PID file retains OS runtime placement.
+Service startup failure cancels its periodic attachment cleanup task.
 
 ### AR-006: Provider capability model was under-specified — medium (fixed 2026-08-04)
 

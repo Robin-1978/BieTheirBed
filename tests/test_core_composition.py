@@ -16,6 +16,9 @@ from pc_assistant.agent_runtime.contracts import (
 )
 from pc_assistant.agent_runtime.model_step import ProviderChunk
 from pc_assistant.config import AppConfig
+from pc_assistant.runtime import RuntimePaths
+from pc_assistant.service.core_client import CoreClient
+from pc_assistant.service.credentials import resolve_local_service_token
 
 
 class _OfflineProvider:
@@ -66,8 +69,7 @@ def _config(tmp_path: Path, **updates) -> AppConfig:
 
 def test_core_composition_builds_forward_only_registry_and_profiles(tmp_path: Path) -> None:
     composition = build_core_runtime(
-        _config(tmp_path),
-        socket_path=tmp_path / "core.sock",
+        _config(tmp_path, service_port=0),
         provider_factory=_OfflineProvider,
     )
 
@@ -83,8 +85,7 @@ def test_core_composition_builds_forward_only_registry_and_profiles(tmp_path: Pa
 @pytest.mark.asyncio
 async def test_control_lists_only_principal_profile_tools(tmp_path: Path) -> None:
     composition = build_core_runtime(
-        _config(tmp_path),
-        socket_path=tmp_path / "core.sock",
+        _config(tmp_path, service_port=0),
         provider_factory=_OfflineProvider,
     )
     local = await composition.control.create_session("local")
@@ -99,13 +100,50 @@ async def test_control_lists_only_principal_profile_tools(tmp_path: Path) -> Non
     assert RuntimeScope(principal_id="local", session_handle=local.session_handle) == local
 
 
-def test_tcp_endpoint_requires_token_even_on_loopback(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="requires an authentication token"):
-        build_core_runtime(
-            _config(tmp_path, service_host="127.0.0.1", service_port=8765),
-            socket_path=tmp_path / "core.sock",
-            provider_factory=_OfflineProvider,
+def test_tcp_endpoint_uses_managed_token_when_not_configured(tmp_path: Path) -> None:
+    composition = build_core_runtime(
+        _config(tmp_path, service_host="127.0.0.1", service_port=0),
+        provider_factory=_OfflineProvider,
+    )
+
+    token_path = composition.paths.config / "service.token"
+    assert token_path.read_text(encoding="utf-8").strip()
+
+
+@pytest.mark.asyncio
+async def test_tcp_endpoint_separates_local_and_remote_credentials(tmp_path: Path) -> None:
+    config = _config(
+        tmp_path,
+        service_host="127.0.0.1",
+        service_port=0,
+        service_token="remote-secret",
+    )
+    composition = build_core_runtime(config, provider_factory=_OfflineProvider)
+    await composition.host.start()
+    local_client: CoreClient | None = None
+    remote_client: CoreClient | None = None
+    try:
+        uri = f"ws://127.0.0.1:{composition.host.bound_tcp_port}"
+        local_client = await CoreClient.connect(
+            uri,
+            resolve_local_service_token(RuntimePaths.from_root(config.runtime_root)),
         )
+        remote_client = await CoreClient.connect(uri, "remote-secret")
+        local_session = await local_client.create_session()
+        remote_session = await remote_client.create_session()
+
+        local_tools = set((await local_client.list_tools(local_session)).tools)
+        remote_tools = set((await remote_client.list_tools(remote_session)).tools)
+
+        assert "screenshot" in local_tools
+        assert "screenshot" not in remote_tools
+        assert remote_tools == {"currency", "weather", "web_fetch", "web_search"}
+    finally:
+        if local_client is not None:
+            await local_client.disconnect()
+        if remote_client is not None:
+            await remote_client.disconnect()
+        await composition.host.stop()
 
 
 @pytest.mark.asyncio
@@ -113,8 +151,7 @@ async def test_composition_records_correlated_model_and_turn_traces(
     tmp_path: Path,
 ) -> None:
     composition = build_core_runtime(
-        _config(tmp_path),
-        socket_path=tmp_path / "core.sock",
+        _config(tmp_path, service_port=0),
         provider_factory=_AnswerProvider,
     )
     scope = await composition.control.create_session("local")

@@ -94,19 +94,6 @@ class StaticTokenAuthenticator:
         return None
 
 
-class UnixLocalAuthenticator:
-    """Derive a fixed principal from access to a protected Unix socket."""
-
-    def __init__(self, principal_id: str = "local") -> None:
-        if not principal_id.strip():
-            raise ValueError("Local principal must not be empty")
-        self._principal_id = principal_id
-
-    async def authenticate(self, credential: str) -> str:
-        del credential
-        return self._principal_id
-
-
 class ConnectionConfirmationPort:
     """Route confirmations only through the connection that initiated a run."""
 

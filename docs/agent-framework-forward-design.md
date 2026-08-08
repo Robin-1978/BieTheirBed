@@ -62,9 +62,9 @@ adapters:
   only an opaque `artifact_id` and optional caption, and ArtifactStore exposes no
   public path-resolution API; delivery is acknowledged only after the WebSocket
   send succeeds, while local save failures remain client-side warnings;
-- an independent CoreServiceHost for protected Unix sockets and token-authenticated
-  TCP endpoints, including Unix-derived `local` identity, owner-only socket
-  permissions, and explicit lifecycle cleanup;
+- an independent CoreServiceHost for one token-authenticated loopback TCP
+  WebSocket endpoint, including a generated owner-only local credential,
+  optional configured remote credential, and explicit lifecycle cleanup;
 - explicit effect, capability, and risk metadata for every built-in tool, with
   capability-filtered schema exposure, workspace-root enforcement, strict tool
   names, registration-time validation, and Draft 2020-12 JSON Schema checks;
@@ -85,7 +85,7 @@ adapters:
   fallback only before observable primary output;
 - a single forward-only composition root that owns runtime paths, stores,
   provider selection, capability profiles, tool registry, Core services, and
-  Unix/TCP endpoints without calling the old AgentFactory;
+  the loopback WebSocket endpoint without calling the old AgentFactory;
 - connection-scoped confirmation round trips, including timeout/disconnect
   denial and routing back only to the client that initiated the run;
 - screenshot artifact/image-reference pairing so the next model step can see
@@ -118,9 +118,9 @@ adapters:
 - restart-bound configuration writes to the same explicit configuration file
   used at startup, or to `runtime_root/config/local.yaml` when no explicit file
   was supplied;
-- fail-closed transport configuration: non-empty TCP credentials and principals,
-  loopback-only plain TCP until TLS exists, and Unix socket paths whose directory
-  is both owner-only and owned by the service UID;
+- fail-closed transport configuration: generated owner-only local credentials,
+  non-empty configured remote credentials and principals, and loopback-only
+  plain TCP until TLS exists;
 - owner-only runtime state: transcript/memory/artifact databases, persisted
   configuration, traces, and managed artifact/download files use 0600; new
   runtime-owned directories use 0700 without changing permissions on an existing
@@ -265,7 +265,7 @@ The framework supports two explicit profiles:
 
 | Profile | Intended use | Identity | Default capabilities |
 |---|---|---|---|
-| `personal_local` | One OS user, local CLI/TUI | Unix peer/local principal | workspace read/write, configured desktop access, confirmation-gated mutation |
+| `personal_local` | One OS user, local CLI/TUI | managed local WebSocket credential | workspace read/write, configured desktop access, confirmation-gated mutation |
 | `remote_scoped` | Token-authenticated loopback TCP client | authenticated principal | least privilege; no workspace escape or unrestricted shell by default |
 
 Local does not mean untrusted model output becomes trusted. Prompt injection,
@@ -276,8 +276,8 @@ untrusted in both profiles.
 
 Principals are established by the transport, never accepted from request JSON:
 
-- local Unix clients -> `local`;
-- TCP -> authenticated credential identity, not a client-provided name;
+- the owner-only managed local credential -> `local`;
+- configured TCP credentials -> authenticated identity, not a client-provided name;
 
 Plain WebSocket TCP endpoints bind only to loopback. Non-loopback transport is
 rejected until certificate-backed TLS is a real configured feature; bearer

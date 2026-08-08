@@ -114,6 +114,12 @@ directly in `~/.pc-assistant/config/local.yaml`; protect that file with
 If no `providers`/`models` catalog is configured, the original single-model
 fields in `config/default.yaml` remain the fallback.
 
+The Core API uses one token-authenticated WebSocket listener on
+`127.0.0.1:9527` by default. Local CLI/TUI clients use an automatically managed
+credential stored with mode `0600` at
+`~/.pc-assistant/config/service.token`. Setting `service_token` adds a separate
+credential for scoped clients; it is not required for local operation.
+
 ### Environment variables
 
 All config fields can be overridden with `PC_` prefix:

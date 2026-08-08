@@ -57,10 +57,6 @@ class RuntimePaths:
         return self.root / "data"
 
     @property
-    def socket(self) -> Path:
-        return os_runtime_dir() / "service.sock"
-
-    @property
     def pid(self) -> Path:
         return os_runtime_dir() / "service.pid"
 

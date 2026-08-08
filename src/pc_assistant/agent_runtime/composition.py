@@ -47,13 +47,12 @@ from pc_assistant.runtime import RuntimePaths
 from pc_assistant.service.core_host import (
     CoreServiceHost,
     TcpCoreEndpoint,
-    UnixCoreEndpoint,
 )
 from pc_assistant.service.core_server import (
     CoreServer,
     StaticTokenAuthenticator,
-    UnixLocalAuthenticator,
 )
+from pc_assistant.service.credentials import resolve_local_service_token
 from pc_assistant.tools.artifact_prepare import ArtifactPrepareTool
 from pc_assistant.tools.base import ToolCapability
 from pc_assistant.tools.clipboard import ClipboardTool
@@ -170,7 +169,6 @@ def _build_registry(
 def build_core_runtime(
     config: AppConfig,
     *,
-    socket_path: str | Path | None = None,
     provider_factory: Callable[..., HttpModelProvider] = HttpModelProvider,
 ) -> CoreRuntimeComposition:
     """Build one Core graph without legacy agents or in-process service fallback."""
@@ -334,34 +332,23 @@ def build_core_runtime(
     )
     artifact_service = ArtifactService(sessions, artifacts)
 
-    unix_server = CoreServer(
+    local_token = resolve_local_service_token(paths)
+    credentials = {local_token: "local"}
+    if config.service_token.strip():
+        credentials[config.service_token.strip()] = "remote"
+    tcp_server = CoreServer(
         application,
         control,
         artifact_service,
-        UnixLocalAuthenticator(),
+        StaticTokenAuthenticator(credentials),
     )
-    unix_endpoint = UnixCoreEndpoint(
-        unix_server,
-        Path(socket_path).expanduser().resolve()
-        if socket_path is not None
-        else paths.socket.expanduser().resolve(),
-    )
-    tcp_endpoint: TcpCoreEndpoint | None = None
-    if config.service_port > 0:
-        if not config.service_token:
-            raise ValueError("TCP Core API requires an authentication token")
-        tcp_server = CoreServer(
-            application,
-            control,
-            artifact_service,
-            StaticTokenAuthenticator({config.service_token: "remote"}),
-        )
-        tcp_endpoint = TcpCoreEndpoint(
+    host = CoreServiceHost(
+        tcp=TcpCoreEndpoint(
             tcp_server,
             config.service_host,
             config.service_port,
         )
-    host = CoreServiceHost(unix=unix_endpoint, tcp=tcp_endpoint)
+    )
     return CoreRuntimeComposition(
         paths=paths,
         sessions=sessions,
