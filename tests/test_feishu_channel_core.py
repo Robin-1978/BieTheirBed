@@ -6,9 +6,14 @@ import threading
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import RunEvent, RuntimeEventPayload
+from pc_assistant.agent_runtime.contracts import (
+    RunEvent,
+    RuntimeEventPayload,
+    RuntimeStatus,
+)
 from pc_assistant.channels.feishu import (
     FeishuChannel,
+    _StreamingCardState,
     _principal_for_log,
     _render_card_markdown,
 )
@@ -25,6 +30,26 @@ class _CoreClient:
     async def create_session(self) -> str:
         self.created += 1
         return f"session-{self.created}"
+
+    async def status(self, _session) -> RuntimeStatus:
+        return RuntimeStatus(
+            status="ready",
+            connected=True,
+            details={
+                "provider": "volcengine",
+                "model": "model-a",
+                "prompt_tokens": 1234,
+                "completion_tokens": 56,
+                "total_tokens": 1290,
+                "cached_tokens": 200,
+                "turns": 3,
+                "model_calls": 4,
+                "tool_calls": 2,
+                "messages": 9,
+                "sessions": 1,
+                "available_tools": 12,
+            },
+        )
 
     async def run(self, session, text, attachments):
         self.runs.append((session, text, attachments))
@@ -157,6 +182,27 @@ async def test_feishu_confirmation_round_trip_stays_in_channel(tmp_path) -> None
     assert sent[-1] == ("ou-user", "✅ 已批准执行")
 
 
+@pytest.mark.asyncio
+async def test_feishu_status_renders_core_usage_without_channel_metrics(
+    tmp_path,
+) -> None:
+    channel = FeishuChannel(_config(tmp_path))
+    channel._clients["ou-user"] = _CoreClient()
+    channel._sessions["ou-user"] = "session-a"
+    cards = []
+    channel._send_card = lambda *args: cards.append(args) or True
+
+    await channel._run_text("ou-user", "/status")
+
+    assert len(cards) == 1
+    rendered = cards[0][1]
+    assert "输入：1,234 tokens" in rendered
+    assert "输出：56 tokens" in rendered
+    assert "合计：1,290 tokens" in rendered
+    assert "工具调用：2" in rendered
+    assert cards[0][3] == "状态"
+
+
 def test_feishu_principal_log_identifier_is_not_reversible() -> None:
     identifier = _principal_for_log("ou-sensitive-user")
 
@@ -172,6 +218,24 @@ def test_feishu_card_replaces_core_artifact_image_reference() -> None:
 
     assert rendered == "操作完成\n\n🖼️ 屏幕截图（见附件）"
     assert "api.artifact.local" not in rendered
+
+
+def test_feishu_tool_success_uses_plain_check_without_completion_copy() -> None:
+    state = _StreamingCardState()
+    state.add_tool_call("mouse", {"action": "click"})
+    state.add_tool_result(
+        "mouse",
+        {"status": "completed", "output": {"success": True}},
+        blocked=False,
+    )
+
+    rendered = json.dumps(state.build_card(), ensure_ascii=False)
+
+    assert "✓ `mouse`" in rendered
+    assert "✅" not in rendered
+    assert "⚙️" not in rendered
+    assert "— 完成" not in rendered
+    assert rendered.count("mouse") == 1
 
 
 def test_feishu_long_card_output_is_split_without_data_loss(tmp_path) -> None:

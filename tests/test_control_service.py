@@ -33,6 +33,11 @@ def _service(tmp_path: Path, handles: tuple[str, ...] = ("session-a", "session-b
         memory,
         tool_names=lambda _scope: ["write_file", "read_file", "read_file"],
         config_controller=config,
+        status_details=lambda _scope: {
+            "model": "model-a",
+            "prompt_tokens": 120,
+            "completion_tokens": 30,
+        },
     )
     return service, sessions, memory, config
 
@@ -60,7 +65,15 @@ async def test_history_and_status_require_owned_scope(tmp_path: Path) -> None:
     status = await service.get_status(scope)
 
     assert history.messages[0]["content"] == "hello"
-    assert status.details == {"session_handle": "session-a", "messages": 1}
+    assert status.details == {
+        "model": "model-a",
+        "prompt_tokens": 120,
+        "completion_tokens": 30,
+        "session_handle": "session-a",
+        "messages": 1,
+        "sessions": 1,
+        "available_tools": 2,
+    }
     foreign = RuntimeScope(principal_id="principal-b", session_handle=scope.session_handle)
     with pytest.raises(SessionNotFoundError):
         await service.get_history(foreign)

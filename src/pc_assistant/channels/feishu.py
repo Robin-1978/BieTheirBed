@@ -12,6 +12,7 @@ import re
 import threading
 import time
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -134,12 +135,36 @@ def _summarize_tool_result(result: Any) -> str:
     return _tail(str(output), 220) if output not in (None, "") else "完成"
 
 
+def _tool_result_failed(result: Any, *, blocked: bool) -> bool:
+    if blocked:
+        return True
+    if not isinstance(result, dict):
+        return False
+    if str(result.get("status", "")).lower() in {
+        "failed",
+        "rejected",
+        "not_executed",
+        "error",
+    }:
+        return True
+    output = result.get("output")
+    return isinstance(output, dict) and output.get("success") is False
+
+
+@dataclass
+class _ToolStep:
+    name: str
+    arguments: dict[str, Any] = field(default_factory=dict)
+    status: str = "running"
+    detail: str = ""
+
+
 class _StreamingCardState:
     """Channel-local projection of standard Core run events."""
 
     def __init__(self) -> None:
         self.reasoning = ""
-        self.steps: list[str] = []
+        self.steps: list[_ToolStep] = []
         self.draft = ""
         self.final_output = ""
         self.error = ""
@@ -158,11 +183,42 @@ class _StreamingCardState:
     def add_tool_call(self, name: str, arguments: dict[str, Any]) -> None:
         self.phase = "working"
         self.draft = ""
-        self.steps.append(f"⚙️ `{name}`\n`{_brief_json(arguments)}`")
+        self.steps.append(_ToolStep(name=name, arguments=arguments))
 
     def add_tool_result(self, name: str, result: Any, *, blocked: bool) -> None:
-        icon = "❌" if blocked else "✅"
-        self.steps.append(f"{icon} `{name}` — {_summarize_tool_result(result)}")
+        step = next(
+            (
+                candidate
+                for candidate in reversed(self.steps)
+                if candidate.name == name and candidate.status == "running"
+            ),
+            None,
+        )
+        if step is None:
+            step = _ToolStep(name=name)
+            self.steps.append(step)
+        failed = _tool_result_failed(result, blocked=blocked)
+        step.status = "failed" if failed else "completed"
+        summary = _summarize_tool_result(result)
+        step.detail = summary if failed or summary != "完成" else ""
+
+    def _render_steps(self) -> str:
+        rendered: list[str] = []
+        for step in self.steps:
+            if step.status == "running":
+                line = f"… `{step.name}`"
+                if step.arguments:
+                    line += f"\n`{_brief_json(step.arguments)}`"
+            elif step.status == "failed":
+                line = f"× `{step.name}`"
+                if step.detail:
+                    line += f" — {step.detail}"
+            else:
+                line = f"✓ `{step.name}`"
+                if step.detail:
+                    line += f" — {step.detail}"
+            rendered.append(line)
+        return "\n\n".join(rendered)
 
     def add_notice(self, content: str) -> None:
         if content:
@@ -189,11 +245,11 @@ class _StreamingCardState:
                 }
             )
         if self.steps:
-            steps = "\n\n".join(self.steps)
+            steps = self._render_steps()
             elements.append(
                 {
                     "tag": "markdown",
-                    "content": "🛠️ **工具执行**\n"
+                    "content": "**操作记录**\n"
                     + _tail(steps, _PROGRESS_STEPS_CHARS),
                 }
             )
@@ -473,10 +529,39 @@ class FeishuChannel:
         session = await self._session_for(open_id)
         if text.strip().lower() == "/status":
             status = await client.status(session)
+            details = status.details
+            prompt_tokens = int(details.get("prompt_tokens") or 0)
+            completion_tokens = int(details.get("completion_tokens") or 0)
+            total_tokens = int(details.get("total_tokens") or 0)
+            cached_tokens = int(details.get("cached_tokens") or 0)
+            lines = [
+                f"模型：`{details.get('model') or '未知'}`"
+                f"（{details.get('provider') or '未知'}）",
+                f"连接：{'正常' if status.connected else '断开'}",
+                "",
+                f"输入：{prompt_tokens:,} tokens",
+                f"输出：{completion_tokens:,} tokens",
+                f"合计：{total_tokens:,} tokens",
+            ]
+            if cached_tokens:
+                lines.append(f"缓存命中：{cached_tokens:,} tokens")
+            lines.extend(
+                [
+                    "",
+                    f"对话轮次：{int(details.get('turns') or 0):,}",
+                    f"模型调用：{int(details.get('model_calls') or 0):,}",
+                    f"工具调用：{int(details.get('tool_calls') or 0):,}",
+                    f"消息：{int(details.get('messages') or 0):,}",
+                    f"会话：{int(details.get('sessions') or 0):,}",
+                    f"可用工具：{int(details.get('available_tools') or 0):,}",
+                ]
+            )
             await asyncio.to_thread(
-                self._send_text,
+                self._send_card,
                 open_id,
-                f"Core: {status.status}\nConnected: {status.connected}",
+                "\n".join(lines),
+                "blue",
+                "状态",
             )
             return
         if text.strip().lower() == "/tools":

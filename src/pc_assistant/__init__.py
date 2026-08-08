@@ -236,6 +236,9 @@ def main(argv: list[str] | None = None) -> int:
     import asyncio
     from pathlib import Path
 
+    from pc_assistant.network_tls import ensure_default_ca_bundle
+
+    ensure_default_ca_bundle()
     parser = build_parser()
     args = parser.parse_args(argv)
 

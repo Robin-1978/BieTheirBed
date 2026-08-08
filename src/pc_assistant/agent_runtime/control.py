@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Iterable
-from typing import Protocol
+from typing import Any, Protocol
 
 from pc_assistant.agent_runtime.contracts import (
     ConfigSetRequest,
@@ -34,12 +34,14 @@ class ControlService:
         *,
         tool_names: Callable[[RuntimeScope], Iterable[str]],
         config_controller: RuntimeConfigController,
+        status_details: Callable[[RuntimeScope], dict[str, Any]] | None = None,
         config_admin_principals: frozenset[str] = frozenset({"local"}),
     ) -> None:
         self._sessions = sessions
         self._memory = memory
         self._tool_names = tool_names
         self._config_controller = config_controller
+        self._status_details = status_details
         self._config_admin_principals = config_admin_principals
 
     async def _owned_scope(self, scope: RuntimeScope) -> RuntimeScope:
@@ -55,13 +57,28 @@ class ControlService:
     async def get_status(self, scope: RuntimeScope) -> RuntimeStatus:
         owned = await self._owned_scope(scope)
         snapshot = await asyncio.to_thread(self._sessions.load, owned)
+        sessions = await asyncio.to_thread(
+            self._sessions.list_for_principal,
+            owned.principal_id,
+        )
+        tools = tuple(sorted(set(self._tool_names(owned))))
+        details = (
+            await asyncio.to_thread(self._status_details, owned)
+            if self._status_details is not None
+            else {}
+        )
+        details.update(
+            {
+                "session_handle": owned.session_handle,
+                "messages": len(snapshot.messages),
+                "sessions": len(sessions),
+                "available_tools": len(tools),
+            }
+        )
         return RuntimeStatus(
             status="ready",
             connected=True,
-            details={
-                "session_handle": owned.session_handle,
-                "messages": len(snapshot.messages),
-            },
+            details=details,
         )
 
     async def get_history(self, scope: RuntimeScope) -> HistoryResult:
