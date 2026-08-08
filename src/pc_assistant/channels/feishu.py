@@ -8,6 +8,7 @@ import json
 import logging
 import mimetypes
 import os
+import re
 import threading
 import time
 import uuid
@@ -29,6 +30,7 @@ from pc_assistant.service.credentials import (
 
 logger = logging.getLogger(__name__)
 _CONFIRM_TIMEOUT_SECONDS = 110.0
+_MARKDOWN_IMAGE = re.compile(r"!\[([^\]\n]*)\]\([^\n)]*\)")
 
 for _proxy_name in ("NO_PROXY", "no_proxy"):
     _configured = os.environ.get(_proxy_name, "")
@@ -51,6 +53,21 @@ def _principal_for_log(open_id: str) -> str:
     if not open_id:
         return "unknown"
     return hashlib.sha256(open_id.encode("utf-8")).hexdigest()[:10]
+
+
+def _render_card_markdown(text: str) -> str:
+    """Remove image references that Feishu cards cannot render directly.
+
+    Core artifacts are delivered through the Channel's image/file upload path.
+    Leaving an ``attachment://`` or internal artifact URL in Markdown makes
+    Feishu interpret that URL as a platform image key and reject the whole card.
+    """
+
+    def replace_image(match: re.Match[str]) -> str:
+        label = match.group(1).strip() or "图片"
+        return f"🖼️ {label}（见附件）"
+
+    return _MARKDOWN_IMAGE.sub(replace_image, text)
 
 
 class FeishuChannel:
@@ -510,6 +527,7 @@ class FeishuChannel:
             CreateMessageRequestBody,
         )
 
+        rendered = _render_card_markdown(text)
         card = {
             "schema": "2.0",
             "header": {
@@ -518,7 +536,7 @@ class FeishuChannel:
             },
             "body": {
                 "elements": [
-                    {"tag": "markdown", "content": text[:12000]}
+                    {"tag": "markdown", "content": rendered[:12000]}
                 ]
             },
         }
@@ -544,7 +562,7 @@ class FeishuChannel:
             )
             return True
         logger.error("Feishu card send failed code=%s msg=%s", response.code, response.msg)
-        return False
+        return self._send_text(open_id, f"{title}\n\n{rendered}"[:12000])
 
     def _download_image(self, message_id: str, image_key: str) -> tuple[bytes, str]:
         from lark_oapi.api.im.v1 import GetMessageResourceRequest
