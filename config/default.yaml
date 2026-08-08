@@ -13,11 +13,9 @@ models:
     provider: "local_llama"
     model: ""
     supports_vision: true
-    token_family: "default"
     context_window: 8192
 
 default_model: "local_default"
-vision_model: ""
 fallback_enabled: true
 fallback_model: ""
 
@@ -33,45 +31,15 @@ max_iterations: 32
 max_tokens: 4096
 shell_timeout: 30
 context_window_budget: 8192
-auto_compact_enabled: true
-auto_compact_threshold: 0.50
-token_family: "default"
-llm_compact_enabled: true
-max_sessions: 8
 trace_enabled: true
 llm_trace_log: "logs/llm_trace.jsonl"
 turn_trace_log: "logs/turn_trace.jsonl"
-evidence_policy_enabled: true
 log_file: "logs/pc_assistant.json"
 runtime_root: "~/.pc-assistant"
 working_directory: "."
 service_host: "127.0.0.1"
 service_port: 0
 service_token: ""
-feishu_enabled: false
-feishu_app_id: ""
-feishu_app_secret: ""
-feishu_receive_id: ""
-feishu_receive_id_type: "open_id"
-remote_unlock_enabled: false
-remote_unlock_allowed_open_ids: []
-remote_unlock_totp_secret_file: "secrets/unlock.totp"
-remote_unlock_totp_period_seconds: 30
-remote_unlock_max_attempts: 3
-remote_unlock_lockout_seconds: 300
-vision_max_side: 1280
-vision_jpeg_quality: 70
-vision_enabled: true
-vision_provider: "llamacpp"
-vision_server_url: "http://127.0.0.1:8192"
-vision_model_name: ""
-vision_api_key: ""
-vision_api_base: ""
-vision_timeout: 120
-vision_max_tokens: 1024
 attachment_ttl_seconds: 3600
 attachment_cleanup_interval_seconds: 300
 supports_vision: null
-screen_grid_enabled: false
-screen_verify_enabled: false
-ui_backend: "auto"

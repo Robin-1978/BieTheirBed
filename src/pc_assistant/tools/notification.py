@@ -1,16 +1,17 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRisk
 
 
 class NotificationTool(ToolBase):
     name = "notify"
     description = "Show a desktop notification."
-    is_side_effecting = True
+    effect = ToolEffect.EXTERNAL_SIDE_EFFECT
+    capabilities = frozenset({ToolCapability.DESKTOP_CONTROL})
+    risk = ToolRisk.MEDIUM
 
     async def execute(self, **kwargs: Any) -> Any:
         action = kwargs.get("action", "show")

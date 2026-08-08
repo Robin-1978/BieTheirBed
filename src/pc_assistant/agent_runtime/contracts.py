@@ -1,15 +1,27 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
-from typing import Annotated, Any, Literal, Protocol, runtime_checkable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from pc_assistant.artifacts import ArtifactRef
-from pc_assistant.model_adapter.types import ImageAttachment
+
+if TYPE_CHECKING:
+    from pc_assistant.agent_runtime.tool_step import ConfirmationPort
 
 
 NonEmptyString = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+Identifier128 = Annotated[NonEmptyString, StringConstraints(max_length=128)]
+PrincipalId = Annotated[NonEmptyString, StringConstraints(max_length=256)]
+SessionHandle = Annotated[NonEmptyString, StringConstraints(max_length=256)]
+BoundedInput = Annotated[str, StringConstraints(max_length=200_000)]
+ArtifactDataUrl = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=64 * 1024 * 1024),
+]
 
 
 class ContractModel(BaseModel):
@@ -17,26 +29,36 @@ class ContractModel(BaseModel):
 
 
 class RuntimeScope(ContractModel):
-    principal_id: NonEmptyString
-    session_handle: NonEmptyString
+    principal_id: PrincipalId
+    session_handle: SessionHandle
+
+
+class ArtifactAttachment(ContractModel):
+    artifact_id: Identifier128
+    caption: Annotated[str, StringConstraints(max_length=1000)] = ""
 
 
 class RunRequest(ContractModel):
-    input: str = ""
-    attachments: tuple[ImageAttachment, ...] = ()
+    client_request_id: Identifier128
+    input: BoundedInput = ""
+    attachments: tuple[ArtifactAttachment, ...] = Field(default=(), max_length=8)
+    tools_enabled: bool = True
+
+    @model_validator(mode="after")
+    def require_input_or_attachment(self) -> RunRequest:
+        if not self.input.strip() and not self.attachments:
+            raise ValueError("Run request requires input or an attachment")
+        return self
 
 
 class CancelRequest(ContractModel):
-    reason: str = ""
+    run_id: Identifier128
+    reason: Annotated[str, StringConstraints(max_length=1000)] = ""
 
 
 class CancelResult(ContractModel):
     accepted: bool
-    status: str = "cancelled"
-
-
-class StatusRequest(ContractModel):
-    include_sessions: bool = False
+    status: Literal["cancelling", "cancelled", "completed", "failed", "not_found"]
 
 
 class RuntimeStatus(ContractModel):
@@ -45,14 +67,57 @@ class RuntimeStatus(ContractModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
-class CommandRequest(ContractModel):
-    command: NonEmptyString
+class HistoryResult(ContractModel):
+    messages: tuple[dict[str, Any], ...] = ()
 
 
-class CommandResult(ContractModel):
+class MemoryRecord(ContractModel):
+    key: NonEmptyString
+    value: str
+    category: NonEmptyString
+    importance: Literal["core", "relevant"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    source: str = ""
+
+
+class MemoryListResult(ContractModel):
+    memories: tuple[MemoryRecord, ...] = ()
+
+
+class MemoryClearResult(ContractModel):
+    cleared: bool
+
+
+class ToolListResult(ContractModel):
+    tools: tuple[NonEmptyString, ...] = ()
+
+
+class ConfigSetRequest(ContractModel):
+    field_name: NonEmptyString
+    value: bool | int | float | str
+
+
+class ConfigSetResult(ContractModel):
     applied: bool
-    data: dict[str, Any] = Field(default_factory=dict)
+    restart_required: bool = False
     error: str = ""
+
+
+class ArtifactUploadRequest(ContractModel):
+    data_url: ArtifactDataUrl
+    media_type: Annotated[NonEmptyString, StringConstraints(max_length=128)] = (
+        "image/jpeg"
+    )
+    caption: Annotated[str, StringConstraints(max_length=1000)] = ""
+
+
+class ArtifactDownloadRequest(ContractModel):
+    artifact_id: Identifier128
+
+
+class ArtifactDownloadResult(ContractModel):
+    artifact: ArtifactRef
+    data_url: ArtifactDataUrl
 
 
 class HealthStatus(ContractModel):
@@ -70,24 +135,70 @@ class RuntimeEventPayload(ContractModel):
     iteration: int = Field(default=0, ge=0)
 
 
+RuntimeEventType = Literal[
+    "content_delta",
+    "reasoning_delta",
+    "plan",
+    "tool_call",
+    "tool_result",
+    "artifact",
+    "context_compacted",
+    "warning",
+]
+
+
 class RuntimeEvent(ContractModel):
-    event_type: NonEmptyString
+    event_type: RuntimeEventType
     payload: RuntimeEventPayload = Field(default_factory=RuntimeEventPayload)
 
 
+RunEventType = Literal[
+    "run_started",
+    "content_delta",
+    "reasoning_delta",
+    "plan",
+    "tool_call",
+    "tool_result",
+    "artifact",
+    "context_compacted",
+    "warning",
+    "completed",
+    "cancelled",
+    "failed",
+]
+TERMINAL_RUN_EVENT_TYPES = frozenset({"completed", "cancelled", "failed"})
+
+
 class RunEvent(ContractModel):
+    message_type: Literal["run_event"] = "run_event"
     api_version: Literal["v1"] = "v1"
     run_id: NonEmptyString
     event_seq: int = Field(gt=0)
-    event_type: NonEmptyString
+    event_type: RunEventType
     payload: RuntimeEventPayload
+
+    @property
+    def is_terminal(self) -> bool:
+        return self.event_type in TERMINAL_RUN_EVENT_TYPES
+
+
+@dataclass(frozen=True)
+class RuntimeRunContext:
+    scope: RuntimeScope
+    run_id: str
+    cancellation: asyncio.Event
+    confirmation: ConfirmationPort | None = None
+
+    def __post_init__(self) -> None:
+        if not self.run_id.strip():
+            raise ValueError("run_id must not be empty")
 
 
 @runtime_checkable
 class AgentRuntimePort(Protocol):
     def run(
         self,
-        scope: RuntimeScope,
+        context: RuntimeRunContext,
         request: RunRequest,
     ) -> AsyncIterator[RuntimeEvent]: ...
 
@@ -99,17 +210,62 @@ class AgentRuntimePort(Protocol):
 
     async def health_check(self) -> HealthStatus: ...
 
+
+@runtime_checkable
+class ControlServicePort(Protocol):
+    async def create_session(self, principal_id: NonEmptyString) -> RuntimeScope: ...
+
     async def get_status(
         self,
         scope: RuntimeScope,
-        request: StatusRequest,
     ) -> RuntimeStatus: ...
 
-    async def command(
+    async def get_history(
         self,
         scope: RuntimeScope,
-        request: CommandRequest,
-    ) -> CommandResult: ...
+    ) -> HistoryResult: ...
+
+    async def list_memory(
+        self,
+        scope: RuntimeScope,
+    ) -> MemoryListResult: ...
+
+    async def clear_memory(
+        self,
+        scope: RuntimeScope,
+    ) -> MemoryClearResult: ...
+
+    async def list_tools(
+        self,
+        scope: RuntimeScope,
+    ) -> ToolListResult: ...
+
+    async def set_config(
+        self,
+        scope: RuntimeScope,
+        request: ConfigSetRequest,
+    ) -> ConfigSetResult: ...
+
+
+@runtime_checkable
+class ArtifactServicePort(Protocol):
+    async def upload(
+        self,
+        scope: RuntimeScope,
+        request: ArtifactUploadRequest,
+    ) -> ArtifactRef: ...
+
+    async def download(
+        self,
+        scope: RuntimeScope,
+        request: ArtifactDownloadRequest,
+    ) -> ArtifactDownloadResult: ...
+
+    async def acknowledge_delivery(
+        self,
+        scope: RuntimeScope,
+        artifact_id: NonEmptyString,
+    ) -> None: ...
 
 
 @runtime_checkable

@@ -1,6 +1,3 @@
-from __future__ import annotations
+"""Built-in tools registered by the Core composition root."""
 
-from pc_assistant.tools.base import ToolBase
-from pc_assistant.tools.registry import ToolRegistry
-
-__all__ = ["ToolBase", "ToolRegistry"]
+__all__: list[str] = []

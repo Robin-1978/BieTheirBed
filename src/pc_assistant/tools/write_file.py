@@ -1,13 +1,15 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRisk
 
 
 class WriteFileTool(ToolBase):
     name = "write_file"
     description = "Create or overwrite a file."
-    is_side_effecting = True
+    effect = ToolEffect.LOCAL_WRITE
+    capabilities = frozenset({ToolCapability.WORKSPACE_WRITE})
+    risk = ToolRisk.MEDIUM
 
     def __init__(self, working_directory: str = "") -> None:
         self._working_directory = working_directory

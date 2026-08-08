@@ -7,10 +7,7 @@ from typing import Any
 from pc_assistant.context.tags import (
     format_compacted_history,
     is_compacted_history,
-    is_protected_history,
     normalize_message_content,
-    PROTECTED_HISTORY_MAX,
-    truncate_text,
     unwrap_tool_result,
 )
 
@@ -26,11 +23,6 @@ def is_ephemeral_context_message(msg: dict[str, Any]) -> bool:
     if role == "assistant" and content == COMPACTED_HISTORY_ACK:
         return True
     return False
-
-
-def strip_ephemeral(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Drop runtime-only scaffold messages."""
-    return [m for m in messages if not is_ephemeral_context_message(m)]
 
 
 def format_tool_call_line(tc: dict[str, Any]) -> tuple[str, str]:
@@ -124,64 +116,6 @@ def build_compacted_pair(
         {"role": "user", "content": summary},
         {"role": "assistant", "content": COMPACTED_HISTORY_ACK},
     ]
-
-
-def compress_message_list(
-    messages: list[dict[str, Any]],
-    *,
-    keep_recent: int,
-    source: str = "memory_compress",
-) -> list[dict[str, Any]]:
-    """Linear compression used by ConversationStore.trim."""
-    if len(messages) <= keep_recent:
-        return messages
-
-    old_messages = messages[:-keep_recent]
-    recent_messages = messages[-keep_recent:]
-    facts: list[str] = []
-    i = 0
-    while i < len(old_messages):
-        msg = old_messages[i]
-        role = msg.get("role", "")
-        content = normalize_message_content(msg.get("content") or "")
-
-        if is_ephemeral_context_message(msg):
-            i += 1
-            continue
-
-        if role == "assistant" and msg.get("tool_calls"):
-            facts.extend(summarize_tool_turn(old_messages[i:i + 4]))
-            i += 1
-            continue
-
-        if role == "tool":
-            i += 1
-            continue
-
-        if role == "user" and content:
-            if is_protected_history(content):
-                facts.append(f"User: {truncate_text(content, PROTECTED_HISTORY_MAX)}")
-            else:
-                facts.append(f"User: {content[:120]}")
-        elif role == "assistant" and content and len(content) > 10:
-            if is_protected_history(content):
-                facts.append(f"Assistant: {truncate_text(content, PROTECTED_HISTORY_MAX)}")
-            else:
-                facts.append(f"Assistant: {content.split(chr(10))[0][:120]}")
-
-        i += 1
-
-    if not facts:
-        return recent_messages
-
-    compressed = build_compacted_pair(
-        facts[-15:],
-        covered_messages=len(old_messages),
-        keep_recent=keep_recent,
-        source=source,
-    )
-    compressed.extend(recent_messages)
-    return compressed
 
 
 def compact_dialogue_turn(

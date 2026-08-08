@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import copy
 from typing import Any
 
 from pc_assistant.exceptions import ToolNotFoundError
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, ToolCapability, ToolPolicy
 
 
 class ToolRegistry:
@@ -14,34 +13,38 @@ class ToolRegistry:
     def register(self, tool: ToolBase) -> None:
         if not tool.name:
             raise ValueError("Tool must have a non-empty name")
+        if tool.name in self._tools:
+            raise ValueError(f"Tool is already registered: {tool.name}")
+        if tool.schema().get("name") != tool.name:
+            raise ValueError(f"Tool schema name does not match: {tool.name}")
+        if tool.skim_schema().get("name") != tool.name:
+            raise ValueError(f"Tool skim schema name does not match: {tool.name}")
+        tool.validation_schema()
         self._tools[tool.name] = tool
 
     def get(self, name: str) -> ToolBase | None:
         return self._tools.get(name)
 
-    def resolve_name(self, name: str) -> str:
-        """Resolve a name to its registered form (fallback tolerance)."""
-        if name in self._tools:
-            return name
-        lower = name.lower().replace("-", "_")
-        for registered in self._tools:
-            if registered.lower().replace("-", "_") == lower:
-                return registered
-        return name
-
-    def normalize_call(self, name: str, arguments: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-        """Map LLM output to internal name. No param aliasing needed anymore."""
-        return self.resolve_name(name), dict(arguments)
-
-    def all_schemas(self) -> list[dict[str, Any]]:
-        """Wrapped skim schemas for LLM API injection."""
+    def schemas_for(
+        self,
+        capabilities: frozenset[ToolCapability],
+    ) -> list[dict[str, Any]]:
+        """Return only configured tools allowed by the resolved runtime profile."""
         return [
             {
                 "type": "function",
                 "function": tool.skim_schema(),
             }
             for tool in self._tools.values()
+            if (
+                tool.policy.configured
+                and tool.required_schema_capabilities <= capabilities
+            )
         ]
+
+    def policy(self, name: str) -> ToolPolicy | None:
+        tool = self.get(name)
+        return tool.policy if tool is not None else None
 
     def detailed_schema(self, name: str) -> dict[str, Any]:
         """Full schema plus examples for tool_help."""
@@ -82,7 +85,22 @@ class ToolRegistry:
         }
 
     def list_tools(self) -> list[str]:
-        return sorted(self._tools.keys())
+        return sorted(
+            name for name, tool in self._tools.items() if tool.policy.configured
+        )
+
+    def list_for(
+        self,
+        capabilities: frozenset[ToolCapability],
+    ) -> list[str]:
+        return sorted(
+            name
+            for name, tool in self._tools.items()
+            if (
+                tool.policy.configured
+                and tool.required_schema_capabilities <= capabilities
+            )
+        )
 
     def __contains__(self, name: str) -> bool:
         return name in self._tools
@@ -90,25 +108,9 @@ class ToolRegistry:
     def __len__(self) -> int:
         return len(self._tools)
 
-    def clear(self) -> None:
-        self._tools.clear()
-
     async def _commit(self, internal_name: str, **kwargs: Any) -> Any:
-        """Internal unchecked dispatch used only by VerifiedToolExecutor."""
+        """Internal unchecked dispatch used only by ToolStep."""
         tool = self._tools.get(internal_name)
         if tool is None:
             raise ToolNotFoundError(internal_name)
         return await tool.execute(**kwargs)
-
-    async def register_mcp_server(self, server_url: str) -> list[str]:
-        """Discover and register all tools from an MCP server."""
-        from pc_assistant.tools.mcp_adapter import MCPToolAdapter
-
-        adapter = MCPToolAdapter(server_url)
-        tools = await adapter.discover()
-        names: list[str] = []
-        for tool in tools:
-            if tool.name:
-                self._tools[tool.name] = tool
-                names.append(tool.name)
-        return names

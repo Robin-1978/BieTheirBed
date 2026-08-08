@@ -12,7 +12,6 @@ class TestAppConfig:
         assert cfg.llm_temperature == 0.7
         assert cfg.max_iterations == 8
         assert cfg.context_window_budget == 8192
-        assert cfg.auto_compact_enabled is True
 
     def test_model_context_window_overrides_global_fallback(self):
         cfg = AppConfig(
@@ -68,25 +67,6 @@ class TestAppConfig:
         assert cfg.set_field("llm_model_name", "gpt-4") is True
         assert cfg.llm_model_name == "gpt-4"
 
-    def test_vision_provider_is_independent_from_main_provider(self):
-        cfg = AppConfig(
-            llm_provider="openai_compatible",
-            llm_server_url="http://deepseek:8000",
-            supports_vision=False,
-            vision_provider="llamacpp",
-            vision_server_url="http://127.0.0.1:8192",
-            vision_model_name="qwen-vl",
-        )
-        assert cfg.llm_server_url == "http://deepseek:8000"
-        assert cfg.vision_server_url == "http://127.0.0.1:8192"
-        assert cfg.vision_model_name == "qwen-vl"
-
-    def test_false_boolean_environment_override(self, monkeypatch, tmp_path):
-        config = tmp_path / "config.yaml"
-        config.write_text("vision_enabled: true\n", encoding="utf-8")
-        monkeypatch.setenv("PC_VISION_ENABLED", "false")
-        assert load_config(config).vision_enabled is False
-
     def test_multi_provider_model_catalog(self):
         cfg = AppConfig(
             providers={
@@ -114,10 +94,9 @@ class TestAppConfig:
                 },
             },
             default_model="main",
-            vision_model="vision",
         )
         main = cfg.resolve_model()
-        vision = cfg.resolve_vision_model()
+        vision = cfg.resolve_model("vision")
         assert main.provider_name == "ark_primary"
         assert main.model == "coding-model"
         assert main.api_key == "test-key"
@@ -179,6 +158,45 @@ class TestAppConfig:
                 default_model="main",
             )
 
+    def test_fallback_model_must_differ_from_primary(self):
+        with pytest.raises(ValueError, match="must differ"):
+            AppConfig(
+                providers={
+                    "local": {
+                        "driver": "llamacpp",
+                        "server_url": "http://127.0.0.1:8192",
+                    }
+                },
+                models={
+                    "main": {
+                        "provider": "local",
+                        "model": "local-model",
+                    }
+                },
+                default_model="main",
+                fallback_model="main",
+            )
+
+    def test_automatic_fallback_never_reuses_primary(self):
+        cfg = AppConfig(
+            providers={
+                "local": {
+                    "driver": "llamacpp",
+                    "server_url": "http://127.0.0.1:8192",
+                }
+            },
+            models={
+                "main": {
+                    "provider": "local",
+                    "model": "local-model",
+                }
+            },
+            default_model="main",
+            fallback_enabled=True,
+        )
+
+        assert cfg.resolve_fallback_model() is None
+
     def test_loads_user_config_outside_working_directory(self, monkeypatch, tmp_path):
         app_home = tmp_path / ".pc-assistant"
         user_config = app_home / "config" / "local.yaml"
@@ -199,3 +217,10 @@ class TestAppConfig:
         cfg = load_config(explicit)
         assert cfg.max_iterations == 23
         assert cfg.source_config_path == str(explicit.resolve())
+
+    def test_oversized_config_is_rejected_before_yaml_parse(self, tmp_path):
+        explicit = tmp_path / "oversized.yaml"
+        explicit.write_bytes(b"x" * (1024 * 1024 + 1))
+
+        with pytest.raises(ValueError, match="1048576 byte limit"):
+            load_config(explicit)

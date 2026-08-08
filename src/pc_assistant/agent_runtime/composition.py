@@ -1,0 +1,378 @@
+"""Concrete composition root for the forward-only Core runtime."""
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+
+from pc_assistant.agent_runtime.artifact_service import ArtifactService
+from pc_assistant.agent_runtime.config_control import PersistentConfigController
+from pc_assistant.agent_runtime.contracts import HealthStatus, RunRequest, RuntimeScope
+from pc_assistant.agent_runtime.control import ControlService
+from pc_assistant.agent_runtime.core_application import CoreApplication
+from pc_assistant.agent_runtime.http_provider import (
+    FailoverModelProvider,
+    HttpModelProvider,
+)
+from pc_assistant.agent_runtime.model_step import (
+    ModelProviderPort,
+    ModelStep,
+    ModelStepResult,
+)
+from pc_assistant.agent_runtime.react_loop import (
+    ReActContext,
+    ReActLimits,
+    ReActLoop,
+    ReActOutcome,
+)
+from pc_assistant.agent_runtime.run_registry import CoreRunRegistry
+from pc_assistant.agent_runtime.runtime import AgentRuntime, ArtifactMessageHydrator
+from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
+from pc_assistant.agent_runtime.tool_step import (
+    ToolArgumentPolicy,
+    ToolStep,
+)
+from pc_assistant.artifacts import ArtifactStore
+from pc_assistant.config import AppConfig
+from pc_assistant.context.memory_db import (
+    SQLiteMemoryRepository,
+    ScopedEpisodicMemory,
+    ScopedUserMemory,
+)
+from pc_assistant.context.prompt import build_session_context, build_system_prompt
+from pc_assistant.desktop_session import ensure_desktop_session
+from pc_assistant.observability.trace import LLMTraceRecorder, TurnRecorder
+from pc_assistant.runtime import RuntimePaths
+from pc_assistant.service.core_host import (
+    CoreServiceHost,
+    TcpCoreEndpoint,
+    UnixCoreEndpoint,
+)
+from pc_assistant.service.core_server import (
+    CoreServer,
+    StaticTokenAuthenticator,
+    UnixLocalAuthenticator,
+)
+from pc_assistant.tools.artifact_prepare import ArtifactPrepareTool
+from pc_assistant.tools.base import ToolCapability
+from pc_assistant.tools.clipboard import ClipboardTool
+from pc_assistant.tools.describe_tool import DescribeTool
+from pc_assistant.tools.exchange import ExchangeTool
+from pc_assistant.tools.hotkey import HotkeyTool
+from pc_assistant.tools.memory_tool import MemoryTool
+from pc_assistant.tools.mouse import MouseTool
+from pc_assistant.tools.notification import NotificationTool
+from pc_assistant.tools.press_key import PressKeyTool
+from pc_assistant.tools.read_file import ReadFileTool
+from pc_assistant.tools.registry import ToolRegistry
+from pc_assistant.tools.screenshot import ScreenshotTool
+from pc_assistant.tools.shell import ShellTool
+from pc_assistant.tools.type_text import TypeTextTool
+from pc_assistant.tools.weather import WeatherTool
+from pc_assistant.tools.web_fetch import WebFetchTool
+from pc_assistant.tools.web_search import WebSearchTool
+from pc_assistant.tools.window import WindowTool
+from pc_assistant.tools.write_file import WriteFileTool
+
+
+PERSONAL_LOCAL_CAPABILITIES = frozenset(ToolCapability)
+REMOTE_SCOPED_CAPABILITIES = frozenset({ToolCapability.NETWORK})
+
+
+@dataclass(frozen=True)
+class CoreRuntimeComposition:
+    """Owned runtime graph and its independently managed service host."""
+
+    paths: RuntimePaths
+    sessions: RuntimeSessionRepository
+    memory: SQLiteMemoryRepository
+    artifacts: ArtifactStore
+    registry: ToolRegistry
+    runtime: AgentRuntime
+    application: CoreApplication
+    control: ControlService
+    artifact_service: ArtifactService
+    llm_traces: LLMTraceRecorder
+    turn_traces: TurnRecorder
+    host: CoreServiceHost
+
+
+def _usage_integer(usage: dict, *names: str) -> int:
+    for name in names:
+        value = usage.get(name)
+        if isinstance(value, (int, float)):
+            return max(0, int(value))
+    return 0
+
+
+def _cached_usage_tokens(usage: dict) -> int:
+    direct = _usage_integer(
+        usage,
+        "cached_tokens",
+        "cache_read_input_tokens",
+    )
+    if direct:
+        return direct
+    for details_name in ("prompt_tokens_details", "input_tokens_details"):
+        details = usage.get(details_name)
+        if isinstance(details, dict):
+            nested = _usage_integer(
+                details,
+                "cached_tokens",
+                "cache_read_input_tokens",
+            )
+            if nested:
+                return nested
+    return 0
+
+
+def capabilities_for_scope(scope: RuntimeScope) -> frozenset[ToolCapability]:
+    if scope.principal_id == "local":
+        return PERSONAL_LOCAL_CAPABILITIES
+    return REMOTE_SCOPED_CAPABILITIES
+
+
+def _build_registry(
+    config: AppConfig,
+    artifacts: ArtifactStore,
+    memory: ScopedUserMemory,
+    episodic: ScopedEpisodicMemory,
+) -> ToolRegistry:
+    registry = ToolRegistry()
+    for tool in (
+        ReadFileTool(working_directory=config.working_directory),
+        WriteFileTool(working_directory=config.working_directory),
+        ShellTool(default_timeout=config.shell_timeout),
+        WebSearchTool(),
+        WebFetchTool(),
+        ClipboardTool(),
+        MemoryTool(memory=memory, episodic=episodic),
+        WeatherTool(),
+        ExchangeTool(),
+        WindowTool(),
+        NotificationTool(),
+        PressKeyTool(),
+        TypeTextTool(),
+        HotkeyTool(),
+        MouseTool(),
+        ScreenshotTool(artifacts, artifacts.root / "screenshots"),
+        ArtifactPrepareTool(
+            artifacts,
+            working_directory=config.working_directory,
+        ),
+    ):
+        registry.register(tool)
+    registry.register(DescribeTool(registry))
+    return registry
+
+
+def build_core_runtime(
+    config: AppConfig,
+    *,
+    socket_path: str | Path | None = None,
+    provider_factory: Callable[..., HttpModelProvider] = HttpModelProvider,
+) -> CoreRuntimeComposition:
+    """Build one Core graph without legacy agents or in-process service fallback."""
+
+    paths = RuntimePaths.from_root(config.runtime_root)
+    llm_traces = LLMTraceRecorder(
+        str(paths.resolve(config.llm_trace_log)),
+        enabled=config.trace_enabled,
+    )
+    turn_traces = TurnRecorder(
+        str(paths.resolve(config.turn_trace_log)),
+        enabled=config.trace_enabled,
+    )
+    database = paths.data / "assistant.db"
+    sessions = RuntimeSessionRepository(database)
+    memory_repository = SQLiteMemoryRepository(database)
+    memory = ScopedUserMemory(memory_repository)
+    episodic = ScopedEpisodicMemory(memory_repository)
+    artifacts = ArtifactStore(
+        paths.attachments,
+        persistent_root=paths.artifacts,
+        db_path=database,
+        ttl_seconds=config.attachment_ttl_seconds,
+    )
+    registry = _build_registry(config, artifacts, memory, episodic)
+
+    primary = provider_factory(config.resolve_model())
+    provider: ModelProviderPort = primary
+    fallback = config.resolve_fallback_model()
+    fallback_provider: HttpModelProvider | None = None
+    if fallback is not None:
+        fallback_provider = provider_factory(fallback)
+        provider = FailoverModelProvider(primary, fallback_provider)
+
+    async def health_probe() -> HealthStatus:
+        primary_health = await primary.health_check()
+        if primary_health.healthy or fallback_provider is None:
+            return primary_health
+        fallback_health = await fallback_provider.health_check()
+        if fallback_health.healthy:
+            return HealthStatus(
+                healthy=True,
+                detail=f"Fallback model available: {fallback_provider.model_alias}",
+            )
+        return HealthStatus(healthy=False, detail="No configured model is available")
+
+    async def runtime_context(scope: RuntimeScope, query: str) -> str:
+        del scope
+        sections = [
+            memory.build_context_string(query=query),
+            episodic.build_context_string(query=query),
+        ]
+        return build_session_context(
+            memory_context="\n\n".join(section for section in sections if section)
+        )
+
+    model_step = ModelStep(
+        provider,
+        message_hydrator=ArtifactMessageHydrator(artifacts),
+    )
+
+    async def observe_model_step(
+        context: ReActContext,
+        iteration: int,
+        result: ModelStepResult,
+    ) -> None:
+        usage = result.usage
+        prompt_tokens = _usage_integer(usage, "prompt_tokens", "input_tokens")
+        completion_tokens = _usage_integer(
+            usage,
+            "completion_tokens",
+            "output_tokens",
+        )
+        await asyncio.to_thread(
+            llm_traces.record_call,
+            principal_id=context.scope.principal_id,
+            session_id=context.scope.session_handle,
+            run_id=context.run_id,
+            client_request_id=context.client_request_id,
+            model=result.provider_model or primary.model_alias,
+            iteration=iteration,
+            prompt_tokens=prompt_tokens or result.prompt_tokens_estimated,
+            completion_tokens=completion_tokens,
+            cached_tokens=_cached_usage_tokens(usage),
+            latency_ms=result.latency_ms,
+            ttft_ms=result.ttft_ms,
+            finish_reason=result.finish_reason,
+            tool_calls=len(result.tool_calls),
+            error=result.error_code,
+            requested_max_tokens=config.max_tokens,
+            message_budget=max(
+                257,
+                config.effective_context_window_budget() - config.max_tokens,
+            ),
+            schema_tokens=result.schema_tokens_estimated,
+            failover_used=result.failover_used,
+        )
+    tool_step = ToolStep(
+        registry,
+        ToolArgumentPolicy(config.working_directory),
+        prepare_execution=ensure_desktop_session,
+    )
+    react_loop = ReActLoop(
+        model_step,
+        tool_step,
+        limits=ReActLimits(
+            max_iterations=config.max_iterations,
+            max_tool_calls=config.max_total_tool_calls,
+        ),
+        model_observer=observe_model_step,
+    )
+
+    async def observe_run(
+        scope: RuntimeScope,
+        run_id: str,
+        request: RunRequest,
+        outcome: ReActOutcome,
+        elapsed_ms: float,
+    ) -> None:
+        await asyncio.to_thread(
+            turn_traces.record_turn,
+            principal_id=scope.principal_id,
+            session_id=scope.session_handle,
+            run_id=run_id,
+            client_request_id=request.client_request_id,
+            user_input=request.input,
+            outcome=outcome.status,
+            iterations=outcome.iterations,
+            tool_calls=outcome.tool_calls,
+            elapsed_ms=elapsed_ms,
+        )
+    runtime = AgentRuntime(
+        sessions,
+        react_loop,
+        registry,
+        artifacts,
+        capabilities_for=capabilities_for_scope,
+        health_probe=health_probe,
+        system_prompt=build_system_prompt(),
+        prompt_budget=max(
+            257,
+            config.effective_context_window_budget() - config.max_tokens,
+        ),
+        max_output_tokens=config.max_tokens,
+        temperature=config.llm_temperature,
+        runtime_context=runtime_context,
+        run_observer=observe_run,
+    )
+    application = CoreApplication(runtime, sessions, CoreRunRegistry())
+    config_path = (
+        Path(config.source_config_path).expanduser().resolve()
+        if config.source_config_path
+        else paths.config / "local.yaml"
+    )
+    config_controller = PersistentConfigController(config, config_path)
+    control = ControlService(
+        sessions,
+        memory_repository,
+        tool_names=lambda scope: registry.list_for(capabilities_for_scope(scope)),
+        config_controller=config_controller,
+    )
+    artifact_service = ArtifactService(sessions, artifacts)
+
+    unix_server = CoreServer(
+        application,
+        control,
+        artifact_service,
+        UnixLocalAuthenticator(),
+    )
+    unix_endpoint = UnixCoreEndpoint(
+        unix_server,
+        Path(socket_path).expanduser().resolve()
+        if socket_path is not None
+        else paths.socket.expanduser().resolve(),
+    )
+    tcp_endpoint: TcpCoreEndpoint | None = None
+    if config.service_port > 0:
+        if not config.service_token:
+            raise ValueError("TCP Core API requires an authentication token")
+        tcp_server = CoreServer(
+            application,
+            control,
+            artifact_service,
+            StaticTokenAuthenticator({config.service_token: "remote"}),
+        )
+        tcp_endpoint = TcpCoreEndpoint(
+            tcp_server,
+            config.service_host,
+            config.service_port,
+        )
+    host = CoreServiceHost(unix=unix_endpoint, tcp=tcp_endpoint)
+    return CoreRuntimeComposition(
+        paths=paths,
+        sessions=sessions,
+        memory=memory_repository,
+        artifacts=artifacts,
+        registry=registry,
+        runtime=runtime,
+        application=application,
+        control=control,
+        artifact_service=artifact_service,
+        llm_traces=llm_traces,
+        turn_traces=turn_traces,
+        host=host,
+    )

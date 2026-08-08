@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from pc_assistant.context.memory_db import (
@@ -10,11 +12,10 @@ from pc_assistant.context.memory_db import (
 )
 from pc_assistant.context.scope import (
     MemoryScope,
-    derive_memory_scope,
+    current_memory_scope,
     reset_memory_scope,
     set_memory_scope,
 )
-from pc_assistant.harness.safety import SafetyChecker
 
 
 class scoped_as:
@@ -33,6 +34,15 @@ class scoped_as:
 def stores(tmp_path):
     repository = SQLiteMemoryRepository(tmp_path / "context.db")
     return ScopedUserMemory(repository), ScopedEpisodicMemory(repository)
+
+
+def test_memory_access_without_request_scope_fails_closed(stores):
+    memory, _ = stores
+
+    with pytest.raises(RuntimeError, match="scope is not bound"):
+        current_memory_scope()
+    with pytest.raises(RuntimeError, match="scope is not bound"):
+        memory.retrieve("preferred_language")
 
 
 def test_explicit_identity_keys_remain_distinct(stores):
@@ -90,30 +100,12 @@ def test_episode_isolated_by_both_principal_and_session(stores):
         assert episodes.recall() == []
 
 
-def test_feishu_principal_is_user_not_conversation():
-    first = derive_memory_scope("feishu:ou_123:conversation_a")
-    second = derive_memory_scope("feishu:ou_123:conversation_b")
-    other = derive_memory_scope("feishu:ou_456:conversation_a")
+def test_incompatible_memory_schema_requires_offline_migration(tmp_path) -> None:
+    database = tmp_path / "context.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE memories (principal_id TEXT, key TEXT)"
+        )
 
-    assert first.principal_id == second.principal_id == "feishu:ou_123"
-    assert other.principal_id == "feishu:ou_456"
-    assert first.session_id != second.session_id
-
-
-def test_core_store_requires_confirmation():
-    checker = SafetyChecker()
-    needs, reason = checker.needs_confirmation(
-        "memory",
-        {"action": "store", "key": "assistant_name", "importance": "core"},
-    )
-    assert needs is True
-    assert "assistant_name" in reason
-
-
-def test_relevant_store_does_not_require_confirmation():
-    checker = SafetyChecker()
-    needs, _ = checker.needs_confirmation(
-        "memory",
-        {"action": "store", "key": "preferred_browser", "importance": "relevant"},
-    )
-    assert needs is False
+    with pytest.raises(RuntimeError, match="explicit offline migration"):
+        SQLiteMemoryRepository(database)

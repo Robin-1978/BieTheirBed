@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from pc_assistant.ui.clipboard import available_tool, copy_or_save, copy_to_clipboard
 from pc_assistant.config import AppConfig
-from pc_assistant.ui.app import ChatApp
+from pc_assistant.ui.core_app import CoreChatApp
 from pc_assistant.ui.widgets import CommandOutput, UserMessage
 
 
@@ -85,11 +85,11 @@ class TestSelectionCopy:
     def test_right_click_copies_exact_selection_without_menu(self):
         from types import SimpleNamespace
 
-        app = ChatApp(AppConfig())
+        app = CoreChatApp(AppConfig(), _Client(), "session-a")
         copied = []
         stopped = []
         app._selected_text = lambda: "exact selected text"
-        app._copy_worker = lambda text, label: copied.append((text, label))
+        app._copy_worker = lambda text: copied.append(text)
         event = SimpleNamespace(
             button=3,
             prevent_default=lambda: stopped.append("prevented"),
@@ -98,16 +98,16 @@ class TestSelectionCopy:
 
         app.on_mouse_down(event)
 
-        assert copied == [("exact selected text", "Copied selected text")]
+        assert copied == ["exact selected text"]
         assert stopped == ["prevented", "stopped"]
 
     def test_ctrl_c_is_not_overridden_and_escape_cancels(self):
-        bindings = {key: action for key, action, _ in ChatApp.BINDINGS}
+        bindings = {key: action for key, action, _ in CoreChatApp.BINDINGS}
         assert "ctrl+c" not in bindings
         assert bindings["escape"] == "cancel_turn"
 
     async def test_textual_ctrl_c_copies_screen_selection(self):
-        app = ChatApp(AppConfig())
+        app = CoreChatApp(AppConfig(), _Client(), "session-a")
         copied: list[str] = []
         app.copy_to_clipboard = lambda text: copied.append(text)
 
@@ -122,3 +122,8 @@ class TestSelectionCopy:
             await pilot.pause()
 
         assert copied == [selected]
+
+
+class _Client:
+    def set_confirmation_handler(self, handler):
+        self.handler = handler

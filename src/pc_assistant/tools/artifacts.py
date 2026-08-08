@@ -20,30 +20,9 @@ class ArtifactPaths:
         *,
         prefix: str,
         suffix: str,
-        requested: str | Path | None = None,
     ) -> Path:
-        self.root.mkdir(parents=True, exist_ok=True)
-        if requested:
-            raw = Path(requested).expanduser()
-            candidate = raw.resolve() if raw.is_absolute() else (self.root / raw).resolve()
-            try:
-                candidate.relative_to(self.root)
-            except ValueError as exc:
-                raise ValueError(
-                    f"Screenshot path must stay below the temporary artifact directory: {self.root}"
-                ) from exc
-        else:
-            timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-            candidate = self.root / f"{prefix}-{timestamp}-{uuid4().hex[:8]}{suffix}"
-        candidate.parent.mkdir(parents=True, exist_ok=True)
+        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.root.chmod(0o700)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        candidate = self.root / f"{prefix}-{timestamp}-{uuid4().hex[:8]}{suffix}"
         return candidate
-
-
-def image_artifact(path: Path, media_type: str) -> dict[str, str | bool]:
-    """Return channel-safe metadata; binary image bytes are never embedded."""
-    return {
-        "kind": "image",
-        "path": str(path),
-        "media_type": media_type,
-        "temporary": True,
-    }

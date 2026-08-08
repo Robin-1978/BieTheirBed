@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import stat
+
 import pytest
 
 from pc_assistant.artifacts import ArtifactStore
@@ -17,6 +19,9 @@ def test_reference_is_small_and_hydration_is_request_only(tmp_path):
 
     assert ref["type"] == "image_ref"
     assert "base64" not in str(ref)
+    path = next((tmp_path / "attachments").rglob("*.png"))
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
     messages = [{"role": "user", "content": [ref]}]
     hydrated = store.hydrate_messages("session-a", messages)
 
@@ -104,7 +109,7 @@ def test_startup_never_deletes_unregistered_files(tmp_path):
     assert stale.read_bytes() == b"old"
 
 
-def test_register_managed_path_does_not_copy_image(tmp_path):
+def test_register_generated_path_does_not_copy_image(tmp_path):
     from PIL import Image
 
     root = tmp_path / "attachments"
@@ -119,3 +124,14 @@ def test_register_managed_path_does_not_copy_image(tmp_path):
     assert ref["width"] == 16
     assert ref["height"] == 12
     assert [path for path in root.rglob("*") if path.is_file()] == [image]
+
+
+def test_hydration_rejects_registered_image_that_changed_size(tmp_path):
+    store = ArtifactStore(tmp_path / "attachments", max_bytes=1_024)
+    ref = store.put_data_url("session-a", DATA_URL)
+    path = next((tmp_path / "attachments").rglob("*.png"))
+    with path.open("ab") as stream:
+        stream.write(b"changed")
+
+    with pytest.raises(OSError, match="size changed before hydration"):
+        store.hydrate_ref("session-a", ref)

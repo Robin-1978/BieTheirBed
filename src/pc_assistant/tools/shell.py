@@ -8,10 +8,11 @@ import subprocess
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRisk
 
 
 _DEFAULT_TIMEOUT = 30
+_MAX_OUTPUT_BYTES = 1024 * 1024
 
 
 class UacExecutor:
@@ -119,7 +120,16 @@ do shell script "{escaped_cmd}" with administrator privileges
 class ShellTool(ToolBase):
     name = "run_command"
     description = "Execute a shell command, return stdout/stderr."
-    is_side_effecting = True
+    effect = ToolEffect.LOCAL_WRITE
+    capabilities = frozenset(
+        {
+            ToolCapability.SHELL,
+            ToolCapability.HOST_READ,
+            ToolCapability.HOST_WRITE,
+            ToolCapability.NETWORK,
+        }
+    )
+    risk = ToolRisk.HIGH
 
     def __init__(self, default_timeout: int = 30) -> None:
         self._default_timeout = default_timeout
@@ -268,11 +278,29 @@ class ShellTool(ToolBase):
                 **process_kwargs,
             )
 
-            try:
-                stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout
-                )
-            except asyncio.TimeoutError:
+            output_limit_reached = asyncio.Event()
+            stdout_buffer = bytearray()
+            stderr_buffer = bytearray()
+
+            async def read_limited(stream, buffer: bytearray) -> None:
+                discarding = False
+                while True:
+                    chunk = await stream.read(64 * 1024)
+                    if not chunk:
+                        return
+                    if discarding:
+                        continue
+                    remaining = _MAX_OUTPUT_BYTES - len(buffer)
+                    if remaining <= 0:
+                        output_limit_reached.set()
+                        discarding = True
+                        continue
+                    buffer.extend(chunk[:remaining])
+                    if len(chunk) > remaining:
+                        output_limit_reached.set()
+                        discarding = True
+
+            def terminate_process_group() -> None:
                 if isolated_process_group:
                     try:
                         os.killpg(proc.pid, signal.SIGKILL)
@@ -283,15 +311,69 @@ class ShellTool(ToolBase):
                         proc.kill()
                     except ProcessLookupError:
                         pass
-                await proc.communicate()
+
+            stdout_task = asyncio.create_task(
+                read_limited(proc.stdout, stdout_buffer)
+            )
+            stderr_task = asyncio.create_task(
+                read_limited(proc.stderr, stderr_buffer)
+            )
+            process_task = asyncio.create_task(proc.wait())
+            limit_task = asyncio.create_task(output_limit_reached.wait())
+            timed_out = False
+            output_exceeded = False
+            try:
+                done, _pending = await asyncio.wait_for(
+                    asyncio.wait(
+                        {process_task, limit_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    ),
+                    timeout=timeout,
+                )
+                output_exceeded = (
+                    limit_task in done and output_limit_reached.is_set()
+                )
+                if output_exceeded:
+                    terminate_process_group()
+                await process_task
+            except asyncio.TimeoutError:
+                timed_out = True
+                terminate_process_group()
+                await process_task
+            except asyncio.CancelledError:
+                terminate_process_group()
+                await process_task
+                raise
+            except Exception:
+                terminate_process_group()
+                await process_task
+                raise
+            finally:
+                limit_task.cancel()
+                await asyncio.gather(limit_task, return_exceptions=True)
+                await asyncio.gather(
+                    stdout_task,
+                    stderr_task,
+                    return_exceptions=True,
+                )
+
+            stdout = bytes(stdout_buffer).decode("utf-8", errors="replace")
+            stderr = bytes(stderr_buffer).decode("utf-8", errors="replace")
+            if timed_out:
                 return {
                     "error": f"Command timed out after {timeout}s",
                     "returncode": -1,
                     "command": original_command,
                 }
-
-            stdout = stdout_bytes.decode("utf-8", errors="replace")
-            stderr = stderr_bytes.decode("utf-8", errors="replace")
+            if output_exceeded:
+                return {
+                    "error": f"Command output exceeded {_MAX_OUTPUT_BYTES} bytes",
+                    "returncode": -1,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "output_truncated": True,
+                    "command": original_command,
+                }
             return {
                 "returncode": proc.returncode,
                 "stdout": stdout,

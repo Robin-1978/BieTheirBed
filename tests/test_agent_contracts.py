@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 from collections.abc import AsyncIterator
 from typing import get_args, get_origin, get_type_hints
@@ -29,10 +30,28 @@ def test_runtime_scope_requires_non_empty_principal_and_session() -> None:
 # covers agent-contracts-factory#REQ-001-S05
 # covers agent-contracts-factory#REQ-001-S06
 def test_session_operations_have_no_bare_session_overload() -> None:
-    from pc_assistant.agent_runtime.contracts import AgentRuntimePort, TurnInvoker
+    from pc_assistant.agent_runtime.contracts import (
+        AgentRuntimePort,
+        ControlServicePort,
+        TurnInvoker,
+    )
 
-    for operation in ("run", "cancel", "get_status", "command"):
-        parameters = list(inspect.signature(getattr(AgentRuntimePort, operation)).parameters)
+    run_parameters = list(inspect.signature(AgentRuntimePort.run).parameters)
+    assert run_parameters[:2] == ["self", "context"]
+    assert "session_id" not in run_parameters
+    cancel_parameters = list(inspect.signature(AgentRuntimePort.cancel).parameters)
+    assert cancel_parameters[:2] == ["self", "scope"]
+    assert "session_id" not in cancel_parameters
+
+    for operation in (
+        "get_status",
+        "get_history",
+        "list_memory",
+        "clear_memory",
+        "list_tools",
+        "set_config",
+    ):
+        parameters = list(inspect.signature(getattr(ControlServicePort, operation)).parameters)
         assert parameters[:2] == ["self", "scope"]
         assert "session_id" not in parameters
 
@@ -56,18 +75,19 @@ async def test_run_and_turn_invoker_are_direct_async_iterators() -> None:
         RunRequest,
         RuntimeEvent,
         RuntimeEventPayload,
+        RuntimeRunContext,
         RuntimeScope,
     )
 
     class Runtime:
         def run(
             self,
-            scope: RuntimeScope,
+            context: RuntimeRunContext,
             request: RunRequest,
         ) -> AsyncIterator[RuntimeEvent]:
             async def stream() -> AsyncIterator[RuntimeEvent]:
                 yield RuntimeEvent(
-                    event_type="final_answer",
+                    event_type="content_delta",
                     payload=RuntimeEventPayload(content=request.input),
                 )
 
@@ -75,9 +95,14 @@ async def test_run_and_turn_invoker_are_direct_async_iterators() -> None:
 
     runtime = Runtime()
     scope = RuntimeScope(principal_id="p", session_handle="s")
-    request = RunRequest(input="hello")
+    request = RunRequest(client_request_id="request-a", input="hello")
 
-    events = [event async for event in runtime.run(scope, request)]
+    context = RuntimeRunContext(
+        scope=scope,
+        run_id="run-a",
+        cancellation=asyncio.Event(),
+    )
+    events = [event async for event in runtime.run(context, request)]
 
     assert [event.payload.content for event in events] == ["hello"]
     assert not inspect.iscoroutinefunction(runtime.run)
@@ -85,10 +110,24 @@ async def test_run_and_turn_invoker_are_direct_async_iterators() -> None:
 
 # covers agent-contracts-factory#REQ-001
 def test_scalar_port_operations_are_awaited_once() -> None:
-    from pc_assistant.agent_runtime.contracts import AgentRuntimePort, RuntimeEvent
+    from pc_assistant.agent_runtime.contracts import (
+        AgentRuntimePort,
+        ControlServicePort,
+        RuntimeEvent,
+    )
 
-    for operation in ("cancel", "health_check", "get_status", "command"):
+    for operation in ("cancel", "health_check"):
         assert inspect.iscoroutinefunction(getattr(AgentRuntimePort, operation))
+    for operation in (
+        "create_session",
+        "get_status",
+        "get_history",
+        "list_memory",
+        "clear_memory",
+        "list_tools",
+        "set_config",
+    ):
+        assert inspect.iscoroutinefunction(getattr(ControlServicePort, operation))
     assert not inspect.iscoroutinefunction(AgentRuntimePort.run)
 
     hints = get_type_hints(AgentRuntimePort.run)
@@ -103,7 +142,7 @@ def test_public_run_event_requires_versioned_identity_sequence_and_typed_payload
     event = RunEvent(
         run_id="run-1",
         event_seq=1,
-        event_type="stream_delta",
+        event_type="content_delta",
         payload=RuntimeEventPayload(content="hello"),
     )
 
@@ -113,9 +152,19 @@ def test_public_run_event_requires_versioned_identity_sequence_and_typed_payload
         RunEvent(
             run_id="run-1",
             event_seq=0,
-            event_type="stream_delta",
+            event_type="content_delta",
             payload=RuntimeEventPayload(content="hello"),
         )
+
+
+def test_cancel_contract_targets_run_identity() -> None:
+    from pc_assistant.agent_runtime.contracts import CancelRequest
+
+    request = CancelRequest(run_id="run-1", reason="user requested")
+
+    assert request.run_id == "run-1"
+    with pytest.raises(ValidationError):
+        CancelRequest(run_id="")
 
 
 # covers agent-contracts-factory#REQ-002-S02
@@ -123,53 +172,9 @@ def test_internal_runtime_event_is_transport_neutral() -> None:
     from pc_assistant.agent_runtime.contracts import RuntimeEvent, RuntimeEventPayload
 
     event = RuntimeEvent(
-        event_type="stream_delta",
+        event_type="content_delta",
         payload=RuntimeEventPayload(content="hello"),
     )
 
     assert "run_id" not in type(event).model_fields
     assert "event_seq" not in type(event).model_fields
-
-
-# covers agent-contracts-factory#REQ-005-S01
-def test_runtime_package_exports_only_canonical_contract_names() -> None:
-    import pc_assistant.agent_runtime as runtime_package
-
-    expected = {
-        "AgentFactory",
-        "AgentRuntimePort",
-        "CancelRequest",
-        "CancelResult",
-        "CommandRequest",
-        "CommandResult",
-        "HealthStatus",
-        "RunEvent",
-        "RunRequest",
-        "RuntimeEvent",
-        "RuntimeEventPayload",
-        "RuntimeScope",
-        "RuntimeStatus",
-        "StatusRequest",
-        "TurnInvoker",
-    }
-
-    assert expected <= set(runtime_package.__all__)
-
-
-# covers agent-contracts-factory#REQ-005-S02
-@pytest.mark.parametrize(
-    "rejected_name",
-    [
-        "AgentLike",
-        "ServiceClient",
-        "AgentEvent",
-        "RuntimeControl",
-        "TurnOrchestrator",
-        "Agent",
-    ],
-)
-def test_runtime_package_rejects_legacy_aliases(rejected_name: str) -> None:
-    import pc_assistant.agent_runtime as runtime_package
-
-    assert rejected_name not in runtime_package.__all__
-    assert not hasattr(runtime_package, rejected_name)

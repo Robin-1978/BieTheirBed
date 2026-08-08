@@ -109,7 +109,7 @@ def test_recovery_fails_closed_without_changing_environment(monkeypatch: pytest.
     monkeypatch.setattr(desktop_session, "_list_active_graphical_sessions", lambda: sessions)
 
     with pytest.raises(desktop_session.DesktopSessionError, match="multiple"):
-        desktop_session.ensure_desktop_session("ui")
+        desktop_session.ensure_desktop_session("screenshot")
 
     assert "DISPLAY" not in os.environ
     assert os.environ["XAUTHORITY"] == "/stale/authority"

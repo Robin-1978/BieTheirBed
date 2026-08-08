@@ -1,10 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pc_assistant.agent import Agent
 
 __version__ = "0.1.0"
 
@@ -76,10 +72,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--status", action="store_true", default=False,
         help="Show whether the service daemon is running",
     )
-    parser.add_argument(
-        "--totp-setup", action="store_true", default=False,
-        help="Generate the local TOTP secret and provisioning URI for remote unlock",
-    )
     return parser
 
 
@@ -94,8 +86,6 @@ async def async_main(
     import logging
 
     from pc_assistant.config import load_config
-    from pc_assistant.agent import Agent
-    from pc_assistant.ui.chat import ChatUI
     from pc_assistant.logger import get_logger
 
     cfg = load_config(config_path)
@@ -133,90 +123,33 @@ async def async_main(
             print("Please set PC_LLM_API_KEY environment variable or add llm_api_key to your config file.")
         return 1
 
-    async def agent_confirm_callback(tool_name: str, arguments: dict) -> bool:
-        import asyncio
-
-        title = f"Dangerous operation: {tool_name}"
-        details = "\n".join(f"  {k}: {v}" for k, v in arguments.items())
-        try:
-            from rich.console import Console
-            from rich.panel import Panel
-
-            console = Console()
-            console.print(
-                Panel(
-                    details,
-                    title=f"[yellow]⚠ {title}[/yellow]",
-                    border_style="yellow",
-                    expand=False,
-                )
-            )
-        except ImportError:
-            print(f"\n⚠ {title}")
-            print(details)
-        try:
-            answer = await asyncio.to_thread(input, "Proceed? (y/n): ")
-            return answer.strip().lower() in ("y", "yes")
-        except (EOFError, KeyboardInterrupt):
-            return False
-
-    from pc_assistant.service.lifecycle import get_agent_or_client
-
-    agent = await get_agent_or_client(cfg, no_tools=no_tools)
-    is_remote = not isinstance(agent, Agent)
-
-    scheduler = None
-    channel_manager = None
-
-    if not is_remote:
-        scheduler = agent.registry.get("schedule")
-        if scheduler:
-            task_count = scheduler.task_count()
-            if task_count > 0:
-                await scheduler.execute(action="start")
-                logger.info("Scheduler started with %d tasks", task_count)
-
-        logger.info("Checking LLM server health at %s", main_model.server_url)
-        healthy = await agent.health_check()
-        if not healthy:
-            try:
-                from rich.console import Console
-                from rich.panel import Panel
-
-                console = Console()
-                console.print(
-                    Panel(
-                        f"Could not connect to LLM server at:\n  {main_model.server_url}\n\n"
-                        "Please ensure the server is running and accessible.\n"
-                        "You can change the server URL with:\n"
-                        "  --config path/to/config.yaml\n"
-                        "  or set PC_LLM_SERVER_URL environment variable.",
-                        title="[red]\u2717 LLM Server Unavailable[/red]",
-                        border_style="red",
-                        expand=False,
-                    )
-                )
-            except ImportError:
-                print(f"ERROR: Could not connect to LLM server at {main_model.server_url}")
-            return 1
-
-        logger.info("LLM server is healthy")
-
-        if cfg.feishu_enabled:
-            from pc_assistant.channels import create_channels_from_config
-
-            channel_manager = create_channels_from_config(cfg)
-            if channel_manager.active_channels:
-                await channel_manager.start_all(agent)
-                logger.info("Channels started: %s", channel_manager.active_channels)
-    else:
-        logger.info("Connected to service daemon")
-
     if ask is not None:
-        return await _run_benchmark(agent, ask, json_output=json_output, no_tools=no_tools, attach=attach)
+        from pc_assistant.cli_core import run_core_ask
 
-    chat_ui = ChatUI(config=cfg)
-    chat_ui.set_agent(agent)
+        return await run_core_ask(
+            cfg,
+            ask,
+            json_output=json_output,
+            no_tools=no_tools,
+            attachments=attach,
+        )
+
+    from pc_assistant.service.core_lifecycle import get_core_client
+    from pc_assistant.ui.core_app import CoreChatApp
+
+    try:
+        client = await get_core_client(cfg)
+        health = await client.health()
+        if not health.healthy:
+            print(f"ERROR: {health.detail or 'No configured model is available'}")
+            await client.disconnect()
+            return 1
+        session_handle = await client.create_session()
+    except Exception as exc:
+        print(f"ERROR: Could not connect to Core service: {exc}")
+        return 1
+
+    chat_ui = CoreChatApp(cfg, client, session_handle)
 
     try:
         await chat_ui.run()
@@ -229,100 +162,9 @@ async def async_main(
         except ImportError:
             print("\nInterrupted. Goodbye!")
     finally:
-        if is_remote:
-            from pc_assistant.service.client import ServiceClient
-            if isinstance(agent, ServiceClient):
-                await agent.disconnect()
-        else:
-            if channel_manager:
-                await channel_manager.stop_all()
-            if scheduler:
-                await scheduler.execute(action="stop")
+        await client.disconnect()
 
     return 0
-
-
-async def _run_benchmark(
-    agent: "Agent",
-    question: str,
-    json_output: bool = False,
-    no_tools: bool = False,
-    attach: list[str] | None = None,
-) -> int:
-    import json
-    import sys
-    import time
-
-    if question == "-":
-        question = sys.stdin.read().strip()
-        if not question:
-            print("Error: no input from stdin", file=sys.stderr)
-            return 1
-
-    if no_tools:
-        if hasattr(agent, "clear_tools"):
-            agent.clear_tools()
-
-    attachments = None
-    if attach:
-        from pc_assistant.model_adapter.types import ImageAttachment
-
-        attachments = [ImageAttachment.from_path(p) for p in attach]
-
-    start_time = time.monotonic()
-    tool_call_count = 0
-    answer = None
-    error_msg = None
-
-    try:
-        async for event in agent.run(question, attachments=attachments):
-            if event.type == "tool_call" and not event.blocked:
-                tool_call_count += 1
-            elif event.type == "final_answer":
-                answer = event.content
-            elif event.type == "error":
-                error_msg = event.content
-            elif event.type == "iteration_limit":
-                error_msg = event.content
-            elif event.type == "cancelled":
-                error_msg = event.content
-    except Exception as e:
-        error_msg = str(e)
-
-    elapsed = time.monotonic() - start_time
-    status = await agent.get_status()
-
-    metrics = {
-        "elapsed_seconds": round(elapsed, 3),
-        "prompt_tokens": status["total_prompt_tokens"],
-        "completion_tokens": status["total_completion_tokens"],
-        "total_tokens": status["total_tokens"],
-        "iterations": status["total_iterations"],
-        "tool_calls": tool_call_count,
-        "model": status["model"],
-        "provider": status["provider"],
-    }
-
-    if json_output:
-        result = {
-            "question": question,
-            "answer": answer if not error_msg else None,
-            "metrics": metrics,
-            "error": error_msg,
-        }
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-    else:
-        print(f"Question: {question}")
-        print(f"Answer: {answer if not error_msg else 'ERROR: ' + error_msg}")
-        print("---")
-        print(f"Time: {elapsed:.2f}s")
-        print(f"Tokens: prompt={metrics['prompt_tokens']}, "
-              f"completion={metrics['completion_tokens']}, "
-              f"total={metrics['total_tokens']}")
-        print(f"Iterations: {metrics['iterations']}")
-        print(f"Tool calls: {metrics['tool_calls']}")
-
-    return 0 if not error_msg else 1
 
 
 async def async_benchmark(
@@ -392,7 +234,6 @@ def async_benchmark_report(results_dir: str) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     import asyncio
-    import sys
     from pathlib import Path
 
     parser = build_parser()
@@ -418,26 +259,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.status:
         return _service_status()
 
-    if args.totp_setup:
-        from pc_assistant.config import load_config
-        from pc_assistant.runtime import RuntimePaths
-        from pc_assistant.security.totp import TotpUnlockBroker
-
-        cfg = load_config(config_path)
-        paths = RuntimePaths.from_root(cfg.runtime_root)
-        secret_path = paths.resolve(
-            cfg.remote_unlock_totp_secret_file,
-            default_parent=paths.root / "secrets",
-        )
-        if secret_path.exists():
-            print(f"TOTP secret already exists: {secret_path}", file=sys.stderr)
-            return 1
-        _, uri = TotpUnlockBroker.write_secret(secret_path)
-        print(f"Secret file: {secret_path}")
-        print("Provisioning URI (scan/import locally; do not send via Feishu):")
-        print(uri)
-        return 0
-
     if args.stop:
         return _stop_service()
 
@@ -445,9 +266,14 @@ def main(argv: list[str] | None = None) -> int:
         return _restart_service(config_path, args.log_dir)
 
     if args.serve:
-        from pc_assistant.service.server import run_server, resolve_service_log
-        log_path = resolve_service_log(args.log_dir, config_path)
-        return run_server(config_path, daemon=args.daemon, log_path=log_path)
+        from pc_assistant.service.core_daemon import resolve_core_log, run_core_server
+
+        log_path = resolve_core_log(args.log_dir, config_path)
+        return run_core_server(
+            config_path,
+            daemon=args.daemon,
+            log_path=log_path,
+        )
 
     if args.benchmark_report:
         return async_benchmark_report(args.benchmark_report)
@@ -478,12 +304,14 @@ def _service_state() -> tuple[bool, int | None]:
     """
     import os
 
-    from pc_assistant.service.protocol import PID_PATH
+    from pc_assistant.runtime import RuntimePaths
+
+    pid_path = RuntimePaths.from_root().pid
 
     pid: int | None = None
-    if PID_PATH.exists():
+    if pid_path.exists():
         try:
-            pid = int(PID_PATH.read_text().split()[0])
+            pid = int(pid_path.read_text().split()[0])
         except (ValueError, IndexError, OSError):
             pid = None
     if pid is not None:
@@ -499,9 +327,9 @@ def _service_state() -> tuple[bool, int | None]:
         if owners:
             return True, owners[0]
 
-    if PID_PATH.exists():
+    if pid_path.exists():
         try:
-            PID_PATH.unlink(missing_ok=True)
+            pid_path.unlink(missing_ok=True)
         except OSError:
             pass
     return False, None
@@ -564,16 +392,17 @@ def _pids_listening_on_port(port: int) -> list[int]:
 
 def _service_log_path() -> str:
     """The log path recorded by the daemon (from the PID file), else the default."""
-    from pc_assistant.service.protocol import LOG_PATH, PID_PATH
+    from pc_assistant.runtime import RuntimePaths
 
-    if PID_PATH.exists():
+    paths = RuntimePaths.from_root()
+    if paths.pid.exists():
         try:
-            lines = PID_PATH.read_text().splitlines()
+            lines = paths.pid.read_text().splitlines()
             if len(lines) >= 2 and lines[1].strip():
                 return lines[1].strip()
         except OSError:
             pass
-    return str(LOG_PATH)
+    return str(paths.logs / "service.log")
 
 
 def _wait_for_stopped(pid: int | None, timeout: float = 15.0) -> bool:
@@ -619,12 +448,14 @@ def _stop_service() -> int:
     import signal
     import sys as _sys
 
-    from pc_assistant.service.protocol import PID_PATH
+    from pc_assistant.runtime import RuntimePaths
+
+    pid_path = RuntimePaths.from_root().pid
 
     running, pid = _service_state()
     if not running:
         print("Service is not running.")
-        PID_PATH.unlink(missing_ok=True)
+        pid_path.unlink(missing_ok=True)
         return 0
 
     print(f"Stopping service (pid {pid})...")
@@ -639,7 +470,7 @@ def _stop_service() -> int:
         except OSError:
             pass
     try:
-        PID_PATH.unlink(missing_ok=True)
+        pid_path.unlink(missing_ok=True)
     except OSError:
         pass
     print("Service stopped.")
@@ -652,7 +483,7 @@ def _start_service(config_path: str | None, log_dir: str | None) -> int:
     import sys as _sys
     from pathlib import Path
 
-    from pc_assistant.service.server import resolve_service_log
+    from pc_assistant.service.core_daemon import resolve_core_log
 
     running, pid = _service_state()
     if running:
@@ -678,7 +509,7 @@ def _start_service(config_path: str | None, log_dir: str | None) -> int:
 
     if not _wait_for_running(None):
         print("ERROR: Service did not become ready in time.", file=_sys.stderr)
-        print(f"Check log: {resolve_service_log(log_dir, config_path)}", file=_sys.stderr)
+        print(f"Check log: {resolve_core_log(log_dir, config_path)}", file=_sys.stderr)
         return 1
 
     _, new_pid = _service_state()

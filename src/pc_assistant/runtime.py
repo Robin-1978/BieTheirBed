@@ -8,7 +8,9 @@ from pathlib import Path
 
 def default_runtime_root() -> Path:
     """Return the per-user application state directory."""
-    configured = os.environ.get("PC_ASSISTANT_HOME")
+    configured = os.environ.get("PC_RUNTIME_ROOT") or os.environ.get(
+        "PC_ASSISTANT_HOME"
+    )
     if configured:
         return Path(configured).expanduser()
     return Path.home() / ".pc-assistant"

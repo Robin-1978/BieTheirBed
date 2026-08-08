@@ -1,23 +1,16 @@
 from __future__ import annotations
 
-import pytest
 
 from pc_assistant.model_adapter.parsers.anthropic import (
     AnthropicStreamAccumulator,
     build_anthropic_payload,
     convert_tools_to_anthropic,
-    parse_anthropic_response,
 )
 from pc_assistant.model_adapter.parsers.openai import (
     OpenAIStreamAccumulator,
     build_chat_payload,
-    parse_chat_response,
 )
 from pc_assistant.model_adapter.profiles import resolve_profile
-from pc_assistant.model_adapter.types import (
-    format_tool_result_message,
-    normalize_tool_calls,
-)
 
 
 class TestResolveProfile:
@@ -66,22 +59,6 @@ class TestResolveProfile:
         assert p.health_url == "https://ark.example/api/coding/v3/models"
 
 
-class TestTypes:
-    def test_normalize_tool_calls_parses_json_arguments(self):
-        raw = [{"id": "1", "type": "function", "function": {"name": "web_search", "arguments": '{"query": "42"}'}}]
-        result = normalize_tool_calls(raw)
-        assert result[0]["function"]["arguments"] == {"query": "42"}
-
-    def test_normalize_tool_calls_invalid_json(self):
-        raw = [{"id": "1", "function": {"name": "x", "arguments": "{oops"}}]
-        result = normalize_tool_calls(raw)
-        assert result[0]["function"]["arguments"] == {}
-
-    def test_format_tool_result_message(self):
-        msg = format_tool_result_message("call_123", "ok")
-        assert msg == {"role": "tool", "tool_call_id": "call_123", "content": "ok"}
-
-
 class TestAnthropicParser:
     def test_build_payload_system_as_blocks_with_cache_control(self):
         payload = build_anthropic_payload(
@@ -101,19 +78,6 @@ class TestAnthropicParser:
         converted = convert_tools_to_anthropic(tools, {"type": "ephemeral"})
         assert converted[0]["name"] == "web_search"
         assert converted[0]["cache_control"] == {"type": "ephemeral"}
-
-    def test_parse_response_tool_use(self):
-        resp = parse_anthropic_response({
-            "content": [
-                {"type": "text", "text": "thinking"},
-                {"type": "tool_use", "id": "t1", "name": "web_search", "input": {"query": "x"}},
-            ],
-            "stop_reason": "tool_use",
-            "usage": {"input_tokens": 10},
-        })
-        assert resp.content == "thinking"
-        assert resp.tool_calls[0]["function"]["name"] == "web_search"
-        assert resp.finish_reason == "tool_use"
 
     def test_stream_accumulator_text_and_stop(self):
         acc = AnthropicStreamAccumulator()
@@ -140,14 +104,6 @@ class TestOpenAIParser:
             thinking={"type": "enabled"},
         )
         assert payload["thinking"] == {"type": "enabled"}
-
-    def test_parse_chat_response(self):
-        resp = parse_chat_response({
-            "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
-            "usage": {"total_tokens": 5},
-        })
-        assert resp.content == "hi"
-        assert resp.usage["total_tokens"] == 5
 
     def test_stream_accumulator_tool_calls_and_finish(self):
         acc = OpenAIStreamAccumulator()

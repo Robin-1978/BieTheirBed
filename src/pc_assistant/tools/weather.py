@@ -2,26 +2,39 @@ from __future__ import annotations
 
 import httpx
 from typing import Any
+from urllib.parse import quote
 
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRisk
+from pc_assistant.tools.http_limits import read_limited_json
+
+
+_MAX_WEATHER_RESPONSE_BYTES = 1024 * 1024
 
 
 class WeatherTool(ToolBase):
     name = "weather"
     description = "Get weather for a location."
+    effect = ToolEffect.READ_ONLY
+    capabilities = frozenset({ToolCapability.NETWORK})
+    risk = ToolRisk.LOW
 
     async def execute(self, **kwargs: Any) -> Any:
         location = kwargs.get("location", "")
         forecast = kwargs.get("forecast", "current")
         if not location:
             return {"error": "No location provided"}
+        if not isinstance(location, str) or len(location) > 200:
+            return {"error": "Location must contain at most 200 characters"}
         try:
-            url = f"https://wttr.in/{location}?format=j1"
+            url = f"https://wttr.in/{quote(location, safe='')}?format=j1"
             headers = {"User-Agent": "curl/7.68.0"}
             async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.get(url, headers=headers)
-                resp.raise_for_status()
-                data = resp.json()
+                async with client.stream("GET", url, headers=headers) as resp:
+                    resp.raise_for_status()
+                    data = await read_limited_json(
+                        resp,
+                        _MAX_WEATHER_RESPONSE_BYTES,
+                    )
         except httpx.HTTPError as e:
             return {"error": f"Failed to fetch weather: {e}"}
         except Exception as e:
@@ -67,6 +80,7 @@ class WeatherTool(ToolBase):
                 "properties": {
                     "location": {
                         "type": "string",
+                        "maxLength": 200,
                         "description": "City name or location (e.g. 'Shanghai', 'Beijing', 'New York')",
                     },
                     "forecast": {
@@ -86,7 +100,7 @@ class WeatherTool(ToolBase):
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "location": {"type": "string"},
+                    "location": {"type": "string", "maxLength": 200},
                     "forecast": {"type": "string", "enum": ["current", "forecast"], "description": "forecast adds 3 days"},
                 },
                 "required": ["location"],

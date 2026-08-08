@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 from pc_assistant.model_adapter.content import to_anthropic_content
-from pc_assistant.model_adapter.types import LLMResponse, StreamChunk
+from pc_assistant.model_adapter.types import StreamChunk
 
 
 def convert_tools_to_anthropic(tools: list[dict[str, Any]], cache_control: dict[str, Any] | None = None) -> list[dict[str, Any]]:
@@ -65,29 +65,6 @@ def build_anthropic_payload(
     if tools:
         payload["tools"] = convert_tools_to_anthropic(tools, cache_control)
     return payload
-
-
-def parse_anthropic_response(data: dict[str, Any]) -> LLMResponse:
-    content = ""
-    tool_calls: list[dict[str, Any]] = []
-    for block in data.get("content", []):
-        if block.get("type") == "text":
-            content += block.get("text", "")
-        elif block.get("type") == "tool_use":
-            tool_calls.append({
-                "id": block.get("id", ""),
-                "type": "function",
-                "function": {
-                    "name": block.get("name", ""),
-                    "arguments": block.get("input", {}),
-                },
-            })
-    return LLMResponse(
-        content=content,
-        tool_calls=tool_calls,
-        finish_reason=data.get("stop_reason", ""),
-        usage=data.get("usage", {}),
-    )
 
 
 class AnthropicStreamAccumulator:

@@ -2,13 +2,21 @@ from __future__ import annotations
 
 from typing import Any
 
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import (
+    ToolBase,
+    ToolCapability,
+    ToolEffect,
+    ToolRisk,
+)
 from pc_assistant.tools.registry import ToolRegistry
 
 
 class DescribeTool(ToolBase):
     """Meta-tool to query the full schema of any registered tool."""
     name = "tool_help"
+    effect = ToolEffect.READ_ONLY
+    capabilities = frozenset(ToolCapability)
+    risk = ToolRisk.LOW
     description = "Show full schema and examples for a tool."
 
     def __init__(self, registry: ToolRegistry) -> None:

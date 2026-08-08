@@ -2,13 +2,31 @@ from __future__ import annotations
 
 from typing import Any
 
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import (
+    ToolBase,
+    ToolCapability,
+    ToolEffect,
+    ToolPolicy,
+    ToolRisk,
+)
 
 
 class ClipboardTool(ToolBase):
     name = "clipboard"
     description = "Read or write the system clipboard."
-    is_side_effecting = True
+    effect = ToolEffect.DESKTOP_CONTROL
+    capabilities = frozenset({ToolCapability.DESKTOP_CONTROL})
+    schema_capabilities = frozenset({ToolCapability.DESKTOP_OBSERVE})
+    risk = ToolRisk.MEDIUM
+
+    def policy_for(self, arguments: dict[str, Any]) -> ToolPolicy:
+        if arguments.get("action") == "read":
+            return ToolPolicy(
+                effect=ToolEffect.READ_ONLY,
+                capabilities=frozenset({ToolCapability.DESKTOP_OBSERVE}),
+                risk=ToolRisk.LOW,
+            )
+        return self.policy
 
     async def execute(self, **kwargs: Any) -> Any:
         action = kwargs.get("action")

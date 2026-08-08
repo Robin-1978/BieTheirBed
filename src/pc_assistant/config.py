@@ -8,8 +8,10 @@ from typing import Any, get_args, get_origin, Literal, Union
 import yaml
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
-from pc_assistant.platform_ import get_default_dangerous_commands, get_default_protected_paths
 from pc_assistant.runtime import default_runtime_root
+
+
+_MAX_CONFIG_BYTES = 1024 * 1024
 
 
 class ProviderConfig(BaseModel):
@@ -63,7 +65,6 @@ class ModelConfig(BaseModel):
     provider: str
     model: str
     supports_vision: bool | None = None
-    token_family: str = ""
     # Provider/model context capacity. When set, it replaces the global
     # fallback budget for this model (subject to the completion reserve).
     context_window: int | None = None
@@ -86,7 +87,6 @@ class ResolvedModelConfig(BaseModel):
     api_key: str
     model: str
     supports_vision: bool | None
-    token_family: str
     context_window: int | None
     timeout: float
     thinking: ThinkingConfig | None = None
@@ -98,7 +98,6 @@ class AppConfig(BaseModel):
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
     models: dict[str, ModelConfig] = Field(default_factory=dict)
     default_model: str = ""
-    vision_model: str = ""
     fallback_enabled: bool = True
     fallback_model: str = ""
 
@@ -111,80 +110,38 @@ class AppConfig(BaseModel):
     llm_temperature: float = 0.7
     llm_timeout: float = 120.0
     max_iterations: int = 8
-    max_consecutive_same_tool: int = 3
     max_total_tool_calls: int = 50
-    max_consecutive_tool_calls: int = 50
     max_tokens: int = 1024
     shell_timeout: int = 30
     context_window_budget: int = 8192
-    auto_compact_enabled: bool = True
-    auto_compact_threshold: float = 0.50
-    llm_compact_enabled: bool = True
-    token_family: str = ""
-    max_sessions: int = 100
     trace_enabled: bool = True
     llm_trace_log: str = "logs/llm_calls.jsonl"
     turn_trace_log: str = "logs/turns.jsonl"
-    evidence_policy_enabled: bool = True
-    dangerous_commands: list[str] = Field(default_factory=get_default_dangerous_commands)
-    protected_paths: list[str] = Field(default_factory=get_default_protected_paths)
     log_file: str = "logs/pc_assistant.json"
     runtime_root: str = Field(default_factory=lambda: str(default_runtime_root()))
     working_directory: str = Field(default_factory=os.getcwd)
-    reflection_enabled: bool = False
-    reflection_threshold: int = 7
     ui_theme: str = "catppuccin"
     service_host: str = "127.0.0.1"
     service_port: int = 0
     service_token: str = ""
-    feishu_enabled: bool = False
-    feishu_app_id: str = ""
-    feishu_app_secret: str = ""
-    feishu_receive_id: str = ""
-    feishu_receive_id_type: str = "open_id"
-    remote_unlock_enabled: bool = False
-    remote_unlock_allowed_open_ids: list[str] = Field(default_factory=list)
-    remote_unlock_totp_secret_file: str = "secrets/unlock.totp"
-    remote_unlock_totp_period_seconds: int = 30
-    remote_unlock_max_attempts: int = 3
-    remote_unlock_lockout_seconds: int = 300
-    vision_max_side: int = 1280
-    vision_jpeg_quality: int = 70
-    vision_enabled: bool = True
-    vision_provider: str = "llamacpp"
-    vision_server_url: str = "http://127.0.0.1:8192"
-    vision_model_name: str = ""
-    vision_api_key: str = ""
-    vision_api_base: str = ""
-    vision_timeout: float = 120.0
-    vision_max_tokens: int = 1024
     attachment_ttl_seconds: int = 3600
     attachment_cleanup_interval_seconds: int = 300
     supports_vision: bool | None = None
-    screen_grid_enabled: bool = False
-    screen_verify_enabled: bool = False
-    ui_backend: str = "auto"
     source_config_path: str = ""
 
     @model_validator(mode="after")
     def _validate_provider(self) -> "AppConfig":
-        if (
-            self.service_port > 0
-            and self.service_host not in {"127.0.0.1", "localhost", "::1"}
-            and not self.service_token
-        ):
-            raise ValueError(
-                "service_token is required when service_host is not loopback"
-            )
+        if self.service_port > 0 and not self.service_token:
+            raise ValueError("TCP Core API requires an authentication token")
         if self.models:
             if not self.default_model:
                 raise ValueError("default_model is required when models are configured")
             if self.default_model not in self.models:
                 raise ValueError(f"Unknown default_model '{self.default_model}'")
-            if self.vision_model and self.vision_model not in self.models:
-                raise ValueError(f"Unknown vision_model '{self.vision_model}'")
             if self.fallback_model and self.fallback_model not in self.models:
                 raise ValueError(f"Unknown fallback_model '{self.fallback_model}'")
+            if self.fallback_model == self.default_model:
+                raise ValueError("fallback_model must differ from default_model")
             for alias, model in self.models.items():
                 if model.provider not in self.providers:
                     raise ValueError(
@@ -197,15 +154,6 @@ class AppConfig(BaseModel):
             raise ValueError(
                 f"Provider '{self.llm_provider}' requires an API key. "
                 "Set llm_api_key in config or PC_LLM_API_KEY environment variable."
-            )
-        if (
-            self.vision_enabled
-            and self.vision_provider in providers_needing_key
-            and not self.vision_api_key
-        ):
-            raise ValueError(
-                f"Vision provider '{self.vision_provider}' requires an API key. "
-                "Set vision_api_key or PC_VISION_API_KEY."
             )
         return self
 
@@ -226,7 +174,6 @@ class AppConfig(BaseModel):
                 api_key=endpoint.resolved_api_key(),
                 model=model.model,
                 supports_vision=model.supports_vision,
-                token_family=model.token_family,
                 context_window=model.context_window,
                 timeout=endpoint.timeout,
                 thinking=model.thinking,
@@ -240,27 +187,8 @@ class AppConfig(BaseModel):
             api_key=self.llm_api_key,
             model=self.llm_model_name,
             supports_vision=self.supports_vision,
-            token_family=self.token_family,
             context_window=None,
             timeout=self.llm_timeout,
-            thinking=None,
-        )
-
-    def resolve_vision_model(self) -> ResolvedModelConfig:
-        if self.models and self.vision_model:
-            return self.resolve_model(self.vision_model)
-        return ResolvedModelConfig(
-            alias=self.vision_model_name or "vision",
-            provider_name=self.vision_provider,
-            driver=self.vision_provider,
-            server_url=self.vision_server_url,
-            api_base=self.vision_api_base,
-            api_key=self.vision_api_key,
-            model=self.vision_model_name,
-            supports_vision=True,
-            token_family=self.token_family,
-            context_window=None,
-            timeout=self.vision_timeout,
             thinking=None,
         )
 
@@ -269,7 +197,11 @@ class AppConfig(BaseModel):
         if not self.fallback_enabled:
             return None
         if self.models:
-            aliases = [self.fallback_model] if self.fallback_model else list(self.models)
+            aliases = (
+                [self.fallback_model]
+                if self.fallback_model
+                else [alias for alias in self.models if alias != self.default_model]
+            )
             for alias in aliases:
                 if not alias or alias not in self.models:
                     continue
@@ -288,7 +220,6 @@ class AppConfig(BaseModel):
             api_key="",
             model="",
             supports_vision=self.supports_vision,
-            token_family=self.token_family,
             context_window=None,
             timeout=self.llm_timeout,
             thinking=None,
@@ -334,8 +265,13 @@ class AppConfig(BaseModel):
 def _load_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
-    with open(path, "r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh)
+    with path.open("rb") as stream:
+        raw = stream.read(_MAX_CONFIG_BYTES + 1)
+    if len(raw) > _MAX_CONFIG_BYTES:
+        raise ValueError(
+            f"Config file exceeds {_MAX_CONFIG_BYTES} byte limit: {path}"
+        )
+    data = yaml.safe_load(raw.decode("utf-8"))
     return data if isinstance(data, dict) else {}
 
 
@@ -343,7 +279,6 @@ def _env_overrides() -> dict[str, Any]:
     mapping: dict[str, tuple[str, type]] = {
         "PC_LLM_PROVIDER": ("llm_provider", str),
         "PC_DEFAULT_MODEL": ("default_model", str),
-        "PC_VISION_MODEL": ("vision_model", str),
         "PC_FALLBACK_ENABLED": ("fallback_enabled", bool),
         "PC_FALLBACK_MODEL": ("fallback_model", str),
         "PC_LLM_SERVER_URL": ("llm_server_url", str),
@@ -353,47 +288,21 @@ def _env_overrides() -> dict[str, Any]:
         "PC_LLM_TEMPERATURE": ("llm_temperature", float),
         "PC_LLM_TIMEOUT": ("llm_timeout", float),
         "PC_MAX_ITERATIONS": ("max_iterations", int),
-        "PC_MAX_CONSECUTIVE_SAME_TOOL": ("max_consecutive_same_tool", int),
         "PC_MAX_TOTAL_TOOL_CALLS": ("max_total_tool_calls", int),
-        "PC_MAX_CONSECUTIVE_TOOL_CALLS": ("max_consecutive_tool_calls", int),
         "PC_SHELL_TIMEOUT": ("shell_timeout", int),
         "PC_CONTEXT_WINDOW_BUDGET": ("context_window_budget", int),
-        "PC_AUTO_COMPACT_ENABLED": ("auto_compact_enabled", bool),
-        "PC_AUTO_COMPACT_THRESHOLD": ("auto_compact_threshold", float),
-        "PC_LLM_COMPACT_ENABLED": ("llm_compact_enabled", bool),
-        "PC_TOKEN_FAMILY": ("token_family", str),
-        "PC_MAX_SESSIONS": ("max_sessions", int),
         "PC_TRACE_ENABLED": ("trace_enabled", bool),
         "PC_LLM_TRACE_LOG": ("llm_trace_log", str),
         "PC_TURN_TRACE_LOG": ("turn_trace_log", str),
-        "PC_EVIDENCE_POLICY_ENABLED": ("evidence_policy_enabled", bool),
         "PC_LOG_FILE": ("log_file", str),
         # Friendly application-home alias. PC_RUNTIME_ROOT remains the more
         # specific config override and wins when both are present.
         "PC_ASSISTANT_HOME": ("runtime_root", str),
         "PC_RUNTIME_ROOT": ("runtime_root", str),
         "PC_WORKING_DIRECTORY": ("working_directory", str),
-        "PC_FEISHU_ENABLED": ("feishu_enabled", bool),
-        "PC_FEISHU_APP_ID": ("feishu_app_id", str),
-        "PC_FEISHU_APP_SECRET": ("feishu_app_secret", str),
-        "PC_FEISHU_RECEIVE_ID": ("feishu_receive_id", str),
-        "PC_FEISHU_RECEIVE_ID_TYPE": ("feishu_receive_id_type", str),
-        "PC_VISION_MAX_SIDE": ("vision_max_side", int),
-        "PC_VISION_JPEG_QUALITY": ("vision_jpeg_quality", int),
-        "PC_VISION_ENABLED": ("vision_enabled", bool),
-        "PC_VISION_PROVIDER": ("vision_provider", str),
-        "PC_VISION_SERVER_URL": ("vision_server_url", str),
-        "PC_VISION_MODEL_NAME": ("vision_model_name", str),
-        "PC_VISION_API_KEY": ("vision_api_key", str),
-        "PC_VISION_API_BASE": ("vision_api_base", str),
-        "PC_VISION_TIMEOUT": ("vision_timeout", float),
-        "PC_VISION_MAX_TOKENS": ("vision_max_tokens", int),
         "PC_ATTACHMENT_TTL_SECONDS": ("attachment_ttl_seconds", int),
         "PC_ATTACHMENT_CLEANUP_INTERVAL_SECONDS": ("attachment_cleanup_interval_seconds", int),
         "PC_SUPPORTS_VISION": ("supports_vision", bool),
-        "PC_SCREEN_GRID_ENABLED": ("screen_grid_enabled", bool),
-        "PC_SCREEN_VERIFY_ENABLED": ("screen_verify_enabled", bool),
-        "PC_UI_BACKEND": ("ui_backend", str),
     }
     overrides: dict[str, Any] = {}
     for env_key, (field_name, field_type) in mapping.items():
@@ -406,16 +315,6 @@ def _env_overrides() -> dict[str, Any]:
                     overrides[field_name] = field_type(raw)
             except (ValueError, TypeError):
                 pass
-    raw_dangerous = os.environ.get("PC_DANGEROUS_COMMANDS")
-    if raw_dangerous:
-        overrides["dangerous_commands"] = [
-            cmd.strip() for cmd in raw_dangerous.split(",") if cmd.strip()
-        ]
-    raw_protected = os.environ.get("PC_PROTECTED_PATHS")
-    if raw_protected:
-        overrides["protected_paths"] = [
-            p.strip() for p in raw_protected.split(",") if p.strip()
-        ]
     return overrides
 
 
@@ -423,7 +322,9 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     # Layering, from lowest to highest priority:
     # project defaults -> per-user private config -> explicit --config -> env.
     # The user config location is independent of the current working directory.
-    default_path = Path(__file__).resolve().parents[2] / "config" / "default.yaml"
+    source_default = Path(__file__).resolve().parents[2] / "config" / "default.yaml"
+    packaged_default = Path(__file__).resolve().parent / "resources" / "default.yaml"
+    default_path = source_default if source_default.is_file() else packaged_default
     explicit_path = Path(config_path).expanduser().resolve() if config_path is not None else None
 
     yaml_data = _load_yaml(default_path)

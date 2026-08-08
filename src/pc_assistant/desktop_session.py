@@ -13,12 +13,12 @@ from pathlib import Path
 
 DESKTOP_TOOL_NAMES = frozenset(
     {
+        "clipboard",
+        "notify",
         "mouse",
         "press_key",
         "type_text",
         "hotkey",
-        "ui",
-        "screen",
         "screenshot",
         "windows",
     }

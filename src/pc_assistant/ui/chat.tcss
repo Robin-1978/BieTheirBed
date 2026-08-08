@@ -1,6 +1,6 @@
-/* Chat TUI stylesheet -- uses CSS variables injected by ChatApp */
+/* Chat TUI stylesheet -- uses CSS variables injected by CoreChatApp */
 
-ChatApp {
+CoreChatApp {
     background: $bg;
 }
 

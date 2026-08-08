@@ -1,25 +1,13 @@
-"""Layer 1 (multimodal pipeline) tests: content IR, vision preprocess,
-conversation blocks, token estimation, agent attachment handling."""
+"""Multimodal content, provider serialization, and image budgeting tests."""
 from __future__ import annotations
 
-import pytest
-
-from pc_assistant.agent import Agent, AgentEvent
-from pc_assistant.artifacts import ArtifactStore
-from pc_assistant.config import AppConfig
-from pc_assistant.context.conversation import ConversationManager
-from pc_assistant.llm_provider import StreamChunk
 from pc_assistant.model_adapter.content import (
     build_image_block,
-    has_image,
     text_block,
-    text_content,
     to_anthropic_content,
     to_openai_content,
 )
-from pc_assistant.model_adapter.types import ImageAttachment
-from pc_assistant.tools.base import ToolBase
-from pc_assistant.vision.preprocess import estimate_image_tokens, image_block_from_file
+from pc_assistant.vision.preprocess import estimate_image_tokens
 
 DATA_URL = "data:image/jpeg;base64,AAAA"
 VALID_IMAGE_DATA_URL = (
@@ -40,19 +28,6 @@ class TestContentBlocks:
         assert block["type"] == "image"
         assert block["image_url"] == DATA_URL
         assert block["media_type"] == "image/jpeg"
-
-    def test_text_content_plain_string(self):
-        assert text_content("hello") == "hello"
-
-    def test_text_content_blocks(self):
-        content = [text_block("a"), build_image_block(DATA_URL), text_block("b")]
-        assert text_content(content) == "ab"
-
-    def test_has_image(self):
-        assert has_image([text_block("x"), build_image_block(DATA_URL)])
-        assert not has_image([text_block("x")])
-        assert not has_image("plain")
-
 
 class TestOpenAISerialization:
     def test_str_passthrough(self):
@@ -88,61 +63,6 @@ class TestVisionPreprocess:
     def test_estimate_image_tokens(self):
         assert 0 < estimate_image_tokens(224, 224)
         assert estimate_image_tokens(0, 0) == 0
-
-    def test_image_block_from_file(self, tmp_path):
-        try:
-            from PIL import Image
-        except ImportError:
-            pytest.skip("Pillow not installed")
-        p = tmp_path / "img.png"
-        Image.new("RGB", (64, 64), color="red").save(p)
-        block = image_block_from_file(p, max_side=128)
-        assert block is not None
-        assert block["type"] == "image"
-        assert block["image_url"].startswith("data:image/png;base64,")
-
-    def test_image_block_from_missing_file(self, tmp_path):
-        assert image_block_from_file(str(tmp_path / "nope.png")) is None
-
-
-# ── Conversation blocks ────────────────────────────────────────────────
-
-
-class TestConversationBlocks:
-    def test_add_user_with_reference_blocks(self):
-        conv = ConversationManager()
-        ref = {"type": "image_ref", "artifact_id": "img-1", "media_type": "image/jpeg"}
-        msg = conv.add_user_with_blocks("look at this", [ref])
-        assert msg.role == "user"
-        assert msg.content[0]["type"] == "text"
-        assert msg.content[1]["type"] == "image_ref"
-
-    def test_add_user_with_blocks_no_blocks(self):
-        conv = ConversationManager()
-        msg = conv.add_user_with_blocks("plain", None)
-        assert msg.content == "plain"
-
-    def test_add_tool_result_reference_blocks(self):
-        conv = ConversationManager()
-        ref = {"type": "image_ref", "artifact_id": "img-1", "media_type": "image/jpeg"}
-        msg = conv.add_tool_result_blocks("tc-1", [ref], tool_name="system")
-        assert msg.role == "tool"
-        assert isinstance(msg.content, list)
-        assert msg.content[0]["type"] == "image_ref"
-
-    def test_history_preserves_references_without_base64(self):
-        conv = ConversationManager()
-        conv.add_user_with_blocks("hi", [{"type": "image_ref", "artifact_id": "img-1"}])
-        msgs = conv.get_messages_for_llm_raw()
-        assert isinstance(msgs[0]["content"], list)
-        assert msgs[0]["content"][-1]["type"] == "image_ref"
-        assert "base64" not in str(msgs)
-
-    def test_history_rejects_provider_image_payload(self):
-        conv = ConversationManager()
-        with pytest.raises(ValueError, match="image"):
-            conv.add_user_with_blocks("hi", [build_image_block(DATA_URL)])
-
 
 # ── Token estimation ───────────────────────────────────────────────────
 
@@ -226,167 +146,3 @@ class TestProviderRoleAwareImages:
         assert message["role"] == "user"
         assert message["content"][0]["type"] == "tool_result"
         assert message["content"][0]["tool_use_id"] == "call-1"
-
-
-# ── Agent attachments ──────────────────────────────────────────────────
-
-
-def _capture_stream(captured: list):
-    captured_blocks: list = []
-
-    async def _stream(*args, **kwargs):
-        captured.append(args)
-        captured_blocks.append(args[0])
-        yield StreamChunk(delta_content="The image shows a red square.", finish_reason="stop")
-
-    return _stream
-
-
-async def _collect(agent: Agent, text: str, **kwargs) -> list[AgentEvent]:
-    events: list[AgentEvent] = []
-    async for e in agent.run(text, **kwargs):
-        events.append(e)
-    return events
-
-
-class TestAgentAttachments:
-    @pytest.mark.asyncio
-    async def test_attachment_blocks_reach_llm(self, tmp_path):
-        try:
-            from PIL import Image
-        except ImportError:
-            pytest.skip("Pillow not installed")
-        img = tmp_path / "att.png"
-        Image.new("RGB", (32, 32), color="blue").save(img)
-
-        captured: list = []
-        agent = Agent(
-            config=AppConfig(supports_vision=True),
-            artifact_store=ArtifactStore(tmp_path / "attachments"),
-        )
-        agent._llm.chat_stream = _capture_stream(captured)
-
-        events = await _collect(
-            agent,
-            "what is in this image?",
-            attachments=[ImageAttachment.from_path(str(img), caption="test")],
-        )
-        assert any(e.type == "final_answer" for e in events)
-        last_messages = captured[0][0]
-        # The current user turn is the last message and must carry an image block.
-        last = last_messages[-1]
-        assert last["role"] == "user"
-        assert has_image(last["content"])
-        assert "Image evidence requirement" not in str(last_messages)
-        assert "inspect_image" not in agent.registry.list_tools()
-        history = agent._get_state("").conversation.get_messages_for_llm_raw()
-        assert "data:image" not in str(history)
-        assert "image_ref" in str(history)
-
-    @pytest.mark.asyncio
-    async def test_vision_unsupported_errors(self, tmp_path):
-        try:
-            from PIL import Image
-        except ImportError:
-            pytest.skip("Pillow not installed")
-        img = tmp_path / "att.png"
-        Image.new("RGB", (32, 32)).save(img)
-
-        agent = Agent(
-            config=AppConfig(supports_vision=False, vision_enabled=False),
-            artifact_store=ArtifactStore(tmp_path / "attachments"),
-        )
-        agent._llm.chat_stream = _capture_stream([])
-        events = await _collect(agent, "hi", attachments=[ImageAttachment.from_path(str(img))])
-        errors = [e for e in events if e.type == "error"]
-        assert errors and "vision" in errors[0].content.lower()
-
-    @pytest.mark.asyncio
-    async def test_bad_attachment_errors(self):
-        agent = Agent(config=AppConfig())
-        agent._llm.chat_stream = _capture_stream([])
-        events = await _collect(
-            agent,
-            "hi",
-            attachments=[ImageAttachment.from_path("/nonexistent/nope.png")],
-        )
-        errors = [e for e in events if e.type == "error"]
-        assert errors
-
-    @pytest.mark.asyncio
-    async def test_no_attachments_no_blocks(self):
-        captured: list = []
-        agent = Agent(config=AppConfig())
-        agent._llm.chat_stream = _capture_stream(captured)
-        await _collect(agent, "hi")
-        assert isinstance(captured[0][0][-1]["content"], str)
-
-
-# ── Agent inline image tool result ─────────────────────────────────────
-
-
-class _InlineImageTool(ToolBase):
-    name = "imgtool"
-    description = "Returns an inline image"
-    is_side_effecting = False
-
-    async def execute(self, **kwargs):
-        return {
-            "success": True,
-            "path": "/tmp/out.png",
-            "image": build_image_block(VALID_IMAGE_DATA_URL, "image/png"),
-        }
-
-    def schema(self):
-        return {"name": self.name, "parameters": {"type": "object", "properties": {}}}
-
-
-class TestInlineImageToolResult:
-    @pytest.mark.asyncio
-    async def test_inline_image_hydrated_for_request_but_stored_as_reference(self, tmp_path):
-        agent = Agent(
-            config=AppConfig(supports_vision=True),
-            artifact_store=ArtifactStore(tmp_path / "attachments"),
-        )
-        agent.register_tool(_InlineImageTool())
-
-        captured: list = []
-        calls = {"n": 0}
-
-        async def _stream(*args, **kwargs):
-            captured.append(args[0])
-            calls["n"] += 1
-            if calls["n"] == 1:
-                yield StreamChunk(delta_tool_calls=[{
-                    "id": "call_1",
-                    "type": "function",
-                    "function": {"name": "imgtool", "arguments": "{}"},
-                }], finish_reason="")
-                yield StreamChunk(finish_reason="tool_calls")
-            else:
-                yield StreamChunk(delta_content="done", finish_reason="stop")
-
-        agent._llm.chat_stream = _stream
-        events = await _collect(agent, "use imgtool")
-        assert any(e.type == "tool_result" for e in events)
-        assert len(captured) == 2
-
-        # The tool message (in the follow-up call) must contain the image block.
-        tool_msgs = [m for m in captured[1] if m["role"] == "tool"]
-        assert tool_msgs
-        assert has_image(tool_msgs[-1]["content"])
-        history = agent.conversation.get_messages_for_llm_raw()
-        assert "data:image" not in str(history)
-        assert "image_ref" in str(history)
-        assert all("data:image" not in str(e.model_dump()) for e in events)
-
-
-def _make_tool_stream(agent: Agent):  # noqa: ARG001 - kept for clarity
-    async def _stream(*args, **kwargs):
-        yield StreamChunk(delta_tool_calls=[{
-            "id": "call_1",
-            "type": "function",
-            "function": {"name": "imgtool", "arguments": "{}"},
-        }], finish_reason="")
-        yield StreamChunk(finish_reason="tool_calls")
-    return _stream

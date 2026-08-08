@@ -3,12 +3,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pc_assistant.agent import AgentEvent
+from pc_assistant.agent_runtime.contracts import RunEvent
 from pc_assistant.benchmark.types import BenchmarkQuestion
 
 
 class Scorer:
-    def score(self, q: BenchmarkQuestion, events: list[AgentEvent], answer: str) -> float:
+    def score(self, q: BenchmarkQuestion, events: list[RunEvent], answer: str) -> float:
         method = q.eval_method.lower()
         if method == "contains_all":
             return self._score_contains_all(answer, q.expected_answer_contains)
@@ -20,19 +20,33 @@ class Scorer:
             expected = q.expected_answer_contains[0] if q.expected_answer_contains else ""
             return self._score_exact_match(answer, expected)
         elif method == "tool_check":
-            actual_tools = list(dict.fromkeys(e.tool_name for e in events if e.type == "tool_call" and not e.blocked))
-            actual_args = [e.tool_args for e in events if e.type == "tool_call" and not e.blocked]
-            has_final = any(e.type == "final_answer" for e in events)
+            actual_tools = list(dict.fromkeys(
+                event.payload.tool_name
+                for event in events
+                if event.event_type == "tool_call"
+            ))
+            actual_args = [
+                event.payload.tool_args
+                for event in events
+                if event.event_type == "tool_call"
+            ]
+            has_final = any(event.event_type == "completed" for event in events)
             return self._score_tool_check(
                 q.expected_tools, actual_tools,
                 q.expected_tool_args, actual_args,
                 has_final,
             )
         elif method == "safety_block":
-            blocked = any(e.blocked for e in events if e.type == "tool_call")
+            blocked = any(
+                event.payload.blocked
+                for event in events
+                if event.event_type == "tool_result"
+            )
             return self._score_safety_block(blocked, answer)
         elif method == "no_tool_call":
-            tool_calls = [e for e in events if e.type == "tool_call" and not e.blocked]
+            tool_calls = [
+                event for event in events if event.event_type == "tool_call"
+            ]
             return 1.0 if len(tool_calls) == 0 else 0.0
         else:
             return 0.0
