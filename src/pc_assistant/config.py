@@ -124,6 +124,10 @@ class AppConfig(BaseModel):
     service_host: str = "127.0.0.1"
     service_port: int = 9527
     service_token: str = ""
+    feishu_enabled: bool = False
+    feishu_app_id: str = ""
+    feishu_app_secret: SecretStr = Field(default_factory=lambda: SecretStr(""))
+    feishu_receive_id: str = ""
     attachment_ttl_seconds: int = 3600
     attachment_cleanup_interval_seconds: int = 300
     supports_vision: bool | None = None
@@ -133,6 +137,11 @@ class AppConfig(BaseModel):
     def _validate_provider(self) -> "AppConfig":
         if not 0 <= self.service_port <= 65535:
             raise ValueError("Core WebSocket service port must be between 0 and 65535")
+        if self.feishu_enabled and (
+            not self.feishu_app_id.strip()
+            or not self.feishu_app_secret.get_secret_value().strip()
+        ):
+            raise ValueError("Enabled Feishu channel requires app_id and app_secret")
         if self.models:
             if not self.default_model:
                 raise ValueError("default_model is required when models are configured")
@@ -300,6 +309,10 @@ def _env_overrides() -> dict[str, Any]:
         "PC_ASSISTANT_HOME": ("runtime_root", str),
         "PC_RUNTIME_ROOT": ("runtime_root", str),
         "PC_WORKING_DIRECTORY": ("working_directory", str),
+        "PC_FEISHU_ENABLED": ("feishu_enabled", bool),
+        "PC_FEISHU_APP_ID": ("feishu_app_id", str),
+        "PC_FEISHU_APP_SECRET": ("feishu_app_secret", str),
+        "PC_FEISHU_RECEIVE_ID": ("feishu_receive_id", str),
         "PC_ATTACHMENT_TTL_SECONDS": ("attachment_ttl_seconds", int),
         "PC_ATTACHMENT_CLEANUP_INTERVAL_SECONDS": ("attachment_cleanup_interval_seconds", int),
         "PC_SUPPORTS_VISION": ("supports_vision", bool),

@@ -120,6 +120,19 @@ credential stored with mode `0600` at
 `~/.pc-assistant/config/service.token`. Setting `service_token` adds a separate
 credential for scoped clients; it is not required for local operation.
 
+Enable the independently mounted Feishu channel in
+`~/.pc-assistant/config/local.yaml`:
+
+```yaml
+feishu_enabled: true
+feishu_app_id: "cli_xxx"
+feishu_app_secret: "..."
+```
+
+Feishu connects to Core only through `CoreClient`; Core does not import the
+channel package. Each sender is mapped to a separate signed principal and
+opaque Core session.
+
 ### Environment variables
 
 All config fields can be overridden with `PC_` prefix:
@@ -286,9 +299,8 @@ src/pc_assistant/
 ├── observability/
 │   └── trace.py         # LLM call & turn tracing
 ├── channels/
-│   ├── base.py          # Channel ABC
-│   ├── feishu.py        # Feishu/Lark bot (session-safe)
-│   └── __init__.py      # Config-driven channel creation
+│   ├── feishu.py        # CoreClient-based Feishu/Lark adapter
+│   └── __init__.py      # Channel exports
 ├── benchmark/
 │   ├── runner.py        # Benchmark executor
 │   ├── scorer.py        # Rule-based scoring

@@ -15,11 +15,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    from pc_assistant.service.core_daemon import resolve_core_log, run_core_server
+    from pc_assistant.service.application_daemon import run_service
+    from pc_assistant.service.core_daemon import resolve_core_log
 
     log_path = resolve_core_log(args.log_dir, args.config)
     sys.exit(
-        run_core_server(
+        run_service(
             args.config,
             daemon=args.daemon,
             log_path=log_path,

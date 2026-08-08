@@ -266,10 +266,11 @@ def main(argv: list[str] | None = None) -> int:
         return _restart_service(config_path, args.log_dir)
 
     if args.serve:
-        from pc_assistant.service.core_daemon import resolve_core_log, run_core_server
+        from pc_assistant.service.application_daemon import run_service
+        from pc_assistant.service.core_daemon import resolve_core_log
 
         log_path = resolve_core_log(args.log_dir, config_path)
-        return run_core_server(
+        return run_service(
             config_path,
             daemon=args.daemon,
             log_path=log_path,

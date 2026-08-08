@@ -56,6 +56,9 @@ adapters:
 - a strict CoreServer/CoreClient pair with authenticated request demultiplexing,
   concurrent run streaming and cancellation, complete typed control operations,
   connection-loss cleanup, and no legacy protocol translation;
+- a ChannelRuntime above Core that mounts independent adapters such as Feishu;
+  adapters depend only on CoreClient, while Core imports no channel packages or
+  channel identifiers;
 - scoped artifact ingress and egress that verify principal/session ownership,
   exchange bounded data URLs, never expose server paths, mark successful
   delivery, and save downloads only on the client side; run attachments contain
@@ -277,6 +280,8 @@ untrusted in both profiles.
 Principals are established by the transport, never accepted from request JSON:
 
 - the owner-only managed local credential -> `local`;
+- a short-lived HMAC credential issued by a trusted local adapter -> its signed,
+  per-user `personal:` principal;
 - configured TCP credentials -> authenticated identity, not a client-provided name;
 
 Plain WebSocket TCP endpoints bind only to loopback. Non-loopback transport is

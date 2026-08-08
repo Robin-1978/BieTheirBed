@@ -40,6 +40,10 @@ working_directory: "."
 service_host: "127.0.0.1"
 service_port: 9527
 service_token: ""
+feishu_enabled: false
+feishu_app_id: ""
+feishu_app_secret: ""
+feishu_receive_id: ""
 attachment_ttl_seconds: 3600
 attachment_cleanup_interval_seconds: 300
 supports_vision: null
