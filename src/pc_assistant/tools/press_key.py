@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRisk
 
 
 class PressKeyTool(ToolBase):
     name = "press_key"
     description = "Press a single key."
-    is_side_effecting = True
+    effect = ToolEffect.DESKTOP_CONTROL
+    capabilities = frozenset({ToolCapability.DESKTOP_CONTROL})
+    risk = ToolRisk.HIGH
 
     async def execute(self, **kwargs: Any) -> Any:
         key = kwargs.get("key", "")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import stat
+
 from pc_assistant.observability.trace import (
     JsonlRecorder,
     LLMTraceRecorder,
@@ -14,6 +16,7 @@ class TestJsonlRecorder:
         rec.record({"kind": "x", "value": 1})
         lines = open(path, encoding="utf-8").read().strip().splitlines()
         assert len(lines) == 1
+        assert stat.S_IMODE((tmp_path / "traces.jsonl").stat().st_mode) == 0o600
 
     def test_ring_buffer(self, tmp_path):
         rec = JsonlRecorder(path=str(tmp_path / "t.jsonl"), enabled=True, ring=3)
@@ -32,22 +35,32 @@ class TestLLMTraceRecorder:
     def test_record_call(self, tmp_path):
         rec = LLMTraceRecorder(path=str(tmp_path / "llm.jsonl"), enabled=True)
         rec.record_call(
-            session_id="s1", model="m", iteration=1,
+            principal_id="user-a", session_id="s1", run_id="run-a",
+            client_request_id="request-a", model="m", iteration=1,
             prompt_tokens=10, completion_tokens=5,
             latency_ms=100.0, ttft_ms=20.0,
             finish_reason="stop", tool_calls=1,
+            failover_used=True,
         )
         entry = rec.recent(1)[0]
         assert entry["kind"] == "llm_call"
         assert entry["total_tokens"] == 15
-        assert entry["session_id"] == "s1"
+        assert entry["session_hash"] != "s1"
+        assert entry["run_hash"] != "run-a"
+        assert entry["client_request_hash"] != "request-a"
+        assert "session_id" not in entry
+        assert "run_id" not in entry
+        assert "client_request_id" not in entry
+        assert entry["principal_hash"] != "user-a"
+        assert entry["failover_used"] is True
 
 
 class TestTurnRecorder:
     def test_record_turn(self, tmp_path):
         rec = TurnRecorder(path=str(tmp_path / "turns.jsonl"), enabled=True)
         rec.record_turn(
-            session_id="s1", user_input="hi",
+            principal_id="user-a", session_id="s1", run_id="run-a",
+            client_request_id="request-a", user_input="hi",
             outcome="answer", iterations=1, tool_calls=0,
             evidence_required=True, evidence_satisfied=False,
         )
@@ -55,3 +68,8 @@ class TestTurnRecorder:
         assert entry["kind"] == "turn"
         assert entry["outcome"] == "answer"
         assert entry["evidence_required"] is True
+        assert entry["input_chars"] == 2
+        assert "user_input" not in entry
+        assert "session_id" not in entry
+        assert "run_id" not in entry
+        assert "client_request_id" not in entry

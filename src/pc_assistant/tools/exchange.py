@@ -1,16 +1,29 @@
 from __future__ import annotations
 
 import httpx
+import math
+import re
 from typing import Any
 
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRisk
+from pc_assistant.tools.http_limits import read_limited_json
 
 
 _API_BASE = "https://api.frankfurter.dev/v1"
+_MAX_EXCHANGE_RESPONSE_BYTES = 1024 * 1024
+_CURRENCY_CODE = re.compile(r"^[A-Z]{3}$")
+
+
+def _currency(value: Any, default: str) -> str | None:
+    normalized = str(value or default).strip().upper()
+    return normalized if _CURRENCY_CODE.fullmatch(normalized) else None
 
 
 class ExchangeTool(ToolBase):
     name = "currency"
+    effect = ToolEffect.READ_ONLY
+    capabilities = frozenset({ToolCapability.NETWORK})
+    risk = ToolRisk.LOW
     description = "Convert between currencies."
 
     async def execute(self, **kwargs: Any) -> Any:
@@ -24,13 +37,21 @@ class ExchangeTool(ToolBase):
         return {"error": f"Unknown action: {action}. Use 'rate', 'convert', or 'list'."}
 
     async def _get_rate(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        base = (kwargs.get("base") or kwargs.get("from") or "USD").upper()
-        target = (kwargs.get("target") or kwargs.get("to") or "CNY").upper()
+        base = _currency(kwargs.get("base") or kwargs.get("from"), "USD")
+        target = _currency(kwargs.get("target") or kwargs.get("to"), "CNY")
+        if base is None or target is None:
+            return {"error": "Currency codes must contain exactly three letters"}
         try:
             async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-                resp = await client.get(f"{_API_BASE}/latest?from={base}&to={target}")
-                resp.raise_for_status()
-                data = resp.json()
+                async with client.stream(
+                    "GET",
+                    f"{_API_BASE}/latest?from={base}&to={target}",
+                ) as resp:
+                    resp.raise_for_status()
+                    data = await read_limited_json(
+                        resp,
+                        _MAX_EXCHANGE_RESPONSE_BYTES,
+                    )
         except Exception as e:
             return {"error": f"Failed to fetch exchange rate: {e}"}
         rates = data.get("rates", {})
@@ -51,13 +72,23 @@ class ExchangeTool(ToolBase):
             amount = float(amount)
         except (ValueError, TypeError):
             return {"error": f"Invalid amount: {amount}"}
-        base = (kwargs.get("base") or kwargs.get("from") or "USD").upper()
-        target = (kwargs.get("target") or kwargs.get("to") or "CNY").upper()
+        if not math.isfinite(amount) or abs(amount) > 1_000_000_000_000:
+            return {"error": "Amount must be finite and at most 1000000000000"}
+        base = _currency(kwargs.get("base") or kwargs.get("from"), "USD")
+        target = _currency(kwargs.get("target") or kwargs.get("to"), "CNY")
+        if base is None or target is None:
+            return {"error": "Currency codes must contain exactly three letters"}
         try:
             async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-                resp = await client.get(f"{_API_BASE}/latest?amount={amount}&from={base}&to={target}")
-                resp.raise_for_status()
-                data = resp.json()
+                async with client.stream(
+                    "GET",
+                    f"{_API_BASE}/latest?amount={amount}&from={base}&to={target}",
+                ) as resp:
+                    resp.raise_for_status()
+                    data = await read_limited_json(
+                        resp,
+                        _MAX_EXCHANGE_RESPONSE_BYTES,
+                    )
         except Exception as e:
             return {"error": f"Failed to convert currency: {e}"}
         rates = data.get("rates", {})
@@ -77,9 +108,14 @@ class ExchangeTool(ToolBase):
     async def _list_currencies(self) -> dict[str, Any]:
         try:
             async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-                resp = await client.get(f"{_API_BASE}/currencies")
-                resp.raise_for_status()
-                return {"currencies": resp.json()}
+                async with client.stream("GET", f"{_API_BASE}/currencies") as resp:
+                    resp.raise_for_status()
+                    return {
+                        "currencies": await read_limited_json(
+                            resp,
+                            _MAX_EXCHANGE_RESPONSE_BYTES,
+                        )
+                    }
         except Exception as e:
             return {"error": f"Failed to list currencies: {e}"}
 
@@ -97,14 +133,18 @@ class ExchangeTool(ToolBase):
                     },
                     "base": {
                         "type": "string",
+                        "pattern": "^[A-Za-z]{3}$",
                         "description": "Base currency code (e.g. 'USD', 'EUR', 'CNY')",
                     },
                     "target": {
                         "type": "string",
+                        "pattern": "^[A-Za-z]{3}$",
                         "description": "Target currency code (e.g. 'CNY', 'JPY', 'USD')",
                     },
                     "amount": {
                         "type": "number",
+                        "minimum": -1_000_000_000_000,
+                        "maximum": 1_000_000_000_000,
                         "description": "Amount to convert (for 'convert' action, default: 1)",
                     },
                 },

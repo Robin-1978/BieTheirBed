@@ -1,5 +1,3 @@
-from __future__ import annotations
+"""Core API user interfaces."""
 
-from pc_assistant.ui.chat import ChatUI
-
-__all__ = ["ChatUI"]
+__all__: list[str] = []

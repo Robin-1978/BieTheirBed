@@ -1,4 +1,4 @@
-"""Allow running the service as ``python -m pc_assistant.service.server``."""
+"""Run the forward-only Core service."""
 from __future__ import annotations
 
 import argparse
@@ -15,10 +15,16 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    from pc_assistant.service.server import run_server, resolve_service_log
+    from pc_assistant.service.core_daemon import resolve_core_log, run_core_server
 
-    log_path = resolve_service_log(args.log_dir, args.config)
-    sys.exit(run_server(args.config, daemon=args.daemon, log_path=log_path))
+    log_path = resolve_core_log(args.log_dir, args.config)
+    sys.exit(
+        run_core_server(
+            args.config,
+            daemon=args.daemon,
+            log_path=log_path,
+        )
+    )
 
 
 if __name__ == "__main__":

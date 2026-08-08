@@ -1,8 +1,8 @@
 """Unified, session-scoped storage for inbound and outbound artifacts.
 
 History and public events contain only opaque IDs and bounded metadata. Paths
-and bytes stay inside this store and are exposed only to trusted in-process
-hydration or delivery adapters.
+stay inside this store; bytes cross the Core boundary only through explicit,
+session-scoped delivery APIs.
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from pc_assistant.artifacts.models import ArtifactRef
+from pc_assistant.sqlite_schema import require_exact_table
 
 Direction = Literal["inbound", "outbound"]
 Ownership = Literal["borrowed", "managed", "generated"]
@@ -78,8 +79,11 @@ class ArtifactStore:
         self.cleanup_expired()
 
     def _connect(self) -> sqlite3.Connection:
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        return sqlite3.connect(self._db_path)
+        self._db_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self._db_path.parent.chmod(0o700)
+        connection = sqlite3.connect(self._db_path)
+        self._db_path.chmod(0o600)
+        return connection
 
     def _init_registry(self) -> None:
         with self._connect() as connection:
@@ -104,13 +108,28 @@ class ArtifactStore:
                 )
                 """
             )
-            columns = {
-                row[1] for row in connection.execute("PRAGMA table_info(artifact_registry)")
-            }
-            if "expires_at" not in columns:
-                connection.execute(
-                    "ALTER TABLE artifact_registry ADD COLUMN expires_at REAL"
-                )
+            require_exact_table(
+                connection,
+                "artifact_registry",
+                (
+                    ("artifact_id", "TEXT", False, None, 1),
+                    ("session_key", "TEXT", True, None, 0),
+                    ("path", "TEXT", True, None, 0),
+                    ("name", "TEXT", True, None, 0),
+                    ("media_type", "TEXT", True, None, 0),
+                    ("kind", "TEXT", True, None, 0),
+                    ("size", "INTEGER", True, None, 0),
+                    ("direction", "TEXT", True, None, 0),
+                    ("ownership", "TEXT", True, None, 0),
+                    ("retention", "TEXT", True, None, 0),
+                    ("width", "INTEGER", True, "0", 0),
+                    ("height", "INTEGER", True, "0", 0),
+                    ("content_sha256", "TEXT", True, "''", 0),
+                    ("expires_at", "REAL", False, None, 0),
+                    ("delivered_at", "REAL", False, None, 0),
+                ),
+                label="Artifact registry",
+            )
 
     def _load_registry(self) -> None:
         with self._connect() as connection:
@@ -192,7 +211,10 @@ class ArtifactStore:
 
     @staticmethod
     def _session_key(session_id: str) -> str:
-        return hashlib.sha256((session_id or "default").encode()).hexdigest()[:20]
+        normalized = session_id.strip()
+        if not normalized or len(normalized) > 256:
+            raise ValueError("Artifact session ID must contain 1-256 characters")
+        return hashlib.sha256(normalized.encode()).hexdigest()
 
     @staticmethod
     def _kind(media_type: str) -> str:
@@ -263,8 +285,12 @@ class ArtifactStore:
         height: int = 0,
         content_sha256: str = "",
     ) -> _Artifact:
+        self.cleanup_expired()
         if not path.is_file():
             raise ValueError(f"Artifact file does not exist: {path}")
+        if ownership != "borrowed":
+            path.parent.chmod(0o700)
+            path.chmod(0o600)
         size = path.stat().st_size
         if size <= 0 or size > self._max_bytes:
             raise ValueError(f"Artifact size must be between 1 and {self._max_bytes} bytes")
@@ -312,11 +338,13 @@ class ArtifactStore:
         if width <= 0 or height <= 0:
             raise ValueError("Artifact is not a supported image")
         directory = self.root / self._session_key(session_id) / "inbound"
-        directory.mkdir(parents=True, exist_ok=True)
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        directory.chmod(0o700)
         artifact_id = uuid.uuid4().hex
         path = directory / f"{artifact_id}{suffix}"
         temporary = directory / f".{artifact_id}.tmp"
         temporary.write_bytes(data)
+        temporary.chmod(0o600)
         temporary.replace(path)
         entry = self._register(
             session_id,
@@ -346,7 +374,8 @@ class ArtifactStore:
             resolved.relative_to(self.root)
         except ValueError as exc:
             raise ValueError("Managed artifact must stay below the artifact root") from exc
-        data = resolved.read_bytes()
+        with resolved.open("rb") as stream:
+            data = stream.read(self._max_bytes + 1)
         if not data or len(data) > self._max_bytes:
             raise ValueError(f"Artifact size must be between 1 and {self._max_bytes} bytes")
         detected_media, _suffix, width, height = self._detect_image(data, media_type)
@@ -431,10 +460,6 @@ class ArtifactStore:
         )
         return self.public_ref(session_id, entry.artifact_id)
 
-    # Old call-site name retained only as an internal synonym while tools move
-    # to the ownership-explicit API.
-    register_managed = register_generated
-
     def public_ref(self, session_id: str, artifact_id: str) -> dict[str, Any]:
         entry = self._get(session_id, artifact_id)
         return ArtifactRef(
@@ -448,12 +473,28 @@ class ArtifactStore:
             retention=entry.retention,
             status="delivered" if entry.delivered_at else "available",
             visibility="user",
-            temporary=entry.retention != "persistent",
         ).model_dump()
 
-    def resolve(self, session_id: str, artifact_id: str) -> dict[str, Any]:
+    def read_data_url(
+        self,
+        session_id: str,
+        artifact_id: str,
+        *,
+        max_bytes: int,
+    ) -> str:
+        """Read bounded artifact bytes without exposing the backing path."""
         entry = self._get(session_id, artifact_id)
-        return {**self.public_ref(session_id, artifact_id), "path": str(entry.path)}
+        current_size = entry.path.stat().st_size
+        if current_size != entry.size:
+            raise OSError(f"Artifact size changed before delivery: {artifact_id}")
+        if current_size > max_bytes:
+            raise ValueError(f"Artifact exceeds the {max_bytes} byte download limit")
+        with entry.path.open("rb") as stream:
+            data = stream.read(max_bytes + 1)
+        if len(data) != current_size:
+            raise OSError(f"Artifact size changed while reading: {artifact_id}")
+        encoded = base64.b64encode(data).decode("ascii")
+        return f"data:{entry.media_type};base64,{encoded}"
 
     def mark_delivered(self, session_id: str, artifact_id: str) -> dict[str, Any]:
         """Acknowledge client delivery; Core retains cleanup authority."""
@@ -488,7 +529,14 @@ class ArtifactStore:
 
     def hydrate_ref(self, session_id: str, ref: dict[str, Any]) -> dict[str, Any]:
         entry = self._get(session_id, self._ref_id(ref))
-        encoded = base64.b64encode(entry.path.read_bytes()).decode("ascii")
+        current_size = entry.path.stat().st_size
+        if current_size != entry.size or current_size > self._max_bytes:
+            raise OSError(f"Artifact size changed before hydration: {entry.artifact_id}")
+        with entry.path.open("rb") as stream:
+            data = stream.read(self._max_bytes + 1)
+        if len(data) != current_size:
+            raise OSError(f"Artifact size changed while hydrating: {entry.artifact_id}")
+        encoded = base64.b64encode(data).decode("ascii")
         return {
             "type": "image",
             "image_url": f"data:{entry.media_type};base64,{encoded}",
@@ -496,9 +544,6 @@ class ArtifactStore:
             "width": entry.width,
             "height": entry.height,
         }
-
-    def hydrate_artifact(self, session_id: str, artifact_id: str) -> dict[str, Any]:
-        return self.hydrate_ref(session_id, {"artifact_id": artifact_id})
 
     def metadata(self, session_id: str, artifact_id: str) -> dict[str, Any]:
         entry = self._get(session_id, artifact_id)

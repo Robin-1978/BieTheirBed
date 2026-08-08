@@ -2,7 +2,7 @@
 
 Each theme is a dict of named colors. ``get_palette()`` returns the active
 palette based on ``AppConfig.ui_theme``.  The TCSS file uses CSS variables
-injected at runtime via ``ChatApp.get_css_variables()``.
+injected at runtime via ``CoreChatApp.get_css_variables()``.
 """
 from __future__ import annotations
 

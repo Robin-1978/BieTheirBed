@@ -5,13 +5,16 @@ ring so the UI can render recent activity without re-reading files.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from pc_assistant.redaction import redact_message
+
+def _identity_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
 
 
 class JsonlRecorder:
@@ -25,7 +28,9 @@ class JsonlRecorder:
         self._ring_max = ring
         if enabled:
             try:
-                self._path.parent.mkdir(parents=True, exist_ok=True)
+                self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                self._path.touch(exist_ok=True)
+                self._path.chmod(0o600)
             except OSError:
                 self._enabled = False
 
@@ -61,7 +66,10 @@ class LLMTraceRecorder(JsonlRecorder):
     def record_call(
         self,
         *,
+        principal_id: str,
         session_id: str,
+        run_id: str,
+        client_request_id: str,
         model: str,
         iteration: int,
         prompt_tokens: int = 0,
@@ -75,11 +83,15 @@ class LLMTraceRecorder(JsonlRecorder):
         requested_max_tokens: int = 0,
         message_budget: int = 0,
         schema_tokens: int = 0,
+        failover_used: bool = False,
     ) -> None:
         self.record({
             "kind": "llm_call",
             "ts": datetime.now(tz=timezone.utc).isoformat(),
-            "session_id": session_id,
+            "principal_hash": _identity_hash(principal_id),
+            "session_hash": _identity_hash(session_id),
+            "run_hash": _identity_hash(run_id),
+            "client_request_hash": _identity_hash(client_request_id),
             "model": model,
             "iteration": iteration,
             "prompt_tokens": prompt_tokens,
@@ -95,6 +107,7 @@ class LLMTraceRecorder(JsonlRecorder):
             "requested_max_tokens": requested_max_tokens,
             "message_budget": message_budget,
             "schema_tokens": schema_tokens,
+            "failover_used": failover_used,
         })
 
 
@@ -107,7 +120,10 @@ class TurnRecorder(JsonlRecorder):
     def record_turn(
         self,
         *,
+        principal_id: str,
         session_id: str,
+        run_id: str,
+        client_request_id: str,
         user_input: str,
         outcome: str,
         iterations: int,
@@ -121,8 +137,11 @@ class TurnRecorder(JsonlRecorder):
         self.record({
             "kind": "turn",
             "ts": datetime.now(tz=timezone.utc).isoformat(),
-            "session_id": session_id,
-            "user_input": redact_message(user_input)[:200],
+            "principal_hash": _identity_hash(principal_id),
+            "session_hash": _identity_hash(session_id),
+            "run_hash": _identity_hash(run_id),
+            "client_request_hash": _identity_hash(client_request_id),
+            "input_chars": len(user_input),
             "outcome": outcome,
             "iterations": iterations,
             "tool_calls": tool_calls,

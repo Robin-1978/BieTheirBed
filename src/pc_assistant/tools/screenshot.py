@@ -7,13 +7,15 @@ from typing import Any
 from pc_assistant.artifacts import ArtifactStore
 from pc_assistant.context.scope import current_memory_scope
 from pc_assistant.tools.artifacts import ArtifactPaths
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRisk
 
 
 class ScreenshotTool(ToolBase):
     name = "screenshot"
     description = "Capture full desktop as image."
-    is_side_effecting = True
+    effect = ToolEffect.READ_ONLY
+    capabilities = frozenset({ToolCapability.DESKTOP_OBSERVE})
+    risk = ToolRisk.LOW
 
     def __init__(self, store: ArtifactStore, artifact_dir: str | Path) -> None:
         self._store = store
@@ -35,12 +37,15 @@ class ScreenshotTool(ToolBase):
                 media_type="image/png",
                 retention="temporary",
             )
-            # Keep the public artifact for delivery and expose the same image
-            # id so the main agent can ask the vision tool to inspect it.
+            artifact_id = str(artifact["artifact_id"])
             return {
                 "success": True,
                 "artifact": artifact,
-                "image_id": artifact.get("artifact_id", ""),
+                "image_ref": self._store.reference(
+                    current_memory_scope().session_id,
+                    artifact_id,
+                    caption="Latest full-desktop screenshot",
+                ),
             }
         except ImportError:
             save_path.unlink(missing_ok=True)

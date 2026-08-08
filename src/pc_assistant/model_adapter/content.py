@@ -1,23 +1,15 @@
 """Neutral multimodal content blocks and provider-specific serialization.
 
-Content is either a plain ``str`` (legacy) or a list of blocks:
+Text-only messages use ``str``; multimodal messages use a list of blocks:
 
     {"type": "text",  "text": "..."}
     {"type": "image", "image_url": "data:image/jpeg;base64,...", "media_type": "image/jpeg"}
 
-Helpers convert the neutral list into what each provider expects at the wire
-level. The legacy ``str`` form is always valid input and stays byte-identical.
+Helpers convert the neutral representation into each provider's wire format.
 """
 from __future__ import annotations
 
 from typing import Any
-
-# Content = str | list[ContentBlock]
-# ContentBlock = ContentText | ContentImage  (dicts, JSON-friendly)
-
-ContentBlock = dict[str, Any]
-Content = str | list[ContentBlock]
-
 
 def text_block(text: str) -> dict[str, Any]:
     return {"type": "text", "text": text}
@@ -28,34 +20,11 @@ def build_image_block(image_url: str, media_type: str = "image/jpeg") -> dict[st
     return {"type": "image", "image_url": image_url, "media_type": media_type}
 
 
-def is_block_content(content: Any) -> bool:
-    return isinstance(content, list)
-
-
 def split_content(content: Any) -> list[dict[str, Any]]:
     """Normalize content to a block list (``str`` -> single text block)."""
     if isinstance(content, list):
         return list(content)
     return [text_block(str(content or ""))]
-
-
-def text_content(content: Any) -> str:
-    """Concatenated text of any content (blocks or plain string)."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "".join(
-            b.get("text", "")
-            for b in content
-            if isinstance(b, dict) and b.get("type") == "text"
-        )
-    return str(content or "")
-
-
-def has_image(content: Any) -> bool:
-    if not isinstance(content, list):
-        return False
-    return any(isinstance(b, dict) and b.get("type") == "image" for b in content)
 
 
 def _data_url_parts(image_url: str) -> tuple[str, str]:
@@ -125,21 +94,3 @@ def to_anthropic_content(content: Any) -> Any:
         else:
             out.append(block)
     return out if out else ""
-
-
-def image_data_url_from_file(path: str) -> str | None:
-    """Minimal file->data-URL helper used by tools (avoids PIL dependency)."""
-    from pathlib import Path
-
-    p = Path(path)
-    if not p.exists():
-        return None
-    try:
-        data = p.read_bytes()
-    except OSError:
-        return None
-    import base64
-    import mimetypes
-
-    media = mimetypes.guess_type(p.name)[0] or "image/png"
-    return f"data:{media};base64,{base64.b64encode(data).decode('ascii')}"

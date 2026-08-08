@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import time
+from tempfile import TemporaryDirectory
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
-from pc_assistant.agent import Agent
+from pc_assistant.agent_runtime.composition import build_core_runtime
+from pc_assistant.agent_runtime.contracts import RunEvent
+from pc_assistant.agent_runtime.http_provider import HttpModelProvider
 from pc_assistant.benchmark.dataset import load_dataset, load_datasets_from_dir
 from pc_assistant.benchmark.evaluator import LLMJudge
 from pc_assistant.benchmark.scorer import Scorer
 from pc_assistant.benchmark.types import BenchmarkQuestion, BenchmarkResult
 from pc_assistant.config import AppConfig
-from pc_assistant.llm_provider import LLMProvider
+from pc_assistant.service.core_client import CoreClient
 
 
 class BenchmarkRunner:
@@ -53,35 +55,62 @@ class BenchmarkRunner:
 
         start_time = time.monotonic()
 
-        agent = self._create_agent(q)
-        events: list[Any] = []
+        config = self._question_config(q)
+        events: list[RunEvent] = []
         answer: str | None = None
         error_msg: str | None = None
         tool_count = 0
 
         try:
-            async for event in agent.run(q.question):
-                events.append(event)
-                if event.type == "tool_call" and not event.blocked:
-                    tool_count += 1
-                elif event.type == "final_answer":
-                    answer = event.content
-                elif event.type == "error":
-                    error_msg = event.content
-                elif event.type == "iteration_limit":
-                    error_msg = event.content
-                elif event.type == "cancelled":
-                    error_msg = event.content
+            with TemporaryDirectory(prefix="pc-assistant-benchmark-") as temporary:
+                composition = build_core_runtime(
+                    config,
+                    socket_path=Path(temporary) / "core.sock",
+                )
+                await composition.host.start()
+                client: CoreClient | None = None
+                try:
+                    client = await CoreClient.connect_unix(
+                        str(Path(temporary) / "core.sock")
+                    )
+                    session_handle = await client.create_session()
+                    answer_parts: list[str] = []
+                    async for event in client.run(
+                        session_handle,
+                        q.question,
+                        tools_enabled=not q.no_tools,
+                    ):
+                        events.append(event)
+                        if event.event_type == "content_delta":
+                            answer_parts.append(event.payload.content)
+                        elif event.event_type == "tool_call":
+                            tool_count += 1
+                        elif event.event_type in {"failed", "cancelled"}:
+                            error_msg = event.payload.content or event.event_type
+                    answer = "".join(answer_parts).strip()
+                finally:
+                    if client is not None:
+                        await client.disconnect()
+                    await composition.host.stop()
         except Exception as e:
             error_msg = str(e)
 
         elapsed = time.monotonic() - start_time
-        status = await agent.get_status()
         actual_tools = list(dict.fromkeys(
-            e.tool_name for e in events if e.type == "tool_call" and not e.blocked
+            event.payload.tool_name
+            for event in events
+            if event.event_type == "tool_call"
         ))
-        actual_args = [e.tool_args for e in events if e.type == "tool_call" and not e.blocked]
-        blocked = any(e.blocked for e in events if e.type == "tool_call")
+        actual_args = [
+            event.payload.tool_args
+            for event in events
+            if event.event_type == "tool_call"
+        ]
+        blocked = any(
+            event.payload.blocked
+            for event in events
+            if event.event_type == "tool_result"
+        )
 
         score = 0.0
         eval_detail = ""
@@ -114,10 +143,13 @@ class BenchmarkRunner:
             error=error_msg,
             metrics={
                 "elapsed_seconds": round(elapsed, 3),
-                "prompt_tokens": status["total_prompt_tokens"],
-                "completion_tokens": status["total_completion_tokens"],
-                "total_tokens": status["total_tokens"],
-                "iterations": status["total_iterations"],
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "iterations": max(
+                    (event.payload.iteration for event in events),
+                    default=0,
+                ),
                 "tool_calls": tool_count,
             },
             actual_tools=actual_tools,
@@ -126,25 +158,18 @@ class BenchmarkRunner:
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
-    def _create_agent(self, q: BenchmarkQuestion) -> Agent:
+    def _question_config(self, q: BenchmarkQuestion) -> AppConfig:
         config = self._config.model_copy()
         if q.max_iterations is not None:
             config.max_iterations = q.max_iterations
-        return Agent(config=config, disable_tools=q.no_tools)
+        if q.max_tool_calls is not None:
+            config.max_total_tool_calls = q.max_tool_calls
+        return config
 
     def _create_judge(self) -> LLMJudge | None:
         try:
             model = self._config.resolve_model()
-            provider = LLMProvider(
-                server_url=model.server_url,
-                model_name=model.model,
-                provider=model.driver,
-                api_key=model.api_key,
-                api_base=model.api_base,
-                timeout=model.timeout,
-                thinking=(model.thinking.model_dump() if model.thinking is not None else None),
-            )
-            return LLMJudge(provider)
+            return LLMJudge(HttpModelProvider(model))
         except Exception:
             return None
 

@@ -3,19 +3,31 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRisk
+from pc_assistant.tools.http_limits import read_limited_text
+
+
+_MAX_RESULTS = 10
+_MAX_SEARCH_RESPONSE_BYTES = 2 * 1024 * 1024
 
 
 class WebSearchTool(ToolBase):
     name = "web_search"
     description = "Search the web."
-    is_side_effecting = False
+    effect = ToolEffect.READ_ONLY
+    capabilities = frozenset({ToolCapability.NETWORK})
+    risk = ToolRisk.LOW
 
     async def execute(self, **kwargs: Any) -> Any:
         query = kwargs.get("query", "")
         if not query:
             return {"error": "query is required"}
-        max_results = kwargs.get("max_results", 5)
+        if not isinstance(query, str) or len(query) > 500:
+            return {"error": "query must contain at most 500 characters"}
+        try:
+            max_results = max(1, min(_MAX_RESULTS, int(kwargs.get("max_results", 5))))
+        except (TypeError, ValueError):
+            return {"error": "max_results must be an integer"}
 
         has_chinese = any('\u4e00' <= c <= '\u9fff' for c in query)
 
@@ -43,8 +55,13 @@ class WebSearchTool(ToolBase):
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string"},
-                    "max_results": {"type": "integer", "description": "Default 5"},
+                    "query": {"type": "string", "maxLength": 500},
+                    "max_results": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": _MAX_RESULTS,
+                        "description": "Default 5",
+                    },
                 },
                 "required": ["query"],
             },
@@ -66,9 +83,12 @@ class WebSearchTool(ToolBase):
             }
 
             async with httpx.AsyncClient(follow_redirects=True, timeout=15.0, headers=headers) as client:
-                resp = await client.get(url)
-                resp.raise_for_status()
-                html = resp.text
+                async with client.stream("GET", url) as resp:
+                    resp.raise_for_status()
+                    html = await read_limited_text(
+                        resp,
+                        _MAX_SEARCH_RESPONSE_BYTES,
+                    )
         except Exception:
             return None
 
@@ -124,16 +144,7 @@ class WebSearchTool(ToolBase):
                         kwargs["region"] = region
                     return list(ddgs.text(query, **kwargs))
             except ImportError:
-                try:
-                    from duckduckgo_search import DDGS
-
-                    with DDGS() as ddgs:
-                        kwargs = {"max_results": max_results}
-                        if region:
-                            kwargs["region"] = region
-                        return list(ddgs.text(query, **kwargs))
-                except ImportError:
-                    return None
+                return None
             except Exception:
                 return None
 
@@ -171,9 +182,12 @@ class WebSearchTool(ToolBase):
             async with httpx.AsyncClient(follow_redirects=True, timeout=15.0, headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
             }) as client:
-                resp = await client.get(url)
-                resp.raise_for_status()
-                html = resp.text
+                async with client.stream("GET", url) as resp:
+                    resp.raise_for_status()
+                    html = await read_limited_text(
+                        resp,
+                        _MAX_SEARCH_RESPONSE_BYTES,
+                    )
         except Exception as e:
             return {"error": f"Search error: {e}", "query": query}
 

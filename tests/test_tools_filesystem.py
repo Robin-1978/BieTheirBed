@@ -86,3 +86,36 @@ class TestReadFileRead:
         read_tool = ReadFileTool()
         result = await read_tool.execute(path=str(tmp_path))
         assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_large_file_reads_only_bounded_prefix(self, tmp_path):
+        path = tmp_path / "large.txt"
+        path.write_bytes(b"a" * 600_000)
+
+        result = await ReadFileTool().execute(path=str(path))
+
+        assert result["truncated"] is True
+        assert len(result["content"].encode()) == 512_000
+
+    @pytest.mark.asyncio
+    async def test_line_limit_is_bounded(self, tmp_path):
+        path = tmp_path / "lines.txt"
+        path.write_text("one\ntwo\n", encoding="utf-8")
+
+        result = await ReadFileTool().execute(path=str(path), limit=1_001)
+
+        assert result == {"error": "limit must contain 1-1000 lines"}
+
+    @pytest.mark.asyncio
+    async def test_large_file_line_window_remains_bounded(self, tmp_path):
+        path = tmp_path / "large-lines.txt"
+        path.write_bytes((b"skip\n" * 120_000) + b"target\nrest\n")
+
+        result = await ReadFileTool().execute(
+            path=str(path),
+            offset=120_001,
+            limit=1,
+        )
+
+        assert result["content"] == "target\n"
+        assert result["truncated"] is True

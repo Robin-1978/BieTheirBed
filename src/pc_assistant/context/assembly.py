@@ -7,7 +7,6 @@ from typing import Any
 
 from pc_assistant.context.compact import compact_dialogue_turn
 from pc_assistant.context.tags import (
-    is_context_summary,
     is_compacted_history,
     is_session_context_message,
     is_strategy_context_message,
@@ -176,7 +175,7 @@ def truncate_messages(
 
     summary_block: list[dict[str, Any]] = []
     rest: list[dict[str, Any]] = others
-    if others and (is_compacted_history(others[0].get("content")) or is_context_summary(others[0].get("content"))):
+    if others and is_compacted_history(others[0].get("content")):
         summary_block = others[:2]
         rest = others[2:]
 

@@ -1,16 +1,62 @@
 from __future__ import annotations
 
-import json
 import tempfile
 from pathlib import Path
 
 import pytest
 
-from pc_assistant.agent import AgentEvent
+from pc_assistant.agent_runtime.contracts import RunEvent, RuntimeEventPayload
+from pc_assistant.agent_runtime.model_step import ProviderChunk
 from pc_assistant.benchmark.dataset import load_dataset
+from pc_assistant.benchmark.evaluator import LLMJudge
 from pc_assistant.benchmark.reporter import Reporter
 from pc_assistant.benchmark.scorer import Scorer
 from pc_assistant.benchmark.types import BenchmarkQuestion, BenchmarkResult
+
+
+def _event(
+    sequence: int,
+    event_type: str,
+    *,
+    tool_name: str = "",
+) -> RunEvent:
+    return RunEvent(
+        run_id="run-a",
+        event_seq=sequence,
+        event_type=event_type,
+        payload=RuntimeEventPayload(tool_name=tool_name),
+    )
+
+
+class _JudgeProvider:
+    def __init__(self, text: str, *, finish_reason: str = "stop") -> None:
+        self.text = text
+        self.finish_reason = finish_reason
+
+    async def stream(self, request, cancellation):
+        assert request.purpose == "reflection"
+        assert request.temperature == 0.0
+        assert not cancellation.is_set()
+        yield ProviderChunk(content_delta=self.text)
+        yield ProviderChunk(
+            finish_reason=self.finish_reason,
+            terminal=True,
+            error_code="provider_failed" if self.finish_reason == "error" else "",
+        )
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_uses_forward_provider_port() -> None:
+    score = await LLMJudge(_JudgeProvider("8.5")).judge("q", "answer", "rubric")
+    assert score == 0.85
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_fails_closed_on_provider_error() -> None:
+    score = await LLMJudge(
+        _JudgeProvider("10", finish_reason="error")
+    ).judge("q", "answer", "rubric")
+    assert score == 0.0
 
 
 class TestScorer:
@@ -113,16 +159,20 @@ class TestScorer:
     def test_no_tool_call_clean(self):
         q = BenchmarkQuestion(id="t", category="text_qa", subcategory="test",
                               question="q", eval_method="no_tool_call")
-        events = [AgentEvent(type="stream_delta", content="hi"),
-                  AgentEvent(type="final_answer", content="hi")]
+        events = [
+            _event(1, "content_delta"),
+            _event(2, "completed"),
+        ]
         score = Scorer().score(q, events, "hi")
         assert score == 1.0
 
     def test_no_tool_call_with_tool(self):
         q = BenchmarkQuestion(id="t", category="text_qa", subcategory="test",
                               question="q", eval_method="no_tool_call")
-        events = [AgentEvent(type="tool_call", tool_name="weather"),
-                  AgentEvent(type="final_answer", content="result")]
+        events = [
+            _event(1, "tool_call", tool_name="weather"),
+            _event(2, "completed"),
+        ]
         score = Scorer().score(q, events, "result")
         assert score == 0.0
 

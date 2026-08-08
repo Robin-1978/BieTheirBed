@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import pytest
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, ToolEffect, ToolRisk
 from pc_assistant.tools.registry import ToolRegistry
 
 
 class DummyTool(ToolBase):
     name = "dummy"
     description = "A dummy tool for testing"
+    effect = ToolEffect.READ_ONLY
+    risk = ToolRisk.LOW
 
     async def execute(self, **kwargs):
         return {"result": kwargs.get("input", "none")}
@@ -36,6 +38,14 @@ def test_registry_register():
     assert len(registry) == 1
 
 
+def test_registry_rejects_duplicate_name():
+    registry = ToolRegistry()
+    registry.register(DummyTool())
+
+    with pytest.raises(ValueError, match="already registered"):
+        registry.register(DummyTool())
+
+
 def test_registry_get():
     registry = ToolRegistry()
     tool = DummyTool()
@@ -48,13 +58,6 @@ def test_registry_list_tools():
     registry = ToolRegistry()
     registry.register(DummyTool())
     assert registry.list_tools() == ["dummy"]
-
-
-def test_registry_exposes_schema_and_normalizes_calls():
-    registry = ToolRegistry()
-    tool = DummyTool()
-    registry.register(tool)
-    assert registry.normalize_call("dummy", {"value": 1}) == ("dummy", {"value": 1})
 
 
 def test_registry_empty_name():

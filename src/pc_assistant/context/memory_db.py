@@ -1,4 +1,4 @@
-"""Principal-scoped SQLite memory repository and Agent-facing adapters."""
+"""Principal-scoped SQLite memory repository and runtime bindings."""
 from __future__ import annotations
 
 import re
@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from pc_assistant.context.memory import MemoryItem
 from pc_assistant.context.scope import current_memory_scope
+from pc_assistant.sqlite_schema import require_exact_table, require_index_columns
 
 
 AMBIGUOUS_MEMORY_KEYS = frozenset({
@@ -26,6 +26,32 @@ _SENSITIVE_MEMORY_KEY = re.compile(
     r"(?:password|passwd|passcode|api[_-]?key|token|secret|totp|credential|private[_-]?key)",
     re.IGNORECASE,
 )
+
+
+class MemoryItem:
+    """Small value object returned by scoped memory queries."""
+
+    def __init__(
+        self,
+        key: str,
+        value: str,
+        category: str = "general",
+        confidence: float = 1.0,
+        source: str = "explicit",
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        self.key = key
+        self.value = value
+        self.category = category
+        self.confidence = min(1.0, max(0.0, confidence))
+        self.source = source
+        self.created_at = now
+        self.updated_at = now
+        self.access_count = 0
+
+    def touch(self) -> None:
+        self.access_count += 1
+        self.updated_at = datetime.now(timezone.utc).isoformat()
 
 
 def validate_memory_key(key: str) -> str:
@@ -53,11 +79,13 @@ def validate_memory_key(key: str) -> str:
 class SQLiteMemoryRepository:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path).expanduser().resolve()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.path.parent.chmod(0o700)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=5.0)
+        self.path.chmod(0o600)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA foreign_keys=ON")
@@ -81,8 +109,6 @@ class SQLiteMemoryRepository:
                     access_count INTEGER NOT NULL DEFAULT 0,
                     PRIMARY KEY (principal_id, key)
                 );
-                CREATE INDEX IF NOT EXISTS memories_lookup
-                    ON memories(principal_id, importance, category, updated_at DESC);
                 CREATE TABLE IF NOT EXISTS episodes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     principal_id TEXT NOT NULL,
@@ -92,9 +118,59 @@ class SQLiteMemoryRepository:
                     source TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
-                CREATE INDEX IF NOT EXISTS episodes_lookup
-                    ON episodes(principal_id, session_id, created_at DESC);
                 """
+            )
+            require_exact_table(
+                db,
+                "memories",
+                (
+                    ("principal_id", "TEXT", True, None, 1),
+                    ("key", "TEXT", True, None, 2),
+                    ("value", "TEXT", True, None, 0),
+                    ("category", "TEXT", True, None, 0),
+                    ("importance", "TEXT", True, None, 0),
+                    ("confidence", "REAL", True, None, 0),
+                    ("source", "TEXT", True, None, 0),
+                    ("created_at", "TEXT", True, None, 0),
+                    ("updated_at", "TEXT", True, None, 0),
+                    ("last_used_at", "TEXT", False, None, 0),
+                    ("access_count", "INTEGER", True, "0", 0),
+                ),
+                label="Memory",
+            )
+            require_exact_table(
+                db,
+                "episodes",
+                (
+                    ("id", "INTEGER", False, None, 1),
+                    ("principal_id", "TEXT", True, None, 0),
+                    ("session_id", "TEXT", True, None, 0),
+                    ("summary", "TEXT", True, None, 0),
+                    ("tool_calls", "INTEGER", True, "0", 0),
+                    ("source", "TEXT", True, None, 0),
+                    ("created_at", "TEXT", True, None, 0),
+                ),
+                label="Memory episode",
+            )
+            db.execute(
+                """CREATE INDEX IF NOT EXISTS memories_lookup
+                   ON memories(principal_id, importance, category, updated_at DESC)"""
+            )
+            db.execute(
+                """CREATE INDEX IF NOT EXISTS episodes_lookup
+                   ON episodes(principal_id, session_id, created_at DESC)"""
+            )
+            require_index_columns(
+                db,
+                "memories_lookup",
+                ("principal_id", "importance", "category", "updated_at"),
+                label="Memory",
+            )
+            require_index_columns(
+                db,
+                "episodes_lookup",
+                ("principal_id", "session_id", "created_at"),
+                label="Memory episode",
             )
 
     @staticmethod

@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from pc_assistant.llm_provider import LLMProvider
+import asyncio
+import re
+
+from pc_assistant.agent_runtime.model_step import (
+    ModelProviderPort,
+    ProviderCallRequest,
+)
 
 
 JUDGE_PROMPT = """You are an impartial evaluator. Rate the following answer based on the given rubric.
@@ -17,7 +23,7 @@ Score (0-10):"""
 
 
 class LLMJudge:
-    def __init__(self, provider: LLMProvider):
+    def __init__(self, provider: ModelProviderPort):
         self._provider = provider
 
     async def judge(self, question: str, answer: str, rubric: str) -> float:
@@ -27,10 +33,23 @@ class LLMJudge:
         prompt = JUDGE_PROMPT.format(question=question, answer=answer, rubric=rubric)
 
         try:
-            resp = await self._provider.chat([{"role": "user", "content": prompt}], temperature=0.0)
-            text = resp.content.strip()
-
-            import re
+            chunks: list[str] = []
+            terminal_ok = False
+            request = ProviderCallRequest(
+                call_id="benchmark-judge",
+                purpose="reflection",
+                messages=({"role": "user", "content": prompt},),
+                temperature=0.0,
+                max_output_tokens=32,
+            )
+            async for chunk in self._provider.stream(request, asyncio.Event()):
+                if chunk.content_delta:
+                    chunks.append(chunk.content_delta)
+                if chunk.terminal:
+                    terminal_ok = chunk.finish_reason == "stop"
+            if not terminal_ok:
+                return 0.0
+            text = "".join(chunks).strip()
             match = re.search(r"\b(\d+(?:\.\d+)?)\b", text)
             if match:
                 raw_score = float(match.group(1))

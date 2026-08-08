@@ -41,7 +41,9 @@ _initialized = False
 
 def _ensure_log_dir(log_file: str) -> Path:
     log_path = Path(log_file)
-    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    log_path.touch(exist_ok=True)
+    log_path.chmod(0o600)
     return log_path
 
 

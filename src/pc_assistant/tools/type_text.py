@@ -3,13 +3,15 @@ from __future__ import annotations
 from typing import Any
 
 from pc_assistant.platform_ import get_platform
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRisk
 
 
 class TypeTextTool(ToolBase):
     name = "type_text"
     description = "Type text via keyboard."
-    is_side_effecting = True
+    effect = ToolEffect.DESKTOP_CONTROL
+    capabilities = frozenset({ToolCapability.DESKTOP_CONTROL})
+    risk = ToolRisk.HIGH
 
     async def execute(self, **kwargs: Any) -> Any:
         text = kwargs.get("text", "")

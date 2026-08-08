@@ -11,7 +11,6 @@ from pc_assistant.tools.mouse import MouseTool
 from pc_assistant.tools.notification import NotificationTool
 from pc_assistant.tools.press_key import PressKeyTool
 from pc_assistant.tools.read_file import ReadFileTool
-from pc_assistant.tools.scheduler import SchedulerTool
 from pc_assistant.tools.shell import ShellTool
 from pc_assistant.tools.type_text import TypeTextTool
 from pc_assistant.tools.weather import WeatherTool
@@ -39,7 +38,6 @@ ALL_TOOLS = [
     MemoryTool(),
     MouseTool(),
     NotificationTool(),
-    SchedulerTool(),
     ShellTool(),
     WeatherTool(),
     WebSearchTool(),
@@ -66,14 +64,6 @@ def test_skim_schema_actions_subset_of_schema(tool):
 @pytest.mark.parametrize("tool", ALL_TOOLS, ids=lambda t: t.name)
 def test_skim_schema_has_same_name(tool):
     assert tool.schema()["name"] == tool.skim_schema()["name"]
-
-
-def test_scheduler_skim_has_action_enum():
-    tool = SchedulerTool()
-    skim = tool.skim_schema()
-    props = skim["parameters"]["properties"]
-    assert "action" in props
-    assert "enum" in props["action"]
 
 
 def test_generated_tool_help_example_contains_only_required_inputs():

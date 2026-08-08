@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from pc_assistant.context.memory import MemoryItem
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.context.memory_db import MemoryItem
+from pc_assistant.tools.base import (
+    ToolBase,
+    ToolCapability,
+    ToolEffect,
+    ToolPolicy,
+    ToolRisk,
+)
 
 
 class UserMemoryPort(Protocol):
@@ -30,7 +36,19 @@ class EpisodicMemoryPort(Protocol):
 class MemoryTool(ToolBase):
     name = "memory"
     description = "Store, retrieve, search, or delete user facts."
-    is_side_effecting = True
+    effect = ToolEffect.LOCAL_WRITE
+    capabilities = frozenset({ToolCapability.MEMORY_WRITE})
+    schema_capabilities = frozenset({ToolCapability.MEMORY_READ})
+    risk = ToolRisk.MEDIUM
+
+    def policy_for(self, arguments: dict[str, Any]) -> ToolPolicy:
+        if arguments.get("action") in {"retrieve", "search"}:
+            return ToolPolicy(
+                effect=ToolEffect.READ_ONLY,
+                capabilities=frozenset({ToolCapability.MEMORY_READ}),
+                risk=ToolRisk.LOW,
+            )
+        return self.policy
 
     def __init__(
         self,

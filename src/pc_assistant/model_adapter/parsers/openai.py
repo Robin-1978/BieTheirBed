@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 from pc_assistant.model_adapter.content import split_content, to_openai_content
-from pc_assistant.model_adapter.types import LLMResponse, StreamChunk, normalize_tool_calls
+from pc_assistant.model_adapter.types import StreamChunk
 
 
 def apply_cache_control(messages: list[dict[str, Any]], cache_control: dict[str, Any] | None) -> None:
@@ -71,22 +71,6 @@ def build_chat_payload(
     if tool_choice is not None:
         payload["tool_choice"] = tool_choice
     return payload
-
-
-def parse_chat_response(data: dict[str, Any]) -> LLMResponse:
-    choice = data.get("choices", [{}])[0]
-    message = choice.get("message", {})
-    content = message.get("content", "") or ""
-    raw_tool_calls = message.get("tool_calls", [])
-    tool_calls = normalize_tool_calls(raw_tool_calls)
-    finish_reason = choice.get("finish_reason", "")
-    usage = data.get("usage", {})
-    return LLMResponse(
-        content=content,
-        tool_calls=tool_calls,
-        finish_reason=finish_reason,
-        usage=usage,
-    )
 
 
 class OpenAIStreamAccumulator:

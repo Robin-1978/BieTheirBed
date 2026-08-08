@@ -12,7 +12,6 @@ TAG_COMPACTED_HISTORY = "compacted_history"
 TAG_RUNTIME_CONTEXT = "runtime_context"
 TAG_TOOL_RESULT = "tool_result"
 TAG_USER_REQUEST = "user_request"
-TAG_CONTEXT_SUMMARY = "context_summary"
 
 _COMPACTED_META_RE = re.compile(
     rf'^<{TAG_COMPACTED_HISTORY}\s+([^>]+)>',
@@ -90,25 +89,6 @@ def format_compacted_history(
 def is_compacted_history(content: Any) -> bool:
     c = _content_text(content).strip()
     return c.startswith(f"<{TAG_COMPACTED_HISTORY}")
-
-def format_context_summary(body: str, *, covered_turns: int) -> str:
-    # The body is intentionally Markdown, but it lives inside a tagged prompt
-    # region. Prevent model-generated delimiter text from closing or nesting
-    # the protocol envelope.
-    safe_body = (body or "").strip()
-    safe_body = re.sub(
-        rf"</?{TAG_CONTEXT_SUMMARY}\b[^>]*>",
-        lambda m: m.group(0).replace("<", "&lt;").replace(">", "&gt;"),
-        safe_body,
-        flags=re.IGNORECASE,
-    )
-    return (
-        f'<{TAG_CONTEXT_SUMMARY} lossy="true" covered_turns="{int(covered_turns)}">\n'
-        f'{safe_body}\n</{TAG_CONTEXT_SUMMARY}>'
-    )
-
-def is_context_summary(content: Any) -> bool:
-    return _content_text(content).strip().startswith(f"<{TAG_CONTEXT_SUMMARY}")
 
 
 def parse_compacted_history_meta(content: Any) -> dict[str, str]:
@@ -190,7 +170,7 @@ def is_dialogue_user_turn(msg: dict[str, Any]) -> bool:
     if msg.get("role") != "user":
         return False
     c = _content_text(msg.get("content")).strip()
-    if is_compacted_history(c) or is_context_summary(c):
+    if is_compacted_history(c):
         return False
     if c.startswith(f"<{TAG_RUNTIME_CONTEXT}"):
         return False

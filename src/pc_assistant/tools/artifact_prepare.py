@@ -6,16 +6,15 @@ from typing import Any
 
 from pc_assistant.artifacts import ArtifactStore
 from pc_assistant.context.scope import current_memory_scope
-from pc_assistant.tools.base import ToolBase
+from pc_assistant.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRisk
 
 
 class ArtifactPrepareTool(ToolBase):
     name = "attach"
     description = "Attach an existing file for user delivery."
-    # Preparing this artifact causes the active client to disclose a copy to
-    # the current conversation, so it belongs on the verified side-effect
-    # path even though this tool doesn't know anything about the client.
-    is_side_effecting = True
+    effect = ToolEffect.EXTERNAL_SIDE_EFFECT
+    capabilities = frozenset({ToolCapability.WORKSPACE_READ})
+    risk = ToolRisk.HIGH
 
     def __init__(self, store: ArtifactStore, working_directory: str = ".") -> None:
         self._store = store
