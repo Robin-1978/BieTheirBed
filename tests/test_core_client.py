@@ -108,6 +108,7 @@ class FakeRuntime:
                 assert context.confirmation is not None
                 self.confirmed = await context.confirmation.confirm(
                     context.scope,
+                    context.run_id,
                     ProposedToolCall(
                         call_id="call-mouse",
                         name="mouse",
@@ -365,10 +366,12 @@ async def test_pending_confirmation_limit_closes_connection() -> None:
                     {
                         "message_type": "confirmation_requested",
                         "api_version": "v1",
-                        "request_id": f"confirmation-{index}",
-                        "confirmation_id": f"confirm-{index}",
-                        "session_handle": "session-opaque",
-                        "tool_name": "mouse",
+                            "request_id": f"confirmation-{index}",
+                            "confirmation_id": f"confirm-{index}",
+                            "run_id": f"run-{index}",
+                            "session_handle": "session-opaque",
+                            "tool_call_id": f"call-{index}",
+                            "tool_name": "mouse",
                         "arguments": {},
                         "reason": "desktop_control:high",
                     }
@@ -531,6 +534,8 @@ async def test_confirmation_round_trip_returns_to_initiating_client(
     assert events[-1].event_type == "completed"
     assert runtime.confirmed is True
     assert len(requests) == 1
+    assert requests[0].run_id
+    assert requests[0].tool_call_id == "call-mouse"
     assert requests[0].tool_name == "mouse"
     assert requests[0].arguments["x"] == 10
     await client.disconnect()

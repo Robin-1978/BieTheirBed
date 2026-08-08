@@ -38,6 +38,7 @@ class ConfirmationPort(Protocol):
     async def confirm(
         self,
         scope: RuntimeScope,
+        run_id: str,
         call: ProposedToolCall,
         reason: str,
     ) -> bool: ...
@@ -46,6 +47,7 @@ class ConfirmationPort(Protocol):
 @dataclass(frozen=True)
 class ToolStepContext:
     scope: RuntimeScope
+    run_id: str
     client_request_id: str
     capabilities: frozenset[ToolCapability]
     cancellation: asyncio.Event
@@ -218,6 +220,7 @@ class ToolStep:
                 )
             approved = await context.confirmation.confirm(
                 context.scope,
+                context.run_id,
                 call.model_copy(update={"name": tool_name, "arguments": arguments}),
                 f"{policy.effect.value}:{policy.risk.value}",
             )

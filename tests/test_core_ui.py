@@ -50,7 +50,9 @@ async def test_core_chat_confirmation_resolves_pending_future() -> None:
     request = ConfirmationRequestedMessage(
         request_id="confirmation-a",
         confirmation_id="confirmation-a",
+        run_id="run-a",
         session_handle="session-a",
+        tool_call_id="call-a",
         tool_name="mouse",
         arguments={"action": "click"},
         reason="desktop_control:high",

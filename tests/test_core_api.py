@@ -134,7 +134,9 @@ def test_confirmation_contract_is_strict_and_connection_scoped() -> None:
         ConfirmationRequestedMessage(
             request_id="confirmation-confirmation-1",
             confirmation_id="confirmation-1",
+            run_id="run-1",
             session_handle="session-a",
+            tool_call_id="call-1",
             tool_name="mouse",
             arguments={"action": "click", "x": 10, "y": 20},
             reason="desktop_control:high",
@@ -144,6 +146,8 @@ def test_confirmation_contract_is_strict_and_connection_scoped() -> None:
     assert isinstance(request, ResolveConfirmationRequest)
     assert request.approved
     assert isinstance(message, ConfirmationRequestedMessage)
+    assert message.run_id == "run-1"
+    assert message.tool_call_id == "call-1"
     assert message.session_handle == "session-a"
 
 
