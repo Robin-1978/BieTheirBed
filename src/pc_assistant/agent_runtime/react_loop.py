@@ -197,7 +197,7 @@ class ReActLoop:
                     runtime_event=RuntimeEvent(
                         event_type="tool_call",
                         payload=RuntimeEventPayload(
-                            content=call.call_id,
+                            tool_call_id=call.call_id,
                             tool_name=call.name,
                             tool_args=call.arguments,
                             iteration=iteration,
@@ -217,6 +217,7 @@ class ReActLoop:
                     result = await self._tool_step.execute(
                         ToolStepContext(
                             scope=context.scope,
+                            run_id=context.run_id,
                             client_request_id=context.client_request_id,
                             capabilities=context.capabilities,
                             cancellation=context.cancellation,
@@ -231,7 +232,7 @@ class ReActLoop:
                     runtime_event=RuntimeEvent(
                         event_type="tool_result",
                         payload=RuntimeEventPayload(
-                            content=result.call_id,
+                            tool_call_id=result.call_id,
                             tool_name=result.tool_name,
                             tool_result=result.model_dump(mode="json"),
                             blocked=result.status != "completed",

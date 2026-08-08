@@ -384,8 +384,8 @@ async def test_run_confirmation_is_forwarded_to_react_context(tmp_path: Path) ->
     scope = sessions.create("principal-a")
 
     class Confirmation:
-        async def confirm(self, scope, call, reason):
-            del scope, call, reason
+        async def confirm(self, scope, run_id, call, reason):
+            del scope, run_id, call, reason
             return True
 
     confirmation = Confirmation()

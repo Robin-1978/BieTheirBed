@@ -139,6 +139,7 @@ class ConnectionConfirmationPort:
     async def confirm(
         self,
         scope: RuntimeScope,
+        run_id: str,
         call: ProposedToolCall,
         reason: str,
     ) -> bool:
@@ -150,7 +151,9 @@ class ConnectionConfirmationPort:
                 ConfirmationRequestedMessage(
                     request_id=f"confirmation-{confirmation_id}",
                     confirmation_id=confirmation_id,
+                    run_id=run_id,
                     session_handle=scope.session_handle,
+                    tool_call_id=call.call_id,
                     tool_name=call.name,
                     arguments=call.arguments,
                     reason=reason,

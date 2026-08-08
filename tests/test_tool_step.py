@@ -106,7 +106,8 @@ class Confirmation:
         self.approved = approved
         self.calls = 0
 
-    async def confirm(self, scope, call, reason: str) -> bool:
+    async def confirm(self, scope, run_id, call, reason: str) -> bool:
+        assert run_id == "run-a"
         self.calls += 1
         return self.approved
 
@@ -122,6 +123,7 @@ def _context(
         event.set()
     return ToolStepContext(
         scope=RuntimeScope(principal_id="local", session_handle="session-a"),
+        run_id="run-a",
         client_request_id="request-a",
         capabilities=capabilities,
         cancellation=event,

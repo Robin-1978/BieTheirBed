@@ -15,8 +15,8 @@ from pc_assistant.agent_runtime.contracts import (
 )
 from pc_assistant.channels.feishu import (
     FeishuChannel,
+    _ActiveRunPresentation,
     _StreamingCardState,
-    _confirmation_card,
     _patch_ws_card_dispatch,
     _principal_for_log,
     _render_card_markdown,
@@ -86,6 +86,7 @@ class _CoreClient:
             event_seq=3,
             event_type="tool_call",
             payload=RuntimeEventPayload(
+                tool_call_id="call-mouse",
                 tool_name="mouse",
                 tool_args={"action": "move"},
             ),
@@ -95,6 +96,7 @@ class _CoreClient:
             event_seq=4,
             event_type="tool_result",
             payload=RuntimeEventPayload(
+                tool_call_id="call-mouse",
                 tool_name="mouse",
                 tool_result={"status": "completed", "output": {"success": True}},
             ),
@@ -127,6 +129,27 @@ def _config(tmp_path) -> AppConfig:
         feishu_app_id="app-id",
         feishu_app_secret="app-secret",
     )
+
+
+def _active_presentation(
+    channel: FeishuChannel,
+) -> tuple[_ActiveRunPresentation, _StreamingCardState]:
+    state = _StreamingCardState()
+    state.add_tool_call(
+        "call-mouse",
+        "mouse",
+        {"action": "click"},
+        iteration=1,
+    )
+    presentation = _ActiveRunPresentation(
+        session_handle="session-a",
+        state=state,
+        update_requested=asyncio.Event(),
+        run_id="run-a",
+    )
+    channel._active_run_presentations["run-a"] = presentation
+    channel._active_session_presentations["session-a"] = presentation
+    return presentation, state
 
 
 @pytest.mark.asyncio
@@ -196,16 +219,14 @@ async def test_feishu_routes_text_through_core_client(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_feishu_confirmation_round_trip_stays_in_channel(tmp_path) -> None:
     channel = FeishuChannel(_config(tmp_path))
-    channel._clients["ou-user"] = _CoreClient()
     channel._session_users["session-a"] = "ou-user"
-    cards = []
-    channel._send_card_returning_id = (
-        lambda recipient, card: cards.append((recipient, card)) or "card-a"
-    )
+    presentation, state = _active_presentation(channel)
     request = ConfirmationRequestedMessage(
         request_id="confirmation-request",
         confirmation_id="confirmation-a",
+        run_id="run-a",
         session_handle="session-a",
+        tool_call_id="call-mouse",
         tool_name="mouse",
         arguments={"action": "click"},
         reason="state-changing desktop action",
@@ -219,28 +240,141 @@ async def test_feishu_confirmation_round_trip_stays_in_channel(tmp_path) -> None
         True,
     )
 
+    pending_card = state.build_card()
+    rendered_pending = json.dumps(pending_card, ensure_ascii=False)
+    assert pending_card["header"]["title"]["content"] == "小诺 · 等待确认"
+    assert "确认" in rendered_pending
+    assert "取消" in rendered_pending
+    assert "behaviors" in rendered_pending
+    assert presentation.update_requested.is_set()
+
     assert resolved is not None
     assert await pending is True
-    assert cards[0][0] == "ou-user"
-    card = cards[0][1]
-    assert card["schema"] == "2.0"
-    rendered = json.dumps(card, ensure_ascii=False)
-    assert "mouse" in rendered
-    assert "确认" in rendered
-    assert "取消" in rendered
-    assert "behaviors" in rendered
-    assert "请回复" not in rendered
+    rendered_resolved = json.dumps(state.build_card(), ensure_ascii=False)
+    assert "已确认" in rendered_resolved
+    assert "behaviors" not in rendered_resolved
+
+
+@pytest.mark.asyncio
+async def test_feishu_confirmation_updates_the_single_streaming_card(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "pc_assistant.channels.feishu._STREAM_PATCH_INTERVAL_SECONDS",
+        0,
+    )
+    channel = FeishuChannel(_config(tmp_path))
+    channel._session_users["session-a"] = "ou-user"
+    created_cards = []
+    updated_cards = []
+    channel._send_card_returning_id = (
+        lambda recipient, card: created_cards.append((recipient, card))
+        or "card-a"
+    )
+    channel._update_card = (
+        lambda message_id, card: updated_cards.append((message_id, card))
+        or True
+    )
+
+    class ConfirmingClient:
+        async def run(self, _session, _text, _attachments):
+            yield RunEvent(
+                run_id="run-a",
+                event_seq=1,
+                event_type="run_started",
+                payload=RuntimeEventPayload(),
+            )
+            yield RunEvent(
+                run_id="run-a",
+                event_seq=2,
+                event_type="tool_call",
+                payload=RuntimeEventPayload(
+                    tool_call_id="call-mouse",
+                    tool_name="mouse",
+                    tool_args={"action": "click"},
+                    iteration=1,
+                ),
+            )
+            approved = await channel._confirm_tool(
+                "ou-user",
+                ConfirmationRequestedMessage(
+                    request_id="confirmation-request",
+                    confirmation_id="confirmation-a",
+                    run_id="run-a",
+                    session_handle="session-a",
+                    tool_call_id="call-mouse",
+                    tool_name="mouse",
+                    arguments={"action": "click"},
+                    reason="desktop_control:high",
+                ),
+            )
+            assert approved
+            yield RunEvent(
+                run_id="run-a",
+                event_seq=3,
+                event_type="tool_result",
+                payload=RuntimeEventPayload(
+                    tool_call_id="call-mouse",
+                    tool_name="mouse",
+                    tool_result={"status": "completed"},
+                    iteration=1,
+                ),
+            )
+            yield RunEvent(
+                run_id="run-a",
+                event_seq=4,
+                event_type="final_output",
+                payload=RuntimeEventPayload(content="完成", iteration=2),
+            )
+            yield RunEvent(
+                run_id="run-a",
+                event_seq=5,
+                event_type="completed",
+                payload=RuntimeEventPayload(),
+            )
+
+    run = asyncio.create_task(
+        channel._stream_core_run(
+            "ou-user",
+            ConfirmingClient(),
+            "session-a",
+            "点击",
+            (),
+        )
+    )
+    while "ou-user" not in channel._pending_confirmations:
+        await asyncio.sleep(0)
+    while not any(
+        "behaviors" in json.dumps(card, ensure_ascii=False)
+        for _, card in updated_cards
+    ):
+        await asyncio.sleep(0)
+
+    assert channel._resolve_confirmation(
+        "ou-user",
+        "confirmation-a",
+        True,
+        run_id="run-a",
+    )
+    await run
+
+    assert len(created_cards) == 1
+    assert {message_id for message_id, _ in updated_cards} == {"card-a"}
+    assert "behaviors" not in json.dumps(updated_cards[-1][1], ensure_ascii=False)
 
 
 @pytest.mark.asyncio
 async def test_feishu_card_callback_confirms_and_replaces_buttons(tmp_path) -> None:
     channel = FeishuChannel(_config(tmp_path))
     channel._session_users["session-a"] = "ou-user"
-    channel._send_card_returning_id = lambda *_args: "card-a"
+    _presentation, state = _active_presentation(channel)
     request = ConfirmationRequestedMessage(
         request_id="confirmation-request",
         confirmation_id="confirmation-a",
+        run_id="run-a",
         session_handle="session-a",
+        tool_call_id="call-mouse",
         tool_name="mouse",
         arguments={"action": "click"},
         reason="state-changing desktop action",
@@ -261,6 +395,7 @@ async def test_feishu_card_callback_confirms_and_replaces_buttons(tmp_path) -> N
                     "action": {
                         "value": {
                             "action": "confirm",
+                            "run_id": "run-a",
                             "confirmation_id": "confirmation-a",
                         }
                     },
@@ -271,8 +406,8 @@ async def test_feishu_card_callback_confirms_and_replaces_buttons(tmp_path) -> N
 
     assert await pending is True
     assert response.toast.content == "已确认"
-    assert response.card.type == "raw"
-    rendered = json.dumps(response.card.data, ensure_ascii=False)
+    assert getattr(response, "card", None) is None
+    rendered = json.dumps(state.build_card(), ensure_ascii=False)
     assert "已确认" in rendered
     assert "behaviors" not in rendered
 
@@ -283,11 +418,13 @@ async def test_feishu_confirmation_rejects_wrong_user_id_and_double_click(
 ) -> None:
     channel = FeishuChannel(_config(tmp_path))
     channel._session_users["session-a"] = "ou-user"
-    channel._send_card_returning_id = lambda *_args: "card-a"
+    _active_presentation(channel)
     request = ConfirmationRequestedMessage(
         request_id="confirmation-request",
         confirmation_id="confirmation-a",
+        run_id="run-a",
         session_handle="session-a",
+        tool_call_id="call-mouse",
         tool_name="mouse",
         arguments={"action": "click"},
         reason="state-changing desktop action",
@@ -303,18 +440,28 @@ async def test_feishu_confirmation_rejects_wrong_user_id_and_double_click(
     assert await pending is False
 
 
-def test_feishu_confirmation_card_uses_native_v2_buttons() -> None:
+def test_feishu_streaming_card_uses_native_v2_confirmation_buttons() -> None:
+    state = _StreamingCardState()
+    state.add_tool_call(
+        "call-mouse",
+        "mouse",
+        {"action": "click"},
+        iteration=1,
+    )
     request = ConfirmationRequestedMessage(
         request_id="confirmation-request",
         confirmation_id="confirmation-a",
+        run_id="run-a",
         session_handle="session-a",
+        tool_call_id="call-mouse",
         tool_name="mouse",
         arguments={"action": "click"},
         reason="state-changing desktop action",
     )
 
-    card = _confirmation_card(request)
-    columns = card["body"]["elements"][1]["columns"]
+    assert state.request_confirmation(request)
+    card = state.build_card()
+    columns = card["body"]["elements"][2]["columns"]
     buttons = [column["elements"][0] for column in columns]
 
     assert card["schema"] == "2.0"
@@ -323,6 +470,10 @@ def test_feishu_confirmation_card_uses_native_v2_buttons() -> None:
         "confirm",
         "cancel",
     ]
+    assert all(
+        button["behaviors"][0]["value"]["run_id"] == "run-a"
+        for button in buttons
+    )
 
 
 @pytest.mark.asyncio
@@ -379,8 +530,14 @@ def test_feishu_progress_timeline_preserves_event_order() -> None:
     state = _StreamingCardState()
     state.append_reasoning("先分析", iteration=1)
     state.append_draft("我先查询天气", iteration=1)
-    state.add_tool_call("weather", {"location": "上海"}, iteration=1)
+    state.add_tool_call(
+        "call-weather",
+        "weather",
+        {"location": "上海"},
+        iteration=1,
+    )
     state.add_tool_result(
+        "call-weather",
         "weather",
         {"status": "completed", "output": {"success": True}},
         blocked=False,
@@ -443,8 +600,9 @@ def test_feishu_card_replaces_core_artifact_image_reference() -> None:
 
 def test_feishu_tool_success_uses_plain_check_without_completion_copy() -> None:
     state = _StreamingCardState()
-    state.add_tool_call("mouse", {"action": "click"})
+    state.add_tool_call("call-mouse", "mouse", {"action": "click"})
     state.add_tool_result(
+        "call-mouse",
         "mouse",
         {"status": "completed", "output": {"success": True}},
         blocked=False,

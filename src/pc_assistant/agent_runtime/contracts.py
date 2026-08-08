@@ -127,6 +127,7 @@ class HealthStatus(ContractModel):
 
 class RuntimeEventPayload(ContractModel):
     content: str = ""
+    tool_call_id: str = ""
     tool_name: str = ""
     tool_args: dict[str, Any] = Field(default_factory=dict)
     tool_result: Any = None

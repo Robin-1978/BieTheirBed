@@ -293,7 +293,9 @@ class ConfirmationRequestedMessage(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
     confirmation_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+    run_id: RunId
     session_handle: SessionHandle
+    tool_call_id: Annotated[NonEmpty, StringConstraints(max_length=256)]
     tool_name: Annotated[NonEmpty, StringConstraints(max_length=256)]
     arguments: dict[str, Any] = Field(default_factory=dict)
     reason: Annotated[str, StringConstraints(max_length=1000)] = ""
