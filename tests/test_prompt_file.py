@@ -16,6 +16,9 @@ class TestExternalPrompt:
         assert "<role>" in prompt
         assert "PC Assistant" in prompt
         assert "<instructions>" in prompt
+        assert "Independent tools may be called together" in prompt
+        assert "receive no intermediate feedback" in prompt
+        assert "do not emit user-facing prose" in prompt
 
     def test_file_matches_default_fallback(self):
         text = _SYSTEM_TEMPLATE_PATH.read_text(encoding="utf-8")

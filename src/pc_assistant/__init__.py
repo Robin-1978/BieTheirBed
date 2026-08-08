@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 def build_parser() -> argparse.ArgumentParser:
