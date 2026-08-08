@@ -326,11 +326,30 @@ def build_core_runtime(
         else paths.config / "local.yaml"
     )
     config_controller = PersistentConfigController(config, config_path)
+
+    def status_details(scope: RuntimeScope) -> dict[str, object]:
+        configured_model = config.resolve_model()
+        llm = llm_traces.session_totals(
+            scope.principal_id,
+            scope.session_handle,
+        )
+        turns = turn_traces.session_totals(
+            scope.principal_id,
+            scope.session_handle,
+        )
+        return {
+            "provider": configured_model.provider_name,
+            **llm,
+            **turns,
+            "model": llm["model"] or configured_model.model_alias,
+        }
+
     control = ControlService(
         sessions,
         memory_repository,
         tool_names=lambda scope: registry.list_for(capabilities_for_scope(scope)),
         config_controller=config_controller,
+        status_details=status_details,
     )
     artifact_service = ArtifactService(sessions, artifacts)
 

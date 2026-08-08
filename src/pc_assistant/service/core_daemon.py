@@ -104,6 +104,9 @@ def run_core_server(
     daemon: bool = False,
     log_path: Path | None = None,
 ) -> int:
+    from pc_assistant.network_tls import ensure_default_ca_bundle
+
+    ensure_default_ca_bundle()
     resolved_log = log_path or resolve_core_log(None, config_path)
     if daemon:
         daemonize(resolved_log)

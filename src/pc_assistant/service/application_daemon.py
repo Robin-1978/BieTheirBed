@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from pc_assistant.config import AppConfig, load_config
+from pc_assistant.network_tls import ensure_default_ca_bundle
 from pc_assistant.service.channel_runtime import ChannelRuntime
 from pc_assistant.service.core_daemon import (
     CoreDaemon,
@@ -74,6 +75,7 @@ def run_service(
     daemon: bool = False,
     log_path: Path | None = None,
 ) -> int:
+    ensure_default_ca_bundle()
     resolved_log = log_path or resolve_core_log(None, config_path)
     if daemon:
         daemonize(resolved_log)

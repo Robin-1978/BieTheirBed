@@ -54,6 +54,45 @@ class TestLLMTraceRecorder:
         assert entry["principal_hash"] != "user-a"
         assert entry["failover_used"] is True
 
+    def test_session_totals_include_persisted_calls(self, tmp_path):
+        path = str(tmp_path / "llm.jsonl")
+        rec = LLMTraceRecorder(path=path, enabled=True)
+        for prompt, completion, cached in ((10, 5, 2), (20, 7, 3)):
+            rec.record_call(
+                principal_id="user-a",
+                session_id="s1",
+                run_id=f"run-{prompt}",
+                client_request_id=f"request-{prompt}",
+                model="model-a",
+                iteration=1,
+                prompt_tokens=prompt,
+                completion_tokens=completion,
+                cached_tokens=cached,
+            )
+        rec.record_call(
+            principal_id="user-a",
+            session_id="other",
+            run_id="other-run",
+            client_request_id="other-request",
+            model="model-b",
+            iteration=1,
+            prompt_tokens=999,
+        )
+
+        totals = LLMTraceRecorder(path=path, enabled=True).session_totals(
+            "user-a",
+            "s1",
+        )
+
+        assert totals == {
+            "prompt_tokens": 30,
+            "completion_tokens": 12,
+            "cached_tokens": 5,
+            "total_tokens": 42,
+            "model_calls": 2,
+            "model": "model-a",
+        }
+
 
 class TestTurnRecorder:
     def test_record_turn(self, tmp_path):
@@ -73,3 +112,30 @@ class TestTurnRecorder:
         assert "session_id" not in entry
         assert "run_id" not in entry
         assert "client_request_id" not in entry
+
+    def test_session_totals_include_persisted_turns(self, tmp_path):
+        path = str(tmp_path / "turns.jsonl")
+        rec = TurnRecorder(path=path, enabled=True)
+        for run_id, iterations, tool_calls in (("a", 2, 1), ("b", 3, 4)):
+            rec.record_turn(
+                principal_id="user-a",
+                session_id="s1",
+                run_id=run_id,
+                client_request_id=f"request-{run_id}",
+                user_input="hello",
+                outcome="completed",
+                iterations=iterations,
+                tool_calls=tool_calls,
+            )
+
+        totals = TurnRecorder(path=path, enabled=True).session_totals(
+            "user-a",
+            "s1",
+        )
+
+        assert totals == {
+            "turns": 2,
+            "iterations": 5,
+            "tool_calls": 5,
+            "last_outcome": "completed",
+        }

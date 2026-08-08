@@ -56,6 +56,33 @@ class JsonlRecorder:
         with self._lock:
             return list(self._ring[-limit:])
 
+    def _session_records(
+        self,
+        principal_id: str,
+        session_id: str,
+    ) -> list[dict[str, Any]]:
+        principal_hash = _identity_hash(principal_id)
+        session_hash = _identity_hash(session_id)
+        records: list[dict[str, Any]] = []
+        with self._lock:
+            try:
+                with open(self._path, encoding="utf-8") as fh:
+                    for line in fh:
+                        try:
+                            entry = json.loads(line)
+                        except (json.JSONDecodeError, TypeError):
+                            continue
+                        if not isinstance(entry, dict):
+                            continue
+                        if (
+                            entry.get("principal_hash") == principal_hash
+                            and entry.get("session_hash") == session_hash
+                        ):
+                            records.append(entry)
+            except OSError:
+                pass
+        return records
+
 
 class LLMTraceRecorder(JsonlRecorder):
     """Records one line per LLM (stream) call."""
@@ -110,6 +137,35 @@ class LLMTraceRecorder(JsonlRecorder):
             "failover_used": failover_used,
         })
 
+    def session_totals(
+        self,
+        principal_id: str,
+        session_id: str,
+    ) -> dict[str, int | str]:
+        prompt_tokens = 0
+        completion_tokens = 0
+        cached_tokens = 0
+        model_calls = 0
+        model = ""
+        for entry in self._session_records(principal_id, session_id):
+            prompt_tokens += max(0, int(entry.get("prompt_tokens") or 0))
+            completion_tokens += max(
+                0,
+                int(entry.get("completion_tokens") or 0),
+            )
+            cached_tokens += max(0, int(entry.get("cached_tokens") or 0))
+            model_calls += 1
+            if entry.get("model"):
+                model = str(entry["model"])
+        return {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "cached_tokens": cached_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+            "model_calls": model_calls,
+            "model": model,
+        }
+
 
 class TurnRecorder(JsonlRecorder):
     """Records one line per user turn / agent run."""
@@ -151,3 +207,25 @@ class TurnRecorder(JsonlRecorder):
             "evidence_required": evidence_required,
             "evidence_satisfied": evidence_satisfied,
         })
+
+    def session_totals(
+        self,
+        principal_id: str,
+        session_id: str,
+    ) -> dict[str, int | str]:
+        turns = 0
+        iterations = 0
+        tool_calls = 0
+        last_outcome = ""
+        for entry in self._session_records(principal_id, session_id):
+            turns += 1
+            iterations += max(0, int(entry.get("iterations") or 0))
+            tool_calls += max(0, int(entry.get("tool_calls") or 0))
+            if entry.get("outcome"):
+                last_outcome = str(entry["outcome"])
+        return {
+            "turns": turns,
+            "iterations": iterations,
+            "tool_calls": tool_calls,
+            "last_outcome": last_outcome,
+        }
