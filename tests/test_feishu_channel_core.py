@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 
 import pytest
 
@@ -190,3 +191,57 @@ def test_feishu_long_card_output_is_split_without_data_loss(tmp_path) -> None:
     ]
     assert len(contents) > 1
     assert "".join(contents) == _render_card_markdown(text)
+
+
+@pytest.mark.asyncio
+async def test_feishu_card_io_does_not_block_core_event_consumption(tmp_path) -> None:
+    class BurstClient:
+        def __init__(self) -> None:
+            self.consumed = asyncio.Event()
+
+        async def run(self, _session, _text, _attachments):
+            yield RunEvent(
+                run_id="run-burst",
+                event_seq=1,
+                event_type="run_started",
+                payload=RuntimeEventPayload(),
+            )
+            for index in range(2, 1002):
+                yield RunEvent(
+                    run_id="run-burst",
+                    event_seq=index,
+                    event_type="reasoning_delta",
+                    payload=RuntimeEventPayload(content="x"),
+                )
+            yield RunEvent(
+                run_id="run-burst",
+                event_seq=1002,
+                event_type="final_output",
+                payload=RuntimeEventPayload(content="完成"),
+            )
+            yield RunEvent(
+                run_id="run-burst",
+                event_seq=1003,
+                event_type="completed",
+                payload=RuntimeEventPayload(),
+            )
+            self.consumed.set()
+
+    channel = FeishuChannel(_config(tmp_path))
+    release_card = threading.Event()
+
+    def slow_card(_recipient, _card):
+        release_card.wait(timeout=2)
+        return "card-a"
+
+    channel._send_card_returning_id = slow_card
+    channel._update_card = lambda _message_id, _card: True
+    client = BurstClient()
+    task = asyncio.create_task(
+        channel._stream_core_run("ou-user", client, "session-a", "hello", ())
+    )
+
+    await asyncio.wait_for(client.consumed.wait(), timeout=0.5)
+    assert not task.done()
+    release_card.set()
+    await asyncio.wait_for(task, timeout=2)
