@@ -1,6 +1,6 @@
-# PC Assistant
+# 知栖 · Knoa
 
-A Python desktop AI agent with ReAct reasoning, multi-LLM support, tool calling, and a Rich terminal UI.
+A personal computer agent with ReAct reasoning, multi-LLM support, tool calling, and a Rich terminal UI.
 
 ## Features
 

@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import argparse
 
+from pc_assistant.branding import ASSISTANT_IDENTITY, ASSISTANT_NAME
+
 __version__ = "0.1.1"
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pca",
-        description="PC Assistant - A Python computer assistant agent",
+        description=f"{ASSISTANT_IDENTITY} - A Python computer assistant agent",
     )
     parser.add_argument(
         "-c", "--config", type=str, default=None, help="Path to configuration YAML file"
@@ -99,7 +101,7 @@ async def async_main(
         logging.getLogger("pc_assistant").setLevel(logging.DEBUG)
 
     logger = get_logger("main")
-    logger.info("PC Assistant starting (config=%s)", config_path or "default")
+    logger.info("%s starting (config=%s)", ASSISTANT_NAME, config_path or "default")
 
     providers_needing_key = {"openai", "anthropic"}
     if main_model.driver in providers_needing_key and not main_model.api_key:
@@ -504,7 +506,7 @@ def _start_service(config_path: str | None, log_dir: str | None) -> int:
     if config_path:
         cmd += ["--config", config_path]
 
-    print("Starting PC Assistant service (daemon)...")
+    print(f"Starting {ASSISTANT_NAME} service (daemon)...")
     try:
         subprocess.Popen(cmd)  # daemon double-forks; parent process exits on its own
     except Exception as e:

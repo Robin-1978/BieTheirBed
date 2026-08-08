@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from pc_assistant import __version__
+from pc_assistant.branding import ASSISTANT_NAME
 from pc_assistant.config import AppConfig
 from pc_assistant.runtime import RuntimePaths
 from pc_assistant.service.core_api import (
@@ -64,7 +65,7 @@ def _principal_for_log(open_id: str) -> str:
 
 
 def _service_notice(state: str) -> str:
-    return f"PC Assistant v{__version__} {state}"
+    return f"{ASSISTANT_NAME} v{__version__} {state}"
 
 
 def _render_card_markdown(text: str) -> str:
@@ -489,9 +490,9 @@ class _StreamingCardState:
         elif self.phase == "cancelled":
             template, title = "grey", "已停止"
         elif final_chunk is not None:
-            template, title = "blue", "💬 PC Assistant"
+            template, title = "blue", f"💬 {ASSISTANT_NAME}"
         else:
-            template, title = "turquoise", "⏳ PC Assistant 处理中"
+            template, title = "turquoise", f"⏳ {ASSISTANT_NAME} 处理中"
         return {
             "schema": "2.0",
             "header": {
@@ -1101,7 +1102,7 @@ class FeishuChannel:
                         open_id,
                         chunk,
                         "blue",
-                        f"PC Assistant（续 {index}/{total}）",
+                        f"{ASSISTANT_NAME}（续 {index}/{total}）",
                     )
         else:
             if not terminal:
@@ -1516,7 +1517,7 @@ class FeishuChannel:
         open_id: str,
         text: str,
         template: str = "blue",
-        title: str = "PC Assistant",
+        title: str = ASSISTANT_NAME,
     ) -> bool:
         rendered = _render_card_markdown(text)
         chunks = _split_text(rendered)

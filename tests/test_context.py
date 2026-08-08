@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pc_assistant.branding import ASSISTANT_IDENTITY
 from pc_assistant.context.assembly import truncate_messages
 from pc_assistant.context.prompt import build_system_prompt
 from pc_assistant.context.tags import (
@@ -27,7 +28,7 @@ def test_system_prompt_contains_canonical_instruction_envelope() -> None:
         extra_instructions="Always be polite.",
     )
 
-    assert "PC Assistant" in prompt
+    assert ASSISTANT_IDENTITY in prompt
     assert "<instructions>" in prompt
     assert "filesystem, shell" in prompt
     assert "Always be polite." in prompt

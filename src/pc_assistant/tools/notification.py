@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from pc_assistant.branding import ASSISTANT_NAME
 from pc_assistant.platform_ import get_platform
 from pc_assistant.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRisk
 
@@ -81,7 +82,7 @@ class NotificationTool(ToolBase):
         }
 
     async def _show_notification(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        title = kwargs.get("title", "PC Assistant")
+        title = kwargs.get("title", ASSISTANT_NAME)
         message = kwargs.get("message", "")
         sound = kwargs.get("sound", True)
         icon = kwargs.get("icon")
@@ -128,7 +129,7 @@ class NotificationTool(ToolBase):
             notification = Notification()
             notification.title = title
             notification.message = message
-            notification.app_name = "PC Assistant"
+            notification.app_name = ASSISTANT_NAME
             if icon:
                 notification.icon = icon
             notification.notify()
@@ -163,7 +164,7 @@ class NotificationTool(ToolBase):
             $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
             $xml.LoadXml($template)
             $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
-            $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("PC Assistant")
+            $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("{ASSISTANT_NAME}")
             $notifier.Show($toast)
             '''
 
@@ -252,7 +253,7 @@ class NotificationTool(ToolBase):
                 notification = Notification()
                 notification.title = title
                 notification.message = message
-                notification.app_name = "PC Assistant"
+                notification.app_name = ASSISTANT_NAME
                 if icon:
                     notification.icon = icon
                 notification.notify()
