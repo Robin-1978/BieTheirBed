@@ -519,78 +519,108 @@ class FeishuChannel:
         attachments: tuple[ArtifactInputRef, ...],
     ) -> None:
         state = _StreamingCardState()
-        card_message_id: str | None = None
-        card_failed = False
+        card_task: asyncio.Task[str | None] | None = None
+        update_requested = asyncio.Event()
+        stop_updates = False
         last_patch = 0.0
         terminal = ""
         artifacts: list[str] = []
         artifact_ids: set[str] = set()
 
-        async def ensure_card() -> None:
-            nonlocal card_message_id, card_failed, last_patch
-            if card_message_id is not None or card_failed:
-                return
-            card_message_id = await asyncio.to_thread(
-                self._send_card_returning_id,
-                open_id,
-                state.build_card(),
-            )
-            last_patch = time.monotonic()
-            card_failed = card_message_id is None
-
-        async def patch_card(*, force: bool = False) -> bool:
-            nonlocal last_patch
-            await ensure_card()
-            if card_message_id is None:
-                return False
-            now = time.monotonic()
-            if not force and now - last_patch < _STREAM_PATCH_INTERVAL_SECONDS:
-                return True
-            updated = await asyncio.to_thread(
-                self._update_card,
-                card_message_id,
-                state.build_card(),
-            )
-            last_patch = now
-            return updated
-
-        async for event in client.run(session, text, attachments):
-            await ensure_card()
-            payload = event.payload
-            if event.event_type == "reasoning_delta":
-                state.append_reasoning(payload.content)
-                await patch_card()
-            elif event.event_type == "content_delta":
-                state.append_draft(payload.content)
-                await patch_card()
-            elif event.event_type == "final_output":
-                state.set_final_output(payload.content)
-            elif event.event_type == "tool_call":
-                state.add_tool_call(payload.tool_name, payload.tool_args)
-                await patch_card(force=True)
-            elif event.event_type == "tool_result":
-                state.add_tool_result(
-                    payload.tool_name,
-                    payload.tool_result,
-                    blocked=payload.blocked,
+        async def create_initial_card(card: dict[str, Any]) -> str | None:
+            try:
+                return await asyncio.to_thread(
+                    self._send_card_returning_id,
+                    open_id,
+                    card,
                 )
-                await patch_card(force=True)
-            elif event.event_type == "artifact" and payload.artifact:
-                artifact_id = payload.artifact.artifact_id
-                if artifact_id not in artifact_ids:
-                    artifact_ids.add(artifact_id)
-                    artifacts.append(artifact_id)
-            elif event.event_type == "context_compacted":
-                state.add_notice("较早对话已整理为简短工作摘要。")
-                await patch_card()
-            elif event.event_type in {"plan", "warning"}:
-                state.add_notice(payload.content)
-                await patch_card()
-            elif event.event_type in {"failed", "cancelled"}:
-                terminal = event.event_type
-                state.set_error(payload.content or event.event_type)
-            elif event.event_type == "completed":
-                terminal = "completed"
+            except Exception:
+                logger.exception("Feishu initial streaming card failed")
+                return None
+
+        def start_card() -> None:
+            nonlocal card_task
+            if card_task is None:
+                initial = state.build_card()
+                card_task = asyncio.create_task(
+                    create_initial_card(initial)
+                )
+
+        async def update_worker() -> None:
+            nonlocal last_patch
+            while True:
+                await update_requested.wait()
+                update_requested.clear()
+                if stop_updates:
+                    return
+                delay = _STREAM_PATCH_INTERVAL_SECONDS - (
+                    time.monotonic() - last_patch
+                )
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                if stop_updates:
+                    return
+                task = card_task
+                if task is None:
+                    continue
+                message_id = await task
+                if message_id is None:
+                    continue
+                snapshot = state.build_card()
+                await asyncio.to_thread(
+                    self._update_card,
+                    message_id,
+                    snapshot,
+                )
+                last_patch = time.monotonic()
+
+        updater = asyncio.create_task(update_worker())
+        try:
+            async for event in client.run(session, text, attachments):
+                start_card()
+                payload = event.payload
+                if event.event_type == "reasoning_delta":
+                    state.append_reasoning(payload.content)
+                    update_requested.set()
+                elif event.event_type == "content_delta":
+                    state.append_draft(payload.content)
+                    update_requested.set()
+                elif event.event_type == "final_output":
+                    state.set_final_output(payload.content)
+                elif event.event_type == "tool_call":
+                    state.add_tool_call(payload.tool_name, payload.tool_args)
+                    update_requested.set()
+                elif event.event_type == "tool_result":
+                    state.add_tool_result(
+                        payload.tool_name,
+                        payload.tool_result,
+                        blocked=payload.blocked,
+                    )
+                    update_requested.set()
+                elif event.event_type == "artifact" and payload.artifact:
+                    artifact_id = payload.artifact.artifact_id
+                    if artifact_id not in artifact_ids:
+                        artifact_ids.add(artifact_id)
+                        artifacts.append(artifact_id)
+                elif event.event_type == "context_compacted":
+                    state.add_notice("较早对话已整理为简短工作摘要。")
+                    update_requested.set()
+                elif event.event_type in {"plan", "warning"}:
+                    state.add_notice(payload.content)
+                    update_requested.set()
+                elif event.event_type in {"failed", "cancelled"}:
+                    terminal = event.event_type
+                    state.set_error(payload.content or event.event_type)
+                elif event.event_type == "completed":
+                    terminal = "completed"
+        finally:
+            stop_updates = True
+            update_requested.set()
+            await updater
+
+        card_message_id = (
+            await card_task if card_task is not None else None
+        )
 
         if terminal == "completed":
             if state.phase != "done":
@@ -1024,7 +1054,12 @@ class FeishuChannel:
         for index, chunk in enumerate(chunks, start=1):
             chunk_title = title if total == 1 else f"{title}（{index}/{total}）"
             card = self._text_card(chunk, template, chunk_title)
-            if self._send_card_returning_id(open_id, card) is None:
+            try:
+                message_id = self._send_card_returning_id(open_id, card)
+            except Exception:
+                logger.exception("Feishu card send failed")
+                message_id = None
+            if message_id is None:
                 succeeded = False
                 self._send_long_text(open_id, f"{chunk_title}\n\n{chunk}")
         return succeeded
@@ -1183,6 +1218,7 @@ class FeishuChannel:
             f"ws://{self._config.service_host}:{self._config.service_port}",
             credential,
             confirmation_handler=confirm,
+            max_buffered_run_events=4096,
         )
         self._clients[open_id] = client
         return client
