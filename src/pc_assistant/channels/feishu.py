@@ -36,6 +36,7 @@ _CONFIRM_TIMEOUT_SECONDS = 110.0
 _MARKDOWN_IMAGE = re.compile(r"!\[([^\]\n]*)\]\([^\n)]*\)")
 _STREAM_PATCH_INTERVAL_SECONDS = 0.6
 _CARD_MARKDOWN_CHARS = 3500
+_CARD_TABLES_PER_CHUNK = 3
 _PROGRESS_REASONING_CHARS = 700
 _PROGRESS_STEPS_CHARS = 1000
 _PROGRESS_DRAFT_CHARS = 900
@@ -95,8 +96,7 @@ def _render_muted_card_markdown(text: str) -> str:
     return f"<font color='grey'>{escaped}</font>"
 
 
-def _split_text(text: str, limit: int = _CARD_MARKDOWN_CHARS) -> tuple[str, ...]:
-    """Split transport payloads without dropping any model output."""
+def _split_plain_text(text: str, limit: int) -> tuple[str, ...]:
     if limit < 1:
         raise ValueError("Text chunk limit must be positive")
     if not text:
@@ -117,6 +117,123 @@ def _split_text(text: str, limit: int = _CARD_MARKDOWN_CHARS) -> tuple[str, ...]
                 end = offset + boundary + 1
         chunks.append(text[offset:end])
         offset = end
+    return tuple(chunks)
+
+
+def _is_table_separator_line(line: str) -> bool:
+    stripped = line.strip().strip("|")
+    if "|" not in stripped:
+        return False
+    cells = stripped.split("|")
+    return len(cells) >= 2 and all(
+        re.fullmatch(r"\s*:?-{3,}:?\s*", cell) is not None
+        for cell in cells
+    )
+
+
+def _markdown_table_count(text: str) -> int:
+    return sum(
+        1 for line in text.splitlines() if _is_table_separator_line(line)
+    )
+
+
+def _markdown_blocks(text: str) -> tuple[str, ...]:
+    """Keep tables, lists and fenced code together when blank lines allow it."""
+    blocks: list[str] = []
+    current: list[str] = []
+    fence = ""
+    for line in text.splitlines(keepends=True):
+        current.append(line)
+        stripped = line.lstrip()
+        marker = stripped[:3]
+        if marker in {"```", "~~~"}:
+            if not fence:
+                fence = marker
+            elif marker == fence:
+                fence = ""
+        if not fence and not line.strip():
+            blocks.append("".join(current))
+            current = []
+    if current:
+        blocks.append("".join(current))
+    return tuple(blocks)
+
+
+def _split_fenced_block(block: str, limit: int) -> tuple[str, ...] | None:
+    lines = block.splitlines(keepends=True)
+    nonempty = [index for index, line in enumerate(lines) if line.strip()]
+    if len(nonempty) < 2:
+        return None
+    first, last = nonempty[0], nonempty[-1]
+    opening = lines[first]
+    marker = opening.lstrip()[:3]
+    if marker not in {"```", "~~~"} or not lines[last].lstrip().startswith(marker):
+        return None
+    prefix = "".join(lines[:first])
+    closing = lines[last]
+    suffix = "".join(lines[last + 1 :])
+    inner = "".join(lines[first + 1 : last])
+    budget = limit - len(prefix) - len(opening) - len(closing) - 1
+    if budget < 1:
+        return None
+    pieces = _split_plain_text(inner, budget)
+    rendered: list[str] = []
+    for index, piece in enumerate(pieces):
+        separator = "" if not piece or piece.endswith("\n") else "\n"
+        rendered.append(
+            (prefix if index == 0 else "")
+            + opening
+            + piece
+            + separator
+            + closing
+            + (suffix if index == len(pieces) - 1 else "")
+        )
+    return tuple(rendered)
+
+
+def _split_markdown_block(block: str, limit: int) -> tuple[str, ...]:
+    if len(block) <= limit:
+        return (block,)
+    fenced = _split_fenced_block(block, limit)
+    if fenced is not None:
+        return fenced
+    return _split_plain_text(block, limit)
+
+
+def _split_text(
+    text: str,
+    limit: int = _CARD_MARKDOWN_CHARS,
+    *,
+    max_tables: int | None = _CARD_TABLES_PER_CHUNK,
+) -> tuple[str, ...]:
+    """Split Markdown at block boundaries and cap tables per Feishu card."""
+    if limit < 1:
+        raise ValueError("Text chunk limit must be positive")
+    if max_tables is not None and max_tables < 1:
+        raise ValueError("Markdown table limit must be positive")
+    if not text:
+        return ("",)
+
+    chunks: list[str] = []
+    current = ""
+    current_tables = 0
+    for block in _markdown_blocks(text):
+        for piece in _split_markdown_block(block, limit):
+            piece_tables = _markdown_table_count(piece)
+            exceeds_chars = bool(current) and len(current) + len(piece) > limit
+            exceeds_tables = (
+                bool(current)
+                and max_tables is not None
+                and current_tables + piece_tables > max_tables
+            )
+            if exceeds_chars or exceeds_tables:
+                chunks.append(current)
+                current = ""
+                current_tables = 0
+            current += piece
+            current_tables += piece_tables
+    if current:
+        chunks.append(current)
     return tuple(chunks)
 
 
@@ -1661,7 +1778,7 @@ class FeishuChannel:
 
     def _send_long_text(self, open_id: str, text: str) -> bool:
         succeeded = True
-        for chunk in _split_text(text, _TEXT_MESSAGE_CHARS):
+        for chunk in _split_plain_text(text, _TEXT_MESSAGE_CHARS):
             if not self._send_text(open_id, chunk):
                 succeeded = False
         return succeeded
@@ -1773,7 +1890,43 @@ class FeishuChannel:
                 message_id = None
             if message_id is None:
                 succeeded = False
-                self._send_long_text(open_id, f"{chunk_title}\n\n{chunk}")
+                retry_chunks = _split_text(
+                    chunk,
+                    max(1000, _CARD_MARKDOWN_CHARS // 2),
+                    max_tables=1,
+                )
+                if len(retry_chunks) > 1:
+                    retry_total = len(retry_chunks)
+                    for retry_index, retry_chunk in enumerate(
+                        retry_chunks,
+                        start=1,
+                    ):
+                        retry_title = (
+                            f"{chunk_title}（{retry_index}/{retry_total}）"
+                        )
+                        retry_card = self._text_card(
+                            retry_chunk,
+                            template,
+                            retry_title,
+                        )
+                        try:
+                            retry_message_id = self._send_card_returning_id(
+                                open_id,
+                                retry_card,
+                            )
+                        except Exception:
+                            logger.exception("Feishu card retry failed")
+                            retry_message_id = None
+                        if retry_message_id is None:
+                            self._send_long_text(
+                                open_id,
+                                f"{retry_title}\n\n{retry_chunk}",
+                            )
+                else:
+                    self._send_long_text(
+                        open_id,
+                        f"{chunk_title}\n\n{chunk}",
+                    )
         return succeeded
 
     def _download_image(self, message_id: str, image_key: str) -> tuple[bytes, str]:
