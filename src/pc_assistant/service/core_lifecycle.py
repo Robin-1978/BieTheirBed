@@ -9,6 +9,7 @@ import sys
 from pc_assistant.config import AppConfig
 from pc_assistant.runtime import RuntimePaths
 from pc_assistant.service.core_client import ConfirmationHandler, CoreClient
+from pc_assistant.service.credentials import resolve_local_service_token
 
 
 logger = logging.getLogger(__name__)
@@ -46,29 +47,19 @@ async def _connect_existing(
     *,
     confirmation_handler: ConfirmationHandler | None,
 ) -> CoreClient | None:
-    if paths.socket.exists():
-        try:
-            return await asyncio.wait_for(
-                CoreClient.connect_unix(
-                    str(paths.socket),
-                    confirmation_handler=confirmation_handler,
-                ),
-                timeout=2.0,
-            )
-        except Exception as exc:
-            logger.debug("Core Unix connection failed: %s", type(exc).__name__)
-    if config.service_port > 0 and config.service_token:
-        try:
-            return await asyncio.wait_for(
-                CoreClient.connect(
-                    f"ws://{config.service_host}:{config.service_port}",
-                    config.service_token,
-                    confirmation_handler=confirmation_handler,
-                ),
-                timeout=2.0,
-            )
-        except Exception as exc:
-            logger.debug("Core TCP connection failed: %s", type(exc).__name__)
+    if config.service_port <= 0:
+        raise ValueError("Core WebSocket service requires a configured TCP port")
+    try:
+        return await asyncio.wait_for(
+            CoreClient.connect(
+                f"ws://{config.service_host}:{config.service_port}",
+                resolve_local_service_token(paths),
+                confirmation_handler=confirmation_handler,
+            ),
+            timeout=2.0,
+        )
+    except Exception as exc:
+        logger.debug("Core WebSocket connection failed: %s", type(exc).__name__)
     return None
 
 

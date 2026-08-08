@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import time
-from tempfile import TemporaryDirectory
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -13,7 +12,9 @@ from pc_assistant.benchmark.evaluator import LLMJudge
 from pc_assistant.benchmark.scorer import Scorer
 from pc_assistant.benchmark.types import BenchmarkQuestion, BenchmarkResult
 from pc_assistant.config import AppConfig
+from pc_assistant.runtime import RuntimePaths
 from pc_assistant.service.core_client import CoreClient
+from pc_assistant.service.credentials import resolve_local_service_token
 
 
 class BenchmarkRunner:
@@ -62,36 +63,35 @@ class BenchmarkRunner:
         tool_count = 0
 
         try:
-            with TemporaryDirectory(prefix="pc-assistant-benchmark-") as temporary:
-                composition = build_core_runtime(
-                    config,
-                    socket_path=Path(temporary) / "core.sock",
+            composition = build_core_runtime(config)
+            await composition.host.start()
+            client: CoreClient | None = None
+            try:
+                client = await CoreClient.connect(
+                    f"ws://{config.service_host}:{composition.host.bound_tcp_port}",
+                    resolve_local_service_token(
+                        RuntimePaths.from_root(config.runtime_root)
+                    ),
                 )
-                await composition.host.start()
-                client: CoreClient | None = None
-                try:
-                    client = await CoreClient.connect_unix(
-                        str(Path(temporary) / "core.sock")
-                    )
-                    session_handle = await client.create_session()
-                    answer_parts: list[str] = []
-                    async for event in client.run(
-                        session_handle,
-                        q.question,
-                        tools_enabled=not q.no_tools,
-                    ):
-                        events.append(event)
-                        if event.event_type == "content_delta":
-                            answer_parts.append(event.payload.content)
-                        elif event.event_type == "tool_call":
-                            tool_count += 1
-                        elif event.event_type in {"failed", "cancelled"}:
-                            error_msg = event.payload.content or event.event_type
-                    answer = "".join(answer_parts).strip()
-                finally:
-                    if client is not None:
-                        await client.disconnect()
-                    await composition.host.stop()
+                session_handle = await client.create_session()
+                answer_parts: list[str] = []
+                async for event in client.run(
+                    session_handle,
+                    q.question,
+                    tools_enabled=not q.no_tools,
+                ):
+                    events.append(event)
+                    if event.event_type == "content_delta":
+                        answer_parts.append(event.payload.content)
+                    elif event.event_type == "tool_call":
+                        tool_count += 1
+                    elif event.event_type in {"failed", "cancelled"}:
+                        error_msg = event.payload.content or event.event_type
+                answer = "".join(answer_parts).strip()
+            finally:
+                if client is not None:
+                    await client.disconnect()
+                await composition.host.stop()
         except Exception as e:
             error_msg = str(e)
 
@@ -160,6 +160,7 @@ class BenchmarkRunner:
 
     def _question_config(self, q: BenchmarkQuestion) -> AppConfig:
         config = self._config.model_copy()
+        config.service_port = 0
         if q.max_iterations is not None:
             config.max_iterations = q.max_iterations
         if q.max_tool_calls is not None:

@@ -122,7 +122,7 @@ class AppConfig(BaseModel):
     working_directory: str = Field(default_factory=os.getcwd)
     ui_theme: str = "catppuccin"
     service_host: str = "127.0.0.1"
-    service_port: int = 0
+    service_port: int = 9527
     service_token: str = ""
     attachment_ttl_seconds: int = 3600
     attachment_cleanup_interval_seconds: int = 300
@@ -131,8 +131,8 @@ class AppConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_provider(self) -> "AppConfig":
-        if self.service_port > 0 and not self.service_token:
-            raise ValueError("TCP Core API requires an authentication token")
+        if not 0 <= self.service_port <= 65535:
+            raise ValueError("Core WebSocket service port must be between 0 and 65535")
         if self.models:
             if not self.default_model:
                 raise ValueError("default_model is required when models are configured")

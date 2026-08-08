@@ -135,31 +135,6 @@ class CoreClient:
         await client.start(credential)
         return client
 
-    @classmethod
-    async def connect_unix(
-        cls,
-        path: str,
-        credential: str = "local-transport",
-        *,
-        confirmation_handler: ConfirmationHandler | None = None,
-        request_timeout_seconds: float = 60.0,
-        max_buffered_run_events: int = 256,
-        max_pending_confirmations: int = 8,
-    ) -> CoreClient:
-        websocket = await websockets.unix_connect(
-            path=path,
-            max_size=CORE_WS_MAX_SIZE,
-        )
-        client = cls(
-            websocket,
-            confirmation_handler=confirmation_handler,
-            request_timeout_seconds=request_timeout_seconds,
-            max_buffered_run_events=max_buffered_run_events,
-            max_pending_confirmations=max_pending_confirmations,
-        )
-        await client.start(credential)
-        return client
-
     @staticmethod
     def _request_id() -> str:
         return uuid.uuid4().hex

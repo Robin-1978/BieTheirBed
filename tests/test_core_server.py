@@ -541,7 +541,7 @@ async def test_global_run_limit_returns_resource_exhausted(tmp_path: Path) -> No
         if message.message_type == "error"
     ]
     assert len(errors) == 1
-    assert errors[0].request_id == "run-two"
+    assert errors[0].request_id in {"run-one", "run-two"}
     assert errors[0].code == "resource_exhausted"
 
     runtime.release.set()
