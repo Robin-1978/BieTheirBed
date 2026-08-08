@@ -1,0 +1,8 @@
+{
+  "schema": "gs-harness/generation-envelope/v1",
+  "generation": 8,
+  "value": {
+    "generation": 8,
+    "path": "/home/robin/ws/BieTheirBed/openspec/changes/agent-contracts-factory/.openspec.yaml"
+  }
+}

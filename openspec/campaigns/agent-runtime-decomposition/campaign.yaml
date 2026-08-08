@@ -1,0 +1,36 @@
+name: agent-runtime-decomposition
+description: "Replace the monolithic Agent with explicit CoreServer, AgentRuntime, ReActLoop, ModelStep, and ToolStep boundaries through one direct no-compatibility cutover."
+phases:
+  - name: "Foundation"
+    value: "Establish exact target contracts and one concrete composition owner."
+    changes:
+      - agent-contracts-factory
+  - name: "Operation extraction"
+    value: "Make model and verified-tool operations independently testable on parallel branches."
+    changes:
+      - agent-model-turn-step
+      - agent-tool-turn-step
+  - name: "Atomic cutover"
+    value: "Make ReActLoop the only production iteration path and remove the old module and every legacy consumer together."
+    changes:
+      - agent-react-loop-cutover
+dependencies:
+  agent-contracts-factory: []
+  agent-model-turn-step:
+    - agent-contracts-factory
+  agent-tool-turn-step:
+    - agent-contracts-factory
+  agent-react-loop-cutover:
+    - agent-model-turn-step
+    - agent-tool-turn-step
+critical_path:
+  - agent-contracts-factory
+  - agent-model-turn-step
+  - agent-react-loop-cutover
+knowledge_base:
+  blueprint: docs/agent-runtime-decomposition-phases.md
+  coverage_matrix: docs/agent-runtime-decomposition-coverage-matrix.yaml
+  path_decision: .gs-harness/plans/agent-runtime-decomposition.yaml
+  baseline_spec: openspec/specs/pc-assistant-system/spec.md
+  modules: modules.yaml
+  architecture: docs/architecture.md

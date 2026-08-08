@@ -1,7 +1,7 @@
 config_schema: 1
 config_validation:
-  profile: advisory
-version: "2.9.12"
+  profile: standard
+version: "2.10.0"
 version_file: VERSION
 name: BieTheirBed
 description: >-
@@ -289,6 +289,13 @@ review_gate:
   apply_at: [archive]
   require_verdict: APPROVE
   require_human_reviewer: true
+  provider:
+    type: local_os_user
+    issuer: local://os-user
+    audience: gs-harness-baseline-import
+    verification_methods: [local_os_user]
+    human_subject_types: [human]
+    allowed_subjects: [robin]
 
 doctor:
   severity_policy:

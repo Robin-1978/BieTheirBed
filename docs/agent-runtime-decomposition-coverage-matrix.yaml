@@ -1,0 +1,21 @@
+campaign: agent-runtime-decomposition
+blueprint: docs/agent-runtime-decomposition-phases.md
+updated: 2026-08-07
+changes:
+  - id: C1
+    slug: agent-contracts-factory
+    blueprint_sections: [2.2, 2.3, 4.1, 4.5, 5.1, 5.3, 5.4, 5.5, 6, 14, 15, 16]
+    vision_sections: [AR-001, AR-010, section-7.1-item-5]
+  - id: C2
+    slug: agent-model-turn-step
+    blueprint_sections: [2.2, 2.3, 4.2, 4.5, 5.1, 5.3, 5.4, 5.5, 7, 9, 10, 15, 16]
+    vision_sections: [section-3.3, invariant-3, invariant-4, AR-001]
+  - id: C3
+    slug: agent-tool-turn-step
+    blueprint_sections: [2.2, 2.3, 4.3, 4.5, 5.1, 5.3, 5.4, 5.5, 7, 9, 10, 15, 16]
+    vision_sections: [principal-production-invariant, invariant-1, invariant-8, AR-002, AR-003]
+  - id: C4
+    slug: agent-react-loop-cutover
+    blueprint_sections: [2.2, 2.3, 3, 4.4, 4.5, 5.1, 5.2, 5.3, 5.4, 5.5, 6, 9, 10, 14, 15, 16]
+    vision_sections: [section-3.1, section-3.2, section-3.3, AR-009, section-7.1-item-5]
+gaps: []
