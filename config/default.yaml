@@ -47,3 +47,7 @@ feishu_receive_id: ""
 attachment_ttl_seconds: 3600
 attachment_cleanup_interval_seconds: 300
 supports_vision: null
+
+# Dynamic MCP tools are disabled unless a private local config explicitly
+# enables a server and assigns local effect/capability/risk policy per tool.
+mcp_servers: {}

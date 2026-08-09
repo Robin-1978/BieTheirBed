@@ -61,10 +61,19 @@ class CancelResult(ContractModel):
     status: Literal["cancelling", "cancelled", "completed", "failed", "not_found"]
 
 
+class ExtensionStatusRecord(ContractModel):
+    extension_id: Identifier128
+    kind: Literal["mcp", "skill", "connector"]
+    state: Literal["configured", "running", "failed", "stopped"]
+    tools: tuple[NonEmptyString, ...] = ()
+    detail: Annotated[str, StringConstraints(max_length=1000)] = ""
+
+
 class RuntimeStatus(ContractModel):
     status: NonEmptyString
     connected: bool
     details: dict[str, Any] = Field(default_factory=dict)
+    extensions: tuple[ExtensionStatusRecord, ...] = ()
 
 
 class HistoryResult(ContractModel):

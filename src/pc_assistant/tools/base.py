@@ -35,12 +35,38 @@ class ToolCapability(str, Enum):
     DESKTOP_CONTROL = "desktop_control"
     MEMORY_READ = "memory_read"
     MEMORY_WRITE = "memory_write"
+    MCP = "mcp"
 
 
 class ToolRisk(str, Enum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+
+
+class ToolOriginKind(str, Enum):
+    BUILTIN = "builtin"
+    MCP = "mcp"
+    SKILL = "skill"
+    CONNECTOR = "connector"
+
+
+@dataclass(frozen=True)
+class ToolOrigin:
+    kind: ToolOriginKind
+    extension_id: str
+
+    def __post_init__(self) -> None:
+        normalized = self.extension_id.strip()
+        if not normalized or len(normalized) > 128:
+            raise ValueError("Tool origin extension_id must contain 1-128 characters")
+        object.__setattr__(self, "extension_id", normalized)
+
+
+BUILTIN_TOOL_ORIGIN = ToolOrigin(
+    kind=ToolOriginKind.BUILTIN,
+    extension_id="builtin",
+)
 
 
 @dataclass(frozen=True)

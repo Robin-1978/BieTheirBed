@@ -8,6 +8,7 @@ from typing import Any, Protocol
 from pc_assistant.agent_runtime.contracts import (
     ConfigSetRequest,
     ConfigSetResult,
+    ExtensionStatusRecord,
     HistoryResult,
     MemoryClearResult,
     MemoryListResult,
@@ -35,6 +36,7 @@ class ControlService:
         tool_names: Callable[[RuntimeScope], Iterable[str]],
         config_controller: RuntimeConfigController,
         status_details: Callable[[RuntimeScope], dict[str, Any]] | None = None,
+        extension_statuses: Callable[[], Iterable[ExtensionStatusRecord]] | None = None,
         config_admin_principals: frozenset[str] = frozenset({"local"}),
     ) -> None:
         self._sessions = sessions
@@ -42,6 +44,7 @@ class ControlService:
         self._tool_names = tool_names
         self._config_controller = config_controller
         self._status_details = status_details
+        self._extension_statuses = extension_statuses
         self._config_admin_principals = config_admin_principals
 
     async def _owned_scope(self, scope: RuntimeScope) -> RuntimeScope:
@@ -79,6 +82,11 @@ class ControlService:
             status="ready",
             connected=True,
             details=details,
+            extensions=(
+                tuple(self._extension_statuses())
+                if self._extension_statuses is not None
+                else ()
+            ),
         )
 
     async def get_history(self, scope: RuntimeScope) -> HistoryResult:

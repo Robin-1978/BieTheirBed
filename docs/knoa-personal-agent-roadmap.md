@@ -189,6 +189,9 @@ CLI/TUI 长期保留，用于：
 
 ## 6. Phase A：能力扩展平台
 
+> 进度（2026-08-09）：Phase A 已启动。A1 ExtensionManager 生命周期基础和 A2
+> MCP Streamable HTTP 纵向闭环已完成；Skill Package 与 Connector/Secret 仍待推进。
+
 ### 6.1 Skill Package
 
 定义稳定、可验证的 Skill 包结构，至少包含：

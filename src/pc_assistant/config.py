@@ -9,6 +9,7 @@ import yaml
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
 from pc_assistant.runtime import default_runtime_root
+from pc_assistant.extensions.models import MCP_SERVER_ID_PATTERN, MCPServerConfig
 
 
 _MAX_CONFIG_BYTES = 1024 * 1024
@@ -131,6 +132,7 @@ class AppConfig(BaseModel):
     attachment_ttl_seconds: int = 3600
     attachment_cleanup_interval_seconds: int = 300
     supports_vision: bool | None = None
+    mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     source_config_path: str = ""
 
     @model_validator(mode="after")
@@ -142,6 +144,13 @@ class AppConfig(BaseModel):
             or not self.feishu_app_secret.get_secret_value().strip()
         ):
             raise ValueError("Enabled Feishu channel requires app_id and app_secret")
+        invalid_mcp_ids = [
+            server_id
+            for server_id in self.mcp_servers
+            if not MCP_SERVER_ID_PATTERN.fullmatch(server_id)
+        ]
+        if invalid_mcp_ids:
+            raise ValueError("MCP server IDs must contain 1-24 safe characters")
         if self.models:
             if not self.default_model:
                 raise ValueError("default_model is required when models are configured")

@@ -621,8 +621,6 @@ risk: LOW | MEDIUM | HIGH
 Minimum capabilities are:
 
 ```text
-workspace_read
-workspace_write
 host_read
 host_write
 shell
@@ -631,6 +629,7 @@ desktop_observe
 desktop_control
 memory_read
 memory_write
+mcp
 ```
 
 This is a small enum model, not a policy language.
@@ -652,18 +651,18 @@ lookup uses `memory_read`; memory mutation uses `memory_write`.
 
 ### 9.3 Extension boundary
 
-MCP and other dynamic tool discovery are intentionally out of scope. A future
-integration is accepted only when there is a concrete use case and every
-discovered tool enters through the same ToolBase metadata, registration-time
-schema validation, capability filtering, confirmation, and ToolStep commit
-boundary. Discovery metadata can never grant authority by itself.
+The initial MCP extension runtime was added on 2026-08-09 through the separately
+approved `knoa-capability-extension-design.md`. Every discovered tool enters
+through the same ToolBase metadata, registration-time schema validation,
+capability filtering, confirmation, and ToolStep commit boundary. Discovery
+metadata can never grant authority by itself. The first transport is MCP
+Streamable HTTP; stdio remains disabled until its process isolation contract is
+implemented.
 
 ### 9.4 Filesystem, shell, network, and desktop
 
-- File tools resolve paths against configured roots and reject escape after
-  symlink-aware canonicalization.
-- `workspace_read/write` cannot access arbitrary home or system paths.
-- `host_read/write` is a separate explicit capability.
+- File tools normalize relative paths against the configured default directory
+  and use explicit `host_read/write` capability for personal computer access.
 - Shell executes inside an OS sandbox/profile where supported. Command regexes
   remain defense in depth, not the primary authority boundary.
 - Network access is explicit. A read operation followed by network upload is
