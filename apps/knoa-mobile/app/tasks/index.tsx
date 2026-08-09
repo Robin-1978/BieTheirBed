@@ -1,4 +1,11 @@
 import * as DocumentPicker from "expo-document-picker";
+import {
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  useAudioRecorder,
+  useAudioRecorderState,
+} from "expo-audio";
 import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -32,6 +39,9 @@ export default function TaskListScreen() {
   const [attachments, setAttachments] = useState<ArtifactInput[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recording = useAudioRecorderState(recorder, 250);
 
   const refresh = useCallback(async () => {
     if (!gateway.client) return;
@@ -100,6 +110,42 @@ export default function TaskListScreen() {
     }
   }
 
+  async function toggleRecording() {
+    if (!gateway.client || transcribing) return;
+    if (recording.isRecording) {
+      await recorder.stop();
+      const uri = recorder.uri;
+      if (!uri) return;
+      setTranscribing(true);
+      try {
+        await setAudioModeAsync({ allowsRecording: false });
+        const response = await fetch(uri);
+        const extension = uri.toLowerCase().endsWith(".webm") ? "webm" : "m4a";
+        const mediaType = extension === "webm" ? "audio/webm" : "audio/mp4";
+        const artifact = await gateway.client.uploadArtifact({
+          sessionHandle: gateway.sessionHandle,
+          bytes: await response.arrayBuffer(),
+          mediaType,
+          name: `voice-${Date.now()}.${extension}`,
+          caption: "语音输入",
+        });
+        const transcript = await gateway.client.transcribeArtifact(
+          gateway.sessionHandle,
+          artifact.artifact_id,
+        );
+        setText((current) => current ? `${current}\n${transcript}` : transcript);
+      } finally {
+        setTranscribing(false);
+      }
+      return;
+    }
+    const permission = await requestRecordingPermissionsAsync();
+    if (!permission.granted) return;
+    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+    await recorder.prepareToRecordAsync();
+    recorder.record();
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.topline}>
@@ -119,7 +165,19 @@ export default function TaskListScreen() {
         />
         {attachments.length ? <Text style={styles.attachments}>已附加 {attachments.length} 个文件</Text> : null}
         <View style={styles.actions}>
-          <Pressable onPress={() => void chooseFile()}><Text style={styles.link}>添加文件</Text></Pressable>
+          <View style={styles.ingress}>
+            <Pressable onPress={() => void chooseFile()}><Text style={styles.link}>添加文件</Text></Pressable>
+            <Pressable onPress={() => router.push("/capture")}><Text style={styles.link}>拍照</Text></Pressable>
+            <Pressable onPress={() => void toggleRecording()}>
+              <Text style={[styles.link, recording.isRecording && styles.recording]}>
+                {transcribing
+                  ? "转写中…"
+                  : recording.isRecording
+                    ? `停止录音 ${Math.round(recording.durationMillis / 1000)}s`
+                    : "语音输入"}
+              </Text>
+            </Pressable>
+          </View>
           <Pressable style={styles.send} onPress={() => void createTask()} disabled={submitting}>
             {submitting ? <ActivityIndicator color="white" /> : <Text style={styles.sendText}>开始</Text>}
           </Pressable>
@@ -165,7 +223,9 @@ const styles = StyleSheet.create({
   input: { minHeight: 72, color: colors.ink, fontSize: 16, textAlignVertical: "top" },
   attachments: { color: colors.muted, fontSize: 13 },
   actions: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  ingress: { flexDirection: "row", alignItems: "center", gap: 16 },
   link: { color: colors.accent, fontWeight: "600" },
+  recording: { color: colors.danger },
   send: { minWidth: 74, alignItems: "center", backgroundColor: colors.accent, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 12 },
   sendText: { color: "white", fontWeight: "700" },
   filters: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 8 },

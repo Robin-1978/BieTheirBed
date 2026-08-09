@@ -26,6 +26,7 @@ export default function RootLayout() {
         <Stack.Screen name="tasks/index" options={{ title: "任务" }} />
         <Stack.Screen name="tasks/[id]" options={{ title: "任务详情" }} />
         <Stack.Screen name="capabilities" options={{ title: "能力与连接" }} />
+        <Stack.Screen name="capture" options={{ title: "拍照任务" }} />
       </Stack>
     </GatewayProvider>
   );

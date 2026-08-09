@@ -170,6 +170,17 @@ export class GatewayClient {
     };
   }
 
+  async transcribeArtifact(
+    sessionHandle: string,
+    artifactId: string,
+  ): Promise<string> {
+    const response = await this.json<{ result: { transcript: string } }>(
+      `/v1/artifacts/${encodeURIComponent(artifactId)}/transcribe?session_handle=${encodeURIComponent(sessionHandle)}`,
+      { method: "POST" },
+    );
+    return response.result.transcript;
+  }
+
   async runtimeStatus(sessionHandle: string): Promise<Json> {
     return this.json(
       `/v1/runtime/status?session_handle=${encodeURIComponent(sessionHandle)}`,
