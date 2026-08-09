@@ -355,6 +355,11 @@ Task 至少记录：
 - 长结果优先生成报告 Artifact，卡片展示摘要而非无限拆分；
 - 可生成深链，未来跳转到 App 的任务详情。
 
+> 进度（2026-08-09）：Phase C 已启动。飞书已支持 `/tasks`、`/task <id>` 和
+> `/stop <id>`，均通过 principal-scoped Core Task API 查询或控制；用户发送新消息时
+> 不再被上一条长任务的 Channel 锁阻塞，而是立即创建新的持久 Task，执行顺序由 Core
+> 的 session 调度保证。下一步补普通文件入口与长结果 Artifact 化。
+
 ### Phase C 验收
 
 - 飞书可独立完成文本、图片、文件和语音任务入口；
