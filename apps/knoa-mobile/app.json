@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "小诺",
+    "slug": "knoa-mobile",
+    "scheme": "knoa",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "icon": "../../assets/branding/xiaonuo-avatar-tech.png",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "dev.knoa.mobile"
+    },
+    "android": {
+      "package": "dev.knoa.mobile",
+      "adaptiveIcon": {
+        "foregroundImage": "../../assets/branding/xiaonuo-avatar-tech.png",
+        "backgroundColor": "#F4F0E8"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "允许小诺扫描本地服务生成的配对二维码"
+        }
+      ]
+    ]
+  }
+}

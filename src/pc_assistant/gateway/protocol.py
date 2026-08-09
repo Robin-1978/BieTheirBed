@@ -7,7 +7,7 @@ from pc_assistant.agent_runtime.contracts import RuntimeStatus, ToolListResult
 from pc_assistant.agent_runtime.contracts import ArtifactTranscriptionResult
 from pc_assistant.artifacts import ArtifactRef
 from pc_assistant.service.core_api import ArtifactInputRef, TaskSnapshot
-from pc_assistant.tasks import ApprovalState, TaskState
+from pc_assistant.tasks import ApprovalState, TaskEvent, TaskState
 
 
 class GatewayRequest(BaseModel):
@@ -85,6 +85,10 @@ class EventQuery(GatewayQuery):
     after_id: int = Field(default=0, ge=0, le=9_223_372_036_854_775_807)
 
 
+class TaskEventQuery(GatewayQuery):
+    after_seq: int = Field(default=0, ge=0)
+
+
 class ArtifactUploadQuery(GatewayQuery):
     session_handle: str = Field(min_length=1, max_length=256)
     name: str = Field(default="", max_length=160)
@@ -158,6 +162,10 @@ class TaskResponse(BaseModel):
 class TaskListResponse(BaseModel):
     tasks: tuple[TaskSnapshot, ...]
     next_cursor: str = ""
+
+
+class TaskEventListResponse(BaseModel):
+    events: tuple[TaskEvent, ...]
 
 
 class ApprovalResolvedResponse(BaseModel):

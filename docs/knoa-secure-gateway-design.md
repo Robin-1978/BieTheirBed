@@ -218,6 +218,13 @@ Gateway device record and are never sent to Core.
 - Flutter client generated from the Gateway/Core schemas;
 - task list/detail, approval and Artifact workflows.
 
+> Progress: the first Expo/React Native workbench is implemented with generated
+> OpenAPI types, local Ed25519 identity, QR pairing, Task list/detail/control,
+> approval actions, Artifact transfer, Markdown rendering, resumable SSE and
+> Skill/MCP status. A principal-scoped per-Task event replay endpoint was added
+> so cold-started clients can reconstruct timelines and pending approvals without
+> relying on transient connection state. Push provider routing remains next.
+
 ## 9. Non-goals
 
 - exposing the current loopback Core port to the internet;

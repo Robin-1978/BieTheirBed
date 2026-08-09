@@ -396,7 +396,12 @@ Task 至少记录：
 > 当前设备可读取自身的无敏感信息审计事件；配置真实 `gateway_public_url` 后，本地
 > 配对命令会输出版本化 JSON 与终端二维码。Gateway 工作台已补齐任务暂停、恢复、
 > 重试、语音转写、运行状态和 Skill/MCP 工具清单。
-> 并用 route-drift 测试保证后续 Flutter 客户端可生成而非手写漂移模型。
+> 并用 route-drift 测试保证后续移动客户端可生成而非手写漂移模型。
+> D4 的首个可验证移动端切片已进入 `apps/knoa-mobile`：采用 Expo/React Native 与
+> strict TypeScript，从 Gateway OpenAPI 生成契约；已实现 Ed25519 配对/认证、任务
+> 列表与详情、任务控制、确认、文件上传下载、Markdown、SSE 游标续传、单 Task 事件
+> 回放、Skill/MCP/Tool 状态和本设备审计。当前机器没有 Flutter/Dart，因此优先交付
+> 可立即 typecheck/test/doctor 的双端工程；客户端边界仍完全由 Gateway 协议决定。
 
 ### 9.1 第一版范围
 

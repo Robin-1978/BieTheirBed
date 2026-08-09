@@ -265,6 +265,18 @@ class _Core:
             ),
         )
 
+    async def task_events(self, principal_id, task_id, *, after_seq):
+        self.calls.append(("task_events", principal_id, task_id, after_seq))
+        return (
+            TaskEvent(
+                task_id=task_id,
+                event_seq=after_seq + 1,
+                event_type="reasoning_delta",
+                payload=TaskEventPayload(content="分析中"),
+                occurred_at=3.0,
+            ),
+        )
+
     async def upload_artifact(
         self,
         principal_id,
@@ -365,6 +377,10 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
             headers=headers,
         )
         detail = await http.get("/v1/tasks/task-a", headers=headers)
+        timeline = await http.get(
+            "/v1/tasks/task-a/events?after_seq=2",
+            headers=headers,
+        )
         cancelled = await http.post(
             "/v1/tasks/task-a/cancel",
             headers=headers,
@@ -398,6 +414,8 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
     assert listed.json()["tasks"][0]["task_id"] == "task-a"
     assert listed.json()["next_cursor"] == "next-a"
     assert detail.json()["task"]["phase"] == "working"
+    assert timeline.json()["events"][0]["event_seq"] == 3
+    assert timeline.json()["events"][0]["payload"]["content"] == "分析中"
     assert cancelled.json() == {"accepted": True, "state": "cancelled"}
     assert paused.json() == {"accepted": True, "state": "paused"}
     assert resumed.json() == {"accepted": True, "state": "queued"}
