@@ -16,6 +16,7 @@ from pc_assistant.gateway.identity import (
     PairingGrant,
     PairingGrantRejectedError,
 )
+from pc_assistant.gateway.adapter import SecureGatewayAdapter
 
 __all__ = [
     "AuthenticatedGatewaySession",
@@ -30,4 +31,5 @@ __all__ = [
     "IssuedGatewaySession",
     "PairingGrant",
     "PairingGrantRejectedError",
+    "SecureGatewayAdapter",
 ]

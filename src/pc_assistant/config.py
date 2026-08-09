@@ -178,6 +178,10 @@ class AppConfig(BaseModel):
     webhook_host: str = "127.0.0.1"
     webhook_port: int = 9528
     webhook_routes: dict[str, WebhookRouteConfig] = Field(default_factory=dict)
+    gateway_enabled: bool = False
+    gateway_host: str = "127.0.0.1"
+    gateway_port: int = 9529
+    gateway_session_ttl_seconds: int = Field(default=900, ge=60, le=3600)
     feishu_enabled: bool = False
     feishu_app_id: str = ""
     feishu_app_secret: SecretStr = Field(default_factory=lambda: SecretStr(""))
@@ -198,6 +202,8 @@ class AppConfig(BaseModel):
             raise ValueError("Core WebSocket service port must be between 0 and 65535")
         if not 0 <= self.webhook_port <= 65535:
             raise ValueError("Webhook port must be between 0 and 65535")
+        if not 0 <= self.gateway_port <= 65535:
+            raise ValueError("Secure Gateway port must be between 0 and 65535")
         invalid_webhook_ids = [
             route_id
             for route_id in self.webhook_routes
@@ -212,6 +218,11 @@ class AppConfig(BaseModel):
                 raise ValueError("Enabled webhook adapter requires the Core TCP service")
             if self.webhook_port == self.service_port:
                 raise ValueError("Webhook and Core service ports must differ")
+        if self.gateway_enabled:
+            if self.gateway_port == self.service_port:
+                raise ValueError("Secure Gateway and Core service ports must differ")
+            if self.webhook_enabled and self.gateway_port == self.webhook_port:
+                raise ValueError("Secure Gateway and Webhook ports must differ")
         if self.feishu_enabled and (
             not self.feishu_app_id.strip()
             or not self.feishu_app_secret.get_secret_value().strip()

@@ -98,3 +98,42 @@ async def test_application_daemon_mounts_webhook_outside_core(
         "stop:webhook",
         "stop:core",
     ]
+
+
+@pytest.mark.asyncio
+async def test_application_daemon_mounts_gateway_outside_core(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    events = []
+    core = _Lifecycle("core", events)
+    channels = _Lifecycle("channels", events)
+    gateway = _Lifecycle("gateway", events)
+    monkeypatch.setattr(
+        "pc_assistant.service.application_daemon.CoreDaemon",
+        lambda config, log_path: core,
+    )
+    monkeypatch.setattr(
+        "pc_assistant.service.application_daemon.ChannelRuntime.from_config",
+        lambda config: channels,
+    )
+    monkeypatch.setattr(
+        "pc_assistant.gateway.SecureGatewayAdapter",
+        lambda config: gateway,
+    )
+    daemon = ApplicationDaemon(
+        AppConfig(fallback_enabled=False, gateway_enabled=True),
+        log_path=tmp_path / "service.log",
+    )
+
+    await daemon.start()
+    await daemon.stop()
+
+    assert events == [
+        "start:core",
+        "start:gateway",
+        "start:channels",
+        "stop:channels",
+        "stop:gateway",
+        "stop:core",
+    ]

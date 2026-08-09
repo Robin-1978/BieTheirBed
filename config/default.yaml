@@ -44,6 +44,10 @@ webhook_enabled: false
 webhook_host: "127.0.0.1"
 webhook_port: 9528
 webhook_routes: {}
+gateway_enabled: false
+gateway_host: "127.0.0.1"
+gateway_port: 9529
+gateway_session_ttl_seconds: 900
 feishu_enabled: false
 feishu_app_id: ""
 feishu_app_secret: ""

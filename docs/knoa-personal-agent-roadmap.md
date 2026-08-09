@@ -384,8 +384,8 @@ Task 至少记录：
 > 256 位单次配对 secret、原子消费、Ed25519 公钥格式约束、principal-scoped 设备列表
 > 与即时撤销均已落地。D2 的密码学基础也已完成：持久单次 challenge、规范化签名
 > payload、Ed25519 持有证明、仅存 hash 的短期 opaque session，以及设备撤销后的即时
-> session 拒绝。尚未开放网络 listener；下一步是严格限流的 loopback Gateway API 与
-> 选定 CoreClient 命令适配。
+> session 拒绝。默认关闭、仅允许 loopback 绑定、严格 JSON/请求体/限流约束的 Gateway
+> 认证 API 也已完成；下一步是选定 CoreClient 命令与标准事件适配。
 
 ### 9.1 第一版范围
 
