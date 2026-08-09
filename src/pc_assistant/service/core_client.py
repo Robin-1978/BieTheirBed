@@ -57,6 +57,8 @@ from pc_assistant.service.core_api import (
     PauseScheduleRequest,
     PauseTaskRequest,
     PauseTriggerRequest,
+    PrincipalTaskEventMessage,
+    PrincipalTaskEventsSubscribedMessage,
     ResolveApprovalRequest,
     ResumeScheduleRequest,
     ScheduleAcceptedMessage,
@@ -69,6 +71,7 @@ from pc_assistant.service.core_api import (
     SetConfigRequest,
     StatusMessage,
     SubscribeTaskRequest,
+    SubscribePrincipalTaskEventsRequest,
     TaskAcceptedMessage,
     TaskCancelResultMessage,
     TaskEventMessage,
@@ -88,7 +91,7 @@ from pc_assistant.service.core_api import (
     UploadArtifactRequest,
     parse_core_server_message_json,
 )
-from pc_assistant.tasks import TaskEvent, TaskState
+from pc_assistant.tasks import PrincipalTaskEvent, TaskEvent, TaskState
 
 
 class ClientWebSocket(Protocol):
@@ -138,7 +141,7 @@ class CoreClient:
         self._pending: dict[str, asyncio.Future[CoreServerMessage]] = {}
         self._subscription_queues: dict[
             str,
-            asyncio.Queue[TaskEvent | Exception],
+            asyncio.Queue[TaskEvent | PrincipalTaskEvent | Exception],
         ] = {}
         self._active_tasks: list[str] = []
         self._send_lock = asyncio.Lock()
@@ -256,7 +259,22 @@ class CoreClient:
                             await self._websocket.close()
                             break
                     continue
-                if isinstance(message, TaskSubscribedMessage):
+                if isinstance(message, PrincipalTaskEventMessage):
+                    queue = self._subscription_queues.get(message.request_id)
+                    if queue is not None:
+                        try:
+                            queue.put_nowait(message.feed_event)
+                        except asyncio.QueueFull:
+                            failure = CoreTaskBufferOverflowError(
+                                "Core principal Task event buffer overflow"
+                            )
+                            await self._websocket.close()
+                            break
+                    continue
+                if isinstance(
+                    message,
+                    (TaskSubscribedMessage, PrincipalTaskEventsSubscribedMessage),
+                ):
                     future = self._pending.get(message.request_id)
                     if future is None or future.done():
                         failure = CoreConnectionLostError(
@@ -469,6 +487,10 @@ class CoreClient:
                 item = await queue.get()
                 if isinstance(item, Exception):
                     raise item
+                if not isinstance(item, TaskEvent):
+                    raise CoreConnectionLostError(
+                        "Core protocol mixed Task subscription event types"
+                    )
                 if (
                     item.event_type == "approval_requested"
                     and self._approval_handler is not None
@@ -491,6 +513,36 @@ class CoreClient:
             self._subscription_queues.pop(request_id, None)
             if task_id in self._active_tasks:
                 self._active_tasks.remove(task_id)
+
+    async def principal_task_events(
+        self,
+        *,
+        after_id: int = 0,
+    ) -> AsyncIterator[PrincipalTaskEvent]:
+        request_id = self._request_id()
+        response = await self._request(
+            SubscribePrincipalTaskEventsRequest(
+                request_id=request_id,
+                after_id=after_id,
+            )
+        )
+        if not isinstance(response, PrincipalTaskEventsSubscribedMessage):
+            raise RuntimeError(
+                "CoreServer returned an invalid principal Task event subscription"
+            )
+        queue = self._subscription_queues[request_id]
+        try:
+            while True:
+                item = await queue.get()
+                if isinstance(item, Exception):
+                    raise item
+                if not isinstance(item, PrincipalTaskEvent):
+                    raise CoreConnectionLostError(
+                        "Core protocol mixed Task subscription event types"
+                    )
+                yield item
+        finally:
+            self._subscription_queues.pop(request_id, None)
 
     async def get_task(self, task_id: str) -> TaskSnapshot:
         response = await self._request(

@@ -21,13 +21,20 @@ from pc_assistant.service.core_api import (
     ResolveApprovalRequest,
     ResumeTaskRequest,
     ResumeScheduleRequest,
+    SubscribePrincipalTaskEventsRequest,
     SubscribeTaskRequest,
+    PrincipalTaskEventMessage,
     TaskEventMessage,
     core_request_schema,
     parse_core_request_json,
     parse_core_server_message_json,
 )
-from pc_assistant.tasks import TaskEvent, TaskEventPayload, TaskState
+from pc_assistant.tasks import (
+    PrincipalTaskEvent,
+    TaskEvent,
+    TaskEventPayload,
+    TaskState,
+)
 
 
 def test_core_request_rejects_legacy_free_form_protocol() -> None:
@@ -84,6 +91,48 @@ def test_task_commands_are_versioned_and_method_specific() -> None:
         )
 
 
+def test_principal_task_event_feed_is_strict_and_versioned() -> None:
+    request = parse_core_request_json(
+        SubscribePrincipalTaskEventsRequest(
+            request_id="principal-feed-1",
+            after_id=11,
+        ).model_dump_json()
+    )
+    message = parse_core_server_message_json(
+        PrincipalTaskEventMessage(
+            request_id="principal-feed-1",
+            feed_event=PrincipalTaskEvent(
+                feed_event_id=12,
+                principal_id="principal-a",
+                event=TaskEvent(
+                    task_id="task-a",
+                    event_seq=3,
+                    event_type="completed",
+                    payload=TaskEventPayload(state=TaskState.COMPLETED),
+                    occurred_at=1.0,
+                ),
+            ),
+        ).model_dump_json()
+    )
+
+    assert isinstance(request, SubscribePrincipalTaskEventsRequest)
+    assert request.after_id == 11
+    assert isinstance(message, PrincipalTaskEventMessage)
+    assert message.feed_event.feed_event_id == 12
+    with pytest.raises(ValidationError):
+        parse_core_request_json(
+            json.dumps(
+                {
+                    "api_version": "v1",
+                    "request_id": "principal-feed-2",
+                    "method": "subscribe_principal_task_events",
+                    "after_id": 0,
+                    "principal_id": "attacker-selected",
+                }
+            )
+        )
+
+
 def test_create_session_has_no_caller_selected_session_handle() -> None:
     request = parse_core_request_json(
         CreateSessionRequest(request_id="request-1").model_dump_json()
@@ -114,6 +163,7 @@ def test_core_schema_exposes_only_task_lifecycle_methods() -> None:
 
     assert "create_task" in rendered
     assert "subscribe_task" in rendered
+    assert "subscribe_principal_task_events" in rendered
     assert "get_task" in rendered
     assert "list_tasks" in rendered
     assert "cancel_task" in rendered

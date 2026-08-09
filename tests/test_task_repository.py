@@ -563,3 +563,51 @@ def test_approval_ownership_does_not_reveal_foreign_identity(tmp_path: Path) -> 
             approval.approval_id,
             approved=True,
         )
+def test_principal_event_feed_is_ordered_and_owner_scoped(tmp_path: Path) -> None:
+    database = tmp_path / "principal-feed.db"
+    handles = iter(("feed-session-a", "feed-session-b"))
+    sessions = RuntimeSessionRepository(
+        database,
+        handle_factory=lambda: next(handles),
+    )
+    scope_a = sessions.create("feed-principal-a")
+    scope_b = sessions.create("feed-principal-b")
+    task_ids = iter(("feed-task-a", "feed-task-b"))
+    repository = TaskRepository(
+        database,
+        task_id_factory=lambda: next(task_ids),
+    )
+    task_a, _ = repository.create(
+        scope_a,
+        client_request_id="feed-request-a",
+        goal="task A",
+    )
+    repository.create(
+        scope_b,
+        client_request_id="feed-request-b",
+        goal="task B",
+    )
+    repository.claim_next("feed-worker-a", principal_id=scope_a.principal_id)
+    repository.append_event(
+        scope_a.principal_id,
+        task_a.task_id,
+        "content_delta",
+        TaskEventPayload(content="working"),
+    )
+
+    feed_a = repository.list_principal_events(scope_a.principal_id)
+    feed_b = repository.list_principal_events(scope_b.principal_id)
+
+    assert [item.feed_event_id for item in feed_a] == sorted(
+        item.feed_event_id for item in feed_a
+    )
+    assert [item.event.event_type for item in feed_a] == [
+        "task_created",
+        "state_changed",
+        "content_delta",
+    ]
+    assert [item.event.event_type for item in feed_b] == ["task_created"]
+    assert repository.list_principal_events(
+        scope_a.principal_id,
+        after_id=feed_a[1].feed_event_id,
+    ) == (feed_a[2],)

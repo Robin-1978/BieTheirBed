@@ -69,6 +69,8 @@ from pc_assistant.service.core_api import (
     PauseScheduleRequest,
     PauseTaskRequest,
     PauseTriggerRequest,
+    PrincipalTaskEventMessage,
+    PrincipalTaskEventsSubscribedMessage,
     ResolveApprovalRequest,
     ResumeScheduleRequest,
     ResumeTaskRequest,
@@ -81,6 +83,7 @@ from pc_assistant.service.core_api import (
     SetConfigRequest,
     StatusMessage,
     SubscribeTaskRequest,
+    SubscribePrincipalTaskEventsRequest,
     TaskAcceptedMessage,
     TaskCancelResultMessage,
     TaskEventMessage,
@@ -267,7 +270,10 @@ class CoreServer:
                         )
                     )
                     continue
-                if isinstance(request, SubscribeTaskRequest):
+                if isinstance(
+                    request,
+                    (SubscribeTaskRequest, SubscribePrincipalTaskEventsRequest),
+                ):
                     if request.request_id in subscriptions:
                         await send(
                             self._error(
@@ -288,6 +294,8 @@ class CoreServer:
                         continue
                     subscription = asyncio.create_task(
                         self._stream_task(principal, request, send)
+                        if isinstance(request, SubscribeTaskRequest)
+                        else self._stream_principal_tasks(principal, request, send)
                     )
                     subscriptions[request.request_id] = subscription
                     subscription.add_done_callback(
@@ -349,6 +357,40 @@ class CoreServer:
                     request.request_id,
                     "internal_error",
                     "Task subscription failed",
+                )
+            )
+
+    async def _stream_principal_tasks(
+        self,
+        principal: str,
+        request: SubscribePrincipalTaskEventsRequest,
+        send: Callable[[Any], Awaitable[None]],
+    ) -> None:
+        try:
+            await send(
+                PrincipalTaskEventsSubscribedMessage(
+                    request_id=request.request_id,
+                    after_id=request.after_id,
+                )
+            )
+            async for feed_event in self._tasks.principal_events(
+                principal,
+                after_id=request.after_id,
+            ):
+                await send(
+                    PrincipalTaskEventMessage(
+                        request_id=request.request_id,
+                        feed_event=feed_event,
+                    )
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            await send(
+                self._error(
+                    request.request_id,
+                    "internal_error",
+                    "Principal Task event subscription failed",
                 )
             )
 

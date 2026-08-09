@@ -9,6 +9,7 @@ from pc_assistant.tasks.event_hub import (
 from pc_assistant.tasks.executor import TaskExecutor
 from pc_assistant.tasks.models import (
     ApprovalState,
+    PrincipalTaskEvent,
     TERMINAL_TASK_STATES,
     TaskApprovalRecord,
     TaskAttemptRecord,
@@ -36,6 +37,7 @@ from pc_assistant.tasks.tool_commit import DurableToolCommitService
 __all__ = [
     "TERMINAL_TASK_STATES",
     "ApprovalState",
+    "PrincipalTaskEvent",
     "DurableApprovalService",
     "DurableToolCommitService",
     "TaskApprovalRecord",

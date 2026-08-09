@@ -272,6 +272,37 @@ async def test_client_auth_session_and_task_round_trip(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_client_replays_and_tails_principal_task_event_feed(
+    tmp_path: Path,
+) -> None:
+    connected = await _connected(tmp_path)
+    stream = connected.client.principal_task_events(after_id=0)
+    try:
+        first_event = asyncio.create_task(anext(stream))
+        session_handle = await connected.client.create_session()
+        accepted = await connected.client.create_task(session_handle, "background task")
+        events = [await asyncio.wait_for(first_event, timeout=2.0)]
+        while events[-1].event.event_type != "completed":
+            events.append(await asyncio.wait_for(anext(stream), timeout=2.0))
+
+        assert accepted.task_id == "task-opaque"
+        assert [item.event.event_type for item in events] == [
+            "task_created",
+            "state_changed",
+            "content_delta",
+            "final_output",
+            "completed",
+        ]
+        assert [item.feed_event_id for item in events] == sorted(
+            item.feed_event_id for item in events
+        )
+        assert {item.principal_id for item in events} == {"local"}
+    finally:
+        await stream.aclose()
+        await connected.close()
+
+
+@pytest.mark.asyncio
 async def test_client_disconnect_only_closes_subscription(tmp_path: Path) -> None:
     connected = await _connected(tmp_path)
     session = await connected.client.create_session()
