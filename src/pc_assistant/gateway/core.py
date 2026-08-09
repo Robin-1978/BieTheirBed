@@ -29,7 +29,7 @@ from pc_assistant.service.credentials import (
     issue_principal_credential,
     resolve_local_service_token,
 )
-from pc_assistant.tasks import TaskState
+from pc_assistant.tasks import TaskEvent, TaskState
 from pc_assistant.tasks import PrincipalTaskEvent
 
 
@@ -120,6 +120,13 @@ class GatewayCoreClient(Protocol):
         *,
         after_id: int = 0,
     ) -> AsyncIterator[PrincipalTaskEvent]: ...
+
+    def task_events(
+        self,
+        task_id: str,
+        *,
+        after_seq: int = 0,
+    ) -> AsyncIterator[TaskEvent]: ...
 
     async def disconnect(self) -> None: ...
 
@@ -328,6 +335,24 @@ class GatewayCoreBridge:
         client = await self._client_for(principal_id)
         async for event in client.principal_task_events(after_id=after_id):
             yield event
+
+    async def task_events(
+        self,
+        principal_id: str,
+        task_id: str,
+        *,
+        after_seq: int = 0,
+    ) -> tuple[TaskEvent, ...]:
+        client = await self._client_for(principal_id)
+        return tuple(
+            [
+                event
+                async for event in client.task_events(
+                    task_id,
+                    after_seq=after_seq,
+                )
+            ]
+        )
 
     async def _client_for(self, principal_id: str) -> GatewayCoreClient:
         lock = self._locks.setdefault(principal_id, asyncio.Lock())

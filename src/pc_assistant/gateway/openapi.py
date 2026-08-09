@@ -33,6 +33,7 @@ from pc_assistant.gateway.protocol import (
     SessionResponse,
     TaskAcceptedResponse,
     TaskCommandResponse,
+    TaskEventListResponse,
     TaskListResponse,
     TaskResponse,
     ToolListResponse,
@@ -60,6 +61,7 @@ _MODELS: tuple[type[BaseModel], ...] = (
     ResumeTaskRequest,
     RetryTaskRequest,
     TaskCommandResponse,
+    TaskEventListResponse,
     ResolveApprovalRequest,
     ApprovalResolvedResponse,
     AuditEventResponse,
@@ -256,6 +258,25 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     ],
                     "responses": {
                         "200": _json_response("Owned Task", TaskResponse),
+                        **_errors("400", "401", "404", "429", "503"),
+                    },
+                }
+            },
+            "/v1/tasks/{task_id}/events": {
+                "get": {
+                    "operationId": "listTaskEvents",
+                    "security": bearer,
+                    "parameters": [
+                        {
+                            "name": "task_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "maxLength": 128},
+                        },
+                        _query("after_seq", {"type": "integer", "minimum": 0}),
+                    ],
+                    "responses": {
+                        "200": _json_response("Task event timeline", TaskEventListResponse),
                         **_errors("400", "401", "404", "429", "503"),
                     },
                 }

@@ -56,6 +56,7 @@ from pc_assistant.gateway.protocol import (
     RetryTaskRequest,
     RuntimeQuery,
     TaskListQuery,
+    TaskEventQuery,
 )
 from pc_assistant.service.core_client import (
     CoreConnectionLostError,
@@ -159,6 +160,11 @@ class SecureGatewayAdapter:
                     methods=["GET"],
                 ),
                 Route("/v1/tasks/{task_id:str}", self._get_task, methods=["GET"]),
+                Route(
+                    "/v1/tasks/{task_id:str}/events",
+                    self._task_events,
+                    methods=["GET"],
+                ),
                 Route(
                     "/v1/tasks/{task_id:str}/cancel",
                     self._cancel_task,
@@ -427,6 +433,28 @@ class SecureGatewayAdapter:
         except Exception as exc:
             return self._core_error(exc)
         return JSONResponse({"task": task.model_dump(mode="json")})
+
+    async def _task_events(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=120)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        task_id = self._path_identifier(request, "task_id")
+        if task_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            query = TaskEventQuery.model_validate(dict(request.query_params))
+            events = await self._core.task_events(
+                authenticated.device.principal_id,
+                task_id,
+                after_seq=query.after_seq,
+            )
+        except ValidationError:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse(
+            {"events": [event.model_dump(mode="json") for event in events]}
+        )
 
     async def _cancel_task(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=30)
