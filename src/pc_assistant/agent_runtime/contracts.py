@@ -147,6 +147,7 @@ class ArtifactUploadRequest(ContractModel):
     media_type: Annotated[NonEmptyString, StringConstraints(max_length=128)] = (
         "image/jpeg"
     )
+    name: Annotated[str, StringConstraints(max_length=160)] = ""
     caption: Annotated[str, StringConstraints(max_length=1000)] = ""
 
 

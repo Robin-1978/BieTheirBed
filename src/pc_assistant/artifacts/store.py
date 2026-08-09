@@ -23,6 +23,35 @@ from pc_assistant.sqlite_schema import require_exact_table
 Direction = Literal["inbound", "outbound"]
 Ownership = Literal["borrowed", "managed", "generated"]
 Retention = Literal["temporary", "session", "persistent"]
+_TEXT_FILE_SUFFIXES = frozenset(
+    {
+        ".c",
+        ".cc",
+        ".conf",
+        ".cpp",
+        ".csv",
+        ".go",
+        ".h",
+        ".hpp",
+        ".html",
+        ".ini",
+        ".java",
+        ".js",
+        ".json",
+        ".log",
+        ".md",
+        ".py",
+        ".rs",
+        ".sh",
+        ".sql",
+        ".toml",
+        ".ts",
+        ".txt",
+        ".xml",
+        ".yaml",
+        ".yml",
+    }
+)
 
 
 @dataclass
@@ -225,16 +254,25 @@ class ArtifactStore:
         cleaned = "".join(
             ch for ch in Path(name).name if ch.isalnum() or ch in "._- "
         ).strip()
+        if cleaned in {".", ".."}:
+            cleaned = ""
         return cleaned[:160] or "artifact.bin"
 
     @staticmethod
     def _decode_data_url(data_url: str, fallback_media_type: str) -> tuple[bytes, str]:
-        if not data_url.startswith("data:image/") or "," not in data_url:
-            raise ValueError("Artifact must be an image data URL")
+        if not data_url.startswith("data:") or "," not in data_url:
+            raise ValueError("Artifact must be a data URL")
         metadata, encoded = data_url.split(",", 1)
-        if ";base64" not in metadata:
+        metadata_parts = metadata[5:].split(";")
+        if "base64" not in metadata_parts[1:]:
             raise ValueError("Artifact data URL must use base64 encoding")
-        media_type = metadata[5:].split(";", 1)[0] or fallback_media_type
+        media_type = metadata_parts[0] or fallback_media_type
+        if (
+            len(media_type) > 128
+            or "/" not in media_type
+            or any(character.isspace() for character in media_type)
+        ):
+            raise ValueError("Artifact media type is invalid")
         try:
             data = base64.b64decode(encoded, validate=True)
         except Exception as exc:
@@ -319,7 +357,7 @@ class ArtifactStore:
         return entry
 
     # ------------------------------------------------------------------
-    # Inbound image artifacts
+    # Inbound artifacts
     # ------------------------------------------------------------------
 
     def put_data_url(
@@ -328,15 +366,26 @@ class ArtifactStore:
         data_url: str,
         *,
         media_type: str = "image/jpeg",
+        name: str = "",
         source: str = "upload",
         caption: str = "",
     ) -> dict[str, Any]:
         data, detected_media = self._decode_data_url(data_url, media_type)
         if not data or len(data) > self._max_bytes:
             raise ValueError(f"Artifact size must be between 1 and {self._max_bytes} bytes")
-        detected_media, suffix, width, height = self._detect_image(data, detected_media)
-        if width <= 0 or height <= 0:
-            raise ValueError("Artifact is not a supported image")
+        safe_name = self._safe_name(name) if name else ""
+        width = height = 0
+        if detected_media.startswith("image/"):
+            detected_media, suffix, width, height = self._detect_image(
+                data,
+                detected_media,
+            )
+            if width <= 0 or height <= 0:
+                raise ValueError("Artifact is not a supported image")
+        else:
+            suffix = Path(safe_name).suffix
+            if not suffix:
+                suffix = mimetypes.guess_extension(detected_media) or ".bin"
         directory = self.root / self._session_key(session_id) / "inbound"
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         directory.chmod(0o700)
@@ -352,12 +401,13 @@ class ArtifactStore:
             direction="inbound",
             ownership="managed",
             retention="session",
+            name=safe_name,
             media_type=detected_media,
             width=width,
             height=height,
             content_sha256=hashlib.sha256(data).hexdigest(),
         )
-        return self._image_ref(entry, source=source, caption=caption)
+        return self._inbound_ref(entry, source=source, caption=caption)
 
     def register_path(
         self,
@@ -392,12 +442,17 @@ class ArtifactStore:
             height=height,
             content_sha256=hashlib.sha256(data).hexdigest(),
         )
-        return self._image_ref(entry, source=source, caption=caption)
+        return self._inbound_ref(entry, source=source, caption=caption)
 
     @staticmethod
-    def _image_ref(entry: _Artifact, *, source: str, caption: str = "") -> dict[str, Any]:
+    def _inbound_ref(
+        entry: _Artifact,
+        *,
+        source: str,
+        caption: str = "",
+    ) -> dict[str, Any]:
         ref: dict[str, Any] = {
-            "type": "image_ref",
+            "type": "image_ref" if entry.kind == "image" else "file_ref",
             "artifact_id": entry.artifact_id,
             "kind": entry.kind,
             "name": entry.name,
@@ -496,6 +551,50 @@ class ArtifactStore:
         encoded = base64.b64encode(data).decode("ascii")
         return f"data:{entry.media_type};base64,{encoded}"
 
+    def read_text(
+        self,
+        session_id: str,
+        artifact_id: str,
+        *,
+        max_bytes: int = 512_000,
+    ) -> dict[str, Any]:
+        """Read bounded text from an owned inbound file without exposing its path."""
+        entry = self._get(session_id, artifact_id)
+        if entry.kind != "file":
+            raise ValueError("Artifact is not a file")
+        textual = (
+            entry.media_type.startswith("text/")
+            or entry.media_type
+            in {
+                "application/json",
+                "application/javascript",
+                "application/sql",
+                "application/toml",
+                "application/xml",
+                "application/x-yaml",
+            }
+            or Path(entry.name).suffix.lower() in _TEXT_FILE_SUFFIXES
+        )
+        if not textual:
+            raise ValueError(
+                f"Artifact type is not readable as text: {entry.media_type}"
+            )
+        bounded = max(1, min(max_bytes, 512_000))
+        with entry.path.open("rb") as stream:
+            data = stream.read(bounded + 1)
+        truncated = len(data) > bounded
+        data = data[:bounded]
+        if b"\x00" in data:
+            raise ValueError("Artifact contains binary data")
+        return {
+            "artifact_id": entry.artifact_id,
+            "name": entry.name,
+            "media_type": entry.media_type,
+            "content": data.decode("utf-8", errors="replace"),
+            "size": entry.size,
+            "truncated": truncated,
+        }
+
     def mark_delivered(self, session_id: str, artifact_id: str) -> dict[str, Any]:
         """Acknowledge client delivery; Core retains cleanup authority."""
         entry = self._get(session_id, artifact_id)
@@ -529,6 +628,8 @@ class ArtifactStore:
 
     def hydrate_ref(self, session_id: str, ref: dict[str, Any]) -> dict[str, Any]:
         entry = self._get(session_id, self._ref_id(ref))
+        if entry.kind != "image":
+            raise ValueError("Artifact is not an image")
         current_size = entry.path.stat().st_size
         if current_size != entry.size or current_size > self._max_bytes:
             raise OSError(f"Artifact size changed before hydration: {entry.artifact_id}")
@@ -549,7 +650,10 @@ class ArtifactStore:
         entry = self._get(session_id, artifact_id)
         return {
             "artifact_id": entry.artifact_id,
+            "kind": entry.kind,
+            "name": entry.name,
             "media_type": entry.media_type,
+            "size": entry.size,
             "width": entry.width,
             "height": entry.height,
             "content_sha256": entry.content_sha256,
@@ -560,7 +664,7 @@ class ArtifactStore:
 
     def reference(self, session_id: str, artifact_id: str, *, caption: str = "") -> dict[str, Any]:
         entry = self._get(session_id, artifact_id)
-        return self._image_ref(entry, source="service-upload", caption=caption)
+        return self._inbound_ref(entry, source="service-upload", caption=caption)
 
     def hydrate_messages(
         self, session_id: str, messages: list[dict[str, Any]]
@@ -576,15 +680,24 @@ class ArtifactStore:
                 continue
             resolved: list[dict[str, Any]] = []
             for block in content:
-                if not isinstance(block, dict) or block.get("type") != "image_ref":
+                if not isinstance(block, dict):
                     resolved.append(block)
-                elif index >= latest_user_index:
+                elif block.get("type") == "image_ref" and index >= latest_user_index:
                     resolved.append(self.hydrate_ref(session_id, block))
-                else:
+                elif block.get("type") == "image_ref":
                     resolved.append({
                         "type": "text",
                         "text": f"[historical image reference: {self._ref_id(block)}]",
                     })
+                elif block.get("type") == "file_ref":
+                    resolved.append(
+                        {
+                            "type": "text",
+                            "text": self._file_manifest(session_id, block),
+                        }
+                    )
+                else:
+                    resolved.append(block)
             message["content"] = resolved
         return hydrated
 
@@ -598,7 +711,18 @@ class ArtifactStore:
                 continue
             resolved: list[dict[str, Any]] = []
             for block in content:
-                if not isinstance(block, dict) or block.get("type") != "image_ref":
+                if not isinstance(block, dict):
+                    resolved.append(block)
+                    continue
+                if block.get("type") == "file_ref":
+                    resolved.append(
+                        {
+                            "type": "text",
+                            "text": self._file_manifest(session_id, block),
+                        }
+                    )
+                    continue
+                if block.get("type") != "image_ref":
                     resolved.append(block)
                     continue
                 artifact_id = self._ref_id(block)
@@ -624,6 +748,29 @@ class ArtifactStore:
                 resolved.append({"type": "text", "text": line + "]"})
             message["content"] = resolved
         return manifested
+
+    def _file_manifest(self, session_id: str, block: dict[str, Any]) -> str:
+        artifact_id = self._ref_id(block)
+        try:
+            metadata = self.metadata(session_id, artifact_id)
+        except KeyError:
+            metadata = {
+                "artifact_id": artifact_id,
+                "name": block.get("name", "file"),
+                "media_type": block.get("media_type", "unknown"),
+                "size": block.get("size", 0),
+            }
+        caption = str(block.get("caption", "")).strip()
+        line = (
+            "[available file: "
+            f"artifact_id={metadata['artifact_id']}; "
+            f"name={metadata['name']}; "
+            f"media_type={metadata['media_type']}; "
+            f"size={metadata['size']} bytes"
+        )
+        if caption:
+            line += f"; caption={caption}"
+        return line + "; use read_artifact to inspect text content]"
 
     # ------------------------------------------------------------------
     # Lifecycle

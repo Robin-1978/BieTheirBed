@@ -55,6 +55,7 @@ class ArtifactService:
                 owned.session_handle,
                 request.data_url,
                 media_type=request.media_type,
+                name=request.name,
                 source="core-api-upload",
                 caption=request.caption,
             )

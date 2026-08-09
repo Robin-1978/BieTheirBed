@@ -24,6 +24,7 @@ DATA_URL = (
     "data:image/png;base64,"
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
 )
+TEXT_DATA_URL = "data:text/plain;base64,SGVsbG8sIEtub2Eh"
 
 
 def _service(tmp_path: Path) -> tuple[ArtifactService, RuntimeSessionRepository]:
@@ -52,6 +53,26 @@ async def test_upload_is_scoped_and_returns_bounded_reference(tmp_path: Path) ->
     assert result.media_type == "image/png"
     assert result.visibility == "agent"
     assert "base64" not in result.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_upload_preserves_owned_file_name_and_type(tmp_path: Path) -> None:
+    service, sessions = _service(tmp_path)
+    scope = sessions.create("principal-a")
+
+    result = await service.upload(
+        scope,
+        ArtifactUploadRequest(
+            data_url=TEXT_DATA_URL,
+            media_type="text/plain",
+            name="notes.txt",
+            caption="meeting notes",
+        ),
+    )
+
+    assert result.kind == "file"
+    assert result.name == "notes.txt"
+    assert result.media_type == "text/plain"
 
 
 @pytest.mark.asyncio

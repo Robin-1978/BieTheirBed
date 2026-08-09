@@ -89,10 +89,25 @@ def test_expired_attachment_is_deleted(tmp_path):
     assert not files[0].exists()
 
 
-def test_rejects_non_image_or_invalid_base64(tmp_path):
+def test_accepts_named_file_and_rejects_invalid_base64(tmp_path):
     store = ArtifactStore(tmp_path / "attachments")
-    with pytest.raises(ValueError):
-        store.put_data_url("s", "data:text/plain;base64,AAAA")
+    ref = store.put_data_url(
+        "s",
+        "data:text/plain;base64,5bCP6K+6",
+        name="notes.txt",
+    )
+
+    assert ref["type"] == "file_ref"
+    assert ref["kind"] == "file"
+    assert ref["name"] == "notes.txt"
+    assert store.read_text("s", ref["artifact_id"])["content"] == "小诺"
+    hydrated = store.hydrate_messages(
+        "s",
+        [{"role": "user", "content": [ref]}],
+    )
+    assert "available file" in hydrated[0]["content"][0]["text"]
+    assert ref["artifact_id"] in hydrated[0]["content"][0]["text"]
+    assert "read_artifact" in hydrated[0]["content"][0]["text"]
     with pytest.raises(ValueError):
         store.put_data_url("s", "data:image/jpeg;base64,***")
 

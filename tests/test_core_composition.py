@@ -115,7 +115,13 @@ async def test_control_lists_only_principal_profile_tools(tmp_path: Path) -> Non
 
     assert "screenshot" in local_tools
     assert "screenshot" not in remote_tools
-    assert remote_tools == {"currency", "weather", "web_fetch", "web_search"}
+    assert remote_tools == {
+        "currency",
+        "read_artifact",
+        "weather",
+        "web_fetch",
+        "web_search",
+    }
     local_descriptors = {item.name: item for item in local_result.descriptors}
     assert set(local_descriptors) == local_tools
     assert local_descriptors["read_file"].origin_kind == "builtin"
@@ -175,7 +181,13 @@ async def test_tcp_endpoint_separates_local_and_remote_credentials(tmp_path: Pat
 
         assert "screenshot" in local_tools
         assert "screenshot" not in remote_tools
-        assert remote_tools == {"currency", "weather", "web_fetch", "web_search"}
+        assert remote_tools == {
+            "currency",
+            "read_artifact",
+            "weather",
+            "web_fetch",
+            "web_search",
+        }
         assert "screenshot" in channel_tools
         assert "mouse" in channel_tools
     finally:

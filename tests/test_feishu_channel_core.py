@@ -36,6 +36,7 @@ class _CoreClient:
         self.created = 0
         self.cancelled = 0
         self.runs = []
+        self.uploads = []
         self.is_connected = True
 
     async def create_session(self) -> str:
@@ -99,6 +100,10 @@ class _CoreClient:
             final_summary="",
             failure_code="",
         )
+
+    async def upload_artifact(self, session, data_url, **kwargs):
+        self.uploads.append((session, data_url, kwargs))
+        return SimpleNamespace(artifact_id="artifact-file")
 
     async def execute_task(self, session, text, attachments):
         self.runs.append((session, text, attachments))
@@ -362,6 +367,40 @@ async def test_feishu_new_message_is_not_blocked_by_running_task(tmp_path) -> No
     assert client.started == ["第一项", "第二项"]
     client.release.set()
     await asyncio.gather(first, second)
+
+
+@pytest.mark.asyncio
+async def test_feishu_file_is_registered_as_pending_core_artifact(tmp_path) -> None:
+    channel = FeishuChannel(_config(tmp_path))
+    client = _CoreClient()
+    channel._clients["ou-user"] = client
+    channel._sessions["ou-user"] = "session-a"
+    channel._download_file = lambda *_args: (b"hello", "text/plain")
+    channel._add_reaction = lambda *_args: "reaction-a"
+    channel._remove_reaction = lambda *_args: True
+    sent = []
+    channel._send_text = lambda *args: sent.append(args) or True
+
+    await channel._handle_file(
+        "ou-user",
+        "message-file",
+        "file-key",
+        "notes.txt",
+    )
+
+    assert len(client.uploads) == 1
+    session, data_url, options = client.uploads[0]
+    assert session == "session-a"
+    assert data_url == "data:text/plain;base64,aGVsbG8="
+    assert options == {
+        "media_type": "text/plain",
+        "name": "notes.txt",
+        "caption": "notes.txt",
+    }
+    assert channel._pending_attachments["ou-user"][0].artifact_id == (
+        "artifact-file"
+    )
+    assert sent == [("ou-user", "文件已收到：notes.txt\n请继续发送任务。")]
 
 
 @pytest.mark.asyncio
