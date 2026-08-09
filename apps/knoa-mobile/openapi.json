@@ -1930,6 +1930,118 @@
           }
         }
       }
+    },
+    "/v1/device/push": {
+      "put": {
+        "operationId": "registerDevicePush",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterPushRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Push registration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushRegistrationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "unregisterDevicePush",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Push registration removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushRegistrationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2537,6 +2649,46 @@
           }
         },
         "title": "PauseTaskRequest",
+        "type": "object"
+      },
+      "PushRegistrationResponse": {
+        "properties": {
+          "registered": {
+            "title": "Registered",
+            "type": "boolean"
+          },
+          "provider": {
+            "default": "",
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "registered"
+        ],
+        "title": "PushRegistrationResponse",
+        "type": "object"
+      },
+      "RegisterPushRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "provider": {
+            "pattern": "^expo$",
+            "title": "Provider",
+            "type": "string"
+          },
+          "token": {
+            "maxLength": 512,
+            "minLength": 16,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "token"
+        ],
+        "title": "RegisterPushRequest",
         "type": "object"
       },
       "ResolveApprovalRequest": {

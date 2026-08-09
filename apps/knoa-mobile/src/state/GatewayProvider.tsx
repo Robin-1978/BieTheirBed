@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 
 import { GatewayClient } from "@/api/gatewayClient";
 import type { PrincipalTaskEvent } from "@/api/models";
+import { registerPush } from "@/notifications";
 import { authenticateDevice, pairDevice } from "@/security/pairing";
 import {
   clearSession,
@@ -81,6 +82,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         gatewayUrl: device.gatewayUrl,
         sessionToken: token,
       }));
+      void registerPush(client).catch(() => undefined);
     } catch (error) {
       setState((current) => ({
         ...current,

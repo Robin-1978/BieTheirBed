@@ -223,7 +223,14 @@ Gateway device record and are never sent to Core.
 > approval actions, Artifact transfer, Markdown rendering, resumable SSE and
 > Skill/MCP status. A principal-scoped per-Task event replay endpoint was added
 > so cold-started clients can reconstruct timelines and pending approvals without
-> relying on transient connection state. Push provider routing remains next.
+> relying on transient connection state.
+
+> Gateway-owned Push registration and delivery are now implemented. Devices can
+> register or remove only their own Expo token; the dispatcher consumes the
+> standard principal Task event feed with a persisted cursor and emits only
+> approval and terminal notifications containing opaque Task/approval IDs.
+> Device revocation also removes its Push registration. Provider tokens and
+> delivery logic never enter Core.
 
 ## 9. Non-goals
 

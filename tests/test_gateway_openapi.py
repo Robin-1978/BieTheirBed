@@ -45,6 +45,9 @@ def test_gateway_openapi_matches_the_allow_listed_http_surface(tmp_path) -> None
     assert schema["paths"]["/v1/tasks/{task_id}/events"]["get"][
         "operationId"
     ] == "listTaskEvents"
+    assert schema["paths"]["/v1/device/push"]["put"]["operationId"] == (
+        "registerDevicePush"
+    )
 
 
 @pytest.mark.asyncio

@@ -184,6 +184,17 @@ export class GatewayClient {
     return this.json(`/v1/device/audit?after_id=${afterId}&limit=100`);
   }
 
+  async registerPush(token: string): Promise<void> {
+    await this.json("/v1/device/push", {
+      method: "PUT",
+      body: { provider: "expo", token },
+    });
+  }
+
+  async unregisterPush(): Promise<void> {
+    await this.json("/v1/device/push", { method: "DELETE" });
+  }
+
   private async json<T>(
     path: string,
     options: {
