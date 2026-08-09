@@ -32,6 +32,11 @@ The first verifiable client uses Expo + React Native + strict TypeScript:
 This is a product implementation choice, not a new Core dependency. A future
 native or Flutter client can consume the same Gateway contract.
 
+The current Expo 57 dependency graph reports no critical npm advisories. CI
+fails on any future critical advisory; existing upstream moderate/high
+transitive advisories remain tracked until the Expo/Metro ecosystem publishes
+compatible fixes rather than forcing an unverified major downgrade or override.
+
 ## 3. Security model
 
 1. The App generates an Ed25519 private key locally and stores it only in the

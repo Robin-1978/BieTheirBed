@@ -39,7 +39,7 @@ jobs:
         run: python -m pip install -e .
       - name: Install mobile dependencies
         working-directory: apps/knoa-mobile
-        run: npm ci
+        run: npm ci && npm audit --audit-level=critical
       - name: Verify generated Gateway contract
         working-directory: apps/knoa-mobile
         run: npm run contract && git diff --exit-code -- openapi.json src/api/schema.ts
