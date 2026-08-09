@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import time
 from collections import defaultdict, deque
@@ -13,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+from starlette.responses import StreamingResponse
 from starlette.routing import Route
 
 from pc_assistant.config import AppConfig
@@ -99,6 +101,12 @@ class _TaskListQuery(BaseModel):
     cursor: str = Field(default="", max_length=512)
 
 
+class _EventQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    after_id: int = Field(default=0, ge=0, le=9_223_372_036_854_775_807)
+
+
 class _WindowLimiter:
     def __init__(self, *, clock=time.monotonic) -> None:
         self._clock = clock
@@ -134,6 +142,7 @@ class SecureGatewayAdapter:
         authentication: GatewayAuthenticationService | None = None,
         core: GatewayCoreBridge | None = None,
         limiter: _WindowLimiter | None = None,
+        event_heartbeat_seconds: float = 15.0,
     ) -> None:
         if not config.gateway_enabled:
             raise ValueError("SecureGatewayAdapter requires gateway_enabled")
@@ -154,6 +163,8 @@ class SecureGatewayAdapter:
         self._authentication = authentication
         self._core = core or GatewayCoreBridge(config)
         self._limiter = limiter or _WindowLimiter()
+        self._event_heartbeat_seconds = max(0.01, event_heartbeat_seconds)
+        self._active_event_streams: dict[str, int] = defaultdict(int)
         self._server: _EmbeddedUvicornServer | None = None
         self._server_task: asyncio.Task[None] | None = None
         self.app = Starlette(
@@ -167,6 +178,7 @@ class SecureGatewayAdapter:
                 Route("/v1/sessions", self._create_session, methods=["POST"]),
                 Route("/v1/tasks", self._create_task, methods=["POST"]),
                 Route("/v1/tasks", self._list_tasks, methods=["GET"]),
+                Route("/v1/events", self._events, methods=["GET"]),
                 Route("/v1/tasks/{task_id:str}", self._get_task, methods=["GET"]),
                 Route(
                     "/v1/tasks/{task_id:str}/cancel",
@@ -435,24 +447,114 @@ class SecureGatewayAdapter:
             }
         )
 
+    async def _events(self, request: Request) -> JSONResponse | StreamingResponse:
+        authenticated = self._authorize(request, limit=20)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        try:
+            query = _EventQuery.model_validate(dict(request.query_params))
+            after_id = self._event_cursor(request, query.after_id)
+        except (ValidationError, ValueError):
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        device_id = authenticated.device.device_id
+        if self._active_event_streams[device_id] >= 3:
+            return JSONResponse({"error": "too_many_streams"}, status_code=429)
+        self._active_event_streams[device_id] += 1
+        token = self._bearer_token(request)
+        principal_id = authenticated.device.principal_id
+
+        async def stream():
+            iterator = self._core.principal_task_events(
+                principal_id,
+                after_id=after_id,
+            ).__aiter__()
+            pending: asyncio.Task[Any] | None = None
+            try:
+                pending = asyncio.create_task(anext(iterator))
+                while True:
+                    done, _pending = await asyncio.wait(
+                        {pending},
+                        timeout=self._event_heartbeat_seconds,
+                    )
+                    if not done:
+                        if self._authenticate_token(token) is None:
+                            return
+                        yield b": keepalive\n\n"
+                        continue
+                    try:
+                        feed_event = pending.result()
+                    except StopAsyncIteration:
+                        return
+                    except Exception:
+                        logger.warning(
+                            "Secure Gateway event stream lost",
+                            exc_info=True,
+                        )
+                        yield self._sse("error", {"error": "unavailable"})
+                        return
+                    if self._authenticate_token(token) is None:
+                        return
+                    yield self._sse(
+                        feed_event.event.event_type,
+                        {
+                            "feed_event_id": feed_event.feed_event_id,
+                            "event": feed_event.event.model_dump(mode="json"),
+                        },
+                        event_id=feed_event.feed_event_id,
+                    )
+                    pending = asyncio.create_task(anext(iterator))
+            finally:
+                if pending is not None and not pending.done():
+                    pending.cancel()
+                    await asyncio.gather(pending, return_exceptions=True)
+                close = getattr(iterator, "aclose", None)
+                if close is not None:
+                    await close()
+                remaining = self._active_event_streams.get(device_id, 1) - 1
+                if remaining > 0:
+                    self._active_event_streams[device_id] = remaining
+                else:
+                    self._active_event_streams.pop(device_id, None)
+
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-store",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     def _authorize(
         self,
         request: Request,
         *,
         limit: int,
     ) -> AuthenticatedGatewaySession | JSONResponse:
-        authorization = request.headers.get("Authorization", "")
-        scheme, _space, token = authorization.partition(" ")
-        if scheme.lower() != "bearer" or not token:
+        token = self._bearer_token(request)
+        if not token:
             return JSONResponse({"error": "unauthorized"}, status_code=401)
-        try:
-            session = self._authentication.authenticate_session(token)
-        except GatewayAuthenticationRejectedError:
+        session = self._authenticate_token(token)
+        if session is None:
             return JSONResponse({"error": "unauthorized"}, status_code=401)
         key = f"authorized:{request.url.path}:{session.device.device_id}"
         if not self._limiter.allow(key, limit=limit):
             return JSONResponse({"error": "rate_limited"}, status_code=429)
         return session
+
+    def _authenticate_token(self, token: str) -> AuthenticatedGatewaySession | None:
+        try:
+            return self._authentication.authenticate_session(token)
+        except GatewayAuthenticationRejectedError:
+            return None
+
+    @staticmethod
+    def _bearer_token(request: Request) -> str:
+        authorization = request.headers.get("Authorization", "")
+        scheme, space, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not space or not token or " " in token:
+            return ""
+        return token
 
     async def _body(
         self,
@@ -510,6 +612,36 @@ class SecureGatewayAdapter:
             return JSONResponse({"error": "unavailable"}, status_code=503)
         logger.warning("Secure Gateway Core request failed", exc_info=exc)
         return JSONResponse({"error": "unavailable"}, status_code=503)
+
+    @staticmethod
+    def _event_cursor(request: Request, query_after_id: int) -> int:
+        header = request.headers.get("Last-Event-ID", "").strip()
+        if not header:
+            return query_after_id
+        if not header.isascii() or not header.isdecimal():
+            raise ValueError("invalid event cursor")
+        header_id = int(header)
+        if header_id > 9_223_372_036_854_775_807:
+            raise ValueError("invalid event cursor")
+        if query_after_id and query_after_id != header_id:
+            raise ValueError("conflicting event cursors")
+        return header_id
+
+    @staticmethod
+    def _sse(event: str, payload: dict[str, Any], *, event_id: int | None = None) -> bytes:
+        lines = []
+        if event_id is not None:
+            lines.append(f"id: {event_id}")
+        lines.append(f"event: {event}")
+        lines.append(
+            "data: "
+            + json.dumps(
+                payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+        return ("\n".join(lines) + "\n\n").encode("utf-8")
 
     @staticmethod
     def _challenge_response(challenge: Any) -> JSONResponse:
