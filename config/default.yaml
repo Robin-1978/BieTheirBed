@@ -51,3 +51,7 @@ supports_vision: null
 # Dynamic MCP tools are disabled unless a private local config explicitly
 # enables a server and assigns local effect/capability/risk policy per tool.
 mcp_servers: {}
+
+# Additional roots containing Skill package directories. Knoa also loads its
+# packaged built-in Skills and ~/.pc-assistant/skills.
+skill_directories: []

@@ -189,8 +189,9 @@ CLI/TUI 长期保留，用于：
 
 ## 6. Phase A：能力扩展平台
 
-> 进度（2026-08-09）：Phase A 已启动。A1 ExtensionManager 生命周期基础和 A2
-> MCP Streamable HTTP 纵向闭环已完成；Skill Package 与 Connector/Secret 仍待推进。
+> 进度（2026-08-09）：Phase A 已启动。A1 ExtensionManager 生命周期基础、A2
+> MCP Streamable HTTP 纵向闭环和 A3 Skill Package 基础已完成；下一步推进
+> Connector/Secret。
 
 ### 6.1 Skill Package
 
@@ -205,6 +206,10 @@ CLI/TUI 长期保留，用于：
 - 明确的来源、签名或信任级别。
 
 Skill 是能力编排和领域知识，不得绕过 ToolStep 直接执行代码或获得额外权限。
+
+A3 已落地数据型 Skill 包、严格 manifest、包根目录约束、文本资源大小限制、
+工具/权限依赖检查和按请求触发的选择性上下文注入。安装、签名、Secret 引用与
+管理面生命周期留到具备相应信任边界后实现，不提前扩张 manifest。
 
 ### 6.2 MCP Runtime
 

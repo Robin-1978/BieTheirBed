@@ -15,6 +15,7 @@ A personal computer agent with ReAct reasoning, multi-LLM support, tool calling,
 - **Built-in Tools** — Local automation, memory, scheduling, vision observation, screenshots, and managed file preparation
 - **Core Artifact Delivery** — Tools produce opaque artifacts; Feishu/TUI/service clients adapt standard artifact events without channel logic in the Agent
 - **MCP Extension Runtime** — Failure-isolated Streamable HTTP discovery with explicit local tool policy
+- **Selective Skill Packages** — Safe data-only packages activated by request, available tools, and granted capabilities
 - **Safety Guardrails** — Dangerous command blocking, protected paths, user confirmation, typed refusal codes
 - **Idempotency** — Side-effecting tools are protected against duplicate execution on retry
 - **Scoped Memory** — Principal-scoped core/relevant preferences plus session-scoped episodes in SQLite
@@ -294,7 +295,10 @@ src/pc_assistant/
 ├── extensions/
 │   ├── manager.py       # Failure-isolated extension lifecycle
 │   ├── models.py        # Strict local MCP policy configuration
-│   └── mcp.py           # Official MCP Streamable HTTP client and ToolBase adapter
+│   ├── mcp.py           # Official MCP Streamable HTTP client and ToolBase adapter
+│   └── skill.py         # Safe Skill loading, indexing and selective activation
+├── skill_packages/
+│   └── research_report/ # Built-in research workflow instructions
 ├── harness/
 │   ├── verifier.py      # SDB: deterministic verifier (propose→verify→commit)
 │   ├── refusal.py       # Typed refusal codes & Verdict

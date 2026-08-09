@@ -133,6 +133,7 @@ class AppConfig(BaseModel):
     attachment_cleanup_interval_seconds: int = 300
     supports_vision: bool | None = None
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
+    skill_directories: tuple[str, ...] = ()
     source_config_path: str = ""
 
     @model_validator(mode="after")
