@@ -45,4 +45,4 @@ jobs:
         run: npm run contract && git diff --exit-code -- openapi.json src/api/schema.ts
       - name: Typecheck and test mobile workbench
         working-directory: apps/knoa-mobile
-        run: npm run typecheck && npm test && npm run doctor
+        run: npm run typecheck && npm test && npm run doctor && npm run bundle:android
