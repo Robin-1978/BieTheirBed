@@ -25,3 +25,7 @@ platform secure store. The App never stores the Core local service token.
 Expo Push registration becomes active in an EAS development/production build
 with a real project ID. Notifications contain only a category plus opaque Task
 and approval IDs, and open the corresponding `/tasks/<task-id>` route.
+
+The task composer accepts documents, native voice recording and camera capture.
+Voice bytes are uploaded as an Artifact and sent through the Gateway's standard
+transcription endpoint; the App contains no speech-provider integration.

@@ -60,14 +60,16 @@ native or Flutter client can consume the same Gateway contract.
 - `knoa://tasks/<task-id>` route shape through file-based mobile navigation;
 - Expo Push registration, standard approval/terminal notifications and
   notification-to-Task navigation using opaque IDs only;
+- native audio recording routed through Artifact upload and the configured Core
+  transcription capability, plus camera capture that creates a normal
+  multimodal Task;
 - generated OpenAPI TypeScript contract, strict typecheck and unit tests.
 
 ## 5. Next slices
 
-1. Native audio recording and direct transcription/task creation.
-2. OS share-sheet ingress, camera capture and richer Artifact previews.
-3. Offline Task snapshot cache and explicit reconnect diagnostics.
-4. Production EAS project provisioning and real-device Push delivery validation.
+1. OS share-sheet ingress and richer Artifact previews.
+2. Offline Task snapshot cache and explicit reconnect diagnostics.
+3. Production EAS project provisioning and real-device Push delivery validation.
 
 Push tokens, provider credentials and delivery audit remain Gateway-owned. Core
 events remain provider-neutral and contain no mobile links.

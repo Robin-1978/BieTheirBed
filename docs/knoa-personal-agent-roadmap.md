@@ -405,6 +405,9 @@ Task 至少记录：
 > Gateway-owned Expo Push 注册和投递也已接入：只消费标准 Task 事件并持久保存独立
 > cursor，通知只携带类别及不透明 Task/approval ID；App 点击后进入对应任务详情。
 > 设备撤销会同步移除 Push 注册，provider token 与投递逻辑不会进入 Core。
+> App 多模态入口也已补齐第一批：原生录音先上传 Artifact，再调用 Core 配置的标准
+> 转写能力并回填可编辑任务文本；拍照直接生成受同一 Task/Artifact/权限边界管理的
+> 图片任务，移动端没有内嵌语音厂商或视觉执行逻辑。
 
 ### 9.1 第一版范围
 
