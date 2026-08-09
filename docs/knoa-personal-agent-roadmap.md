@@ -378,6 +378,12 @@ Task 至少记录：
 
 ## 9. Phase D：Knoa 移动工作台
 
+> 进度（2026-08-09）：Phase D 已启动，Secure Gateway 的正向设计见
+> `docs/knoa-secure-gateway-design.md`。App 深链在真实 bundle scheme/verified domain
+> 确定前不生成占位地址。D1 身份持久层已完成：独立 owner-only Gateway 数据库、
+> 256 位单次配对 secret、原子消费、Ed25519 公钥格式约束、principal-scoped 设备列表
+> 与即时撤销均已落地；尚未开放网络 listener 或声称完成签名验证。
+
 ### 9.1 第一版范围
 
 - 登录、设备配对和安全连接；

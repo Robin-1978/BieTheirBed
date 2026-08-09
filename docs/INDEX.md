@@ -4,6 +4,7 @@
 
 - [PC Assistant Architecture](architecture.md)
 - [Knoa Personal Agent Product & Capability Roadmap](knoa-personal-agent-roadmap.md)
+- [Knoa Secure Gateway Forward Design](knoa-secure-gateway-design.md)
 - [Knoa Capability Extension Design](knoa-capability-extension-design.md)
 - [Knoa Durable Task Design](knoa-durable-task-design.md)
 
