@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Protocol
 
 from pc_assistant.config import AppConfig
@@ -21,6 +21,7 @@ from pc_assistant.service.credentials import (
     resolve_local_service_token,
 )
 from pc_assistant.tasks import TaskState
+from pc_assistant.tasks import PrincipalTaskEvent
 
 
 class GatewayCoreClient(Protocol):
@@ -63,6 +64,12 @@ class GatewayCoreClient(Protocol):
         *,
         approved: bool,
     ) -> ApprovalResolvedMessage: ...
+
+    def principal_task_events(
+        self,
+        *,
+        after_id: int = 0,
+    ) -> AsyncIterator[PrincipalTaskEvent]: ...
 
     async def disconnect(self) -> None: ...
 
@@ -155,6 +162,16 @@ class GatewayCoreBridge:
     ) -> ApprovalResolvedMessage:
         client = await self._client_for(principal_id)
         return await client.resolve_approval(approval_id, approved=approved)
+
+    async def principal_task_events(
+        self,
+        principal_id: str,
+        *,
+        after_id: int = 0,
+    ) -> AsyncIterator[PrincipalTaskEvent]:
+        client = await self._client_for(principal_id)
+        async for event in client.principal_task_events(after_id=after_id):
+            yield event
 
     async def _client_for(self, principal_id: str) -> GatewayCoreClient:
         lock = self._locks.setdefault(principal_id, asyncio.Lock())

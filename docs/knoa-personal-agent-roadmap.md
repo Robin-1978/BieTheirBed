@@ -386,8 +386,9 @@ Task 至少记录：
 > payload、Ed25519 持有证明、仅存 hash 的短期 opaque session，以及设备撤销后的即时
 > session 拒绝。默认关闭、仅允许 loopback 绑定、严格 JSON/请求体/限流约束的 Gateway
 > 认证 API 也已完成。Gateway 通过独立、principal-scoped Bridge 白名单开放会话创建、
-> Task 创建/列表/详情/取消与权限确认，不接受任意 Core method；下一步是可恢复的标准
-> 事件流与 Artifact 传输。
+> Task 创建/列表/详情/取消与权限确认，不接受任意 Core method。支持 `Last-Event-ID`
+> 续传、心跳重验 session、限制设备并发连接的标准 SSE 事件流也已完成；下一步是
+> Artifact 传输与 TLS 远程部署。
 
 ### 9.1 第一版范围
 

@@ -7,9 +7,17 @@ import pytest
 
 from pc_assistant.config import AppConfig
 from pc_assistant.gateway.adapter import SecureGatewayAdapter
+from pc_assistant.gateway.auth import GatewayAuthenticationRejectedError
 from pc_assistant.gateway.identity import PairingGrantRejectedError
 from pc_assistant.service.core_api import TaskSnapshot
-from pc_assistant.tasks import ApprovalState, TaskCancelResult, TaskState
+from pc_assistant.tasks import (
+    ApprovalState,
+    PrincipalTaskEvent,
+    TaskCancelResult,
+    TaskEvent,
+    TaskEventPayload,
+    TaskState,
+)
 
 
 def _config(tmp_path) -> AppConfig:
@@ -116,6 +124,20 @@ class _Core:
             state=ApprovalState.APPROVED,
         )
 
+    async def principal_task_events(self, principal_id, *, after_id):
+        self.calls.append(("principal_task_events", principal_id, after_id))
+        yield PrincipalTaskEvent(
+            feed_event_id=after_id + 1,
+            principal_id=principal_id,
+            event=TaskEvent(
+                task_id="task-a",
+                event_seq=3,
+                event_type="content_delta",
+                payload=TaskEventPayload(content="你好"),
+                occurred_at=3.0,
+            ),
+        )
+
 @pytest.mark.asyncio
 async def test_gateway_adapter_exposes_bounded_authentication_flow(tmp_path) -> None:
     adapter = SecureGatewayAdapter(
@@ -210,6 +232,58 @@ async def test_gateway_adapter_rejects_unauthenticated_core_commands(tmp_path) -
 
     assert response.status_code == 401
     assert core.calls == []
+
+
+@pytest.mark.asyncio
+async def test_gateway_adapter_streams_resumable_standard_task_events(tmp_path) -> None:
+    core = _Core()
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=_Authentication(),
+        core=core,
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {
+        "Authorization": "Bearer " + "v1.gws-a." + "t" * 43,
+        "Last-Event-ID": "40",
+    }
+    async with httpx.AsyncClient(transport=transport, base_url="http://gateway.local") as http:
+        response = await http.get("/v1/events", headers=headers)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "id: 41\n" in response.text
+    assert "event: content_delta\n" in response.text
+    assert '"content":"你好"' in response.text
+    assert core.calls == [("principal_task_events", "personal:owner", 40)]
+
+
+@pytest.mark.asyncio
+async def test_gateway_event_stream_stops_when_device_session_is_revoked(tmp_path) -> None:
+    class _RevokedAuthentication(_Authentication):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def authenticate_session(self, token):
+            self.calls += 1
+            if self.calls > 1:
+                raise GatewayAuthenticationRejectedError("revoked")
+            return super().authenticate_session(token)
+
+    authentication = _RevokedAuthentication()
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=authentication,
+        core=_Core(),
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
+    async with httpx.AsyncClient(transport=transport, base_url="http://gateway.local") as http:
+        response = await http.get("/v1/events", headers=headers)
+
+    assert response.status_code == 200
+    assert response.content == b""
+    assert authentication.calls == 2
 
 
 @pytest.mark.asyncio

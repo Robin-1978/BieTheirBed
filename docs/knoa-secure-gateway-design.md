@@ -187,6 +187,11 @@ Gateway device record and are never sent to Core.
 - bounded Artifact upload/download;
 - device audit and immediate revocation checks.
 
+> Progress: the principal Task feed is exposed as bounded standard SSE with
+> `Last-Event-ID` resumption, stable Core event names, per-device connection
+> limits and session revalidation before delivery and on heartbeats. TLS/public
+> binding and Artifact transfer remain disabled.
+
 ### D4 — mobile delivery
 
 - Push routing;
