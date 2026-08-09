@@ -25,6 +25,8 @@ from pc_assistant.gateway.protocol import (
     PairCompleteRequest,
     PairCompleteResponse,
     PauseTaskRequest,
+    PushRegistrationResponse,
+    RegisterPushRequest,
     ResolveApprovalRequest,
     ResumeTaskRequest,
     RetryTaskRequest,
@@ -58,6 +60,8 @@ _MODELS: tuple[type[BaseModel], ...] = (
     TaskListResponse,
     CancelTaskRequest,
     PauseTaskRequest,
+    RegisterPushRequest,
+    PushRegistrationResponse,
     ResumeTaskRequest,
     RetryTaskRequest,
     TaskCommandResponse,
@@ -526,6 +530,31 @@ def gateway_openapi_schema() -> dict[str, Any]:
                         **_errors("400", "401", "429"),
                     },
                 }
+            },
+            "/v1/device/push": {
+                "put": {
+                    "operationId": "registerDevicePush",
+                    "security": bearer,
+                    "requestBody": _json_body(RegisterPushRequest),
+                    "responses": {
+                        "200": _json_response(
+                            "Push registration",
+                            PushRegistrationResponse,
+                        ),
+                        **_errors("400", "401", "415", "429"),
+                    },
+                },
+                "delete": {
+                    "operationId": "unregisterDevicePush",
+                    "security": bearer,
+                    "responses": {
+                        "200": _json_response(
+                            "Push registration removed",
+                            PushRegistrationResponse,
+                        ),
+                        **_errors("401", "429"),
+                    },
+                },
             },
         },
         "components": {

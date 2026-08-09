@@ -1,10 +1,16 @@
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { useEffect } from "react";
 
+import { installNotificationNavigation } from "@/notifications";
 import { GatewayProvider } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
 export default function RootLayout() {
+  useEffect(() => {
+    const subscription = installNotificationNavigation();
+    return () => subscription.remove();
+  }, []);
   return (
     <GatewayProvider>
       <StatusBar style="dark" />

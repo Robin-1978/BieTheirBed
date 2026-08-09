@@ -21,3 +21,7 @@ pca gateway pair --ttl 300
 
 The mobile private key and short-lived session token are stored through the
 platform secure store. The App never stores the Core local service token.
+
+Expo Push registration becomes active in an EAS development/production build
+with a real project ID. Notifications contain only a category plus opaque Task
+and approval IDs, and open the corresponding `/tasks/<task-id>` route.

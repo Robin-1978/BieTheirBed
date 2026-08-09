@@ -28,6 +28,7 @@ from pc_assistant.artifacts import ArtifactRef
 from pc_assistant.gateway.adapter import SecureGatewayAdapter
 from pc_assistant.gateway.auth import GatewayAuthenticationRejectedError
 from pc_assistant.gateway.identity import PairingGrantRejectedError
+from pc_assistant.gateway.push import GatewayPushRepository
 from pc_assistant.service.core_api import TaskSnapshot
 from pc_assistant.tasks import (
     ApprovalState,
@@ -492,6 +493,33 @@ async def test_gateway_adapter_exposes_current_device_audit_without_secrets(
     assert token not in serialized
     assert "personal:owner" not in serialized
     assert "dev-a" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_gateway_adapter_registers_and_removes_current_device_push(tmp_path) -> None:
+    repository = GatewayPushRepository(tmp_path / "data" / "gateway.db")
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=_Authentication(),
+        core=_Core(),
+        push_repository=repository,
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://gateway.local",
+    ) as http:
+        registered = await http.put(
+            "/v1/device/push",
+            headers=headers,
+            json={"provider": "expo", "token": "ExponentPushToken[token-a]"},
+        )
+        removed = await http.delete("/v1/device/push", headers=headers)
+
+    assert registered.json() == {"registered": True, "provider": "expo"}
+    assert removed.json() == {"registered": False, "provider": ""}
+    assert repository.list_for_principal("personal:owner") == ()
 
 
 @pytest.mark.asyncio

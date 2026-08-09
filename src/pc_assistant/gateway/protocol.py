@@ -66,6 +66,11 @@ class RetryTaskRequest(PauseTaskRequest):
     pass
 
 
+class RegisterPushRequest(GatewayRequest):
+    provider: str = Field(pattern="^expo$")
+    token: str = Field(min_length=16, max_length=512)
+
+
 class ResolveApprovalRequest(GatewayRequest):
     approved: bool
 
@@ -200,3 +205,8 @@ class AuditEventResponse(BaseModel):
 
 class AuditListResponse(BaseModel):
     events: tuple[AuditEventResponse, ...]
+
+
+class PushRegistrationResponse(BaseModel):
+    registered: bool
+    provider: str = ""

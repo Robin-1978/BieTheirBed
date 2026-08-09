@@ -402,6 +402,9 @@ Task 至少记录：
 > 列表与详情、任务控制、确认、文件上传下载、Markdown、SSE 游标续传、单 Task 事件
 > 回放、Skill/MCP/Tool 状态和本设备审计。当前机器没有 Flutter/Dart，因此优先交付
 > 可立即 typecheck/test/doctor 的双端工程；客户端边界仍完全由 Gateway 协议决定。
+> Gateway-owned Expo Push 注册和投递也已接入：只消费标准 Task 事件并持久保存独立
+> cursor，通知只携带类别及不透明 Task/approval ID；App 点击后进入对应任务详情。
+> 设备撤销会同步移除 Push 注册，provider token 与投递逻辑不会进入 Core。
 
 ### 9.1 第一版范围
 

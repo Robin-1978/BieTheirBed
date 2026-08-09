@@ -36,6 +36,12 @@ from pc_assistant.gateway.identity import (
     GatewayIdentityRepository,
     PairingGrantRejectedError,
 )
+from pc_assistant.gateway.push import (
+    ExpoPushTransport,
+    GatewayPushDispatcher,
+    GatewayPushRepository,
+    PushTransport,
+)
 from pc_assistant.network_tls import is_loopback_host
 from pc_assistant.runtime import RuntimePaths
 from pc_assistant.gateway.protocol import (
@@ -51,6 +57,7 @@ from pc_assistant.gateway.protocol import (
     PairChallengeRequest,
     PairCompleteRequest,
     PauseTaskRequest,
+    RegisterPushRequest,
     ResolveApprovalRequest,
     ResumeTaskRequest,
     RetryTaskRequest,
@@ -105,6 +112,8 @@ class SecureGatewayAdapter:
         core: GatewayCoreBridge | None = None,
         limiter: _WindowLimiter | None = None,
         audit: GatewayAuditRepository | None = None,
+        push_repository: GatewayPushRepository | None = None,
+        push_transport: PushTransport | None = None,
         event_heartbeat_seconds: float = 15.0,
     ) -> None:
         if not config.gateway_enabled:
@@ -135,6 +144,13 @@ class SecureGatewayAdapter:
         self._authentication = authentication
         self._audit = audit or GatewayAuditRepository(database)
         self._core = core or GatewayCoreBridge(config)
+        self._push_repository = push_repository or GatewayPushRepository(database)
+        self._push_dispatcher = GatewayPushDispatcher(
+            config.owner_principal_id,
+            self._core,
+            self._push_repository,
+            push_transport or ExpoPushTransport(),
+        )
         self._limiter = limiter or _WindowLimiter()
         self._event_heartbeat_seconds = max(0.01, event_heartbeat_seconds)
         self._active_event_streams: dict[str, int] = defaultdict(int)
@@ -194,6 +210,11 @@ class SecureGatewayAdapter:
                 Route("/v1/tools", self._list_tools, methods=["GET"]),
                 Route("/v1/device/audit", self._device_audit, methods=["GET"]),
                 Route(
+                    "/v1/device/push",
+                    self._device_push,
+                    methods=["PUT", "DELETE"],
+                ),
+                Route(
                     "/v1/approvals/{approval_id:str}/resolve",
                     self._resolve_approval,
                     methods=["POST"],
@@ -238,6 +259,7 @@ class SecureGatewayAdapter:
                         self._config.gateway_host,
                         self.bound_port,
                     )
+                    self._push_dispatcher.start()
                     return
                 if task.done():
                     await task
@@ -249,6 +271,7 @@ class SecureGatewayAdapter:
             raise
 
     async def stop(self) -> None:
+        await self._push_dispatcher.stop()
         server, self._server = self._server, None
         task, self._server_task = self._server_task, None
         if server is not None:
@@ -621,6 +644,48 @@ class SecureGatewayAdapter:
                     for event in events
                 ]
             }
+        )
+
+    async def _device_push(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=30)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        device = authenticated.device
+        if request.method == "DELETE":
+            await asyncio.to_thread(
+                self._push_repository.unregister,
+                device.principal_id,
+                device.device_id,
+            )
+            self._record_audit(
+                "push_unregistered",
+                request=request,
+                device_id=device.device_id,
+                principal_id=device.principal_id,
+            )
+            return JSONResponse({"registered": False, "provider": ""})
+        parsed = await self._parse_body(request, RegisterPushRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            registration = await asyncio.to_thread(
+                self._push_repository.register,
+                device.device_id,
+                device.principal_id,
+                parsed.provider,
+                parsed.token,
+            )
+        except ValueError:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        self._record_audit(
+            "push_registered",
+            request=request,
+            device_id=device.device_id,
+            principal_id=device.principal_id,
+            detail_code=registration.provider,
+        )
+        return JSONResponse(
+            {"registered": True, "provider": registration.provider}
         )
 
     async def _resolve_approval(self, request: Request) -> JSONResponse:
