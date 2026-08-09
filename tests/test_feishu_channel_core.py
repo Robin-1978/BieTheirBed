@@ -69,6 +69,37 @@ class _CoreClient:
             result=TaskCancelResult(accepted=True, state=TaskState.RUNNING),
         )
 
+    async def cancel_task(self, task_id) -> TaskCancelResultMessage:
+        self.cancelled += 1
+        self.cancelled_task_id = task_id
+        return TaskCancelResultMessage(
+            request_id="cancel-request",
+            result=TaskCancelResult(accepted=True, state=TaskState.RUNNING),
+        )
+
+    async def list_tasks(self, *, limit):
+        assert limit == 10
+        return SimpleNamespace(
+            tasks=(
+                SimpleNamespace(
+                    task_id="task-a",
+                    state=TaskState.RUNNING,
+                    goal="整理项目计划",
+                ),
+            ),
+            next_cursor="",
+        )
+
+    async def get_task(self, task_id):
+        assert task_id == "task-a"
+        return SimpleNamespace(
+            task_id=task_id,
+            state=TaskState.RUNNING,
+            goal="整理项目计划",
+            final_summary="",
+            failure_code="",
+        )
+
     async def execute_task(self, session, text, attachments):
         self.runs.append((session, text, attachments))
         yield TaskEvent(
@@ -248,6 +279,89 @@ async def test_feishu_routes_text_through_core_client(tmp_path) -> None:
     ]
     assert channel._sessions == {"ou-user": "session-1"}
     assert (tmp_path / "data" / "feishu_sessions.json").is_file()
+
+
+@pytest.mark.asyncio
+async def test_feishu_lists_inspects_and_stops_owned_tasks(tmp_path) -> None:
+    channel = FeishuChannel(_config(tmp_path))
+    client = _CoreClient()
+    channel._clients["ou-user"] = client
+    cards = []
+    texts = []
+    channel._send_card = lambda *args: cards.append(args) or True
+    channel._send_text = lambda *args: texts.append(args) or True
+
+    await channel._run_text("ou-user", "/tasks")
+    await channel._run_text("ou-user", "/task task-a")
+    await channel._run_text("ou-user", "/stop task-a")
+
+    assert len(cards) == 2
+    assert "整理项目计划" in cards[0][1]
+    assert "`task-a`" in cards[0][1]
+    assert "进行中" in cards[1][1]
+    assert texts == [("ou-user", "正在停止任务。")]
+    assert client.cancelled_task_id == "task-a"
+
+
+@pytest.mark.asyncio
+async def test_feishu_new_message_is_not_blocked_by_running_task(tmp_path) -> None:
+    class ConcurrentClient:
+        is_connected = True
+
+        def __init__(self) -> None:
+            self.started = []
+            self.both_started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def execute_task(self, _session, text, _attachments):
+            task_id = f"task-{len(self.started) + 1}"
+            self.started.append(text)
+            if len(self.started) == 2:
+                self.both_started.set()
+            yield TaskEvent(
+                task_id=task_id,
+                event_seq=1,
+                occurred_at=1.0,
+                event_type="task_created",
+                payload=TaskEventPayload(state=TaskState.QUEUED),
+            )
+            await self.release.wait()
+            yield TaskEvent(
+                task_id=task_id,
+                event_seq=2,
+                occurred_at=2.0,
+                event_type="final_output",
+                payload=TaskEventPayload(content=f"{text} 完成"),
+            )
+            yield TaskEvent(
+                task_id=task_id,
+                event_seq=3,
+                occurred_at=3.0,
+                event_type="completed",
+                payload=TaskEventPayload(state=TaskState.COMPLETED),
+            )
+
+    channel = FeishuChannel(_config(tmp_path))
+    client = ConcurrentClient()
+    channel._clients["ou-user"] = client
+    channel._sessions["ou-user"] = "session-a"
+    channel._send_card_returning_id = lambda *_args: "card-a"
+    channel._update_card = lambda *_args: True
+    channel._add_reaction = lambda *_args: "reaction-a"
+    channel._remove_reaction = lambda *_args: True
+
+    first = asyncio.create_task(
+        channel._handle_text("ou-user", "第一项", "message-1")
+    )
+    await asyncio.sleep(0)
+    second = asyncio.create_task(
+        channel._handle_text("ou-user", "第二项", "message-2")
+    )
+    await asyncio.wait_for(client.both_started.wait(), timeout=1.0)
+
+    assert client.started == ["第一项", "第二项"]
+    client.release.set()
+    await asyncio.gather(first, second)
 
 
 @pytest.mark.asyncio
@@ -471,7 +585,7 @@ def test_feishu_streaming_card_uses_native_v2_confirmation_buttons() -> None:
 
 
 @pytest.mark.asyncio
-async def test_feishu_stop_bypasses_busy_user_lock(tmp_path) -> None:
+async def test_feishu_stop_cancels_current_core_task(tmp_path) -> None:
     channel = FeishuChannel(_config(tmp_path))
     client = _CoreClient()
     channel._clients["ou-user"] = client
@@ -480,15 +594,7 @@ async def test_feishu_stop_bypasses_busy_user_lock(tmp_path) -> None:
     channel._send_text = lambda *args: sent.append(args) or True
     channel._add_reaction = lambda *_args: "reaction-a"
     channel._remove_reaction = lambda *args: reactions.append(args)
-    lock = channel._user_locks.setdefault("ou-user", asyncio.Lock())
-    await lock.acquire()
-    try:
-        await asyncio.wait_for(
-            channel._handle_text("ou-user", "/stop", "message-stop"),
-            timeout=0.2,
-        )
-    finally:
-        lock.release()
+    await channel._handle_text("ou-user", "/stop", "message-stop")
 
     assert client.cancelled == 1
     assert sent == [("ou-user", "正在停止当前任务。")]

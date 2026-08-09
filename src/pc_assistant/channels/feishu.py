@@ -51,6 +51,15 @@ _PROGRESS_TIMELINE_CHARS = (
 _TEXT_MESSAGE_CHARS = 4000
 _PRINCIPAL_WATCH_RETRY_SECONDS = 2.0
 _TASK_TERMINAL_EVENT_TYPES = frozenset({"completed", "failed", "cancelled"})
+_TASK_STATE_LABELS = {
+    TaskState.QUEUED: "排队中",
+    TaskState.RUNNING: "进行中",
+    TaskState.WAITING_APPROVAL: "等待确认",
+    TaskState.PAUSED: "已暂停",
+    TaskState.COMPLETED: "已完成",
+    TaskState.FAILED: "出错",
+    TaskState.CANCELLED: "已停止",
+}
 
 for _proxy_name in ("NO_PROXY", "no_proxy"):
     _configured = os.environ.get(_proxy_name, "")
@@ -849,7 +858,6 @@ class FeishuChannel:
         self._principal_watcher_started_at: dict[str, float] = {}
         self._foreground_task_ids: set[str] = set()
         self._background_approval_decisions: dict[str, bool] = {}
-        self._user_locks: dict[str, asyncio.Lock] = {}
         self._pending_attachments: dict[str, list[ArtifactInputRef]] = {}
         self._active_task_presentations: dict[str, _ActiveTaskPresentation] = {}
         self._active_session_presentations: dict[
@@ -1177,16 +1185,14 @@ class FeishuChannel:
                 )
                 return
 
-            lock = self._user_locks.setdefault(open_id, asyncio.Lock())
-            async with lock:
-                try:
-                    await self._run_text(open_id, text)
-                except Exception as exc:
-                    logger.exception(
-                        "Feishu Core Task failed principal=%s",
-                        _principal_for_log(open_id),
-                    )
-                    await asyncio.to_thread(
+            try:
+                await self._run_text(open_id, text)
+            except Exception as exc:
+                logger.exception(
+                    "Feishu Core Task failed principal=%s",
+                    _principal_for_log(open_id),
+                )
+                await asyncio.to_thread(
                     self._send_text,
                     open_id,
                     f"处理失败：{type(exc).__name__}",
@@ -1232,14 +1238,101 @@ class FeishuChannel:
 
     async def _run_text(self, open_id: str, text: str) -> None:
         client = await self._client_for(open_id)
-        if text.strip().lower() == "/new":
+        stripped = text.strip()
+        command, _separator, argument = stripped.partition(" ")
+        command = command.lower()
+        argument = argument.strip()
+        if command == "/new" and not argument:
             session = await client.create_session()
             self._bind_session(open_id, session)
             await asyncio.to_thread(self._send_text, open_id, "已创建新会话")
             return
 
+        if command == "/tasks" and not argument:
+            listing = await client.list_tasks(limit=10)
+            if not listing.tasks:
+                await asyncio.to_thread(self._send_text, open_id, "暂无任务。")
+                return
+            lines = []
+            for task in listing.tasks:
+                goal = " ".join(task.goal.split())
+                if len(goal) > 100:
+                    goal = goal[:99] + "…"
+                lines.append(
+                    f"- **{_TASK_STATE_LABELS[task.state]}** `{task.task_id}`\n"
+                    f"  {goal}"
+                )
+            if listing.next_cursor:
+                lines.append("\n仅显示最近 10 个任务。")
+            await asyncio.to_thread(
+                self._send_card,
+                open_id,
+                "\n".join(lines),
+                "blue",
+                "任务",
+            )
+            return
+
+        if command == "/task":
+            if not argument:
+                await asyncio.to_thread(
+                    self._send_text,
+                    open_id,
+                    "用法：/task <任务 ID>",
+                )
+                return
+            try:
+                task = await client.get_task(argument)
+            except CoreRequestError as exc:
+                if exc.code == "task_not_found":
+                    await asyncio.to_thread(
+                        self._send_text,
+                        open_id,
+                        "未找到该任务。",
+                    )
+                    return
+                raise
+            lines = [
+                f"状态：**{_TASK_STATE_LABELS[task.state]}**",
+                f"任务：`{task.task_id}`",
+                "",
+                task.goal,
+            ]
+            outcome = task.final_summary or task.failure_code
+            if outcome:
+                lines.extend(["", "---", "", outcome])
+            await asyncio.to_thread(
+                self._send_card,
+                open_id,
+                "\n".join(lines),
+                "blue" if task.state is not TaskState.FAILED else "red",
+                "任务",
+            )
+            return
+
+        if command in {"/stop", "/cancel"} and argument:
+            try:
+                result = await client.cancel_task(argument)
+            except CoreRequestError as exc:
+                if exc.code == "task_not_found":
+                    await asyncio.to_thread(
+                        self._send_text,
+                        open_id,
+                        "未找到该任务。",
+                    )
+                    return
+                raise
+            message = (
+                "正在停止任务。"
+                if result.result.accepted
+                and result.result.state not in TERMINAL_TASK_STATES
+                else "任务已经结束。"
+            )
+            await asyncio.to_thread(self._send_text, open_id, message)
+            return
+
         session = await self._session_for(open_id)
-        if text.strip().lower() == "/status":
+        if command == "/status" and not argument:
             status = await client.status(session)
             details = status.details
             prompt_tokens = int(details.get("prompt_tokens") or 0)
