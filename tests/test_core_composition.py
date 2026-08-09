@@ -11,7 +11,6 @@ from pc_assistant.agent_runtime.composition import (
 )
 from pc_assistant.agent_runtime.contracts import (
     HealthStatus,
-    RunRequest,
     RuntimeScope,
 )
 from pc_assistant.agent_runtime.model_step import ProviderChunk
@@ -145,6 +144,7 @@ async def test_tcp_endpoint_separates_local_and_remote_credentials(tmp_path: Pat
         service_token="remote-secret",
     )
     composition = build_core_runtime(config, provider_factory=_OfflineProvider)
+    await composition.task_service.start()
     await composition.host.start()
     local_client: CoreClient | None = None
     remote_client: CoreClient | None = None
@@ -186,6 +186,7 @@ async def test_tcp_endpoint_separates_local_and_remote_credentials(tmp_path: Pat
         if channel_client is not None:
             await channel_client.disconnect()
         await composition.host.stop()
+        await composition.task_service.stop()
 
 
 @pytest.mark.asyncio
@@ -240,15 +241,22 @@ async def test_composition_records_correlated_model_and_turn_traces(
         provider_factory=_AnswerProvider,
     )
     scope = await composition.control.create_session("local")
-
-    events = [
-        event
-        async for event in composition.application.run(
-            "local",
-            scope.session_handle,
-            RunRequest(client_request_id="request-a", input="hello"),
+    await composition.task_service.start()
+    try:
+        task = await composition.task_service.create(
+            scope,
+            client_request_id="request-a",
+            goal="hello",
         )
-    ]
+        events = [
+            event
+            async for event in composition.task_service.events(
+                "local",
+                task.task_id,
+            )
+        ]
+    finally:
+        await composition.task_service.stop()
 
     final = [event for event in events if event.event_type == "final_output"]
     assert len(final) == 1

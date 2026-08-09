@@ -54,6 +54,31 @@ The MCP Server owns its business API, authentication flow, protocol adapters,
 domain validation and provider-specific audit. Channels never own extension
 logic and Core never imports Channel code.
 
+### 2.1 Process and trust boundary
+
+Built-in Tools are trusted Core code and are registered directly by the Core
+composition root. Imported executable capabilities are never loaded into the
+Core interpreter:
+
+- a local MCP Server runs as one independent stdio child process owned by its
+  extension provider;
+- a remote MCP Server runs outside Knoa and is reached through Streamable HTTP;
+- launch details come from declarative configuration, never a server-specific
+  branch in Core;
+- startup, discovery and calls are bounded by timeouts, and returned data is
+  bounded before it crosses the Tool boundary;
+- startup failure or a broken process affects only calls to that extension; it
+  must not terminate Core or prevent other extensions from running;
+- Core passes a minimal environment plus explicitly allowed names and never
+  imports package modules into the Core interpreter.
+
+Process separation protects Core from third-party crashes and dependency
+conflicts. It is not a complete security sandbox: CPU, memory, filesystem and
+network containment require an OS-level launcher such as a service unit,
+container or sandbox runtime. That containment belongs behind the generic MCP
+process-launch boundary and remains policy/configuration, never package-specific
+Core logic.
+
 ## 3. Authority model
 
 MCP discovery is not authority. Server annotations, descriptions and schemas
@@ -153,6 +178,10 @@ tools:
     risk: high
 ```
 
+`command`, `args`, `working_directory`, inherited environment names and timeout
+are package configuration. Core contains no knowledge of the executable,
+language, framework or business domain represented by those values.
+
 Package constraints:
 
 - fixed UTF-8 `mcp.yaml`, bounded to 64 KiB;
@@ -198,7 +227,7 @@ After approval Knoa:
 1. validates the source manifest without importing its Python modules;
 2. bounds file count, individual file size and total package size;
 3. omits symbolic links and rejects special files;
-4. omits private `.env` files, VCS metadata and local Agent metadata;
+4. omits hidden metadata without recognizing any external tool or project layout;
 5. copies into an isolated staging directory;
 6. validates the staged package using its final server ID;
 7. atomically moves it into `~/.pc-assistant/mcp/<server-id>`;

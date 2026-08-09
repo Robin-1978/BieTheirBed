@@ -7,15 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import (
-    CancelResult,
-    RunEvent,
-    RuntimeEventPayload,
-    RuntimeStatus,
-)
+from pc_assistant.agent_runtime.contracts import RuntimeStatus
 from pc_assistant.channels.feishu import (
     FeishuChannel,
-    _ActiveRunPresentation,
+    _ActiveTaskPresentation,
     _StreamingCardState,
     _markdown_table_count,
     _patch_ws_card_dispatch,
@@ -25,9 +20,12 @@ from pc_assistant.channels.feishu import (
     _split_text,
 )
 from pc_assistant.config import AppConfig
-from pc_assistant.service.core_api import (
-    CancelResultMessage,
-    ConfirmationRequestedMessage,
+from pc_assistant.service.core_api import TaskCancelResultMessage
+from pc_assistant.tasks import (
+    TaskCancelResult,
+    TaskEvent,
+    TaskEventPayload,
+    TaskState,
 )
 
 
@@ -62,64 +60,71 @@ class _CoreClient:
             },
         )
 
-    async def cancel_active(self) -> CancelResultMessage:
+    async def cancel_active_task(self) -> TaskCancelResultMessage:
         self.cancelled += 1
-        return CancelResultMessage(
+        return TaskCancelResultMessage(
             request_id="cancel-request",
-            result=CancelResult(accepted=True, status="cancelling"),
+            result=TaskCancelResult(accepted=True, state=TaskState.RUNNING),
         )
 
-    async def run(self, session, text, attachments):
+    async def execute_task(self, session, text, attachments):
         self.runs.append((session, text, attachments))
-        yield RunEvent(
-            run_id="run-a",
+        yield TaskEvent(
+            task_id="task-a",
             event_seq=1,
-            event_type="run_started",
-            payload=RuntimeEventPayload(),
+            occurred_at=1.0,
+            event_type="task_created",
+            payload=TaskEventPayload(),
         )
-        yield RunEvent(
-            run_id="run-a",
+        yield TaskEvent(
+            task_id="task-a",
             event_seq=2,
+            occurred_at=2.0,
             event_type="reasoning_delta",
-            payload=RuntimeEventPayload(content="分析中"),
+            payload=TaskEventPayload(content="分析中"),
         )
-        yield RunEvent(
-            run_id="run-a",
+        yield TaskEvent(
+            task_id="task-a",
             event_seq=3,
+            occurred_at=3.0,
             event_type="tool_call",
-            payload=RuntimeEventPayload(
+            payload=TaskEventPayload(
                 tool_call_id="call-mouse",
                 tool_name="mouse",
                 tool_args={"action": "move"},
             ),
         )
-        yield RunEvent(
-            run_id="run-a",
+        yield TaskEvent(
+            task_id="task-a",
             event_seq=4,
+            occurred_at=4.0,
             event_type="tool_result",
-            payload=RuntimeEventPayload(
+            payload=TaskEventPayload(
                 tool_call_id="call-mouse",
                 tool_name="mouse",
                 tool_result={"status": "completed", "output": {"success": True}},
             ),
         )
-        yield RunEvent(
-            run_id="run-a",
+        yield TaskEvent(
+            task_id="task-a",
             event_seq=5,
+            occurred_at=5.0,
             event_type="content_delta",
-            payload=RuntimeEventPayload(content="完成"),
+            payload=TaskEventPayload(content="完成"),
         )
-        yield RunEvent(
-            run_id="run-a",
+        yield TaskEvent(
+            task_id="task-a",
             event_seq=6,
+            occurred_at=6.0,
             event_type="final_output",
-            payload=RuntimeEventPayload(content="完成"),
+            payload=TaskEventPayload(content="完成"),
         )
-        yield RunEvent(
-            run_id="run-a",
+        yield TaskEvent(
+            task_id="task-a",
             event_seq=7,
+            occurred_at=7.0,
             event_type="completed",
-            payload=RuntimeEventPayload(),
+            payload=TaskEventPayload(),
         )
 
 
@@ -133,9 +138,34 @@ def _config(tmp_path) -> AppConfig:
     )
 
 
+def _approval_event(
+    *,
+    task_id: str = "task-a",
+    approval_id: str = "confirmation-a",
+    call_id: str = "call-mouse",
+    tool_name: str = "mouse",
+    arguments: dict | None = None,
+    reason: str = "state-changing desktop action",
+) -> TaskEvent:
+    return TaskEvent(
+        task_id=task_id,
+        event_seq=3,
+        occurred_at=3.0,
+        event_type="approval_requested",
+        payload=TaskEventPayload(
+            state=TaskState.WAITING_APPROVAL,
+            approval_id=approval_id,
+            tool_call_id=call_id,
+            tool_name=tool_name,
+            tool_args=arguments or {"action": "click"},
+            reason=reason,
+        ),
+    )
+
+
 def _active_presentation(
     channel: FeishuChannel,
-) -> tuple[_ActiveRunPresentation, _StreamingCardState]:
+) -> tuple[_ActiveTaskPresentation, _StreamingCardState]:
     state = _StreamingCardState()
     state.add_tool_call(
         "call-mouse",
@@ -143,13 +173,13 @@ def _active_presentation(
         {"action": "click"},
         iteration=1,
     )
-    presentation = _ActiveRunPresentation(
+    presentation = _ActiveTaskPresentation(
         session_handle="session-a",
         state=state,
         update_requested=asyncio.Event(),
-        run_id="run-a",
+        task_id="task-a",
     )
-    channel._active_run_presentations["run-a"] = presentation
+    channel._active_task_presentations["task-a"] = presentation
     channel._active_session_presentations["session-a"] = presentation
     return presentation, state
 
@@ -223,16 +253,7 @@ async def test_feishu_confirmation_round_trip_stays_in_channel(tmp_path) -> None
     channel = FeishuChannel(_config(tmp_path))
     channel._session_users["session-a"] = "ou-user"
     presentation, state = _active_presentation(channel)
-    request = ConfirmationRequestedMessage(
-        request_id="confirmation-request",
-        confirmation_id="confirmation-a",
-        run_id="run-a",
-        session_handle="session-a",
-        tool_call_id="call-mouse",
-        tool_name="mouse",
-        arguments={"action": "click"},
-        reason="state-changing desktop action",
-    )
+    request = _approval_event()
 
     pending = asyncio.create_task(channel._confirm_tool("ou-user", request))
     await asyncio.sleep(0)
@@ -280,18 +301,20 @@ async def test_feishu_confirmation_updates_the_single_streaming_card(
     )
 
     class ConfirmingClient:
-        async def run(self, _session, _text, _attachments):
-            yield RunEvent(
-                run_id="run-a",
+        async def execute_task(self, _session, _text, _attachments):
+            yield TaskEvent(
+                task_id="task-a",
                 event_seq=1,
-                event_type="run_started",
-                payload=RuntimeEventPayload(),
+                occurred_at=1.0,
+                event_type="task_created",
+                payload=TaskEventPayload(),
             )
-            yield RunEvent(
-                run_id="run-a",
+            yield TaskEvent(
+                task_id="task-a",
                 event_seq=2,
+                occurred_at=2.0,
                 event_type="tool_call",
-                payload=RuntimeEventPayload(
+                payload=TaskEventPayload(
                     tool_call_id="call-mouse",
                     tool_name="mouse",
                     tool_args={"action": "click"},
@@ -300,44 +323,38 @@ async def test_feishu_confirmation_updates_the_single_streaming_card(
             )
             approved = await channel._confirm_tool(
                 "ou-user",
-                ConfirmationRequestedMessage(
-                    request_id="confirmation-request",
-                    confirmation_id="confirmation-a",
-                    run_id="run-a",
-                    session_handle="session-a",
-                    tool_call_id="call-mouse",
-                    tool_name="mouse",
-                    arguments={"action": "click"},
-                    reason="desktop_control:high",
-                ),
+                _approval_event(reason="desktop_control:high"),
             )
             assert approved
-            yield RunEvent(
-                run_id="run-a",
+            yield TaskEvent(
+                task_id="task-a",
                 event_seq=3,
+                occurred_at=3.0,
                 event_type="tool_result",
-                payload=RuntimeEventPayload(
+                payload=TaskEventPayload(
                     tool_call_id="call-mouse",
                     tool_name="mouse",
                     tool_result={"status": "completed"},
                     iteration=1,
                 ),
             )
-            yield RunEvent(
-                run_id="run-a",
+            yield TaskEvent(
+                task_id="task-a",
                 event_seq=4,
+                occurred_at=4.0,
                 event_type="final_output",
-                payload=RuntimeEventPayload(content="完成", iteration=2),
+                payload=TaskEventPayload(content="完成", iteration=2),
             )
-            yield RunEvent(
-                run_id="run-a",
+            yield TaskEvent(
+                task_id="task-a",
                 event_seq=5,
+                occurred_at=5.0,
                 event_type="completed",
-                payload=RuntimeEventPayload(),
+                payload=TaskEventPayload(),
             )
 
     run = asyncio.create_task(
-        channel._stream_core_run(
+        channel._stream_core_task(
             "ou-user",
             ConfirmingClient(),
             "session-a",
@@ -357,7 +374,7 @@ async def test_feishu_confirmation_updates_the_single_streaming_card(
         "ou-user",
         "confirmation-a",
         True,
-        run_id="run-a",
+        task_id="task-a",
     )
     await run
 
@@ -371,16 +388,7 @@ async def test_feishu_card_callback_confirms_and_replaces_buttons(tmp_path) -> N
     channel = FeishuChannel(_config(tmp_path))
     channel._session_users["session-a"] = "ou-user"
     _presentation, state = _active_presentation(channel)
-    request = ConfirmationRequestedMessage(
-        request_id="confirmation-request",
-        confirmation_id="confirmation-a",
-        run_id="run-a",
-        session_handle="session-a",
-        tool_call_id="call-mouse",
-        tool_name="mouse",
-        arguments={"action": "click"},
-        reason="state-changing desktop action",
-    )
+    request = _approval_event()
     pending = asyncio.create_task(channel._confirm_tool("ou-user", request))
     await asyncio.sleep(0)
     handler = channel._create_event_handler()
@@ -397,8 +405,8 @@ async def test_feishu_card_callback_confirms_and_replaces_buttons(tmp_path) -> N
                     "action": {
                         "value": {
                             "action": "confirm",
-                            "run_id": "run-a",
-                            "confirmation_id": "confirmation-a",
+                            "task_id": "task-a",
+                            "approval_id": "confirmation-a",
                         }
                     },
                 }
@@ -421,16 +429,7 @@ async def test_feishu_confirmation_rejects_wrong_user_id_and_double_click(
     channel = FeishuChannel(_config(tmp_path))
     channel._session_users["session-a"] = "ou-user"
     _active_presentation(channel)
-    request = ConfirmationRequestedMessage(
-        request_id="confirmation-request",
-        confirmation_id="confirmation-a",
-        run_id="run-a",
-        session_handle="session-a",
-        tool_call_id="call-mouse",
-        tool_name="mouse",
-        arguments={"action": "click"},
-        reason="state-changing desktop action",
-    )
+    request = _approval_event()
     pending = asyncio.create_task(channel._confirm_tool("ou-user", request))
     await asyncio.sleep(0)
 
@@ -450,16 +449,7 @@ def test_feishu_streaming_card_uses_native_v2_confirmation_buttons() -> None:
         {"action": "click"},
         iteration=1,
     )
-    request = ConfirmationRequestedMessage(
-        request_id="confirmation-request",
-        confirmation_id="confirmation-a",
-        run_id="run-a",
-        session_handle="session-a",
-        tool_call_id="call-mouse",
-        tool_name="mouse",
-        arguments={"action": "click"},
-        reason="state-changing desktop action",
-    )
+    request = _approval_event()
 
     assert state.request_confirmation(request)
     card = state.build_card()
@@ -473,7 +463,7 @@ def test_feishu_streaming_card_uses_native_v2_confirmation_buttons() -> None:
         "cancel",
     ]
     assert all(
-        button["behaviors"][0]["value"]["run_id"] == "run-a"
+        button["behaviors"][0]["value"]["task_id"] == "task-a"
         for button in buttons
     )
 
@@ -752,31 +742,35 @@ async def test_feishu_card_io_does_not_block_core_event_consumption(tmp_path) ->
         def __init__(self) -> None:
             self.consumed = asyncio.Event()
 
-        async def run(self, _session, _text, _attachments):
-            yield RunEvent(
-                run_id="run-burst",
+        async def execute_task(self, _session, _text, _attachments):
+            yield TaskEvent(
+                task_id="task-burst",
                 event_seq=1,
-                event_type="run_started",
-                payload=RuntimeEventPayload(),
+                occurred_at=1.0,
+                event_type="task_created",
+                payload=TaskEventPayload(),
             )
             for index in range(2, 1002):
-                yield RunEvent(
-                    run_id="run-burst",
+                yield TaskEvent(
+                    task_id="task-burst",
                     event_seq=index,
+                    occurred_at=float(index),
                     event_type="reasoning_delta",
-                    payload=RuntimeEventPayload(content="x"),
+                    payload=TaskEventPayload(content="x"),
                 )
-            yield RunEvent(
-                run_id="run-burst",
+            yield TaskEvent(
+                task_id="task-burst",
                 event_seq=1002,
+                occurred_at=1002.0,
                 event_type="final_output",
-                payload=RuntimeEventPayload(content="完成"),
+                payload=TaskEventPayload(content="完成"),
             )
-            yield RunEvent(
-                run_id="run-burst",
+            yield TaskEvent(
+                task_id="task-burst",
                 event_seq=1003,
+                occurred_at=1003.0,
                 event_type="completed",
-                payload=RuntimeEventPayload(),
+                payload=TaskEventPayload(),
             )
             self.consumed.set()
 
@@ -791,7 +785,7 @@ async def test_feishu_card_io_does_not_block_core_event_consumption(tmp_path) ->
     channel._update_card = lambda _message_id, _card: True
     client = BurstClient()
     task = asyncio.create_task(
-        channel._stream_core_run("ou-user", client, "session-a", "hello", ())
+        channel._stream_core_task("ou-user", client, "session-a", "hello", ())
     )
 
     await asyncio.wait_for(client.consumed.wait(), timeout=0.5)

@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from pc_assistant.agent_runtime.composition import build_core_runtime
-from pc_assistant.agent_runtime.contracts import RunEvent
 from pc_assistant.agent_runtime.http_provider import HttpModelProvider
 from pc_assistant.benchmark.dataset import load_dataset, load_datasets_from_dir
 from pc_assistant.benchmark.evaluator import LLMJudge
@@ -15,6 +14,7 @@ from pc_assistant.config import AppConfig
 from pc_assistant.runtime import RuntimePaths
 from pc_assistant.service.core_client import CoreClient
 from pc_assistant.service.credentials import resolve_local_service_token
+from pc_assistant.tasks import TaskEvent
 
 
 class BenchmarkRunner:
@@ -57,13 +57,14 @@ class BenchmarkRunner:
         start_time = time.monotonic()
 
         config = self._question_config(q)
-        events: list[RunEvent] = []
+        events: list[TaskEvent] = []
         answer: str | None = None
         error_msg: str | None = None
         tool_count = 0
 
         try:
             composition = build_core_runtime(config)
+            await composition.task_service.start()
             await composition.host.start()
             client: CoreClient | None = None
             try:
@@ -75,7 +76,7 @@ class BenchmarkRunner:
                 )
                 session_handle = await client.create_session()
                 answer_parts: list[str] = []
-                async for event in client.run(
+                async for event in client.execute_task(
                     session_handle,
                     q.question,
                     tools_enabled=not q.no_tools,
@@ -94,6 +95,7 @@ class BenchmarkRunner:
                 if client is not None:
                     await client.disconnect()
                 await composition.host.stop()
+                await composition.task_service.stop()
         except Exception as e:
             error_msg = str(e)
 

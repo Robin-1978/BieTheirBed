@@ -18,8 +18,6 @@ from pc_assistant.agent_runtime.contracts import (
     RuntimeScope,
 )
 from pc_assistant.agent_runtime.control import ControlService
-from pc_assistant.agent_runtime.core_application import CoreApplication
-from pc_assistant.agent_runtime.run_registry import CoreRunRegistry
 from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
 from pc_assistant.artifacts import ArtifactStore
 from pc_assistant.context.memory_db import SQLiteMemoryRepository
@@ -31,6 +29,13 @@ from pc_assistant.service.core_host import (
 from pc_assistant.service.core_server import (
     CoreServer,
     StaticTokenAuthenticator,
+)
+from pc_assistant.tasks import (
+    DurableApprovalService,
+    TaskEventHub,
+    TaskExecutor,
+    TaskRepository,
+    TaskService,
 )
 
 
@@ -59,11 +64,11 @@ class FakeConfig:
 
 
 def _servers(tmp_path: Path):
-    sessions = RuntimeSessionRepository(tmp_path / "assistant.db")
-    application = CoreApplication(EmptyRuntime(), sessions, CoreRunRegistry())
+    database = tmp_path / "assistant.db"
+    sessions = RuntimeSessionRepository(database)
     control = ControlService(
         sessions,
-        SQLiteMemoryRepository(tmp_path / "assistant.db"),
+        SQLiteMemoryRepository(database),
         tool_names=lambda _scope: (),
         config_controller=FakeConfig(),
     )
@@ -71,11 +76,20 @@ def _servers(tmp_path: Path):
         sessions,
         ArtifactStore(
             tmp_path / "attachments",
-            db_path=tmp_path / "assistant.db",
+            db_path=database,
         ),
     )
+    repository = TaskRepository(database)
+    events = TaskEventHub()
+    approvals = DurableApprovalService(repository, events)
+    tasks = TaskService(
+        repository,
+        TaskExecutor(repository, EmptyRuntime(), approvals, events),
+        approvals,
+        events,
+    )
     tcp = CoreServer(
-        application,
+        tasks,
         control,
         artifacts,
         StaticTokenAuthenticator({"remote-token": "remote-a"}),

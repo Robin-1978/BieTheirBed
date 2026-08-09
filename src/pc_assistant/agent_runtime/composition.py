@@ -16,7 +16,6 @@ from pc_assistant.agent_runtime.contracts import (
     ToolDescriptorRecord,
 )
 from pc_assistant.agent_runtime.control import ControlService
-from pc_assistant.agent_runtime.core_application import CoreApplication
 from pc_assistant.agent_runtime.http_provider import (
     FailoverModelProvider,
     HttpModelProvider,
@@ -32,7 +31,6 @@ from pc_assistant.agent_runtime.react_loop import (
     ReActLoop,
     ReActOutcome,
 )
-from pc_assistant.agent_runtime.run_registry import CoreRunRegistry
 from pc_assistant.agent_runtime.runtime import AgentRuntime, ArtifactMessageHydrator
 from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
 from pc_assistant.agent_runtime.tool_step import (
@@ -93,6 +91,13 @@ from pc_assistant.tools.web_fetch import WebFetchTool
 from pc_assistant.tools.web_search import WebSearchTool
 from pc_assistant.tools.window import WindowTool
 from pc_assistant.tools.write_file import WriteFileTool
+from pc_assistant.tasks import (
+    DurableApprovalService,
+    TaskEventHub,
+    TaskExecutor,
+    TaskRepository,
+    TaskService,
+)
 
 
 PERSONAL_LOCAL_CAPABILITIES = frozenset(ToolCapability)
@@ -105,11 +110,12 @@ class CoreRuntimeComposition:
 
     paths: RuntimePaths
     sessions: RuntimeSessionRepository
+    tasks: TaskRepository
+    task_service: TaskService
     memory: SQLiteMemoryRepository
     artifacts: ArtifactStore
     registry: ToolRegistry
     runtime: AgentRuntime
-    application: CoreApplication
     control: ControlService
     artifact_service: ArtifactService
     llm_traces: LLMTraceRecorder
@@ -207,6 +213,7 @@ def build_core_runtime(
     )
     database = paths.data / "assistant.db"
     sessions = RuntimeSessionRepository(database)
+    tasks = TaskRepository(database)
     memory_repository = SQLiteMemoryRepository(database)
     memory = ScopedUserMemory(memory_repository)
     episodic = ScopedEpisodicMemory(memory_repository)
@@ -370,7 +377,20 @@ def build_core_runtime(
         runtime_context=runtime_context,
         run_observer=observe_run,
     )
-    application = CoreApplication(runtime, sessions, CoreRunRegistry())
+    task_events = TaskEventHub()
+    task_approvals = DurableApprovalService(tasks, task_events)
+    task_executor = TaskExecutor(
+        tasks,
+        runtime,
+        task_approvals,
+        task_events,
+    )
+    task_service = TaskService(
+        tasks,
+        task_executor,
+        task_approvals,
+        task_events,
+    )
     config_path = (
         Path(config.source_config_path).expanduser().resolve()
         if config.source_config_path
@@ -436,7 +456,7 @@ def build_core_runtime(
     if config.service_token.strip():
         credentials[config.service_token.strip()] = "remote"
     tcp_server = CoreServer(
-        application,
+        task_service,
         control,
         artifact_service,
         CompositeAuthenticator(
@@ -454,11 +474,12 @@ def build_core_runtime(
     return CoreRuntimeComposition(
         paths=paths,
         sessions=sessions,
+        tasks=tasks,
+        task_service=task_service,
         memory=memory_repository,
         artifacts=artifacts,
         registry=registry,
         runtime=runtime,
-        application=application,
         control=control,
         artifact_service=artifact_service,
         llm_traces=llm_traces,

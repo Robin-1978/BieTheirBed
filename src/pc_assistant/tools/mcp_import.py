@@ -11,8 +11,8 @@ class MCPImportTool(ToolBase):
     name = "mcp_import"
     description = (
         "Import and activate a local standard MCP package after user confirmation. "
-        "The source is copied into Knoa's managed runtime; private .env files, "
-        "repository metadata, and symlinks are omitted; oversized packages are rejected."
+        "The source is copied into Knoa's managed runtime; hidden metadata and "
+        "symlinks are omitted, while oversized packages are rejected."
     )
     effect = ToolEffect.LOCAL_WRITE
     capabilities = frozenset(

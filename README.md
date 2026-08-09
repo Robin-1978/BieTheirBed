@@ -15,6 +15,7 @@ A personal computer agent with ReAct reasoning, multi-LLM support, tool calling,
 - **Built-in Tools** — Local automation, memory, scheduling, vision observation, screenshots, and managed file preparation
 - **Canonical Tool Definitions** — Built-in and MCP tools share one MCP-compatible `inputSchema`/`outputSchema` contract
 - **Core Artifact Delivery** — Tools produce opaque artifacts; Feishu/TUI/service clients adapt standard artifact events without channel logic in the Agent
+- **Durable Tasks** — Core-owned Task state, persistent event replay, connection-independent execution, durable approval, explicit cancellation, and conservative restart recovery
 - **MCP Extension Runtime** — Failure-isolated official SDK clients for Streamable HTTP and supervised local stdio packages
 - **Selective Skill Packages** — Safe data-only packages activated by request, available tools, and granted capabilities
 - **Typed Capability Inventory** — Principal-filtered tool origin, policy, risk, and confirmation metadata for management clients
@@ -144,19 +145,24 @@ mcp_servers:
 Manually imported local MCP packages live under
 `~/.pc-assistant/mcp/<server-id>/`. Each package contains a bounded `mcp.yaml`
 manifest and its local server files. Local packages use the official MCP stdio
-transport, a fixed command/argument list and a package-confined working
-directory. Only a minimal base environment plus explicitly named
+transport in an independent child process. The manifest declaratively defines
+the command, arguments, package-confined working directory and timeout; Core
+contains no server-specific launch branches. Only a minimal base environment plus explicitly named
 `inherit_env` values reaches the child process. Server metadata never grants
 authority: unconfigured tools remain hidden and all enabled tools still pass
 schema validation, capability checks, confirmation and cancellation through
 the standard `ToolStep` boundary.
 
+This process boundary isolates crashes and dependency conflicts. Strong
+resource or host-access containment is a separate OS-level sandbox policy and
+is not implied by stdio process isolation.
+
 When explicitly requested, the Agent can call the confirmation-gated
 `mcp_import` Built-in Tool with an existing local package directory. Knoa
-validates and snapshots the package, omits private `.env` and repository
-metadata, omits symlinks, rejects size-limit violations, installs it atomically,
+validates and snapshots the package, omits hidden metadata and symlinks,
+rejects size-limit violations, installs it atomically,
 and activates the MCP provider without restarting Core. Newly registered tools
-are visible to the next model iteration in the same run. Network download and
+are visible to the next model iteration in the same Task attempt. Network download and
 marketplace trust remain separate future concerns; this tool imports local
 packages only.
 

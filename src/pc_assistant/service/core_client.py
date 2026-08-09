@@ -1,4 +1,4 @@
-"""Thin Core API v1 WebSocket client."""
+"""Thin Core API v1 WebSocket client for durable Tasks."""
 from __future__ import annotations
 
 import asyncio
@@ -15,47 +15,56 @@ from pc_assistant.agent_runtime.contracts import (
     HistoryResult,
     MemoryClearResult,
     MemoryListResult,
-    RunEvent,
     RuntimeStatus,
     ToolListResult,
 )
 from pc_assistant.artifacts import ArtifactRef
 from pc_assistant.service.core_api import (
+    ApprovalResolvedMessage,
     AuthenticateRequest,
     AuthenticatedMessage,
     ArtifactDownloadedMessage,
     ArtifactInputRef,
     ArtifactUploadedMessage,
-    CancelResultMessage,
-    CancelRunRequest,
     CORE_WS_MAX_SIZE,
+    CancelTaskRequest,
+    ClearMemoryRequest,
+    ConfigSetMessage,
     CoreError,
     CoreServerMessage,
     CreateSessionRequest,
+    CreateTaskRequest,
     DownloadArtifactRequest,
-    ClearMemoryRequest,
-    ConfigSetMessage,
-    ConfirmationRequestedMessage,
-    ConfirmationResolvedMessage,
-    GetStatusRequest,
+    GetTaskRequest,
     GetHistoryRequest,
+    GetStatusRequest,
     HealthMessage,
     HealthRequest,
     HistoryMessage,
     ListMemoryRequest,
+    ListTasksRequest,
     ListToolsRequest,
     MemoryClearedMessage,
     MemoryListMessage,
-    RunAcceptedMessage,
-    ResolveConfirmationRequest,
+    ResolveApprovalRequest,
+    ResumeTaskRequest,
     SessionCreatedMessage,
     SetConfigRequest,
-    StartRunRequest,
     StatusMessage,
+    SubscribeTaskRequest,
+    TaskAcceptedMessage,
+    TaskCancelResultMessage,
+    TaskEventMessage,
+    TaskListMessage,
+    TaskResumedMessage,
+    TaskSnapshot,
+    TaskSnapshotMessage,
+    TaskSubscribedMessage,
     ToolsMessage,
     UploadArtifactRequest,
     parse_core_server_message_json,
 )
+from pc_assistant.tasks import TaskEvent, TaskState
 
 
 class ClientWebSocket(Protocol):
@@ -68,7 +77,7 @@ class CoreConnectionLostError(ConnectionError):
     pass
 
 
-class CoreRunBufferOverflowError(CoreConnectionLostError):
+class CoreTaskBufferOverflowError(CoreConnectionLostError):
     pass
 
 
@@ -83,7 +92,7 @@ class CoreRequestError(RuntimeError):
         super().__init__(error.message)
 
 
-ConfirmationHandler = Callable[[ConfirmationRequestedMessage], Awaitable[bool]]
+ApprovalHandler = Callable[[TaskEvent], Awaitable[bool]]
 
 
 class CoreClient:
@@ -91,25 +100,23 @@ class CoreClient:
         self,
         websocket: ClientWebSocket,
         *,
-        confirmation_handler: ConfirmationHandler | None = None,
+        approval_handler: ApprovalHandler | None = None,
         request_timeout_seconds: float = 60.0,
-        max_buffered_run_events: int = 256,
-        max_pending_confirmations: int = 8,
+        max_buffered_task_events: int = 256,
     ) -> None:
-        if max_buffered_run_events < 1:
-            raise ValueError("Run event buffer limit must be at least one")
-        if max_pending_confirmations < 1:
-            raise ValueError("Pending confirmation limit must be at least one")
+        if max_buffered_task_events < 1:
+            raise ValueError("Task event buffer limit must be at least one")
         self._websocket = websocket
-        self._confirmation_handler = confirmation_handler
+        self._approval_handler = approval_handler
         self._request_timeout = max(0.01, request_timeout_seconds)
-        self._max_buffered_run_events = max_buffered_run_events
-        self._max_pending_confirmations = max_pending_confirmations
+        self._max_buffered_task_events = max_buffered_task_events
         self._reader_task: asyncio.Task[None] | None = None
-        self._confirmation_tasks: set[asyncio.Task[None]] = set()
         self._pending: dict[str, asyncio.Future[CoreServerMessage]] = {}
-        self._run_queues: dict[str, asyncio.Queue[RunEvent | Exception]] = {}
-        self._active_runs: list[str] = []
+        self._subscription_queues: dict[
+            str,
+            asyncio.Queue[TaskEvent | Exception],
+        ] = {}
+        self._active_tasks: list[str] = []
         self._send_lock = asyncio.Lock()
         self._connected = False
 
@@ -119,18 +126,16 @@ class CoreClient:
         uri: str,
         credential: str,
         *,
-        confirmation_handler: ConfirmationHandler | None = None,
+        approval_handler: ApprovalHandler | None = None,
         request_timeout_seconds: float = 60.0,
-        max_buffered_run_events: int = 256,
-        max_pending_confirmations: int = 8,
+        max_buffered_task_events: int = 256,
     ) -> CoreClient:
         websocket = await websockets.connect(uri, max_size=CORE_WS_MAX_SIZE)
         client = cls(
             websocket,
-            confirmation_handler=confirmation_handler,
+            approval_handler=approval_handler,
             request_timeout_seconds=request_timeout_seconds,
-            max_buffered_run_events=max_buffered_run_events,
-            max_pending_confirmations=max_pending_confirmations,
+            max_buffered_task_events=max_buffered_task_events,
         )
         await client.start(credential)
         return client
@@ -180,7 +185,9 @@ class CoreClient:
             await self._websocket.send(request.model_dump_json())
 
     async def _request(self, request: Any) -> CoreServerMessage:
-        future: asyncio.Future[CoreServerMessage] = asyncio.get_running_loop().create_future()
+        future: asyncio.Future[CoreServerMessage] = (
+            asyncio.get_running_loop().create_future()
+        )
         self._pending[request.request_id] = future
         try:
             try:
@@ -213,93 +220,53 @@ class CoreClient:
         try:
             async for raw in self._websocket:
                 message = parse_core_server_message_json(raw)
-                if isinstance(message, ConfirmationRequestedMessage):
-                    if len(self._confirmation_tasks) >= self._max_pending_confirmations:
-                        failure = CoreConnectionLostError(
-                            "Core pending confirmation limit exceeded"
-                        )
-                        await self._websocket.close()
-                        break
-                    task = asyncio.create_task(self._resolve_confirmation(message))
-                    self._confirmation_tasks.add(task)
-                    task.add_done_callback(self._confirmation_tasks.discard)
-                    continue
-                if isinstance(message, RunEvent):
-                    queue = self._run_queues.get(message.run_id)
+                if isinstance(message, TaskEventMessage):
+                    queue = self._subscription_queues.get(message.request_id)
                     if queue is not None:
                         try:
-                            queue.put_nowait(message)
+                            queue.put_nowait(message.event)
                         except asyncio.QueueFull:
-                            failure = CoreRunBufferOverflowError(
-                                "Core run event buffer overflow"
+                            failure = CoreTaskBufferOverflowError(
+                                "Core Task event buffer overflow"
                             )
                             await self._websocket.close()
                             break
                     continue
-                if isinstance(message, RunAcceptedMessage):
+                if isinstance(message, TaskSubscribedMessage):
                     future = self._pending.get(message.request_id)
                     if future is None or future.done():
                         failure = CoreConnectionLostError(
-                            "Core protocol violation: unsolicited run acceptance"
+                            "Core protocol violation: unsolicited Task subscription"
                         )
                         await self._websocket.close()
                         break
-                    self._run_queues.setdefault(
-                        message.run_id,
-                        asyncio.Queue(maxsize=self._max_buffered_run_events),
+                    self._subscription_queues.setdefault(
+                        message.request_id,
+                        asyncio.Queue(maxsize=self._max_buffered_task_events),
                     )
+                if isinstance(message, CoreError):
+                    queue = self._subscription_queues.get(message.request_id)
+                    if queue is not None:
+                        queue.put_nowait(CoreRequestError(message))
+                        continue
                 future = self._pending.get(message.request_id)
                 if future is not None and not future.done():
                     future.set_result(message)
         except asyncio.CancelledError:
             return
         except Exception as exc:
-            failure = CoreConnectionLostError(f"Core connection lost: {type(exc).__name__}")
+            failure = CoreConnectionLostError(
+                f"Core connection lost: {type(exc).__name__}"
+            )
         finally:
             self._connected = False
             self._fail_all(failure)
-            tasks, self._confirmation_tasks = self._confirmation_tasks, set()
-            for task in tasks:
-                task.cancel()
-            if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
-
-    async def _resolve_confirmation(
-        self,
-        message: ConfirmationRequestedMessage,
-    ) -> None:
-        approved = False
-        if self._confirmation_handler is not None:
-            try:
-                approved = bool(await self._confirmation_handler(message))
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                approved = False
-        try:
-            response = await self._request(
-                ResolveConfirmationRequest(
-                    request_id=self._request_id(),
-                    confirmation_id=message.confirmation_id,
-                    approved=approved,
-                )
-            )
-            if not isinstance(response, ConfirmationResolvedMessage):
-                raise RuntimeError(
-                    "CoreServer returned an invalid confirmation response"
-                )
-        except (
-            CoreConnectionLostError,
-            CoreRequestError,
-            CoreRequestTimeoutError,
-        ):
-            return
 
     def _fail_all(self, error: Exception) -> None:
         for future in tuple(self._pending.values()):
             if not future.done():
                 future.set_exception(error)
-        for queue in tuple(self._run_queues.values()):
+        for queue in tuple(self._subscription_queues.values()):
             while not queue.empty():
                 queue.get_nowait()
             queue.put_nowait(error)
@@ -425,63 +392,183 @@ class CoreClient:
             )
         )
         if not isinstance(response, ArtifactDownloadedMessage):
-            raise RuntimeError("CoreServer returned an invalid artifact download response")
+            raise RuntimeError(
+                "CoreServer returned an invalid artifact download response"
+            )
         return response.result
 
-    async def run(
+    async def create_task(
         self,
         session_handle: str,
         user_input: str = "",
         attachments: tuple[ArtifactInputRef, ...] = (),
         *,
         tools_enabled: bool = True,
-    ) -> AsyncIterator[RunEvent]:
+        priority: int = 0,
+        parent_task_id: str = "",
+    ) -> TaskAcceptedMessage:
         response = await self._request(
-            StartRunRequest(
+            CreateTaskRequest(
                 request_id=self._request_id(),
                 session_handle=session_handle,
                 input=user_input,
                 attachments=attachments,
                 tools_enabled=tools_enabled,
+                priority=priority,
+                parent_task_id=parent_task_id,
             )
         )
-        if not isinstance(response, RunAcceptedMessage):
-            raise RuntimeError("CoreServer returned an invalid run response")
-        run_id = response.run_id
-        queue = self._run_queues[run_id]
-        self._active_runs.append(run_id)
+        if not isinstance(response, TaskAcceptedMessage):
+            raise RuntimeError("CoreServer returned an invalid Task response")
+        return response
+
+    async def task_events(
+        self,
+        task_id: str,
+        *,
+        after_seq: int = 0,
+    ) -> AsyncIterator[TaskEvent]:
+        request_id = self._request_id()
+        response = await self._request(
+            SubscribeTaskRequest(
+                request_id=request_id,
+                task_id=task_id,
+                after_seq=after_seq,
+            )
+        )
+        if not isinstance(response, TaskSubscribedMessage):
+            raise RuntimeError("CoreServer returned an invalid Task subscription")
+        queue = self._subscription_queues[request_id]
+        self._active_tasks.append(task_id)
         try:
             while True:
                 item = await queue.get()
                 if isinstance(item, Exception):
                     raise item
+                if (
+                    item.event_type == "approval_requested"
+                    and self._approval_handler is not None
+                ):
+                    approved = False
+                    try:
+                        approved = bool(await self._approval_handler(item))
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        approved = False
+                    await self.resolve_approval(
+                        item.payload.approval_id,
+                        approved=approved,
+                    )
                 yield item
-                if item.is_terminal:
+                if item.event_type in {"completed", "failed", "cancelled"}:
                     return
         finally:
-            self._run_queues.pop(run_id, None)
-            if run_id in self._active_runs:
-                self._active_runs.remove(run_id)
+            self._subscription_queues.pop(request_id, None)
+            if task_id in self._active_tasks:
+                self._active_tasks.remove(task_id)
 
-    async def cancel(self, run_id: str) -> CancelResultMessage:
+    async def get_task(self, task_id: str) -> TaskSnapshot:
         response = await self._request(
-            CancelRunRequest(request_id=self._request_id(), run_id=run_id)
+            GetTaskRequest(
+                request_id=self._request_id(),
+                task_id=task_id,
+            )
         )
-        if not isinstance(response, CancelResultMessage):
-            raise RuntimeError("CoreServer returned an invalid cancel response")
+        if not isinstance(response, TaskSnapshotMessage):
+            raise RuntimeError("CoreServer returned an invalid Task snapshot")
+        return response.task
+
+    async def list_tasks(
+        self,
+        *,
+        session_handle: str = "",
+        state: TaskState | None = None,
+        limit: int = 50,
+        cursor: str = "",
+    ) -> TaskListMessage:
+        response = await self._request(
+            ListTasksRequest(
+                request_id=self._request_id(),
+                session_handle=session_handle,
+                state=state,
+                limit=limit,
+                cursor=cursor,
+            )
+        )
+        if not isinstance(response, TaskListMessage):
+            raise RuntimeError("CoreServer returned an invalid Task list")
         return response
 
-    async def cancel_active(self) -> CancelResultMessage | None:
-        if not self._active_runs:
+    async def execute_task(
+        self,
+        session_handle: str,
+        user_input: str = "",
+        attachments: tuple[ArtifactInputRef, ...] = (),
+        *,
+        tools_enabled: bool = True,
+        priority: int = 0,
+    ) -> AsyncIterator[TaskEvent]:
+        accepted = await self.create_task(
+            session_handle,
+            user_input,
+            attachments,
+            tools_enabled=tools_enabled,
+            priority=priority,
+        )
+        async for event in self.task_events(accepted.task_id):
+            yield event
+
+    async def cancel_task(self, task_id: str) -> TaskCancelResultMessage:
+        response = await self._request(
+            CancelTaskRequest(request_id=self._request_id(), task_id=task_id)
+        )
+        if not isinstance(response, TaskCancelResultMessage):
+            raise RuntimeError("CoreServer returned an invalid Task cancel response")
+        return response
+
+    async def cancel_active_task(self) -> TaskCancelResultMessage | None:
+        if not self._active_tasks:
             return None
-        return await self.cancel(self._active_runs[-1])
+        return await self.cancel_task(self._active_tasks[-1])
+
+    async def resume_task(
+        self,
+        task_id: str,
+        *,
+        reason: str = "",
+    ) -> TaskResumedMessage:
+        response = await self._request(
+            ResumeTaskRequest(
+                request_id=self._request_id(),
+                task_id=task_id,
+                reason=reason,
+            )
+        )
+        if not isinstance(response, TaskResumedMessage):
+            raise RuntimeError("CoreServer returned an invalid Task resume response")
+        return response
+
+    async def resolve_approval(
+        self,
+        approval_id: str,
+        *,
+        approved: bool,
+    ) -> ApprovalResolvedMessage:
+        response = await self._request(
+            ResolveApprovalRequest(
+                request_id=self._request_id(),
+                approval_id=approval_id,
+                approved=approved,
+            )
+        )
+        if not isinstance(response, ApprovalResolvedMessage):
+            raise RuntimeError("CoreServer returned an invalid approval response")
+        return response
 
     @property
     def is_connected(self) -> bool:
         return self._connected
 
-    def set_confirmation_handler(
-        self,
-        handler: ConfirmationHandler | None,
-    ) -> None:
-        self._confirmation_handler = handler
+    def set_approval_handler(self, handler: ApprovalHandler | None) -> None:
+        self._approval_handler = handler

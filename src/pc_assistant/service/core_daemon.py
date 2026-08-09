@@ -41,10 +41,12 @@ class CoreDaemon:
         composition = build_core_runtime(self._config)
         try:
             await composition.extensions.start()
+            await composition.task_service.start()
             await composition.host.start()
             self._write_pid(composition.paths.pid)
         except BaseException:
             await composition.host.stop()
+            await composition.task_service.stop()
             await composition.extensions.stop()
             raise
         self._composition = composition
@@ -60,6 +62,7 @@ class CoreDaemon:
         if composition is None:
             return
         await composition.host.stop()
+        await composition.task_service.stop()
         await composition.extensions.stop()
         composition.paths.pid.unlink(missing_ok=True)
         logger.info("Core service stopped")

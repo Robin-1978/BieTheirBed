@@ -1,13 +1,14 @@
 # Agent Framework Forward Design
 
-> Status: approved forward-design baseline
+> Status: superseded implementation baseline
 > Date: 2026-08-08
 > Scope: production agent runtime, service protocol, scoped state, tool safety,
 > reliability, observability, and engineering gates
-> Relationship: this document is the authoritative target-state design.
-> `agent-runtime-decomposition-phases.md` may provide implementation sequencing,
-> but must conform to this design and must not preserve incompatible legacy
-> behavior.
+> Relationship: this document records the 2026-08-08 runtime cutover. The active
+> target-state documents are `architecture.md`,
+> `knoa-capability-extension-design.md`, and `knoa-durable-task-design.md`.
+> Its connection-owned Run sections are historical and are not compatibility
+> requirements.
 
 ## 1. Executive decision
 

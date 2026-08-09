@@ -193,37 +193,6 @@ class RuntimeEvent(ContractModel):
     payload: RuntimeEventPayload = Field(default_factory=RuntimeEventPayload)
 
 
-RunEventType = Literal[
-    "run_started",
-    "content_delta",
-    "final_output",
-    "reasoning_delta",
-    "plan",
-    "tool_call",
-    "tool_result",
-    "artifact",
-    "context_compacted",
-    "warning",
-    "completed",
-    "cancelled",
-    "failed",
-]
-TERMINAL_RUN_EVENT_TYPES = frozenset({"completed", "cancelled", "failed"})
-
-
-class RunEvent(ContractModel):
-    message_type: Literal["run_event"] = "run_event"
-    api_version: Literal["v1"] = "v1"
-    run_id: NonEmptyString
-    event_seq: int = Field(gt=0)
-    event_type: RunEventType
-    payload: RuntimeEventPayload
-
-    @property
-    def is_terminal(self) -> bool:
-        return self.event_type in TERMINAL_RUN_EVENT_TYPES
-
-
 @dataclass(frozen=True)
 class RuntimeRunContext:
     scope: RuntimeScope

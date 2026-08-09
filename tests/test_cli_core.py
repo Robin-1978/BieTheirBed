@@ -7,12 +7,11 @@ import pytest
 from pc_assistant.agent_runtime.contracts import (
     ArtifactDownloadResult,
     HealthStatus,
-    RunEvent,
-    RuntimeEventPayload,
 )
 from pc_assistant.artifacts import ArtifactRef
 from pc_assistant.cli_core import run_core_ask
 from pc_assistant.config import AppConfig
+from pc_assistant.tasks import TaskEvent, TaskEventPayload, TaskState
 
 
 PNG = base64.b64decode(
@@ -63,7 +62,7 @@ class _Client:
             data_url=f"data:image/png;base64,{encoded}",
         )
 
-    def run(
+    def execute_task(
         self,
         session_handle,
         user_input,
@@ -77,23 +76,26 @@ class _Client:
         self.attachments = attachments
 
         async def stream():
-            yield RunEvent(
-                run_id="run-a",
+            yield TaskEvent(
+                task_id="task-a",
                 event_seq=1,
-                event_type="run_started",
-                payload=RuntimeEventPayload(),
+                occurred_at=1.0,
+                event_type="task_created",
+                payload=TaskEventPayload(state=TaskState.QUEUED),
             )
-            yield RunEvent(
-                run_id="run-a",
+            yield TaskEvent(
+                task_id="task-a",
                 event_seq=2,
+                occurred_at=2.0,
                 event_type="content_delta",
-                payload=RuntimeEventPayload(content="done"),
+                payload=TaskEventPayload(content="done"),
             )
-            yield RunEvent(
-                run_id="run-a",
+            yield TaskEvent(
+                task_id="task-a",
                 event_seq=3,
+                occurred_at=3.0,
                 event_type="artifact",
-                payload=RuntimeEventPayload(
+                payload=TaskEventPayload(
                     artifact=ArtifactRef(
                         artifact_id="capture-a",
                         kind="image",
@@ -103,11 +105,12 @@ class _Client:
                     )
                 ),
             )
-            yield RunEvent(
-                run_id="run-a",
+            yield TaskEvent(
+                task_id="task-a",
                 event_seq=4,
+                occurred_at=4.0,
                 event_type="completed",
-                payload=RuntimeEventPayload(),
+                payload=TaskEventPayload(state=TaskState.COMPLETED),
             )
 
         return stream()

@@ -5,19 +5,22 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from pc_assistant.agent_runtime.contracts import RuntimeEventPayload
-from pc_assistant.agent_runtime.events import RunEventSequencer
 from pc_assistant.artifacts import ArtifactRef
 from pc_assistant.service.core_api import (
-    ConfirmationRequestedMessage,
     CreateSessionRequest,
+    CreateTaskRequest,
     DownloadArtifactRequest,
-    ResolveConfirmationRequest,
-    StartRunRequest,
+    GetTaskRequest,
+    ListTasksRequest,
+    ResolveApprovalRequest,
+    ResumeTaskRequest,
+    SubscribeTaskRequest,
+    TaskEventMessage,
     core_request_schema,
     parse_core_request_json,
     parse_core_server_message_json,
 )
+from pc_assistant.tasks import TaskEvent, TaskEventPayload, TaskState
 
 
 def test_core_request_rejects_legacy_free_form_protocol() -> None:
@@ -27,12 +30,12 @@ def test_core_request_rejects_legacy_free_form_protocol() -> None:
         parse_core_request_json(legacy)
 
 
-def test_core_request_rejects_caller_supplied_principal_and_unknown_fields() -> None:
+def test_task_request_rejects_caller_supplied_principal() -> None:
     raw = json.dumps(
         {
             "api_version": "v1",
             "request_id": "request-1",
-            "method": "run",
+            "method": "create_task",
             "session_handle": "opaque-session",
             "input": "hello",
             "principal_id": "attacker-selected",
@@ -43,21 +46,25 @@ def test_core_request_rejects_caller_supplied_principal_and_unknown_fields() -> 
         parse_core_request_json(raw)
 
 
-def test_core_request_is_versioned_and_method_specific() -> None:
+def test_task_commands_are_versioned_and_method_specific() -> None:
     request = parse_core_request_json(
-        json.dumps(
-            {
-                "api_version": "v1",
-                "request_id": "request-1",
-                "method": "run",
-                "session_handle": "opaque-session",
-                "input": "hello",
-            }
-        )
+        CreateTaskRequest(
+            request_id="request-1",
+            session_handle="opaque-session",
+            input="hello",
+        ).model_dump_json()
+    )
+    subscription = parse_core_request_json(
+        SubscribeTaskRequest(
+            request_id="subscribe-1",
+            task_id="task-1",
+            after_seq=7,
+        ).model_dump_json()
     )
 
-    assert isinstance(request, StartRunRequest)
-    assert request.input == "hello"
+    assert isinstance(request, CreateTaskRequest)
+    assert isinstance(subscription, SubscribeTaskRequest)
+    assert subscription.after_seq == 7
     with pytest.raises(ValidationError):
         parse_core_request_json(
             json.dumps(
@@ -72,13 +79,7 @@ def test_core_request_is_versioned_and_method_specific() -> None:
 
 def test_create_session_has_no_caller_selected_session_handle() -> None:
     request = parse_core_request_json(
-        json.dumps(
-            {
-                "api_version": "v1",
-                "request_id": "request-1",
-                "method": "create_session",
-            }
-        )
+        CreateSessionRequest(request_id="request-1").model_dump_json()
     )
 
     assert isinstance(request, CreateSessionRequest)
@@ -86,14 +87,14 @@ def test_create_session_has_no_caller_selected_session_handle() -> None:
         CreateSessionRequest(request_id="request-2", session_handle="chosen")
 
 
-def test_run_requires_content_or_artifact_reference() -> None:
+def test_task_requires_content_or_artifact_reference() -> None:
     with pytest.raises(ValidationError):
-        StartRunRequest(
+        CreateTaskRequest(
             request_id="request-1",
             session_handle="opaque-session",
         )
 
-    request = StartRunRequest(
+    request = CreateTaskRequest(
         request_id="request-2",
         session_handle="opaque-session",
         attachments=({"artifact_id": "artifact-1"},),
@@ -101,16 +102,18 @@ def test_run_requires_content_or_artifact_reference() -> None:
     assert request.attachments[0].artifact_id == "artifact-1"
 
 
-def test_core_schema_exposes_discriminated_methods() -> None:
-    schema = core_request_schema()
-    rendered = json.dumps(schema)
+def test_core_schema_exposes_only_task_lifecycle_methods() -> None:
+    rendered = json.dumps(core_request_schema())
 
-    assert "create_session" in rendered
-    assert "cancel_run" in rendered
-    assert "memory_clear" in rendered
-    assert "artifact_upload" in rendered
-    assert "artifact_download" in rendered
-    assert "confirmation_resolve" in rendered
+    assert "create_task" in rendered
+    assert "subscribe_task" in rendered
+    assert "get_task" in rendered
+    assert "list_tasks" in rendered
+    assert "cancel_task" in rendered
+    assert "resume_task" in rendered
+    assert "approval_resolve" in rendered
+    assert "cancel_run" not in rendered
+    assert "confirmation_resolve" not in rendered
 
     request = parse_core_request_json(
         DownloadArtifactRequest(
@@ -121,70 +124,67 @@ def test_core_schema_exposes_discriminated_methods() -> None:
     )
     assert isinstance(request, DownloadArtifactRequest)
 
+    resumed = parse_core_request_json(
+        ResumeTaskRequest(
+            request_id="resume-1",
+            task_id="task-1",
+            reason="reviewed recovery state",
+        ).model_dump_json()
+    )
+    assert isinstance(resumed, ResumeTaskRequest)
 
-def test_confirmation_contract_is_strict_and_connection_scoped() -> None:
+    detail = parse_core_request_json(
+        GetTaskRequest(request_id="detail-1", task_id="task-1").model_dump_json()
+    )
+    listing = parse_core_request_json(
+        ListTasksRequest(
+            request_id="list-1",
+            state=TaskState.PAUSED,
+            limit=25,
+        ).model_dump_json()
+    )
+    assert isinstance(detail, GetTaskRequest)
+    assert isinstance(listing, ListTasksRequest)
+
+
+def test_approval_and_task_event_wire_contracts_are_strict() -> None:
     request = parse_core_request_json(
-        ResolveConfirmationRequest(
+        ResolveApprovalRequest(
             request_id="resolve-1",
-            confirmation_id="confirmation-1",
+            approval_id="approval-1",
             approved=True,
         ).model_dump_json()
     )
     message = parse_core_server_message_json(
-        ConfirmationRequestedMessage(
-            request_id="confirmation-confirmation-1",
-            confirmation_id="confirmation-1",
-            run_id="run-1",
-            session_handle="session-a",
-            tool_call_id="call-1",
-            tool_name="mouse",
-            arguments={"action": "click", "x": 10, "y": 20},
-            reason="desktop_control:high",
+        TaskEventMessage(
+            request_id="subscription-1",
+            event=TaskEvent(
+                task_id="task-1",
+                event_seq=3,
+                event_type="approval_requested",
+                payload=TaskEventPayload(
+                    state=TaskState.WAITING_APPROVAL,
+                    approval_id="approval-1",
+                    tool_call_id="call-1",
+                    tool_name="mouse",
+                    tool_args={"action": "click", "x": 10, "y": 20},
+                    reason="desktop_control:high",
+                ),
+                occurred_at=1.0,
+            ),
         ).model_dump_json()
     )
 
-    assert isinstance(request, ResolveConfirmationRequest)
-    assert request.approved
-    assert isinstance(message, ConfirmationRequestedMessage)
-    assert message.run_id == "run-1"
-    assert message.tool_call_id == "call-1"
-    assert message.session_handle == "session-a"
-
-
-def test_run_events_are_strictly_ordered_and_have_one_terminal_event() -> None:
-    sequencer = RunEventSequencer("run-1")
-
-    started = sequencer.emit("run_started")
-    delta = sequencer.emit(
-        "content_delta",
-        RuntimeEventPayload(content="hello"),
-    )
-    final_output = sequencer.emit(
-        "final_output",
-        RuntimeEventPayload(content="hello"),
-    )
-    completed = sequencer.emit(
-        "completed",
-        RuntimeEventPayload(content="hello"),
-    )
-
-    assert [
-        started.event_seq,
-        delta.event_seq,
-        final_output.event_seq,
-        completed.event_seq,
-    ] == [1, 2, 3, 4]
-    assert completed.is_terminal
-    assert sequencer.terminal
-    with pytest.raises(RuntimeError, match="terminal"):
-        sequencer.emit("failed", RuntimeEventPayload(content="late failure"))
-
-
-def test_run_event_rejects_unknown_public_event_type() -> None:
-    sequencer = RunEventSequencer("run-1")
-
+    assert isinstance(request, ResolveApprovalRequest)
+    assert isinstance(message, TaskEventMessage)
+    assert message.event.payload.approval_id == "approval-1"
     with pytest.raises(ValidationError):
-        sequencer.emit("legacy_stream_delta")  # type: ignore[arg-type]
+        TaskEvent(
+            task_id="task-1",
+            event_seq=1,
+            event_type="task_created",
+            payload=TaskEventPayload(state=TaskState.QUEUED),
+        )
 
 
 def test_public_artifact_reference_is_strict_and_immutable() -> None:
