@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ValidationError
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
@@ -37,94 +37,29 @@ from pc_assistant.gateway.identity import (
 )
 from pc_assistant.network_tls import is_loopback_host
 from pc_assistant.runtime import RuntimePaths
-from pc_assistant.service.core_api import ArtifactInputRef
+from pc_assistant.gateway.protocol import (
+    ArtifactDownloadQuery,
+    ArtifactUploadQuery,
+    AuthChallengeRequest,
+    AuthCompleteRequest,
+    CancelTaskRequest,
+    CreateTaskRequest,
+    EventQuery,
+    GatewayRequest,
+    PairChallengeRequest,
+    PairCompleteRequest,
+    ResolveApprovalRequest,
+    TaskListQuery,
+)
 from pc_assistant.service.core_client import (
     CoreConnectionLostError,
     CoreRequestError,
     CoreRequestTimeoutError,
 )
-from pc_assistant.tasks import TaskState
 
 
 logger = logging.getLogger(__name__)
 _MAX_BODY_BYTES = 16 * 1024
-
-
-class _RequestModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-
-class _PairChallenge(_RequestModel):
-    grant_id: str = Field(min_length=1, max_length=128)
-
-
-class _PairComplete(_PairChallenge):
-    grant_secret: str = Field(min_length=32, max_length=256)
-    challenge_id: str = Field(min_length=1, max_length=128)
-    nonce: str = Field(min_length=32, max_length=256)
-    display_name: str = Field(min_length=1, max_length=80)
-    public_key: str = Field(min_length=40, max_length=64)
-    signature: str = Field(min_length=80, max_length=128)
-
-
-class _AuthChallenge(_RequestModel):
-    device_id: str = Field(min_length=1, max_length=128)
-
-
-class _AuthComplete(_AuthChallenge):
-    challenge_id: str = Field(min_length=1, max_length=128)
-    nonce: str = Field(min_length=32, max_length=256)
-    signature: str = Field(min_length=80, max_length=128)
-
-
-class _CreateTask(_RequestModel):
-    session_handle: str = Field(min_length=1, max_length=256)
-    input: str = Field(default="", max_length=200_000)
-    attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
-    tools_enabled: bool = True
-    priority: int = Field(default=0, ge=0, le=9)
-    parent_task_id: str = Field(default="", max_length=128)
-
-    def require_content(self) -> None:
-        if not self.input.strip() and not self.attachments:
-            raise ValueError("Task request requires input or an attachment")
-
-
-class _CancelTask(_RequestModel):
-    reason: str = Field(default="", max_length=1000)
-
-
-class _ResolveApproval(_RequestModel):
-    approved: bool
-
-
-class _TaskListQuery(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    session_handle: str = Field(default="", max_length=256)
-    state: TaskState | None = None
-    limit: int = Field(default=50, ge=1, le=100)
-    cursor: str = Field(default="", max_length=512)
-
-
-class _EventQuery(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    after_id: int = Field(default=0, ge=0, le=9_223_372_036_854_775_807)
-
-
-class _ArtifactUploadQuery(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    session_handle: str = Field(min_length=1, max_length=256)
-    name: str = Field(default="", max_length=160)
-    caption: str = Field(default="", max_length=1000)
-
-
-class _ArtifactDownloadQuery(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    session_handle: str = Field(min_length=1, max_length=256)
 
 
 class _WindowLimiter:
@@ -199,6 +134,7 @@ class SecureGatewayAdapter:
         self.app = Starlette(
             routes=[
                 Route("/health", self._health, methods=["GET"]),
+                Route("/openapi.json", self._openapi, methods=["GET"]),
                 Route("/v1/pair/challenge", self._pair_challenge, methods=["POST"]),
                 Route("/v1/pair/complete", self._pair_complete, methods=["POST"]),
                 Route("/v1/auth/challenge", self._auth_challenge, methods=["POST"]),
@@ -293,8 +229,13 @@ class SecureGatewayAdapter:
     async def _health(self, _request: Request) -> JSONResponse:
         return JSONResponse({"status": "ok", "scope": "authentication"})
 
+    async def _openapi(self, _request: Request) -> JSONResponse:
+        from pc_assistant.gateway.openapi import gateway_openapi_schema
+
+        return JSONResponse(gateway_openapi_schema())
+
     async def _pair_challenge(self, request: Request) -> JSONResponse:
-        parsed = await self._body(request, _PairChallenge, limit=20)
+        parsed = await self._body(request, PairChallengeRequest, limit=20)
         if isinstance(parsed, JSONResponse):
             return parsed
         try:
@@ -304,7 +245,7 @@ class SecureGatewayAdapter:
         return self._challenge_response(challenge)
 
     async def _pair_complete(self, request: Request) -> JSONResponse:
-        parsed = await self._body(request, _PairComplete, limit=10)
+        parsed = await self._body(request, PairCompleteRequest, limit=10)
         if isinstance(parsed, JSONResponse):
             return parsed
         try:
@@ -322,7 +263,7 @@ class SecureGatewayAdapter:
         )
 
     async def _auth_challenge(self, request: Request) -> JSONResponse:
-        parsed = await self._body(request, _AuthChallenge, limit=30)
+        parsed = await self._body(request, AuthChallengeRequest, limit=30)
         if isinstance(parsed, JSONResponse):
             return parsed
         try:
@@ -332,7 +273,7 @@ class SecureGatewayAdapter:
         return self._challenge_response(challenge)
 
     async def _auth_complete(self, request: Request) -> JSONResponse:
-        parsed = await self._body(request, _AuthComplete, limit=20)
+        parsed = await self._body(request, AuthCompleteRequest, limit=20)
         if isinstance(parsed, JSONResponse):
             return parsed
         try:
@@ -379,7 +320,7 @@ class SecureGatewayAdapter:
         authenticated = self._authorize(request, limit=60)
         if isinstance(authenticated, JSONResponse):
             return authenticated
-        parsed = await self._parse_body(request, _CreateTask)
+        parsed = await self._parse_body(request, CreateTaskRequest)
         if isinstance(parsed, JSONResponse):
             return parsed
         try:
@@ -407,7 +348,7 @@ class SecureGatewayAdapter:
         if isinstance(authenticated, JSONResponse):
             return authenticated
         try:
-            query = _TaskListQuery.model_validate(dict(request.query_params))
+            query = TaskListQuery.model_validate(dict(request.query_params))
         except ValidationError:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         try:
@@ -450,7 +391,7 @@ class SecureGatewayAdapter:
         task_id = self._path_identifier(request, "task_id")
         if task_id is None:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
-        parsed = await self._parse_body(request, _CancelTask)
+        parsed = await self._parse_body(request, CancelTaskRequest)
         if isinstance(parsed, JSONResponse):
             return parsed
         try:
@@ -470,7 +411,7 @@ class SecureGatewayAdapter:
         approval_id = self._path_identifier(request, "approval_id")
         if approval_id is None:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
-        parsed = await self._parse_body(request, _ResolveApproval)
+        parsed = await self._parse_body(request, ResolveApprovalRequest)
         if isinstance(parsed, JSONResponse):
             return parsed
         try:
@@ -494,7 +435,7 @@ class SecureGatewayAdapter:
         if isinstance(authenticated, JSONResponse):
             return authenticated
         try:
-            query = _EventQuery.model_validate(dict(request.query_params))
+            query = EventQuery.model_validate(dict(request.query_params))
             after_id = self._event_cursor(request, query.after_id)
         except (ValidationError, ValueError):
             return JSONResponse({"error": "invalid_request"}, status_code=400)
@@ -572,7 +513,7 @@ class SecureGatewayAdapter:
         if isinstance(authenticated, JSONResponse):
             return authenticated
         try:
-            query = _ArtifactUploadQuery.model_validate(dict(request.query_params))
+            query = ArtifactUploadQuery.model_validate(dict(request.query_params))
         except ValidationError:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         media_type = request.headers.get("Content-Type", "").partition(";")[0].strip()
@@ -623,7 +564,7 @@ class SecureGatewayAdapter:
         if artifact_id is None:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         try:
-            query = _ArtifactDownloadQuery.model_validate(dict(request.query_params))
+            query = ArtifactDownloadQuery.model_validate(dict(request.query_params))
         except ValidationError:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         try:
@@ -686,10 +627,10 @@ class SecureGatewayAdapter:
     async def _body(
         self,
         request: Request,
-        model: type[_RequestModel],
+        model: type[GatewayRequest],
         *,
         limit: int,
-    ) -> _RequestModel | JSONResponse:
+    ) -> GatewayRequest | JSONResponse:
         host = request.client.host if request.client is not None else "unknown"
         key = f"{request.url.path}:{host}"
         if not self._limiter.allow(key, limit=limit):
@@ -699,8 +640,8 @@ class SecureGatewayAdapter:
     async def _parse_body(
         self,
         request: Request,
-        model: type[_RequestModel],
-    ) -> _RequestModel | JSONResponse:
+        model: type[GatewayRequest],
+    ) -> GatewayRequest | JSONResponse:
         content_type = request.headers.get("Content-Type", "").partition(";")[0]
         if content_type.strip().lower() != "application/json":
             return JSONResponse({"error": "unsupported_media_type"}, status_code=415)
