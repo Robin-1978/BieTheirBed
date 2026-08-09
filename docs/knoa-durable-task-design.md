@@ -461,8 +461,12 @@ outside INFO logs.
 > provides event deduplication, and the stable trigger-event ID becomes the Task
 > request ID. Paused triggers reject new events and hold already received events.
 > Payloads are size-bounded and explicitly labelled as untrusted data before
-> entering Task input. HTTP webhook adaptation and proactive result notification
-> remain outside the automation core.
+> entering Task input. Core now also publishes a durable, ordered,
+> principal-scoped Task event feed. Feishu consumes that standard feed with a
+> persisted cursor, suppresses duplicate delivery for Tasks already presented
+> in a live card, and proactively delivers background Task terminal results.
+> HTTP webhook adaptation remains outside the automation core as the next B5
+> adapter-layer step.
 
 ## 14. Acceptance criteria
 

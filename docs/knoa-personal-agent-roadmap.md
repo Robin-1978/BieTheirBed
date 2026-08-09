@@ -327,7 +327,9 @@ Task 至少记录：
 > 计划暂停/恢复也已接入：周期计划恢复时跳过停机期间的积压，过期的一次性计划不会
 > 静默补跑。认证 Trigger ingress 也已进入 Core：外部 event ID 持久去重、独立
 > dispatcher 有界重试、暂停时拒绝新事件并冻结未 claim 事件，payload 以不可信数据
-> 进入 Task。下一步是 HTTP webhook 适配和主动结果通知。
+> 进入 Task。Core 已增加按 principal 排序、可重放的持久 Task event feed；飞书
+> Channel 使用持久 cursor 独立订阅该标准流，前台卡片任务去重，后台 Schedule/Trigger
+> Task 完成、失败或取消后主动交付结果。下一步是独立 HTTP webhook adapter。
 
 ### 7.5 Phase B 验收
 
