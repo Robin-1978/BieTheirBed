@@ -63,8 +63,8 @@ class ToolPolicyDeniedError(PermissionError):
 class ToolArgumentPolicy:
     """Normalize authority-sensitive arguments before the commit boundary."""
 
-    def __init__(self, workspace_root: str | Path) -> None:
-        self._workspace_root = Path(workspace_root).expanduser().resolve()
+    def __init__(self, default_directory: str | Path) -> None:
+        self._default_directory = Path(default_directory).expanduser().resolve()
 
     def normalize(
         self,
@@ -72,33 +72,26 @@ class ToolArgumentPolicy:
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
         normalized = dict(arguments)
-        workspace_access = bool(
+        host_path_access = bool(
             capabilities
             & {
-                ToolCapability.WORKSPACE_READ,
-                ToolCapability.WORKSPACE_WRITE,
+                ToolCapability.HOST_READ,
+                ToolCapability.HOST_WRITE,
             }
         )
-        if workspace_access and "path" in normalized:
+        if host_path_access and "path" in normalized:
             raw_path = str(normalized["path"]).strip()
             if not raw_path:
                 raise ToolPolicyDeniedError(
                     "tool_invalid_arguments",
-                    "Workspace path must not be empty",
+                    "Host path must not be empty",
                 )
             candidate = Path(raw_path).expanduser()
             resolved = (
                 candidate.resolve()
                 if candidate.is_absolute()
-                else (self._workspace_root / candidate).resolve()
+                else (self._default_directory / candidate).resolve()
             )
-            try:
-                resolved.relative_to(self._workspace_root)
-            except ValueError as exc:
-                raise ToolPolicyDeniedError(
-                    "capability_denied",
-                    "Workspace path escapes the configured root",
-                ) from exc
             normalized["path"] = str(resolved)
         return normalized
 

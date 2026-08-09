@@ -11,9 +11,12 @@ from pc_assistant.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRi
 
 class ArtifactPrepareTool(ToolBase):
     name = "attach"
-    description = "Attach an existing file for user delivery."
+    description = (
+        "Deliver an existing local file, including files in Desktop or Downloads. "
+        "The source file is borrowed read-only and is never copied, modified, or deleted."
+    )
     effect = ToolEffect.EXTERNAL_SIDE_EFFECT
-    capabilities = frozenset({ToolCapability.WORKSPACE_READ})
+    capabilities = frozenset({ToolCapability.HOST_READ})
     risk = ToolRisk.HIGH
 
     def __init__(self, store: ArtifactStore, working_directory: str = ".") -> None:
@@ -43,7 +46,10 @@ class ArtifactPrepareTool(ToolBase):
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path of the existing file to deliver to the current user.",
+                        "description": (
+                            "Path of an existing local file to deliver to the current user; "
+                            "Desktop and Downloads paths are allowed."
+                        ),
                     },
                 },
                 "required": ["path"],

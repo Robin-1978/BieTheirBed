@@ -27,8 +27,6 @@ class ToolEffect(str, Enum):
 
 
 class ToolCapability(str, Enum):
-    WORKSPACE_READ = "workspace_read"
-    WORKSPACE_WRITE = "workspace_write"
     HOST_READ = "host_read"
     HOST_WRITE = "host_write"
     SHELL = "shell"

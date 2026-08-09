@@ -79,9 +79,23 @@ def test_core_composition_builds_forward_only_registry_and_profiles(tmp_path: Pa
     local = set(composition.registry.list_for(PERSONAL_LOCAL_CAPABILITIES))
     remote = set(composition.registry.list_for(REMOTE_SCOPED_CAPABILITIES))
 
-    assert {"read_file", "write_file", "screenshot", "mouse", "tool_help"} <= local
+    assert {
+        "attach",
+        "read_file",
+        "write_file",
+        "screenshot",
+        "mouse",
+        "tool_help",
+    } <= local
     assert {"web_search", "web_fetch", "weather", "currency"} <= remote
-    assert not {"read_file", "write_file", "run_command", "mouse", "tool_help"} & remote
+    assert not {
+        "attach",
+        "read_file",
+        "write_file",
+        "run_command",
+        "mouse",
+        "tool_help",
+    } & remote
     assert not {"screen", "ui", "schedule", "inspect_image"} & local
 
 
