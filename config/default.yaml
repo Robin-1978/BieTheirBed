@@ -40,6 +40,9 @@ working_directory: "."
 service_host: "127.0.0.1"
 service_port: 9527
 service_token: ""
+owner_principal_id: "personal:owner"
+owner_principal_aliases:
+  - "local"
 webhook_enabled: false
 webhook_host: "127.0.0.1"
 webhook_port: 9528

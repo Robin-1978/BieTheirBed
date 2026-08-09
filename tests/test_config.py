@@ -14,6 +14,8 @@ class TestAppConfig:
         assert cfg.context_window_budget == 8192
         assert cfg.audio_transcription.enabled is False
         assert cfg.gateway_enabled is False
+        assert cfg.owner_principal_id == "personal:owner"
+        assert cfg.owner_principal_aliases == ("local",)
         assert cfg.gateway_artifact_max_bytes == 32 * 1024 * 1024
 
     def test_audio_transcription_requires_public_mcp_tool(self):

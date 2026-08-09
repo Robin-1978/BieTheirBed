@@ -842,6 +842,7 @@ class FeishuChannel:
         self._app_secret = config.feishu_app_secret.get_secret_value().strip()
         self._receive_id = config.feishu_receive_id.strip()
         self._binding_path = self._paths.data / "feishu_open_id"
+        self._binding_lock = threading.RLock()
         self._sessions_path = self._paths.data / "feishu_sessions.json"
         self._notification_cursors_path = (
             self._paths.data / "feishu_notification_cursors.json"
@@ -992,6 +993,12 @@ class FeishuChannel:
             try:
                 sender = event.event.sender
                 open_id = sender.sender_id.open_id
+                if not self._save_binding(open_id):
+                    logger.warning(
+                        "Ignored Feishu message from non-owner sender=%s",
+                        _principal_for_log(open_id),
+                    )
+                    return
                 message = event.event.message
                 message_id = getattr(message, "message_id", "") or ""
                 if not self._claim_message(message_id):
@@ -1045,6 +1052,19 @@ class FeishuChannel:
                     value = {}
                 operator = event.event.operator
                 open_id = operator.open_id if operator is not None else ""
+                if not self._save_binding(open_id):
+                    logger.warning(
+                        "Ignored Feishu card action from non-owner sender=%s",
+                        _principal_for_log(open_id),
+                    )
+                    return P2CardActionTriggerResponse(
+                        {
+                            "toast": {
+                                "type": "warning",
+                                "content": "无权操作",
+                            }
+                        }
+                    )
                 action_name = str(value.get("action", ""))
                 task_id = str(value.get("task_id", ""))
                 approval_id = str(value.get("approval_id", ""))
@@ -2187,13 +2207,20 @@ class FeishuChannel:
             }
         return True
 
-    def _save_binding(self, open_id: str) -> None:
-        if not open_id:
-            return
-        self._receive_id = open_id
-        self._binding_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self._binding_path.write_text(open_id, encoding="utf-8")
-        self._binding_path.chmod(0o600)
+    def _save_binding(self, open_id: str) -> bool:
+        """Bind the first Feishu owner and never let another sender replace it."""
+        normalized = open_id.strip()
+        if not normalized:
+            return False
+        with self._binding_lock:
+            current = self._current_receive_id()
+            if current and current != normalized:
+                return False
+            self._receive_id = normalized
+            self._binding_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self._binding_path.write_text(normalized, encoding="utf-8")
+            self._binding_path.chmod(0o600)
+        return True
 
     def _current_receive_id(self) -> str:
         if self._receive_id:
@@ -2677,7 +2704,7 @@ class FeishuChannel:
             if current is not None:
                 await current.disconnect()
             signing_key = resolve_local_service_token(self._paths)
-            principal = f"personal:feishu:{_principal_for_log(open_id)}"
+            principal = self._config.owner_principal_id
             credential = issue_principal_credential(signing_key, principal)
 
             async def confirm(message: TaskEvent) -> bool:

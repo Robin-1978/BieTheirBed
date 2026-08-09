@@ -21,7 +21,7 @@ def test_gateway_admin_pairs_lists_and_revokes_device(
     runtime_root = tmp_path / "runtime"
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        f"runtime_root: {runtime_root}\n",
+        f"runtime_root: {runtime_root}\nowner_principal_id: personal:robin\n",
         encoding="utf-8",
     )
 
@@ -50,7 +50,7 @@ def test_gateway_admin_pairs_lists_and_revokes_device(
     ) == 0
     assert capsys.readouterr().out.strip() == f"revoked={device.device_id}"
     with pytest.raises(DeviceNotFoundError):
-        repository.active_device("personal:owner", device.device_id)
+        repository.active_device("personal:robin", device.device_id)
 
 
 def test_gateway_admin_rejects_invalid_pairing_ttl() -> None:

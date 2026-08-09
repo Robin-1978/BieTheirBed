@@ -70,6 +70,7 @@ from pc_assistant.extensions.skill import (
 )
 from pc_assistant.observability.trace import LLMTraceRecorder, TurnRecorder
 from pc_assistant.runtime import RuntimePaths
+from pc_assistant.principal import converge_owner_principals, discover_owner_aliases
 from pc_assistant.service.core_host import (
     CoreServiceHost,
     TcpCoreEndpoint,
@@ -224,6 +225,11 @@ def build_core_runtime(
     """Build one Core graph without legacy agents or in-process service fallback."""
 
     paths = RuntimePaths.from_root(config.runtime_root)
+    converge_owner_principals(
+        paths,
+        config.owner_principal_id,
+        discover_owner_aliases(paths, config.owner_principal_aliases),
+    )
     llm_traces = LLMTraceRecorder(
         str(paths.resolve(config.llm_trace_log)),
         enabled=config.trace_enabled,
@@ -488,7 +494,7 @@ def build_core_runtime(
     )
 
     local_token = resolve_local_service_token(paths)
-    credentials = {local_token: "local"}
+    credentials = {local_token: config.owner_principal_id}
     if config.service_token.strip():
         credentials[config.service_token.strip()] = "remote"
     tcp_server = CoreServer(

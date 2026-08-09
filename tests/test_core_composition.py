@@ -105,7 +105,7 @@ async def test_control_lists_only_principal_profile_tools(tmp_path: Path) -> Non
         _config(tmp_path, service_port=0),
         provider_factory=_OfflineProvider,
     )
-    local = await composition.control.create_session("local")
+    local = await composition.control.create_session("personal:owner")
     remote = await composition.control.create_session("remote")
 
     local_result = await composition.control.list_tools(local)
@@ -128,7 +128,13 @@ async def test_control_lists_only_principal_profile_tools(tmp_path: Path) -> Non
     assert local_descriptors["read_file"].effect == "read_only"
     assert local_descriptors["write_file"].requires_confirmation is True
     assert {item.name for item in remote_result.descriptors} == remote_tools
-    assert RuntimeScope(principal_id="local", session_handle=local.session_handle) == local
+    assert (
+        RuntimeScope(
+            principal_id="personal:owner",
+            session_handle=local.session_handle,
+        )
+        == local
+    )
 
 
 def test_tcp_endpoint_uses_managed_token_when_not_configured(tmp_path: Path) -> None:

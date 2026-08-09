@@ -13,19 +13,20 @@ def run_gateway_admin(
     config_path: str | None,
     *,
     action: str,
-    principal_id: str,
+    principal_id: str | None,
     ttl_seconds: int = 300,
     device_id: str = "",
 ) -> int:
     """Execute one explicit local-only owner operation."""
     config = load_config(config_path) if config_path else load_config()
+    principal = principal_id or config.owner_principal_id
     database = RuntimePaths.from_root(config.runtime_root).data / "gateway.db"
     identities = GatewayIdentityRepository(database)
 
     try:
         if action == "pair":
             grant = identities.create_pairing_grant(
-                principal_id,
+                principal,
                 ttl_seconds=ttl_seconds,
             )
             print(f"grant_id={grant.grant_id}")
@@ -34,7 +35,7 @@ def run_gateway_admin(
             return 0
 
         if action == "devices":
-            devices = identities.list_devices(principal_id)
+            devices = identities.list_devices(principal)
             if not devices:
                 print("No paired devices.")
                 return 0
@@ -49,7 +50,7 @@ def run_gateway_admin(
             return 0
 
         if action == "revoke":
-            device = identities.revoke_device(principal_id, device_id)
+            device = identities.revoke_device(principal, device_id)
             print(f"revoked={device.device_id}")
             return 0
     except (LookupError, ValueError) as exc:
