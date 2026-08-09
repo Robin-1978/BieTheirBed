@@ -203,7 +203,9 @@ Gateway device record and are never sent to Core.
 > non-loopback plaintext is rejected. Real certificate/domain deployment remains
 > an external rollout step. Pairing grant creation, device listing and revocation
 > are available only through the local owner CLI; no remote administration route
-> is exposed.
+> is exposed. The mobile protocol is published as OpenAPI 3.1 from the same
+> Pydantic request models used at runtime, with route-drift tests for client
+> generation.
 
 ### D4 — mobile delivery
 

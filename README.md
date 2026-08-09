@@ -255,6 +255,10 @@ pca gateway devices
 pca gateway revoke <device-id>
 ```
 
+When enabled, `GET /openapi.json` serves the OpenAPI 3.1 source for generated
+mobile clients. Request models are shared with the running adapter, and tests
+fail if the documented allow-listed paths drift from the actual routes.
+
 ### Environment variables
 
 All config fields can be overridden with `PC_` prefix:
