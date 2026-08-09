@@ -272,6 +272,30 @@ async def test_client_auth_session_and_task_round_trip(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_client_uploads_named_file_artifact(tmp_path: Path) -> None:
+    connected = await _connected(tmp_path)
+    try:
+        session_handle = await connected.client.create_session()
+        uploaded = await connected.client.upload_artifact(
+            session_handle,
+            "data:text/plain;base64,SGVsbG8sIEtub2Eh",
+            media_type="text/plain",
+            name="notes.txt",
+            caption="meeting notes",
+        )
+        downloaded = await connected.client.download_artifact(
+            session_handle,
+            uploaded.artifact_id,
+        )
+
+        assert uploaded.kind == "file"
+        assert uploaded.name == "notes.txt"
+        assert downloaded.data_url == "data:text/plain;base64,SGVsbG8sIEtub2Eh"
+    finally:
+        await connected.close()
+
+
+@pytest.mark.asyncio
 async def test_client_replays_and_tails_principal_task_event_feed(
     tmp_path: Path,
 ) -> None:

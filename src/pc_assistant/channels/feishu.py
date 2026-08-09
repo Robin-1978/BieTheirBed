@@ -49,6 +49,7 @@ _PROGRESS_TIMELINE_CHARS = (
     + _PROGRESS_DRAFT_CHARS
 )
 _TEXT_MESSAGE_CHARS = 4000
+_MAX_CORE_ARTIFACT_RAW_BYTES = 45 * 1024 * 1024
 _PRINCIPAL_WATCH_RETRY_SECONDS = 2.0
 _TASK_TERMINAL_EVENT_TYPES = frozenset({"completed", "failed", "cancelled"})
 _TASK_STATE_LABELS = {
@@ -1004,6 +1005,18 @@ class FeishuChannel:
                         self._submit(
                             self._handle_image(open_id, message_id, image_key)
                         )
+                elif message.message_type == "file":
+                    file_key = str(content.get("file_key", "")).strip()
+                    file_name = str(content.get("file_name", "")).strip()
+                    if file_key:
+                        self._submit(
+                            self._handle_file(
+                                open_id,
+                                message_id,
+                                file_key,
+                                file_name or "attachment.bin",
+                            )
+                        )
             except Exception:
                 logger.exception("Feishu inbound message handling failed")
 
@@ -1656,6 +1669,64 @@ class FeishuChannel:
                 _principal_for_log(open_id),
             )
             await asyncio.to_thread(self._send_text, open_id, "图片接收失败")
+        finally:
+            await asyncio.to_thread(
+                self._remove_reaction,
+                message_id,
+                reaction_id,
+            )
+
+    async def _handle_file(
+        self,
+        open_id: str,
+        message_id: str,
+        file_key: str,
+        file_name: str,
+    ) -> None:
+        reaction_id = await asyncio.to_thread(
+            self._add_reaction,
+            message_id,
+            "Typing",
+        )
+        try:
+            self._save_binding(open_id)
+            data, media_type = await asyncio.to_thread(
+                self._download_file,
+                message_id,
+                file_key,
+                file_name,
+            )
+            if len(data) > _MAX_CORE_ARTIFACT_RAW_BYTES:
+                raise ValueError("File exceeds Core ingress limit")
+            session = await self._session_for(open_id)
+            encoded = base64.b64encode(data).decode("ascii")
+            client = await self._client_for(open_id)
+            artifact = await client.upload_artifact(
+                session,
+                f"data:{media_type};base64,{encoded}",
+                media_type=media_type,
+                name=file_name,
+                caption=file_name,
+            )
+            pending = self._pending_attachments.setdefault(open_id, [])
+            pending.append(
+                ArtifactInputRef(
+                    artifact_id=artifact.artifact_id,
+                    caption=file_name,
+                )
+            )
+            self._pending_attachments[open_id] = pending[-4:]
+            await asyncio.to_thread(
+                self._send_text,
+                open_id,
+                f"文件已收到：{file_name}\n请继续发送任务。",
+            )
+        except Exception:
+            logger.exception(
+                "Feishu file ingress failed principal=%s",
+                _principal_for_log(open_id),
+            )
+            await asyncio.to_thread(self._send_text, open_id, "文件接收失败")
         finally:
             await asyncio.to_thread(
                 self._remove_reaction,
@@ -2317,6 +2388,32 @@ class FeishuChannel:
         elif data.startswith(b"RIFF") and data[8:12] == b"WEBP":
             media_type = "image/webp"
         return data, media_type
+
+    def _download_file(
+        self,
+        message_id: str,
+        file_key: str,
+        file_name: str,
+    ) -> tuple[bytes, str]:
+        from lark_oapi.api.im.v1 import GetMessageResourceRequest
+
+        request = (
+            GetMessageResourceRequest.builder()
+            .message_id(message_id)
+            .file_key(file_key)
+            .type("file")
+            .build()
+        )
+        with self._lark_lock:
+            response = self._get_lark_client().im.v1.message_resource.get(request)
+        if not response.success() or not response.file:
+            raise RuntimeError(
+                f"Feishu file download failed: {response.code} {response.msg}"
+            )
+        media_type = (
+            mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+        )
+        return response.file.read(), media_type
 
     async def _deliver_artifact(
         self,

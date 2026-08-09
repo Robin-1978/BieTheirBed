@@ -745,6 +745,7 @@ class CoreServer:
                     ArtifactUploadRequest(
                         data_url=request.data_url,
                         media_type=request.media_type,
+                        name=request.name,
                         caption=request.caption,
                     ),
                 )

@@ -406,6 +406,7 @@ class CoreClient:
         data_url: str,
         *,
         media_type: str = "image/jpeg",
+        name: str = "",
         caption: str = "",
     ) -> ArtifactRef:
         response = await self._request(
@@ -414,6 +415,7 @@ class CoreClient:
                 session_handle=session_handle,
                 data_url=data_url,
                 media_type=media_type,
+                name=name,
                 caption=caption,
             )
         )

@@ -429,6 +429,7 @@ class UploadArtifactRequest(SessionRequest):
     method: Literal["artifact_upload"] = "artifact_upload"
     data_url: Annotated[str, StringConstraints(min_length=1, max_length=64 * 1024 * 1024)]
     media_type: Annotated[str, StringConstraints(min_length=1, max_length=128)] = "image/jpeg"
+    name: Annotated[str, StringConstraints(max_length=160)] = ""
     caption: Annotated[str, StringConstraints(max_length=1000)] = ""
 
 

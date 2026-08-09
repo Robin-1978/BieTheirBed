@@ -186,6 +186,9 @@ durable principal Task feed with a persisted cursor, so Schedule and Trigger
 results are delivered proactively without coupling Feishu to Core automation.
 Feishu also exposes `/tasks`, `/task <id>`, and `/stop <id>` for owned durable
 Tasks. New messages can enqueue new Tasks while earlier work continues.
+Images and ordinary files enter the same owned Core Artifact boundary. Attached
+text files preserve their safe name and can be inspected through the bounded
+`read_artifact` Built-in Tool without exposing a server filesystem path.
 
 An optional HTTP webhook adapter can feed configured durable Triggers without
 adding HTTP parsing to Core. Keep it on loopback and expose it only through a

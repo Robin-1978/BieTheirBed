@@ -89,6 +89,7 @@ from pc_assistant.tools.mcp_import import MCPImportTool
 from pc_assistant.tools.mouse import MouseTool
 from pc_assistant.tools.notification import NotificationTool
 from pc_assistant.tools.press_key import PressKeyTool
+from pc_assistant.tools.read_artifact import ReadArtifactTool
 from pc_assistant.tools.read_file import ReadFileTool
 from pc_assistant.tools.registry import ToolRegistry
 from pc_assistant.tools.screenshot import ScreenshotTool
@@ -185,6 +186,7 @@ def _build_registry(
     registry = ToolRegistry()
     for tool in (
         ReadFileTool(working_directory=config.working_directory),
+        ReadArtifactTool(artifacts),
         WriteFileTool(working_directory=config.working_directory),
         ShellTool(default_timeout=config.shell_timeout),
         WebSearchTool(),

@@ -358,7 +358,9 @@ Task 至少记录：
 > 进度（2026-08-09）：Phase C 已启动。飞书已支持 `/tasks`、`/task <id>` 和
 > `/stop <id>`，均通过 principal-scoped Core Task API 查询或控制；用户发送新消息时
 > 不再被上一条长任务的 Channel 锁阻塞，而是立即创建新的持久 Task，执行顺序由 Core
-> 的 session 调度保证。下一步补普通文件入口与长结果 Artifact 化。
+> 的 session 调度保证。普通文件也已进入同一 Artifact ingress：保留安全文件名和 MIME，
+> 以 session-scoped `file_ref` 传递；文本类附件由低风险 Core 工具 `read_artifact`
+> 按 artifact ID 读取，路径不泄露给 Channel 或模型。下一步补长结果 Artifact 化与音频能力。
 
 ### Phase C 验收
 
