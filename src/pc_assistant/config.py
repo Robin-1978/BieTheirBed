@@ -93,6 +93,34 @@ class ResolvedModelConfig(BaseModel):
     thinking: ThinkingConfig | None = None
 
 
+class WebhookRouteConfig(BaseModel):
+    """One authenticated external webhook mapped to an owned Trigger."""
+
+    trigger_id: str = Field(min_length=1, max_length=128)
+    principal_id: str = Field(min_length=1, max_length=256)
+    secret: SecretStr = Field(default_factory=lambda: SecretStr(""))
+    secret_env: str = ""
+
+    def resolved_secret(self) -> str:
+        if self.secret_env:
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", self.secret_env):
+                raise ValueError("webhook secret_env must be an environment variable name")
+            value = os.environ.get(self.secret_env, "")
+            if not value:
+                raise ValueError(
+                    f"Webhook secret environment variable '{self.secret_env}' is not set"
+                )
+            if len(value.encode("utf-8")) < 32:
+                raise ValueError("Webhook route secret must contain at least 32 bytes")
+            return value
+        value = self.secret.get_secret_value()
+        if not value:
+            raise ValueError("Webhook route secret is required")
+        if len(value.encode("utf-8")) < 32:
+            raise ValueError("Webhook route secret must contain at least 32 bytes")
+        return value
+
+
 class AppConfig(BaseModel):
     # Multi-provider model catalog. Provider keys identify API accounts;
     # model keys are stable aliases used by the application.
@@ -125,6 +153,10 @@ class AppConfig(BaseModel):
     service_host: str = "127.0.0.1"
     service_port: int = 9527
     service_token: str = ""
+    webhook_enabled: bool = False
+    webhook_host: str = "127.0.0.1"
+    webhook_port: int = 9528
+    webhook_routes: dict[str, WebhookRouteConfig] = Field(default_factory=dict)
     feishu_enabled: bool = False
     feishu_app_id: str = ""
     feishu_app_secret: SecretStr = Field(default_factory=lambda: SecretStr(""))
@@ -140,6 +172,22 @@ class AppConfig(BaseModel):
     def _validate_provider(self) -> "AppConfig":
         if not 0 <= self.service_port <= 65535:
             raise ValueError("Core WebSocket service port must be between 0 and 65535")
+        if not 0 <= self.webhook_port <= 65535:
+            raise ValueError("Webhook port must be between 0 and 65535")
+        invalid_webhook_ids = [
+            route_id
+            for route_id in self.webhook_routes
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", route_id)
+        ]
+        if invalid_webhook_ids:
+            raise ValueError("Webhook route IDs must contain 1-64 safe characters")
+        if self.webhook_enabled:
+            if not self.webhook_routes:
+                raise ValueError("Enabled webhook adapter requires at least one route")
+            if self.service_port <= 0:
+                raise ValueError("Enabled webhook adapter requires the Core TCP service")
+            if self.webhook_port == self.service_port:
+                raise ValueError("Webhook and Core service ports must differ")
         if self.feishu_enabled and (
             not self.feishu_app_id.strip()
             or not self.feishu_app_secret.get_secret_value().strip()
@@ -319,6 +367,9 @@ def _env_overrides() -> dict[str, Any]:
         "PC_ASSISTANT_HOME": ("runtime_root", str),
         "PC_RUNTIME_ROOT": ("runtime_root", str),
         "PC_WORKING_DIRECTORY": ("working_directory", str),
+        "PC_WEBHOOK_ENABLED": ("webhook_enabled", bool),
+        "PC_WEBHOOK_HOST": ("webhook_host", str),
+        "PC_WEBHOOK_PORT": ("webhook_port", int),
         "PC_FEISHU_ENABLED": ("feishu_enabled", bool),
         "PC_FEISHU_APP_ID": ("feishu_app_id", str),
         "PC_FEISHU_APP_SECRET": ("feishu_app_secret", str),

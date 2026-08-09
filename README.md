@@ -185,6 +185,27 @@ continuation cards instead of truncating model output. It also follows the
 durable principal Task feed with a persisted cursor, so Schedule and Trigger
 results are delivered proactively without coupling Feishu to Core automation.
 
+An optional HTTP webhook adapter can feed configured durable Triggers without
+adding HTTP parsing to Core. Keep it on loopback and expose it only through a
+TLS reverse proxy:
+
+```yaml
+webhook_enabled: true
+webhook_host: "127.0.0.1"
+webhook_port: 9528
+webhook_routes:
+  gitlab:
+    trigger_id: "trg_..."
+    principal_id: "personal:feishu:..."
+    secret_env: "KNOA_GITLAB_WEBHOOK_SECRET"
+```
+
+Send JSON to `POST /hooks/gitlab` with `X-Knoa-Event-Id` and
+`X-Knoa-Signature: sha256=<hex>`. The signature is HMAC-SHA256 over
+`event_id + "\\n" + raw_request_body`; route secrets must contain at least 32
+bytes. Reusing an event ID is safe because Trigger ingress is durably
+idempotent.
+
 ### Environment variables
 
 All config fields can be overridden with `PC_` prefix:
@@ -220,6 +241,9 @@ All config fields can be overridden with `PC_` prefix:
 | `PC_EVIDENCE_POLICY_ENABLED` | evidence_policy_enabled |
 | `PC_ASSISTANT_HOME` | runtime_root (friendly alias) |
 | `PC_RUNTIME_ROOT` | runtime_root |
+| `PC_WEBHOOK_ENABLED` | webhook_enabled |
+| `PC_WEBHOOK_HOST` | webhook_host |
+| `PC_WEBHOOK_PORT` | webhook_port |
 
 ### Runtime config
 

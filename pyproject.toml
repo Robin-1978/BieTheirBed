@@ -24,6 +24,8 @@ dependencies = [
     "plyer>=2.1.0",
     "jsonschema>=4.0",
     "websockets>=14.0,<16",
+    "starlette>=0.37,<2",
+    "uvicorn>=0.30,<1",
     "lark-oapi>=1.6,<2",
     "mcp>=1.27,<2",
 ]

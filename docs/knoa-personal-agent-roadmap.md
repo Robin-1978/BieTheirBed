@@ -320,7 +320,7 @@ Task 至少记录：
 - 高风险操作仍进入持久确认状态；
 - 失败重试有上限、退避和通知。
 
-> 进度（2026-08-09）：B5 已启动。一次性、固定周期和标准五段 Cron 的统一时间
+> 进度（2026-08-09）：B5 已完成。一次性、固定周期和标准五段 Cron 的统一时间
 > 语义已实现，Cron 使用显式 IANA 时区，周期任务以初始时间为锚点避免累计漂移。
 > Schedule 与每次 Occurrence claim 已持久化；生产 dispatcher 使用稳定 occurrence ID
 > 幂等调用 TaskService，并提供有界指数退避、过期 lease 恢复和 Core API 创建/详情/列表。
@@ -329,7 +329,9 @@ Task 至少记录：
 > dispatcher 有界重试、暂停时拒绝新事件并冻结未 claim 事件，payload 以不可信数据
 > 进入 Task。Core 已增加按 principal 排序、可重放的持久 Task event feed；飞书
 > Channel 使用持久 cursor 独立订阅该标准流，前台卡片任务去重，后台 Schedule/Trigger
-> Task 完成、失败或取消后主动交付结果。下一步是独立 HTTP webhook adapter。
+> Task 的确认、完成、失败或取消均通过标准事件主动处理。独立 HTTP webhook adapter
+> 运行在单独的 loopback 端口：配置式绑定 principal/Trigger，以 HMAC-SHA256 验证
+> 外部 event ID 和限长 JSON 原文，再通过认证 Core API 入站；对外暴露交给 TLS 反向代理。
 
 ### 7.5 Phase B 验收
 

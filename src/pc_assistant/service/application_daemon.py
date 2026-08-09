@@ -28,6 +28,11 @@ class ApplicationDaemon:
     def __init__(self, config: AppConfig, *, log_path: Path) -> None:
         self._core = CoreDaemon(config, log_path=log_path)
         self._channels = ChannelRuntime.from_config(config)
+        self._webhooks = None
+        if config.webhook_enabled:
+            from pc_assistant.adapters import WebhookAdapter
+
+            self._webhooks = WebhookAdapter(config)
         self._started = False
 
     async def start(self) -> None:
@@ -35,15 +40,20 @@ class ApplicationDaemon:
             raise RuntimeError("ApplicationDaemon is already started")
         await self._core.start()
         try:
+            if self._webhooks is not None:
+                await self._webhooks.start()
             await self._channels.start()
         except BaseException:
+            if self._webhooks is not None:
+                await self._webhooks.stop()
             await self._core.stop()
             raise
         self._started = True
         logger.info(
-            "Application service ready (pid %d, channels=%s)",
+            "Application service ready (pid %d, channels=%s, webhook=%s)",
             os.getpid(),
             ",".join(self._channels.names) or "none",
+            "enabled" if self._webhooks is not None else "disabled",
         )
 
     async def stop(self) -> None:
@@ -52,6 +62,11 @@ class ApplicationDaemon:
             return
         self._started = False
         await self._channels.stop()
+        if self._webhooks is not None:
+            try:
+                await self._webhooks.stop()
+            except Exception:
+                logger.exception("Webhook adapter stop failed")
         await self._core.stop()
         logger.info("Application service stopped")
 
