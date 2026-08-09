@@ -169,6 +169,18 @@ async def test_yuque_connector_registers_read_write_tools_with_standard_policy(
         "connector__yuque__update_document",
     ]
     assert registry.origin("connector__yuque__get_document").kind is ToolOriginKind.CONNECTOR
+    descriptors = {
+        item.name: item
+        for item in registry.descriptors_for(
+            frozenset({ToolCapability.NETWORK, ToolCapability.CONNECTOR})
+        )
+    }
+    assert descriptors["connector__yuque__get_document"].requires_confirmation is False
+    assert descriptors["connector__yuque__update_document"].requires_confirmation is True
+    assert (
+        descriptors["connector__yuque__update_document"].origin.extension_id
+        == "connector:yuque"
+    )
     assert secrets.requested == ["yuque-primary"]
 
     step = ToolStep(registry, ToolArgumentPolicy(tmp_path))

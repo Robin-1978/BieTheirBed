@@ -80,6 +80,19 @@ def test_registry_list_tools():
     assert registry.list_tools() == ["dummy"]
 
 
+def test_registry_describes_visible_tool_policy_and_origin():
+    registry = ToolRegistry()
+    registry.register(DummyTool())
+
+    descriptor = registry.descriptors_for(frozenset())[0]
+
+    assert descriptor.name == "dummy"
+    assert descriptor.description == "A dummy tool for testing"
+    assert descriptor.origin == BUILTIN_TOOL_ORIGIN
+    assert descriptor.policy.effect is ToolEffect.READ_ONLY
+    assert descriptor.requires_confirmation is False
+
+
 def test_registry_empty_name():
     class NoName(ToolBase):
         description = "no name"

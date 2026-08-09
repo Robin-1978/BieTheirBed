@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from pc_assistant.exceptions import ToolNotFoundError
@@ -7,9 +8,20 @@ from pc_assistant.tools.base import (
     BUILTIN_TOOL_ORIGIN,
     ToolBase,
     ToolCapability,
+    ToolEffect,
     ToolOrigin,
     ToolPolicy,
+    ToolRisk,
 )
+
+
+@dataclass(frozen=True)
+class RegisteredToolDescriptor:
+    name: str
+    description: str
+    origin: ToolOrigin
+    policy: ToolPolicy
+    requires_confirmation: bool
 
 
 class ToolRegistry:
@@ -126,6 +138,28 @@ class ToolRegistry:
                 and tool.required_schema_capabilities <= capabilities
             )
         )
+
+    def descriptors_for(
+        self,
+        capabilities: frozenset[ToolCapability],
+    ) -> tuple[RegisteredToolDescriptor, ...]:
+        descriptors: list[RegisteredToolDescriptor] = []
+        for name in self.list_for(capabilities):
+            tool = self._tools[name]
+            policy = tool.policy
+            descriptors.append(
+                RegisteredToolDescriptor(
+                    name=name,
+                    description=tool.description,
+                    origin=self._origins[name],
+                    policy=policy,
+                    requires_confirmation=(
+                        policy.effect is not ToolEffect.READ_ONLY
+                        or policy.risk is ToolRisk.HIGH
+                    ),
+                )
+            )
+        return tuple(descriptors)
 
     def __contains__(self, name: str) -> bool:
         return name in self._tools

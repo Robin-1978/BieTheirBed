@@ -108,12 +108,20 @@ async def test_control_lists_only_principal_profile_tools(tmp_path: Path) -> Non
     local = await composition.control.create_session("local")
     remote = await composition.control.create_session("remote")
 
-    local_tools = set((await composition.control.list_tools(local)).tools)
-    remote_tools = set((await composition.control.list_tools(remote)).tools)
+    local_result = await composition.control.list_tools(local)
+    remote_result = await composition.control.list_tools(remote)
+    local_tools = set(local_result.tools)
+    remote_tools = set(remote_result.tools)
 
     assert "screenshot" in local_tools
     assert "screenshot" not in remote_tools
     assert remote_tools == {"currency", "weather", "web_fetch", "web_search"}
+    local_descriptors = {item.name: item for item in local_result.descriptors}
+    assert set(local_descriptors) == local_tools
+    assert local_descriptors["read_file"].origin_kind == "builtin"
+    assert local_descriptors["read_file"].effect == "read_only"
+    assert local_descriptors["write_file"].requires_confirmation is True
+    assert {item.name for item in remote_result.descriptors} == remote_tools
     assert RuntimeScope(principal_id="local", session_handle=local.session_handle) == local
 
 

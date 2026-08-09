@@ -13,6 +13,7 @@ from pc_assistant.agent_runtime.contracts import (
     HealthStatus,
     RunRequest,
     RuntimeScope,
+    ToolDescriptorRecord,
 )
 from pc_assistant.agent_runtime.control import ControlService
 from pc_assistant.agent_runtime.core_application import CoreApplication
@@ -393,6 +394,23 @@ def build_core_runtime(
         sessions,
         memory_repository,
         tool_names=lambda scope: registry.list_for(capabilities_for_scope(scope)),
+        tool_descriptors=lambda scope: tuple(
+            ToolDescriptorRecord(
+                name=descriptor.name,
+                description=descriptor.description[:2000],
+                origin_kind=descriptor.origin.kind.value,
+                extension_id=descriptor.origin.extension_id,
+                effect=descriptor.policy.effect.value,
+                risk=descriptor.policy.risk.value,
+                capabilities=tuple(
+                    sorted(capability.value for capability in descriptor.policy.capabilities)
+                ),
+                requires_confirmation=descriptor.requires_confirmation,
+            )
+            for descriptor in registry.descriptors_for(
+                capabilities_for_scope(scope)
+            )
+        ),
         config_controller=config_controller,
         status_details=status_details,
         extension_statuses=lambda: tuple(

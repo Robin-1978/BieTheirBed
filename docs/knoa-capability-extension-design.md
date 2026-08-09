@@ -46,7 +46,10 @@ Started on 2026-08-09:
   Connector, startup authorization health, reauthorization-safe failures and
   metadata-only audit records;
 - live validation against a user-authorized Yuque account remains a deployment
-  step because repository tests intentionally contain no credential.
+  step because repository tests intentionally contain no credential;
+- the additive `/tools` management response now includes typed descriptors for
+  origin, extension ownership, effect, risk, capabilities and confirmation
+  behavior while retaining the simple name list for existing clients.
 
 ## 2. Domain model
 
@@ -210,18 +213,18 @@ or document paths and report expired authorization without transport details.
 Audit records contain connector ID, operation, outcome, HTTP status and latency;
 they never contain arguments, document bodies or credentials.
 
-## 8. Public status evolution
+## 8. Public status
 
-The current `/tools` response remains a list of available names. A later Core
-API revision will add typed extension/tool descriptors containing:
+The `/tools` response keeps its list of available names and also exposes typed,
+principal-filtered descriptors containing:
 
 - origin and extension ID;
-- enabled/healthy/degraded state;
 - effect, risk and required capabilities;
-- bounded diagnostic text;
-- version and transport type.
+- whether the standard confirmation boundary applies.
 
-This must be additive and typed; clients must not inspect registry internals.
+Extension health and bounded diagnostic text remain in `RuntimeStatus.extensions`.
+Transport-specific version data can be added later without making clients
+inspect registry internals.
 
 ## 9. Phase A implementation slices
 
@@ -257,6 +260,12 @@ This must be additive and typed; clients must not inspect registry internals.
 - [x] Connector lifecycle through ExtensionManager;
 - [x] one read/write business integration (Yuque documents);
 - [x] startup health, reauthorization and metadata-only audit behavior.
+
+### A5 — Management descriptors
+
+- [x] additive typed tool descriptors on the existing Core API;
+- [x] principal-filtered origin, policy and confirmation metadata;
+- [x] existing name-only Channel/TUI consumers remain unchanged.
 
 ## 10. Acceptance criteria
 
