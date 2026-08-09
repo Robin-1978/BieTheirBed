@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -16,8 +17,12 @@ from pc_assistant.agent_runtime.tool_step import (
 )
 from pc_assistant.config import AppConfig
 from pc_assistant.extensions import ExtensionManager, ExtensionState
-from pc_assistant.extensions.mcp import MCPServerProvider, MCPToolDefinition
-from pc_assistant.extensions.mcp import StreamableHTTPMCPClient
+from pc_assistant.extensions.mcp import (
+    MCPServerProvider,
+    MCPToolDefinition,
+    StdioMCPClient,
+    StreamableHTTPMCPClient,
+)
 from pc_assistant.extensions.models import MCPServerConfig
 from pc_assistant.tools.base import ToolCapability, ToolOriginKind
 from pc_assistant.tools.registry import ToolRegistry
@@ -78,7 +83,12 @@ def _context(
     )
 
 
-def _config(*, effect: str = "read_only", risk: str = "low") -> MCPServerConfig:
+def _config(
+    *,
+    effect: str = "read_only",
+    risk: str = "low",
+    capabilities: list[str] | None = None,
+) -> MCPServerConfig:
     return MCPServerConfig.model_validate(
         {
             "enabled": True,
@@ -86,7 +96,7 @@ def _config(*, effect: str = "read_only", risk: str = "low") -> MCPServerConfig:
             "tools": {
                 "ping": {
                     "effect": effect,
-                    "capabilities": [],
+                    "capabilities": capabilities or ["network"],
                     "risk": risk,
                 }
             },
@@ -158,6 +168,50 @@ async def test_mcp_discovery_registers_only_locally_configured_tools(
     await manager.stop()
     assert client.closed is True
     assert registry.list_tools() == []
+
+
+@pytest.mark.asyncio
+async def test_dotted_remote_tool_name_is_normalized_for_core() -> None:
+    config = MCPServerConfig.model_validate(
+        {
+            "enabled": True,
+            "url": "https://mcp.example.test/mcp",
+            "tools": {
+                "monitor.list_observations": {
+                    "effect": "read_only",
+                    "risk": "low",
+                }
+            },
+        }
+    )
+    client = _FakeMCPClient(
+        (
+            MCPToolDefinition(
+                name="monitor.list_observations",
+                description="List observations",
+                input_schema={"type": "object", "properties": {}},
+            ),
+        )
+    )
+    registry = ToolRegistry()
+    manager = ExtensionManager(
+        registry,
+        (
+            MCPServerProvider(
+                "monitor",
+                config,
+                client_factory=lambda _config: client,
+            ),
+        ),
+    )
+
+    await manager.start()
+
+    assert registry.list_tools() == ["mcp__monitor__monitor_list_observations"]
+    policy = registry.policy("mcp__monitor__monitor_list_observations")
+    assert policy is not None
+    assert policy.capabilities == frozenset({ToolCapability.MCP})
+    await manager.stop()
 
 
 @pytest.mark.asyncio
@@ -261,13 +315,26 @@ def test_mcp_config_rejects_unsafe_urls_names_and_unknown_policy() -> None:
                 "url": "https://user:secret@example.test/mcp",
             }
         )
+    dotted = MCPServerConfig.model_validate(
+        {
+            "enabled": True,
+            "url": "https://example.test/mcp",
+            "tools": {
+                "safe.tool": {
+                    "effect": "read_only",
+                    "risk": "low",
+                }
+            },
+        }
+    )
+    assert "safe.tool" in dotted.tools
     with pytest.raises(ValidationError, match="safe characters"):
         MCPServerConfig.model_validate(
             {
                 "enabled": True,
                 "url": "https://example.test/mcp",
                 "tools": {
-                    "unsafe.tool": {
+                    "unsafe/tool": {
                         "effect": "read_only",
                         "risk": "low",
                     }
@@ -296,6 +363,103 @@ def test_mcp_config_rejects_unsafe_urls_names_and_unknown_policy() -> None:
                 }
             }
         )
+
+
+def test_mcp_config_enforces_transport_specific_fields() -> None:
+    stdio = MCPServerConfig.model_validate(
+        {
+            "enabled": True,
+            "transport": "stdio",
+            "command": "python",
+            "args": ["-m", "monitor", "mcp"],
+            "working_directory": ".",
+            "inherit_env": ["MONITOR_DB_PATH"],
+        }
+    )
+    assert stdio.command == "python"
+    with pytest.raises(ValidationError, match="requires a command"):
+        MCPServerConfig.model_validate({"enabled": True, "transport": "stdio"})
+    with pytest.raises(ValidationError, match="must not configure a URL"):
+        MCPServerConfig.model_validate(
+            {
+                "enabled": True,
+                "transport": "stdio",
+                "command": "python",
+                "url": "https://example.test/mcp",
+            }
+        )
+    with pytest.raises(ValidationError, match="must not configure stdio fields"):
+        MCPServerConfig.model_validate(
+            {
+                "enabled": True,
+                "url": "https://example.test/mcp",
+                "command": "python",
+            }
+        )
+
+
+def test_stdio_environment_is_explicit_and_missing_values_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PATH", "/safe/bin")
+    monkeypatch.setenv("MONITOR_TOKEN", "secret")
+    monkeypatch.setenv("UNRELATED_SECRET", "must-not-pass")
+    config = MCPServerConfig.model_validate(
+        {
+            "enabled": True,
+            "transport": "stdio",
+            "command": "python",
+            "inherit_env": ["MONITOR_TOKEN"],
+        }
+    )
+    environment = StdioMCPClient(config)._environment()
+    assert environment["PATH"] == "/safe/bin"
+    assert environment["MONITOR_TOKEN"] == "secret"
+    assert "UNRELATED_SECRET" not in environment
+
+    monkeypatch.delenv("MONITOR_TOKEN")
+    with pytest.raises(ValueError, match="MONITOR_TOKEN"):
+        StdioMCPClient(config)._environment()
+
+
+@pytest.mark.asyncio
+async def test_stdio_client_with_live_official_mcp_server(tmp_path: Path) -> None:
+    pytest.importorskip("mcp.server.fastmcp")
+    server_script = tmp_path / "server.py"
+    server_script.write_text(
+        """
+from mcp.server.fastmcp import FastMCP
+
+app = FastMCP("stdio-test")
+
+@app.tool(name="monitor.echo")
+def echo(message: str) -> str:
+    return f"echo:{message}"
+
+app.run(transport="stdio")
+""".strip(),
+        encoding="utf-8",
+    )
+    config = MCPServerConfig.model_validate(
+        {
+            "enabled": True,
+            "transport": "stdio",
+            "command": sys.executable,
+            "args": [str(server_script)],
+            "working_directory": str(tmp_path),
+            "timeout_seconds": 5,
+        }
+    )
+    client = StdioMCPClient(config)
+    try:
+        await client.start()
+        tools = await client.list_tools()
+        result = await client.call_tool("monitor.echo", {"message": "hello"})
+    finally:
+        await client.close()
+
+    assert [tool.name for tool in tools] == ["monitor.echo"]
+    assert result.structuredContent == {"result": "echo:hello"}
 
 
 @pytest.mark.asyncio

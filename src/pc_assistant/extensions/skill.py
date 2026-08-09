@@ -9,8 +9,12 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from pc_assistant.context.tags import escape
-from pc_assistant.extensions.manager import ExtensionDescriptor, ExtensionProvider
-from pc_assistant.tools.base import ToolBase, ToolCapability, ToolOriginKind
+from pc_assistant.extensions.manager import (
+    ExtensionDescriptor,
+    ExtensionKind,
+    ExtensionProvider,
+)
+from pc_assistant.tools.base import ToolBase, ToolCapability
 
 
 logger = logging.getLogger(__name__)
@@ -255,7 +259,7 @@ class SkillPackageProvider(ExtensionProvider):
             raise ValueError("Skill package directory must use a safe Skill ID")
         self._descriptor = ExtensionDescriptor(
             extension_id=f"skill:{self._skill_id}",
-            kind=ToolOriginKind.SKILL,
+            kind=ExtensionKind.SKILL,
         )
 
     @property

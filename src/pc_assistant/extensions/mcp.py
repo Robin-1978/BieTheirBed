@@ -1,8 +1,10 @@
-"""Official MCP Streamable HTTP adapter behind Knoa's ToolStep boundary."""
+"""Official MCP HTTP/stdio adapters behind Knoa's ToolStep boundary."""
 from __future__ import annotations
 
 import asyncio
 import json
+import os
+import re
 from collections.abc import Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
@@ -10,12 +12,15 @@ from typing import Any, Protocol
 
 import httpx
 
-from pc_assistant.extensions.manager import ExtensionDescriptor, ExtensionProvider
+from pc_assistant.extensions.manager import (
+    ExtensionDescriptor,
+    ExtensionKind,
+    ExtensionProvider,
+)
 from pc_assistant.extensions.models import MCPServerConfig, MCPToolPolicyConfig
 from pc_assistant.tools.base import (
     ToolBase,
     ToolCapability,
-    ToolOriginKind,
 )
 
 
@@ -23,6 +28,18 @@ _MAX_DISCOVERY_PAGES = 16
 _MAX_DISCOVERED_TOOLS = 256
 _MAX_RESULT_BYTES = 512_000
 _MAX_TEXT_CHARS = 200_000
+_PUBLIC_NAME_UNSAFE = re.compile(r"[^A-Za-z0-9_-]+")
+_STDIO_BASE_ENV = frozenset(
+    {
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "PATH",
+        "SSL_CERT_DIR",
+        "SSL_CERT_FILE",
+        "TMPDIR",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -121,6 +138,106 @@ class StreamableHTTPMCPClient:
             await stack.aclose()
 
 
+class StdioMCPClient:
+    """Own one locally supervised MCP child process over stdin/stdout."""
+
+    def __init__(self, config: MCPServerConfig) -> None:
+        self._config = config
+        self._timeout = config.timeout_seconds
+        self._stack: AsyncExitStack | None = None
+        self._session: Any = None
+
+    def _environment(self) -> dict[str, str]:
+        environment = {
+            name: value
+            for name in _STDIO_BASE_ENV
+            if (value := os.environ.get(name)) is not None
+        }
+        for name in self._config.inherit_env:
+            value = os.environ.get(name)
+            if value is None:
+                raise ValueError(f"Required MCP environment variable is not set: {name}")
+            environment[name] = value
+        return environment
+
+    async def start(self) -> None:
+        if self._stack is not None:
+            raise RuntimeError("MCP stdio client is already started")
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        stack = AsyncExitStack()
+        try:
+            read_stream, write_stream = await stack.enter_async_context(
+                stdio_client(
+                    StdioServerParameters(
+                        command=self._config.command,
+                        args=list(self._config.args),
+                        env=self._environment(),
+                        cwd=self._config.working_directory or None,
+                    )
+                )
+            )
+            session = await stack.enter_async_context(
+                ClientSession(read_stream, write_stream)
+            )
+            await asyncio.wait_for(session.initialize(), timeout=self._timeout)
+        except BaseException:
+            await stack.aclose()
+            raise
+        self._stack = stack
+        self._session = session
+
+    def _require_session(self) -> Any:
+        if self._session is None:
+            raise RuntimeError("MCP stdio client is not started")
+        return self._session
+
+    async def list_tools(self) -> tuple[MCPToolDefinition, ...]:
+        session = self._require_session()
+        cursor: str | None = None
+        definitions: list[MCPToolDefinition] = []
+        for _page in range(_MAX_DISCOVERY_PAGES):
+            result = await asyncio.wait_for(
+                session.list_tools(cursor=cursor),
+                timeout=self._timeout,
+            )
+            for tool in result.tools:
+                definitions.append(
+                    MCPToolDefinition(
+                        name=tool.name,
+                        description=tool.description or "",
+                        input_schema=dict(tool.inputSchema),
+                    )
+                )
+                if len(definitions) > _MAX_DISCOVERED_TOOLS:
+                    raise ValueError("MCP server exposes too many tools")
+            cursor = result.nextCursor
+            if not cursor:
+                return tuple(definitions)
+        raise ValueError("MCP tool discovery pagination limit exceeded")
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        session = self._require_session()
+        return await asyncio.wait_for(
+            session.call_tool(name, arguments),
+            timeout=self._timeout,
+        )
+
+    async def close(self) -> None:
+        stack, self._stack = self._stack, None
+        self._session = None
+        if stack is not None:
+            await stack.aclose()
+
+
+def _public_tool_name(server_id: str, remote_name: str) -> str:
+    normalized = _PUBLIC_NAME_UNSAFE.sub("_", remote_name).strip("_")
+    if not normalized:
+        raise ValueError("MCP tool name cannot be normalized safely")
+    return f"mcp__{server_id}__{normalized}"
+
+
 def _bounded_text(value: str, remaining: int) -> tuple[str, int, bool]:
     limit = max(0, min(_MAX_TEXT_CHARS, remaining))
     if len(value) <= limit:
@@ -196,7 +313,6 @@ class MCPTool(ToolBase):
             {
                 *policy.capabilities,
                 ToolCapability.MCP,
-                ToolCapability.NETWORK,
             }
         )
         self.risk = policy.risk
@@ -213,11 +329,11 @@ class MCPTool(ToolBase):
             return {"error": "MCP tool call failed"}
         return _render_mcp_result(result)
 
-    def schema(self) -> dict[str, Any]:
+    def definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": self._input_schema,
+            "inputSchema": self._input_schema,
         }
 
 
@@ -225,54 +341,73 @@ class MCPServerProvider(ExtensionProvider):
     def __init__(
         self,
         server_id: str,
-        config: MCPServerConfig,
+        config: MCPServerConfig | None = None,
         *,
+        config_loader: Callable[[], MCPServerConfig] | None = None,
         client_factory: Callable[[MCPServerConfig], MCPClientPort] | None = None,
     ) -> None:
+        if (config is None) == (config_loader is None):
+            raise ValueError("MCP provider requires exactly one configuration source")
         self._server_id = server_id
         self._config = config
+        self._config_loader = config_loader
+        self._client_factory = client_factory
         self._descriptor = ExtensionDescriptor(
             extension_id=f"mcp:{server_id}",
-            kind=ToolOriginKind.MCP,
+            kind=ExtensionKind.MCP,
         )
-        self._client = (
-            client_factory(config)
-            if client_factory is not None
-            else StreamableHTTPMCPClient(
-                config.url,
-                timeout_seconds=config.timeout_seconds,
-            )
-        )
+        self._client: MCPClientPort | None = None
 
     @property
     def descriptor(self) -> ExtensionDescriptor:
         return self._descriptor
 
     async def start(self) -> tuple[ToolBase, ...]:
-        await self._client.start()
+        if self._config is not None:
+            config = self._config
+        else:
+            loader = self._config_loader
+            if loader is None:  # guarded by __init__; keeps the boundary explicit
+                raise RuntimeError("MCP configuration loader is unavailable")
+            config = loader()
+        if not config.enabled:
+            raise ValueError("MCP server is disabled")
+        if self._client_factory is not None:
+            client = self._client_factory(config)
+        elif config.transport == "stdio":
+            client = StdioMCPClient(config)
+        else:
+            client = StreamableHTTPMCPClient(
+                config.url,
+                timeout_seconds=config.timeout_seconds,
+            )
+        self._client = client
+        await client.start()
         definitions = {
             definition.name: definition
-            for definition in await self._client.list_tools()
+            for definition in await client.list_tools()
         }
         tools: list[ToolBase] = []
-        for remote_name, policy in self._config.tools.items():
+        for remote_name, policy in config.tools.items():
             definition = definitions.get(remote_name)
             if definition is None:
                 continue
             tools.append(
                 MCPTool(
-                    public_name=f"mcp__{self._server_id}__{remote_name}",
+                    public_name=_public_tool_name(self._server_id, remote_name),
                     remote_name=remote_name,
                     description=definition.description,
                     input_schema=definition.input_schema,
                     policy=policy,
-                    client=self._client,
+                    client=client,
                 )
             )
         return tuple(tools)
 
     async def stop(self) -> None:
-        await self._client.close()
+        client, self._client = self._client, None
+        if client is not None:
+            await client.close()
 
 
 def build_mcp_providers(

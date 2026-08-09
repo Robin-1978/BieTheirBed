@@ -148,4 +148,4 @@ def test_persistent_generated_artifact_survives_session_and_store_restart(tmp_pa
 def test_user_screenshot_schema_has_no_parameters(tmp_path):
     store = ArtifactStore(tmp_path / "attachments")
     tool = ScreenshotTool(store, tmp_path / "attachments" / "screenshots")
-    assert tool.schema()["parameters"]["properties"] == {}
+    assert tool.definition()["inputSchema"]["properties"] == {}

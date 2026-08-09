@@ -14,9 +14,9 @@ class TestClipboardToolName:
 
     def test_schema(self):
         t = ClipboardTool()
-        s = t.schema()
+        s = t.definition()
         assert s["name"] == "clipboard"
-        assert "parameters" in s
+        assert "inputSchema" in s
 
 
 class TestClipboardRead:

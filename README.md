@@ -13,10 +13,10 @@ A personal computer agent with ReAct reasoning, multi-LLM support, tool calling,
 - **Prompt Caching** — Cache-friendly static prefix (system + tool schemas + history); Anthropic `cache_control` blocks for prompt caching
 - **Token Calibration** — Per-call token estimation calibrated against real usage
 - **Built-in Tools** — Local automation, memory, scheduling, vision observation, screenshots, and managed file preparation
+- **Canonical Tool Definitions** — Built-in and MCP tools share one MCP-compatible `inputSchema`/`outputSchema` contract
 - **Core Artifact Delivery** — Tools produce opaque artifacts; Feishu/TUI/service clients adapt standard artifact events without channel logic in the Agent
-- **MCP Extension Runtime** — Failure-isolated Streamable HTTP discovery with explicit local tool policy
+- **MCP Extension Runtime** — Failure-isolated official SDK clients for Streamable HTTP and supervised local stdio packages
 - **Selective Skill Packages** — Safe data-only packages activated by request, available tools, and granted capabilities
-- **Business Connectors** — Secret-isolated Yuque document read/write through the same capability and confirmation boundary
 - **Typed Capability Inventory** — Principal-filtered tool origin, policy, risk, and confirmation metadata for management clients
 - **Safety Guardrails** — Dangerous command blocking, protected paths, user confirmation, typed refusal codes
 - **Idempotency** — Side-effecting tools are protected against duplicate execution on retry
@@ -123,21 +123,33 @@ credential stored with mode `0600` at
 `~/.pc-assistant/config/service.token`. Setting `service_token` adds a separate
 credential for scoped clients; it is not required for local operation.
 
-### Yuque Connector
+### MCP extensions
 
-Connector configuration contains only a Secret ID:
+Remote MCP servers are explicitly configured with a local policy for every
+tool Knoa may expose:
 
 ```yaml
-connectors:
-  yuque:
+mcp_servers:
+  knowledge:
     enabled: true
-    token_secret: yuque-primary
+    transport: streamable_http
+    url: "https://127.0.0.1:9000/mcp"
+    tools:
+      search_documents:
+        effect: read_only
+        capabilities: [network]
+        risk: low
 ```
 
-Provide the token through `PC_SECRET_YUQUE_PRIMARY`, or store it in
-`~/.pc-assistant/secrets/yuque-primary.secret` as an owner-owned regular file
-with mode `0600`. The Connector exposes read and confirmation-gated update
-tools; credentials and document bodies are omitted from Connector audit logs.
+Manually imported local MCP packages live under
+`~/.pc-assistant/mcp/<server-id>/`. Each package contains a bounded `mcp.yaml`
+manifest and its local server files. Local packages use the official MCP stdio
+transport, a fixed command/argument list and a package-confined working
+directory. Only a minimal base environment plus explicitly named
+`inherit_env` values reaches the child process. Server metadata never grants
+authority: unconfigured tools remain hidden and all enabled tools still pass
+schema validation, capability checks, confirmation and cancellation through
+the standard `ToolStep` boundary.
 
 Enable the independently mounted Feishu channel in
 `~/.pc-assistant/config/local.yaml`:
@@ -206,7 +218,9 @@ By default, mutable application state is kept outside the source tree under
 ├── attachments/   # temporary inbound and generated artifacts
 ├── artifacts/     # persistent user-requested generated files
 ├── cache/         # idempotency and other rebuildable state
-└── data/          # assistant.db and procedural memory
+├── data/          # assistant.db and procedural memory
+├── skills/        # manually imported data-only Skill packages
+└── mcp/           # manually imported local stdio MCP packages
 ```
 
 Set `PC_ASSISTANT_HOME` (or `PC_RUNTIME_ROOT`) to override this root. Service
@@ -311,11 +325,10 @@ src/pc_assistant/
 │   ├── image_inspect.py # Structured image observation by attachment ID
 │   └── ...              # 16 built-in tool implementations
 ├── extensions/
-│   ├── connector.py     # Authenticated Yuque tools and metadata-only audit
 │   ├── manager.py       # Failure-isolated extension lifecycle
 │   ├── models.py        # Strict local MCP policy configuration
-│   ├── mcp.py           # Official MCP Streamable HTTP client and ToolBase adapter
-│   ├── secrets.py       # Stable Secret references and private local resolution
+│   ├── mcp.py           # Official HTTP/stdio MCP clients and ToolBase adapter
+│   ├── mcp_package.py   # Confined local package discovery and manifest loading
 │   └── skill.py         # Safe Skill loading, indexing and selective activation
 ├── skill_packages/
 │   └── research_report/ # Built-in research workflow instructions

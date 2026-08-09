@@ -119,11 +119,11 @@ class ExchangeTool(ToolBase):
         except Exception as e:
             return {"error": f"Failed to list currencies: {e}"}
 
-    def schema(self) -> dict[str, Any]:
+    def definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "action": {
@@ -152,11 +152,11 @@ class ExchangeTool(ToolBase):
             },
         }
 
-    def skim_schema(self) -> dict[str, Any]:
+    def skim_definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["rate", "convert", "list"]},

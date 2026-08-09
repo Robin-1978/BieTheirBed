@@ -13,9 +13,9 @@ class TestReadFileToolName:
 
     def test_schema(self):
         t = ReadFileTool()
-        s = t.schema()
+        s = t.definition()
         assert s["name"] == "read_file"
-        assert "parameters" in s
+        assert "inputSchema" in s
 
 
 class TestWriteFileToolName:
@@ -25,9 +25,9 @@ class TestWriteFileToolName:
 
     def test_schema(self):
         t = WriteFileTool()
-        s = t.schema()
+        s = t.definition()
         assert s["name"] == "write_file"
-        assert "parameters" in s
+        assert "inputSchema" in s
 
 
 class TestWriteAndRead:

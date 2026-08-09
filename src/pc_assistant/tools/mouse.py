@@ -46,11 +46,11 @@ class MouseTool(ToolBase):
             return {"error": f"Unknown action: {action}. Use: position, move, click, double_click, right_click, scroll, drag."}
         return await handler(kwargs)
 
-    def schema(self) -> dict[str, Any]:
+    def definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "action": {
@@ -96,11 +96,11 @@ class MouseTool(ToolBase):
             },
         }
 
-    def skim_schema(self) -> dict[str, Any]:
+    def skim_definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["position", "move", "click", "double_click", "right_click", "scroll", "drag", "press", "release"]},

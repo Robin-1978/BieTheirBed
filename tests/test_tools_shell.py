@@ -14,9 +14,9 @@ class TestShellToolName:
 
     def test_schema(self):
         t = ShellTool()
-        s = t.schema()
+        s = t.definition()
         assert s["name"] == "run_command"
-        assert "parameters" in s
+        assert "inputSchema" in s
 
 
 class TestShellEcho:

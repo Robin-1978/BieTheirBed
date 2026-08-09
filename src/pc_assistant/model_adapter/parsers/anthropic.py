@@ -9,12 +9,14 @@ from pc_assistant.model_adapter.types import StreamChunk
 
 def convert_tools_to_anthropic(tools: list[dict[str, Any]], cache_control: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     anthropic_tools: list[dict[str, Any]] = []
-    for t in tools:
-        func = t.get("function", {})
+    for definition in tools:
         tool_def = {
-            "name": func.get("name", ""),
-            "description": func.get("description", ""),
-            "input_schema": func.get("parameters", {"type": "object", "properties": {}}),
+            "name": definition.get("name", ""),
+            "description": definition.get("description", ""),
+            "input_schema": definition.get(
+                "inputSchema",
+                {"type": "object", "properties": {}},
+            ),
         }
         if cache_control:
             tool_def["cache_control"] = cache_control

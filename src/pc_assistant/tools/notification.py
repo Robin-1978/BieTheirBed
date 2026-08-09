@@ -25,11 +25,11 @@ class NotificationTool(ToolBase):
             return {"error": f"Unknown action: {action}.", "instruction": "Use action='show' or action='alert'. Use tasks for delayed work."}
         return await handler(kwargs)
 
-    def schema(self) -> dict[str, Any]:
+    def definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "action": {
@@ -63,11 +63,11 @@ class NotificationTool(ToolBase):
             },
         }
 
-    def skim_schema(self) -> dict[str, Any]:
+    def skim_definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["show", "alert"]},

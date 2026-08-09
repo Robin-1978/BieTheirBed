@@ -111,11 +111,11 @@ class WebFetchTool(ToolBase):
             text = text[:max_chars] + f"\n\n[... truncated, {len(text) - max_chars} chars omitted]"
         return {"content": text, "url": url, "status_code": status_code}
 
-    def schema(self) -> dict[str, Any]:
+    def definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "url": {"type": "string", "maxLength": _MAX_URL_LENGTH},
@@ -124,11 +124,11 @@ class WebFetchTool(ToolBase):
             },
         }
 
-    def skim_schema(self) -> dict[str, Any]:
+    def skim_definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {"url": {"type": "string", "description": "http(s) URL"}},
                 "required": ["url"],

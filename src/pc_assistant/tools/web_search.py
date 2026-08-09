@@ -48,11 +48,11 @@ class WebSearchTool(ToolBase):
                 return bing_result
             return await self._search_http(query, max_results)
 
-    def schema(self) -> dict[str, Any]:
+    def definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "maxLength": 500},

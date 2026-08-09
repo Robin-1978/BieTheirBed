@@ -60,11 +60,11 @@ class WindowTool(ToolBase):
             return {"error": f"Unknown action: {action}. Use: list, active, info, focus, move, resize, minimize, maximize, restore, close."}
         return await handler(kwargs)
 
-    def schema(self) -> dict[str, Any]:
+    def definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "action": {
@@ -97,11 +97,11 @@ class WindowTool(ToolBase):
             },
         }
 
-    def skim_schema(self) -> dict[str, Any]:
+    def skim_definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["list", "active", "info", "focus", "move", "resize", "minimize", "maximize", "restore", "close"]},

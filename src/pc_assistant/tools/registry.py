@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from jsonschema import Draft202012Validator
+
 from pc_assistant.exceptions import ToolNotFoundError
 from pc_assistant.tools.base import (
     BUILTIN_TOOL_ORIGIN,
@@ -39,13 +41,52 @@ class ToolRegistry:
             raise ValueError("Tool must have a non-empty name")
         if tool.name in self._tools:
             raise ValueError(f"Tool is already registered: {tool.name}")
-        if tool.schema().get("name") != tool.name:
-            raise ValueError(f"Tool schema name does not match: {tool.name}")
-        if tool.skim_schema().get("name") != tool.name:
-            raise ValueError(f"Tool skim schema name does not match: {tool.name}")
-        tool.validation_schema()
+        self._canonical_definition(tool, tool.definition(), label="full")
+        self._canonical_definition(tool, tool.skim_definition(), label="skim")
         self._tools[tool.name] = tool
         self._origins[tool.name] = origin
+
+    @staticmethod
+    def _canonical_definition(
+        tool: ToolBase,
+        definition: dict[str, Any],
+        *,
+        label: str,
+    ) -> dict[str, Any]:
+        allowed = {"name", "description", "inputSchema", "outputSchema"}
+        unexpected = set(definition) - allowed
+        if unexpected:
+            raise ValueError(
+                f"Tool {label} definition contains unsupported MCP fields: "
+                f"{sorted(unexpected)}"
+            )
+        if definition.get("name") != tool.name:
+            raise ValueError(f"Tool {label} definition name does not match: {tool.name}")
+        description = definition.get("description", "")
+        if not isinstance(description, str):
+            raise ValueError("Tool description must be text")
+        input_schema = definition.get("inputSchema")
+        if not isinstance(input_schema, dict):
+            raise ValueError("Tool definition requires an MCP inputSchema object")
+        normalized_input = dict(input_schema)
+        normalized_input.setdefault("type", "object")
+        normalized_input.setdefault("additionalProperties", False)
+        if normalized_input.get("type") != "object":
+            raise ValueError("Tool inputSchema must describe an object")
+        Draft202012Validator.check_schema(normalized_input)
+        output_schema = definition.get("outputSchema")
+        if output_schema is not None:
+            if not isinstance(output_schema, dict):
+                raise ValueError("Tool outputSchema must be an object")
+            Draft202012Validator.check_schema(output_schema)
+        normalized = {
+            "name": tool.name,
+            "description": description or tool.description,
+            "inputSchema": normalized_input,
+        }
+        if output_schema is not None:
+            normalized["outputSchema"] = dict(output_schema)
+        return normalized
 
     def unregister(self, name: str, *, origin: ToolOrigin) -> None:
         registered_origin = self._origins.get(name)
@@ -62,16 +103,17 @@ class ToolRegistry:
     def origin(self, name: str) -> ToolOrigin | None:
         return self._origins.get(name)
 
-    def schemas_for(
+    def definitions_for(
         self,
         capabilities: frozenset[ToolCapability],
     ) -> list[dict[str, Any]]:
-        """Return only configured tools allowed by the resolved runtime profile."""
+        """Return authorized MCP-compatible canonical Tool definitions."""
         return [
-            {
-                "type": "function",
-                "function": tool.skim_schema(),
-            }
+            self._canonical_definition(
+                tool,
+                tool.skim_definition(),
+                label="skim",
+            )
             for tool in self._tools.values()
             if (
                 tool.policy.configured
@@ -88,11 +130,15 @@ class ToolRegistry:
         tool = self.get(name)
         if tool is None:
             return {}
-        schema = tool.schema()
+        definition = self._canonical_definition(
+            tool,
+            tool.definition(),
+            label="full",
+        )
         examples = list(getattr(tool, "examples", []) or [])
         if not examples:
-            properties = schema.get("parameters", {}).get("properties", {})
-            required = set(schema.get("parameters", {}).get("required", []))
+            properties = definition.get("inputSchema", {}).get("properties", {})
+            required = set(definition.get("inputSchema", {}).get("required", []))
             example: dict[str, Any] = {}
             for key, prop in properties.items():
                 if key not in required:
@@ -113,13 +159,16 @@ class ToolRegistry:
                     example[key] = "..."
             if example:
                 examples = [example]
-        return {
-            "name": schema.get("name", tool.name),
-            "description": schema.get("description", tool.description),
+        detail = {
+            "name": definition.get("name", tool.name),
+            "description": definition.get("description", tool.description),
             "details": getattr(tool, "details", "") or tool.description,
-            "parameters": schema.get("parameters", {}),
+            "inputSchema": definition.get("inputSchema", {}),
             "examples": examples,
         }
+        if "outputSchema" in definition:
+            detail["outputSchema"] = definition["outputSchema"]
+        return detail
 
     def list_tools(self) -> list[str]:
         return sorted(

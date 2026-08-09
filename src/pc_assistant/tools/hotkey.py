@@ -28,11 +28,11 @@ class HotkeyTool(ToolBase):
         except Exception as e:
             return {"error": f"Failed to send hotkey: {e}"}
 
-    def schema(self) -> dict[str, Any]:
+    def definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "keys": {"type": "array", "items": {"type": "string"}, "description": "e.g. [ctrl, c]"},
@@ -41,11 +41,11 @@ class HotkeyTool(ToolBase):
             },
         }
 
-    def skim_schema(self) -> dict[str, Any]:
+    def skim_definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {"keys": {"type": "array", "items": {"type": "string"}, "description": "e.g. [ctrl, c]"}},
                 "required": ["keys"],

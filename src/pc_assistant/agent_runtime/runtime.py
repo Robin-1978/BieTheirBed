@@ -164,8 +164,8 @@ class AgentRuntime:
                             scope=scope,
                             client_request_id=request.client_request_id,
                             messages=messages,
-                            tool_schemas=tuple(
-                                self._registry.schemas_for(capabilities)
+                            tool_definitions=tuple(
+                                self._registry.definitions_for(capabilities)
                             ),
                             capabilities=capabilities,
                             cancellation=context.cancellation,

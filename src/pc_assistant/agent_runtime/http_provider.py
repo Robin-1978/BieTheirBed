@@ -32,6 +32,22 @@ _MAX_STREAM_LINE_BYTES = 2 * 1024 * 1024
 _MAX_MODEL_STREAM_BYTES = 16 * 1024 * 1024
 
 
+def _openai_tool_definitions(
+    definitions: tuple[dict[str, Any], ...],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": definition["name"],
+                "description": definition.get("description", ""),
+                "parameters": definition["inputSchema"],
+            },
+        }
+        for definition in definitions
+    ]
+
+
 def _finish_reason(raw: str) -> str:
     normalized = raw.strip().lower()
     mapping = {
@@ -138,7 +154,7 @@ class HttpModelProvider(ModelProviderPort):
         payload = build_chat_payload(
             self._model.model,
             messages,
-            list(request.tools),
+            _openai_tool_definitions(request.tools),
             request.temperature,
             request.max_output_tokens,
             cache_prompt=self._profile.cache_prompt,

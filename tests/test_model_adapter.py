@@ -74,7 +74,11 @@ class TestAnthropicParser:
         assert payload["system"] == "sys"
 
     def test_convert_tools_to_anthropic_with_cache_control(self):
-        tools = [{"function": {"name": "web_search", "description": "d", "parameters": {"type": "object", "properties": {}}}}]
+        tools = [{
+            "name": "web_search",
+            "description": "d",
+            "inputSchema": {"type": "object", "properties": {}},
+        }]
         converted = convert_tools_to_anthropic(tools, {"type": "ephemeral"})
         assert converted[0]["name"] == "web_search"
         assert converted[0]["cache_control"] == {"type": "ephemeral"}
