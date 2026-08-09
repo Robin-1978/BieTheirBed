@@ -8,6 +8,8 @@ import pytest
 from pc_assistant.config import AppConfig
 from pc_assistant.gateway.adapter import SecureGatewayAdapter
 from pc_assistant.gateway.identity import PairingGrantRejectedError
+from pc_assistant.service.core_api import TaskSnapshot
+from pc_assistant.tasks import ApprovalState, TaskCancelResult, TaskState
 
 
 def _config(tmp_path) -> AppConfig:
@@ -54,6 +56,66 @@ class _Authentication:
         )
 
 
+def _task_snapshot() -> TaskSnapshot:
+    return TaskSnapshot(
+        task_id="task-a",
+        session_handle="session-a",
+        client_request_id="request-a",
+        goal="hello",
+        tools_enabled=True,
+        priority=0,
+        state=TaskState.RUNNING,
+        phase="working",
+        attempt_count=1,
+        cancel_requested=False,
+        created_at=1.0,
+        updated_at=2.0,
+        next_event_seq=3,
+    )
+
+
+class _Core:
+    def __init__(self) -> None:
+        self.calls = []
+        self.closed = False
+
+    async def close(self):
+        self.closed = True
+
+    async def create_session(self, principal_id):
+        self.calls.append(("create_session", principal_id))
+        return "session-a"
+
+    async def create_task(self, principal_id, session_handle, user_input, attachments, **kwargs):
+        self.calls.append(
+            ("create_task", principal_id, session_handle, user_input, attachments, kwargs)
+        )
+        return SimpleNamespace(task_id="task-a", state=TaskState.QUEUED)
+
+    async def list_tasks(self, principal_id, **kwargs):
+        self.calls.append(("list_tasks", principal_id, kwargs))
+        return SimpleNamespace(tasks=(_task_snapshot(),), next_cursor="next-a")
+
+    async def get_task(self, principal_id, task_id):
+        self.calls.append(("get_task", principal_id, task_id))
+        return _task_snapshot()
+
+    async def cancel_task(self, principal_id, task_id, *, reason):
+        self.calls.append(("cancel_task", principal_id, task_id, reason))
+        return SimpleNamespace(
+            result=TaskCancelResult(accepted=True, state=TaskState.CANCELLED)
+        )
+
+    async def resolve_approval(self, principal_id, approval_id, *, approved):
+        self.calls.append(
+            ("resolve_approval", principal_id, approval_id, approved)
+        )
+        return SimpleNamespace(
+            approval_id=approval_id,
+            resolved=True,
+            state=ApprovalState.APPROVED,
+        )
+
 @pytest.mark.asyncio
 async def test_gateway_adapter_exposes_bounded_authentication_flow(tmp_path) -> None:
     adapter = SecureGatewayAdapter(
@@ -83,6 +145,71 @@ async def test_gateway_adapter_exposes_bounded_authentication_flow(tmp_path) -> 
     assert auth.json()["challenge_id"] == "gch-b"
     assert complete.status_code == 200
     assert session.json()["principal_id"] == "personal:owner"
+
+
+@pytest.mark.asyncio
+async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_path) -> None:
+    core = _Core()
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=_Authentication(),
+        core=core,
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
+    async with httpx.AsyncClient(transport=transport, base_url="http://gateway.local") as http:
+        session = await http.post("/v1/sessions", headers=headers)
+        created = await http.post(
+            "/v1/tasks",
+            headers=headers,
+            json={"session_handle": "session-a", "input": "hello"},
+        )
+        listed = await http.get(
+            "/v1/tasks?state=running&limit=10",
+            headers=headers,
+        )
+        detail = await http.get("/v1/tasks/task-a", headers=headers)
+        cancelled = await http.post(
+            "/v1/tasks/task-a/cancel",
+            headers=headers,
+            json={"reason": "owner request"},
+        )
+        approval = await http.post(
+            "/v1/approvals/approval-a/resolve",
+            headers=headers,
+            json={"approved": True},
+        )
+
+    assert session.status_code == 201
+    assert session.json() == {"session_handle": "session-a"}
+    assert created.status_code == 202
+    assert created.json() == {"task_id": "task-a", "state": "queued"}
+    assert listed.json()["tasks"][0]["task_id"] == "task-a"
+    assert listed.json()["next_cursor"] == "next-a"
+    assert detail.json()["task"]["phase"] == "working"
+    assert cancelled.json() == {"accepted": True, "state": "cancelled"}
+    assert approval.json() == {
+        "approval_id": "approval-a",
+        "resolved": True,
+        "state": "approved",
+    }
+    assert {call[1] for call in core.calls} == {"personal:owner"}
+
+
+@pytest.mark.asyncio
+async def test_gateway_adapter_rejects_unauthenticated_core_commands(tmp_path) -> None:
+    core = _Core()
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=_Authentication(),
+        core=core,
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://gateway.local") as http:
+        response = await http.get("/v1/tasks")
+
+    assert response.status_code == 401
+    assert core.calls == []
 
 
 @pytest.mark.asyncio
