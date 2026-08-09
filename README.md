@@ -16,6 +16,7 @@ A personal computer agent with ReAct reasoning, multi-LLM support, tool calling,
 - **Canonical Tool Definitions** — Built-in and MCP tools share one MCP-compatible `inputSchema`/`outputSchema` contract
 - **Core Artifact Delivery** — Tools produce opaque artifacts; Feishu/TUI/service clients adapt standard artifact events without channel logic in the Agent
 - **Durable Tasks** — Core-owned Task state, persistent event replay, connection-independent execution, durable approval, safe-boundary pause/resume, Attempt/ToolStep checkpoints, and fail-closed restart recovery
+- **Durable Automation** — Persistent one-time/interval/Cron schedules and authenticated business triggers create idempotent Tasks through bounded delivery dispatchers
 - **MCP Extension Runtime** — Failure-isolated official SDK clients for Streamable HTTP and supervised local stdio packages
 - **Selective Skill Packages** — Safe data-only packages activated by request, available tools, and granted capabilities
 - **Typed Capability Inventory** — Principal-filtered tool origin, policy, risk, and confirmation metadata for management clients

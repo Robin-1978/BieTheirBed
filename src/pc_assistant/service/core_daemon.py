@@ -43,10 +43,12 @@ class CoreDaemon:
             await composition.extensions.start()
             await composition.task_service.start()
             await composition.schedule_dispatcher.start()
+            await composition.trigger_dispatcher.start()
             await composition.host.start()
             self._write_pid(composition.paths.pid)
         except BaseException:
             await composition.host.stop()
+            await composition.trigger_dispatcher.stop()
             await composition.schedule_dispatcher.stop()
             await composition.task_service.stop()
             await composition.extensions.stop()
@@ -64,6 +66,7 @@ class CoreDaemon:
         if composition is None:
             return
         await composition.host.stop()
+        await composition.trigger_dispatcher.stop()
         await composition.schedule_dispatcher.stop()
         await composition.task_service.stop()
         await composition.extensions.stop()

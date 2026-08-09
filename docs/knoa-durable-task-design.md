@@ -1,6 +1,6 @@
 # Knoa Durable Task Design
 
-> Status: active forward design; B1-B4 complete, B5 next
+> Status: active forward design; B1-B4 complete, B5 automation core complete
 >
 > Date: 2026-08-09
 >
@@ -453,8 +453,16 @@ outside INFO logs.
 > and survives expired worker leases without duplicating Task creation. Core API
 > v1 exposes create/detail/list/pause/resume schedule commands. Resuming interval
 > or Cron plans skips accumulated downtime instead of flooding catch-up Tasks;
-> an expired one-time plan completes without silently running late. Authenticated
-> Trigger ingress and proactive delivery notification remain.
+> an expired one-time plan completes without silently running late.
+>
+> Authenticated Trigger ingress is also implemented as a transport-independent
+> Core service and authenticated Core API adapter. Trigger definitions and
+> external events are persisted separately; `trigger_id + external_event_id`
+> provides event deduplication, and the stable trigger-event ID becomes the Task
+> request ID. Paused triggers reject new events and hold already received events.
+> Payloads are size-bounded and explicitly labelled as untrusted data before
+> entering Task input. HTTP webhook adaptation and proactive result notification
+> remain outside the automation core.
 
 ## 14. Acceptance criteria
 

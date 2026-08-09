@@ -42,6 +42,9 @@ from pc_assistant.automation import (
     ScheduleDispatcher,
     ScheduleRepository,
     ScheduleService,
+    TriggerDispatcher,
+    TriggerRepository,
+    TriggerService,
 )
 from pc_assistant.config import AppConfig
 from pc_assistant.context.memory_db import (
@@ -121,6 +124,9 @@ class CoreRuntimeComposition:
     schedules: ScheduleRepository
     schedule_dispatcher: ScheduleDispatcher
     schedule_service: ScheduleService
+    triggers: TriggerRepository
+    trigger_dispatcher: TriggerDispatcher
+    trigger_service: TriggerService
     memory: SQLiteMemoryRepository
     artifacts: ArtifactStore
     registry: ToolRegistry
@@ -224,6 +230,7 @@ def build_core_runtime(
     sessions = RuntimeSessionRepository(database)
     tasks = TaskRepository(database)
     schedules = ScheduleRepository(database)
+    triggers = TriggerRepository(database)
     memory_repository = SQLiteMemoryRepository(database)
     memory = ScopedUserMemory(memory_repository)
     episodic = ScopedEpisodicMemory(memory_repository)
@@ -405,6 +412,8 @@ def build_core_runtime(
     )
     schedule_dispatcher = ScheduleDispatcher(schedules, task_service)
     schedule_service = ScheduleService(schedules, schedule_dispatcher)
+    trigger_dispatcher = TriggerDispatcher(triggers, task_service)
+    trigger_service = TriggerService(triggers, trigger_dispatcher)
     config_path = (
         Path(config.source_config_path).expanduser().resolve()
         if config.source_config_path
@@ -472,6 +481,7 @@ def build_core_runtime(
     tcp_server = CoreServer(
         task_service,
         schedule_service,
+        trigger_service,
         control,
         artifact_service,
         CompositeAuthenticator(
@@ -494,6 +504,9 @@ def build_core_runtime(
         schedules=schedules,
         schedule_dispatcher=schedule_dispatcher,
         schedule_service=schedule_service,
+        triggers=triggers,
+        trigger_dispatcher=trigger_dispatcher,
+        trigger_service=trigger_service,
         memory=memory_repository,
         artifacts=artifacts,
         registry=registry,

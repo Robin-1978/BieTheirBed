@@ -10,8 +10,10 @@ from pc_assistant.automation import ScheduleKind, ScheduleSpec
 from pc_assistant.service.core_api import (
     CreateSessionRequest,
     CreateScheduleRequest,
+    CreateTriggerRequest,
     CreateTaskRequest,
     DownloadArtifactRequest,
+    FireTriggerRequest,
     GetTaskRequest,
     ListTasksRequest,
     PauseScheduleRequest,
@@ -123,6 +125,12 @@ def test_core_schema_exposes_only_task_lifecycle_methods() -> None:
     assert "list_schedules" in rendered
     assert "pause_schedule" in rendered
     assert "resume_schedule" in rendered
+    assert "create_trigger" in rendered
+    assert "get_trigger" in rendered
+    assert "list_triggers" in rendered
+    assert "pause_trigger" in rendered
+    assert "resume_trigger" in rendered
+    assert "fire_trigger" in rendered
     assert "cancel_run" not in rendered
     assert "confirmation_resolve" not in rendered
 
@@ -198,6 +206,25 @@ def test_core_schema_exposes_only_task_lifecycle_methods() -> None:
         ),
         ResumeScheduleRequest,
     )
+
+    trigger = parse_core_request_json(
+        CreateTriggerRequest(
+            request_id="trigger-1",
+            session_handle="session-1",
+            name="gitlab merge",
+            goal="review merge request",
+        ).model_dump_json()
+    )
+    event = parse_core_request_json(
+        FireTriggerRequest(
+            request_id="event-1",
+            trigger_id="trigger-1",
+            external_event_id="gitlab-event-1",
+            payload={"project": "knoa"},
+        ).model_dump_json()
+    )
+    assert isinstance(trigger, CreateTriggerRequest)
+    assert isinstance(event, FireTriggerRequest)
 
 
 def test_approval_and_task_event_wire_contracts_are_strict() -> None:
