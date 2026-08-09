@@ -12,6 +12,7 @@ def test_runtime_layout_has_sibling_directories(tmp_path):
     assert paths.cache.parent == paths.root
     assert len({paths.logs, paths.attachments, paths.artifacts, paths.cache}) == 4
     assert paths.data.parent == paths.root
+    assert paths.mcp.parent == paths.root
     assert not hasattr(paths, "socket")
 
 

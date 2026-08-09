@@ -61,8 +61,8 @@ class RuntimePaths:
         return self.root / "skills"
 
     @property
-    def secrets(self) -> Path:
-        return self.root / "secrets"
+    def mcp(self) -> Path:
+        return self.root / "mcp"
 
     @property
     def pid(self) -> Path:

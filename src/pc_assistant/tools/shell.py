@@ -147,11 +147,11 @@ class ShellTool(ToolBase):
             timeout_val = _DEFAULT_TIMEOUT
         return await self._run(command, timeout_val, cwd, env)
 
-    def schema(self) -> dict[str, Any]:
+    def definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "command": {
@@ -175,11 +175,11 @@ class ShellTool(ToolBase):
             },
         }
 
-    def skim_schema(self) -> dict[str, Any]:
+    def skim_definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "command": {"type": "string", "description": "shell command; may require confirmation"},

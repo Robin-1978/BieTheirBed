@@ -36,10 +36,10 @@ class RecordingTool(ToolBase):
         self.calls.append(kwargs)
         return {"ok": True}
 
-    def schema(self) -> dict[str, Any]:
+    def definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string"},
@@ -61,8 +61,8 @@ class UnknownPolicyTool(ToolBase):
     async def execute(self, **kwargs: Any) -> Any:
         return kwargs
 
-    def schema(self) -> dict[str, Any]:
-        return {"name": self.name, "parameters": {"type": "object"}}
+    def definition(self) -> dict[str, Any]:
+        return {"name": self.name, "inputSchema": {"type": "object"}}
 
 
 class MixedPolicyTool(ToolBase):
@@ -88,10 +88,10 @@ class MixedPolicyTool(ToolBase):
         self.calls.append(kwargs["action"])
         return {"ok": True}
 
-    def schema(self) -> dict[str, Any]:
+    def definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["read", "write"]},
@@ -299,7 +299,7 @@ def test_mixed_tool_schema_is_visible_with_read_capability() -> None:
     capabilities = frozenset({ToolCapability.HOST_READ})
 
     assert registry.list_for(capabilities) == ["mixed"]
-    assert registry.schemas_for(capabilities)[0]["function"]["name"] == "mixed"
+    assert registry.definitions_for(capabilities)[0]["name"] == "mixed"
 
 
 @pytest.mark.asyncio

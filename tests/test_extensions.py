@@ -4,13 +4,13 @@ import pytest
 
 from pc_assistant.extensions import (
     ExtensionDescriptor,
+    ExtensionKind,
     ExtensionManager,
     ExtensionState,
 )
 from pc_assistant.tools.base import (
     ToolBase,
     ToolEffect,
-    ToolOriginKind,
     ToolRisk,
 )
 from pc_assistant.tools.registry import ToolRegistry
@@ -27,11 +27,11 @@ class _Tool(ToolBase):
     async def execute(self, **kwargs):
         return kwargs
 
-    def schema(self):
+    def definition(self):
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {},
                 "additionalProperties": False,
@@ -49,7 +49,7 @@ class _Provider:
     ) -> None:
         self._descriptor = ExtensionDescriptor(
             extension_id=extension_id,
-            kind=ToolOriginKind.MCP,
+            kind=ExtensionKind.MCP,
         )
         self._tools = tools
         self._failure = failure
@@ -70,6 +70,15 @@ class _Provider:
         self.stopped = True
 
 
+class _SkillProvider(_Provider):
+    def __init__(self, tools: tuple[ToolBase, ...]) -> None:
+        super().__init__("skill:unsafe", tools)
+        self._descriptor = ExtensionDescriptor(
+            extension_id="skill:unsafe",
+            kind=ExtensionKind.SKILL,
+        )
+
+
 @pytest.mark.asyncio
 async def test_extension_manager_registers_origin_and_cleans_up() -> None:
     registry = ToolRegistry()
@@ -79,7 +88,7 @@ async def test_extension_manager_registers_origin_and_cleans_up() -> None:
     await manager.start()
 
     assert registry.list_tools() == ["mcp__docs__search"]
-    assert registry.origin("mcp__docs__search") == provider.descriptor.origin
+    assert registry.origin("mcp__docs__search") == provider.descriptor.tool_origin
     assert manager.statuses[0].state is ExtensionState.RUNNING
 
     await manager.stop()
@@ -124,3 +133,16 @@ async def test_extension_registration_is_transactional_per_provider() -> None:
     assert registry.origin("temporary") is None
     assert manager.statuses[0].state is ExtensionState.FAILED
     assert provider.stopped is True
+
+
+@pytest.mark.asyncio
+async def test_skill_extension_cannot_register_executable_tools() -> None:
+    registry = ToolRegistry()
+    provider = _SkillProvider((_Tool("must_not_register"),))
+    manager = ExtensionManager(registry, (provider,))
+
+    await manager.start()
+
+    assert registry.list_tools() == []
+    assert manager.statuses[0].state is ExtensionState.FAILED
+    assert "cannot register executable tools" in manager.statuses[0].detail

@@ -71,11 +71,11 @@ class WeatherTool(ToolBase):
         except (KeyError, IndexError) as e:
             return {"error": f"Failed to parse weather data: {e}", "raw": str(data)[:500]}
 
-    def schema(self) -> dict[str, Any]:
+    def definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "location": {
@@ -93,11 +93,11 @@ class WeatherTool(ToolBase):
             },
         }
 
-    def skim_schema(self) -> dict[str, Any]:
+    def skim_definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "location": {"type": "string", "maxLength": 200},

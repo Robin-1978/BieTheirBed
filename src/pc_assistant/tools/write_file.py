@@ -43,11 +43,11 @@ class WriteFileTool(ToolBase):
         except Exception as e:
             return {"error": str(e)}
 
-    def schema(self) -> dict[str, Any]:
+    def definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string"},
@@ -57,11 +57,11 @@ class WriteFileTool(ToolBase):
             },
         }
 
-    def skim_schema(self) -> dict[str, Any]:
+    def skim_definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string"},

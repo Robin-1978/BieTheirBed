@@ -26,11 +26,11 @@ class PressKeyTool(ToolBase):
         except Exception as e:
             return {"error": f"Failed to press key '{key}': {e}"}
 
-    def schema(self) -> dict[str, Any]:
+    def definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "key": {"type": "string", "description": "e.g. enter, tab, f1, a"},
@@ -39,11 +39,11 @@ class PressKeyTool(ToolBase):
             },
         }
 
-    def skim_schema(self) -> dict[str, Any]:
+    def skim_definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {"key": {"type": "string", "description": "e.g. enter, tab, f1, a"}},
                 "required": ["key"],

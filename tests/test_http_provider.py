@@ -79,11 +79,15 @@ def _model(driver: str = "openai_compatible") -> ResolvedModelConfig:
     )
 
 
-def _request() -> ProviderCallRequest:
+def _request(
+    *,
+    tools: tuple[dict, ...] = (),
+) -> ProviderCallRequest:
     return ProviderCallRequest(
         call_id="model-call-a",
         purpose="react",
         messages=({"role": "user", "content": "hello"},),
+        tools=tools,
     )
 
 
@@ -121,7 +125,20 @@ async def test_openai_provider_streams_normalized_content_and_tool_call() -> Non
     client = FakeClient(FakeResponse(lines))
     provider = HttpModelProvider(_model(), client_factory=ClientFactory(client))
 
-    chunks = [chunk async for chunk in provider.stream(_request(), asyncio.Event())]
+    request = _request(
+        tools=(
+            {
+                "name": "read_file",
+                "description": "Read a file",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+            },
+        )
+    )
+    chunks = [chunk async for chunk in provider.stream(request, asyncio.Event())]
 
     assert chunks[0].content_delta == "hi"
     assert chunks[-1].terminal
@@ -131,6 +148,11 @@ async def test_openai_provider_streams_normalized_content_and_tool_call() -> Non
     payload = client.requests[0][2]["json"]
     assert payload["stream"] is True
     assert payload["model"] == "model-a"
+    assert payload["tools"][0]["function"]["parameters"] == {
+        "type": "object",
+        "properties": {"path": {"type": "string"}},
+        "required": ["path"],
+    }
 
 
 @pytest.mark.asyncio
@@ -153,16 +175,33 @@ async def test_anthropic_provider_streams_normalized_terminal_call() -> None:
     lines = []
     for event_type, data in events:
         lines.extend([f"event: {event_type}", "data: " + json.dumps(data), ""])
+    client = FakeClient(FakeResponse(lines))
     provider = HttpModelProvider(
         _model("anthropic"),
-        client_factory=ClientFactory(FakeClient(FakeResponse(lines))),
+        client_factory=ClientFactory(client),
     )
 
-    chunks = [chunk async for chunk in provider.stream(_request(), asyncio.Event())]
+    request = _request(
+        tools=(
+            {
+                "name": "read_file",
+                "description": "Read a file",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                },
+            },
+        )
+    )
+    chunks = [chunk async for chunk in provider.stream(request, asyncio.Event())]
 
     assert chunks[0].content_delta == "hi"
     assert chunks[-1].finish_reason == "tool_calls"
     assert chunks[-1].tool_calls[0].name == "read_file"
+    assert client.requests[0][2]["json"]["tools"][0]["input_schema"] == {
+        "type": "object",
+        "properties": {"path": {"type": "string"}},
+    }
 
 
 @pytest.mark.asyncio

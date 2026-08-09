@@ -20,22 +20,27 @@ class ExtensionState(str, Enum):
     STOPPED = "stopped"
 
 
+class ExtensionKind(str, Enum):
+    MCP = "mcp"
+    SKILL = "skill"
+
+
 @dataclass(frozen=True)
 class ExtensionDescriptor:
     extension_id: str
-    kind: ToolOriginKind
+    kind: ExtensionKind
 
     def __post_init__(self) -> None:
         normalized = self.extension_id.strip()
         if not normalized or len(normalized) > 128:
             raise ValueError("Extension ID must contain 1-128 characters")
-        if self.kind is ToolOriginKind.BUILTIN:
-            raise ValueError("Built-in tools are not lifecycle-managed extensions")
         object.__setattr__(self, "extension_id", normalized)
 
     @property
-    def origin(self) -> ToolOrigin:
-        return ToolOrigin(kind=self.kind, extension_id=self.extension_id)
+    def tool_origin(self) -> ToolOrigin:
+        if self.kind is not ExtensionKind.MCP:
+            raise ValueError("Skill extensions cannot register executable tools")
+        return ToolOrigin(kind=ToolOriginKind.MCP, extension_id=self.extension_id)
 
 
 @dataclass(frozen=True)
@@ -94,17 +99,22 @@ class ExtensionManager:
     async def _start_provider(self, provider: ExtensionProvider) -> None:
         descriptor = provider.descriptor
         registered: list[str] = []
+        origin: ToolOrigin | None = None
         try:
             tools = await provider.start()
             names = [tool.name for tool in tools]
             if len(set(names)) != len(names):
                 raise ValueError("Extension returned duplicate tool names")
+            if tools:
+                origin = descriptor.tool_origin
             for tool in tools:
-                self._registry.register(tool, origin=descriptor.origin)
+                assert origin is not None
+                self._registry.register(tool, origin=origin)
                 registered.append(tool.name)
         except Exception as exc:
             for name in reversed(registered):
-                self._registry.unregister(name, origin=descriptor.origin)
+                assert origin is not None
+                self._registry.unregister(name, origin=origin)
             try:
                 await provider.stop()
             except Exception:
@@ -139,8 +149,10 @@ class ExtensionManager:
         providers, self._started = list(reversed(self._started)), []
         for provider in providers:
             descriptor = provider.descriptor
+            origin = descriptor.tool_origin if self._registered.get(descriptor) else None
             for name in reversed(self._registered.pop(descriptor, ())):
-                self._registry.unregister(name, origin=descriptor.origin)
+                assert origin is not None
+                self._registry.unregister(name, origin=origin)
             try:
                 await provider.stop()
             except Exception:

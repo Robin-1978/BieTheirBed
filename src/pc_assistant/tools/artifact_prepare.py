@@ -37,11 +37,11 @@ class ArtifactPrepareTool(ToolBase):
             return {"error": str(exc)}
         return {"success": True, "artifact": artifact}
 
-    def schema(self) -> dict[str, Any]:
+    def definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "path": {
@@ -57,11 +57,11 @@ class ArtifactPrepareTool(ToolBase):
             },
         }
 
-    def skim_schema(self) -> dict[str, Any]:
+    def skim_definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string"},

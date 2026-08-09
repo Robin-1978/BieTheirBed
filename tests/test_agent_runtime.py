@@ -423,4 +423,4 @@ async def test_run_can_disable_all_tools_without_mutating_registry(tmp_path: Pat
         pass
 
     assert loop.contexts[0].capabilities == frozenset()
-    assert loop.contexts[0].tool_schemas == ()
+    assert loop.contexts[0].tool_definitions == ()

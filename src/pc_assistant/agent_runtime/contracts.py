@@ -63,7 +63,7 @@ class CancelResult(ContractModel):
 
 class ExtensionStatusRecord(ContractModel):
     extension_id: Identifier128
-    kind: Literal["mcp", "skill", "connector"]
+    kind: Literal["mcp", "skill"]
     state: Literal["configured", "running", "failed", "stopped"]
     tools: tuple[NonEmptyString, ...] = ()
     detail: Annotated[str, StringConstraints(max_length=1000)] = ""
@@ -100,7 +100,7 @@ class MemoryClearResult(ContractModel):
 class ToolDescriptorRecord(ContractModel):
     name: NonEmptyString
     description: Annotated[str, StringConstraints(max_length=2000)] = ""
-    origin_kind: Literal["builtin", "mcp", "skill", "connector"]
+    origin_kind: Literal["builtin", "mcp"]
     extension_id: Identifier128
     effect: Literal[
         "read_only",
@@ -120,7 +120,6 @@ class ToolDescriptorRecord(ContractModel):
             "memory_read",
             "memory_write",
             "mcp",
-            "connector",
         ],
         ...,
     ] = ()

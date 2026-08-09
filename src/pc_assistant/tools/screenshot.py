@@ -54,9 +54,9 @@ class ScreenshotTool(ToolBase):
             save_path.unlink(missing_ok=True)
             return {"error": f"Screen capture failed: {exc}"}
 
-    def schema(self) -> dict[str, Any]:
+    def definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {"type": "object", "properties": {}},
+            "inputSchema": {"type": "object", "properties": {}},
         }

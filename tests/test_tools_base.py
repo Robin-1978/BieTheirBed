@@ -21,8 +21,12 @@ class DummyTool(ToolBase):
     async def execute(self, **kwargs):
         return {"result": kwargs.get("input", "none")}
 
-    def schema(self):
-        return {"name": self.name, "description": self.description}
+    def definition(self):
+        return {
+            "name": self.name,
+            "description": self.description,
+            "inputSchema": {"type": "object", "properties": {}},
+        }
 
 
 def test_tool_base_is_abstract():
@@ -66,6 +70,19 @@ def test_registry_rejects_duplicate_name():
         registry.register(DummyTool())
 
 
+def test_registry_rejects_legacy_non_mcp_definition() -> None:
+    class LegacyTool(DummyTool):
+        def definition(self):
+            return {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {"type": "object"},
+            }
+
+    with pytest.raises(ValueError, match="unsupported MCP fields"):
+        ToolRegistry().register(LegacyTool())
+
+
 def test_registry_get():
     registry = ToolRegistry()
     tool = DummyTool()
@@ -100,7 +117,7 @@ def test_registry_empty_name():
         async def execute(self, **kwargs):
             return {}
 
-        def schema(self):
+        def definition(self):
             return {}
 
     tool = NoName()

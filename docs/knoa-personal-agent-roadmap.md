@@ -31,7 +31,7 @@ Knoa 不应被定义为“远程控制电脑的软件”，也不应只围绕聊
 实施顺序必须是：
 
 ```text
-能力扩展平台（Skill / MCP / Connector）
+能力扩展平台（Skill / MCP）
                     ↓
 持久任务与主动执行平台
                     ↓
@@ -86,11 +86,10 @@ App 不能先于稳定的任务和能力协议成为新的业务逻辑中心。
 
 以下能力是实现产品北极星的主要缺口：
 
-- 当前生产 Core 没有真正加载 Skill；
-- 当前生产 Core 没有 MCP discovery、lifecycle 或 ToolStep Adapter；
-- README 中的 MCP 描述超前于当前实现，需要在能力落地前明确标注；
-- 没有邮箱、日历、Jira、语雀、GitHub、网盘等业务连接器；
-- 没有连接器账号、Secret 和授权生命周期管理；
+- 当前已加载数据型 Skill，并支持按请求、工具和权限动态匹配；
+- 当前已具备 MCP discovery、lifecycle、官方 HTTP/stdio Client 和 ToolStep Adapter；
+- 邮箱、日历、Jira、语雀、GitHub、网盘等业务能力仍需逐步以 MCP Server 接入；
+- 各 MCP Server 的账号、Secret 和授权生命周期仍需按真实服务逐个完成；
 - 没有持久任务队列、定时任务、Webhook 或主动触发器；
 - 运行依附于 WebSocket 连接，连接断开会取消正在执行的任务；
 - 没有任务事件持久化、断线重放、暂停继续和进程重启恢复；
@@ -129,7 +128,7 @@ App 不能先于稳定的任务和能力协议成为新的业务逻辑中心。
 - 权限请求、生物识别确认和风险说明；
 - 文件、照片、相机、录音和系统分享菜单；
 - 成果预览、下载、收藏、再次执行和分享；
-- Skill、MCP、Connector 的状态和授权管理；
+- Skill、MCP 的状态和授权管理；
 - Push 通知、离线消息和断线重连；
 - 记忆、偏好、设备和安全策略管理。
 
@@ -166,7 +165,7 @@ CLI/TUI 长期保留，用于：
 │ Task Service    Agent Runtime    Approval Service    Memory    Artifact Service     │
 │ Event Journal   Scheduler        Trigger Service     Audit     Observability        │
 │                                                                                     │
-│ Capability Registry → Built-in Tools / Skills / MCP Servers / Connectors           │
+│ Capability Registry → Built-in Tools / Skills / MCP Servers                        │
 └───────────────────────────────┬────────────────────────────────────────────────────┘
                                 │ verified ToolStep commit boundary
 ┌───────────────────────────────▼────────────────────────────────────────────────────┐
@@ -178,7 +177,7 @@ CLI/TUI 长期保留，用于：
 
 1. Core 不导入飞书、App 或其他具体 Channel。
 2. 所有入口只能通过经过认证的 principal 调用公开协议。
-3. Built-in、Skill、MCP 和 Connector 工具必须经过同一个 ToolStep。
+3. Built-in 与 MCP 工具必须经过同一个 ToolStep；Skill 只能编排这些工具。
 4. 工具发现和 Schema 元数据不能自行授予权限。
 5. 任务生命周期属于 Core，不能属于某一条 WebSocket 连接。
 6. 客户端断开不等于用户取消任务。
@@ -190,9 +189,9 @@ CLI/TUI 长期保留，用于：
 ## 6. Phase A：能力扩展平台
 
 > 进度（2026-08-09）：Phase A 已启动。A1 ExtensionManager 生命周期基础、A2
-> MCP Streamable HTTP 纵向闭环、A3 Skill Package 基础和 A4 Connector/Secret
-> 基础已完成；A5 工具来源、权限、风险和确认策略的 typed 管理描述也已完成。
-> Phase A 仅剩用户私有账号的真实部署验证。
+> MCP Streamable HTTP 与本地 stdio 纵向闭环、A3 Skill Package 基础、A4
+> 本地 MCP 包发现和 A5 工具来源、权限、风险与确认策略的 typed 管理描述均已完成。
+> Phase A 后续工作是按需导入真实 MCP 包并完成私有账号部署验证。
 
 ### 6.1 Skill Package
 
@@ -200,8 +199,7 @@ CLI/TUI 长期保留，用于：
 
 - manifest、名称、版本和描述；
 - 使用说明、触发条件和上下文资源；
-- 所需工具、MCP Server、Connector 和权限；
-- Secret 引用而不是明文凭据；
+- 所需 Built-in/MCP 工具和权限；
 - 安装、启用、禁用、升级和卸载生命周期；
 - 健康检查和诊断信息；
 - 明确的来源、签名或信任级别。
@@ -227,21 +225,16 @@ MCP 接入必须包含：
 
 未知或未配置的 MCP 权限默认禁用，不能从 Server 自述中自动推导高权限。
 
-### 6.3 Connector 与 Secret
+### 6.3 外部服务与凭据边界
 
-建立邮箱、日历、知识库、工单和代码平台等 Connector 的统一边界：
+邮箱、日历、知识库、工单和代码平台统一由各自 MCP Server 负责业务协议、OAuth/API
+Token、账号健康和重新授权。Core 只接收标准 MCP 工具，不理解服务类型，也不保存
+服务专用字段。
 
-- OAuth/API Token 生命周期；
-- Secret 加密存储与最小暴露；
-- 账号健康状态和重新授权；
-- 读写操作分级；
-- 外部副作用、数据外发和删除操作确认；
-- Connector 结果统一转化为工具结果或 Artifact。
-
-A4 首个纵向闭环采用语雀文档：Secret 仅通过稳定 ID 引用，从私有文件或环境
-解析；读取与更新均注册为标准 Connector 工具，更新继续经过统一权限确认；启动
-时验证授权，失效时输出重新授权状态；审计只记录操作元数据，不记录 Token、参数
-或文档正文。真实账号联调由用户本地私有配置完成，仓库和测试不携带凭据。
+本地 stdio MCP 只继承 manifest 明确列出的环境变量名；值不进入 manifest、模型上下文
+或工具 Schema。读取、写入、数据外发与删除操作仍由 Core 的本地 effect/capability/risk
+策略分级，高风险外部副作用继续经过统一确认。MCP Server 自己负责提供方级审计，Core
+负责统一工具调用审计。
 
 ### 6.4 Phase A 验收
 
@@ -341,12 +334,12 @@ Task 至少记录：
 - 图片、文件、相机和录音上传；
 - Markdown、代码、表格、图片和文件预览；
 - Push 通知和通知跳转；
-- Skill/MCP/Connector 状态查看。
+- Skill/MCP 状态查看。
 
 ### 9.2 后续范围
 
 - Skill/MCP 安装和权限管理；
-- Connector 授权；
+- MCP Server 授权；
 - 定时任务和触发器编辑；
 - 成果库、搜索、收藏和分享；
 - 记忆和偏好管理；
@@ -390,14 +383,14 @@ Task 至少记录：
 
 ## 11. 工程原则
 
-- **高内聚**：任务、能力、连接器、确认、Artifact 各有唯一所有者。
+- **高内聚**：任务、能力、MCP Server、确认、Artifact 各有唯一所有者。
 - **低耦合**：Channel/App 依赖公开协议，不依赖 Core 内部类型和实例。
 - **YAGNI**：先打通真实工作闭环，再扩展通用平台能力。
 - **安全默认拒绝**：未知扩展、权限、Secret 和外部副作用默认禁用。
 - **正向设计**：按目标模型实现，不保留旧运行时或双语义兼容。
 - **可恢复优先**：长期工作不能依赖进程内对象或活跃连接。
 - **交付优先**：任务最终必须产生可验证结论或成果，而不只是工具调用记录。
-- **语义工具优先**：业务 Connector/MCP 优先于脆弱的鼠标键盘模拟。
+- **语义工具优先**：业务 MCP 工具优先于脆弱的鼠标键盘模拟。
 - **Channel 自治**：标准事件保持中立，各 Channel 自行选择表达方式。
 
 ## 12. 质量指标
@@ -406,7 +399,7 @@ Task 至少记录：
 
 - 真实任务完成率和人工接管率；
 - 平均任务耗时、失败阶段和恢复成功率；
-- 工具/MCP/Connector 成功率和延迟；
+- 工具/MCP 成功率和延迟；
 - 重复副作用为零；
 - 确认请求正确到达率和原子解决率；
 - 断线事件恢复完整率；
@@ -419,7 +412,7 @@ Task 至少记录：
 
 实施前按依赖顺序形成两份独立设计：
 
-1. **Knoa Capability Extension Design**：Skill、MCP、Connector、Secret 和统一
+1. **Knoa Capability Extension Design**：Skill、Built-in/MCP Tool 和统一
    ToolStep 接入契约。
 2. **Knoa Durable Task Design**：Task 聚合、Event Journal、确认持久化、重放、
    调度与恢复语义。

@@ -133,11 +133,11 @@ class MemoryTool(ToolBase):
         deleted = self._memory.delete(key)
         return {"deleted": deleted, "key": key}
 
-    def schema(self) -> dict[str, Any]:
+    def definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "action": {
@@ -166,11 +166,11 @@ class MemoryTool(ToolBase):
             },
         }
 
-    def skim_schema(self) -> dict[str, Any]:
+    def skim_definition(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["store", "retrieve", "search", "delete"]},

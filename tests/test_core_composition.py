@@ -188,6 +188,49 @@ async def test_tcp_endpoint_separates_local_and_remote_credentials(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_new_session_status_uses_configured_model_alias(tmp_path: Path) -> None:
+    composition = build_core_runtime(
+        _config(tmp_path, service_port=0),
+        provider_factory=_OfflineProvider,
+    )
+    scope = await composition.control.create_session("local")
+
+    status = await composition.control.get_status(scope)
+
+    assert status.status == "ready"
+    assert status.details["model"] == "default"
+    assert status.details["model_calls"] == 0
+    assert status.details["total_tokens"] == 0
+
+
+@pytest.mark.asyncio
+async def test_broken_local_mcp_package_does_not_block_core(tmp_path: Path) -> None:
+    runtime_root = tmp_path / "runtime"
+    package = runtime_root / "mcp" / "broken"
+    package.mkdir(parents=True)
+    (package / "mcp.yaml").write_text(
+        "enabled: true\ntransport: stdio\ncommand: ''\n",
+        encoding="utf-8",
+    )
+    composition = build_core_runtime(
+        _config(tmp_path, service_port=0),
+        provider_factory=_OfflineProvider,
+    )
+
+    await composition.extensions.start()
+    try:
+        failed = next(
+            status
+            for status in composition.extensions.statuses
+            if status.descriptor.extension_id == "mcp:broken"
+        )
+        assert failed.state.value == "failed"
+        assert "read_file" in composition.registry.list_tools()
+    finally:
+        await composition.extensions.stop()
+
+
+@pytest.mark.asyncio
 async def test_composition_records_correlated_model_and_turn_traces(
     tmp_path: Path,
 ) -> None:

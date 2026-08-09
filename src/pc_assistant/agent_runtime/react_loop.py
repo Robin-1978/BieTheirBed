@@ -41,7 +41,7 @@ class ReActContext:
     scope: RuntimeScope
     client_request_id: str
     messages: tuple[dict[str, Any], ...]
-    tool_schemas: tuple[dict[str, Any], ...]
+    tool_definitions: tuple[dict[str, Any], ...]
     capabilities: frozenset[ToolCapability]
     cancellation: asyncio.Event
     run_id: str = ""
@@ -116,7 +116,7 @@ class ReActLoop:
                     messages=tuple(messages),
                     system_prompt=context.system_prompt,
                     runtime_context=context.runtime_context,
-                    tools=context.tool_schemas,
+                    tools=context.tool_definitions,
                     prompt_budget=context.prompt_budget,
                     max_output_tokens=context.max_output_tokens,
                     temperature=context.temperature,

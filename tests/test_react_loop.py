@@ -49,7 +49,7 @@ def _context(cancellation: asyncio.Event | None = None) -> ReActContext:
         scope=RuntimeScope(principal_id="local", session_handle="session-a"),
         client_request_id="request-a",
         messages=({"role": "user", "content": "do it"},),
-        tool_schemas=(),
+        tool_definitions=(),
         capabilities=frozenset(),
         cancellation=cancellation or asyncio.Event(),
     )

@@ -2,6 +2,7 @@
 
 from pc_assistant.extensions.manager import (
     ExtensionDescriptor,
+    ExtensionKind,
     ExtensionManager,
     ExtensionProvider,
     ExtensionState,
@@ -10,6 +11,7 @@ from pc_assistant.extensions.manager import (
 
 __all__ = [
     "ExtensionDescriptor",
+    "ExtensionKind",
     "ExtensionManager",
     "ExtensionProvider",
     "ExtensionState",

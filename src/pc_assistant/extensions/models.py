@@ -9,7 +9,6 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    SecretStr,
     field_validator,
     model_validator,
 )
@@ -18,9 +17,8 @@ from pc_assistant.tools.base import ToolCapability, ToolEffect, ToolRisk
 
 
 MCP_SERVER_ID_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,23}$")
-MCP_TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
-CONNECTOR_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,23}$")
-SECRET_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+MCP_TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
+ENVIRONMENT_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 
 
 class ExtensionConfigModel(BaseModel):
@@ -45,8 +43,12 @@ class MCPToolPolicyConfig(ExtensionConfigModel):
 
 class MCPServerConfig(ExtensionConfigModel):
     enabled: bool = False
-    transport: Literal["streamable_http"] = "streamable_http"
+    transport: Literal["streamable_http", "stdio"] = "streamable_http"
     url: str = ""
+    command: str = ""
+    args: tuple[str, ...] = Field(default=(), max_length=64)
+    working_directory: str = ""
+    inherit_env: tuple[str, ...] = Field(default=(), max_length=64)
     timeout_seconds: float = Field(default=30.0, ge=1.0, le=300.0)
     tools: dict[str, MCPToolPolicyConfig] = Field(default_factory=dict)
 
@@ -63,46 +65,44 @@ class MCPServerConfig(ExtensionConfigModel):
             raise ValueError("MCP URL must not contain credentials")
         return normalized
 
-    @model_validator(mode="after")
-    def validate_enabled_server(self) -> MCPServerConfig:
-        if self.enabled and not self.url:
-            raise ValueError("Enabled MCP server requires a URL")
-        invalid = [name for name in self.tools if not MCP_TOOL_NAME_PATTERN.fullmatch(name)]
-        if invalid:
-            raise ValueError("MCP tool names must contain 1-32 safe characters")
-        return self
-
-
-class YuqueConnectorConfig(ExtensionConfigModel):
-    enabled: bool = False
-    driver: Literal["yuque"] = "yuque"
-    base_url: str = "https://www.yuque.com/api/v2"
-    token_secret: SecretStr = Field(default_factory=lambda: SecretStr(""))
-    timeout_seconds: float = Field(default=30.0, ge=1.0, le=300.0)
-
-    @field_validator("base_url")
+    @field_validator("command", "working_directory")
     @classmethod
-    def validate_base_url(cls, value: str) -> str:
-        normalized = value.strip().rstrip("/")
-        parsed = urlparse(normalized)
-        if parsed.scheme != "https" or not parsed.hostname:
-            raise ValueError("Yuque Connector base_url must use https")
-        if parsed.username or parsed.password:
-            raise ValueError("Connector URL must not contain credentials")
-        if parsed.query or parsed.fragment:
-            raise ValueError("Connector base_url must not contain query or fragment")
+    def validate_process_string(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) > 4096 or "\x00" in normalized:
+            raise ValueError("MCP process fields must contain at most 4096 safe characters")
         return normalized
 
-    @field_validator("token_secret")
+    @field_validator("args")
     @classmethod
-    def validate_token_secret(cls, value: SecretStr) -> SecretStr:
-        normalized = value.get_secret_value().strip()
-        if normalized and not SECRET_ID_PATTERN.fullmatch(normalized):
-            raise ValueError("Connector token_secret must be a safe Secret ID")
-        return SecretStr(normalized)
+    def validate_args(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if any(len(value) > 4096 or "\x00" in value for value in values):
+            raise ValueError("MCP arguments must contain at most 4096 safe characters")
+        return values
+
+    @field_validator("inherit_env")
+    @classmethod
+    def validate_inherit_env(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(value.strip() for value in values)
+        if any(not ENVIRONMENT_NAME_PATTERN.fullmatch(value) for value in normalized):
+            raise ValueError("MCP inherited environment names must be safe identifiers")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("MCP inherited environment names must be unique")
+        return normalized
 
     @model_validator(mode="after")
-    def validate_enabled_connector(self) -> YuqueConnectorConfig:
-        if self.enabled and not self.token_secret.get_secret_value():
-            raise ValueError("Enabled Yuque Connector requires token_secret")
+    def validate_enabled_server(self) -> MCPServerConfig:
+        if self.transport == "streamable_http":
+            if self.enabled and not self.url:
+                raise ValueError("Enabled Streamable HTTP MCP server requires a URL")
+            if self.command or self.args or self.working_directory or self.inherit_env:
+                raise ValueError("Streamable HTTP MCP server must not configure stdio fields")
+        else:
+            if self.enabled and not self.command:
+                raise ValueError("Enabled stdio MCP server requires a command")
+            if self.url:
+                raise ValueError("stdio MCP server must not configure a URL")
+        invalid = [name for name in self.tools if not MCP_TOOL_NAME_PATTERN.fullmatch(name)]
+        if invalid:
+            raise ValueError("MCP tool names must contain 1-128 safe characters")
         return self

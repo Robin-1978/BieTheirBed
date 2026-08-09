@@ -3,19 +3,23 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, TypedDict
 
 from jsonschema import Draft202012Validator
 
 
-@dataclass(frozen=True)
-class ToolParameter:
-    """Metadata for a single tool parameter visible in skim schema."""
+class _RequiredToolDefinition(TypedDict):
+    """Required fields from the MCP Tool definition contract."""
 
     name: str
-    description: str = ""
-    required: bool | None = None
-    skim: bool = True
+    inputSchema: dict[str, Any]
+
+
+class ToolDefinition(_RequiredToolDefinition, total=False):
+    """Knoa's MCP-compatible canonical Tool definition."""
+
+    description: str
+    outputSchema: dict[str, Any]
 
 
 class ToolEffect(str, Enum):
@@ -36,7 +40,6 @@ class ToolCapability(str, Enum):
     MEMORY_READ = "memory_read"
     MEMORY_WRITE = "memory_write"
     MCP = "mcp"
-    CONNECTOR = "connector"
 
 
 class ToolRisk(str, Enum):
@@ -48,8 +51,6 @@ class ToolRisk(str, Enum):
 class ToolOriginKind(str, Enum):
     BUILTIN = "builtin"
     MCP = "mcp"
-    SKILL = "skill"
-    CONNECTOR = "connector"
 
 
 @dataclass(frozen=True)
@@ -81,30 +82,6 @@ class ToolPolicy:
         return self.effect is not ToolEffect.UNKNOWN
 
 
-def parameter(
-    name: str,
-    *,
-    description: str = "",
-    required: bool | None = None,
-    skim: bool = True,
-):
-    """Declare a parameter's skim-schema metadata on a tool class."""
-
-    def decorate(cls):
-        current = tuple(getattr(cls, "_declared_parameters", ()))
-        cls._declared_parameters = current + (
-            ToolParameter(
-                name=name,
-                description=description,
-                required=required,
-                skim=skim,
-            ),
-        )
-        return cls
-
-    return decorate
-
-
 class ToolBase(ABC):
     name: str = ""
     description: str = ""
@@ -112,18 +89,16 @@ class ToolBase(ABC):
     capabilities: frozenset[ToolCapability] = frozenset()
     schema_capabilities: frozenset[ToolCapability] | None = None
     risk: ToolRisk = ToolRisk.HIGH
-    _declared_parameters: tuple[ToolParameter, ...] = ()
-
     @abstractmethod
     async def execute(self, **kwargs: Any) -> Any: ...
 
     @abstractmethod
-    def schema(self) -> dict[str, Any]:
-        """Full JSON schema (returned by tool_help)."""
+    def definition(self) -> ToolDefinition:
+        """Return the full MCP-compatible canonical Tool definition."""
 
-    def skim_schema(self) -> dict[str, Any]:
-        """Compact schema for LLM injection. Override to omit rare params."""
-        return self.schema()
+    def skim_definition(self) -> ToolDefinition:
+        """Return a compact canonical definition for model injection."""
+        return self.definition()
 
     @property
     def policy(self) -> ToolPolicy:
@@ -146,11 +121,11 @@ class ToolBase(ABC):
 
     def validation_schema(self) -> dict[str, Any]:
         """Return the fail-closed JSON Schema used at the commit boundary."""
-        parameters = dict(self.schema().get("parameters") or {})
-        parameters.setdefault("type", "object")
-        parameters.setdefault("additionalProperties", False)
-        Draft202012Validator.check_schema(parameters)
-        return parameters
+        input_schema = dict(self.definition().get("inputSchema") or {})
+        input_schema.setdefault("type", "object")
+        input_schema.setdefault("additionalProperties", False)
+        Draft202012Validator.check_schema(input_schema)
+        return input_schema
 
     def __repr__(self) -> str:
         return f"<Tool {self.name}>"
