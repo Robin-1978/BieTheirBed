@@ -18,6 +18,31 @@ jobs:
       - name: Build distributions
         run: python -m build
       - name: Lint
-        run: ruff check src tests
+        run: ruff check src tests scripts
       - name: Test and enforce Core coverage
         run: python -m pytest -q --cov --cov-report=term-missing
+
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/knoa-mobile/package-lock.json
+      - name: Install Gateway contract exporter
+        run: python -m pip install -e .
+      - name: Install mobile dependencies
+        working-directory: apps/knoa-mobile
+        run: npm ci
+      - name: Verify generated Gateway contract
+        working-directory: apps/knoa-mobile
+        run: npm run contract && git diff --exit-code -- openapi.json src/api/schema.ts
+      - name: Typecheck and test mobile workbench
+        working-directory: apps/knoa-mobile
+        run: npm run typecheck && npm test && npm run doctor
