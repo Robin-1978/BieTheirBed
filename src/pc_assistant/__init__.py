@@ -154,7 +154,7 @@ async def async_main(
     chat_ui = CoreChatApp(cfg, client, session_handle)
 
     try:
-        await chat_ui.run()
+        await chat_ui.run_async()
     except KeyboardInterrupt:
         logger.info("Received KeyboardInterrupt, shutting down")
         try:

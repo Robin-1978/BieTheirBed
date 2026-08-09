@@ -6,9 +6,9 @@ from pc_assistant.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRi
 
 class WriteFileTool(ToolBase):
     name = "write_file"
-    description = "Create or overwrite a file."
+    description = "Create or overwrite a local file anywhere on the host."
     effect = ToolEffect.LOCAL_WRITE
-    capabilities = frozenset({ToolCapability.WORKSPACE_WRITE})
+    capabilities = frozenset({ToolCapability.HOST_WRITE})
     risk = ToolRisk.MEDIUM
 
     def __init__(self, working_directory: str = "") -> None:

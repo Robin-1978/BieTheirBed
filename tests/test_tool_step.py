@@ -26,7 +26,7 @@ from pc_assistant.tools.registry import ToolRegistry
 class RecordingTool(ToolBase):
     name = "record"
     effect = ToolEffect.LOCAL_WRITE
-    capabilities = frozenset({ToolCapability.WORKSPACE_WRITE})
+    capabilities = frozenset({ToolCapability.HOST_WRITE})
     risk = ToolRisk.MEDIUM
 
     def __init__(self) -> None:
@@ -68,8 +68,8 @@ class UnknownPolicyTool(ToolBase):
 class MixedPolicyTool(ToolBase):
     name = "mixed"
     effect = ToolEffect.LOCAL_WRITE
-    capabilities = frozenset({ToolCapability.WORKSPACE_WRITE})
-    schema_capabilities = frozenset({ToolCapability.WORKSPACE_READ})
+    capabilities = frozenset({ToolCapability.HOST_WRITE})
+    schema_capabilities = frozenset({ToolCapability.HOST_READ})
     risk = ToolRisk.MEDIUM
 
     def __init__(self) -> None:
@@ -79,7 +79,7 @@ class MixedPolicyTool(ToolBase):
         if arguments.get("action") == "read":
             return ToolPolicy(
                 ToolEffect.READ_ONLY,
-                frozenset({ToolCapability.WORKSPACE_READ}),
+                frozenset({ToolCapability.HOST_READ}),
                 ToolRisk.LOW,
             )
         return self.policy
@@ -116,7 +116,7 @@ def _context(
     *,
     confirmation=None,
     cancelled: bool = False,
-    capabilities=frozenset({ToolCapability.WORKSPACE_WRITE}),
+    capabilities=frozenset({ToolCapability.HOST_WRITE}),
 ) -> ToolStepContext:
     event = asyncio.Event()
     if cancelled:
@@ -167,7 +167,9 @@ async def test_nested_json_schema_is_enforced_before_commit(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
-async def test_workspace_escape_and_missing_capability_fail_closed(tmp_path: Path) -> None:
+async def test_host_path_can_leave_default_directory_but_requires_capability(
+    tmp_path: Path,
+) -> None:
     tool = RecordingTool()
     step = _step(tmp_path, tool)
     call = ProposedToolCall(
@@ -176,12 +178,14 @@ async def test_workspace_escape_and_missing_capability_fail_closed(tmp_path: Pat
         arguments={"path": "../escape.txt", "options": {"enabled": True}},
     )
 
-    escaped = await step.execute(_context(confirmation=Confirmation(True)), call)
+    allowed = await step.execute(_context(confirmation=Confirmation(True)), call)
     denied = await step.execute(_context(capabilities=frozenset()), call)
 
-    assert escaped.code == "capability_denied"
+    assert allowed.status == "completed"
     assert denied.code == "capability_denied"
-    assert tool.calls == []
+    assert tool.calls == [
+        {"path": str((tmp_path / "../escape.txt").resolve()), "options": {"enabled": True}}
+    ]
 
 
 @pytest.mark.asyncio
@@ -277,7 +281,7 @@ async def test_call_specific_read_policy_does_not_request_confirmation(
 ) -> None:
     tool = MixedPolicyTool()
     result = await _step(tmp_path, tool).execute(
-        _context(capabilities=frozenset({ToolCapability.WORKSPACE_READ})),
+        _context(capabilities=frozenset({ToolCapability.HOST_READ})),
         ProposedToolCall(
             call_id="call-a",
             name="mixed",
@@ -292,7 +296,7 @@ async def test_call_specific_read_policy_does_not_request_confirmation(
 def test_mixed_tool_schema_is_visible_with_read_capability() -> None:
     registry = ToolRegistry()
     registry.register(MixedPolicyTool())
-    capabilities = frozenset({ToolCapability.WORKSPACE_READ})
+    capabilities = frozenset({ToolCapability.HOST_READ})
 
     assert registry.list_for(capabilities) == ["mixed"]
     assert registry.schemas_for(capabilities)[0]["function"]["name"] == "mixed"

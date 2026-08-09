@@ -11,9 +11,9 @@ _MAX_LINE_COUNT = 1_000
 
 class ReadFileTool(ToolBase):
     name = "read_file"
-    description = "Read a file's content."
+    description = "Read an existing local file, including files outside the current directory."
     effect = ToolEffect.READ_ONLY
-    capabilities = frozenset({ToolCapability.WORKSPACE_READ})
+    capabilities = frozenset({ToolCapability.HOST_READ})
     risk = ToolRisk.LOW
 
     def __init__(self, working_directory: str = "") -> None:
