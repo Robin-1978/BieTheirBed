@@ -23,6 +23,7 @@ from pc_assistant.channels.feishu import (
 )
 from pc_assistant.config import AppConfig
 from pc_assistant.service.core_api import TaskCancelResultMessage
+from pc_assistant.service.core_client import CoreRequestError
 from pc_assistant.tasks import (
     PrincipalTaskEvent,
     TaskCancelResult,
@@ -105,6 +106,11 @@ class _CoreClient:
     async def upload_artifact(self, session, data_url, **kwargs):
         self.uploads.append((session, data_url, kwargs))
         return SimpleNamespace(artifact_id="artifact-file")
+
+    async def transcribe_artifact(self, session, artifact_id):
+        self.transcriptions = getattr(self, "transcriptions", [])
+        self.transcriptions.append((session, artifact_id))
+        return SimpleNamespace(transcript="整理这段会议录音")
 
     async def execute_task(self, session, text, attachments):
         self.runs.append((session, text, attachments))
@@ -419,6 +425,8 @@ async def test_feishu_audio_is_registered_as_pending_core_artifact(tmp_path) -> 
     channel._remove_reaction = lambda *_args: True
     sent = []
     channel._send_text = lambda *args: sent.append(args) or True
+    channel._send_card_returning_id = lambda *_args: "card-a"
+    channel._update_card = lambda *_args: True
 
     await channel._handle_audio(
         "ou-user",
@@ -435,10 +443,55 @@ async def test_feishu_audio_is_registered_as_pending_core_artifact(tmp_path) -> 
         "name": "voice-message.ogg",
         "caption": "Feishu voice message",
     }
+    assert client.transcriptions == [("session-a", "artifact-file")]
+    assert len(client.runs) == 1
+    session, text, attachments = client.runs[0]
+    assert session == "session-a"
+    assert text == "整理这段会议录音"
+    assert attachments[0].artifact_id == "artifact-file"
+    assert "ou-user" not in channel._pending_attachments
+    assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_feishu_audio_keeps_artifact_when_transcription_is_unavailable(
+    tmp_path,
+) -> None:
+    channel = FeishuChannel(_config(tmp_path))
+
+    class UnavailableClient(_CoreClient):
+        async def transcribe_artifact(self, session, artifact_id):
+            del session, artifact_id
+            from pc_assistant.service.core_api import CoreError
+
+            raise CoreRequestError(
+                CoreError(
+                    request_id="request-a",
+                    code="capability_denied",
+                    message="unavailable",
+                    correlation_id="correlation-a",
+                )
+            )
+
+    client = UnavailableClient()
+    channel._clients["ou-user"] = client
+    channel._sessions["ou-user"] = "session-a"
+    channel._download_audio = lambda *_args: (
+        b"OggSvoice",
+        "audio/ogg",
+        "voice-message.ogg",
+    )
+    channel._add_reaction = lambda *_args: "reaction-a"
+    channel._remove_reaction = lambda *_args: True
+    sent = []
+    channel._send_text = lambda *args: sent.append(args) or True
+
+    await channel._handle_audio("ou-user", "message-audio", "audio-key")
+
     assert channel._pending_attachments["ou-user"][0].artifact_id == (
         "artifact-file"
     )
-    assert sent == [("ou-user", "语音已收到，请继续发送任务。")]
+    assert sent == [("ou-user", "语音已收到；尚未配置转写能力。")]
 
 
 def test_feishu_audio_download_detects_common_media_types(tmp_path) -> None:

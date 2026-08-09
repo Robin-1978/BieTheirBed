@@ -253,7 +253,31 @@ Monitor exposes those operations with the official `mcp.server.fastmcp.FastMCP`
 SDK over stdio. Knoa sees only standard MCP discovery and calls. The earlier
 handwritten line-oriented JSON-RPC implementation has been removed.
 
-## 9. Non-goals
+## 9. Standard audio transcription capability
+
+Audio transcription is a Core command over an owned Artifact, not Feishu
+business logic. Private configuration maps the command to one discovered MCP
+Tool by its deterministic public name. Core accepts the mapping only when that
+Tool is locally classified as read-only and non-high-risk.
+
+The MCP input contract is intentionally small:
+
+```json
+{
+  "audio_data_url": "data:audio/ogg;base64,...",
+  "media_type": "audio/ogg",
+  "file_name": "voice-message.ogg"
+}
+```
+
+No backing path, principal ID, session capability or arbitrary environment is
+passed to the MCP process. The preferred result is
+`structuredContent.transcript`; text content blocks are accepted as a bounded
+fallback. Missing configuration, an unavailable extension, invalid audio, a
+high-risk policy, and malformed output all fail closed while the original
+Artifact remains owned by Core.
+
+## 10. Non-goals
 
 - arbitrary imported `ToolBase` subclasses;
 - direct execution of downloaded Python tool code inside Core;

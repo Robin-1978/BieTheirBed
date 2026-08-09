@@ -18,6 +18,7 @@ from pydantic import (
 
 from pc_assistant.agent_runtime.contracts import (
     ArtifactDownloadResult,
+    ArtifactTranscriptionResult,
     ConfigSetResult,
     HealthStatus,
     HistoryResult,
@@ -438,6 +439,11 @@ class DownloadArtifactRequest(SessionRequest):
     artifact_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
 
 
+class TranscribeArtifactRequest(SessionRequest):
+    method: Literal["artifact_transcribe"] = "artifact_transcribe"
+    artifact_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+
+
 CoreRequest: TypeAlias = Annotated[
     AuthenticateRequest
     | HealthRequest
@@ -469,7 +475,8 @@ CoreRequest: TypeAlias = Annotated[
     | ListToolsRequest
     | SetConfigRequest
     | UploadArtifactRequest
-    | DownloadArtifactRequest,
+    | DownloadArtifactRequest
+    | TranscribeArtifactRequest,
     Field(discriminator="method"),
 ]
 _CORE_REQUEST_ADAPTER = TypeAdapter(CoreRequest)
@@ -640,6 +647,13 @@ class ArtifactDownloadedMessage(CoreModel):
     result: ArtifactDownloadResult
 
 
+class ArtifactTranscribedMessage(CoreModel):
+    message_type: Literal["artifact_transcribed"] = "artifact_transcribed"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    result: ArtifactTranscriptionResult
+
+
 class TaskCancelResultMessage(CoreModel):
     message_type: Literal["task_cancel_result"] = "task_cancel_result"
     api_version: Literal["v1"] = "v1"
@@ -739,6 +753,7 @@ CoreServerMessage: TypeAlias = Annotated[
     | ConfigSetMessage
     | ArtifactUploadedMessage
     | ArtifactDownloadedMessage
+    | ArtifactTranscribedMessage
     | TaskCancelResultMessage
     | TaskPauseResultMessage
     | TaskResumedMessage

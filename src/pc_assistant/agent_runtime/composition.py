@@ -37,6 +37,9 @@ from pc_assistant.agent_runtime.tool_step import (
     ToolArgumentPolicy,
     ToolStep,
 )
+from pc_assistant.agent_runtime.transcription_service import (
+    ArtifactTranscriptionService,
+)
 from pc_assistant.artifacts import ArtifactStore
 from pc_assistant.automation import (
     ScheduleDispatcher,
@@ -134,6 +137,7 @@ class CoreRuntimeComposition:
     runtime: AgentRuntime
     control: ControlService
     artifact_service: ArtifactService
+    transcription_service: ArtifactTranscriptionService
     llm_traces: LLMTraceRecorder
     turn_traces: TurnRecorder
     extensions: ExtensionManager
@@ -475,6 +479,13 @@ def build_core_runtime(
         ),
     )
     artifact_service = ArtifactService(sessions, artifacts)
+    transcription_service = ArtifactTranscriptionService(
+        config.audio_transcription,
+        artifacts,
+        registry,
+        tool_step,
+        capabilities_for=capabilities_for_scope,
+    )
 
     local_token = resolve_local_service_token(paths)
     credentials = {local_token: "local"}
@@ -490,6 +501,7 @@ def build_core_runtime(
             StaticTokenAuthenticator(credentials),
             SignedPrincipalAuthenticator(local_token),
         ),
+        transcription=transcription_service,
     )
     host = CoreServiceHost(
         tcp=TcpCoreEndpoint(
@@ -515,6 +527,7 @@ def build_core_runtime(
         runtime=runtime,
         control=control,
         artifact_service=artifact_service,
+        transcription_service=transcription_service,
         llm_traces=llm_traces,
         turn_traces=turn_traces,
         extensions=extensions,

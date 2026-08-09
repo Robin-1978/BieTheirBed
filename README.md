@@ -190,7 +190,19 @@ Images, ordinary files, and Feishu voice messages enter the same owned Core
 Artifact boundary. Attached text files preserve their safe name and can be
 inspected through the bounded `read_artifact` Built-in Tool without exposing a
 server filesystem path. Voice bytes remain an opaque owned Artifact; a
-transcription provider is not embedded in the Feishu Channel.
+transcription provider is not embedded in the Feishu Channel. To make voice
+messages immediately create Tasks, explicitly map a read-only, non-high-risk
+MCP Tool in private config:
+
+```yaml
+audio_transcription:
+  enabled: true
+  tool: "mcp__speech__transcribe"
+  max_bytes: 20971520
+```
+
+The mapped Tool receives only `audio_data_url`, `media_type`, and `file_name`.
+It should return `structuredContent.transcript` (or a text content block).
 Long final outputs are retained in the Task journal and also emitted as a
 persistent Markdown Artifact. Feishu shows a compact preview and delivers the
 complete file instead of flooding the conversation with continuation cards.

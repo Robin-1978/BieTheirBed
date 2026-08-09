@@ -12,6 +12,18 @@ class TestAppConfig:
         assert cfg.llm_temperature == 0.7
         assert cfg.max_iterations == 8
         assert cfg.context_window_budget == 8192
+        assert cfg.audio_transcription.enabled is False
+
+    def test_audio_transcription_requires_public_mcp_tool(self):
+        with pytest.raises(ValueError, match="requires an MCP tool"):
+            AppConfig(audio_transcription={"enabled": True})
+        with pytest.raises(ValueError, match="public MCP tool name"):
+            AppConfig(
+                audio_transcription={
+                    "enabled": True,
+                    "tool": "builtin_transcribe",
+                }
+            )
 
     def test_model_context_window_overrides_global_fallback(self):
         cfg = AppConfig(

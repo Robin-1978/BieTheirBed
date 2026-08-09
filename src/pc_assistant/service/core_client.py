@@ -10,6 +10,7 @@ import websockets
 
 from pc_assistant.agent_runtime.contracts import (
     ArtifactDownloadResult,
+    ArtifactTranscriptionResult,
     ConfigSetResult,
     HealthStatus,
     HistoryResult,
@@ -26,6 +27,7 @@ from pc_assistant.service.core_api import (
     AuthenticatedMessage,
     ArtifactDownloadedMessage,
     ArtifactInputRef,
+    ArtifactTranscribedMessage,
     ArtifactUploadedMessage,
     CORE_WS_MAX_SIZE,
     CancelTaskRequest,
@@ -81,6 +83,7 @@ from pc_assistant.service.core_api import (
     TaskSnapshot,
     TaskSnapshotMessage,
     TaskSubscribedMessage,
+    TranscribeArtifactRequest,
     ToolsMessage,
     TriggerAcceptedMessage,
     TriggerEventAcceptedMessage,
@@ -438,6 +441,24 @@ class CoreClient:
         if not isinstance(response, ArtifactDownloadedMessage):
             raise RuntimeError(
                 "CoreServer returned an invalid artifact download response"
+            )
+        return response.result
+
+    async def transcribe_artifact(
+        self,
+        session_handle: str,
+        artifact_id: str,
+    ) -> ArtifactTranscriptionResult:
+        response = await self._request(
+            TranscribeArtifactRequest(
+                request_id=self._request_id(),
+                session_handle=session_handle,
+                artifact_id=artifact_id,
+            )
+        )
+        if not isinstance(response, ArtifactTranscribedMessage):
+            raise RuntimeError(
+                "CoreServer returned an invalid artifact transcription response"
             )
         return response.result
 

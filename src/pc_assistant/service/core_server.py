@@ -14,10 +14,17 @@ from pc_assistant.agent_runtime.artifact_service import (
     ArtifactNotFoundError,
     InvalidArtifactError,
 )
+from pc_assistant.agent_runtime.transcription_service import (
+    InvalidAudioArtifactError,
+    TranscriptionFailedError,
+    TranscriptionUnavailableError,
+)
 from pc_assistant.agent_runtime.contracts import (
     ArtifactAttachment,
     ArtifactDownloadRequest,
     ArtifactServicePort,
+    ArtifactTranscriptionRequest,
+    ArtifactTranscriptionServicePort,
     ArtifactUploadRequest,
     ConfigSetRequest,
     ControlServicePort,
@@ -40,6 +47,7 @@ from pc_assistant.service.core_api import (
     AuthenticateRequest,
     AuthenticatedMessage,
     ArtifactDownloadedMessage,
+    ArtifactTranscribedMessage,
     ArtifactUploadedMessage,
     CancelTaskRequest,
     ClearMemoryRequest,
@@ -83,6 +91,7 @@ from pc_assistant.service.core_api import (
     SetConfigRequest,
     StatusMessage,
     SubscribeTaskRequest,
+    TranscribeArtifactRequest,
     SubscribePrincipalTaskEventsRequest,
     TaskAcceptedMessage,
     TaskCancelResultMessage,
@@ -183,6 +192,7 @@ class CoreServer:
         artifacts: ArtifactServicePort,
         authenticator: PrincipalAuthenticator,
         *,
+        transcription: ArtifactTranscriptionServicePort | None = None,
         authentication_timeout_seconds: float = 10.0,
         max_subscriptions_per_connection: int = 8,
     ) -> None:
@@ -193,6 +203,7 @@ class CoreServer:
         self._triggers = triggers
         self._control = control
         self._artifacts = artifacts
+        self._transcription = transcription
         self._authenticator = authenticator
         self._authentication_timeout = max(0.01, authentication_timeout_seconds)
         self._max_subscriptions = max_subscriptions_per_connection
@@ -784,6 +795,27 @@ class CoreServer:
                     )
                 except Exception:
                     pass
+            elif isinstance(request, TranscribeArtifactRequest):
+                if self._transcription is None:
+                    raise TranscriptionUnavailableError(
+                        "Audio transcription is unavailable"
+                    )
+                scope = RuntimeScope(
+                    principal_id=principal,
+                    session_handle=request.session_handle,
+                )
+                result = await self._transcription.transcribe(
+                    scope,
+                    ArtifactTranscriptionRequest(
+                        artifact_id=request.artifact_id,
+                    ),
+                )
+                await send(
+                    ArtifactTranscribedMessage(
+                        request_id=request.request_id,
+                        result=result,
+                    )
+                )
             else:
                 await send(
                     self._error(
@@ -878,6 +910,30 @@ class CoreServer:
                     request.request_id,
                     "invalid_request",
                     "Task state does not allow this command",
+                )
+            )
+        except TranscriptionUnavailableError:
+            await send(
+                self._error(
+                    request.request_id,
+                    "capability_denied",
+                    "Audio transcription is unavailable",
+                )
+            )
+        except InvalidAudioArtifactError:
+            await send(
+                self._error(
+                    request.request_id,
+                    "invalid_request",
+                    "Invalid audio artifact",
+                )
+            )
+        except TranscriptionFailedError:
+            await send(
+                self._error(
+                    request.request_id,
+                    "provider_failed",
+                    "Audio transcription failed",
                 )
             )
         except PermissionError:

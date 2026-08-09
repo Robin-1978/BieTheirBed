@@ -60,6 +60,27 @@ class ThinkingConfig(BaseModel):
     type: Literal["enabled", "disabled", "auto"] = "enabled"
 
 
+class AudioTranscriptionConfig(BaseModel):
+    """Explicit mapping from Core audio ingress to one standard MCP Tool."""
+
+    enabled: bool = False
+    tool: str = ""
+    max_bytes: int = Field(default=20 * 1024 * 1024, ge=1, le=45 * 1024 * 1024)
+
+    @model_validator(mode="after")
+    def validate_tool_mapping(self) -> AudioTranscriptionConfig:
+        normalized = self.tool.strip()
+        if normalized and not re.fullmatch(
+            r"mcp__[A-Za-z][A-Za-z0-9_-]{0,23}__[A-Za-z0-9_-]{1,128}",
+            normalized,
+        ):
+            raise ValueError("Audio transcription tool must be a public MCP tool name")
+        if self.enabled and not normalized:
+            raise ValueError("Enabled audio transcription requires an MCP tool")
+        self.tool = normalized
+        return self
+
+
 class ModelConfig(BaseModel):
     """A model exposed by one named provider account."""
 
@@ -163,6 +184,9 @@ class AppConfig(BaseModel):
     feishu_receive_id: str = ""
     attachment_ttl_seconds: int = 3600
     attachment_cleanup_interval_seconds: int = 300
+    audio_transcription: AudioTranscriptionConfig = Field(
+        default_factory=AudioTranscriptionConfig
+    )
     supports_vision: bool | None = None
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     skill_directories: tuple[str, ...] = ()

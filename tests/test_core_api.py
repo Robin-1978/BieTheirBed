@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from pc_assistant.artifacts import ArtifactRef
+from pc_assistant.agent_runtime.contracts import ArtifactTranscriptionResult
 from pc_assistant.automation import ScheduleKind, ScheduleSpec
 from pc_assistant.service.core_api import (
     CreateSessionRequest,
@@ -25,6 +26,8 @@ from pc_assistant.service.core_api import (
     SubscribeTaskRequest,
     PrincipalTaskEventMessage,
     TaskEventMessage,
+    TranscribeArtifactRequest,
+    ArtifactTranscribedMessage,
     core_request_schema,
     parse_core_request_json,
     parse_core_server_message_json,
@@ -181,6 +184,7 @@ def test_core_schema_exposes_only_task_lifecycle_methods() -> None:
     assert "pause_trigger" in rendered
     assert "resume_trigger" in rendered
     assert "fire_trigger" in rendered
+    assert "artifact_transcribe" in rendered
     assert "cancel_run" not in rendered
     assert "confirmation_resolve" not in rendered
 
@@ -192,6 +196,26 @@ def test_core_schema_exposes_only_task_lifecycle_methods() -> None:
         ).model_dump_json()
     )
     assert isinstance(request, DownloadArtifactRequest)
+
+    transcription_request = parse_core_request_json(
+        TranscribeArtifactRequest(
+            request_id="transcribe-1",
+            session_handle="session-1",
+            artifact_id="artifact-1",
+        ).model_dump_json()
+    )
+    transcription_message = parse_core_server_message_json(
+        ArtifactTranscribedMessage(
+            request_id="transcribe-1",
+            result=ArtifactTranscriptionResult(
+                artifact_id="artifact-1",
+                transcript="hello",
+                tool_name="mcp__speech__transcribe",
+            ),
+        ).model_dump_json()
+    )
+    assert isinstance(transcription_request, TranscribeArtifactRequest)
+    assert isinstance(transcription_message, ArtifactTranscribedMessage)
 
     resumed = parse_core_request_json(
         ResumeTaskRequest(
