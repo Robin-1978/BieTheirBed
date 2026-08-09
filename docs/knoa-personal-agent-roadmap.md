@@ -389,7 +389,9 @@ Task 至少记录：
 > Task 创建/列表/详情/取消与权限确认，不接受任意 Core method。支持 `Last-Event-ID`
 > 续传、心跳重验 session、限制设备并发连接的标准 SSE 事件流也已完成。Artifact
 > 已使用受限二进制请求/响应传输，不塞入 Gateway JSON；Gateway 预先约束大小、media
-> type 和设备身份，Core 继续校验 principal/session 所有权。下一步是 TLS 远程部署。
+> type 和设备身份，Core 继续校验 principal/session 所有权。显式远程模式、绝对证书
+> 路径、owner-only 私钥和非 loopback 明文拒绝也已实现；下一步是真实证书/域名部署
+> 验证与 D4 移动端交付。
 
 ### 9.1 第一版范围
 

@@ -125,17 +125,23 @@ Schedule, Trigger and capability installation remain out of the first public
 surface. They can be added from the same generated Core contracts after the App
 has a real product flow and stronger confirmation UI.
 
-HTTP is used for bounded commands and Artifact transfer; WebSocket is used for
-resumable event delivery. Event payloads retain Core sequence IDs so reconnect
-never depends on Gateway memory.
+HTTP is used for bounded commands and Artifact transfer; standard SSE is used
+for resumable event delivery. Event payloads retain Core sequence IDs so
+reconnect never depends on Gateway memory.
 
 ## 6. TLS and deployment
 
-Production accepts either:
+The implemented direct-listener mode requires:
 
-- configured certificate/key files owned by the service user; or
-- TLS termination by an explicitly configured local reverse proxy where the
-  Gateway binds only to loopback and validates forwarded-origin policy.
+- explicit `gateway_remote_enabled: true`;
+- configured absolute certificate/key paths owned by the service user;
+- an owner-only private key file;
+- TLS startup success before any non-loopback listener is accepted.
+
+Loopback plaintext remains available for local development while the Gateway is
+enabled. Reverse-proxy TLS termination is deferred until trusted-proxy and
+forwarded-origin policy are explicitly designed; forwarded headers are not
+trusted today.
 
 The first implementation does not automate public DNS, ACME, router port
 forwarding or cloud relay. Tailscale/WireGuard may be used as a private product
@@ -191,8 +197,11 @@ Gateway device record and are never sent to Core.
 > `Last-Event-ID` resumption, stable Core event names, per-device connection
 > limits and session revalidation before delivery and on heartbeats. Binary
 > Artifact upload/download is principal/session scoped, bounded before Core calls,
-> delivered with no-store headers and never encoded inside Gateway JSON. TLS and
-> public binding remain disabled.
+> delivered with no-store headers and never encoded inside Gateway JSON. Direct
+> TLS listener support is implemented and fail-closed: remote mode is explicit,
+> certificate paths must be absolute, the private key is owner-only, and
+> non-loopback plaintext is rejected. Real certificate/domain deployment remains
+> an external rollout step.
 
 ### D4 — mobile delivery
 
