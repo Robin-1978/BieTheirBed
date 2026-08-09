@@ -1,0 +1,57 @@
+# Knoa Cloudflare Tunnel
+
+Knoa keeps the Secure Gateway on loopback. Cloudflare terminates public TLS and
+the local `cloudflared` connector forwards traffic without opening an inbound
+router or firewall port.
+
+## Cloudflare public hostname
+
+Configure the Tunnel in the Cloudflare dashboard with this public hostname:
+
+| Setting | Value |
+| --- | --- |
+| Subdomain | `kona` |
+| Domain | `tinydotdot.com` |
+| Service type | `HTTP` |
+| Origin URL | `127.0.0.1:9529` |
+
+The resulting public Gateway URL is `https://kona.tinydotdot.com`.
+
+Do not enable "No TLS Verify": the origin is intentionally plain HTTP over the
+local connector. Device authentication remains enforced by the Gateway.
+
+## Local connector
+
+Store the remotely managed Tunnel token outside the repository:
+
+```bash
+install -d -m 700 ~/.pc-assistant/config
+install -m 600 deploy/cloudflared/cloudflare.env.example \
+  ~/.pc-assistant/config/cloudflare.env
+```
+
+Replace the example value in `cloudflare.env`, then install the user service:
+
+```bash
+install -d -m 700 ~/.config/systemd/user
+install -m 600 deploy/cloudflared/cloudflared-knoa.user.service \
+  ~/.config/systemd/user/cloudflared-knoa.service
+systemctl --user daemon-reload
+systemctl --user enable --now cloudflared-knoa.service
+```
+
+Verify both sides:
+
+```bash
+curl --fail http://127.0.0.1:9529/health
+curl --fail https://kona.tinydotdot.com/health
+```
+
+The expected response is:
+
+```json
+{"status":"ok","scope":"authentication"}
+```
+
+This service is deliberately independent of `cloudflared-per.service`, so a
+restart or token rotation for either application cannot interrupt the other.

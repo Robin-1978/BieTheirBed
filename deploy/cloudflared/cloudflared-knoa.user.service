@@ -1,0 +1,14 @@
+[Unit]
+Description=Cloudflare Tunnel (Knoa Secure Gateway)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/home/robin/.pc-assistant/config/cloudflare.env
+ExecStart=/disk/dev/bin/cloudflared tunnel run --token ${KNOA_CLOUDFLARE_TUNNEL_TOKEN}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
