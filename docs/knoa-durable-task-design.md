@@ -444,6 +444,12 @@ outside INFO logs.
 - bounded retry/backoff and proactive notification;
 - create Tasks through TaskService rather than invoke AgentRuntime directly.
 
+> In progress: the shared recurrence kernel now validates typed one-time,
+> interval and five-field Cron specifications with explicit IANA timezones.
+> Interval calculation remains anchored to the original start time to avoid
+> drift. The next slice persists schedules and claimed occurrences before a
+> dispatcher creates idempotent Tasks through `TaskService`.
+
 ## 14. Acceptance criteria
 
 1. A disconnected client can reconnect with `after_seq` and recover all
