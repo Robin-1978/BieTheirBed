@@ -322,7 +322,9 @@ Task 至少记录：
 
 > 进度（2026-08-09）：B5 已启动。一次性、固定周期和标准五段 Cron 的统一时间
 > 语义已实现，Cron 使用显式 IANA 时区，周期任务以初始时间为锚点避免累计漂移。
-> 下一步是持久 Schedule/Occurrence claim，再由 dispatcher 幂等调用 TaskService。
+> Schedule 与每次 Occurrence claim 已持久化；生产 dispatcher 使用稳定 occurrence ID
+> 幂等调用 TaskService，并提供有界指数退避、过期 lease 恢复和 Core API 创建/详情/列表。
+> 下一步是计划暂停/恢复、认证 Trigger ingress 和主动结果通知。
 
 ### 7.5 Phase B 验收
 

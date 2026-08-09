@@ -447,8 +447,12 @@ outside INFO logs.
 > In progress: the shared recurrence kernel now validates typed one-time,
 > interval and five-field Cron specifications with explicit IANA timezones.
 > Interval calculation remains anchored to the original start time to avoid
-> drift. The next slice persists schedules and claimed occurrences before a
-> dispatcher creates idempotent Tasks through `TaskService`.
+> drift. `runtime_schedules` and `runtime_schedule_occurrences` now persist the
+> plan and every delivery claim. The production dispatcher uses the stable
+> occurrence ID as the Task request ID, retries with bounded exponential backoff
+> and survives expired worker leases without duplicating Task creation. Core API
+> v1 exposes create/detail/list schedule commands. Trigger ingress, schedule
+> pause/resume and proactive delivery notification remain.
 
 ## 14. Acceptance criteria
 

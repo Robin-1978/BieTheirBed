@@ -14,6 +14,19 @@ class ScheduleKind(str, Enum):
     CRON = "cron"
 
 
+class ScheduleState(str, Enum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+
+
+class OccurrenceState(str, Enum):
+    CLAIMED = "claimed"
+    RETRY_WAIT = "retry_wait"
+    TASK_CREATED = "task_created"
+    DEAD = "dead"
+
+
 class ScheduleSpec(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -46,3 +59,42 @@ class ScheduleSpec(BaseModel):
         elif not self.cron_expression.strip():
             raise ValueError("Cron schedule requires cron_expression")
         return self
+
+
+class ScheduleRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    schedule_id: Annotated[str, StringConstraints(min_length=1, max_length=128)]
+    principal_id: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    session_handle: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    client_request_id: Annotated[str, StringConstraints(min_length=1, max_length=128)]
+    goal: Annotated[str, StringConstraints(min_length=1, max_length=200_000)]
+    spec: ScheduleSpec
+    tools_enabled: bool = True
+    priority: int = Field(default=0, ge=0, le=9)
+    state: ScheduleState
+    next_fire_at: float | None = Field(default=None, ge=0.0)
+    last_fire_at: float | None = Field(default=None, ge=0.0)
+    fire_count: int = Field(default=0, ge=0)
+    created_at: float = Field(ge=0.0)
+    updated_at: float = Field(ge=0.0)
+
+
+class ScheduleOccurrenceRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    occurrence_id: Annotated[str, StringConstraints(min_length=1, max_length=128)]
+    schedule_id: Annotated[str, StringConstraints(min_length=1, max_length=128)]
+    principal_id: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    session_handle: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    ordinal: int = Field(gt=0)
+    scheduled_for: float = Field(ge=0.0)
+    state: OccurrenceState
+    attempt_count: int = Field(ge=0)
+    next_attempt_at: float | None = Field(default=None, ge=0.0)
+    lease_owner: Annotated[str, StringConstraints(max_length=128)] = ""
+    lease_expires_at: float | None = Field(default=None, ge=0.0)
+    task_id: Annotated[str, StringConstraints(max_length=128)] = ""
+    failure_code: Annotated[str, StringConstraints(max_length=256)] = ""
+    created_at: float = Field(ge=0.0)
+    updated_at: float = Field(ge=0.0)

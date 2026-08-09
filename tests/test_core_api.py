@@ -6,8 +6,10 @@ import pytest
 from pydantic import ValidationError
 
 from pc_assistant.artifacts import ArtifactRef
+from pc_assistant.automation import ScheduleKind, ScheduleSpec
 from pc_assistant.service.core_api import (
     CreateSessionRequest,
+    CreateScheduleRequest,
     CreateTaskRequest,
     DownloadArtifactRequest,
     GetTaskRequest,
@@ -114,6 +116,9 @@ def test_core_schema_exposes_only_task_lifecycle_methods() -> None:
     assert "pause_task" in rendered
     assert "resume_task" in rendered
     assert "approval_resolve" in rendered
+    assert "create_schedule" in rendered
+    assert "get_schedule" in rendered
+    assert "list_schedules" in rendered
     assert "cancel_run" not in rendered
     assert "confirmation_resolve" not in rendered
 
@@ -158,6 +163,19 @@ def test_core_schema_exposes_only_task_lifecycle_methods() -> None:
     )
     assert isinstance(detail, GetTaskRequest)
     assert isinstance(listing, ListTasksRequest)
+
+    schedule = parse_core_request_json(
+        CreateScheduleRequest(
+            request_id="schedule-1",
+            session_handle="session-1",
+            goal="prepare report",
+            spec=ScheduleSpec(
+                kind=ScheduleKind.CRON,
+                cron_expression="0 9 * * 1-5",
+            ),
+        ).model_dump_json()
+    )
+    assert isinstance(schedule, CreateScheduleRequest)
 
 
 def test_approval_and_task_event_wire_contracts_are_strict() -> None:
