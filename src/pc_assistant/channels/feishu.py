@@ -50,6 +50,8 @@ _PROGRESS_TIMELINE_CHARS = (
 )
 _TEXT_MESSAGE_CHARS = 4000
 _MAX_CORE_ARTIFACT_RAW_BYTES = 45 * 1024 * 1024
+_LONG_RESULT_CARD_CHARS = 12_000
+_LONG_RESULT_PREVIEW_CHARS = 1_800
 _PRINCIPAL_WATCH_RETRY_SECONDS = 2.0
 _TASK_TERMINAL_EVENT_TYPES = frozenset({"completed", "failed", "cancelled"})
 _TASK_STATE_LABELS = {
@@ -1563,9 +1565,16 @@ class FeishuChannel:
         if terminal == "completed":
             if state.phase != "done":
                 raise RuntimeError("Core Task completed without final_output event")
-            rendered = _render_card_markdown(
-                state.final_output if state.final_output else "已完成"
-            )
+            final_output = state.final_output if state.final_output else "已完成"
+            if len(final_output) > _LONG_RESULT_CARD_CHARS and artifacts:
+                preview = _split_text(
+                    _render_card_markdown(final_output),
+                    _LONG_RESULT_PREVIEW_CHARS,
+                    max_tables=1,
+                )[0].rstrip()
+                rendered = preview + "\n\n完整内容见附件。"
+            else:
+                rendered = _render_card_markdown(final_output)
             chunks = _split_text(rendered)
             final_card = state.build_card(final_chunk=chunks[0])
             if card_message_id is not None:

@@ -515,6 +515,44 @@ class ArtifactStore:
         )
         return self.public_ref(session_id, entry.artifact_id)
 
+    def create_generated_text(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        name: str = "result.md",
+        retention: Retention = "persistent",
+    ) -> dict[str, Any]:
+        """Create one Core-owned UTF-8 result artifact atomically."""
+        data = content.encode("utf-8")
+        if not data or len(data) > self._max_bytes:
+            raise ValueError(
+                f"Artifact size must be between 1 and {self._max_bytes} bytes"
+            )
+        root = self.persistent_root if retention == "persistent" else self.root
+        directory = root / self._session_key(session_id) / "generated"
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        directory.chmod(0o700)
+        artifact_key = uuid.uuid4().hex
+        safe_name = self._safe_name(name)
+        suffix = Path(safe_name).suffix or ".md"
+        path = directory / f"{artifact_key}{suffix}"
+        temporary = directory / f".{artifact_key}.tmp"
+        temporary.write_bytes(data)
+        temporary.chmod(0o600)
+        temporary.replace(path)
+        entry = self._register(
+            session_id,
+            path,
+            direction="outbound",
+            ownership="generated",
+            retention=retention,
+            name=safe_name,
+            media_type="text/markdown",
+            content_sha256=hashlib.sha256(data).hexdigest(),
+        )
+        return self.public_ref(session_id, entry.artifact_id)
+
     def public_ref(self, session_id: str, artifact_id: str) -> dict[str, Any]:
         entry = self._get(session_id, artifact_id)
         return ArtifactRef(

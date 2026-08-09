@@ -32,9 +32,16 @@ DATA_URL = (
 
 
 class FakeLoop:
-    def __init__(self, status: str = "completed", *, wait_for_cancel: bool = False):
+    def __init__(
+        self,
+        status: str = "completed",
+        *,
+        wait_for_cancel: bool = False,
+        final_content: str = "done",
+    ):
         self.status = status
         self.wait_for_cancel = wait_for_cancel
+        self.final_content = final_content
         self.started = asyncio.Event()
         self.contexts = []
         self.memory_scopes = []
@@ -61,7 +68,10 @@ class FakeLoop:
                         payload=RuntimeEventPayload(content="done"),
                     ),
                 )
-                messages = (*context.messages, {"role": "assistant", "content": "done"})
+                messages = (
+                    *context.messages,
+                    {"role": "assistant", "content": self.final_content},
+                )
             else:
                 messages = context.messages
             yield ReActEvent(
@@ -69,7 +79,9 @@ class FakeLoop:
                 outcome=ReActOutcome(
                     status=self.status,
                     messages=messages,
-                    final_content="done" if self.status == "completed" else "",
+                    final_content=(
+                        self.final_content if self.status == "completed" else ""
+                    ),
                     error_code="provider_failed" if self.status == "failed" else "",
                 ),
             )
@@ -374,6 +386,68 @@ async def test_attachment_history_stores_reference_and_hydration_is_ephemeral(
     hydrated = await ArtifactMessageHydrator(artifacts).hydrate(scope, list(messages))
     assert "data:image/png;base64" in str(hydrated[0])
     assert "base64" not in str(messages)
+
+
+@pytest.mark.asyncio
+async def test_long_final_output_creates_persistent_markdown_artifact(
+    tmp_path: Path,
+) -> None:
+    final_content = "完整报告\n\n" + ("详细内容。" * 3_000)
+    loop = FakeLoop(final_content=final_content)
+    loop.release.set()
+    runtime, sessions, artifacts = _runtime(tmp_path, loop)
+    scope = sessions.create("principal-a")
+
+    events = [
+        event
+        async for event in runtime.run(
+            _context(scope, "run-long"),
+            RunRequest(client_request_id="request-long", input="生成报告"),
+        )
+    ]
+
+    artifact_event = next(event for event in events if event.event_type == "artifact")
+    assert artifact_event.payload.artifact is not None
+    artifact = artifact_event.payload.artifact
+    assert artifact.name == "run-long-result.md"
+    assert artifact.kind == "file"
+    assert artifact.retention == "persistent"
+    downloaded = artifacts.read_data_url(
+        scope.session_handle,
+        artifact.artifact_id,
+        max_bytes=100_000,
+    )
+    assert downloaded.startswith("data:text/markdown;base64,")
+    assert events[-1].event_type == "final_output"
+    assert events[-1].payload.content == final_content
+
+
+@pytest.mark.asyncio
+async def test_long_result_artifact_failure_keeps_full_final_output(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    final_content = "内容" * 7_000
+    loop = FakeLoop(final_content=final_content)
+    loop.release.set()
+    runtime, sessions, artifacts = _runtime(tmp_path, loop)
+    scope = sessions.create("principal-a")
+
+    def fail(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(artifacts, "create_generated_text", fail)
+    events = [
+        event
+        async for event in runtime.run(
+            _context(scope, "run-fallback"),
+            RunRequest(client_request_id="request-fallback", input="生成报告"),
+        )
+    ]
+
+    assert "artifact" not in [event.event_type for event in events]
+    assert events[-1].event_type == "final_output"
+    assert events[-1].payload.content == final_content
 
 
 @pytest.mark.asyncio
