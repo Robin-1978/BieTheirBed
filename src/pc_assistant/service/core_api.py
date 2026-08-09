@@ -263,6 +263,20 @@ class ListSchedulesRequest(CoreModel):
     limit: int = Field(default=50, ge=1, le=100)
 
 
+class PauseScheduleRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["pause_schedule"] = "pause_schedule"
+    schedule_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+
+
+class ResumeScheduleRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["resume_schedule"] = "resume_schedule"
+    schedule_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+
+
 class SessionRequest(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
@@ -325,6 +339,8 @@ CoreRequest: TypeAlias = Annotated[
     | CreateScheduleRequest
     | GetScheduleRequest
     | ListSchedulesRequest
+    | PauseScheduleRequest
+    | ResumeScheduleRequest
     | GetStatusRequest
     | GetHistoryRequest
     | ListMemoryRequest

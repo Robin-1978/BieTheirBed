@@ -50,8 +50,10 @@ from pc_assistant.service.core_api import (
     ListToolsRequest,
     MemoryClearedMessage,
     MemoryListMessage,
+    PauseScheduleRequest,
     PauseTaskRequest,
     ResolveApprovalRequest,
+    ResumeScheduleRequest,
     ScheduleAcceptedMessage,
     ScheduleListMessage,
     ScheduleSnapshot,
@@ -640,6 +642,28 @@ class CoreClient:
         if not isinstance(response, ScheduleListMessage):
             raise RuntimeError("CoreServer returned an invalid schedule list")
         return response.schedules
+
+    async def pause_schedule(self, schedule_id: str) -> ScheduleSnapshot:
+        response = await self._request(
+            PauseScheduleRequest(
+                request_id=self._request_id(),
+                schedule_id=schedule_id,
+            )
+        )
+        if not isinstance(response, ScheduleSnapshotMessage):
+            raise RuntimeError("CoreServer returned an invalid paused schedule")
+        return response.schedule
+
+    async def resume_schedule(self, schedule_id: str) -> ScheduleSnapshot:
+        response = await self._request(
+            ResumeScheduleRequest(
+                request_id=self._request_id(),
+                schedule_id=schedule_id,
+            )
+        )
+        if not isinstance(response, ScheduleSnapshotMessage):
+            raise RuntimeError("CoreServer returned an invalid resumed schedule")
+        return response.schedule
 
     @property
     def is_connected(self) -> bool:

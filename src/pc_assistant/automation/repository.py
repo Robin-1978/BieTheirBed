@@ -400,6 +400,68 @@ class ScheduleRepository:
             rows = db.execute(query, tuple(parameters)).fetchall()
         return tuple(self._record(row) for row in rows)
 
+    def pause(self, principal_id: str, schedule_id: str) -> ScheduleRecord:
+        principal = self._identifier(principal_id, label="principal_id", limit=256)
+        normalized_id = self._identifier(schedule_id, label="schedule_id")
+        now = self._clock()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                """SELECT * FROM runtime_schedules
+                   WHERE schedule_id=? AND principal_id=?""",
+                (normalized_id, principal),
+            ).fetchone()
+            if row is None:
+                raise ScheduleNotFoundError("Schedule not found")
+            current = self._record(row)
+            if current.state is ScheduleState.PAUSED:
+                return current
+            if current.state is ScheduleState.COMPLETED:
+                raise ScheduleTransitionError("Completed schedule cannot be paused")
+            db.execute(
+                """UPDATE runtime_schedules SET state=?, updated_at=?
+                   WHERE schedule_id=?""",
+                (ScheduleState.PAUSED.value, now, normalized_id),
+            )
+            updated = db.execute(
+                "SELECT * FROM runtime_schedules WHERE schedule_id=?",
+                (normalized_id,),
+            ).fetchone()
+            assert updated is not None
+            return self._record(updated)
+
+    def resume(self, principal_id: str, schedule_id: str) -> ScheduleRecord:
+        principal = self._identifier(principal_id, label="principal_id", limit=256)
+        normalized_id = self._identifier(schedule_id, label="schedule_id")
+        now = self._clock()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                """SELECT * FROM runtime_schedules
+                   WHERE schedule_id=? AND principal_id=?""",
+                (normalized_id, principal),
+            ).fetchone()
+            if row is None:
+                raise ScheduleNotFoundError("Schedule not found")
+            current = self._record(row)
+            if current.state is ScheduleState.ACTIVE:
+                return current
+            if current.state is ScheduleState.COMPLETED:
+                raise ScheduleTransitionError("Completed schedule cannot be resumed")
+            due = next_fire_at(current.spec, after=now)
+            state = ScheduleState.ACTIVE if due is not None else ScheduleState.COMPLETED
+            db.execute(
+                """UPDATE runtime_schedules SET
+                       state=?, next_fire_at=?, updated_at=? WHERE schedule_id=?""",
+                (state.value, due, now, normalized_id),
+            )
+            updated = db.execute(
+                "SELECT * FROM runtime_schedules WHERE schedule_id=?",
+                (normalized_id,),
+            ).fetchone()
+            assert updated is not None
+            return self._record(updated)
+
     def claim_due(
         self,
         worker_id: str,

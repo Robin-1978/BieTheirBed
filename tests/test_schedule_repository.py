@@ -203,6 +203,49 @@ def test_task_creation_is_idempotent_for_occurrence(tmp_path: Path) -> None:
     assert repository.claim_due("worker-b") is None
 
 
+def test_pause_and_resume_skip_missed_interval_occurrences(tmp_path: Path) -> None:
+    clock = _Clock(100.0)
+    repository, scope = _repository(tmp_path, clock)
+    schedule, _ = repository.create(
+        scope,
+        client_request_id="request-a",
+        goal="check inbox",
+        spec=ScheduleSpec(
+            kind=ScheduleKind.INTERVAL,
+            run_at=160.0,
+            interval_seconds=60.0,
+        ),
+    )
+
+    paused = repository.pause(scope.principal_id, schedule.schedule_id)
+    clock.value = 401.0
+    assert repository.claim_due("worker-a") is None
+    resumed = repository.resume(scope.principal_id, schedule.schedule_id)
+
+    assert paused.state is ScheduleState.PAUSED
+    assert resumed.state is ScheduleState.ACTIVE
+    assert resumed.next_fire_at == 460.0
+    assert repository.claim_due("worker-a") is None
+
+
+def test_missed_one_time_schedule_completes_when_resumed(tmp_path: Path) -> None:
+    clock = _Clock(100.0)
+    repository, scope = _repository(tmp_path, clock)
+    schedule, _ = repository.create(
+        scope,
+        client_request_id="request-a",
+        goal="prepare report",
+        spec=ScheduleSpec(kind=ScheduleKind.ONE_TIME, run_at=200.0),
+    )
+    repository.pause(scope.principal_id, schedule.schedule_id)
+    clock.value = 201.0
+
+    resumed = repository.resume(scope.principal_id, schedule.schedule_id)
+
+    assert resumed.state is ScheduleState.COMPLETED
+    assert resumed.next_fire_at is None
+
+
 def test_delivery_failure_uses_bounded_exponential_backoff(tmp_path: Path) -> None:
     clock = _Clock(100.0)
     repository, scope = _repository(

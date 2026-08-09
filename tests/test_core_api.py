@@ -14,9 +14,11 @@ from pc_assistant.service.core_api import (
     DownloadArtifactRequest,
     GetTaskRequest,
     ListTasksRequest,
+    PauseScheduleRequest,
     PauseTaskRequest,
     ResolveApprovalRequest,
     ResumeTaskRequest,
+    ResumeScheduleRequest,
     SubscribeTaskRequest,
     TaskEventMessage,
     core_request_schema,
@@ -119,6 +121,8 @@ def test_core_schema_exposes_only_task_lifecycle_methods() -> None:
     assert "create_schedule" in rendered
     assert "get_schedule" in rendered
     assert "list_schedules" in rendered
+    assert "pause_schedule" in rendered
+    assert "resume_schedule" in rendered
     assert "cancel_run" not in rendered
     assert "confirmation_resolve" not in rendered
 
@@ -176,6 +180,24 @@ def test_core_schema_exposes_only_task_lifecycle_methods() -> None:
         ).model_dump_json()
     )
     assert isinstance(schedule, CreateScheduleRequest)
+    assert isinstance(
+        parse_core_request_json(
+            PauseScheduleRequest(
+                request_id="pause-schedule-1",
+                schedule_id="schedule-1",
+            ).model_dump_json()
+        ),
+        PauseScheduleRequest,
+    )
+    assert isinstance(
+        parse_core_request_json(
+            ResumeScheduleRequest(
+                request_id="resume-schedule-1",
+                schedule_id="schedule-1",
+            ).model_dump_json()
+        ),
+        ResumeScheduleRequest,
+    )
 
 
 def test_approval_and_task_event_wire_contracts_are_strict() -> None:
