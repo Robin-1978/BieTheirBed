@@ -135,28 +135,6 @@ def test_scalar_port_operations_are_awaited_once() -> None:
     assert get_args(hints["return"]) == (RuntimeEvent,)
 
 
-# covers agent-contracts-factory#REQ-002-S01
-def test_public_run_event_requires_versioned_identity_sequence_and_typed_payload() -> None:
-    from pc_assistant.agent_runtime.contracts import RunEvent, RuntimeEventPayload
-
-    event = RunEvent(
-        run_id="run-1",
-        event_seq=1,
-        event_type="content_delta",
-        payload=RuntimeEventPayload(content="hello"),
-    )
-
-    assert event.api_version == "v1"
-    assert event.payload.content == "hello"
-    with pytest.raises(ValidationError):
-        RunEvent(
-            run_id="run-1",
-            event_seq=0,
-            event_type="content_delta",
-            payload=RuntimeEventPayload(content="hello"),
-        )
-
-
 def test_cancel_contract_targets_run_identity() -> None:
     from pc_assistant.agent_runtime.contracts import CancelRequest
 

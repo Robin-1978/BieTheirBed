@@ -20,15 +20,13 @@ from pc_assistant import __version__
 from pc_assistant.branding import ASSISTANT_NAME
 from pc_assistant.config import AppConfig
 from pc_assistant.runtime import RuntimePaths
-from pc_assistant.service.core_api import (
-    ArtifactInputRef,
-    ConfirmationRequestedMessage,
-)
+from pc_assistant.service.core_api import ArtifactInputRef
 from pc_assistant.service.core_client import CoreClient, CoreRequestError
 from pc_assistant.service.credentials import (
     issue_principal_credential,
     resolve_local_service_token,
 )
+from pc_assistant.tasks import TERMINAL_TASK_STATES, TaskEvent
 
 
 logger = logging.getLogger(__name__)
@@ -294,8 +292,8 @@ class _ToolStep:
     status: str = "running"
     detail: str = ""
     iteration: int = 0
-    confirmation_id: str = ""
-    confirmation_run_id: str = ""
+    approval_id: str = ""
+    approval_task_id: str = ""
     confirmation_reason: str = ""
     confirmation_status: str = ""
 
@@ -309,11 +307,11 @@ class _ThoughtStep:
 
 @dataclass
 class _PendingConfirmation:
-    confirmation_id: str
+    approval_id: str
     future: asyncio.Future[bool]
     loop: asyncio.AbstractEventLoop
-    message: ConfirmationRequestedMessage
-    presentation: _ActiveRunPresentation
+    message: TaskEvent
+    presentation: _ActiveTaskPresentation
     resolved: bool = False
 
 
@@ -403,7 +401,7 @@ def _patch_ws_card_dispatch(ws_client: Any) -> None:
 
 
 class _StreamingCardState:
-    """Channel-local projection of standard Core run events."""
+    """Channel-local projection of standard Core Task events."""
 
     def __init__(self) -> None:
         self.timeline: list[_ThoughtStep | _ToolStep] = []
@@ -530,29 +528,30 @@ class _StreamingCardState:
 
     def request_confirmation(
         self,
-        message: ConfirmationRequestedMessage,
+        message: TaskEvent,
     ) -> bool:
+        payload = message.payload
         step = next(
             (
                 candidate
                 for candidate in reversed(self.timeline)
                 if isinstance(candidate, _ToolStep)
-                and candidate.call_id == message.tool_call_id
+                and candidate.call_id == payload.tool_call_id
                 and candidate.status == "running"
             ),
             None,
         )
         if step is None:
             step = _ToolStep(
-                call_id=message.tool_call_id,
-                name=message.tool_name,
-                arguments=message.arguments,
+                call_id=payload.tool_call_id,
+                name=payload.tool_name,
+                arguments=payload.tool_args,
             )
             self.timeline.append(step)
-        step.confirmation_id = message.confirmation_id
-        step.confirmation_run_id = message.run_id
+        step.approval_id = payload.approval_id
+        step.approval_task_id = message.task_id
         step.confirmation_reason = (
-            message.reason or "该操作可能改变系统状态"
+            payload.reason or "该操作可能改变系统状态"
         )
         step.confirmation_status = "pending"
         self.phase = "working"
@@ -560,7 +559,7 @@ class _StreamingCardState:
 
     def resolve_confirmation(
         self,
-        confirmation_id: str,
+        approval_id: str,
         status: str,
     ) -> bool:
         step = next(
@@ -568,7 +567,7 @@ class _StreamingCardState:
                 candidate
                 for candidate in reversed(self.timeline)
                 if isinstance(candidate, _ToolStep)
-                and candidate.confirmation_id == confirmation_id
+                and candidate.approval_id == approval_id
             ),
             None,
         )
@@ -671,8 +670,8 @@ class _StreamingCardState:
                                         "type": "callback",
                                         "value": {
                                             "action": "confirm",
-                                            "run_id": step.confirmation_run_id,
-                                            "confirmation_id": step.confirmation_id,
+                                            "task_id": step.approval_task_id,
+                                            "approval_id": step.approval_id,
                                         },
                                     }
                                 ],
@@ -696,8 +695,8 @@ class _StreamingCardState:
                                         "type": "callback",
                                         "value": {
                                             "action": "cancel",
-                                            "run_id": step.confirmation_run_id,
-                                            "confirmation_id": step.confirmation_id,
+                                            "task_id": step.approval_task_id,
+                                            "approval_id": step.approval_id,
                                         },
                                     }
                                 ],
@@ -788,27 +787,27 @@ class _StreamingCardState:
 
 
 @dataclass
-class _ActiveRunPresentation:
+class _ActiveTaskPresentation:
     session_handle: str
     state: _StreamingCardState
     update_requested: asyncio.Event
-    run_id: str = ""
+    task_id: str = ""
 
-    def bind_run(self, run_id: str) -> None:
-        if not self.run_id:
-            self.run_id = run_id
+    def bind_task(self, task_id: str) -> None:
+        if not self.task_id:
+            self.task_id = task_id
 
     def request_confirmation(
         self,
-        message: ConfirmationRequestedMessage,
+        message: TaskEvent,
     ) -> bool:
         attached = self.state.request_confirmation(message)
         if attached:
             self.update_requested.set()
         return attached
 
-    def resolve_confirmation(self, confirmation_id: str, status: str) -> None:
-        if self.state.resolve_confirmation(confirmation_id, status):
+    def resolve_confirmation(self, approval_id: str, status: str) -> None:
+        if self.state.resolve_confirmation(approval_id, status):
             self.update_requested.set()
 
 
@@ -836,10 +835,10 @@ class FeishuChannel:
         self._session_users: dict[str, str] = {}
         self._user_locks: dict[str, asyncio.Lock] = {}
         self._pending_attachments: dict[str, list[ArtifactInputRef]] = {}
-        self._active_run_presentations: dict[str, _ActiveRunPresentation] = {}
+        self._active_task_presentations: dict[str, _ActiveTaskPresentation] = {}
         self._active_session_presentations: dict[
             str,
-            _ActiveRunPresentation,
+            _ActiveTaskPresentation,
         ] = {}
         self._pending_confirmations: dict[str, _PendingConfirmation] = {}
         self._pending_confirmation_lock = threading.RLock()
@@ -985,15 +984,15 @@ class FeishuChannel:
                 operator = event.event.operator
                 open_id = operator.open_id if operator is not None else ""
                 action_name = str(value.get("action", ""))
-                run_id = str(value.get("run_id", ""))
-                confirmation_id = str(value.get("confirmation_id", ""))
+                task_id = str(value.get("task_id", ""))
+                approval_id = str(value.get("approval_id", ""))
                 if action_name not in {"confirm", "cancel"}:
                     raise ValueError("unknown confirmation action")
                 pending = self._resolve_confirmation(
                     open_id,
-                    confirmation_id,
+                    approval_id,
                     action_name == "confirm",
-                    run_id=run_id,
+                    task_id=task_id,
                 )
                 if pending is None:
                     return P2CardActionTriggerResponse(
@@ -1057,7 +1056,7 @@ class FeishuChannel:
         status: str,
     ) -> None:
         pending.presentation.resolve_confirmation(
-            pending.confirmation_id,
+            pending.approval_id,
             status,
         )
         if not pending.future.done():
@@ -1080,18 +1079,18 @@ class FeishuChannel:
     def _resolve_confirmation(
         self,
         open_id: str,
-        confirmation_id: str,
+        approval_id: str,
         approved: bool,
         *,
-        run_id: str = "",
+        task_id: str = "",
     ) -> _PendingConfirmation | None:
         with self._pending_confirmation_lock:
             pending = self._pending_confirmations.get(open_id)
             if (
                 pending is None
                 or pending.resolved
-                or pending.confirmation_id != confirmation_id
-                or (run_id and pending.message.run_id != run_id)
+                or pending.approval_id != approval_id
+                or (task_id and pending.message.task_id != task_id)
             ):
                 return None
             pending.resolved = True
@@ -1113,7 +1112,7 @@ class FeishuChannel:
             self._save_binding(open_id)
             normalized = text.strip().lower()
             if normalized in {"/stop", "/cancel"}:
-                await self._cancel_active_run(open_id)
+                await self._cancel_active_task(open_id)
                 return
             with self._pending_confirmation_lock:
                 confirmation = self._pending_confirmations.get(open_id)
@@ -1121,7 +1120,7 @@ class FeishuChannel:
                 if normalized in {"确认", "批准", "yes", "y", "ok"}:
                     self._resolve_confirmation(
                         open_id,
-                        confirmation.confirmation_id,
+                        confirmation.approval_id,
                         True,
                     )
                     await asyncio.to_thread(
@@ -1133,7 +1132,7 @@ class FeishuChannel:
                 if normalized in {"取消", "拒绝", "no", "n"}:
                     self._resolve_confirmation(
                         open_id,
-                        confirmation.confirmation_id,
+                        confirmation.approval_id,
                         False,
                     )
                     await asyncio.to_thread(
@@ -1155,7 +1154,7 @@ class FeishuChannel:
                     await self._run_text(open_id, text)
                 except Exception as exc:
                     logger.exception(
-                        "Feishu Core run failed principal=%s",
+                        "Feishu Core Task failed principal=%s",
                         _principal_for_log(open_id),
                     )
                     await asyncio.to_thread(
@@ -1170,7 +1169,7 @@ class FeishuChannel:
                 reaction_id,
             )
 
-    async def _cancel_active_run(self, open_id: str) -> None:
+    async def _cancel_active_task(self, open_id: str) -> None:
         client = self._clients.get(open_id)
         if client is None or not client.is_connected:
             await asyncio.to_thread(
@@ -1180,7 +1179,7 @@ class FeishuChannel:
             )
             return
         try:
-            result = await client.cancel_active()
+            result = await client.cancel_active_task()
         except Exception:
             logger.exception(
                 "Feishu Core cancellation failed principal=%s",
@@ -1192,10 +1191,12 @@ class FeishuChannel:
                 "停止失败，请稍后重试。",
             )
             return
-        if result is None or result.result.status == "not_found":
+        if result is None:
             message = "当前没有正在运行的任务。"
-        elif result.result.accepted:
+        elif result.result.accepted and result.result.state not in TERMINAL_TASK_STATES:
             message = "正在停止当前任务。"
+        elif result.result.state is not None:
+            message = "当前任务已经结束。"
         else:
             message = "当前任务已经结束。"
         await asyncio.to_thread(self._send_text, open_id, message)
@@ -1257,7 +1258,7 @@ class FeishuChannel:
 
         attachments = tuple(self._pending_attachments.pop(open_id, []))
         try:
-            await self._stream_core_run(
+            await self._stream_core_task(
                 open_id,
                 client,
                 session,
@@ -1269,7 +1270,7 @@ class FeishuChannel:
                 raise
             session = await client.create_session()
             self._bind_session(open_id, session)
-            await self._stream_core_run(
+            await self._stream_core_task(
                 open_id,
                 client,
                 session,
@@ -1277,7 +1278,7 @@ class FeishuChannel:
                 attachments,
             )
 
-    async def _stream_core_run(
+    async def _stream_core_task(
         self,
         open_id: str,
         client: CoreClient,
@@ -1288,7 +1289,7 @@ class FeishuChannel:
         state = _StreamingCardState()
         card_task: asyncio.Task[str | None] | None = None
         update_requested = asyncio.Event()
-        presentation = _ActiveRunPresentation(
+        presentation = _ActiveTaskPresentation(
             session_handle=session,
             state=state,
             update_requested=update_requested,
@@ -1349,9 +1350,9 @@ class FeishuChannel:
 
         updater = asyncio.create_task(update_worker())
         try:
-            async for event in client.run(session, text, attachments):
-                presentation.bind_run(event.run_id)
-                self._active_run_presentations[event.run_id] = presentation
+            async for event in client.execute_task(session, text, attachments):
+                presentation.bind_task(event.task_id)
+                self._active_task_presentations[event.task_id] = presentation
                 start_card()
                 payload = event.payload
                 if event.event_type == "reasoning_delta":
@@ -1411,9 +1412,9 @@ class FeishuChannel:
             stop_updates = True
             update_requested.set()
             await updater
-            if presentation.run_id:
-                self._active_run_presentations.pop(
-                    presentation.run_id,
+            if presentation.task_id:
+                self._active_task_presentations.pop(
+                    presentation.task_id,
                     None,
                 )
             if self._active_session_presentations.get(session) is presentation:
@@ -1425,7 +1426,7 @@ class FeishuChannel:
 
         if terminal == "completed":
             if state.phase != "done":
-                raise RuntimeError("Core completed without final_output event")
+                raise RuntimeError("Core Task completed without final_output event")
             rendered = _render_card_markdown(
                 state.final_output if state.final_output else "已完成"
             )
@@ -1457,7 +1458,7 @@ class FeishuChannel:
                     )
         else:
             if not terminal:
-                state.set_error("Core run ended without a terminal event")
+                state.set_error("Core Task ended without a terminal event")
             final_card = state.build_card()
             if card_message_id is None or not await asyncio.to_thread(
                 self._update_card,
@@ -1542,20 +1543,14 @@ class FeishuChannel:
     async def _confirm_tool(
         self,
         open_id: str,
-        message: ConfirmationRequestedMessage,
+        message: TaskEvent,
     ) -> bool:
-        if self._session_users.get(message.session_handle) != open_id:
-            return False
-        presentation = self._active_run_presentations.get(message.run_id)
-        if presentation is None:
-            presentation = self._active_session_presentations.get(
-                message.session_handle
-            )
+        presentation = self._active_task_presentations.get(message.task_id)
         if (
             presentation is None
             or (
-                presentation.run_id
-                and presentation.run_id != message.run_id
+                presentation.task_id
+                and presentation.task_id != message.task_id
             )
             or not presentation.request_confirmation(message)
         ):
@@ -1563,7 +1558,7 @@ class FeishuChannel:
         loop = asyncio.get_running_loop()
         future: asyncio.Future[bool] = loop.create_future()
         pending = _PendingConfirmation(
-            confirmation_id=message.confirmation_id,
+            approval_id=message.payload.approval_id,
             future=future,
             loop=loop,
             message=message,
@@ -1573,7 +1568,7 @@ class FeishuChannel:
             current = self._pending_confirmations.get(open_id)
             if current is not None and not current.resolved:
                 presentation.resolve_confirmation(
-                    message.confirmation_id,
+                    message.payload.approval_id,
                     "cancelled",
                 )
                 return False
@@ -1584,7 +1579,7 @@ class FeishuChannel:
             with self._pending_confirmation_lock:
                 pending.resolved = True
             presentation.resolve_confirmation(
-                message.confirmation_id,
+                message.payload.approval_id,
                 "expired",
             )
             return False
@@ -2076,14 +2071,14 @@ class FeishuChannel:
         principal = f"personal:feishu:{_principal_for_log(open_id)}"
         credential = issue_principal_credential(signing_key, principal)
 
-        async def confirm(message: ConfirmationRequestedMessage) -> bool:
+        async def confirm(message: TaskEvent) -> bool:
             return await self._confirm_tool(open_id, message)
 
         client = await CoreClient.connect(
             f"ws://{self._config.service_host}:{self._config.service_port}",
             credential,
-            confirmation_handler=confirm,
-            max_buffered_run_events=4096,
+            approval_handler=confirm,
+            max_buffered_task_events=4096,
         )
         self._clients[open_id] = client
         return client

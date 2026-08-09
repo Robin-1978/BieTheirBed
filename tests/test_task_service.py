@@ -1,0 +1,289 @@
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+import pytest
+
+from pc_assistant.agent_runtime.contracts import (
+    CancelRequest,
+    CancelResult,
+    HealthStatus,
+    RunRequest,
+    RuntimeEvent,
+    RuntimeEventPayload,
+    RuntimeRunContext,
+)
+from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
+from pc_assistant.agent_runtime.tool_step import ProposedToolCall
+from pc_assistant.tasks import (
+    DurableApprovalService,
+    TaskEventHub,
+    TaskExecutor,
+    TaskRepository,
+    TaskService,
+    TaskState,
+)
+
+
+class _Runtime:
+    def __init__(
+        self,
+        *,
+        hold: asyncio.Event | None = None,
+        request_confirmation: bool = False,
+    ) -> None:
+        self.hold = hold
+        self.request_confirmation = request_confirmation
+        self.cancellations: list[CancelRequest] = []
+
+    def run(self, context: RuntimeRunContext, request: RunRequest):
+        return self._run(context, request)
+
+    async def _run(self, context: RuntimeRunContext, request: RunRequest):
+        yield RuntimeEvent(
+            event_type="content_delta",
+            payload=RuntimeEventPayload(content=f"working:{request.input}"),
+        )
+        if self.hold is not None:
+            hold_task = asyncio.create_task(self.hold.wait())
+            cancel_task = asyncio.create_task(context.cancellation.wait())
+            done, pending = await asyncio.wait(
+                {hold_task, cancel_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            if cancel_task in done and context.cancellation.is_set():
+                return
+        approved = True
+        if self.request_confirmation:
+            assert context.confirmation is not None
+            approved = await context.confirmation.confirm(
+                context.scope,
+                context.run_id,
+                ProposedToolCall(
+                    call_id="call-a",
+                    name="publish",
+                    arguments={"document": "report"},
+                ),
+                "external_side_effect:high",
+            )
+        if context.cancellation.is_set():
+            return
+        yield RuntimeEvent(
+            event_type="final_output",
+            payload=RuntimeEventPayload(
+                content="approved" if approved else "denied"
+            ),
+        )
+
+    async def cancel(self, scope, request: CancelRequest) -> CancelResult:
+        del scope
+        self.cancellations.append(request)
+        return CancelResult(accepted=True, status="cancelling")
+
+    async def health_check(self) -> HealthStatus:
+        return HealthStatus(healthy=True)
+
+
+def _components(
+    tmp_path: Path,
+    runtime: _Runtime,
+    *,
+    task_id: str = "task-a",
+) -> tuple[TaskService, TaskRepository, object]:
+    database = tmp_path / "assistant.db"
+    sessions = RuntimeSessionRepository(
+        database,
+        handle_factory=lambda: "session-a",
+    )
+    scope = sessions.active("principal-a") or sessions.create("principal-a")
+    repository = TaskRepository(
+        database,
+        task_id_factory=lambda: task_id,
+        approval_id_factory=lambda: "approval-a",
+    )
+    hub = TaskEventHub(subscriber_capacity=32)
+    approvals = DurableApprovalService(repository, hub)
+    executor = TaskExecutor(repository, runtime, approvals, hub)
+    return TaskService(repository, executor, approvals, hub), repository, scope
+
+
+def test_task_executor_rejects_unbounded_concurrency(tmp_path: Path) -> None:
+    database = tmp_path / "assistant.db"
+    sessions = RuntimeSessionRepository(database)
+    sessions.create("principal-a")
+    repository = TaskRepository(database)
+    hub = TaskEventHub()
+    approvals = DurableApprovalService(repository, hub)
+
+    with pytest.raises(ValueError, match="concurrency"):
+        TaskExecutor(
+            repository,
+            _Runtime(),
+            approvals,
+            hub,
+            max_concurrency=33,
+        )
+
+
+@pytest.mark.asyncio
+async def test_task_executes_without_connection_owned_run(tmp_path: Path) -> None:
+    service, repository, scope = _components(tmp_path, _Runtime())
+    await service.start()
+    try:
+        task = await service.create(
+            scope,
+            client_request_id="request-a",
+            goal="finish report",
+        )
+
+        events = [
+            event
+            async for event in service.events(scope.principal_id, task.task_id)
+        ]
+
+        assert [event.event_type for event in events] == [
+            "task_created",
+            "state_changed",
+            "content_delta",
+            "final_output",
+            "completed",
+        ]
+        assert repository.get(scope.principal_id, task.task_id).state is (
+            TaskState.COMPLETED
+        )
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_unsubscribe_does_not_cancel_task(tmp_path: Path) -> None:
+    release = asyncio.Event()
+    service, repository, scope = _components(tmp_path, _Runtime(hold=release))
+    await service.start()
+    try:
+        task = await service.create(
+            scope,
+            client_request_id="request-a",
+            goal="finish report",
+        )
+        stream = service.events(scope.principal_id, task.task_id)
+        while True:
+            event = await anext(stream)
+            if event.event_type == "content_delta":
+                break
+        await stream.aclose()
+
+        release.set()
+        for _ in range(100):
+            current = repository.get(scope.principal_id, task.task_id)
+            if current.state is TaskState.COMPLETED:
+                break
+            await asyncio.sleep(0.01)
+
+        assert repository.get(scope.principal_id, task.task_id).state is (
+            TaskState.COMPLETED
+        )
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_approval_resolves_from_task_service_not_stream_connection(
+    tmp_path: Path,
+) -> None:
+    service, repository, scope = _components(
+        tmp_path,
+        _Runtime(request_confirmation=True),
+    )
+    await service.start()
+    try:
+        task = await service.create(
+            scope,
+            client_request_id="request-a",
+            goal="publish report",
+        )
+        events = []
+        async for event in service.events(scope.principal_id, task.task_id):
+            events.append(event)
+            if event.event_type == "approval_requested":
+                approval, changed = await service.resolve_approval(
+                    scope.principal_id,
+                    event.payload.approval_id,
+                    approved=True,
+                    resolved_by="another-connection",
+                )
+                assert changed is True
+                assert approval.state.value == "approved"
+
+        assert "approval_resolved" in [event.event_type for event in events]
+        assert events[-2].event_type == "final_output"
+        assert events[-2].payload.content == "approved"
+        assert repository.get(scope.principal_id, task.task_id).state is (
+            TaskState.COMPLETED
+        )
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_restart_pauses_interrupted_task_until_explicit_resume(
+    tmp_path: Path,
+) -> None:
+    release = asyncio.Event()
+    first, first_repository, scope = _components(
+        tmp_path,
+        _Runtime(hold=release),
+    )
+    await first.start()
+    task = await first.create(
+        scope,
+        client_request_id="request-a",
+        goal="finish report",
+    )
+    for _ in range(100):
+        if first_repository.get(scope.principal_id, task.task_id).state is (
+            TaskState.RUNNING
+        ):
+            break
+        await asyncio.sleep(0.01)
+    await first.stop()
+
+    second, second_repository, _ = _components(
+        tmp_path,
+        _Runtime(),
+        task_id="task-b",
+    )
+    await second.start()
+    try:
+        await asyncio.sleep(0.05)
+        paused = second_repository.get(scope.principal_id, task.task_id)
+        assert paused.state is TaskState.PAUSED
+        assert paused.attempt_count == 1
+
+        resumed = await second.resume(
+            scope.principal_id,
+            task.task_id,
+            reason="user approved retry after restart",
+        )
+        assert resumed.state is TaskState.QUEUED
+
+        events = [
+            event
+            async for event in second.events(scope.principal_id, task.task_id)
+        ]
+
+        assert second_repository.get(scope.principal_id, task.task_id).state is (
+            TaskState.COMPLETED
+        )
+        assert second_repository.get(scope.principal_id, task.task_id).attempt_count == 2
+        assert any(
+            event.event_type == "state_changed"
+            and event.payload.state is TaskState.PAUSED
+            for event in events
+        )
+    finally:
+        await second.stop()

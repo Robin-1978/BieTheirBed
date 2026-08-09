@@ -125,5 +125,5 @@ class TestSelectionCopy:
 
 
 class _Client:
-    def set_confirmation_handler(self, handler):
+    def set_approval_handler(self, handler):
         self.handler = handler

@@ -11,11 +11,9 @@ from pathlib import Path
 
 from pc_assistant.config import AppConfig
 from pc_assistant.artifacts.delivery import save_download
-from pc_assistant.service.core_api import (
-    ArtifactInputRef,
-    ConfirmationRequestedMessage,
-)
+from pc_assistant.service.core_api import ArtifactInputRef
 from pc_assistant.service.core_lifecycle import get_core_client
+from pc_assistant.tasks import TaskEvent
 
 
 async def run_core_ask(
@@ -43,7 +41,7 @@ async def run_core_ask(
     try:
         client = await get_core_client(
             config,
-            confirmation_handler=_confirm_in_terminal,
+            approval_handler=_confirm_in_terminal,
         )
         health = await client.health()
         if not health.healthy:
@@ -55,7 +53,7 @@ async def run_core_ask(
                 refs.append(
                     await _upload_attachment(client, session_handle, path)
                 )
-            async for event in client.run(
+            async for event in client.execute_task(
                 session_handle,
                 question,
                 tuple(refs),
@@ -159,14 +157,15 @@ async def _upload_attachment(client, session_handle: str, path: str) -> Artifact
     return ArtifactInputRef(artifact_id=artifact.artifact_id, caption=source.name)
 
 
-async def _confirm_in_terminal(message: ConfirmationRequestedMessage) -> bool:
+async def _confirm_in_terminal(event: TaskEvent) -> bool:
+    payload = event.payload
     details = "\n".join(
-        f"  {key}: {value}" for key, value in message.arguments.items()
+        f"  {key}: {value}" for key, value in payload.tool_args.items()
     )
-    print(f"\nConfirmation required: {message.tool_name}", file=sys.stderr)
+    print(f"\nConfirmation required: {payload.tool_name}", file=sys.stderr)
     if details:
         print(details, file=sys.stderr)
-    print(f"  reason: {message.reason}", file=sys.stderr)
+    print(f"  reason: {payload.reason}", file=sys.stderr)
     try:
         answer = await asyncio.to_thread(input, "Proceed? (y/n): ")
     except (EOFError, KeyboardInterrupt):

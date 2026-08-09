@@ -4,10 +4,9 @@ import asyncio
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import RunEvent, RuntimeEventPayload
 from pc_assistant.artifacts import ArtifactRef
 from pc_assistant.config import AppConfig
-from pc_assistant.service.core_api import ConfirmationRequestedMessage
+from pc_assistant.tasks import TaskEvent, TaskEventPayload, TaskState
 from pc_assistant.ui.core_app import CoreChatApp
 from pc_assistant.ui.widgets import CommandOutput
 
@@ -17,7 +16,7 @@ class _Client:
         self.handler = None
         self.sessions = 0
 
-    def set_confirmation_handler(self, handler) -> None:
+    def set_approval_handler(self, handler) -> None:
         self.handler = handler
 
     async def create_session(self) -> str:
@@ -47,15 +46,19 @@ async def test_core_chat_mounts_and_creates_core_owned_session() -> None:
 async def test_core_chat_confirmation_resolves_pending_future() -> None:
     client = _Client()
     app = CoreChatApp(AppConfig(), client, "session-a")
-    request = ConfirmationRequestedMessage(
-        request_id="confirmation-a",
-        confirmation_id="confirmation-a",
-        run_id="run-a",
-        session_handle="session-a",
-        tool_call_id="call-a",
-        tool_name="mouse",
-        arguments={"action": "click"},
-        reason="desktop_control:high",
+    request = TaskEvent(
+        task_id="task-a",
+        event_seq=3,
+        occurred_at=3.0,
+        event_type="approval_requested",
+        payload=TaskEventPayload(
+            state=TaskState.WAITING_APPROVAL,
+            approval_id="approval-a",
+            tool_call_id="call-a",
+            tool_name="mouse",
+            tool_args={"action": "click"},
+            reason="desktop_control:high",
+        ),
     )
 
     async with app.run_test():
@@ -84,11 +87,12 @@ async def test_artifact_download_failure_is_a_local_warning_and_does_not_raise(
         async def write(self, value):
             writes.append(value)
 
-    event = RunEvent(
-        run_id="run-a",
+    event = TaskEvent(
+        task_id="task-a",
         event_seq=1,
+        occurred_at=1.0,
         event_type="artifact",
-        payload=RuntimeEventPayload(
+        payload=TaskEventPayload(
             artifact=ArtifactRef(
                 artifact_id="artifact-a",
                 kind="image",

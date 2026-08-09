@@ -6,7 +6,7 @@ import pytest
 import yaml
 
 from pc_assistant.agent_runtime.composition import build_core_runtime
-from pc_assistant.agent_runtime.contracts import HealthStatus, RunRequest
+from pc_assistant.agent_runtime.contracts import HealthStatus
 from pc_assistant.agent_runtime.model_step import ProviderChunk
 from pc_assistant.config import AppConfig
 from pc_assistant.extensions import ExtensionManager, ExtensionState
@@ -184,19 +184,22 @@ async def test_builtin_skill_reaches_model_only_for_matching_personal_run(
     await composition.extensions.start()
     try:
         scope = await composition.control.create_session("local")
+        await composition.task_service.start()
+        task = await composition.task_service.create(
+            scope,
+            client_request_id="request-a",
+            goal="请深入研究这个主题并给我研究报告",
+        )
         events = [
             event
-            async for event in composition.application.run(
+            async for event in composition.task_service.events(
                 "local",
-                scope.session_handle,
-                RunRequest(
-                    client_request_id="request-a",
-                    input="请深入研究这个主题并给我研究报告",
-                ),
+                task.task_id,
             )
         ]
         statuses = (await composition.control.get_status(scope)).extensions
     finally:
+        await composition.task_service.stop()
         await composition.extensions.stop()
 
     assert events[-1].event_type == "completed"

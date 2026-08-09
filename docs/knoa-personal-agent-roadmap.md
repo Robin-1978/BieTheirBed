@@ -193,6 +193,9 @@ CLI/TUI 长期保留，用于：
 > 本地 MCP 包发现和 A5 工具来源、权限、风险与确认策略的 typed 管理描述均已完成。
 > A6 已支持 Agent 发起、本地目录暂存校验、用户确认、原子安装和运行时动态激活。
 > Phase A 后续工作是按需导入真实 MCP 包并完成私有账号部署验证。
+> 第三方本地 MCP 的 OS 级 CPU、内存、文件系统和网络沙箱列为最低优先级
+> Backlog；当前独立进程、超时、最小环境和故障隔离已经满足主线推进要求，
+> 不阻塞 Phase B。
 
 ### 6.1 Skill Package
 
@@ -240,13 +243,32 @@ Token、账号健康和重新授权。Core 只接收标准 MCP 工具，不理�
 ### 6.4 Phase A 验收
 
 - 新增 Skill 不修改 ReActLoop 或 Channel；
-- 新增 MCP Server 不修改 CoreApplication；
+- 新增 MCP Server 不修改 TaskService、AgentRuntime 或 CoreServer；
 - 所有动态工具进入现有 capability/confirmation/ToolStep 边界；
 - 一个故障扩展不会影响其他扩展或基础工具；
 - `/tools` 和未来 App 能显示来源、权限、状态和健康信息；
 - 至少打通一个知识类、一个工作流类和一个文件类真实集成。
 
+### 6.5 最低优先级 Backlog
+
+- 在出现明确的不可信第三方包或资源争用场景后，再引入通用 MCP ProcessLauncher
+  的 OS 级资源沙箱策略；
+- 沙箱实现必须位于通用进程启动边界之后，不得向 Core 引入 systemd、容器产品、
+  第三方服务或具体 MCP 包的业务概念；
+- 该项不阻塞能力接入、持久任务、飞书增强或移动工作台。
+
 ## 7. Phase B：持久任务与主动执行
+
+> 进度（2026-08-09）：Phase B 正向设计已完成，详见
+> `docs/knoa-durable-task-design.md`。B1-B3 已完成：持久 Task 聚合、EventJournal、
+> 连接无关 TaskExecutor、`after_seq` 重放、持久审批以及飞书/TUI 标准确认命令均已
+> 进入生产路径；公开 Run 协议和连接所有的确认逻辑已经删除。B4 已开始：重启时
+> 无法证明执行结果的 `running` Task 保守进入 `paused`，只有显式 `resume_task`
+> 才会重新排队，避免外部副作用被自动重试；执行器已支持不同 session 有界并发，
+> 同一 session 仍在持久 claim 边界严格串行；Task 详情与有界游标列表已经进入
+> Core API，且不会暴露内部 lease、worker 或 revision 字段。
+> 持久创建事务同时限制全局 128 个、单 principal 32 个非终态 Task；幂等重试先于
+> 容量判断，满载时通过标准 `resource_exhausted` 返回。
 
 ### 7.1 Task 模型
 
@@ -409,9 +431,9 @@ Task 至少记录：
 - token、模型调用和工具调用成本；
 - Skill/MCP 健康状态和故障隔离效果。
 
-## 13. 建议的下一份设计文档
+## 13. 设计文档状态
 
-实施前按依赖顺序形成两份独立设计：
+已按依赖顺序形成两份独立设计：
 
 1. **Knoa Capability Extension Design**：Skill、Built-in/MCP Tool 和统一
    ToolStep 接入契约。

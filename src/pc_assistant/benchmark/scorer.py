@@ -3,12 +3,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pc_assistant.agent_runtime.contracts import RunEvent
 from pc_assistant.benchmark.types import BenchmarkQuestion
+from pc_assistant.tasks import TaskEvent
 
 
 class Scorer:
-    def score(self, q: BenchmarkQuestion, events: list[RunEvent], answer: str) -> float:
+    def score(self, q: BenchmarkQuestion, events: list[TaskEvent], answer: str) -> float:
         method = q.eval_method.lower()
         if method == "contains_all":
             return self._score_contains_all(answer, q.expected_answer_contains)

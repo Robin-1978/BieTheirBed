@@ -12,12 +12,11 @@ from textual.app import App, ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Header, Markdown, Static
 
-from pc_assistant.agent_runtime.contracts import RunEvent
 from pc_assistant.artifacts.delivery import save_download
 from pc_assistant.branding import ASSISTANT_NAME
 from pc_assistant.config import AppConfig
-from pc_assistant.service.core_api import ConfirmationRequestedMessage
 from pc_assistant.service.core_client import CoreClient
+from pc_assistant.tasks import TaskEvent
 from pc_assistant.ui.clipboard import copy_or_save
 from pc_assistant.ui.state import MessageType, UIState
 from pc_assistant.ui.theme import AVAILABLE_THEMES, get_palette, set_theme
@@ -100,10 +99,10 @@ class CoreChatApp(App):
     def on_mount(self) -> None:
         self.query_one("#chat-log", VerticalScroll).mount(CommandOutput(_WELCOME))
         self.query_one("#user-input", ChatInput).focus()
-        self._client.set_confirmation_handler(self._confirm_tool)
+        self._client.set_approval_handler(self._confirm_tool)
 
     def on_unmount(self) -> None:
-        self._client.set_confirmation_handler(None)
+        self._client.set_approval_handler(None)
         pending = self._confirm_pending
         if pending is not None and not pending.done():
             pending.set_result(False)
@@ -151,7 +150,7 @@ class CoreChatApp(App):
         stream = Markdown.get_stream(response.markdown)
         answer_parts: list[str] = []
         try:
-            async for event in self._client.run(self._session_handle, text):
+            async for event in self._client.execute_task(self._session_handle, text):
                 if self._cancelled:
                     break
                 await self._handle_event(event, response, stream, answer_parts)
@@ -166,7 +165,7 @@ class CoreChatApp(App):
 
     async def _handle_event(
         self,
-        event: RunEvent,
+        event: TaskEvent,
         response: AssistantMessage,
         stream: Any,
         answer_parts: list[str],
@@ -242,19 +241,20 @@ class CoreChatApp(App):
             await stream.write("\n\n*较早对话已整理为简短工作摘要。*\n")
         self.call_later(self._scroll_end)
 
-    async def _confirm_tool(self, message: ConfirmationRequestedMessage) -> bool:
+    async def _confirm_tool(self, event: TaskEvent) -> bool:
         if self._confirm_pending is not None:
             return False
+        payload = event.payload
         future = asyncio.get_running_loop().create_future()
         self._confirm_pending = future
         details = ", ".join(
-            f"{key}={value}" for key, value in list(message.arguments.items())[:4]
+            f"{key}={value}" for key, value in list(payload.tool_args.items())[:4]
         )
         self.call_later(
             self._mount_confirmation,
-            message.tool_name,
+            payload.tool_name,
             details,
-            message.reason,
+            payload.reason,
         )
         try:
             return await asyncio.wait_for(future, timeout=_CONFIRM_TIMEOUT)
@@ -359,7 +359,7 @@ class CoreChatApp(App):
         if not self._processing:
             return
         self._cancelled = True
-        asyncio.create_task(self._client.cancel_active())
+        asyncio.create_task(self._client.cancel_active_task())
 
     def action_copy_last(self) -> None:
         text = self._selected_text() or self._last_answer

@@ -18,23 +18,28 @@ from pydantic import (
 
 from pc_assistant.agent_runtime.contracts import (
     ArtifactDownloadResult,
-    CancelResult,
     ConfigSetResult,
     HealthStatus,
     HistoryResult,
     MemoryClearResult,
     MemoryListResult,
-    RunEvent,
     RuntimeStatus,
     ToolListResult,
 )
 from pc_assistant.artifacts import ArtifactRef
+from pc_assistant.tasks import (
+    ApprovalState,
+    TaskCancelResult,
+    TaskEvent,
+    TaskRecord,
+    TaskState,
+)
 
 
 NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 RequestId = Annotated[NonEmpty, StringConstraints(max_length=128)]
 SessionHandle = Annotated[NonEmpty, StringConstraints(max_length=256)]
-RunId = Annotated[NonEmpty, StringConstraints(max_length=128)]
+TaskId = Annotated[NonEmpty, StringConstraints(max_length=128)]
 CORE_WS_MAX_SIZE = 70 * 1024 * 1024
 
 
@@ -45,6 +50,58 @@ class CoreModel(BaseModel):
 class ArtifactInputRef(CoreModel):
     artifact_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
     caption: Annotated[str, StringConstraints(max_length=1000)] = ""
+
+
+class TaskSnapshot(CoreModel):
+    task_id: TaskId
+    session_handle: SessionHandle
+    client_request_id: RequestId
+    parent_task_id: Annotated[str, StringConstraints(max_length=128)] = ""
+    goal: Annotated[str, StringConstraints(max_length=200_000)]
+    attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
+    tools_enabled: bool
+    priority: int = Field(ge=0, le=9)
+    state: TaskState
+    phase: Annotated[str, StringConstraints(max_length=256)] = ""
+    attempt_count: int = Field(ge=0)
+    cancel_requested: bool
+    final_summary: Annotated[str, StringConstraints(max_length=200_000)] = ""
+    failure_code: Annotated[str, StringConstraints(max_length=256)] = ""
+    created_at: float = Field(ge=0.0)
+    updated_at: float = Field(ge=0.0)
+    started_at: float | None = Field(default=None, ge=0.0)
+    finished_at: float | None = Field(default=None, ge=0.0)
+    next_event_seq: int = Field(gt=0)
+
+    @classmethod
+    def from_record(cls, task: TaskRecord) -> TaskSnapshot:
+        return cls(
+            task_id=task.task_id,
+            session_handle=task.session_handle,
+            client_request_id=task.client_request_id,
+            parent_task_id=task.parent_task_id,
+            goal=task.goal,
+            attachments=tuple(
+                ArtifactInputRef(
+                    artifact_id=attachment.artifact_id,
+                    caption=attachment.caption,
+                )
+                for attachment in task.attachments
+            ),
+            tools_enabled=task.tools_enabled,
+            priority=task.priority,
+            state=task.state,
+            phase=task.phase,
+            attempt_count=task.attempt_count,
+            cancel_requested=task.cancel_requested,
+            final_summary=task.final_summary,
+            failure_code=task.failure_code,
+            created_at=task.created_at,
+            updated_at=task.updated_at,
+            started_at=task.started_at,
+            finished_at=task.finished_at,
+            next_event_seq=task.next_event_seq,
+        )
 
 
 class AuthenticateRequest(CoreModel):
@@ -66,35 +123,70 @@ class CreateSessionRequest(CoreModel):
     method: Literal["create_session"] = "create_session"
 
 
-class StartRunRequest(CoreModel):
+class CreateTaskRequest(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
-    method: Literal["run"] = "run"
+    method: Literal["create_task"] = "create_task"
     session_handle: SessionHandle
     input: Annotated[str, StringConstraints(max_length=200_000)] = ""
     attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
     tools_enabled: bool = True
+    priority: int = Field(default=0, ge=0, le=9)
+    parent_task_id: Annotated[str, StringConstraints(max_length=128)] = ""
 
     @model_validator(mode="after")
-    def require_input_or_attachment(self) -> StartRunRequest:
+    def require_input_or_attachment(self) -> CreateTaskRequest:
         if not self.input.strip() and not self.attachments:
-            raise ValueError("Run request requires input or an attachment")
+            raise ValueError("Task request requires input or an attachment")
         return self
 
 
-class CancelRunRequest(CoreModel):
+class SubscribeTaskRequest(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
-    method: Literal["cancel_run"] = "cancel_run"
-    run_id: RunId
+    method: Literal["subscribe_task"] = "subscribe_task"
+    task_id: TaskId
+    after_seq: int = Field(default=0, ge=0)
+
+
+class GetTaskRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["get_task"] = "get_task"
+    task_id: TaskId
+
+
+class ListTasksRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["list_tasks"] = "list_tasks"
+    session_handle: Annotated[str, StringConstraints(max_length=256)] = ""
+    state: TaskState | None = None
+    limit: int = Field(default=50, ge=1, le=100)
+    cursor: Annotated[str, StringConstraints(max_length=512)] = ""
+
+
+class CancelTaskRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["cancel_task"] = "cancel_task"
+    task_id: TaskId
     reason: Annotated[str, StringConstraints(max_length=1000)] = ""
 
 
-class ResolveConfirmationRequest(CoreModel):
+class ResumeTaskRequest(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
-    method: Literal["confirmation_resolve"] = "confirmation_resolve"
-    confirmation_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+    method: Literal["resume_task"] = "resume_task"
+    task_id: TaskId
+    reason: Annotated[str, StringConstraints(max_length=1000)] = ""
+
+
+class ResolveApprovalRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["approval_resolve"] = "approval_resolve"
+    approval_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
     approved: bool
 
 
@@ -149,9 +241,13 @@ CoreRequest: TypeAlias = Annotated[
     AuthenticateRequest
     | HealthRequest
     | CreateSessionRequest
-    | StartRunRequest
-    | CancelRunRequest
-    | ResolveConfirmationRequest
+    | CreateTaskRequest
+    | SubscribeTaskRequest
+    | GetTaskRequest
+    | ListTasksRequest
+    | CancelTaskRequest
+    | ResumeTaskRequest
+    | ResolveApprovalRequest
     | GetStatusRequest
     | GetHistoryRequest
     | ListMemoryRequest
@@ -177,7 +273,7 @@ ErrorCode = Literal[
     "session_not_found",
     "artifact_not_found",
     "artifact_too_large",
-    "run_not_found",
+    "task_not_found",
     "capability_denied",
     "confirmation_denied",
     "tool_invalid_arguments",
@@ -211,11 +307,42 @@ class SessionCreatedMessage(CoreModel):
     session_handle: SessionHandle
 
 
-class RunAcceptedMessage(CoreModel):
-    message_type: Literal["run_accepted"] = "run_accepted"
+class TaskAcceptedMessage(CoreModel):
+    message_type: Literal["task_accepted"] = "task_accepted"
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
-    run_id: RunId
+    task_id: TaskId
+    state: TaskState
+
+
+class TaskSubscribedMessage(CoreModel):
+    message_type: Literal["task_subscribed"] = "task_subscribed"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    task_id: TaskId
+    after_seq: int = Field(ge=0)
+
+
+class TaskSnapshotMessage(CoreModel):
+    message_type: Literal["task_snapshot"] = "task_snapshot"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    task: TaskSnapshot
+
+
+class TaskListMessage(CoreModel):
+    message_type: Literal["task_list"] = "task_list"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    tasks: tuple[TaskSnapshot, ...]
+    next_cursor: Annotated[str, StringConstraints(max_length=512)] = ""
+
+
+class TaskEventMessage(CoreModel):
+    message_type: Literal["task_event"] = "task_event"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    event: TaskEvent
 
 
 class HealthMessage(CoreModel):
@@ -281,37 +408,38 @@ class ArtifactDownloadedMessage(CoreModel):
     result: ArtifactDownloadResult
 
 
-class CancelResultMessage(CoreModel):
-    message_type: Literal["cancel_result"] = "cancel_result"
+class TaskCancelResultMessage(CoreModel):
+    message_type: Literal["task_cancel_result"] = "task_cancel_result"
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
-    result: CancelResult
+    result: TaskCancelResult
 
 
-class ConfirmationRequestedMessage(CoreModel):
-    message_type: Literal["confirmation_requested"] = "confirmation_requested"
+class TaskResumedMessage(CoreModel):
+    message_type: Literal["task_resumed"] = "task_resumed"
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
-    confirmation_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
-    run_id: RunId
-    session_handle: SessionHandle
-    tool_call_id: Annotated[NonEmpty, StringConstraints(max_length=256)]
-    tool_name: Annotated[NonEmpty, StringConstraints(max_length=256)]
-    arguments: dict[str, Any] = Field(default_factory=dict)
-    reason: Annotated[str, StringConstraints(max_length=1000)] = ""
+    task_id: TaskId
+    state: TaskState
 
 
-class ConfirmationResolvedMessage(CoreModel):
-    message_type: Literal["confirmation_resolved"] = "confirmation_resolved"
+class ApprovalResolvedMessage(CoreModel):
+    message_type: Literal["approval_resolved"] = "approval_resolved"
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
+    approval_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
     resolved: bool
+    state: ApprovalState
 
 
 CoreServerMessage: TypeAlias = Annotated[
     AuthenticatedMessage
     | SessionCreatedMessage
-    | RunAcceptedMessage
+    | TaskAcceptedMessage
+    | TaskSubscribedMessage
+    | TaskSnapshotMessage
+    | TaskListMessage
+    | TaskEventMessage
     | HealthMessage
     | StatusMessage
     | HistoryMessage
@@ -321,11 +449,10 @@ CoreServerMessage: TypeAlias = Annotated[
     | ConfigSetMessage
     | ArtifactUploadedMessage
     | ArtifactDownloadedMessage
-    | CancelResultMessage
-    | ConfirmationRequestedMessage
-    | ConfirmationResolvedMessage
-    | CoreError
-    | RunEvent,
+    | TaskCancelResultMessage
+    | TaskResumedMessage
+    | ApprovalResolvedMessage
+    | CoreError,
     Field(discriminator="message_type"),
 ]
 _CORE_SERVER_MESSAGE_ADAPTER = TypeAdapter(CoreServerMessage)

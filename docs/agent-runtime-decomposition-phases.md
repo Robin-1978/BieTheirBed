@@ -1,5 +1,9 @@
 # Agent Runtime Decomposition Campaign
 
+> Historical campaign record. The connection-owned public Run protocol described
+> here was superseded by the Core-owned durable Task design in
+> `knoa-durable-task-design.md`; it is not an active compatibility requirement.
+
 > Based on `docs/architecture.md`, the approved Path C decision, and a current-code audit, replace the monolithic Agent with explicit runtime boundaries and no legacy compatibility layer.
 > Core insight: the main problem is ownership concentration, not file length; every extracted component must own a production operation and be wired into the live path immediately.
 > Key architecture decisions: direct cutover with no shims; versioned Core API v1 is separate from the principal-bound AgentRuntimePort; ReActLoop owns Reasoning→Acting→Observation iteration; CoreServer is the only production execution authority.

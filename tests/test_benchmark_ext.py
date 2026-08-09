@@ -5,13 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import RunEvent, RuntimeEventPayload
 from pc_assistant.agent_runtime.model_step import ProviderChunk
 from pc_assistant.benchmark.dataset import load_dataset
 from pc_assistant.benchmark.evaluator import LLMJudge
 from pc_assistant.benchmark.reporter import Reporter
 from pc_assistant.benchmark.scorer import Scorer
 from pc_assistant.benchmark.types import BenchmarkQuestion, BenchmarkResult
+from pc_assistant.tasks import TaskEvent, TaskEventPayload
 
 
 def _event(
@@ -19,12 +19,13 @@ def _event(
     event_type: str,
     *,
     tool_name: str = "",
-) -> RunEvent:
-    return RunEvent(
-        run_id="run-a",
+) -> TaskEvent:
+    return TaskEvent(
+        task_id="task-a",
         event_seq=sequence,
+        occurred_at=float(sequence),
         event_type=event_type,
-        payload=RuntimeEventPayload(tool_name=tool_name),
+        payload=TaskEventPayload(tool_name=tool_name),
     )
 
 

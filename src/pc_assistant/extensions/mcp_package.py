@@ -23,19 +23,6 @@ _MAX_MANIFEST_BYTES = 64 * 1024
 _MAX_PACKAGE_FILES = 4096
 _MAX_PACKAGE_FILE_BYTES = 32 * 1024 * 1024
 _MAX_PACKAGE_BYTES = 128 * 1024 * 1024
-_IGNORED_DIRECTORIES = frozenset(
-    {
-        ".agents",
-        ".claude",
-        ".codex",
-        ".git",
-        ".gs",
-        ".gs-harness",
-        ".pytest_cache",
-        ".ruff_cache",
-        "__pycache__",
-    }
-)
 
 
 def _read_manifest(package_root: Path) -> str:
@@ -131,8 +118,8 @@ def build_mcp_package_providers(
     return tuple(providers)
 
 
-def _is_private_environment_file(name: str) -> bool:
-    return name == ".env" or (name.startswith(".env.") and name != ".env.example")
+def _is_hidden_metadata(name: str) -> bool:
+    return name.startswith(".")
 
 
 def _package_layout(
@@ -146,7 +133,7 @@ def _package_layout(
         kept_directories: list[str] = []
         for name in directories:
             candidate = current_path / name
-            if name in _IGNORED_DIRECTORIES:
+            if _is_hidden_metadata(name):
                 continue
             if candidate.is_symlink():
                 continue
@@ -154,7 +141,7 @@ def _package_layout(
             relative_directories.append(candidate.relative_to(source))
         directories[:] = kept_directories
         for name in names:
-            if _is_private_environment_file(name):
+            if _is_hidden_metadata(name):
                 continue
             candidate = current_path / name
             metadata = candidate.lstat()

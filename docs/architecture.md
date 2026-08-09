@@ -132,7 +132,7 @@ authority merely by entering the context window.
 **Responsibilities:**
 
 - Parse CLI commands and configuration selection.
-- Render streaming `RunEvent` output.
+- Render persisted and replayable `TaskEvent` output.
 - Translate interactive confirmation into a Core API confirmation command.
 - Adapt Feishu messages to session-scoped CoreClient requests.
 
@@ -159,10 +159,11 @@ lossless continuation cards; none of those concepts enter Core.
 
 **Responsibilities:**
 
-- Expose the versioned Core API and ordered run events.
+- Expose the versioned Core API and ordered durable Task events.
 - Keep CoreServer as the only production execution process; CoreClient never
   falls back to an in-process Agent.
-- Scope runs, cancellation, confirmation, and status by session/client.
+- Scope Task creation by session and Task reads, cancellation, approval, and
+  recovery commands by authenticated principal ownership.
 
 **Target anchor:** `agent_runtime.contracts::AgentRuntimePort` is the Core-owned
 application port. `CoreClient` speaks the versioned Core API; it is not a local
@@ -177,9 +178,11 @@ persist provider-native image payloads or weaken session authorization.
 
 **Responsibilities:**
 
-- `AgentRuntime` owns session lifecycle; `ReActLoop` owns the ReAct iteration
-  lifecycle and ordered internal `RuntimeEvent` stream. CoreServer maps those
-  events to public Core API `RunEvent` envelopes.
+- `TaskService` owns persistent Task lifecycle and subscriptions;
+  `TaskExecutor` invokes `AgentRuntime` independently of client connections.
+  `ReActLoop` owns the ReAct iteration lifecycle and ordered internal
+  `RuntimeEvent` stream. Each public `TaskEvent` is committed to the journal
+  before live delivery.
 - Bind a request to a `SessionState`.
 - Assemble LLM messages, receive proposals, request verification, execute tools,
   and record outcomes.
@@ -250,10 +253,11 @@ primitive and must not become a public bypass around the verifier.
 
 Tools may produce managed artifacts, but delivery is not itself a model tool.
 The `screenshot` tool creates a user-visible PNG artifact; `artifact_prepare`
-borrows an existing file without copying or taking deletion ownership. AgentRuntime converts
-their safe public references into an internal `RuntimeEvent(type="artifact")`;
-CoreServer maps it to `RunEvent(type="artifact")`, and the active client adapts
-that public event to its channel. Internal `screen` captures
+borrows an existing file without copying or taking deletion ownership.
+AgentRuntime converts their safe public references into an internal
+`RuntimeEvent(type="artifact")`; TaskExecutor persists it as a
+`TaskEvent(type="artifact")`, and the active client adapts that public event to
+its channel. Internal `screen` captures
 remain GUI observations and are never automatically delivered.
 
 Local opening and conversation delivery are intentionally separate operations.
@@ -336,9 +340,11 @@ only happy-path helper output.
 
 ```text
 Channel/UI
-  -> CoreClient.run(input, session_id)
+  -> CoreClient.create_task(input, session_handle)
   -> Core API v1
-  -> CoreServer -> AgentRuntimePort.run(input, session_id)
+  -> CoreServer -> TaskService persists Task + task_created
+  -> TaskExecutor claims Task independently of the connection
+  -> AgentRuntimePort.run(internal attempt)
   -> SessionManager
   -> Conversation + runtime context assembly
   -> provider adapter
@@ -347,7 +353,8 @@ Channel/UI
   -> ToolRegistry.execute
   -> tool result
   -> next LLM iteration or final RuntimeEvent
-  -> CoreServer maps RuntimeEvent to RunEvent
+  -> TaskExecutor persists RuntimeEvent as ordered TaskEvent
+  -> subscribers replay by task_id + after_seq
 ```
 
 ### 4.2 Approved multimodal target
@@ -379,7 +386,7 @@ user asks to send/capture a file
   -> ArtifactStore(session, direction=outbound, ownership + retention)
   -> public artifact reference (ID + bounded metadata, no path/bytes)
   -> RuntimeEvent(type="artifact")
-  -> CoreServer maps to RunEvent(type="artifact")
+  -> TaskExecutor persists TaskEvent(type="artifact")
   -> active client/channel adapter
   -> image/file delivery to that conversation
 ```

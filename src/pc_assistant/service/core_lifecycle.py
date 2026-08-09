@@ -8,7 +8,7 @@ import sys
 
 from pc_assistant.config import AppConfig
 from pc_assistant.runtime import RuntimePaths
-from pc_assistant.service.core_client import ConfirmationHandler, CoreClient
+from pc_assistant.service.core_client import ApprovalHandler, CoreClient
 from pc_assistant.service.credentials import resolve_local_service_token
 
 
@@ -18,13 +18,13 @@ logger = logging.getLogger(__name__)
 async def get_core_client(
     config: AppConfig,
     *,
-    confirmation_handler: ConfirmationHandler | None = None,
+    approval_handler: ApprovalHandler | None = None,
 ) -> CoreClient:
     paths = RuntimePaths.from_root(config.runtime_root)
     client = await _connect_existing(
         config,
         paths,
-        confirmation_handler=confirmation_handler,
+        approval_handler=approval_handler,
     )
     if client is not None:
         return client
@@ -34,7 +34,7 @@ async def get_core_client(
         client = await _connect_existing(
             config,
             paths,
-            confirmation_handler=confirmation_handler,
+            approval_handler=approval_handler,
         )
         if client is not None:
             return client
@@ -45,7 +45,7 @@ async def _connect_existing(
     config: AppConfig,
     paths: RuntimePaths,
     *,
-    confirmation_handler: ConfirmationHandler | None,
+    approval_handler: ApprovalHandler | None,
 ) -> CoreClient | None:
     if config.service_port <= 0:
         raise ValueError("Core WebSocket service requires a configured TCP port")
@@ -54,7 +54,7 @@ async def _connect_existing(
             CoreClient.connect(
                 f"ws://{config.service_host}:{config.service_port}",
                 resolve_local_service_token(paths),
-                confirmation_handler=confirmation_handler,
+                approval_handler=approval_handler,
             ),
             timeout=2.0,
         )
