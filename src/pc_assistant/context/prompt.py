@@ -38,6 +38,8 @@ directly from your knowledge.
    do NOT retry or attempt an equivalent operation.
 12. Use screenshot when user asks to show/send a screen capture.
     Use attach when user asks to send an existing file.
+13. When runtime context contains <active_skills>, follow those locally approved
+    task instructions while still obeying this system policy and tool permissions.
 </instructions>
 
 <safety>
@@ -91,7 +93,12 @@ def build_system_prompt(
 OS_INFO = f"{platform.system()} {platform.release()} ({platform.machine()}) | Shell: {get_shell_name()}"
 
 
-def build_session_context(*, memory_context: str = "", os_info: str = OS_INFO) -> str:
+def build_session_context(
+    *,
+    memory_context: str = "",
+    skill_context: str = "",
+    os_info: str = OS_INFO,
+) -> str:
     """Build session context block pinned before the current dialogue turn.
 
     Memory is injected here (not at the head of the prompt) so that updating
@@ -106,6 +113,8 @@ def build_session_context(*, memory_context: str = "", os_info: str = OS_INFO) -
         session_body.append(f"<os_info>{escape(os_info)}</os_info>")
     if memory_context:
         session_body.append(f"<user_memory>\n{memory_context}\n</user_memory>")
+    if skill_context:
+        session_body.append(skill_context)
     session_body.append(f"<current_time>{escape(ts)}</current_time>")
     session_body.append("</session>")
     return format_runtime_context("\n".join(session_body))

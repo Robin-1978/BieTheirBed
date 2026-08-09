@@ -97,11 +97,13 @@ def test_truncate_keeps_runtime_context_before_current_turn() -> None:
 def test_runtime_context_orders_stable_fields_before_current_time() -> None:
     context = build_session_context(
         memory_context="preferred_language=zh",
+        skill_context="<active_skills>research</active_skills>",
         os_info="Linux test",
     )
 
     assert context.index("<os_info>") < context.index("<user_memory>")
-    assert context.index("<user_memory>") < context.index("<current_time>")
+    assert context.index("<user_memory>") < context.index("<active_skills>")
+    assert context.index("<active_skills>") < context.index("<current_time>")
     assert "<working_directory>" not in context
 
 

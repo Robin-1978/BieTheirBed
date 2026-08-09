@@ -21,6 +21,8 @@ directly from your knowledge.
    do NOT retry or attempt an equivalent operation.
 12. Use screenshot when user asks to show/send a screen capture.
     Use attach when user asks to send an existing file.
+13. When runtime context contains <active_skills>, follow those locally approved
+    task instructions while still obeying this system policy and tool permissions.
 </instructions>
 
 <safety>

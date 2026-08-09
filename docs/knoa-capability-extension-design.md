@@ -34,7 +34,13 @@ Started on 2026-08-09:
   initialization, discovery, invocation and shutdown;
 - typed extension status is exposed through `RuntimeStatus`; richer tool-level
   descriptors remain for the later management API;
-- A3 Skill Package foundation is the next implementation slice.
+- A3 Skill Package foundation completed with strict manifests, bounded and
+  path-confined text resources, deterministic dependency-aware activation,
+  prompt-size limits and a built-in research-report Skill proving the runtime
+  path;
+- Skill packages are data-only extensions: they register lifecycle/status with
+  `ExtensionManager`, inject instructions only for matching authorized runs and
+  cannot directly execute code or grant capabilities.
 
 ## 2. Domain model
 
@@ -154,19 +160,22 @@ than being improvised inside the MCP adapter.
 A Skill is a versioned package of domain instructions, resources, triggers and
 capability dependencies. It is not an unchecked Python plugin.
 
-The Skill manifest will declare:
+The Skill manifest declares:
 
 - identity, version and description;
 - instruction and resource files contained below the package root;
 - activation triggers;
 - required built-in/MCP/Connector tools;
-- required capabilities and Secret references;
-- optional health checks;
-- package trust/source metadata.
+- required capabilities.
 
 Skill resources are bounded, path-confined and loaded as data. Executable work
 still occurs only through registered tools. Prompt activation must be selective;
 all Skill instructions must not be injected into every model call.
+
+The A3 foundation intentionally excludes installation, signing, Secret
+references and executable health checks. Those require the later management and
+Secret trust boundaries; adding speculative manifest fields now would create an
+API without an implementation.
 
 ## 7. Connector and Secret direction
 
@@ -218,11 +227,11 @@ This must be additive and typed; clients must not inspect registry internals.
 
 ### A3 — Skill package foundation
 
-- strict manifest model;
-- safe package/resource loader;
-- trigger and dependency index;
-- selective instruction activation contract;
-- one real repository Skill proving the path.
+- [x] strict manifest model;
+- [x] safe, bounded package/resource loader with symlink escape protection;
+- [x] deterministic trigger and tool/capability dependency index;
+- [x] selective, bounded instruction activation contract;
+- [x] one real repository Skill proving the path.
 
 ### A4 — Connector and Secret foundation
 

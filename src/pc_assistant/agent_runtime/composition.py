@@ -49,6 +49,11 @@ from pc_assistant.context.prompt import build_session_context, build_system_prom
 from pc_assistant.desktop_session import ensure_desktop_session
 from pc_assistant.extensions import ExtensionManager
 from pc_assistant.extensions.mcp import build_mcp_providers
+from pc_assistant.extensions.skill import (
+    SkillCatalog,
+    build_skill_providers,
+    builtin_skill_root,
+)
 from pc_assistant.observability.trace import LLMTraceRecorder, TurnRecorder
 from pc_assistant.runtime import RuntimePaths
 from pc_assistant.service.core_host import (
@@ -104,6 +109,7 @@ class CoreRuntimeComposition:
     llm_traces: LLMTraceRecorder
     turn_traces: TurnRecorder
     extensions: ExtensionManager
+    skills: SkillCatalog
     host: CoreServiceHost
 
 
@@ -204,9 +210,18 @@ def build_core_runtime(
         ttl_seconds=config.attachment_ttl_seconds,
     )
     registry = _build_registry(config, artifacts, memory, episodic)
+    skills = SkillCatalog()
+    skill_roots = (
+        builtin_skill_root(),
+        paths.skills,
+        *(paths.resolve(directory) for directory in config.skill_directories),
+    )
     extensions = ExtensionManager(
         registry,
-        build_mcp_providers(config.mcp_servers),
+        (
+            *build_skill_providers(skill_roots, skills),
+            *build_mcp_providers(config.mcp_servers),
+        ),
     )
 
     primary = provider_factory(config.resolve_model())
@@ -230,13 +245,19 @@ def build_core_runtime(
         return HealthStatus(healthy=False, detail="No configured model is available")
 
     async def runtime_context(scope: RuntimeScope, query: str) -> str:
-        del scope
+        capabilities = capabilities_for_scope(scope)
+        skill_context = skills.active_context(
+            query,
+            available_tools=frozenset(registry.list_for(capabilities)),
+            capabilities=capabilities,
+        )
         sections = [
             memory.build_context_string(query=query),
             episodic.build_context_string(query=query),
         ]
         return build_session_context(
-            memory_context="\n\n".join(section for section in sections if section)
+            memory_context="\n\n".join(section for section in sections if section),
+            skill_context=skill_context,
         )
 
     model_step = ModelStep(
@@ -408,5 +429,6 @@ def build_core_runtime(
         llm_traces=llm_traces,
         turn_traces=turn_traces,
         extensions=extensions,
+        skills=skills,
         host=host,
     )

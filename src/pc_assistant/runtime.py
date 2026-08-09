@@ -57,6 +57,10 @@ class RuntimePaths:
         return self.root / "data"
 
     @property
+    def skills(self) -> Path:
+        return self.root / "skills"
+
+    @property
     def pid(self) -> Path:
         return os_runtime_dir() / "service.pid"
 
