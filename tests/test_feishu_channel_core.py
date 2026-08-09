@@ -763,6 +763,82 @@ async def test_feishu_principal_feed_skips_foreground_task_duplicate(
     assert "task-foreground" not in channel._foreground_task_ids
 
 
+@pytest.mark.asyncio
+async def test_feishu_principal_feed_resolves_background_approval_in_card(
+    tmp_path,
+) -> None:
+    channel = FeishuChannel(_config(tmp_path))
+    created_cards = []
+    updated_cards = []
+    channel._send_card_returning_id = (
+        lambda recipient, card: created_cards.append((recipient, card))
+        or "card-background"
+    )
+    channel._update_card = (
+        lambda message_id, card: updated_cards.append((message_id, card))
+        or True
+    )
+    event = _approval_event(task_id="task-background")
+    feed_event = PrincipalTaskEvent(
+        feed_event_id=5,
+        principal_id="principal-a",
+        event=event,
+    )
+
+    class ApprovalClient:
+        def __init__(self) -> None:
+            self.resolutions = []
+            self.fail_once = True
+
+        async def get_task(self, task_id):
+            assert task_id == "task-background"
+            return SimpleNamespace(
+                state=TaskState.WAITING_APPROVAL,
+                session_handle="session-background",
+            )
+
+        async def resolve_approval(self, approval_id, *, approved):
+            self.resolutions.append((approval_id, approved))
+            if self.fail_once:
+                self.fail_once = False
+                raise RuntimeError("connection lost after resolution")
+            return SimpleNamespace()
+
+    client = ApprovalClient()
+    delivery = asyncio.create_task(
+        channel._deliver_principal_task_event(
+            "ou-user",
+            client,
+            feed_event,
+        )
+    )
+    while "ou-user" not in channel._pending_confirmations:
+        await asyncio.sleep(0)
+
+    assert channel._resolve_confirmation(
+        "ou-user",
+        "confirmation-a",
+        True,
+        task_id="task-background",
+    )
+    assert not await delivery
+    assert await channel._deliver_principal_task_event(
+        "ou-user",
+        client,
+        feed_event,
+    )
+
+    assert client.resolutions == [
+        ("confirmation-a", True),
+        ("confirmation-a", True),
+    ]
+    assert len(created_cards) == 1
+    assert "确认" in json.dumps(created_cards[0][1], ensure_ascii=False)
+    assert updated_cards[0][0] == "card-background"
+    assert "已确认" in json.dumps(updated_cards[0][1], ensure_ascii=False)
+    assert "task-background" not in channel._active_task_presentations
+
+
 def test_feishu_long_fenced_code_keeps_balanced_markdown() -> None:
     text = "```python\n" + ("print('小诺')\n" * 500) + "```\n"
 

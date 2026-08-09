@@ -30,6 +30,7 @@ from pc_assistant.tasks import (
     TERMINAL_TASK_STATES,
     PrincipalTaskEvent,
     TaskEvent,
+    TaskState,
 )
 
 
@@ -847,6 +848,7 @@ class FeishuChannel:
         self._principal_watchers: dict[str, asyncio.Task[None]] = {}
         self._principal_watcher_started_at: dict[str, float] = {}
         self._foreground_task_ids: set[str] = set()
+        self._background_approval_decisions: dict[str, bool] = {}
         self._user_locks: dict[str, asyncio.Lock] = {}
         self._pending_attachments: dict[str, list[ArtifactInputRef]] = {}
         self._active_task_presentations: dict[str, _ActiveTaskPresentation] = {}
@@ -899,6 +901,7 @@ class FeishuChannel:
         await asyncio.gather(*watchers, return_exceptions=True)
         self._principal_watcher_started_at.clear()
         self._foreground_task_ids.clear()
+        self._background_approval_decisions.clear()
         receive_id = self._current_receive_id()
         if receive_id:
             try:
@@ -1739,7 +1742,9 @@ class FeishuChannel:
                     if not self._running:
                         return
                     self._notification_cursors[open_id] = cursor
-                    if feed_event.event.event_type in _TASK_TERMINAL_EVENT_TYPES:
+                    if feed_event.event.event_type in (
+                        _TASK_TERMINAL_EVENT_TYPES | {"approval_requested"}
+                    ):
                         self._save_notification_cursors()
             except asyncio.CancelledError:
                 raise
@@ -1759,6 +1764,14 @@ class FeishuChannel:
         feed_event: PrincipalTaskEvent,
     ) -> bool:
         event = feed_event.event
+        if event.event_type == "approval_requested":
+            if event.task_id in self._foreground_task_ids:
+                return True
+            return await self._deliver_background_approval(
+                open_id,
+                client,
+                event,
+            )
         if event.event_type not in _TASK_TERMINAL_EVENT_TYPES:
             return True
         if event.task_id in self._foreground_task_ids:
@@ -1807,6 +1820,90 @@ class FeishuChannel:
                 exc_info=True,
             )
             return False
+
+    async def _deliver_background_approval(
+        self,
+        open_id: str,
+        client: CoreClient,
+        event: TaskEvent,
+    ) -> bool:
+        approval_id = event.payload.approval_id
+        decided = self._background_approval_decisions.get(approval_id)
+        if decided is not None:
+            try:
+                await client.resolve_approval(approval_id, approved=decided)
+            except Exception:
+                logger.warning(
+                    "Feishu background approval retry failed approval_id=%s",
+                    approval_id,
+                    exc_info=True,
+                )
+                return False
+            self._background_approval_decisions.pop(approval_id, None)
+            return True
+        with self._pending_confirmation_lock:
+            current = self._pending_confirmations.get(open_id)
+            if current is not None and not current.resolved:
+                return False
+        try:
+            snapshot = await client.get_task(event.task_id)
+        except Exception:
+            logger.warning(
+                "Feishu background approval Task lookup failed task_id=%s",
+                event.task_id,
+                exc_info=True,
+            )
+            return False
+        if snapshot.state is not TaskState.WAITING_APPROVAL:
+            return True
+
+        state = _StreamingCardState()
+        presentation = _ActiveTaskPresentation(
+            session_handle=snapshot.session_handle,
+            state=state,
+            update_requested=asyncio.Event(),
+            task_id=event.task_id,
+        )
+        self._active_task_presentations[event.task_id] = presentation
+        confirmation = asyncio.create_task(self._confirm_tool(open_id, event))
+        await asyncio.sleep(0)
+        try:
+            message_id = await asyncio.to_thread(
+                self._send_card_returning_id,
+                open_id,
+                state.build_card(),
+            )
+            if message_id is None:
+                confirmation.cancel()
+                await asyncio.gather(confirmation, return_exceptions=True)
+                return False
+            approved = await confirmation
+            self._background_approval_decisions[approval_id] = approved
+            await asyncio.to_thread(
+                self._update_card,
+                message_id,
+                state.build_card(),
+            )
+            await client.resolve_approval(
+                approval_id,
+                approved=approved,
+            )
+            self._background_approval_decisions.pop(approval_id, None)
+            return True
+        except asyncio.CancelledError:
+            confirmation.cancel()
+            await asyncio.gather(confirmation, return_exceptions=True)
+            raise
+        except Exception:
+            logger.warning(
+                "Feishu background approval delivery failed task_id=%s",
+                event.task_id,
+                exc_info=True,
+            )
+            return False
+        finally:
+            if self._active_task_presentations.get(event.task_id) is presentation:
+                self._active_task_presentations.pop(event.task_id, None)
 
     def _claim_message(self, message_id: str) -> bool:
         if not message_id:

@@ -40,6 +40,10 @@ working_directory: "."
 service_host: "127.0.0.1"
 service_port: 9527
 service_token: ""
+webhook_enabled: false
+webhook_host: "127.0.0.1"
+webhook_port: 9528
+webhook_routes: {}
 feishu_enabled: false
 feishu_app_id: ""
 feishu_app_secret: ""

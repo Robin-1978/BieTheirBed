@@ -1,6 +1,6 @@
 # Knoa Durable Task Design
 
-> Status: active forward design; B1-B4 complete, B5 automation core complete
+> Status: active forward design; B1-B5 complete
 >
 > Date: 2026-08-09
 >
@@ -464,9 +464,13 @@ outside INFO logs.
 > entering Task input. Core now also publishes a durable, ordered,
 > principal-scoped Task event feed. Feishu consumes that standard feed with a
 > persisted cursor, suppresses duplicate delivery for Tasks already presented
-> in a live card, and proactively delivers background Task terminal results.
-> HTTP webhook adaptation remains outside the automation core as the next B5
-> adapter-layer step.
+> in a live card, presents durable background approvals, and proactively
+> delivers terminal results.
+> The optional HTTP webhook adapter is mounted above Core on a separate
+> loopback port. Declarative routes bind an external path to one principal and
+> Trigger, verify HMAC-SHA256 over the external event ID and bounded raw JSON
+> body, then call the authenticated Core Trigger API. It owns no Task execution
+> logic and must be exposed externally only through a TLS reverse proxy.
 
 ## 14. Acceptance criteria
 
