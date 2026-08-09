@@ -170,6 +170,12 @@ Gateway device record and are never sent to Core.
 - strict request/rate/body limits;
 - selected CoreClient command adaptation.
 
+> Progress: the cryptographic and session foundation is implemented. Pairing
+> and authentication use single-use persisted challenges, canonical signed
+> payloads and Ed25519 proof; opaque session secrets are stored only as hashes,
+> expire within a configured short window and are rejected immediately when the
+> bound device is revoked. No HTTP/WebSocket listener is mounted yet.
+
 ### D3 — secure remote transport
 
 - TLS configuration and fail-closed public binding;

@@ -382,7 +382,10 @@ Task 至少记录：
 > `docs/knoa-secure-gateway-design.md`。App 深链在真实 bundle scheme/verified domain
 > 确定前不生成占位地址。D1 身份持久层已完成：独立 owner-only Gateway 数据库、
 > 256 位单次配对 secret、原子消费、Ed25519 公钥格式约束、principal-scoped 设备列表
-> 与即时撤销均已落地；尚未开放网络 listener 或声称完成签名验证。
+> 与即时撤销均已落地。D2 的密码学基础也已完成：持久单次 challenge、规范化签名
+> payload、Ed25519 持有证明、仅存 hash 的短期 opaque session，以及设备撤销后的即时
+> session 拒绝。尚未开放网络 listener；下一步是严格限流的 loopback Gateway API 与
+> 选定 CoreClient 命令适配。
 
 ### 9.1 第一版范围
 

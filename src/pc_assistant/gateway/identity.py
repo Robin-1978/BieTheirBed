@@ -4,10 +4,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import os
 import secrets
 import sqlite3
-import stat
 import time
 import uuid
 from dataclasses import dataclass
@@ -18,6 +16,7 @@ from pc_assistant.sqlite_schema import (
     require_exact_table,
     require_index_columns,
 )
+from pc_assistant.gateway.storage import prepare_owner_only_database
 
 
 DeviceState = Literal["active", "revoked"]
@@ -70,35 +69,15 @@ class GatewayIdentityRepository:
         device_id_factory=lambda: f"dev_{uuid.uuid4().hex}",
         secret_factory=lambda: secrets.token_urlsafe(32),
     ) -> None:
-        self._db_path = Path(db_path).expanduser().resolve()
+        self._db_path = prepare_owner_only_database(
+            db_path,
+            label="Gateway identity database",
+        )
         self._clock = clock
         self._grant_id_factory = grant_id_factory
         self._device_id_factory = device_id_factory
         self._secret_factory = secret_factory
-        self._prepare_database()
         self._initialize()
-
-    def _prepare_database(self) -> None:
-        self._db_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if self._db_path.parent.stat().st_uid != os.geteuid():
-            raise RuntimeError("Gateway identity directory has the wrong owner")
-        self._db_path.parent.chmod(0o700)
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-        if hasattr(os, "O_NOFOLLOW"):
-            flags |= os.O_NOFOLLOW
-        try:
-            descriptor = os.open(self._db_path, flags, 0o600)
-        except FileExistsError:
-            metadata = self._db_path.lstat()
-            if not stat.S_ISREG(metadata.st_mode):
-                raise RuntimeError("Gateway identity database must be a regular file")
-            if metadata.st_uid != os.geteuid():
-                raise RuntimeError("Gateway identity database has the wrong owner")
-            if stat.S_IMODE(metadata.st_mode) & 0o077:
-                raise RuntimeError("Gateway identity database must be owner-only")
-        else:
-            os.close(descriptor)
-        self._db_path.chmod(0o600)
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._db_path)
@@ -341,6 +320,47 @@ class GatewayIdentityRepository:
         if row is None:
             raise DeviceNotFoundError("Active device not found")
         return self._device(row)
+
+    def active_device_by_id(self, device_id: str) -> GatewayDevice:
+        normalized_device = self._identifier(device_id, "Device ID")
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT device_id, principal_id, display_name, public_key,
+                       state, created_at, last_seen_at, revoked_at
+                FROM gateway_devices
+                WHERE device_id = ? AND state = 'active'
+                """,
+                (normalized_device,),
+            ).fetchone()
+        if row is None:
+            raise DeviceNotFoundError("Active device not found")
+        return self._device(row)
+
+    def mark_seen(self, device_id: str) -> GatewayDevice:
+        device = self.active_device_by_id(device_id)
+        now = float(self._clock())
+        with self._connect() as connection:
+            updated = connection.execute(
+                """
+                UPDATE gateway_devices
+                SET last_seen_at = ?
+                WHERE device_id = ? AND state = 'active'
+                """,
+                (now, device.device_id),
+            )
+            if updated.rowcount != 1:
+                raise DeviceNotFoundError("Active device not found")
+        return GatewayDevice(
+            device_id=device.device_id,
+            principal_id=device.principal_id,
+            display_name=device.display_name,
+            public_key=device.public_key,
+            state=device.state,
+            created_at=device.created_at,
+            last_seen_at=now,
+            revoked_at=device.revoked_at,
+        )
 
     def revoke_device(self, principal_id: str, device_id: str) -> GatewayDevice:
         principal = self._principal(principal_id)
