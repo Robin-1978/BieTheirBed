@@ -31,6 +31,7 @@ from pc_assistant.service.core_client import (
 from pc_assistant.service.core_server import CoreServer, StaticTokenAuthenticator
 from pc_assistant.tasks import (
     DurableApprovalService,
+    DurableToolCommitService,
     TaskEvent,
     TaskEventHub,
     TaskExecutor,
@@ -189,7 +190,8 @@ async def _connected(
     )
     hub = TaskEventHub()
     approvals = DurableApprovalService(repository, hub)
-    executor = TaskExecutor(repository, runtime, approvals, hub)
+    commits = DurableToolCommitService(repository)
+    executor = TaskExecutor(repository, runtime, approvals, commits, hub)
     tasks = TaskService(repository, executor, approvals, hub)
     control = ControlService(
         sessions,
@@ -270,6 +272,45 @@ async def test_client_disconnect_only_closes_subscription(tmp_path: Path) -> Non
         TaskState.COMPLETED
     )
     await connected.tasks.stop()
+
+
+@pytest.mark.asyncio
+async def test_client_can_pause_and_resume_running_task(tmp_path: Path) -> None:
+    connected = await _connected(tmp_path)
+    connected.runtime.hold = True
+    try:
+        session = await connected.client.create_session()
+        accepted = await connected.client.create_task(session, "long task")
+        await connected.runtime.started.wait()
+
+        requested = await connected.client.pause_task(
+            accepted.task_id,
+            reason="pause from phone",
+        )
+        assert requested.result.state is TaskState.RUNNING
+        for _ in range(100):
+            task = connected.repository.get("local", accepted.task_id)
+            if task.state is TaskState.PAUSED:
+                break
+            await asyncio.sleep(0.01)
+
+        assert connected.repository.get("local", accepted.task_id).state is (
+            TaskState.PAUSED
+        )
+        resumed = await connected.client.resume_task(accepted.task_id)
+        assert resumed.state is TaskState.QUEUED
+        connected.runtime.release.set()
+        for _ in range(100):
+            task = connected.repository.get("local", accepted.task_id)
+            if task.state is TaskState.COMPLETED:
+                break
+            await asyncio.sleep(0.01)
+        assert connected.repository.get("local", accepted.task_id).state is (
+            TaskState.COMPLETED
+        )
+    finally:
+        connected.runtime.release.set()
+        await connected.close()
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import math
 import secrets
@@ -21,12 +22,17 @@ from pc_assistant.tasks.models import (
     ApprovalState,
     TERMINAL_TASK_STATES,
     TaskApprovalRecord,
+    TaskAttemptRecord,
+    TaskAttemptState,
     TaskCancelResult,
     TaskEvent,
     TaskEventPayload,
     TaskEventType,
+    TaskPauseResult,
     TaskRecord,
     TaskState,
+    TaskToolStepRecord,
+    TaskToolStepState,
 )
 
 
@@ -152,6 +158,33 @@ class TaskRepository:
                     occurred_at REAL NOT NULL,
                     PRIMARY KEY(task_id, event_seq)
                 );
+                CREATE TABLE IF NOT EXISTS runtime_task_attempts (
+                    attempt_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL
+                        REFERENCES runtime_tasks(task_id) ON DELETE CASCADE,
+                    ordinal INTEGER NOT NULL,
+                    state TEXT NOT NULL,
+                    started_at REAL NOT NULL,
+                    finished_at REAL,
+                    failure_code TEXT NOT NULL,
+                    UNIQUE(task_id, ordinal)
+                );
+                CREATE TABLE IF NOT EXISTS runtime_task_tool_steps (
+                    tool_step_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL
+                        REFERENCES runtime_tasks(task_id) ON DELETE CASCADE,
+                    principal_id TEXT NOT NULL,
+                    tool_call_id TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    arguments_json TEXT NOT NULL,
+                    effect TEXT NOT NULL,
+                    risk TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    result_json TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    UNIQUE(task_id, tool_step_id)
+                );
                 CREATE TABLE IF NOT EXISTS runtime_task_approvals (
                     approval_id TEXT PRIMARY KEY,
                     task_id TEXT NOT NULL
@@ -180,6 +213,10 @@ class TaskRepository:
                     ON runtime_task_approvals(
                         principal_id, state, created_at, approval_id
                     );
+                CREATE INDEX IF NOT EXISTS runtime_task_attempts_by_task
+                    ON runtime_task_attempts(task_id, ordinal);
+                CREATE INDEX IF NOT EXISTS runtime_task_tool_steps_by_task_state
+                    ON runtime_task_tool_steps(task_id, state, created_at);
                 """
             )
             require_exact_table(
@@ -223,6 +260,39 @@ class TaskRepository:
                     ("occurred_at", "REAL", True, None, 0),
                 ),
                 label="Runtime Task event",
+            )
+            require_exact_table(
+                db,
+                "runtime_task_attempts",
+                (
+                    ("attempt_id", "TEXT", False, None, 1),
+                    ("task_id", "TEXT", True, None, 0),
+                    ("ordinal", "INTEGER", True, None, 0),
+                    ("state", "TEXT", True, None, 0),
+                    ("started_at", "REAL", True, None, 0),
+                    ("finished_at", "REAL", False, None, 0),
+                    ("failure_code", "TEXT", True, None, 0),
+                ),
+                label="Runtime Task attempt",
+            )
+            require_exact_table(
+                db,
+                "runtime_task_tool_steps",
+                (
+                    ("tool_step_id", "TEXT", False, None, 1),
+                    ("task_id", "TEXT", True, None, 0),
+                    ("principal_id", "TEXT", True, None, 0),
+                    ("tool_call_id", "TEXT", True, None, 0),
+                    ("tool_name", "TEXT", True, None, 0),
+                    ("arguments_json", "TEXT", True, None, 0),
+                    ("effect", "TEXT", True, None, 0),
+                    ("risk", "TEXT", True, None, 0),
+                    ("state", "TEXT", True, None, 0),
+                    ("result_json", "TEXT", True, None, 0),
+                    ("created_at", "REAL", True, None, 0),
+                    ("updated_at", "REAL", True, None, 0),
+                ),
+                label="Runtime Task tool step",
             )
             require_exact_table(
                 db,
@@ -282,6 +352,34 @@ class TaskRepository:
             )
             require_foreign_keys(
                 db,
+                "runtime_task_attempts",
+                (
+                    (
+                        "runtime_tasks",
+                        "task_id",
+                        "task_id",
+                        "NO ACTION",
+                        "CASCADE",
+                    ),
+                ),
+                label="Runtime Task attempt",
+            )
+            require_foreign_keys(
+                db,
+                "runtime_task_tool_steps",
+                (
+                    (
+                        "runtime_tasks",
+                        "task_id",
+                        "task_id",
+                        "NO ACTION",
+                        "CASCADE",
+                    ),
+                ),
+                label="Runtime Task tool step",
+            )
+            require_foreign_keys(
+                db,
                 "runtime_task_approvals",
                 (
                     (
@@ -311,6 +409,18 @@ class TaskRepository:
                 "runtime_task_approvals_by_owner_state",
                 ("principal_id", "state", "created_at", "approval_id"),
                 label="Runtime Task approval",
+            )
+            require_index_columns(
+                db,
+                "runtime_task_attempts_by_task",
+                ("task_id", "ordinal"),
+                label="Runtime Task attempt",
+            )
+            require_index_columns(
+                db,
+                "runtime_task_tool_steps_by_task_state",
+                ("task_id", "state", "created_at"),
+                label="Runtime Task tool step",
             )
 
     @staticmethod
@@ -411,6 +521,59 @@ class TaskRepository:
         )
 
     @staticmethod
+    def _attempt_id(task_id: str, ordinal: int) -> str:
+        return hashlib.sha256(
+            f"{task_id}\0{ordinal}".encode("utf-8")
+        ).hexdigest()[:32]
+
+    @staticmethod
+    def _attempt_record(row: sqlite3.Row) -> TaskAttemptRecord:
+        return TaskAttemptRecord(
+            attempt_id=str(row["attempt_id"]),
+            task_id=str(row["task_id"]),
+            ordinal=int(row["ordinal"]),
+            state=TaskAttemptState(str(row["state"])),
+            started_at=float(row["started_at"]),
+            finished_at=(
+                None if row["finished_at"] is None else float(row["finished_at"])
+            ),
+            failure_code=str(row["failure_code"]),
+        )
+
+    @staticmethod
+    def _json_object(raw: str, *, label: str) -> dict[str, object]:
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"{label} is corrupt") from exc
+        if not isinstance(value, dict):
+            raise RuntimeError(f"{label} is corrupt")
+        return value
+
+    @classmethod
+    def _tool_step_record(cls, row: sqlite3.Row) -> TaskToolStepRecord:
+        return TaskToolStepRecord(
+            tool_step_id=str(row["tool_step_id"]),
+            task_id=str(row["task_id"]),
+            principal_id=str(row["principal_id"]),
+            tool_call_id=str(row["tool_call_id"]),
+            tool_name=str(row["tool_name"]),
+            arguments=cls._json_object(
+                str(row["arguments_json"]),
+                label="Task tool step arguments",
+            ),
+            effect=str(row["effect"]),
+            risk=str(row["risk"]),
+            state=TaskToolStepState(str(row["state"])),
+            result=cls._json_object(
+                str(row["result_json"]),
+                label="Task tool step result",
+            ),
+            created_at=float(row["created_at"]),
+            updated_at=float(row["updated_at"]),
+        )
+
+    @staticmethod
     def _owned_session(db: sqlite3.Connection, scope: RuntimeScope) -> None:
         row = db.execute(
             """SELECT 1 FROM runtime_sessions
@@ -485,6 +648,28 @@ class TaskRepository:
             event_type=event_type,
             payload=payload,
             occurred_at=occurred_at,
+        )
+
+    @staticmethod
+    def _finish_active_attempt(
+        db: sqlite3.Connection,
+        task_id: str,
+        state: TaskAttemptState,
+        now: float,
+        *,
+        failure_code: str = "",
+    ) -> None:
+        db.execute(
+            """UPDATE runtime_task_attempts SET
+                   state=?, finished_at=?, failure_code=?
+               WHERE task_id=? AND state=?""",
+            (
+                state.value,
+                now,
+                failure_code,
+                task_id,
+                TaskAttemptState.RUNNING.value,
+            ),
         )
 
     def create(
@@ -730,6 +915,299 @@ class TaskRepository:
             )
         return tasks, next_cursor
 
+    def list_attempts(
+        self,
+        principal_id: str,
+        task_id: str,
+    ) -> tuple[TaskAttemptRecord, ...]:
+        task = self.get(principal_id, task_id)
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT * FROM runtime_task_attempts
+                   WHERE task_id=? ORDER BY ordinal""",
+                (task.task_id,),
+            ).fetchall()
+        return tuple(self._attempt_record(row) for row in rows)
+
+    def begin_tool_step(
+        self,
+        principal_id: str,
+        task_id: str,
+        *,
+        tool_step_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        arguments: dict[str, object],
+        effect: str,
+        risk: str,
+    ) -> tuple[TaskToolStepRecord, bool]:
+        principal = self._normalize_identifier(
+            principal_id,
+            label="principal_id",
+            limit=256,
+        )
+        normalized_task_id = self._normalize_identifier(
+            task_id,
+            label="task_id",
+            limit=128,
+        )
+        normalized_step_id = self._normalize_identifier(
+            tool_step_id,
+            label="tool_step_id",
+            limit=128,
+        )
+        normalized_call_id = self._normalize_identifier(
+            tool_call_id,
+            label="tool_call_id",
+            limit=256,
+        )
+        normalized_tool_name = self._normalize_identifier(
+            tool_name,
+            label="tool_name",
+            limit=256,
+        )
+        if effect not in {
+            "read_only",
+            "local_write",
+            "external_side_effect",
+            "desktop_control",
+            "unknown",
+        }:
+            raise ValueError("Task tool effect is invalid")
+        if risk not in {"low", "medium", "high"}:
+            raise ValueError("Task tool risk is invalid")
+        arguments_json = json.dumps(
+            arguments,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        if len(arguments_json.encode("utf-8")) > _MAX_EVENT_BYTES:
+            raise ValueError("Task tool arguments exceed the size limit")
+        now = self._clock()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            task = self._owned_task(db, principal, normalized_task_id)
+            if TaskState(str(task["state"])) is not TaskState.RUNNING:
+                raise TaskTransitionError(
+                    "Task must be running before tool commit"
+                )
+            existing = db.execute(
+                """SELECT * FROM runtime_task_tool_steps
+                   WHERE tool_step_id=? AND task_id=? AND principal_id=?""",
+                (normalized_step_id, normalized_task_id, principal),
+            ).fetchone()
+            if existing is not None:
+                record = self._tool_step_record(existing)
+                if (
+                    record.tool_call_id != normalized_call_id
+                    or record.tool_name != normalized_tool_name
+                    or record.arguments != arguments
+                    or record.effect != effect
+                    or record.risk != risk
+                ):
+                    raise TaskIdempotencyConflictError(
+                        "tool_step_id already belongs to another tool commit"
+                    )
+                return record, False
+            db.execute(
+                """INSERT INTO runtime_task_tool_steps(
+                       tool_step_id, task_id, principal_id, tool_call_id,
+                       tool_name, arguments_json, effect, risk, state,
+                       result_json, created_at, updated_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    normalized_step_id,
+                    normalized_task_id,
+                    principal,
+                    normalized_call_id,
+                    normalized_tool_name,
+                    arguments_json,
+                    effect,
+                    risk,
+                    TaskToolStepState.COMMITTING.value,
+                    "{}",
+                    now,
+                    now,
+                ),
+            )
+            row = db.execute(
+                """SELECT * FROM runtime_task_tool_steps
+                   WHERE tool_step_id=?""",
+                (normalized_step_id,),
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("Task tool step could not be persisted")
+            return self._tool_step_record(row), True
+
+    def finish_tool_step(
+        self,
+        principal_id: str,
+        task_id: str,
+        tool_step_id: str,
+        *,
+        state: TaskToolStepState,
+        result: dict[str, object],
+    ) -> tuple[TaskToolStepRecord, bool]:
+        if state not in {
+            TaskToolStepState.COMPLETED,
+            TaskToolStepState.FAILED,
+        }:
+            raise ValueError("Task tool step may finish only completed or failed")
+        principal = self._normalize_identifier(
+            principal_id,
+            label="principal_id",
+            limit=256,
+        )
+        normalized_task_id = self._normalize_identifier(
+            task_id,
+            label="task_id",
+            limit=128,
+        )
+        normalized_step_id = self._normalize_identifier(
+            tool_step_id,
+            label="tool_step_id",
+            limit=128,
+        )
+        result_json = json.dumps(
+            result,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        if len(result_json.encode("utf-8")) > _MAX_EVENT_BYTES:
+            raise ValueError("Task tool result exceeds the size limit")
+        now = self._clock()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._owned_task(db, principal, normalized_task_id)
+            row = db.execute(
+                """SELECT * FROM runtime_task_tool_steps
+                   WHERE tool_step_id=? AND task_id=? AND principal_id=?""",
+                (normalized_step_id, normalized_task_id, principal),
+            ).fetchone()
+            if row is None:
+                raise TaskNotFoundError("Task tool step not found")
+            current = self._tool_step_record(row)
+            if current.state is not TaskToolStepState.COMMITTING:
+                if current.state is state and current.result == result:
+                    return current, False
+                raise TaskTransitionError("Task tool step is already terminal")
+            db.execute(
+                """UPDATE runtime_task_tool_steps SET
+                       state=?, result_json=?, updated_at=?
+                   WHERE tool_step_id=? AND state=?""",
+                (
+                    state.value,
+                    result_json,
+                    now,
+                    normalized_step_id,
+                    TaskToolStepState.COMMITTING.value,
+                ),
+            )
+            updated = db.execute(
+                """SELECT * FROM runtime_task_tool_steps
+                   WHERE tool_step_id=?""",
+                (normalized_step_id,),
+            ).fetchone()
+            if updated is None:
+                raise RuntimeError("Task tool step disappeared")
+            return self._tool_step_record(updated), True
+
+    def pause_for_unknown_tool_outcome(
+        self,
+        principal_id: str,
+        task_id: str,
+        *,
+        reason: str,
+    ) -> tuple[TaskRecord, TaskEvent]:
+        """Atomically quarantine unfinished tool commits and pause their Task."""
+
+        principal = self._normalize_identifier(
+            principal_id,
+            label="principal_id",
+            limit=256,
+        )
+        normalized_task_id = self._normalize_identifier(
+            task_id,
+            label="task_id",
+            limit=128,
+        )
+        normalized_reason = reason.strip()
+        if not normalized_reason or len(normalized_reason) > 2000:
+            raise ValueError(
+                "Unknown tool outcome reason must contain 1-2000 characters"
+            )
+        now = self._clock()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = self._owned_task(db, principal, normalized_task_id)
+            current = TaskState(str(row["state"]))
+            if current is not TaskState.RUNNING:
+                raise TaskTransitionError(
+                    "Only a running Task can report an unknown tool outcome"
+                )
+            db.execute(
+                """UPDATE runtime_task_tool_steps SET
+                       state=?, updated_at=?
+                   WHERE task_id=? AND principal_id=? AND state=?""",
+                (
+                    TaskToolStepState.OUTCOME_UNKNOWN.value,
+                    now,
+                    normalized_task_id,
+                    principal,
+                    TaskToolStepState.COMMITTING.value,
+                ),
+            )
+            self._finish_active_attempt(
+                db,
+                normalized_task_id,
+                TaskAttemptState.INTERRUPTED,
+                now,
+                failure_code="tool_outcome_unknown",
+            )
+            event = self._append_event(
+                db,
+                row,
+                "state_changed",
+                TaskEventPayload(
+                    previous_state=TaskState.RUNNING,
+                    state=TaskState.PAUSED,
+                    phase="outcome_unknown",
+                    reason=normalized_reason,
+                ),
+                now,
+            )
+            db.execute(
+                """UPDATE runtime_tasks SET
+                       state=?, phase=?, lease_owner='', lease_expires_at=NULL,
+                       updated_at=?, next_event_seq=?, revision=revision+1
+                   WHERE task_id=?""",
+                (
+                    TaskState.PAUSED.value,
+                    "outcome_unknown",
+                    now,
+                    event.event_seq + 1,
+                    normalized_task_id,
+                ),
+            )
+            updated = self._owned_task(db, principal, normalized_task_id)
+            return self._record(updated), event
+
+    def list_tool_steps(
+        self,
+        principal_id: str,
+        task_id: str,
+    ) -> tuple[TaskToolStepRecord, ...]:
+        task = self.get(principal_id, task_id)
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT * FROM runtime_task_tool_steps
+                   WHERE task_id=? ORDER BY created_at, tool_step_id""",
+                (task.task_id,),
+            ).fetchall()
+        return tuple(self._tool_step_record(row) for row in rows)
+
     def list_events(
         self,
         principal_id: str,
@@ -786,6 +1264,7 @@ class TaskRepository:
         )
         now = self._clock()
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             row = self._owned_task(db, principal, normalized_task_id)
             if TaskState(str(row["state"])) in TERMINAL_TASK_STATES:
                 raise TaskTransitionError("Terminal Task cannot accept new events")
@@ -820,6 +1299,7 @@ class TaskRepository:
             raise ValueError("Task cancellation reason exceeds 2000 characters")
         now = self._clock()
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             row = self._owned_task(db, principal, normalized_task_id)
             state = TaskState(str(row["state"]))
             if state in TERMINAL_TASK_STATES:
@@ -843,6 +1323,13 @@ class TaskRepository:
                             normalized_task_id,
                             ApprovalState.PENDING.value,
                         ),
+                    )
+                    self._finish_active_attempt(
+                        db,
+                        normalized_task_id,
+                        TaskAttemptState.CANCELLED,
+                        now,
+                        failure_code="cancelled",
                     )
                 event = self._append_event(
                     db,
@@ -895,12 +1382,120 @@ class TaskRepository:
             )
             return TaskCancelResult(accepted=True, state=state), event
 
+    def request_pause(
+        self,
+        principal_id: str,
+        task_id: str,
+        *,
+        reason: str = "",
+    ) -> tuple[TaskPauseResult, TaskEvent | None]:
+        """Persist a pause request and stop immediately only at a safe boundary."""
+
+        principal = self._normalize_identifier(
+            principal_id,
+            label="principal_id",
+            limit=256,
+        )
+        normalized_task_id = self._normalize_identifier(
+            task_id,
+            label="task_id",
+            limit=128,
+        )
+        normalized_reason = reason.strip()
+        if len(normalized_reason) > 2000:
+            raise ValueError("Task pause reason exceeds 2000 characters")
+        now = self._clock()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = self._owned_task(db, principal, normalized_task_id)
+            state = TaskState(str(row["state"]))
+            if state in TERMINAL_TASK_STATES:
+                raise TaskTransitionError("Terminal Task cannot be paused")
+            if state is TaskState.PAUSED:
+                return TaskPauseResult(accepted=True, state=state), None
+            if state is TaskState.RUNNING:
+                if str(row["phase"]) == "pause_requested":
+                    return TaskPauseResult(accepted=True, state=state), None
+                event = self._append_event(
+                    db,
+                    row,
+                    "warning",
+                    TaskEventPayload(
+                        state=state,
+                        phase="pause_requested",
+                        reason=normalized_reason or "Pause requested",
+                    ),
+                    now,
+                )
+                db.execute(
+                    """UPDATE runtime_tasks SET
+                           phase=?, updated_at=?, next_event_seq=?, revision=revision+1
+                       WHERE task_id=?""",
+                    (
+                        "pause_requested",
+                        now,
+                        event.event_seq + 1,
+                        normalized_task_id,
+                    ),
+                )
+                return TaskPauseResult(accepted=True, state=state), event
+            if state is TaskState.WAITING_APPROVAL:
+                db.execute(
+                    """UPDATE runtime_task_approvals SET
+                           state=?, resolved_at=?, resolved_by=?
+                       WHERE task_id=? AND state=?""",
+                    (
+                        ApprovalState.CANCELLED.value,
+                        now,
+                        "task_paused",
+                        normalized_task_id,
+                        ApprovalState.PENDING.value,
+                    ),
+                )
+                self._finish_active_attempt(
+                    db,
+                    normalized_task_id,
+                    TaskAttemptState.INTERRUPTED,
+                    now,
+                    failure_code="paused",
+                )
+            event = self._append_event(
+                db,
+                row,
+                "state_changed",
+                TaskEventPayload(
+                    previous_state=state,
+                    state=TaskState.PAUSED,
+                    phase="manual_pause",
+                    reason=normalized_reason or "Task paused",
+                ),
+                now,
+            )
+            db.execute(
+                """UPDATE runtime_tasks SET
+                       state=?, phase=?, lease_owner='', lease_expires_at=NULL,
+                       updated_at=?, next_event_seq=?, revision=revision+1
+                   WHERE task_id=?""",
+                (
+                    TaskState.PAUSED.value,
+                    "manual_pause",
+                    now,
+                    event.event_seq + 1,
+                    normalized_task_id,
+                ),
+            )
+            return (
+                TaskPauseResult(accepted=True, state=TaskState.PAUSED),
+                event,
+            )
+
     def resume(
         self,
         principal_id: str,
         task_id: str,
         *,
         reason: str = "",
+        acknowledge_outcome_unknown: bool = False,
     ) -> tuple[TaskRecord, TaskEvent]:
         principal = self._normalize_identifier(
             principal_id,
@@ -922,6 +1517,13 @@ class TaskRepository:
             state = TaskState(str(row["state"]))
             if state is not TaskState.PAUSED:
                 raise TaskTransitionError("Only a paused Task can be resumed")
+            if (
+                str(row["phase"]) == "outcome_unknown"
+                and not acknowledge_outcome_unknown
+            ):
+                raise TaskTransitionError(
+                    "Unknown tool outcome must be explicitly acknowledged"
+                )
             event = self._append_event(
                 db,
                 row,
@@ -936,7 +1538,7 @@ class TaskRepository:
             db.execute(
                 """UPDATE runtime_tasks SET
                        state=?, cancel_requested=0, lease_owner='',
-                       lease_expires_at=NULL, updated_at=?, next_event_seq=?,
+                       lease_expires_at=NULL, phase='', updated_at=?, next_event_seq=?,
                        revision=revision+1
                    WHERE task_id=?""",
                 (
@@ -1183,6 +1785,13 @@ class TaskRepository:
             if resume_state is TaskState.QUEUED:
                 lease_owner = ""
                 lease_expires_at = None
+                self._finish_active_attempt(
+                    db,
+                    approval.task_id,
+                    TaskAttemptState.INTERRUPTED,
+                    now,
+                    failure_code="approval_wait_interrupted",
+                )
             db.execute(
                 """UPDATE runtime_tasks SET
                        state=?, lease_owner=?, lease_expires_at=?, updated_at=?,
@@ -1254,6 +1863,7 @@ class TaskRepository:
             raise ValueError("Task terminal metadata exceeds its size limit")
         now = self._clock()
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             row = self._owned_task(db, principal, normalized_task_id)
             current = TaskState(str(row["state"]))
             if expected_revision is not None and int(row["revision"]) != expected_revision:
@@ -1279,6 +1889,28 @@ class TaskRepository:
                 reason=normalized_reason,
             )
             event = self._append_event(db, row, event_type, payload, now)
+            attempt_state = {
+                TaskState.COMPLETED: TaskAttemptState.COMPLETED,
+                TaskState.FAILED: TaskAttemptState.FAILED,
+                TaskState.CANCELLED: TaskAttemptState.CANCELLED,
+                TaskState.PAUSED: TaskAttemptState.INTERRUPTED,
+            }.get(target)
+            if attempt_state is not None:
+                self._finish_active_attempt(
+                    db,
+                    normalized_task_id,
+                    attempt_state,
+                    now,
+                    failure_code=(
+                        failure_code
+                        if target is TaskState.FAILED
+                        else "paused"
+                        if target is TaskState.PAUSED
+                        else "cancelled"
+                        if target is TaskState.CANCELLED
+                        else ""
+                    ),
+                )
             started_at = row["started_at"]
             if target is TaskState.RUNNING and started_at is None:
                 started_at = now
@@ -1380,6 +2012,22 @@ class TaskRepository:
                 state=TaskState.RUNNING,
             )
             event = self._append_event(db, row, "state_changed", payload, now)
+            ordinal = int(row["attempt_count"]) + 1
+            db.execute(
+                """INSERT INTO runtime_task_attempts(
+                       attempt_id, task_id, ordinal, state, started_at,
+                       finished_at, failure_code
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    self._attempt_id(str(row["task_id"]), ordinal),
+                    str(row["task_id"]),
+                    ordinal,
+                    TaskAttemptState.RUNNING.value,
+                    now,
+                    None,
+                    "",
+                ),
+            )
             db.execute(
                 """UPDATE runtime_tasks SET
                        state=?, attempt_count=attempt_count+1,
@@ -1414,12 +2062,92 @@ class TaskRepository:
         recovered: list[TaskEvent] = []
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                """UPDATE runtime_task_tool_steps SET
+                       state=?, updated_at=?
+                   WHERE state=?""",
+                (
+                    TaskToolStepState.OUTCOME_UNKNOWN.value,
+                    now,
+                    TaskToolStepState.COMMITTING.value,
+                ),
+            )
+            waiting_rows = db.execute(
+                """SELECT * FROM runtime_tasks
+                   WHERE state=? ORDER BY created_at, task_id""",
+                (TaskState.WAITING_APPROVAL.value,),
+            ).fetchall()
+            for row in waiting_rows:
+                self._finish_active_attempt(
+                    db,
+                    str(row["task_id"]),
+                    TaskAttemptState.INTERRUPTED,
+                    now,
+                    failure_code="core_restart_waiting_approval",
+                )
+                event = self._append_event(
+                    db,
+                    row,
+                    "warning",
+                    TaskEventPayload(
+                        state=TaskState.WAITING_APPROVAL,
+                        phase="waiting_approval",
+                        reason=(
+                            "Core restarted while approval was pending; the approval "
+                            "remains valid and will start a new attempt when resolved"
+                        ),
+                    ),
+                    now,
+                )
+                db.execute(
+                    """UPDATE runtime_tasks SET
+                           lease_owner='', lease_expires_at=NULL, updated_at=?,
+                           next_event_seq=?, revision=revision+1
+                       WHERE task_id=?""",
+                    (
+                        now,
+                        event.event_seq + 1,
+                        str(row["task_id"]),
+                    ),
+                )
+                recovered.append(event)
             rows = db.execute(
                 """SELECT * FROM runtime_tasks
                    WHERE state=? ORDER BY created_at, task_id""",
                 (TaskState.RUNNING.value,),
             ).fetchall()
             for row in rows:
+                unknown_commit = db.execute(
+                    """SELECT 1 FROM runtime_task_tool_steps
+                       WHERE task_id=? AND state=? LIMIT 1""",
+                    (
+                        str(row["task_id"]),
+                        TaskToolStepState.OUTCOME_UNKNOWN.value,
+                    ),
+                ).fetchone()
+                pause_requested = str(row["phase"]) == "pause_requested"
+                phase = (
+                    "outcome_unknown"
+                    if unknown_commit is not None
+                    else "manual_pause"
+                    if pause_requested
+                    else "interrupted"
+                )
+                reason = (
+                    "Core restarted during a tool commit; its outcome is unknown "
+                    "and explicit recovery is required"
+                    if unknown_commit is not None
+                    else "The persisted pause request was completed during Core recovery"
+                    if pause_requested
+                    else "Core restarted before execution completed; explicit resume is required"
+                )
+                self._finish_active_attempt(
+                    db,
+                    str(row["task_id"]),
+                    TaskAttemptState.INTERRUPTED,
+                    now,
+                    failure_code="core_restart",
+                )
                 event = self._append_event(
                     db,
                     row,
@@ -1427,20 +2155,19 @@ class TaskRepository:
                     TaskEventPayload(
                         previous_state=TaskState.RUNNING,
                         state=TaskState.PAUSED,
-                        reason=(
-                            "Core restarted while execution outcome was unknown; "
-                            "explicit resume is required"
-                        ),
+                        phase=phase,
+                        reason=reason,
                     ),
                     now,
                 )
                 db.execute(
                     """UPDATE runtime_tasks SET
-                           state=?, lease_owner='', lease_expires_at=NULL,
+                           state=?, phase=?, lease_owner='', lease_expires_at=NULL,
                            updated_at=?, next_event_seq=?, revision=revision+1
                        WHERE task_id=?""",
                     (
                         TaskState.PAUSED.value,
+                        phase,
                         now,
                         event.event_seq + 1,
                         str(row["task_id"]),

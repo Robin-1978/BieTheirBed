@@ -48,6 +48,7 @@ from pc_assistant.service.core_api import (
     ListToolsRequest,
     MemoryClearedMessage,
     MemoryListMessage,
+    PauseTaskRequest,
     ResolveApprovalRequest,
     ResumeTaskRequest,
     SessionCreatedMessage,
@@ -58,6 +59,7 @@ from pc_assistant.service.core_api import (
     TaskCancelResultMessage,
     TaskEventMessage,
     TaskListMessage,
+    TaskPauseResultMessage,
     TaskResumedMessage,
     TaskSnapshot,
     TaskSnapshotMessage,
@@ -468,11 +470,26 @@ class CoreServer:
                         result=result,
                     )
                 )
+            elif isinstance(request, PauseTaskRequest):
+                result = await self._tasks.pause(
+                    principal,
+                    request.task_id,
+                    reason=request.reason,
+                )
+                await send(
+                    TaskPauseResultMessage(
+                        request_id=request.request_id,
+                        result=result,
+                    )
+                )
             elif isinstance(request, ResumeTaskRequest):
                 task = await self._tasks.resume(
                     principal,
                     request.task_id,
                     reason=request.reason,
+                    acknowledge_outcome_unknown=(
+                        request.acknowledge_outcome_unknown
+                    ),
                 )
                 await send(
                     TaskResumedMessage(

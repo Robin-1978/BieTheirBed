@@ -46,6 +46,7 @@ from pc_assistant.service.core_api import (
     ListToolsRequest,
     MemoryClearedMessage,
     MemoryListMessage,
+    PauseTaskRequest,
     ResolveApprovalRequest,
     ResumeTaskRequest,
     SessionCreatedMessage,
@@ -56,6 +57,7 @@ from pc_assistant.service.core_api import (
     TaskCancelResultMessage,
     TaskEventMessage,
     TaskListMessage,
+    TaskPauseResultMessage,
     TaskResumedMessage,
     TaskSnapshot,
     TaskSnapshotMessage,
@@ -532,17 +534,31 @@ class CoreClient:
             return None
         return await self.cancel_task(self._active_tasks[-1])
 
+    async def pause_task(self, task_id: str, *, reason: str = "") -> TaskPauseResultMessage:
+        response = await self._request(
+            PauseTaskRequest(
+                request_id=self._request_id(),
+                task_id=task_id,
+                reason=reason,
+            )
+        )
+        if not isinstance(response, TaskPauseResultMessage):
+            raise RuntimeError("CoreServer returned an invalid Task pause response")
+        return response
+
     async def resume_task(
         self,
         task_id: str,
         *,
         reason: str = "",
+        acknowledge_outcome_unknown: bool = False,
     ) -> TaskResumedMessage:
         response = await self._request(
             ResumeTaskRequest(
                 request_id=self._request_id(),
                 task_id=task_id,
                 reason=reason,
+                acknowledge_outcome_unknown=acknowledge_outcome_unknown,
             )
         )
         if not isinstance(response, TaskResumedMessage):

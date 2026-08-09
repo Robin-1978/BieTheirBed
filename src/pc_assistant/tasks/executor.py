@@ -13,6 +13,7 @@ from pc_assistant.agent_runtime.contracts import (
     RuntimeRunContext,
     RuntimeScope,
 )
+from pc_assistant.agent_runtime.tool_step import ToolOutcomeUnknownError
 from pc_assistant.tasks.approval import DurableApprovalService
 from pc_assistant.tasks.event_hub import TaskEventHub
 from pc_assistant.tasks.models import (
@@ -24,6 +25,7 @@ from pc_assistant.tasks.models import (
     TaskState,
 )
 from pc_assistant.tasks.repository import TaskRepository
+from pc_assistant.tasks.tool_commit import DurableToolCommitService
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,7 @@ class TaskExecutor:
         repository: TaskRepository,
         runtime: AgentRuntimePort,
         approvals: DurableApprovalService,
+        tool_commits: DurableToolCommitService,
         events: TaskEventHub,
         *,
         worker_id: str = "core-worker",
@@ -48,6 +51,7 @@ class TaskExecutor:
         self._repository = repository
         self._runtime = runtime
         self._approvals = approvals
+        self._tool_commits = tool_commits
         self._events = events
         self._worker_id = worker_id
         self._lease_seconds = lease_seconds
@@ -182,6 +186,7 @@ class TaskExecutor:
                 run_id=task.task_id,
                 cancellation=cancellation,
                 confirmation=self._approvals,
+                tool_commit=self._tool_commits,
             )
             async for runtime_event in self._runtime.run(context, request):
                 current = await asyncio.to_thread(
@@ -193,6 +198,8 @@ class TaskExecutor:
                     cancellation.set()
                     break
                 if current.cancel_requested:
+                    cancellation.set()
+                if current.phase == "pause_requested":
                     cancellation.set()
                 if cancellation.is_set():
                     break
@@ -207,7 +214,17 @@ class TaskExecutor:
             )
             if current.state in TERMINAL_TASK_STATES:
                 return
+            if current.state is TaskState.PAUSED:
+                return
             if current.cancel_requested or cancellation.is_set():
+                if current.phase == "pause_requested":
+                    await self._transition(
+                        task,
+                        TaskState.PAUSED,
+                        phase="manual_pause",
+                        reason="Task pause reached a safe boundary",
+                    )
+                    return
                 await self._transition(
                     task,
                     TaskState.CANCELLED,
@@ -224,6 +241,24 @@ class TaskExecutor:
         except asyncio.CancelledError:
             cancellation.set()
             raise
+        except ToolOutcomeUnknownError:
+            logger.exception("Task tool outcome is unknown: %s", task.task_id)
+            try:
+                _, event = await asyncio.to_thread(
+                    self._repository.pause_for_unknown_tool_outcome,
+                    task.principal_id,
+                    task.task_id,
+                    reason=(
+                        "A tool returned but its durable outcome checkpoint failed; "
+                        "automatic replay is blocked"
+                    ),
+                )
+                await self._events.publish(event)
+            except Exception:
+                logger.exception(
+                    "Unknown tool outcome state could not be persisted: %s",
+                    task.task_id,
+                )
         except Exception as exc:
             logger.exception("Task execution failed: %s", task.task_id)
             try:

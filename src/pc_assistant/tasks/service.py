@@ -17,6 +17,7 @@ from pc_assistant.tasks.models import (
     TaskApprovalRecord,
     TaskCancelResult,
     TaskEvent,
+    TaskPauseResult,
     TaskRecord,
     TaskState,
 )
@@ -126,18 +127,40 @@ class TaskService:
             await self._events.publish(event)
         return result
 
+    async def pause(
+        self,
+        principal_id: str,
+        task_id: str,
+        *,
+        reason: str = "",
+    ) -> TaskPauseResult:
+        result, event = await asyncio.to_thread(
+            self._repository.request_pause,
+            principal_id,
+            task_id,
+            reason=reason,
+        )
+        self._executor.signal_cancel(task_id)
+        if result.state is TaskState.PAUSED:
+            await self._approvals.cancel_task(task_id)
+        if event is not None:
+            await self._events.publish(event)
+        return result
+
     async def resume(
         self,
         principal_id: str,
         task_id: str,
         *,
         reason: str = "",
+        acknowledge_outcome_unknown: bool = False,
     ) -> TaskRecord:
         task, event = await asyncio.to_thread(
             self._repository.resume,
             principal_id,
             task_id,
             reason=reason,
+            acknowledge_outcome_unknown=acknowledge_outcome_unknown,
         )
         await self._events.publish(event)
         self._executor.wake()
