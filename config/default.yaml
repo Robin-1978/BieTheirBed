@@ -53,6 +53,7 @@ gateway_port: 9529
 gateway_session_ttl_seconds: 900
 gateway_artifact_max_bytes: 33554432
 gateway_remote_enabled: false
+gateway_public_url: ""
 gateway_tls_cert_file: ""
 gateway_tls_key_file: ""
 feishu_enabled: false

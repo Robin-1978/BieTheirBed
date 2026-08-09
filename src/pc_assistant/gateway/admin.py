@@ -5,7 +5,9 @@ from datetime import UTC, datetime
 import sys
 
 from pc_assistant.config import load_config
+from pc_assistant.gateway.audit import GatewayAuditRepository
 from pc_assistant.gateway.identity import GatewayIdentityRepository
+from pc_assistant.gateway.pairing import GatewayPairingPayload
 from pc_assistant.runtime import RuntimePaths
 
 
@@ -22,6 +24,7 @@ def run_gateway_admin(
     principal = principal_id or config.owner_principal_id
     database = RuntimePaths.from_root(config.runtime_root).data / "gateway.db"
     identities = GatewayIdentityRepository(database)
+    audit = GatewayAuditRepository(database)
 
     try:
         if action == "pair":
@@ -32,6 +35,13 @@ def run_gateway_admin(
             print(f"grant_id={grant.grant_id}")
             print(f"grant_secret={grant.secret}")
             print(f"expires_at={_timestamp(grant.expires_at)}")
+            if config.gateway_public_url:
+                payload = GatewayPairingPayload.from_grant(
+                    grant,
+                    config.gateway_public_url,
+                ).encoded()
+                print(f"pairing_json={payload}")
+                _print_qr(payload)
             return 0
 
         if action == "devices":
@@ -51,6 +61,12 @@ def run_gateway_admin(
 
         if action == "revoke":
             device = identities.revoke_device(principal, device_id)
+            audit.append(
+                "revoked",
+                device_id=device.device_id,
+                principal_id=device.principal_id,
+                detail_code="local_admin",
+            )
             print(f"revoked={device.device_id}")
             return 0
     except (LookupError, ValueError) as exc:
@@ -62,3 +78,12 @@ def run_gateway_admin(
 
 def _timestamp(value: float) -> str:
     return datetime.fromtimestamp(value, UTC).isoformat()
+
+
+def _print_qr(payload: str) -> None:
+    import qrcode
+
+    code = qrcode.QRCode(border=1)
+    code.add_data(payload)
+    code.make(fit=True)
+    code.print_ascii(invert=True)

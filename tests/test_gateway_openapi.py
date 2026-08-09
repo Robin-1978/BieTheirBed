@@ -39,6 +39,9 @@ def test_gateway_openapi_matches_the_allow_listed_http_surface(tmp_path) -> None
     assert schema["paths"]["/v1/runtime/status"]["get"]["operationId"] == (
         "getRuntimeStatus"
     )
+    assert schema["paths"]["/v1/device/audit"]["get"]["operationId"] == (
+        "listDeviceAudit"
+    )
 
 
 @pytest.mark.asyncio

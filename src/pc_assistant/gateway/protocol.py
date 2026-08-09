@@ -99,6 +99,11 @@ class RuntimeQuery(GatewayQuery):
     session_handle: str = Field(min_length=1, max_length=256)
 
 
+class AuditQuery(GatewayQuery):
+    after_id: int = Field(default=0, ge=0)
+    limit: int = Field(default=100, ge=1, le=200)
+
+
 class ErrorResponse(BaseModel):
     error: str
 
@@ -175,3 +180,15 @@ class RuntimeStatusResponse(BaseModel):
 
 class ToolListResponse(BaseModel):
     result: ToolListResult
+
+
+class AuditEventResponse(BaseModel):
+    event_id: int
+    event_type: str
+    occurred_at: float
+    remote_address_hash: str
+    detail_code: str
+
+
+class AuditListResponse(BaseModel):
+    events: tuple[AuditEventResponse, ...]

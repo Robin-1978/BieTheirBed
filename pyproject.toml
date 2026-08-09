@@ -29,6 +29,7 @@ dependencies = [
     "lark-oapi>=1.6,<2",
     "mcp>=1.27,<2",
     "cryptography>=42,<46",
+    "qrcode>=8,<9",
 ]
 
 [project.optional-dependencies]

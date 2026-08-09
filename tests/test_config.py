@@ -64,6 +64,13 @@ class TestAppConfig:
         with pytest.raises(ValueError, match="certificate and key"):
             AppConfig(gateway_enabled=True, gateway_remote_enabled=True)
 
+    def test_gateway_public_url_requires_https_outside_loopback(self):
+        assert AppConfig(gateway_public_url="http://127.0.0.1:9529/").gateway_public_url == (
+            "http://127.0.0.1:9529"
+        )
+        with pytest.raises(ValueError, match="must use HTTPS"):
+            AppConfig(gateway_public_url="http://knoa.example.com")
+
     def test_model_context_window_overrides_global_fallback(self):
         cfg = AppConfig(
             providers={"api": {"driver": "openai_compatible", "api_key": "k"}},
