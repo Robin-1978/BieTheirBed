@@ -14,6 +14,7 @@ from pc_assistant.tasks.event_hub import TaskEventHub
 from pc_assistant.tasks.executor import TaskExecutor
 from pc_assistant.tasks.models import (
     TERMINAL_TASK_STATES,
+    PrincipalTaskEvent,
     TaskApprovalRecord,
     TaskCancelResult,
     TaskEvent,
@@ -246,3 +247,27 @@ class TaskService:
                     return
         finally:
             await subscription.close()
+
+    async def principal_events(
+        self,
+        principal_id: str,
+        *,
+        after_id: int = 0,
+        poll_interval: float = 0.5,
+    ) -> AsyncIterator[PrincipalTaskEvent]:
+        if not 0.1 <= poll_interval <= 10.0:
+            raise ValueError("Principal event poll interval must be 0.1-10 seconds")
+        cursor = after_id
+        while True:
+            page = await asyncio.to_thread(
+                self._repository.list_principal_events,
+                principal_id,
+                after_id=cursor,
+                limit=200,
+            )
+            if not page:
+                await asyncio.sleep(poll_interval)
+                continue
+            for feed_event in page:
+                cursor = feed_event.feed_event_id
+                yield feed_event

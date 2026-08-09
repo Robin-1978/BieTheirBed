@@ -373,3 +373,37 @@ async def test_unknown_tool_outcome_pauses_instead_of_failing_task(
         )[0].state.value == "interrupted"
     finally:
         await service.stop()
+@pytest.mark.asyncio
+async def test_principal_event_stream_replays_and_tails(tmp_path: Path) -> None:
+    release = asyncio.Event()
+    service, repository, scope = _components(tmp_path, _Runtime(hold=release))
+    await service.start()
+    try:
+        task = await service.create(
+            scope,
+            client_request_id="feed-request-a",
+            goal="finish report",
+        )
+        stream = service.principal_events(
+            scope.principal_id,
+            poll_interval=0.1,
+        )
+        seen = []
+        while len(seen) < 3:
+            seen.append(await anext(stream))
+        release.set()
+        while seen[-1].event.event_type != "completed":
+            seen.append(await anext(stream))
+        await stream.aclose()
+
+        assert {item.event.task_id for item in seen} == {task.task_id}
+        assert [item.feed_event_id for item in seen] == sorted(
+            item.feed_event_id for item in seen
+        )
+        assert seen[-1].event.event_type == "completed"
+        assert repository.get(scope.principal_id, task.task_id).state is (
+            TaskState.COMPLETED
+        )
+    finally:
+        release.set()
+        await service.stop()

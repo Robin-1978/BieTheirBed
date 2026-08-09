@@ -20,6 +20,7 @@ from pc_assistant.sqlite_schema import (
 )
 from pc_assistant.tasks.models import (
     ApprovalState,
+    PrincipalTaskEvent,
     TERMINAL_TASK_STATES,
     TaskApprovalRecord,
     TaskAttemptRecord,
@@ -158,6 +159,15 @@ class TaskRepository:
                     occurred_at REAL NOT NULL,
                     PRIMARY KEY(task_id, event_seq)
                 );
+                CREATE TABLE IF NOT EXISTS runtime_principal_task_events (
+                    feed_event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    principal_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL
+                        REFERENCES runtime_tasks(task_id) ON DELETE CASCADE,
+                    task_event_seq INTEGER NOT NULL,
+                    occurred_at REAL NOT NULL,
+                    UNIQUE(task_id, task_event_seq)
+                );
                 CREATE TABLE IF NOT EXISTS runtime_task_attempts (
                     attempt_id TEXT PRIMARY KEY,
                     task_id TEXT NOT NULL
@@ -217,6 +227,10 @@ class TaskRepository:
                     ON runtime_task_attempts(task_id, ordinal);
                 CREATE INDEX IF NOT EXISTS runtime_task_tool_steps_by_task_state
                     ON runtime_task_tool_steps(task_id, state, created_at);
+                CREATE INDEX IF NOT EXISTS runtime_principal_task_events_by_owner
+                    ON runtime_principal_task_events(
+                        principal_id, feed_event_id
+                    );
                 """
             )
             require_exact_table(
@@ -274,6 +288,18 @@ class TaskRepository:
                     ("failure_code", "TEXT", True, None, 0),
                 ),
                 label="Runtime Task attempt",
+            )
+            require_exact_table(
+                db,
+                "runtime_principal_task_events",
+                (
+                    ("feed_event_id", "INTEGER", False, None, 1),
+                    ("principal_id", "TEXT", True, None, 0),
+                    ("task_id", "TEXT", True, None, 0),
+                    ("task_event_seq", "INTEGER", True, None, 0),
+                    ("occurred_at", "REAL", True, None, 0),
+                ),
+                label="Runtime principal Task event",
             )
             require_exact_table(
                 db,
@@ -366,6 +392,20 @@ class TaskRepository:
             )
             require_foreign_keys(
                 db,
+                "runtime_principal_task_events",
+                (
+                    (
+                        "runtime_tasks",
+                        "task_id",
+                        "task_id",
+                        "NO ACTION",
+                        "CASCADE",
+                    ),
+                ),
+                label="Runtime principal Task event",
+            )
+            require_foreign_keys(
+                db,
                 "runtime_task_tool_steps",
                 (
                     (
@@ -421,6 +461,12 @@ class TaskRepository:
                 "runtime_task_tool_steps_by_task_state",
                 ("task_id", "state", "created_at"),
                 label="Runtime Task tool step",
+            )
+            require_index_columns(
+                db,
+                "runtime_principal_task_events_by_owner",
+                ("principal_id", "feed_event_id"),
+                label="Runtime principal Task event",
             )
 
     @staticmethod
@@ -639,6 +685,17 @@ class TaskRepository:
                 event_seq,
                 event_type,
                 cls._event_json(payload),
+                occurred_at,
+            ),
+        )
+        db.execute(
+            """INSERT INTO runtime_principal_task_events(
+                   principal_id, task_id, task_event_seq, occurred_at
+               ) VALUES (?, ?, ?, ?)""",
+            (
+                str(row["principal_id"]),
+                str(row["task_id"]),
+                event_seq,
                 occurred_at,
             ),
         )
@@ -1244,6 +1301,55 @@ class TaskRepository:
                 raise RuntimeError("Task event journal is corrupt") from exc
             events.append(event)
         return tuple(events)
+
+    def list_principal_events(
+        self,
+        principal_id: str,
+        *,
+        after_id: int = 0,
+        limit: int = 200,
+    ) -> tuple[PrincipalTaskEvent, ...]:
+        principal = self._normalize_identifier(
+            principal_id,
+            label="principal_id",
+            limit=256,
+        )
+        if after_id < 0:
+            raise ValueError("after_id must not be negative")
+        if not 1 <= limit <= 1000:
+            raise ValueError("Principal Task event limit must be between 1 and 1000")
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT feed.feed_event_id, feed.principal_id,
+                          event.task_id, event.event_seq, event.event_type,
+                          event.payload_json, event.occurred_at
+                   FROM runtime_principal_task_events AS feed
+                   JOIN runtime_task_events AS event
+                     ON event.task_id=feed.task_id
+                    AND event.event_seq=feed.task_event_seq
+                   WHERE feed.principal_id=? AND feed.feed_event_id>?
+                   ORDER BY feed.feed_event_id LIMIT ?""",
+                (principal, after_id, limit),
+            ).fetchall()
+        feed_events: list[PrincipalTaskEvent] = []
+        for row in rows:
+            try:
+                event = TaskEvent(
+                    task_id=str(row["task_id"]),
+                    event_seq=int(row["event_seq"]),
+                    event_type=str(row["event_type"]),
+                    payload=TaskEventPayload.model_validate_json(row["payload_json"]),
+                    occurred_at=float(row["occurred_at"]),
+                )
+                feed_event = PrincipalTaskEvent(
+                    feed_event_id=int(row["feed_event_id"]),
+                    principal_id=str(row["principal_id"]),
+                    event=event,
+                )
+            except Exception as exc:
+                raise RuntimeError("Principal Task event feed is corrupt") from exc
+            feed_events.append(feed_event)
+        return tuple(feed_events)
 
     def append_event(
         self,

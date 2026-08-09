@@ -132,6 +132,12 @@ class TaskEvent(TaskModel):
     occurred_at: float = Field(ge=0.0)
 
 
+class PrincipalTaskEvent(TaskModel):
+    feed_event_id: int = Field(gt=0)
+    principal_id: Annotated[NonEmpty, StringConstraints(max_length=256)]
+    event: TaskEvent
+
+
 class TaskApprovalRecord(TaskModel):
     approval_id: Identifier
     task_id: Identifier

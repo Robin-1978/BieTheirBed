@@ -38,6 +38,7 @@ from pc_assistant.automation import (
 )
 from pc_assistant.tasks import (
     ApprovalState,
+    PrincipalTaskEvent,
     TaskCancelResult,
     TaskEvent,
     TaskPauseResult,
@@ -241,6 +242,15 @@ class SubscribeTaskRequest(CoreModel):
     after_seq: int = Field(default=0, ge=0)
 
 
+class SubscribePrincipalTaskEventsRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["subscribe_principal_task_events"] = (
+        "subscribe_principal_task_events"
+    )
+    after_id: int = Field(default=0, ge=0)
+
+
 class GetTaskRequest(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
@@ -433,6 +443,7 @@ CoreRequest: TypeAlias = Annotated[
     | CreateSessionRequest
     | CreateTaskRequest
     | SubscribeTaskRequest
+    | SubscribePrincipalTaskEventsRequest
     | GetTaskRequest
     | ListTasksRequest
     | CancelTaskRequest
@@ -527,6 +538,15 @@ class TaskSubscribedMessage(CoreModel):
     after_seq: int = Field(ge=0)
 
 
+class PrincipalTaskEventsSubscribedMessage(CoreModel):
+    message_type: Literal["principal_task_events_subscribed"] = (
+        "principal_task_events_subscribed"
+    )
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    after_id: int = Field(ge=0)
+
+
 class TaskSnapshotMessage(CoreModel):
     message_type: Literal["task_snapshot"] = "task_snapshot"
     api_version: Literal["v1"] = "v1"
@@ -547,6 +567,13 @@ class TaskEventMessage(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
     event: TaskEvent
+
+
+class PrincipalTaskEventMessage(CoreModel):
+    message_type: Literal["principal_task_event"] = "principal_task_event"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    feed_event: PrincipalTaskEvent
 
 
 class HealthMessage(CoreModel):
@@ -697,9 +724,11 @@ CoreServerMessage: TypeAlias = Annotated[
     | SessionCreatedMessage
     | TaskAcceptedMessage
     | TaskSubscribedMessage
+    | PrincipalTaskEventsSubscribedMessage
     | TaskSnapshotMessage
     | TaskListMessage
     | TaskEventMessage
+    | PrincipalTaskEventMessage
     | HealthMessage
     | StatusMessage
     | HistoryMessage

@@ -15,11 +15,13 @@ from pc_assistant.service.core_api import (
     ListTasksRequest,
     PauseTaskRequest,
     ResumeTaskRequest,
+    SubscribePrincipalTaskEventsRequest,
     SubscribeTaskRequest,
     parse_core_server_message_json,
 )
 from pc_assistant.service.core_server import CoreServer, StaticTokenAuthenticator
 from pc_assistant.tasks import (
+    PrincipalTaskEvent,
     TaskCapacityError,
     TaskCancelResult,
     TaskEvent,
@@ -107,6 +109,25 @@ class FakeTasks:
                 event_type="task_created",
                 payload=TaskEventPayload(state=TaskState.QUEUED),
                 occurred_at=1.0,
+            )
+            await asyncio.Event().wait()
+        finally:
+            self.subscription_closed.set()
+
+    async def principal_events(self, principal_id: str, *, after_id: int = 0):
+        del after_id
+        try:
+            event = TaskEvent(
+                task_id="task-a",
+                event_seq=1,
+                event_type="task_created",
+                payload=TaskEventPayload(state=TaskState.QUEUED),
+                occurred_at=1.0,
+            )
+            yield PrincipalTaskEvent(
+                feed_event_id=7,
+                principal_id=principal_id,
+                event=event,
             )
             await asyncio.Event().wait()
         finally:
@@ -283,6 +304,33 @@ async def test_disconnect_closes_subscription_without_cancelling_task() -> None:
         "task_subscribed",
         "task_event",
     ]
+
+
+@pytest.mark.asyncio
+async def test_server_streams_authenticated_principal_task_feed() -> None:
+    tasks = FakeTasks()
+    websocket = FakeWebSocket()
+    server_task = asyncio.create_task(_server(tasks).handle(websocket))
+
+    await websocket.push(AuthenticateRequest(request_id="auth", credential="token-a"))
+    await websocket.push(
+        SubscribePrincipalTaskEventsRequest(
+            request_id="principal-feed",
+            after_id=6,
+        )
+    )
+    await websocket.wait_sent(3)
+    await websocket.close_input()
+    await server_task
+
+    messages = websocket.messages()
+    assert [message.message_type for message in messages] == [
+        "authenticated",
+        "principal_task_events_subscribed",
+        "principal_task_event",
+    ]
+    assert messages[-1].feed_event.feed_event_id == 7
+    assert messages[-1].feed_event.principal_id == "principal-a"
 
 
 @pytest.mark.asyncio
