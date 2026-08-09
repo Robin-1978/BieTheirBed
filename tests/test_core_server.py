@@ -177,6 +177,7 @@ def _task_record(task_id: str):
 def _server(tasks: FakeTasks) -> CoreServer:
     return CoreServer(
         tasks,
+        SimpleNamespace(),
         FakeControl(),
         FakeArtifacts(),
         StaticTokenAuthenticator({"token-a": "principal-a"}),
@@ -339,6 +340,7 @@ def test_server_rejects_non_positive_subscription_limit() -> None:
     with pytest.raises(ValueError, match="subscription"):
         CoreServer(
             FakeTasks(),
+            SimpleNamespace(),
             FakeControl(),
             FakeArtifacts(),
             StaticTokenAuthenticator({"token-a": "principal-a"}),

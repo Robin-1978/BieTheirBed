@@ -27,6 +27,11 @@ from pc_assistant.agent_runtime.contracts import (
     ToolListResult,
 )
 from pc_assistant.artifacts import ArtifactRef
+from pc_assistant.automation import (
+    ScheduleRecord,
+    ScheduleSpec,
+    ScheduleState,
+)
 from pc_assistant.tasks import (
     ApprovalState,
     TaskCancelResult,
@@ -102,6 +107,38 @@ class TaskSnapshot(CoreModel):
             started_at=task.started_at,
             finished_at=task.finished_at,
             next_event_seq=task.next_event_seq,
+        )
+
+
+class ScheduleSnapshot(CoreModel):
+    schedule_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+    session_handle: SessionHandle
+    goal: Annotated[str, StringConstraints(min_length=1, max_length=200_000)]
+    spec: ScheduleSpec
+    tools_enabled: bool
+    priority: int = Field(ge=0, le=9)
+    state: ScheduleState
+    next_fire_at: float | None = Field(default=None, ge=0.0)
+    last_fire_at: float | None = Field(default=None, ge=0.0)
+    fire_count: int = Field(ge=0)
+    created_at: float = Field(ge=0.0)
+    updated_at: float = Field(ge=0.0)
+
+    @classmethod
+    def from_record(cls, schedule: ScheduleRecord) -> ScheduleSnapshot:
+        return cls(
+            schedule_id=schedule.schedule_id,
+            session_handle=schedule.session_handle,
+            goal=schedule.goal,
+            spec=schedule.spec,
+            tools_enabled=schedule.tools_enabled,
+            priority=schedule.priority,
+            state=schedule.state,
+            next_fire_at=schedule.next_fire_at,
+            last_fire_at=schedule.last_fire_at,
+            fire_count=schedule.fire_count,
+            created_at=schedule.created_at,
+            updated_at=schedule.updated_at,
         )
 
 
@@ -200,6 +237,32 @@ class ResolveApprovalRequest(CoreModel):
     approved: bool
 
 
+class CreateScheduleRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["create_schedule"] = "create_schedule"
+    session_handle: SessionHandle
+    goal: Annotated[str, StringConstraints(min_length=1, max_length=200_000)]
+    spec: ScheduleSpec
+    tools_enabled: bool = True
+    priority: int = Field(default=0, ge=0, le=9)
+
+
+class GetScheduleRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["get_schedule"] = "get_schedule"
+    schedule_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+
+
+class ListSchedulesRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["list_schedules"] = "list_schedules"
+    state: ScheduleState | None = None
+    limit: int = Field(default=50, ge=1, le=100)
+
+
 class SessionRequest(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
@@ -259,6 +322,9 @@ CoreRequest: TypeAlias = Annotated[
     | PauseTaskRequest
     | ResumeTaskRequest
     | ResolveApprovalRequest
+    | CreateScheduleRequest
+    | GetScheduleRequest
+    | ListSchedulesRequest
     | GetStatusRequest
     | GetHistoryRequest
     | ListMemoryRequest
@@ -285,6 +351,7 @@ ErrorCode = Literal[
     "artifact_not_found",
     "artifact_too_large",
     "task_not_found",
+    "schedule_not_found",
     "capability_denied",
     "confirmation_denied",
     "tool_invalid_arguments",
@@ -450,6 +517,27 @@ class ApprovalResolvedMessage(CoreModel):
     state: ApprovalState
 
 
+class ScheduleAcceptedMessage(CoreModel):
+    message_type: Literal["schedule_accepted"] = "schedule_accepted"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    schedule: ScheduleSnapshot
+
+
+class ScheduleSnapshotMessage(CoreModel):
+    message_type: Literal["schedule_snapshot"] = "schedule_snapshot"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    schedule: ScheduleSnapshot
+
+
+class ScheduleListMessage(CoreModel):
+    message_type: Literal["schedule_list"] = "schedule_list"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    schedules: tuple[ScheduleSnapshot, ...]
+
+
 CoreServerMessage: TypeAlias = Annotated[
     AuthenticatedMessage
     | SessionCreatedMessage
@@ -471,6 +559,9 @@ CoreServerMessage: TypeAlias = Annotated[
     | TaskPauseResultMessage
     | TaskResumedMessage
     | ApprovalResolvedMessage
+    | ScheduleAcceptedMessage
+    | ScheduleSnapshotMessage
+    | ScheduleListMessage
     | CoreError,
     Field(discriminator="message_type"),
 ]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -92,6 +93,7 @@ def _servers(tmp_path: Path):
     )
     tcp = CoreServer(
         tasks,
+        SimpleNamespace(),
         control,
         artifacts,
         StaticTokenAuthenticator({"remote-token": "remote-a"}),

@@ -22,6 +22,13 @@ from pc_assistant.agent_runtime.contracts import (
 from pc_assistant.agent_runtime.control import ControlService
 from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
 from pc_assistant.agent_runtime.tool_step import ProposedToolCall
+from pc_assistant.automation import (
+    ScheduleDispatcher,
+    ScheduleKind,
+    ScheduleRepository,
+    ScheduleService,
+    ScheduleSpec,
+)
 from pc_assistant.artifacts import ArtifactStore
 from pc_assistant.context.memory_db import SQLiteMemoryRepository
 from pc_assistant.service.core_client import (
@@ -193,6 +200,12 @@ async def _connected(
     commits = DurableToolCommitService(repository)
     executor = TaskExecutor(repository, runtime, approvals, commits, hub)
     tasks = TaskService(repository, executor, approvals, hub)
+    schedule_repository = ScheduleRepository(
+        database,
+        schedule_id_factory=lambda: "schedule-opaque",
+    )
+    schedule_dispatcher = ScheduleDispatcher(schedule_repository, tasks)
+    schedules = ScheduleService(schedule_repository, schedule_dispatcher)
     control = ControlService(
         sessions,
         memory,
@@ -205,6 +218,7 @@ async def _connected(
     )
     server = CoreServer(
         tasks,
+        schedules,
         control,
         artifacts,
         StaticTokenAuthenticator({"token-a": "local"}),
@@ -310,6 +324,31 @@ async def test_client_can_pause_and_resume_running_task(tmp_path: Path) -> None:
         )
     finally:
         connected.runtime.release.set()
+        await connected.close()
+
+
+@pytest.mark.asyncio
+async def test_client_can_create_get_and_list_schedule(tmp_path: Path) -> None:
+    connected = await _connected(tmp_path)
+    try:
+        session = await connected.client.create_session()
+        created = await connected.client.create_schedule(
+            session,
+            "prepare tomorrow report",
+            ScheduleSpec(
+                kind=ScheduleKind.ONE_TIME,
+                run_at=4_000_000_000.0,
+            ),
+            priority=3,
+        )
+        detail = await connected.client.get_schedule(created.schedule_id)
+        listing = await connected.client.list_schedules()
+
+        assert created.schedule_id == "schedule-opaque"
+        assert detail == created
+        assert listing == (created,)
+        assert created.priority == 3
+    finally:
         await connected.close()
 
 

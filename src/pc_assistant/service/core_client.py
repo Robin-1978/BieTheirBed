@@ -19,6 +19,7 @@ from pc_assistant.agent_runtime.contracts import (
     ToolListResult,
 )
 from pc_assistant.artifacts import ArtifactRef
+from pc_assistant.automation import ScheduleSpec, ScheduleState
 from pc_assistant.service.core_api import (
     ApprovalResolvedMessage,
     AuthenticateRequest,
@@ -32,22 +33,29 @@ from pc_assistant.service.core_api import (
     ConfigSetMessage,
     CoreError,
     CoreServerMessage,
+    CreateScheduleRequest,
     CreateSessionRequest,
     CreateTaskRequest,
     DownloadArtifactRequest,
     GetTaskRequest,
     GetHistoryRequest,
     GetStatusRequest,
+    GetScheduleRequest,
     HealthMessage,
     HealthRequest,
     HistoryMessage,
     ListMemoryRequest,
+    ListSchedulesRequest,
     ListTasksRequest,
     ListToolsRequest,
     MemoryClearedMessage,
     MemoryListMessage,
     PauseTaskRequest,
     ResolveApprovalRequest,
+    ScheduleAcceptedMessage,
+    ScheduleListMessage,
+    ScheduleSnapshot,
+    ScheduleSnapshotMessage,
     ResumeTaskRequest,
     SessionCreatedMessage,
     SetConfigRequest,
@@ -581,6 +589,57 @@ class CoreClient:
         if not isinstance(response, ApprovalResolvedMessage):
             raise RuntimeError("CoreServer returned an invalid approval response")
         return response
+
+    async def create_schedule(
+        self,
+        session_handle: str,
+        goal: str,
+        spec: ScheduleSpec,
+        *,
+        tools_enabled: bool = True,
+        priority: int = 0,
+    ) -> ScheduleSnapshot:
+        response = await self._request(
+            CreateScheduleRequest(
+                request_id=self._request_id(),
+                session_handle=session_handle,
+                goal=goal,
+                spec=spec,
+                tools_enabled=tools_enabled,
+                priority=priority,
+            )
+        )
+        if not isinstance(response, ScheduleAcceptedMessage):
+            raise RuntimeError("CoreServer returned an invalid schedule response")
+        return response.schedule
+
+    async def get_schedule(self, schedule_id: str) -> ScheduleSnapshot:
+        response = await self._request(
+            GetScheduleRequest(
+                request_id=self._request_id(),
+                schedule_id=schedule_id,
+            )
+        )
+        if not isinstance(response, ScheduleSnapshotMessage):
+            raise RuntimeError("CoreServer returned an invalid schedule snapshot")
+        return response.schedule
+
+    async def list_schedules(
+        self,
+        *,
+        state: ScheduleState | None = None,
+        limit: int = 50,
+    ) -> tuple[ScheduleSnapshot, ...]:
+        response = await self._request(
+            ListSchedulesRequest(
+                request_id=self._request_id(),
+                state=state,
+                limit=limit,
+            )
+        )
+        if not isinstance(response, ScheduleListMessage):
+            raise RuntimeError("CoreServer returned an invalid schedule list")
+        return response.schedules
 
     @property
     def is_connected(self) -> bool:

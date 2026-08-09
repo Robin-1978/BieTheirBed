@@ -38,6 +38,11 @@ from pc_assistant.agent_runtime.tool_step import (
     ToolStep,
 )
 from pc_assistant.artifacts import ArtifactStore
+from pc_assistant.automation import (
+    ScheduleDispatcher,
+    ScheduleRepository,
+    ScheduleService,
+)
 from pc_assistant.config import AppConfig
 from pc_assistant.context.memory_db import (
     SQLiteMemoryRepository,
@@ -113,6 +118,9 @@ class CoreRuntimeComposition:
     sessions: RuntimeSessionRepository
     tasks: TaskRepository
     task_service: TaskService
+    schedules: ScheduleRepository
+    schedule_dispatcher: ScheduleDispatcher
+    schedule_service: ScheduleService
     memory: SQLiteMemoryRepository
     artifacts: ArtifactStore
     registry: ToolRegistry
@@ -215,6 +223,7 @@ def build_core_runtime(
     database = paths.data / "assistant.db"
     sessions = RuntimeSessionRepository(database)
     tasks = TaskRepository(database)
+    schedules = ScheduleRepository(database)
     memory_repository = SQLiteMemoryRepository(database)
     memory = ScopedUserMemory(memory_repository)
     episodic = ScopedEpisodicMemory(memory_repository)
@@ -394,6 +403,8 @@ def build_core_runtime(
         task_approvals,
         task_events,
     )
+    schedule_dispatcher = ScheduleDispatcher(schedules, task_service)
+    schedule_service = ScheduleService(schedules, schedule_dispatcher)
     config_path = (
         Path(config.source_config_path).expanduser().resolve()
         if config.source_config_path
@@ -460,6 +471,7 @@ def build_core_runtime(
         credentials[config.service_token.strip()] = "remote"
     tcp_server = CoreServer(
         task_service,
+        schedule_service,
         control,
         artifact_service,
         CompositeAuthenticator(
@@ -479,6 +491,9 @@ def build_core_runtime(
         sessions=sessions,
         tasks=tasks,
         task_service=task_service,
+        schedules=schedules,
+        schedule_dispatcher=schedule_dispatcher,
+        schedule_service=schedule_service,
         memory=memory_repository,
         artifacts=artifacts,
         registry=registry,

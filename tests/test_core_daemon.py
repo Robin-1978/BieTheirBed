@@ -29,6 +29,10 @@ class _TaskService(_Host):
     pass
 
 
+class _ScheduleDispatcher(_Host):
+    pass
+
+
 @pytest.mark.asyncio
 async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     tmp_path,
@@ -37,11 +41,13 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     host = _Host()
     extensions = _Extensions()
     task_service = _TaskService()
+    schedule_dispatcher = _ScheduleDispatcher()
     pid = tmp_path / "service.pid"
     composition = SimpleNamespace(
         host=host,
         extensions=extensions,
         task_service=task_service,
+        schedule_dispatcher=schedule_dispatcher,
         paths=SimpleNamespace(pid=pid),
         artifacts=SimpleNamespace(cleanup_expired=lambda: None),
     )
@@ -59,6 +65,7 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     assert host.started
     assert extensions.started
     assert task_service.started
+    assert schedule_dispatcher.started
     assert pid.exists()
     assert str(tmp_path / "service.log") in pid.read_text(encoding="utf-8")
     assert stat.S_IMODE(pid.stat().st_mode) == 0o600
@@ -68,4 +75,5 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     assert host.stopped
     assert extensions.stopped
     assert task_service.stopped
+    assert schedule_dispatcher.stopped
     assert not pid.exists()

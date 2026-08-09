@@ -23,6 +23,11 @@ from pc_assistant.agent_runtime.contracts import (
     ControlServicePort,
     RuntimeScope,
 )
+from pc_assistant.automation import ScheduleService
+from pc_assistant.automation.repository import (
+    ScheduleIdempotencyConflictError,
+    ScheduleNotFoundError,
+)
 from pc_assistant.exceptions import SessionNotFoundError
 from pc_assistant.service.core_api import (
     ApprovalResolvedMessage,
@@ -34,16 +39,19 @@ from pc_assistant.service.core_api import (
     ClearMemoryRequest,
     ConfigSetMessage,
     CoreError,
+    CreateScheduleRequest,
     CreateSessionRequest,
     CreateTaskRequest,
     DownloadArtifactRequest,
     GetTaskRequest,
     GetHistoryRequest,
     GetStatusRequest,
+    GetScheduleRequest,
     HealthMessage,
     HealthRequest,
     HistoryMessage,
     ListMemoryRequest,
+    ListSchedulesRequest,
     ListTasksRequest,
     ListToolsRequest,
     MemoryClearedMessage,
@@ -52,6 +60,10 @@ from pc_assistant.service.core_api import (
     ResolveApprovalRequest,
     ResumeTaskRequest,
     SessionCreatedMessage,
+    ScheduleAcceptedMessage,
+    ScheduleListMessage,
+    ScheduleSnapshot,
+    ScheduleSnapshotMessage,
     SetConfigRequest,
     StatusMessage,
     SubscribeTaskRequest,
@@ -142,6 +154,7 @@ class CoreServer:
     def __init__(
         self,
         tasks: TaskService,
+        schedules: ScheduleService,
         control: ControlServicePort,
         artifacts: ArtifactServicePort,
         authenticator: PrincipalAuthenticator,
@@ -152,6 +165,7 @@ class CoreServer:
         if max_subscriptions_per_connection < 1:
             raise ValueError("Task subscription limit must be at least one")
         self._tasks = tasks
+        self._schedules = schedules
         self._control = control
         self._artifacts = artifacts
         self._authenticator = authenticator
@@ -381,6 +395,50 @@ class CoreServer:
                         next_cursor=next_cursor,
                     )
                 )
+            elif isinstance(request, CreateScheduleRequest):
+                schedule = await self._schedules.create(
+                    RuntimeScope(
+                        principal_id=principal,
+                        session_handle=request.session_handle,
+                    ),
+                    client_request_id=request.request_id,
+                    goal=request.goal,
+                    spec=request.spec,
+                    tools_enabled=request.tools_enabled,
+                    priority=request.priority,
+                )
+                await send(
+                    ScheduleAcceptedMessage(
+                        request_id=request.request_id,
+                        schedule=ScheduleSnapshot.from_record(schedule),
+                    )
+                )
+            elif isinstance(request, GetScheduleRequest):
+                schedule = await self._schedules.get(
+                    principal,
+                    request.schedule_id,
+                )
+                await send(
+                    ScheduleSnapshotMessage(
+                        request_id=request.request_id,
+                        schedule=ScheduleSnapshot.from_record(schedule),
+                    )
+                )
+            elif isinstance(request, ListSchedulesRequest):
+                schedules = await self._schedules.list(
+                    principal,
+                    state=request.state,
+                    limit=request.limit,
+                )
+                await send(
+                    ScheduleListMessage(
+                        request_id=request.request_id,
+                        schedules=tuple(
+                            ScheduleSnapshot.from_record(schedule)
+                            for schedule in schedules
+                        ),
+                    )
+                )
             elif isinstance(request, HealthRequest):
                 await send(
                     HealthMessage(
@@ -583,6 +641,22 @@ class CoreServer:
                     request.request_id,
                     "task_not_found",
                     "Task not found",
+                )
+            )
+        except ScheduleNotFoundError:
+            await send(
+                self._error(
+                    request.request_id,
+                    "schedule_not_found",
+                    "Schedule not found",
+                )
+            )
+        except ScheduleIdempotencyConflictError:
+            await send(
+                self._error(
+                    request.request_id,
+                    "invalid_request",
+                    "Schedule request ID conflicts with an existing schedule",
                 )
             )
         except TaskIdempotencyConflictError:
