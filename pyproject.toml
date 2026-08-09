@@ -28,6 +28,7 @@ dependencies = [
     "uvicorn>=0.30,<1",
     "lark-oapi>=1.6,<2",
     "mcp>=1.27,<2",
+    "cryptography>=42,<46",
 ]
 
 [project.optional-dependencies]
