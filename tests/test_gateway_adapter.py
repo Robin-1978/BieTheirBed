@@ -109,6 +109,7 @@ class _Authentication:
             token="v1.gws-a." + "t" * 43,
             expires_at=900.0,
             device_id="dev-a",
+            principal_id="personal:owner",
         )
 
     def authenticate_session(self, token):
@@ -444,6 +445,35 @@ async def test_gateway_adapter_exposes_transcription_runtime_and_tools(tmp_path)
     assert status.json()["result"]["details"]["total_tokens"] == 42
     assert status.json()["result"]["extensions"][0]["extension_id"] == "jira"
     assert tools.json()["result"]["descriptors"][0]["origin_kind"] == "builtin"
+
+
+@pytest.mark.asyncio
+async def test_gateway_adapter_exposes_current_device_audit_without_secrets(
+    tmp_path,
+) -> None:
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=_Authentication(),
+        core=_Core(),
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    token = "v1.gws-a." + "t" * 43
+    headers = {"Authorization": "Bearer " + token}
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://gateway.local",
+    ) as http:
+        await http.get("/v1/session", headers=headers)
+        response = await http.get("/v1/device/audit", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["events"]
+    assert {event["event_type"] for event in payload["events"]} == {"command"}
+    serialized = response.text
+    assert token not in serialized
+    assert "personal:owner" not in serialized
+    assert "dev-a" not in serialized
 
 
 @pytest.mark.asyncio

@@ -23,6 +23,7 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from pc_assistant.config import AppConfig
+from pc_assistant.gateway.audit import GatewayAuditRepository
 from pc_assistant.gateway.auth import (
     AuthenticatedGatewaySession,
     GatewayAuthenticationRejectedError,
@@ -40,6 +41,7 @@ from pc_assistant.runtime import RuntimePaths
 from pc_assistant.gateway.protocol import (
     ArtifactDownloadQuery,
     ArtifactUploadQuery,
+    AuditQuery,
     AuthChallengeRequest,
     AuthCompleteRequest,
     CancelTaskRequest,
@@ -101,6 +103,7 @@ class SecureGatewayAdapter:
         authentication: GatewayAuthenticationService | None = None,
         core: GatewayCoreBridge | None = None,
         limiter: _WindowLimiter | None = None,
+        audit: GatewayAuditRepository | None = None,
         event_heartbeat_seconds: float = 15.0,
     ) -> None:
         if not config.gateway_enabled:
@@ -121,14 +124,15 @@ class SecureGatewayAdapter:
         elif not is_loopback_host(config.gateway_host):
             raise ValueError("Secure Gateway must bind to loopback before TLS")
         self._config = config
+        database = RuntimePaths.from_root(config.runtime_root).data / "gateway.db"
         if authentication is None:
-            database = RuntimePaths.from_root(config.runtime_root).data / "gateway.db"
             identities = GatewayIdentityRepository(database)
             authentication = GatewayAuthenticationService(
                 identities,
                 GatewayAuthRepository(database),
             )
         self._authentication = authentication
+        self._audit = audit or GatewayAuditRepository(database)
         self._core = core or GatewayCoreBridge(config)
         self._limiter = limiter or _WindowLimiter()
         self._event_heartbeat_seconds = max(0.01, event_heartbeat_seconds)
@@ -182,6 +186,7 @@ class SecureGatewayAdapter:
                 ),
                 Route("/v1/runtime/status", self._runtime_status, methods=["GET"]),
                 Route("/v1/tools", self._list_tools, methods=["GET"]),
+                Route("/v1/device/audit", self._device_audit, methods=["GET"]),
                 Route(
                     "/v1/approvals/{approval_id:str}/resolve",
                     self._resolve_approval,
@@ -283,6 +288,12 @@ class SecureGatewayAdapter:
             ValueError,
         ):
             return JSONResponse({"error": "rejected"}, status_code=401)
+        self._record_audit(
+            "paired",
+            request=request,
+            device_id=device.device_id,
+            principal_id=device.principal_id,
+        )
         return JSONResponse(
             {"device_id": device.device_id, "principal_id": device.principal_id},
             status_code=201,
@@ -308,7 +319,14 @@ class SecureGatewayAdapter:
                 session_ttl_seconds=self._config.gateway_session_ttl_seconds,
             )
         except (GatewayAuthenticationRejectedError, ValueError):
+            self._record_audit("session_rejected", request=request)
             return JSONResponse({"error": "rejected"}, status_code=401)
+        self._record_audit(
+            "authenticated",
+            request=request,
+            device_id=session.device_id,
+            principal_id=session.principal_id,
+        )
         return JSONResponse(
             {
                 "token": session.token,
@@ -548,6 +566,35 @@ class SecureGatewayAdapter:
             return self._core_error(exc)
         return JSONResponse({"result": result.model_dump(mode="json")})
 
+    async def _device_audit(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=60)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        try:
+            query = AuditQuery.model_validate(dict(request.query_params))
+            events = self._audit.list_for_device(
+                authenticated.device.principal_id,
+                authenticated.device.device_id,
+                after_id=query.after_id,
+                limit=query.limit,
+            )
+        except (ValidationError, ValueError):
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        return JSONResponse(
+            {
+                "events": [
+                    {
+                        "event_id": event.event_id,
+                        "event_type": event.event_type,
+                        "occurred_at": event.occurred_at,
+                        "remote_address_hash": event.remote_address_hash,
+                        "detail_code": event.detail_code,
+                    }
+                    for event in events
+                ]
+            }
+        )
+
     async def _resolve_approval(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=30)
         if isinstance(authenticated, JSONResponse):
@@ -587,6 +634,12 @@ class SecureGatewayAdapter:
         if self._active_event_streams[device_id] >= 3:
             return JSONResponse({"error": "too_many_streams"}, status_code=429)
         self._active_event_streams[device_id] += 1
+        self._record_audit(
+            "stream_opened",
+            request=request,
+            device_id=device_id,
+            principal_id=authenticated.device.principal_id,
+        )
         token = self._bearer_token(request)
         principal_id = authenticated.device.principal_id
 
@@ -695,6 +748,13 @@ class SecureGatewayAdapter:
             )
         except Exception as exc:
             return self._core_error(exc)
+        self._record_audit(
+            "artifact_uploaded",
+            request=request,
+            device_id=renewed.device.device_id,
+            principal_id=renewed.device.principal_id,
+            detail_code=artifact.artifact_id,
+        )
         return JSONResponse(
             {"artifact": artifact.model_dump(mode="json")},
             status_code=201,
@@ -745,14 +805,44 @@ class SecureGatewayAdapter:
     ) -> AuthenticatedGatewaySession | JSONResponse:
         token = self._bearer_token(request)
         if not token:
+            self._record_audit("session_rejected", request=request)
             return JSONResponse({"error": "unauthorized"}, status_code=401)
         session = self._authenticate_token(token)
         if session is None:
+            self._record_audit("session_rejected", request=request)
             return JSONResponse({"error": "unauthorized"}, status_code=401)
         key = f"authorized:{request.url.path}:{session.device.device_id}"
         if not self._limiter.allow(key, limit=limit):
             return JSONResponse({"error": "rate_limited"}, status_code=429)
+        self._record_audit(
+            "command",
+            request=request,
+            device_id=session.device.device_id,
+            principal_id=session.device.principal_id,
+            detail_code=f"{request.method} {request.url.path}",
+        )
         return session
+
+    def _record_audit(
+        self,
+        event_type: str,
+        *,
+        request: Request,
+        device_id: str = "",
+        principal_id: str = "",
+        detail_code: str = "",
+    ) -> None:
+        try:
+            remote = request.client.host if request.client is not None else ""
+            self._audit.append(
+                event_type,
+                device_id=device_id,
+                principal_id=principal_id,
+                remote_address=remote,
+                detail_code=detail_code,
+            )
+        except Exception:
+            logger.warning("Secure Gateway audit append failed", exc_info=True)
 
     def _authenticate_token(self, token: str) -> AuthenticatedGatewaySession | None:
         try:

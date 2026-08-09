@@ -9,6 +9,8 @@ from pydantic.json_schema import models_json_schema
 
 from pc_assistant.gateway.protocol import (
     ApprovalResolvedResponse,
+    AuditEventResponse,
+    AuditListResponse,
     ArtifactTranscriptionResponse,
     ArtifactResponse,
     AuthChallengeRequest,
@@ -60,6 +62,8 @@ _MODELS: tuple[type[BaseModel], ...] = (
     TaskCommandResponse,
     ResolveApprovalRequest,
     ApprovalResolvedResponse,
+    AuditEventResponse,
+    AuditListResponse,
     ArtifactResponse,
     ArtifactTranscriptionResponse,
     RuntimeStatusResponse,
@@ -482,6 +486,23 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     "responses": {
                         "200": _json_response("Tool inventory", ToolListResponse),
                         **_errors("400", "401", "404", "429", "503"),
+                    },
+                }
+            },
+            "/v1/device/audit": {
+                "get": {
+                    "operationId": "listDeviceAudit",
+                    "security": bearer,
+                    "parameters": [
+                        _query("after_id", {"type": "integer", "minimum": 0}),
+                        _query(
+                            "limit",
+                            {"type": "integer", "minimum": 1, "maximum": 200},
+                        ),
+                    ],
+                    "responses": {
+                        "200": _json_response("Device audit events", AuditListResponse),
+                        **_errors("400", "401", "429"),
                     },
                 }
             },

@@ -205,7 +205,11 @@ Gateway device record and are never sent to Core.
 > are available only through the local owner CLI; no remote administration route
 > is exposed. The mobile protocol is published as OpenAPI 3.1 from the same
 > Pydantic request models used at runtime, with route-drift tests for client
-> generation.
+> generation. Device audit is now persisted in the Gateway database and exposes
+> only the authenticated device's own secret-free events. Local pairing emits a
+> versioned JSON payload and terminal QR code only when a real public Gateway URL
+> is configured. Task pause/resume/retry, voice transcription, runtime status and
+> Skill/MCP Tool inventory are included in the allow-listed mobile surface.
 
 ### D4 — mobile delivery
 

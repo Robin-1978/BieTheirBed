@@ -4,6 +4,7 @@ import os
 import re
 from pathlib import Path
 from typing import Any, get_args, get_origin, Literal, Union
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
@@ -191,6 +192,7 @@ class AppConfig(BaseModel):
         le=48 * 1024 * 1024,
     )
     gateway_remote_enabled: bool = False
+    gateway_public_url: str = ""
     gateway_tls_cert_file: str = ""
     gateway_tls_key_file: str = ""
     feishu_enabled: bool = False
@@ -258,6 +260,20 @@ class AppConfig(BaseModel):
                 raise ValueError(
                     "Secure Gateway remote TLS mode requires certificate and key files"
                 )
+        public_url = self.gateway_public_url.strip().rstrip("/")
+        if public_url:
+            parsed = urlsplit(public_url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ValueError("Gateway public URL must be an absolute HTTP(S) URL")
+            if parsed.query or parsed.fragment or parsed.username or parsed.password:
+                raise ValueError(
+                    "Gateway public URL must not contain credentials, query or fragment"
+                )
+            if parsed.scheme != "https" and not is_loopback_host(
+                parsed.hostname or ""
+            ):
+                raise ValueError("Non-loopback Gateway public URL must use HTTPS")
+        self.gateway_public_url = public_url
         if self.feishu_enabled and (
             not self.feishu_app_id.strip()
             or not self.feishu_app_secret.get_secret_value().strip()
@@ -441,6 +457,13 @@ def _env_overrides() -> dict[str, Any]:
         "PC_WEBHOOK_ENABLED": ("webhook_enabled", bool),
         "PC_WEBHOOK_HOST": ("webhook_host", str),
         "PC_WEBHOOK_PORT": ("webhook_port", int),
+        "PC_GATEWAY_ENABLED": ("gateway_enabled", bool),
+        "PC_GATEWAY_HOST": ("gateway_host", str),
+        "PC_GATEWAY_PORT": ("gateway_port", int),
+        "PC_GATEWAY_REMOTE_ENABLED": ("gateway_remote_enabled", bool),
+        "PC_GATEWAY_PUBLIC_URL": ("gateway_public_url", str),
+        "PC_GATEWAY_TLS_CERT_FILE": ("gateway_tls_cert_file", str),
+        "PC_GATEWAY_TLS_KEY_FILE": ("gateway_tls_key_file", str),
         "PC_FEISHU_ENABLED": ("feishu_enabled", bool),
         "PC_FEISHU_APP_ID": ("feishu_app_id", str),
         "PC_FEISHU_APP_SECRET": ("feishu_app_secret", str),

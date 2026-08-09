@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 
 import pytest
 
@@ -57,3 +58,36 @@ def test_gateway_admin_rejects_invalid_pairing_ttl() -> None:
     with pytest.raises(SystemExit) as exc_info:
         main(["gateway", "pair", "--ttl", "10"])
     assert exc_info.value.code == 2
+
+
+def test_gateway_admin_emits_canonical_pairing_payload_when_url_is_configured(
+    tmp_path,
+    capsys,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("PC_RUNTIME_ROOT", raising=False)
+    runtime_root = tmp_path / "runtime"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            (
+                f"runtime_root: {runtime_root}",
+                "gateway_public_url: https://knoa.example.com",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["--config", str(config_path), "gateway", "pair", "--ttl", "60"]) == 0
+
+    output = capsys.readouterr().out
+    encoded = next(
+        line.removeprefix("pairing_json=")
+        for line in output.splitlines()
+        if line.startswith("pairing_json=")
+    )
+    payload = json.loads(encoded)
+    assert payload["version"] == "v1"
+    assert payload["gateway_url"] == "https://knoa.example.com"
+    assert payload["grant_id"]
+    assert len(payload["grant_secret"]) >= 32

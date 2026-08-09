@@ -238,6 +238,7 @@ gateway_enabled: true
 gateway_host: "0.0.0.0"
 gateway_port: 9529
 gateway_remote_enabled: true
+gateway_public_url: "https://knoa.example.com"
 gateway_tls_cert_file: "/absolute/path/gateway-cert.pem"
 gateway_tls_key_file: "/absolute/path/gateway-key.pem"
 ```
@@ -254,6 +255,12 @@ pca gateway pair --ttl 300
 pca gateway devices
 pca gateway revoke <device-id>
 ```
+
+When `gateway_public_url` is configured, `pca gateway pair` also prints one
+canonical `pairing_json` payload and a terminal QR code for the mobile App. The
+payload contains the short-lived grant secret and must be treated as sensitive
+until it expires or is consumed. Paired devices can read only their own
+secret-free audit history through `GET /v1/device/audit`.
 
 When enabled, `GET /openapi.json` serves the OpenAPI 3.1 source for generated
 mobile clients. Request models are shared with the running adapter, and tests
@@ -301,6 +308,7 @@ All config fields can be overridden with `PC_` prefix:
 | `PC_GATEWAY_HOST` | gateway_host |
 | `PC_GATEWAY_PORT` | gateway_port |
 | `PC_GATEWAY_REMOTE_ENABLED` | gateway_remote_enabled |
+| `PC_GATEWAY_PUBLIC_URL` | gateway_public_url |
 | `PC_GATEWAY_TLS_CERT_FILE` | gateway_tls_cert_file |
 | `PC_GATEWAY_TLS_KEY_FILE` | gateway_tls_key_file |
 
