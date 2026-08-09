@@ -4,6 +4,8 @@ import pytest
 
 from pc_assistant.config import AppConfig
 from pc_assistant.gateway.core import GatewayCoreBridge
+from pc_assistant.service.core_api import ArtifactInputRef, TaskSnapshot
+from pc_assistant.tasks import TaskState
 
 
 class _Client:
@@ -20,6 +22,32 @@ class _Client:
     async def disconnect(self) -> None:
         self.is_connected = False
         self.disconnected = True
+
+    async def get_task(self, task_id):
+        return TaskSnapshot(
+            task_id=task_id,
+            session_handle="session-a",
+            client_request_id="request-a",
+            goal="original goal",
+            attachments=(ArtifactInputRef(artifact_id="artifact-a"),),
+            tools_enabled=True,
+            priority=3,
+            state=TaskState.FAILED,
+            phase="failed",
+            attempt_count=1,
+            cancel_requested=False,
+            created_at=1.0,
+            updated_at=2.0,
+            next_event_seq=3,
+        )
+
+    async def create_task(self, session_handle, goal, attachments, **kwargs):
+        self.created_task = (session_handle, goal, attachments, kwargs)
+        return type(
+            "Accepted",
+            (),
+            {"task_id": "task-retry", "state": TaskState.QUEUED},
+        )()
 
 
 @pytest.mark.asyncio
@@ -46,3 +74,33 @@ async def test_gateway_core_bridge_reuses_only_same_principal_client(tmp_path) -
     assert other == "personal:b:1"
     assert [client.principal_id for client in clients] == ["personal:a", "personal:b"]
     assert all(client.disconnected for client in clients)
+
+
+@pytest.mark.asyncio
+async def test_gateway_core_bridge_retries_as_child_task(tmp_path) -> None:
+    client = _Client("personal:owner")
+
+    async def factory(_principal_id):
+        return client
+
+    bridge = GatewayCoreBridge(
+        AppConfig(fallback_enabled=False, runtime_root=str(tmp_path)),
+        client_factory=factory,
+    )
+
+    accepted = await bridge.retry_task(
+        "personal:owner",
+        "task-failed",
+        reason="network recovered",
+    )
+
+    assert accepted.task_id == "task-retry"
+    session_handle, goal, attachments, options = client.created_task
+    assert session_handle == "session-a"
+    assert goal == "original goal\n\nRetry note: network recovered"
+    assert attachments[0].artifact_id == "artifact-a"
+    assert options == {
+        "tools_enabled": True,
+        "priority": 3,
+        "parent_task_id": "task-failed",
+    }

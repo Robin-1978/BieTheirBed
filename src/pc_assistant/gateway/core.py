@@ -6,7 +6,12 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Protocol
 
 from pc_assistant.config import AppConfig
-from pc_assistant.agent_runtime.contracts import ArtifactDownloadResult
+from pc_assistant.agent_runtime.contracts import (
+    ArtifactDownloadResult,
+    ArtifactTranscriptionResult,
+    RuntimeStatus,
+    ToolListResult,
+)
 from pc_assistant.artifacts import ArtifactRef
 from pc_assistant.runtime import RuntimePaths
 from pc_assistant.service.core_api import (
@@ -15,6 +20,8 @@ from pc_assistant.service.core_api import (
     TaskAcceptedMessage,
     TaskCancelResultMessage,
     TaskListMessage,
+    TaskPauseResultMessage,
+    TaskResumedMessage,
     TaskSnapshot,
 )
 from pc_assistant.service.core_client import CoreClient
@@ -59,6 +66,31 @@ class GatewayCoreClient(Protocol):
         *,
         reason: str = "",
     ) -> TaskCancelResultMessage: ...
+
+    async def pause_task(
+        self,
+        task_id: str,
+        *,
+        reason: str = "",
+    ) -> TaskPauseResultMessage: ...
+
+    async def resume_task(
+        self,
+        task_id: str,
+        *,
+        reason: str = "",
+        acknowledge_outcome_unknown: bool = False,
+    ) -> TaskResumedMessage: ...
+
+    async def transcribe_artifact(
+        self,
+        session_handle: str,
+        artifact_id: str,
+    ) -> ArtifactTranscriptionResult: ...
+
+    async def status(self, session_handle: str) -> RuntimeStatus: ...
+
+    async def list_tools(self, session_handle: str) -> ToolListResult: ...
 
     async def resolve_approval(
         self,
@@ -170,6 +202,84 @@ class GatewayCoreBridge:
     ) -> TaskCancelResultMessage:
         client = await self._client_for(principal_id)
         return await client.cancel_task(task_id, reason=reason)
+
+    async def pause_task(
+        self,
+        principal_id: str,
+        task_id: str,
+        *,
+        reason: str,
+    ) -> TaskPauseResultMessage:
+        return await (await self._client_for(principal_id)).pause_task(
+            task_id,
+            reason=reason,
+        )
+
+    async def resume_task(
+        self,
+        principal_id: str,
+        task_id: str,
+        *,
+        reason: str,
+        acknowledge_outcome_unknown: bool,
+    ) -> TaskResumedMessage:
+        return await (await self._client_for(principal_id)).resume_task(
+            task_id,
+            reason=reason,
+            acknowledge_outcome_unknown=acknowledge_outcome_unknown,
+        )
+
+    async def retry_task(
+        self,
+        principal_id: str,
+        task_id: str,
+        *,
+        reason: str,
+    ) -> TaskAcceptedMessage:
+        client = await self._client_for(principal_id)
+        previous = await client.get_task(task_id)
+        if previous.state not in {
+            TaskState.COMPLETED,
+            TaskState.FAILED,
+            TaskState.CANCELLED,
+        }:
+            raise ValueError("Only terminal Tasks can be retried")
+        goal = previous.goal
+        if reason.strip():
+            goal += f"\n\nRetry note: {reason.strip()}"
+        return await client.create_task(
+            previous.session_handle,
+            goal,
+            previous.attachments,
+            tools_enabled=previous.tools_enabled,
+            priority=previous.priority,
+            parent_task_id=previous.task_id,
+        )
+
+    async def transcribe_artifact(
+        self,
+        principal_id: str,
+        session_handle: str,
+        artifact_id: str,
+    ) -> ArtifactTranscriptionResult:
+        return await (await self._client_for(principal_id)).transcribe_artifact(
+            session_handle,
+            artifact_id,
+        )
+
+    async def status(
+        self,
+        principal_id: str,
+        session_handle: str,
+    ) -> RuntimeStatus:
+        return await (await self._client_for(principal_id)).status(session_handle)
+
+    async def list_tools(
+        self,
+        principal_id: str,
+        session_handle: str,
+    ) -> ToolListResult:
+        return await (await self._client_for(principal_id)).list_tools(session_handle)
 
     async def resolve_approval(
         self,

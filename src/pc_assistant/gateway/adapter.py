@@ -48,7 +48,11 @@ from pc_assistant.gateway.protocol import (
     GatewayRequest,
     PairChallengeRequest,
     PairCompleteRequest,
+    PauseTaskRequest,
     ResolveApprovalRequest,
+    ResumeTaskRequest,
+    RetryTaskRequest,
+    RuntimeQuery,
     TaskListQuery,
 )
 from pc_assistant.service.core_client import (
@@ -156,6 +160,28 @@ class SecureGatewayAdapter:
                     self._cancel_task,
                     methods=["POST"],
                 ),
+                Route(
+                    "/v1/tasks/{task_id:str}/pause",
+                    self._pause_task,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/tasks/{task_id:str}/resume",
+                    self._resume_task,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/tasks/{task_id:str}/retry",
+                    self._retry_task,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/artifacts/{artifact_id:str}/transcribe",
+                    self._transcribe_artifact,
+                    methods=["POST"],
+                ),
+                Route("/v1/runtime/status", self._runtime_status, methods=["GET"]),
+                Route("/v1/tools", self._list_tools, methods=["GET"]),
                 Route(
                     "/v1/approvals/{approval_id:str}/resolve",
                     self._resolve_approval,
@@ -403,6 +429,124 @@ class SecureGatewayAdapter:
         except Exception as exc:
             return self._core_error(exc)
         return JSONResponse(result.result.model_dump(mode="json"))
+
+    async def _pause_task(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=30)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        task_id = self._path_identifier(request, "task_id")
+        if task_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        parsed = await self._parse_body(request, PauseTaskRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            result = await self._core.pause_task(
+                authenticated.device.principal_id,
+                task_id,
+                reason=parsed.reason,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse(result.result.model_dump(mode="json"))
+
+    async def _resume_task(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=30)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        task_id = self._path_identifier(request, "task_id")
+        if task_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        parsed = await self._parse_body(request, ResumeTaskRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            result = await self._core.resume_task(
+                authenticated.device.principal_id,
+                task_id,
+                reason=parsed.reason,
+                acknowledge_outcome_unknown=parsed.acknowledge_outcome_unknown,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse({"accepted": True, "state": result.state.value})
+
+    async def _retry_task(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=30)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        task_id = self._path_identifier(request, "task_id")
+        if task_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        parsed = await self._parse_body(request, RetryTaskRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            result = await self._core.retry_task(
+                authenticated.device.principal_id,
+                task_id,
+                reason=parsed.reason,
+            )
+        except ValueError:
+            return JSONResponse({"error": "rejected"}, status_code=422)
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse(
+            {"task_id": result.task_id, "state": result.state.value},
+            status_code=202,
+        )
+
+    async def _transcribe_artifact(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=20)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        artifact_id = self._path_identifier(request, "artifact_id")
+        if artifact_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            query = RuntimeQuery.model_validate(dict(request.query_params))
+            result = await self._core.transcribe_artifact(
+                authenticated.device.principal_id,
+                query.session_handle,
+                artifact_id,
+            )
+        except ValidationError:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse({"result": result.model_dump(mode="json")})
+
+    async def _runtime_status(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=120)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        try:
+            query = RuntimeQuery.model_validate(dict(request.query_params))
+            result = await self._core.status(
+                authenticated.device.principal_id,
+                query.session_handle,
+            )
+        except ValidationError:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse({"result": result.model_dump(mode="json")})
+
+    async def _list_tools(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=120)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        try:
+            query = RuntimeQuery.model_validate(dict(request.query_params))
+            result = await self._core.list_tools(
+                authenticated.device.principal_id,
+                query.session_handle,
+            )
+        except ValidationError:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse({"result": result.model_dump(mode="json")})
 
     async def _resolve_approval(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=30)

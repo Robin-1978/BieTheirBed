@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from pc_assistant.agent_runtime.contracts import RuntimeStatus, ToolListResult
+from pc_assistant.agent_runtime.contracts import ArtifactTranscriptionResult
 from pc_assistant.artifacts import ArtifactRef
 from pc_assistant.service.core_api import ArtifactInputRef, TaskSnapshot
 from pc_assistant.tasks import ApprovalState, TaskState
@@ -52,6 +54,18 @@ class CancelTaskRequest(GatewayRequest):
     reason: str = Field(default="", max_length=1000)
 
 
+class PauseTaskRequest(GatewayRequest):
+    reason: str = Field(default="", max_length=1000)
+
+
+class ResumeTaskRequest(PauseTaskRequest):
+    acknowledge_outcome_unknown: bool = False
+
+
+class RetryTaskRequest(PauseTaskRequest):
+    pass
+
+
 class ResolveApprovalRequest(GatewayRequest):
     approved: bool
 
@@ -78,6 +92,10 @@ class ArtifactUploadQuery(GatewayQuery):
 
 
 class ArtifactDownloadQuery(GatewayQuery):
+    session_handle: str = Field(min_length=1, max_length=256)
+
+
+class RuntimeQuery(GatewayQuery):
     session_handle: str = Field(min_length=1, max_length=256)
 
 
@@ -123,6 +141,11 @@ class TaskAcceptedResponse(BaseModel):
     state: TaskState
 
 
+class TaskCommandResponse(BaseModel):
+    accepted: bool
+    state: TaskState
+
+
 class TaskResponse(BaseModel):
     task: TaskSnapshot
 
@@ -140,3 +163,15 @@ class ApprovalResolvedResponse(BaseModel):
 
 class ArtifactResponse(BaseModel):
     artifact: ArtifactRef
+
+
+class ArtifactTranscriptionResponse(BaseModel):
+    result: ArtifactTranscriptionResult
+
+
+class RuntimeStatusResponse(BaseModel):
+    result: RuntimeStatus
+
+
+class ToolListResponse(BaseModel):
+    result: ToolListResult
