@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
@@ -21,6 +21,19 @@ class ScheduleState(str, Enum):
 
 
 class OccurrenceState(str, Enum):
+    CLAIMED = "claimed"
+    RETRY_WAIT = "retry_wait"
+    TASK_CREATED = "task_created"
+    DEAD = "dead"
+
+
+class TriggerState(str, Enum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+
+
+class TriggerEventState(str, Enum):
+    RECEIVED = "received"
     CLAIMED = "claimed"
     RETRY_WAIT = "retry_wait"
     TASK_CREATED = "task_created"
@@ -97,4 +110,46 @@ class ScheduleOccurrenceRecord(BaseModel):
     task_id: Annotated[str, StringConstraints(max_length=128)] = ""
     failure_code: Annotated[str, StringConstraints(max_length=256)] = ""
     created_at: float = Field(ge=0.0)
+    updated_at: float = Field(ge=0.0)
+
+
+class TriggerRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    trigger_id: Annotated[str, StringConstraints(min_length=1, max_length=128)]
+    principal_id: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    session_handle: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    client_request_id: Annotated[str, StringConstraints(min_length=1, max_length=128)]
+    name: Annotated[str, StringConstraints(min_length=1, max_length=128)]
+    goal: Annotated[str, StringConstraints(min_length=1, max_length=64_000)]
+    tools_enabled: bool = True
+    priority: int = Field(default=0, ge=0, le=9)
+    state: TriggerState
+    event_count: int = Field(default=0, ge=0)
+    last_event_at: float | None = Field(default=None, ge=0.0)
+    created_at: float = Field(ge=0.0)
+    updated_at: float = Field(ge=0.0)
+
+
+class TriggerEventRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    trigger_event_id: Annotated[
+        str, StringConstraints(min_length=1, max_length=128)
+    ]
+    trigger_id: Annotated[str, StringConstraints(min_length=1, max_length=128)]
+    principal_id: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    session_handle: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    external_event_id: Annotated[
+        str, StringConstraints(min_length=1, max_length=256)
+    ]
+    payload: dict[str, Any] = Field(default_factory=dict)
+    state: TriggerEventState
+    attempt_count: int = Field(ge=0)
+    next_attempt_at: float | None = Field(default=None, ge=0.0)
+    lease_owner: Annotated[str, StringConstraints(max_length=128)] = ""
+    lease_expires_at: float | None = Field(default=None, ge=0.0)
+    task_id: Annotated[str, StringConstraints(max_length=128)] = ""
+    failure_code: Annotated[str, StringConstraints(max_length=256)] = ""
+    received_at: float = Field(ge=0.0)
     updated_at: float = Field(ge=0.0)

@@ -23,11 +23,16 @@ from pc_assistant.agent_runtime.contracts import (
     ControlServicePort,
     RuntimeScope,
 )
-from pc_assistant.automation import ScheduleService
+from pc_assistant.automation import ScheduleService, TriggerService
 from pc_assistant.automation.repository import (
     ScheduleIdempotencyConflictError,
     ScheduleNotFoundError,
     ScheduleTransitionError,
+)
+from pc_assistant.automation.trigger_repository import (
+    TriggerIdempotencyConflictError,
+    TriggerNotFoundError,
+    TriggerTransitionError,
 )
 from pc_assistant.exceptions import SessionNotFoundError
 from pc_assistant.service.core_api import (
@@ -41,13 +46,16 @@ from pc_assistant.service.core_api import (
     ConfigSetMessage,
     CoreError,
     CreateScheduleRequest,
+    CreateTriggerRequest,
     CreateSessionRequest,
     CreateTaskRequest,
     DownloadArtifactRequest,
+    FireTriggerRequest,
     GetTaskRequest,
     GetHistoryRequest,
     GetStatusRequest,
     GetScheduleRequest,
+    GetTriggerRequest,
     HealthMessage,
     HealthRequest,
     HistoryMessage,
@@ -55,13 +63,16 @@ from pc_assistant.service.core_api import (
     ListSchedulesRequest,
     ListTasksRequest,
     ListToolsRequest,
+    ListTriggersRequest,
     MemoryClearedMessage,
     MemoryListMessage,
     PauseScheduleRequest,
     PauseTaskRequest,
+    PauseTriggerRequest,
     ResolveApprovalRequest,
     ResumeScheduleRequest,
     ResumeTaskRequest,
+    ResumeTriggerRequest,
     SessionCreatedMessage,
     ScheduleAcceptedMessage,
     ScheduleListMessage,
@@ -80,6 +91,12 @@ from pc_assistant.service.core_api import (
     TaskSnapshotMessage,
     TaskSubscribedMessage,
     ToolsMessage,
+    TriggerAcceptedMessage,
+    TriggerEventAcceptedMessage,
+    TriggerEventSnapshot,
+    TriggerListMessage,
+    TriggerSnapshot,
+    TriggerSnapshotMessage,
     UploadArtifactRequest,
     parse_core_request_json,
 )
@@ -158,6 +175,7 @@ class CoreServer:
         self,
         tasks: TaskService,
         schedules: ScheduleService,
+        triggers: TriggerService,
         control: ControlServicePort,
         artifacts: ArtifactServicePort,
         authenticator: PrincipalAuthenticator,
@@ -169,6 +187,7 @@ class CoreServer:
             raise ValueError("Task subscription limit must be at least one")
         self._tasks = tasks
         self._schedules = schedules
+        self._triggers = triggers
         self._control = control
         self._artifacts = artifacts
         self._authenticator = authenticator
@@ -464,6 +483,84 @@ class CoreServer:
                         schedule=ScheduleSnapshot.from_record(schedule),
                     )
                 )
+            elif isinstance(request, CreateTriggerRequest):
+                trigger = await self._triggers.create(
+                    RuntimeScope(
+                        principal_id=principal,
+                        session_handle=request.session_handle,
+                    ),
+                    client_request_id=request.request_id,
+                    name=request.name,
+                    goal=request.goal,
+                    tools_enabled=request.tools_enabled,
+                    priority=request.priority,
+                )
+                await send(
+                    TriggerAcceptedMessage(
+                        request_id=request.request_id,
+                        trigger=TriggerSnapshot.from_record(trigger),
+                    )
+                )
+            elif isinstance(request, GetTriggerRequest):
+                trigger = await self._triggers.get(principal, request.trigger_id)
+                await send(
+                    TriggerSnapshotMessage(
+                        request_id=request.request_id,
+                        trigger=TriggerSnapshot.from_record(trigger),
+                    )
+                )
+            elif isinstance(request, ListTriggersRequest):
+                triggers = await self._triggers.list(
+                    principal,
+                    state=request.state,
+                    limit=request.limit,
+                )
+                await send(
+                    TriggerListMessage(
+                        request_id=request.request_id,
+                        triggers=tuple(
+                            TriggerSnapshot.from_record(trigger)
+                            for trigger in triggers
+                        ),
+                    )
+                )
+            elif isinstance(request, PauseTriggerRequest):
+                trigger = await self._triggers.set_paused(
+                    principal,
+                    request.trigger_id,
+                    paused=True,
+                )
+                await send(
+                    TriggerSnapshotMessage(
+                        request_id=request.request_id,
+                        trigger=TriggerSnapshot.from_record(trigger),
+                    )
+                )
+            elif isinstance(request, ResumeTriggerRequest):
+                trigger = await self._triggers.set_paused(
+                    principal,
+                    request.trigger_id,
+                    paused=False,
+                )
+                await send(
+                    TriggerSnapshotMessage(
+                        request_id=request.request_id,
+                        trigger=TriggerSnapshot.from_record(trigger),
+                    )
+                )
+            elif isinstance(request, FireTriggerRequest):
+                event = await self._triggers.receive(
+                    principal,
+                    request.trigger_id,
+                    external_event_id=request.external_event_id,
+                    payload=request.payload,
+                )
+                await send(
+                    TriggerEventAcceptedMessage(
+                        request_id=request.request_id,
+                        event=TriggerEventSnapshot.from_record(event),
+                    )
+                )
             elif isinstance(request, HealthRequest):
                 await send(
                     HealthMessage(
@@ -690,6 +787,30 @@ class CoreServer:
                     request.request_id,
                     "invalid_request",
                     "Schedule state does not allow this command",
+                )
+            )
+        except TriggerNotFoundError:
+            await send(
+                self._error(
+                    request.request_id,
+                    "trigger_not_found",
+                    "Trigger not found",
+                )
+            )
+        except TriggerIdempotencyConflictError:
+            await send(
+                self._error(
+                    request.request_id,
+                    "invalid_request",
+                    "Trigger or external event ID conflicts with existing input",
+                )
+            )
+        except TriggerTransitionError:
+            await send(
+                self._error(
+                    request.request_id,
+                    "invalid_request",
+                    "Trigger state does not allow this command",
                 )
             )
         except TaskIdempotencyConflictError:

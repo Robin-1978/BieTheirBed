@@ -31,6 +31,10 @@ from pc_assistant.automation import (
     ScheduleRecord,
     ScheduleSpec,
     ScheduleState,
+    TriggerEventRecord,
+    TriggerEventState,
+    TriggerRecord,
+    TriggerState,
 )
 from pc_assistant.tasks import (
     ApprovalState,
@@ -139,6 +143,56 @@ class ScheduleSnapshot(CoreModel):
             fire_count=schedule.fire_count,
             created_at=schedule.created_at,
             updated_at=schedule.updated_at,
+        )
+
+
+class TriggerSnapshot(CoreModel):
+    trigger_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+    session_handle: SessionHandle
+    name: Annotated[NonEmpty, StringConstraints(max_length=128)]
+    goal: Annotated[str, StringConstraints(min_length=1, max_length=64_000)]
+    tools_enabled: bool
+    priority: int = Field(ge=0, le=9)
+    state: TriggerState
+    event_count: int = Field(ge=0)
+    last_event_at: float | None = Field(default=None, ge=0.0)
+    created_at: float = Field(ge=0.0)
+    updated_at: float = Field(ge=0.0)
+
+    @classmethod
+    def from_record(cls, trigger: TriggerRecord) -> TriggerSnapshot:
+        return cls(
+            trigger_id=trigger.trigger_id,
+            session_handle=trigger.session_handle,
+            name=trigger.name,
+            goal=trigger.goal,
+            tools_enabled=trigger.tools_enabled,
+            priority=trigger.priority,
+            state=trigger.state,
+            event_count=trigger.event_count,
+            last_event_at=trigger.last_event_at,
+            created_at=trigger.created_at,
+            updated_at=trigger.updated_at,
+        )
+
+
+class TriggerEventSnapshot(CoreModel):
+    trigger_event_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+    trigger_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+    external_event_id: Annotated[NonEmpty, StringConstraints(max_length=256)]
+    state: TriggerEventState
+    task_id: Annotated[str, StringConstraints(max_length=128)] = ""
+    received_at: float = Field(ge=0.0)
+
+    @classmethod
+    def from_record(cls, event: TriggerEventRecord) -> TriggerEventSnapshot:
+        return cls(
+            trigger_event_id=event.trigger_event_id,
+            trigger_id=event.trigger_id,
+            external_event_id=event.external_event_id,
+            state=event.state,
+            task_id=event.task_id,
+            received_at=event.received_at,
         )
 
 
@@ -277,6 +331,55 @@ class ResumeScheduleRequest(CoreModel):
     schedule_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
 
 
+class CreateTriggerRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["create_trigger"] = "create_trigger"
+    session_handle: SessionHandle
+    name: Annotated[NonEmpty, StringConstraints(max_length=128)]
+    goal: Annotated[str, StringConstraints(min_length=1, max_length=64_000)]
+    tools_enabled: bool = True
+    priority: int = Field(default=0, ge=0, le=9)
+
+
+class GetTriggerRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["get_trigger"] = "get_trigger"
+    trigger_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+
+
+class ListTriggersRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["list_triggers"] = "list_triggers"
+    state: TriggerState | None = None
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class PauseTriggerRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["pause_trigger"] = "pause_trigger"
+    trigger_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+
+
+class ResumeTriggerRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["resume_trigger"] = "resume_trigger"
+    trigger_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+
+
+class FireTriggerRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["fire_trigger"] = "fire_trigger"
+    trigger_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+    external_event_id: Annotated[NonEmpty, StringConstraints(max_length=256)]
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
 class SessionRequest(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
@@ -341,6 +444,12 @@ CoreRequest: TypeAlias = Annotated[
     | ListSchedulesRequest
     | PauseScheduleRequest
     | ResumeScheduleRequest
+    | CreateTriggerRequest
+    | GetTriggerRequest
+    | ListTriggersRequest
+    | PauseTriggerRequest
+    | ResumeTriggerRequest
+    | FireTriggerRequest
     | GetStatusRequest
     | GetHistoryRequest
     | ListMemoryRequest
@@ -368,6 +477,7 @@ ErrorCode = Literal[
     "artifact_too_large",
     "task_not_found",
     "schedule_not_found",
+    "trigger_not_found",
     "capability_denied",
     "confirmation_denied",
     "tool_invalid_arguments",
@@ -554,6 +664,34 @@ class ScheduleListMessage(CoreModel):
     schedules: tuple[ScheduleSnapshot, ...]
 
 
+class TriggerAcceptedMessage(CoreModel):
+    message_type: Literal["trigger_accepted"] = "trigger_accepted"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    trigger: TriggerSnapshot
+
+
+class TriggerSnapshotMessage(CoreModel):
+    message_type: Literal["trigger_snapshot"] = "trigger_snapshot"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    trigger: TriggerSnapshot
+
+
+class TriggerListMessage(CoreModel):
+    message_type: Literal["trigger_list"] = "trigger_list"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    triggers: tuple[TriggerSnapshot, ...]
+
+
+class TriggerEventAcceptedMessage(CoreModel):
+    message_type: Literal["trigger_event_accepted"] = "trigger_event_accepted"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    event: TriggerEventSnapshot
+
+
 CoreServerMessage: TypeAlias = Annotated[
     AuthenticatedMessage
     | SessionCreatedMessage
@@ -578,6 +716,10 @@ CoreServerMessage: TypeAlias = Annotated[
     | ScheduleAcceptedMessage
     | ScheduleSnapshotMessage
     | ScheduleListMessage
+    | TriggerAcceptedMessage
+    | TriggerSnapshotMessage
+    | TriggerListMessage
+    | TriggerEventAcceptedMessage
     | CoreError,
     Field(discriminator="message_type"),
 ]

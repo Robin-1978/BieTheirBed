@@ -94,6 +94,7 @@ def _servers(tmp_path: Path):
     tcp = CoreServer(
         tasks,
         SimpleNamespace(),
+        SimpleNamespace(),
         control,
         artifacts,
         StaticTokenAuthenticator({"remote-token": "remote-a"}),

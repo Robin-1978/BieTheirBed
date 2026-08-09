@@ -28,6 +28,9 @@ from pc_assistant.automation import (
     ScheduleRepository,
     ScheduleService,
     ScheduleSpec,
+    TriggerDispatcher,
+    TriggerRepository,
+    TriggerService,
 )
 from pc_assistant.artifacts import ArtifactStore
 from pc_assistant.context.memory_db import SQLiteMemoryRepository
@@ -206,6 +209,12 @@ async def _connected(
     )
     schedule_dispatcher = ScheduleDispatcher(schedule_repository, tasks)
     schedules = ScheduleService(schedule_repository, schedule_dispatcher)
+    trigger_repository = TriggerRepository(
+        database,
+        trigger_id_factory=lambda: "trigger-opaque",
+    )
+    trigger_dispatcher = TriggerDispatcher(trigger_repository, tasks)
+    triggers = TriggerService(trigger_repository, trigger_dispatcher)
     control = ControlService(
         sessions,
         memory,
@@ -219,6 +228,7 @@ async def _connected(
     server = CoreServer(
         tasks,
         schedules,
+        triggers,
         control,
         artifacts,
         StaticTokenAuthenticator({"token-a": "local"}),
@@ -352,6 +362,44 @@ async def test_client_can_create_get_and_list_schedule(tmp_path: Path) -> None:
         assert created.priority == 3
         assert paused.state.value == "paused"
         assert resumed.state.value == "active"
+    finally:
+        await connected.close()
+
+
+@pytest.mark.asyncio
+async def test_client_can_manage_and_fire_authenticated_trigger(tmp_path: Path) -> None:
+    connected = await _connected(tmp_path)
+    try:
+        session = await connected.client.create_session()
+        created = await connected.client.create_trigger(
+            session,
+            "gitlab merge",
+            "review merge request",
+            priority=4,
+        )
+        detail = await connected.client.get_trigger(created.trigger_id)
+        listing = await connected.client.list_triggers()
+        paused = await connected.client.pause_trigger(created.trigger_id)
+        resumed = await connected.client.resume_trigger(created.trigger_id)
+        event = await connected.client.fire_trigger(
+            created.trigger_id,
+            "gitlab-event-1",
+            {"project": "knoa"},
+        )
+        repeated = await connected.client.fire_trigger(
+            created.trigger_id,
+            "gitlab-event-1",
+            {"project": "knoa"},
+        )
+
+        assert created.trigger_id == "trigger-opaque"
+        assert detail == created
+        assert listing == (created,)
+        assert paused.state.value == "paused"
+        assert resumed.state.value == "active"
+        assert event == repeated
+        assert event.external_event_id == "gitlab-event-1"
+        assert event.state.value == "received"
     finally:
         await connected.close()
 

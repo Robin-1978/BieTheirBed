@@ -19,7 +19,7 @@ from pc_assistant.agent_runtime.contracts import (
     ToolListResult,
 )
 from pc_assistant.artifacts import ArtifactRef
-from pc_assistant.automation import ScheduleSpec, ScheduleState
+from pc_assistant.automation import ScheduleSpec, ScheduleState, TriggerState
 from pc_assistant.service.core_api import (
     ApprovalResolvedMessage,
     AuthenticateRequest,
@@ -34,13 +34,16 @@ from pc_assistant.service.core_api import (
     CoreError,
     CoreServerMessage,
     CreateScheduleRequest,
+    CreateTriggerRequest,
     CreateSessionRequest,
     CreateTaskRequest,
     DownloadArtifactRequest,
+    FireTriggerRequest,
     GetTaskRequest,
     GetHistoryRequest,
     GetStatusRequest,
     GetScheduleRequest,
+    GetTriggerRequest,
     HealthMessage,
     HealthRequest,
     HistoryMessage,
@@ -48,10 +51,12 @@ from pc_assistant.service.core_api import (
     ListSchedulesRequest,
     ListTasksRequest,
     ListToolsRequest,
+    ListTriggersRequest,
     MemoryClearedMessage,
     MemoryListMessage,
     PauseScheduleRequest,
     PauseTaskRequest,
+    PauseTriggerRequest,
     ResolveApprovalRequest,
     ResumeScheduleRequest,
     ScheduleAcceptedMessage,
@@ -59,6 +64,7 @@ from pc_assistant.service.core_api import (
     ScheduleSnapshot,
     ScheduleSnapshotMessage,
     ResumeTaskRequest,
+    ResumeTriggerRequest,
     SessionCreatedMessage,
     SetConfigRequest,
     StatusMessage,
@@ -73,6 +79,12 @@ from pc_assistant.service.core_api import (
     TaskSnapshotMessage,
     TaskSubscribedMessage,
     ToolsMessage,
+    TriggerAcceptedMessage,
+    TriggerEventAcceptedMessage,
+    TriggerEventSnapshot,
+    TriggerListMessage,
+    TriggerSnapshot,
+    TriggerSnapshotMessage,
     UploadArtifactRequest,
     parse_core_server_message_json,
 )
@@ -664,6 +676,97 @@ class CoreClient:
         if not isinstance(response, ScheduleSnapshotMessage):
             raise RuntimeError("CoreServer returned an invalid resumed schedule")
         return response.schedule
+
+    async def create_trigger(
+        self,
+        session_handle: str,
+        name: str,
+        goal: str,
+        *,
+        tools_enabled: bool = True,
+        priority: int = 0,
+    ) -> TriggerSnapshot:
+        response = await self._request(
+            CreateTriggerRequest(
+                request_id=self._request_id(),
+                session_handle=session_handle,
+                name=name,
+                goal=goal,
+                tools_enabled=tools_enabled,
+                priority=priority,
+            )
+        )
+        if not isinstance(response, TriggerAcceptedMessage):
+            raise RuntimeError("CoreServer returned an invalid trigger response")
+        return response.trigger
+
+    async def get_trigger(self, trigger_id: str) -> TriggerSnapshot:
+        response = await self._request(
+            GetTriggerRequest(
+                request_id=self._request_id(),
+                trigger_id=trigger_id,
+            )
+        )
+        if not isinstance(response, TriggerSnapshotMessage):
+            raise RuntimeError("CoreServer returned an invalid trigger snapshot")
+        return response.trigger
+
+    async def list_triggers(
+        self,
+        *,
+        state: TriggerState | None = None,
+        limit: int = 50,
+    ) -> tuple[TriggerSnapshot, ...]:
+        response = await self._request(
+            ListTriggersRequest(
+                request_id=self._request_id(),
+                state=state,
+                limit=limit,
+            )
+        )
+        if not isinstance(response, TriggerListMessage):
+            raise RuntimeError("CoreServer returned an invalid trigger list")
+        return response.triggers
+
+    async def pause_trigger(self, trigger_id: str) -> TriggerSnapshot:
+        response = await self._request(
+            PauseTriggerRequest(
+                request_id=self._request_id(),
+                trigger_id=trigger_id,
+            )
+        )
+        if not isinstance(response, TriggerSnapshotMessage):
+            raise RuntimeError("CoreServer returned an invalid paused trigger")
+        return response.trigger
+
+    async def resume_trigger(self, trigger_id: str) -> TriggerSnapshot:
+        response = await self._request(
+            ResumeTriggerRequest(
+                request_id=self._request_id(),
+                trigger_id=trigger_id,
+            )
+        )
+        if not isinstance(response, TriggerSnapshotMessage):
+            raise RuntimeError("CoreServer returned an invalid resumed trigger")
+        return response.trigger
+
+    async def fire_trigger(
+        self,
+        trigger_id: str,
+        external_event_id: str,
+        payload: dict[str, Any] | None = None,
+    ) -> TriggerEventSnapshot:
+        response = await self._request(
+            FireTriggerRequest(
+                request_id=self._request_id(),
+                trigger_id=trigger_id,
+                external_event_id=external_event_id,
+                payload=payload or {},
+            )
+        )
+        if not isinstance(response, TriggerEventAcceptedMessage):
+            raise RuntimeError("CoreServer returned an invalid trigger event response")
+        return response.event
 
     @property
     def is_connected(self) -> bool:
