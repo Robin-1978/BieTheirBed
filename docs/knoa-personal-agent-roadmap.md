@@ -360,7 +360,9 @@ Task 至少记录：
 > 不再被上一条长任务的 Channel 锁阻塞，而是立即创建新的持久 Task，执行顺序由 Core
 > 的 session 调度保证。普通文件也已进入同一 Artifact ingress：保留安全文件名和 MIME，
 > 以 session-scoped `file_ref` 传递；文本类附件由低风险 Core 工具 `read_artifact`
-> 按 artifact ID 读取，路径不泄露给 Channel 或模型。下一步补长结果 Artifact 化与音频能力。
+> 按 artifact ID 读取，路径不泄露给 Channel 或模型。超过卡片阈值的完整输出由
+> AgentRuntime 生成持久 Markdown Artifact 并发布标准 artifact event；飞书展示短预览并
+> 交付完整文件，生成失败则回退到原有无损分段。下一步补音频能力和 App 深链。
 
 ### Phase C 验收
 

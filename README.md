@@ -189,6 +189,9 @@ Tasks. New messages can enqueue new Tasks while earlier work continues.
 Images and ordinary files enter the same owned Core Artifact boundary. Attached
 text files preserve their safe name and can be inspected through the bounded
 `read_artifact` Built-in Tool without exposing a server filesystem path.
+Long final outputs are retained in the Task journal and also emitted as a
+persistent Markdown Artifact. Feishu shows a compact preview and delivers the
+complete file instead of flooding the conversation with continuation cards.
 
 An optional HTTP webhook adapter can feed configured durable Triggers without
 adding HTTP parsing to Core. Keep it on loopback and expose it only through a

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from pc_assistant.artifacts import ArtifactRef
 from pc_assistant.agent_runtime.contracts import RuntimeStatus
 from pc_assistant.channels.feishu import (
     FeishuChannel,
@@ -401,6 +402,85 @@ async def test_feishu_file_is_registered_as_pending_core_artifact(tmp_path) -> N
         "artifact-file"
     )
     assert sent == [("ou-user", "文件已收到：notes.txt\n请继续发送任务。")]
+
+
+@pytest.mark.asyncio
+async def test_feishu_long_result_uses_preview_and_delivers_full_artifact(
+    tmp_path,
+) -> None:
+    final_output = "摘要\n\n" + ("完整正文。" * 3_000) + "结尾标记"
+    artifact = ArtifactRef(
+        artifact_id="artifact-report",
+        kind="file",
+        name="result.md",
+        media_type="text/markdown",
+        size=len(final_output.encode()),
+        direction="outbound",
+        ownership="generated",
+        retention="persistent",
+        visibility="user",
+    )
+
+    class LongResultClient:
+        async def execute_task(self, _session, _text, _attachments):
+            yield TaskEvent(
+                task_id="task-long",
+                event_seq=1,
+                occurred_at=1.0,
+                event_type="task_created",
+                payload=TaskEventPayload(state=TaskState.QUEUED),
+            )
+            yield TaskEvent(
+                task_id="task-long",
+                event_seq=2,
+                occurred_at=2.0,
+                event_type="artifact",
+                payload=TaskEventPayload(artifact=artifact),
+            )
+            yield TaskEvent(
+                task_id="task-long",
+                event_seq=3,
+                occurred_at=3.0,
+                event_type="final_output",
+                payload=TaskEventPayload(content=final_output),
+            )
+            yield TaskEvent(
+                task_id="task-long",
+                event_seq=4,
+                occurred_at=4.0,
+                event_type="completed",
+                payload=TaskEventPayload(state=TaskState.COMPLETED),
+            )
+
+    channel = FeishuChannel(_config(tmp_path))
+    created_cards = []
+    updated_cards = []
+    delivered = []
+    channel._send_card_returning_id = (
+        lambda recipient, card: created_cards.append((recipient, card))
+        or "card-long"
+    )
+    channel._update_card = (
+        lambda message_id, card: updated_cards.append((message_id, card))
+        or True
+    )
+
+    async def deliver(open_id, session, artifact_id):
+        delivered.append((open_id, session, artifact_id))
+
+    channel._deliver_artifact = deliver
+    await channel._stream_core_task(
+        "ou-user",
+        LongResultClient(),
+        "session-a",
+        "生成长报告",
+        (),
+    )
+
+    rendered = json.dumps(updated_cards[-1][1], ensure_ascii=False)
+    assert "完整内容见附件" in rendered
+    assert "结尾标记" not in rendered
+    assert delivered == [("ou-user", "session-a", "artifact-report")]
 
 
 @pytest.mark.asyncio

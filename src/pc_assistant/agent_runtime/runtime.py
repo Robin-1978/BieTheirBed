@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -24,7 +25,7 @@ from pc_assistant.agent_runtime.session_store import (
     RuntimeSessionRepository,
     SessionSnapshot,
 )
-from pc_assistant.artifacts import ArtifactStore
+from pc_assistant.artifacts import ArtifactRef, ArtifactStore
 from pc_assistant.context.scope import (
     MemoryScope,
     reset_memory_scope,
@@ -32,6 +33,10 @@ from pc_assistant.context.scope import (
 )
 from pc_assistant.tools.base import ToolCapability
 from pc_assistant.tools.registry import ToolRegistry
+
+
+logger = logging.getLogger(__name__)
+_LONG_RESULT_ARTIFACT_CHARS = 12_000
 
 
 class ArtifactMessageHydrator(MessageHydratorPort):
@@ -209,6 +214,29 @@ class AgentRuntime:
                             )
                             observed = True
                             raise
+                        if len(outcome.final_content) > _LONG_RESULT_ARTIFACT_CHARS:
+                            try:
+                                result_artifact = await asyncio.to_thread(
+                                    self._artifacts.create_generated_text,
+                                    scope.session_handle,
+                                    outcome.final_content,
+                                    name=f"{context.run_id}-result.md",
+                                )
+                                yield RuntimeEvent(
+                                    event_type="artifact",
+                                    payload=RuntimeEventPayload(
+                                        artifact=ArtifactRef.model_validate(
+                                            result_artifact
+                                        ),
+                                        iteration=outcome.iterations,
+                                    ),
+                                )
+                            except Exception:
+                                logger.warning(
+                                    "Long result artifact generation failed run_id=%s",
+                                    context.run_id,
+                                    exc_info=True,
+                                )
                         yield RuntimeEvent(
                             event_type="final_output",
                             payload=RuntimeEventPayload(
