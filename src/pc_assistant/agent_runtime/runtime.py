@@ -159,14 +159,16 @@ class AgentRuntime:
                         if self._runtime_context is not None
                         else ""
                     )
+                    def current_tool_definitions() -> tuple[dict[str, Any], ...]:
+                        return tuple(self._registry.definitions_for(capabilities))
+
                     async for event in self._react_loop.run(
                         ReActContext(
                             scope=scope,
                             client_request_id=request.client_request_id,
                             messages=messages,
-                            tool_definitions=tuple(
-                                self._registry.definitions_for(capabilities)
-                            ),
+                            tool_definitions=current_tool_definitions(),
+                            tool_definition_provider=current_tool_definitions,
                             capabilities=capabilities,
                             cancellation=context.cancellation,
                             run_id=context.run_id,

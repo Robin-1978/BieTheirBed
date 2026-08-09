@@ -1,6 +1,7 @@
 """Failure-isolated lifecycle for dynamic capability providers."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from enum import Enum
@@ -73,7 +74,7 @@ class ExtensionManager:
         if len(set(extension_ids)) != len(extension_ids):
             raise ValueError("Extension IDs must be unique")
         self._registry = registry
-        self._providers = providers
+        self._providers = list(providers)
         self._started: list[ExtensionProvider] = []
         self._registered: dict[ExtensionDescriptor, tuple[str, ...]] = {}
         self._statuses: dict[ExtensionDescriptor, ExtensionStatus] = {
@@ -81,6 +82,7 @@ class ExtensionManager:
             for descriptor in descriptors
         }
         self._running = False
+        self._lifecycle_lock = asyncio.Lock()
 
     @property
     def statuses(self) -> tuple[ExtensionStatus, ...]:
@@ -90,11 +92,28 @@ class ExtensionManager:
         )
 
     async def start(self) -> None:
-        if self._running:
-            raise RuntimeError("ExtensionManager is already started")
-        self._running = True
-        for provider in self._providers:
-            await self._start_provider(provider)
+        async with self._lifecycle_lock:
+            if self._running:
+                raise RuntimeError("ExtensionManager is already started")
+            self._running = True
+            for provider in self._providers:
+                await self._start_provider(provider)
+
+    async def add_provider(self, provider: ExtensionProvider) -> ExtensionStatus:
+        """Add one extension and start it immediately when Core is running."""
+
+        async with self._lifecycle_lock:
+            descriptor = provider.descriptor
+            if descriptor in self._statuses:
+                raise ValueError(f"Extension is already configured: {descriptor.extension_id}")
+            self._providers.append(provider)
+            self._statuses[descriptor] = ExtensionStatus(
+                descriptor,
+                ExtensionState.CONFIGURED,
+            )
+            if self._running:
+                await self._start_provider(provider)
+            return self._statuses[descriptor]
 
     async def _start_provider(self, provider: ExtensionProvider) -> None:
         descriptor = provider.descriptor
@@ -146,19 +165,27 @@ class ExtensionManager:
         )
 
     async def stop(self) -> None:
-        providers, self._started = list(reversed(self._started)), []
-        for provider in providers:
-            descriptor = provider.descriptor
-            origin = descriptor.tool_origin if self._registered.get(descriptor) else None
-            for name in reversed(self._registered.pop(descriptor, ())):
-                assert origin is not None
-                self._registry.unregister(name, origin=origin)
-            try:
-                await provider.stop()
-            except Exception:
-                logger.exception("Extension stop failed: %s", descriptor.extension_id)
-            self._statuses[descriptor] = ExtensionStatus(
-                descriptor,
-                ExtensionState.STOPPED,
-            )
-        self._running = False
+        async with self._lifecycle_lock:
+            providers, self._started = list(reversed(self._started)), []
+            for provider in providers:
+                descriptor = provider.descriptor
+                origin = (
+                    descriptor.tool_origin
+                    if self._registered.get(descriptor)
+                    else None
+                )
+                for name in reversed(self._registered.pop(descriptor, ())):
+                    assert origin is not None
+                    self._registry.unregister(name, origin=origin)
+                try:
+                    await provider.stop()
+                except Exception:
+                    logger.exception(
+                        "Extension stop failed: %s",
+                        descriptor.extension_id,
+                    )
+                self._statuses[descriptor] = ExtensionStatus(
+                    descriptor,
+                    ExtensionState.STOPPED,
+                )
+            self._running = False

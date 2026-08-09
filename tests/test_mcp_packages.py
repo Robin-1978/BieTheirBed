@@ -7,6 +7,7 @@ import yaml
 
 from pc_assistant.extensions import ExtensionManager, ExtensionState
 from pc_assistant.extensions.mcp_package import (
+    MCPPackageService,
     build_mcp_package_providers,
     load_mcp_package,
 )
@@ -94,3 +95,65 @@ async def test_invalid_local_package_is_extension_isolated(tmp_path: Path) -> No
     assert len(manager.statuses) == 1
     assert manager.statuses[0].state is ExtensionState.FAILED
     assert "Local MCP packages must use stdio" in manager.statuses[0].detail
+
+
+@pytest.mark.asyncio
+async def test_agent_import_copies_safe_snapshot_and_activates_provider(
+    tmp_path: Path,
+) -> None:
+    source = _write_package(
+        tmp_path / "sources",
+        "monitor.source",
+        command="command-that-does-not-exist-knoa-test",
+        args=[],
+    )
+    (source / ".env").write_text("SECRET=must-not-copy\n", encoding="utf-8")
+    (source / ".git").mkdir()
+    (source / ".git" / "config").write_text("private", encoding="utf-8")
+    (source / "empty").mkdir()
+    registry = ToolRegistry()
+    manager = ExtensionManager(registry)
+    await manager.start()
+    service = MCPPackageService(
+        tmp_path / "runtime" / "mcp",
+        tmp_path / "runtime" / "cache" / "mcp-imports",
+        manager,
+    )
+
+    status = await service.import_local(source, "monitor")
+
+    installed = tmp_path / "runtime" / "mcp" / "monitor"
+    assert status.state is ExtensionState.FAILED
+    assert (installed / "mcp.yaml").is_file()
+    assert (installed / "empty").is_dir()
+    assert not (installed / ".env").exists()
+    assert not (installed / ".git").exists()
+    await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_agent_import_omits_symlinks_and_rejects_reserved_ids(
+    tmp_path: Path,
+) -> None:
+    source = _write_package(tmp_path / "sources", "source")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside", encoding="utf-8")
+    (source / "linked.txt").symlink_to(outside)
+    manager = ExtensionManager(ToolRegistry())
+    await manager.start()
+    service = MCPPackageService(
+        tmp_path / "runtime" / "mcp",
+        tmp_path / "runtime" / "cache" / "mcp-imports",
+        manager,
+        reserved_ids=frozenset({"configured"}),
+    )
+
+    status = await service.import_local(source, "linked")
+    with pytest.raises(ValueError, match="reserved"):
+        await service.import_local(source, "configured")
+
+    installed = tmp_path / "runtime" / "mcp" / "linked"
+    assert status.state is ExtensionState.FAILED
+    assert installed.is_dir()
+    assert not (installed / "linked.txt").exists()
+    await manager.stop()

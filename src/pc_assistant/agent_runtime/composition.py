@@ -50,7 +50,10 @@ from pc_assistant.context.prompt import build_session_context, build_system_prom
 from pc_assistant.desktop_session import ensure_desktop_session
 from pc_assistant.extensions import ExtensionManager
 from pc_assistant.extensions.mcp import build_mcp_providers
-from pc_assistant.extensions.mcp_package import build_mcp_package_providers
+from pc_assistant.extensions.mcp_package import (
+    MCPPackageService,
+    build_mcp_package_providers,
+)
 from pc_assistant.extensions.skill import (
     SkillCatalog,
     build_skill_providers,
@@ -76,6 +79,7 @@ from pc_assistant.tools.describe_tool import DescribeTool
 from pc_assistant.tools.exchange import ExchangeTool
 from pc_assistant.tools.hotkey import HotkeyTool
 from pc_assistant.tools.memory_tool import MemoryTool
+from pc_assistant.tools.mcp_import import MCPImportTool
 from pc_assistant.tools.mouse import MouseTool
 from pc_assistant.tools.notification import NotificationTool
 from pc_assistant.tools.press_key import PressKeyTool
@@ -111,6 +115,7 @@ class CoreRuntimeComposition:
     llm_traces: LLMTraceRecorder
     turn_traces: TurnRecorder
     extensions: ExtensionManager
+    mcp_packages: MCPPackageService
     skills: SkillCatalog
     host: CoreServiceHost
 
@@ -229,6 +234,13 @@ def build_core_runtime(
             ),
         ),
     )
+    mcp_packages = MCPPackageService(
+        paths.mcp,
+        paths.cache / "mcp-imports",
+        extensions,
+        reserved_ids=frozenset(config.mcp_servers),
+    )
+    registry.register(MCPImportTool(mcp_packages))
 
     primary = provider_factory(config.resolve_model())
     provider: ModelProviderPort = primary
@@ -452,6 +464,7 @@ def build_core_runtime(
         llm_traces=llm_traces,
         turn_traces=turn_traces,
         extensions=extensions,
+        mcp_packages=mcp_packages,
         skills=skills,
         host=host,
     )

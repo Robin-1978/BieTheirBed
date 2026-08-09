@@ -191,6 +191,7 @@ CLI/TUI 长期保留，用于：
 > 进度（2026-08-09）：Phase A 已启动。A1 ExtensionManager 生命周期基础、A2
 > MCP Streamable HTTP 与本地 stdio 纵向闭环、A3 Skill Package 基础、A4
 > 本地 MCP 包发现和 A5 工具来源、权限、风险与确认策略的 typed 管理描述均已完成。
+> A6 已支持 Agent 发起、本地目录暂存校验、用户确认、原子安装和运行时动态激活。
 > Phase A 后续工作是按需导入真实 MCP 包并完成私有账号部署验证。
 
 ### 6.1 Skill Package
