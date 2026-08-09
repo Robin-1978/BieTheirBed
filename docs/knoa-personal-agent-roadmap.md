@@ -362,7 +362,9 @@ Task 至少记录：
 > 以 session-scoped `file_ref` 传递；文本类附件由低风险 Core 工具 `read_artifact`
 > 按 artifact ID 读取，路径不泄露给 Channel 或模型。超过卡片阈值的完整输出由
 > AgentRuntime 生成持久 Markdown Artifact 并发布标准 artifact event；飞书展示短预览并
-> 交付完整文件，生成失败则回退到原有无损分段。下一步补音频能力和 App 深链。
+> 交付完整文件，生成失败则回退到原有无损分段。飞书语音消息现已作为带 MIME 和安全
+> 文件名的 session-scoped Artifact 入站，Channel 不内嵌任何厂商转写实现。下一步补
+> Core 标准转写命令与可配置 MCP 能力映射，然后完成 App 深链。
 
 ### Phase C 验收
 

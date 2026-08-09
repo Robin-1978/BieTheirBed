@@ -405,6 +405,88 @@ async def test_feishu_file_is_registered_as_pending_core_artifact(tmp_path) -> N
 
 
 @pytest.mark.asyncio
+async def test_feishu_audio_is_registered_as_pending_core_artifact(tmp_path) -> None:
+    channel = FeishuChannel(_config(tmp_path))
+    client = _CoreClient()
+    channel._clients["ou-user"] = client
+    channel._sessions["ou-user"] = "session-a"
+    channel._download_audio = lambda *_args: (
+        b"OggSvoice",
+        "audio/ogg",
+        "voice-message.ogg",
+    )
+    channel._add_reaction = lambda *_args: "reaction-a"
+    channel._remove_reaction = lambda *_args: True
+    sent = []
+    channel._send_text = lambda *args: sent.append(args) or True
+
+    await channel._handle_audio(
+        "ou-user",
+        "message-audio",
+        "audio-key",
+    )
+
+    assert len(client.uploads) == 1
+    session, data_url, options = client.uploads[0]
+    assert session == "session-a"
+    assert data_url == "data:audio/ogg;base64,T2dnU3ZvaWNl"
+    assert options == {
+        "media_type": "audio/ogg",
+        "name": "voice-message.ogg",
+        "caption": "Feishu voice message",
+    }
+    assert channel._pending_attachments["ou-user"][0].artifact_id == (
+        "artifact-file"
+    )
+    assert sent == [("ou-user", "语音已收到，请继续发送任务。")]
+
+
+def test_feishu_audio_download_detects_common_media_types(tmp_path) -> None:
+    channel = FeishuChannel(_config(tmp_path))
+
+    class Resource:
+        def __init__(self, data: bytes) -> None:
+            self._data = data
+
+        def read(self) -> bytes:
+            return self._data
+
+    class Response:
+        code = 0
+        msg = "ok"
+
+        def __init__(self, data: bytes) -> None:
+            self.file = Resource(data)
+
+        def success(self) -> bool:
+            return True
+
+    payloads = iter((b"OggSvoice", b"RIFF1234WAVEvoice", b"ID3voice"))
+    channel._lark_client = SimpleNamespace(
+        im=SimpleNamespace(
+            v1=SimpleNamespace(
+                message_resource=SimpleNamespace(
+                    get=lambda _request: Response(next(payloads))
+                )
+            )
+        )
+    )
+
+    assert channel._download_audio("message", "key")[1:] == (
+        "audio/ogg",
+        "voice-message.ogg",
+    )
+    assert channel._download_audio("message", "key")[1:] == (
+        "audio/wav",
+        "voice-message.wav",
+    )
+    assert channel._download_audio("message", "key")[1:] == (
+        "audio/mpeg",
+        "voice-message.mp3",
+    )
+
+
+@pytest.mark.asyncio
 async def test_feishu_long_result_uses_preview_and_delivers_full_artifact(
     tmp_path,
 ) -> None:

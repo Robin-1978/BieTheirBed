@@ -1019,6 +1019,16 @@ class FeishuChannel:
                                 file_name or "attachment.bin",
                             )
                         )
+                elif message.message_type == "audio":
+                    file_key = str(content.get("file_key", "")).strip()
+                    if file_key:
+                        self._submit(
+                            self._handle_audio(
+                                open_id,
+                                message_id,
+                                file_key,
+                            )
+                        )
             except Exception:
                 logger.exception("Feishu inbound message handling failed")
 
@@ -1743,6 +1753,62 @@ class FeishuChannel:
                 reaction_id,
             )
 
+    async def _handle_audio(
+        self,
+        open_id: str,
+        message_id: str,
+        file_key: str,
+    ) -> None:
+        reaction_id = await asyncio.to_thread(
+            self._add_reaction,
+            message_id,
+            "Typing",
+        )
+        try:
+            self._save_binding(open_id)
+            data, media_type, file_name = await asyncio.to_thread(
+                self._download_audio,
+                message_id,
+                file_key,
+            )
+            if len(data) > _MAX_CORE_ARTIFACT_RAW_BYTES:
+                raise ValueError("Audio exceeds Core ingress limit")
+            session = await self._session_for(open_id)
+            encoded = base64.b64encode(data).decode("ascii")
+            client = await self._client_for(open_id)
+            artifact = await client.upload_artifact(
+                session,
+                f"data:{media_type};base64,{encoded}",
+                media_type=media_type,
+                name=file_name,
+                caption="Feishu voice message",
+            )
+            pending = self._pending_attachments.setdefault(open_id, [])
+            pending.append(
+                ArtifactInputRef(
+                    artifact_id=artifact.artifact_id,
+                    caption="Feishu voice message",
+                )
+            )
+            self._pending_attachments[open_id] = pending[-4:]
+            await asyncio.to_thread(
+                self._send_text,
+                open_id,
+                "语音已收到，请继续发送任务。",
+            )
+        except Exception:
+            logger.exception(
+                "Feishu audio ingress failed principal=%s",
+                _principal_for_log(open_id),
+            )
+            await asyncio.to_thread(self._send_text, open_id, "语音接收失败")
+        finally:
+            await asyncio.to_thread(
+                self._remove_reaction,
+                message_id,
+                reaction_id,
+            )
+
     async def _confirm_tool(
         self,
         open_id: str,
@@ -2423,6 +2489,45 @@ class FeishuChannel:
             mimetypes.guess_type(file_name)[0] or "application/octet-stream"
         )
         return response.file.read(), media_type
+
+    def _download_audio(
+        self,
+        message_id: str,
+        file_key: str,
+    ) -> tuple[bytes, str, str]:
+        from lark_oapi.api.im.v1 import GetMessageResourceRequest
+
+        request = (
+            GetMessageResourceRequest.builder()
+            .message_id(message_id)
+            .file_key(file_key)
+            .type("file")
+            .build()
+        )
+        with self._lark_lock:
+            response = self._get_lark_client().im.v1.message_resource.get(request)
+        if not response.success() or not response.file:
+            raise RuntimeError(
+                f"Feishu audio download failed: {response.code} {response.msg}"
+            )
+        data = response.file.read()
+        if data.startswith(b"OggS"):
+            return data, "audio/ogg", "voice-message.ogg"
+        if data.startswith(b"fLaC"):
+            return data, "audio/flac", "voice-message.flac"
+        if data.startswith(b"RIFF") and data[8:12] == b"WAVE":
+            return data, "audio/wav", "voice-message.wav"
+        if data.startswith(b"#!AMR"):
+            return data, "audio/amr", "voice-message.amr"
+        if data.startswith(b"ID3") or data[:2] in {
+            b"\xff\xfb",
+            b"\xff\xf3",
+            b"\xff\xf2",
+        }:
+            return data, "audio/mpeg", "voice-message.mp3"
+        if len(data) >= 12 and data[4:8] == b"ftyp":
+            return data, "audio/mp4", "voice-message.m4a"
+        return data, "audio/ogg", "voice-message.ogg"
 
     async def _deliver_artifact(
         self,

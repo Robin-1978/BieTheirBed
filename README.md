@@ -186,9 +186,11 @@ durable principal Task feed with a persisted cursor, so Schedule and Trigger
 results are delivered proactively without coupling Feishu to Core automation.
 Feishu also exposes `/tasks`, `/task <id>`, and `/stop <id>` for owned durable
 Tasks. New messages can enqueue new Tasks while earlier work continues.
-Images and ordinary files enter the same owned Core Artifact boundary. Attached
-text files preserve their safe name and can be inspected through the bounded
-`read_artifact` Built-in Tool without exposing a server filesystem path.
+Images, ordinary files, and Feishu voice messages enter the same owned Core
+Artifact boundary. Attached text files preserve their safe name and can be
+inspected through the bounded `read_artifact` Built-in Tool without exposing a
+server filesystem path. Voice bytes remain an opaque owned Artifact; a
+transcription provider is not embedded in the Feishu Channel.
 Long final outputs are retained in the Task journal and also emitted as a
 persistent Markdown Artifact. Feishu shows a compact preview and delivers the
 complete file instead of flooding the conversation with continuation cards.
