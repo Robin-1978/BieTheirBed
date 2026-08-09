@@ -97,8 +97,39 @@ class MemoryClearResult(ContractModel):
     cleared: bool
 
 
+class ToolDescriptorRecord(ContractModel):
+    name: NonEmptyString
+    description: Annotated[str, StringConstraints(max_length=2000)] = ""
+    origin_kind: Literal["builtin", "mcp", "skill", "connector"]
+    extension_id: Identifier128
+    effect: Literal[
+        "read_only",
+        "local_write",
+        "external_side_effect",
+        "desktop_control",
+    ]
+    risk: Literal["low", "medium", "high"]
+    capabilities: tuple[
+        Literal[
+            "host_read",
+            "host_write",
+            "shell",
+            "network",
+            "desktop_observe",
+            "desktop_control",
+            "memory_read",
+            "memory_write",
+            "mcp",
+            "connector",
+        ],
+        ...,
+    ] = ()
+    requires_confirmation: bool
+
+
 class ToolListResult(ContractModel):
     tools: tuple[NonEmptyString, ...] = ()
+    descriptors: tuple[ToolDescriptorRecord, ...] = ()
 
 
 class ConfigSetRequest(ContractModel):

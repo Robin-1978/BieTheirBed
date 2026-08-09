@@ -17,6 +17,7 @@ A personal computer agent with ReAct reasoning, multi-LLM support, tool calling,
 - **MCP Extension Runtime** — Failure-isolated Streamable HTTP discovery with explicit local tool policy
 - **Selective Skill Packages** — Safe data-only packages activated by request, available tools, and granted capabilities
 - **Business Connectors** — Secret-isolated Yuque document read/write through the same capability and confirmation boundary
+- **Typed Capability Inventory** — Principal-filtered tool origin, policy, risk, and confirmation metadata for management clients
 - **Safety Guardrails** — Dangerous command blocking, protected paths, user confirmation, typed refusal codes
 - **Idempotency** — Side-effecting tools are protected against duplicate execution on retry
 - **Scoped Memory** — Principal-scoped core/relevant preferences plus session-scoped episodes in SQLite

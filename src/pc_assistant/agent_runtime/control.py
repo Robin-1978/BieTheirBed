@@ -15,6 +15,7 @@ from pc_assistant.agent_runtime.contracts import (
     MemoryRecord,
     RuntimeScope,
     RuntimeStatus,
+    ToolDescriptorRecord,
     ToolListResult,
 )
 from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
@@ -35,6 +36,9 @@ class ControlService:
         *,
         tool_names: Callable[[RuntimeScope], Iterable[str]],
         config_controller: RuntimeConfigController,
+        tool_descriptors: (
+            Callable[[RuntimeScope], Iterable[ToolDescriptorRecord]] | None
+        ) = None,
         status_details: Callable[[RuntimeScope], dict[str, Any]] | None = None,
         extension_statuses: Callable[[], Iterable[ExtensionStatusRecord]] | None = None,
         config_admin_principals: frozenset[str] = frozenset({"local"}),
@@ -42,6 +46,7 @@ class ControlService:
         self._sessions = sessions
         self._memory = memory
         self._tool_names = tool_names
+        self._tool_descriptors = tool_descriptors
         self._config_controller = config_controller
         self._status_details = status_details
         self._extension_statuses = extension_statuses
@@ -123,7 +128,12 @@ class ControlService:
     async def list_tools(self, scope: RuntimeScope) -> ToolListResult:
         owned = await self._owned_scope(scope)
         return ToolListResult(
-            tools=tuple(sorted(set(self._tool_names(owned))))
+            tools=tuple(sorted(set(self._tool_names(owned)))),
+            descriptors=(
+                tuple(self._tool_descriptors(owned))
+                if self._tool_descriptors is not None
+                else ()
+            ),
         )
 
     async def set_config(
