@@ -3,6 +3,7 @@
 ## Architecture
 
 - [PC Assistant Architecture](architecture.md)
+- [Knoa Personal Agent Product & Capability Roadmap](knoa-personal-agent-roadmap.md)
 
 ## Refactoring Planning
 
