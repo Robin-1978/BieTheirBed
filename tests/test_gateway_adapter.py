@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import base64
 from types import SimpleNamespace
 
 import httpx
 import pytest
 
 from pc_assistant.config import AppConfig
+from pc_assistant.agent_runtime.contracts import ArtifactDownloadResult
+from pc_assistant.artifacts import ArtifactRef
 from pc_assistant.gateway.adapter import SecureGatewayAdapter
 from pc_assistant.gateway.auth import GatewayAuthenticationRejectedError
 from pc_assistant.gateway.identity import PairingGrantRejectedError
@@ -136,6 +139,53 @@ class _Core:
                 payload=TaskEventPayload(content="你好"),
                 occurred_at=3.0,
             ),
+        )
+
+    async def upload_artifact(
+        self,
+        principal_id,
+        session_handle,
+        data_url,
+        *,
+        media_type,
+        name,
+        caption,
+    ):
+        self.calls.append(
+            (
+                "upload_artifact",
+                principal_id,
+                session_handle,
+                data_url,
+                media_type,
+                name,
+                caption,
+            )
+        )
+        return ArtifactRef(
+            artifact_id="artifact-a",
+            kind="file",
+            name=name or "note.txt",
+            media_type=media_type,
+            size=5,
+            direction="inbound",
+            ownership="managed",
+        )
+
+    async def download_artifact(self, principal_id, session_handle, artifact_id):
+        self.calls.append(
+            ("download_artifact", principal_id, session_handle, artifact_id)
+        )
+        artifact = ArtifactRef(
+            artifact_id=artifact_id,
+            kind="file",
+            name="报告.txt",
+            media_type="text/plain",
+            size=5,
+        )
+        return ArtifactDownloadResult(
+            artifact=artifact,
+            data_url="data:text/plain;base64," + base64.b64encode(b"hello").decode(),
         )
 
 @pytest.mark.asyncio
@@ -284,6 +334,74 @@ async def test_gateway_event_stream_stops_when_device_session_is_revoked(tmp_pat
     assert response.status_code == 200
     assert response.content == b""
     assert authentication.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_gateway_adapter_transfers_bounded_binary_artifacts(tmp_path) -> None:
+    core = _Core()
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=_Authentication(),
+        core=core,
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
+    async with httpx.AsyncClient(transport=transport, base_url="http://gateway.local") as http:
+        uploaded = await http.post(
+            "/v1/artifacts",
+            params={
+                "session_handle": "session-a",
+                "name": "note.txt",
+                "caption": "sample",
+            },
+            headers={**headers, "Content-Type": "text/plain"},
+            content=b"hello",
+        )
+        downloaded = await http.get(
+            "/v1/artifacts/artifact-a",
+            params={"session_handle": "session-a"},
+            headers=headers,
+        )
+
+    assert uploaded.status_code == 201
+    assert uploaded.json()["artifact"]["artifact_id"] == "artifact-a"
+    upload_call = next(call for call in core.calls if call[0] == "upload_artifact")
+    assert upload_call[1:3] == ("personal:owner", "session-a")
+    assert upload_call[3] == "data:text/plain;base64,aGVsbG8="
+    assert downloaded.status_code == 200
+    assert downloaded.content == b"hello"
+    assert downloaded.headers["content-type"] == "text/plain; charset=utf-8"
+    assert "filename*=UTF-8''%E6%8A%A5%E5%91%8A.txt" in downloaded.headers[
+        "content-disposition"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_gateway_adapter_rejects_oversized_artifact_before_core(tmp_path) -> None:
+    core = _Core()
+    config = _config(tmp_path).model_copy(
+        update={"gateway_artifact_max_bytes": 1024 * 1024}
+    )
+    adapter = SecureGatewayAdapter(
+        config,
+        authentication=_Authentication(),
+        core=core,
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {
+        "Authorization": "Bearer " + "v1.gws-a." + "t" * 43,
+        "Content-Type": "application/octet-stream",
+    }
+    async with httpx.AsyncClient(transport=transport, base_url="http://gateway.local") as http:
+        response = await http.post(
+            "/v1/artifacts",
+            params={"session_handle": "session-a"},
+            headers=headers,
+            content=b"x" * (1024 * 1024 + 1),
+        )
+
+    assert response.status_code == 413
+    assert core.calls == []
 
 
 @pytest.mark.asyncio

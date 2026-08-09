@@ -182,6 +182,11 @@ class AppConfig(BaseModel):
     gateway_host: str = "127.0.0.1"
     gateway_port: int = 9529
     gateway_session_ttl_seconds: int = Field(default=900, ge=60, le=3600)
+    gateway_artifact_max_bytes: int = Field(
+        default=32 * 1024 * 1024,
+        ge=1024 * 1024,
+        le=48 * 1024 * 1024,
+    )
     feishu_enabled: bool = False
     feishu_app_id: str = ""
     feishu_app_secret: SecretStr = Field(default_factory=lambda: SecretStr(""))
