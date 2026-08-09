@@ -363,8 +363,10 @@ Task 至少记录：
 > 按 artifact ID 读取，路径不泄露给 Channel 或模型。超过卡片阈值的完整输出由
 > AgentRuntime 生成持久 Markdown Artifact 并发布标准 artifact event；飞书展示短预览并
 > 交付完整文件，生成失败则回退到原有无损分段。飞书语音消息现已作为带 MIME 和安全
-> 文件名的 session-scoped Artifact 入站，Channel 不内嵌任何厂商转写实现。下一步补
-> Core 标准转写命令与可配置 MCP 能力映射，然后完成 App 深链。
+> 文件名的 session-scoped Artifact 入站，Channel 不内嵌任何厂商转写实现。Core 已提供
+> `artifact_transcribe` 标准命令，可显式映射到一个只读、非高风险 MCP Tool；只传音频
+> data URL、MIME 和安全文件名，成功后飞书直接以转写文本创建 Task，失败则保留原
+> Artifact 并优雅降级。下一步完成 App 深链。
 
 ### Phase C 验收
 

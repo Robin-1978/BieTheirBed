@@ -5,7 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import HealthStatus, RuntimeScope
+from pc_assistant.agent_runtime.contracts import (
+    ArtifactTranscriptionResult,
+    HealthStatus,
+    RuntimeScope,
+)
 from pc_assistant.service.core_api import (
     AuthenticateRequest,
     CancelTaskRequest,
@@ -17,6 +21,7 @@ from pc_assistant.service.core_api import (
     ResumeTaskRequest,
     SubscribePrincipalTaskEventsRequest,
     SubscribeTaskRequest,
+    TranscribeArtifactRequest,
     parse_core_server_message_json,
 )
 from pc_assistant.service.core_server import CoreServer, StaticTokenAuthenticator
@@ -171,6 +176,19 @@ class FakeArtifacts:
     pass
 
 
+class FakeTranscription:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def transcribe(self, scope, request):
+        self.calls.append((scope, request))
+        return ArtifactTranscriptionResult(
+            artifact_id=request.artifact_id,
+            transcript="整理会议记录",
+            tool_name="mcp__speech__transcribe",
+        )
+
+
 def _task_record(task_id: str):
     return SimpleNamespace(
         task_id=task_id,
@@ -231,6 +249,43 @@ async def test_server_authenticates_and_accepts_task(tmp_path) -> None:
         "session_created",
         "task_accepted",
     ]
+
+
+@pytest.mark.asyncio
+async def test_server_transcribes_owned_artifact_through_standard_command() -> None:
+    tasks = FakeTasks()
+    transcription = FakeTranscription()
+    server = CoreServer(
+        tasks,
+        SimpleNamespace(),
+        SimpleNamespace(),
+        FakeControl(),
+        FakeArtifacts(),
+        StaticTokenAuthenticator({"token-a": "principal-a"}),
+        transcription=transcription,
+    )
+    websocket = FakeWebSocket()
+    server_task = asyncio.create_task(server.handle(websocket))
+
+    await websocket.push(AuthenticateRequest(request_id="auth", credential="token-a"))
+    await websocket.push(
+        TranscribeArtifactRequest(
+            request_id="transcribe",
+            session_handle="session-a",
+            artifact_id="artifact-a",
+        )
+    )
+    await websocket.wait_sent(2)
+    await websocket.close_input()
+    await server_task
+
+    message = websocket.messages()[-1]
+    assert message.message_type == "artifact_transcribed"
+    assert message.result.transcript == "整理会议记录"
+    scope, request = transcription.calls[0]
+    assert scope.principal_id == "principal-a"
+    assert scope.session_handle == "session-a"
+    assert request.artifact_id == "artifact-a"
 
 
 @pytest.mark.asyncio

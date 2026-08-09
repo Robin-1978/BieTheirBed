@@ -1764,6 +1764,8 @@ class FeishuChannel:
             message_id,
             "Typing",
         )
+        artifact: Any = None
+        session = ""
         try:
             self._save_binding(open_id)
             data, media_type, file_name = await asyncio.to_thread(
@@ -1791,17 +1793,43 @@ class FeishuChannel:
                 )
             )
             self._pending_attachments[open_id] = pending[-4:]
-            await asyncio.to_thread(
-                self._send_text,
-                open_id,
-                "语音已收到，请继续发送任务。",
-            )
         except Exception:
             logger.exception(
                 "Feishu audio ingress failed principal=%s",
                 _principal_for_log(open_id),
             )
             await asyncio.to_thread(self._send_text, open_id, "语音接收失败")
+            await asyncio.to_thread(
+                self._remove_reaction,
+                message_id,
+                reaction_id,
+            )
+            return
+
+        try:
+            client = await self._client_for(open_id)
+            result = await client.transcribe_artifact(
+                session,
+                artifact.artifact_id,
+            )
+            await self._run_text(open_id, result.transcript)
+        except CoreRequestError as exc:
+            message = (
+                "语音已收到；尚未配置转写能力。"
+                if exc.code == "capability_denied"
+                else "语音已收到，但转写失败。请发送文字说明。"
+            )
+            await asyncio.to_thread(self._send_text, open_id, message)
+        except Exception:
+            logger.exception(
+                "Feishu audio transcription failed principal=%s",
+                _principal_for_log(open_id),
+            )
+            await asyncio.to_thread(
+                self._send_text,
+                open_id,
+                "语音已收到，但转写失败。请发送文字说明。",
+            )
         finally:
             await asyncio.to_thread(
                 self._remove_reaction,

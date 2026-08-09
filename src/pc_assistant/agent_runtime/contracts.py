@@ -160,6 +160,16 @@ class ArtifactDownloadResult(ContractModel):
     data_url: ArtifactDataUrl
 
 
+class ArtifactTranscriptionRequest(ContractModel):
+    artifact_id: Identifier128
+
+
+class ArtifactTranscriptionResult(ContractModel):
+    artifact_id: Identifier128
+    transcript: BoundedInput
+    tool_name: Annotated[NonEmptyString, StringConstraints(max_length=256)]
+
+
 class HealthStatus(ContractModel):
     healthy: bool
     detail: str = ""
@@ -279,6 +289,15 @@ class ArtifactServicePort(Protocol):
         scope: RuntimeScope,
         artifact_id: NonEmptyString,
     ) -> None: ...
+
+
+@runtime_checkable
+class ArtifactTranscriptionServicePort(Protocol):
+    async def transcribe(
+        self,
+        scope: RuntimeScope,
+        request: ArtifactTranscriptionRequest,
+    ) -> ArtifactTranscriptionResult: ...
 
 
 @runtime_checkable

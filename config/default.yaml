@@ -50,6 +50,10 @@ feishu_app_secret: ""
 feishu_receive_id: ""
 attachment_ttl_seconds: 3600
 attachment_cleanup_interval_seconds: 300
+audio_transcription:
+  enabled: false
+  tool: ""
+  max_bytes: 20971520
 supports_vision: null
 
 # Dynamic MCP tools are disabled unless a private local config explicitly
