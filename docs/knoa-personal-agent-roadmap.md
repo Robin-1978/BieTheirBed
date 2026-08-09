@@ -324,7 +324,8 @@ Task 至少记录：
 > 语义已实现，Cron 使用显式 IANA 时区，周期任务以初始时间为锚点避免累计漂移。
 > Schedule 与每次 Occurrence claim 已持久化；生产 dispatcher 使用稳定 occurrence ID
 > 幂等调用 TaskService，并提供有界指数退避、过期 lease 恢复和 Core API 创建/详情/列表。
-> 下一步是计划暂停/恢复、认证 Trigger ingress 和主动结果通知。
+> 计划暂停/恢复也已接入：周期计划恢复时跳过停机期间的积压，过期的一次性计划不会
+> 静默补跑。下一步是认证 Trigger ingress 和主动结果通知。
 
 ### 7.5 Phase B 验收
 

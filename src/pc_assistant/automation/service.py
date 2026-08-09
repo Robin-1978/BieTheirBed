@@ -190,3 +190,20 @@ class ScheduleService:
             state=state,
             limit=limit,
         )
+
+    async def pause(self, principal_id: str, schedule_id: str) -> ScheduleRecord:
+        return await asyncio.to_thread(
+            self._repository.pause,
+            principal_id,
+            schedule_id,
+        )
+
+    async def resume(self, principal_id: str, schedule_id: str) -> ScheduleRecord:
+        schedule = await asyncio.to_thread(
+            self._repository.resume,
+            principal_id,
+            schedule_id,
+        )
+        if schedule.state is ScheduleState.ACTIVE:
+            self._dispatcher.wake()
+        return schedule

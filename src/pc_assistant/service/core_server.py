@@ -27,6 +27,7 @@ from pc_assistant.automation import ScheduleService
 from pc_assistant.automation.repository import (
     ScheduleIdempotencyConflictError,
     ScheduleNotFoundError,
+    ScheduleTransitionError,
 )
 from pc_assistant.exceptions import SessionNotFoundError
 from pc_assistant.service.core_api import (
@@ -56,8 +57,10 @@ from pc_assistant.service.core_api import (
     ListToolsRequest,
     MemoryClearedMessage,
     MemoryListMessage,
+    PauseScheduleRequest,
     PauseTaskRequest,
     ResolveApprovalRequest,
+    ResumeScheduleRequest,
     ResumeTaskRequest,
     SessionCreatedMessage,
     ScheduleAcceptedMessage,
@@ -439,6 +442,28 @@ class CoreServer:
                         ),
                     )
                 )
+            elif isinstance(request, PauseScheduleRequest):
+                schedule = await self._schedules.pause(
+                    principal,
+                    request.schedule_id,
+                )
+                await send(
+                    ScheduleSnapshotMessage(
+                        request_id=request.request_id,
+                        schedule=ScheduleSnapshot.from_record(schedule),
+                    )
+                )
+            elif isinstance(request, ResumeScheduleRequest):
+                schedule = await self._schedules.resume(
+                    principal,
+                    request.schedule_id,
+                )
+                await send(
+                    ScheduleSnapshotMessage(
+                        request_id=request.request_id,
+                        schedule=ScheduleSnapshot.from_record(schedule),
+                    )
+                )
             elif isinstance(request, HealthRequest):
                 await send(
                     HealthMessage(
@@ -657,6 +682,14 @@ class CoreServer:
                     request.request_id,
                     "invalid_request",
                     "Schedule request ID conflicts with an existing schedule",
+                )
+            )
+        except ScheduleTransitionError:
+            await send(
+                self._error(
+                    request.request_id,
+                    "invalid_request",
+                    "Schedule state does not allow this command",
                 )
             )
         except TaskIdempotencyConflictError:

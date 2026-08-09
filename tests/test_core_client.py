@@ -343,11 +343,15 @@ async def test_client_can_create_get_and_list_schedule(tmp_path: Path) -> None:
         )
         detail = await connected.client.get_schedule(created.schedule_id)
         listing = await connected.client.list_schedules()
+        paused = await connected.client.pause_schedule(created.schedule_id)
+        resumed = await connected.client.resume_schedule(created.schedule_id)
 
         assert created.schedule_id == "schedule-opaque"
         assert detail == created
         assert listing == (created,)
         assert created.priority == 3
+        assert paused.state.value == "paused"
+        assert resumed.state.value == "active"
     finally:
         await connected.close()
 

@@ -451,8 +451,10 @@ outside INFO logs.
 > plan and every delivery claim. The production dispatcher uses the stable
 > occurrence ID as the Task request ID, retries with bounded exponential backoff
 > and survives expired worker leases without duplicating Task creation. Core API
-> v1 exposes create/detail/list schedule commands. Trigger ingress, schedule
-> pause/resume and proactive delivery notification remain.
+> v1 exposes create/detail/list/pause/resume schedule commands. Resuming interval
+> or Cron plans skips accumulated downtime instead of flooding catch-up Tasks;
+> an expired one-time plan completes without silently running late. Authenticated
+> Trigger ingress and proactive delivery notification remain.
 
 ## 14. Acceptance criteria
 
