@@ -40,7 +40,13 @@ Started on 2026-08-09:
   path;
 - Skill packages are data-only extensions: they register lifecycle/status with
   `ExtensionManager`, inject instructions only for matching authorized runs and
-  cannot directly execute code or grant capabilities.
+  cannot directly execute code or grant capabilities;
+- A4 Connector/Secret foundation implemented with stable Secret references,
+  owner-only local files or environment resolution, a real Yuque read/write
+  Connector, startup authorization health, reauthorization-safe failures and
+  metadata-only audit records;
+- live validation against a user-authorized Yuque account remains a deployment
+  step because repository tests intentionally contain no credential.
 
 ## 2. Domain model
 
@@ -192,6 +198,18 @@ transport boundary. They must never appear in:
 - confirmation arguments;
 - Skill manifests committed to the repository.
 
+The first local implementation resolves `PC_SECRET_<ID>` or an owner-owned,
+non-symlink file at `~/.pc-assistant/secrets/<id>.secret` with exact mode
+`0600`. Connector configuration contains only the stable ID. Secret values are
+revealed explicitly only while constructing the authenticated transport.
+
+The first business Connector is Yuque. It exposes one read-only document tool
+and one confirmation-gated document update tool. Both require `NETWORK` and
+`CONNECTOR` capabilities, use bounded JSON responses, reject unsafe repository
+or document paths and report expired authorization without transport details.
+Audit records contain connector ID, operation, outcome, HTTP status and latency;
+they never contain arguments, document bodies or credentials.
+
 ## 8. Public status evolution
 
 The current `/tools` response remains a list of available names. A later Core
@@ -235,10 +253,10 @@ This must be additive and typed; clients must not inspect registry internals.
 
 ### A4 — Connector and Secret foundation
 
-- Secret reference port and private local implementation;
-- Connector lifecycle through ExtensionManager;
-- one read/write business integration;
-- health, reauthorization and audit behavior.
+- [x] Secret reference port and private local implementation;
+- [x] Connector lifecycle through ExtensionManager;
+- [x] one read/write business integration (Yuque documents);
+- [x] startup health, reauthorization and metadata-only audit behavior.
 
 ## 10. Acceptance criteria
 

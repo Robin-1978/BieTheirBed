@@ -16,6 +16,7 @@ A personal computer agent with ReAct reasoning, multi-LLM support, tool calling,
 - **Core Artifact Delivery** — Tools produce opaque artifacts; Feishu/TUI/service clients adapt standard artifact events without channel logic in the Agent
 - **MCP Extension Runtime** — Failure-isolated Streamable HTTP discovery with explicit local tool policy
 - **Selective Skill Packages** — Safe data-only packages activated by request, available tools, and granted capabilities
+- **Business Connectors** — Secret-isolated Yuque document read/write through the same capability and confirmation boundary
 - **Safety Guardrails** — Dangerous command blocking, protected paths, user confirmation, typed refusal codes
 - **Idempotency** — Side-effecting tools are protected against duplicate execution on retry
 - **Scoped Memory** — Principal-scoped core/relevant preferences plus session-scoped episodes in SQLite
@@ -120,6 +121,22 @@ The Core API uses one token-authenticated WebSocket listener on
 credential stored with mode `0600` at
 `~/.pc-assistant/config/service.token`. Setting `service_token` adds a separate
 credential for scoped clients; it is not required for local operation.
+
+### Yuque Connector
+
+Connector configuration contains only a Secret ID:
+
+```yaml
+connectors:
+  yuque:
+    enabled: true
+    token_secret: yuque-primary
+```
+
+Provide the token through `PC_SECRET_YUQUE_PRIMARY`, or store it in
+`~/.pc-assistant/secrets/yuque-primary.secret` as an owner-owned regular file
+with mode `0600`. The Connector exposes read and confirmation-gated update
+tools; credentials and document bodies are omitted from Connector audit logs.
 
 Enable the independently mounted Feishu channel in
 `~/.pc-assistant/config/local.yaml`:
@@ -293,9 +310,11 @@ src/pc_assistant/
 │   ├── image_inspect.py # Structured image observation by attachment ID
 │   └── ...              # 16 built-in tool implementations
 ├── extensions/
+│   ├── connector.py     # Authenticated Yuque tools and metadata-only audit
 │   ├── manager.py       # Failure-isolated extension lifecycle
 │   ├── models.py        # Strict local MCP policy configuration
 │   ├── mcp.py           # Official MCP Streamable HTTP client and ToolBase adapter
+│   ├── secrets.py       # Stable Secret references and private local resolution
 │   └── skill.py         # Safe Skill loading, indexing and selective activation
 ├── skill_packages/
 │   └── research_report/ # Built-in research workflow instructions

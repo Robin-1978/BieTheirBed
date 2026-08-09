@@ -55,3 +55,7 @@ mcp_servers: {}
 # Additional roots containing Skill package directories. Knoa also loads its
 # packaged built-in Skills and ~/.pc-assistant/skills.
 skill_directories: []
+
+# Authenticated business integrations. Credentials are referenced by Secret ID
+# and resolved from ~/.pc-assistant/secrets/<id>.secret or PC_SECRET_<ID>.
+connectors: {}
