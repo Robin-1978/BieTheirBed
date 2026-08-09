@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
 import pytest
 
@@ -99,6 +100,36 @@ async def test_react_loop_pairs_serial_tool_calls_before_next_model_step() -> No
     ]
     assert tool_ids == ["call-a", "call-b"]
     assert len(model.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_react_loop_refreshes_tool_definitions_between_iterations() -> None:
+    model = SequencedModelStep(
+        [
+            ModelStepResult(
+                status="completed",
+                tool_calls=(ProposedToolCall(call_id="call-a", name="mcp_import"),),
+                finish_reason="tool_calls",
+            ),
+            ModelStepResult(status="completed", content="done", finish_reason="stop"),
+        ]
+    )
+    definitions = iter(
+        [
+            ({"name": "mcp_import", "inputSchema": {"type": "object"}},),
+            ({"name": "mcp__monitor__query", "inputSchema": {"type": "object"}},),
+        ]
+    )
+    context = replace(
+        _context(),
+        tool_definition_provider=lambda: next(definitions),
+    )
+
+    events = [event async for event in ReActLoop(model, RecordingToolStep()).run(context)]
+
+    assert events[-1].outcome is not None
+    assert model.requests[0].tools[0]["name"] == "mcp_import"
+    assert model.requests[1].tools[0]["name"] == "mcp__monitor__query"
 
 
 @pytest.mark.asyncio

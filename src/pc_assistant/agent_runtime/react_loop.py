@@ -44,6 +44,7 @@ class ReActContext:
     tool_definitions: tuple[dict[str, Any], ...]
     capabilities: frozenset[ToolCapability]
     cancellation: asyncio.Event
+    tool_definition_provider: Callable[[], tuple[dict[str, Any], ...]] | None = None
     run_id: str = ""
     confirmation: ConfirmationPort | None = None
     system_prompt: str = ""
@@ -110,13 +111,18 @@ class ReActLoop:
                 return
 
             model_result: ModelStepResult | None = None
+            tool_definitions = (
+                context.tool_definition_provider()
+                if context.tool_definition_provider is not None
+                else context.tool_definitions
+            )
             async for event in self._model_step.run(
                 ModelStepRequest(
                     scope=context.scope,
                     messages=tuple(messages),
                     system_prompt=context.system_prompt,
                     runtime_context=context.runtime_context,
-                    tools=context.tool_definitions,
+                    tools=tool_definitions,
                     prompt_budget=context.prompt_budget,
                     max_output_tokens=context.max_output_tokens,
                     temperature=context.temperature,

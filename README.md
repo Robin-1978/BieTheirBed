@@ -151,6 +151,15 @@ authority: unconfigured tools remain hidden and all enabled tools still pass
 schema validation, capability checks, confirmation and cancellation through
 the standard `ToolStep` boundary.
 
+When explicitly requested, the Agent can call the confirmation-gated
+`mcp_import` Built-in Tool with an existing local package directory. Knoa
+validates and snapshots the package, omits private `.env` and repository
+metadata, omits symlinks, rejects size-limit violations, installs it atomically,
+and activates the MCP provider without restarting Core. Newly registered tools
+are visible to the next model iteration in the same run. Network download and
+marketplace trust remain separate future concerns; this tool imports local
+packages only.
+
 Enable the independently mounted Feishu channel in
 `~/.pc-assistant/config/local.yaml`:
 
@@ -263,6 +272,7 @@ socket and PID files use the operating system runtime directory.
 | `image_inspect` | describe, ocr, locate, compare | Observe visible image content by `image_id`; diagnosis and solutions remain with the main model |
 | `screenshot` | — | Capture a full-desktop PNG for delivery to the current conversation |
 | `artifact_prepare` | path | Borrow an existing file for client delivery without copying or deleting it; protected paths are blocked and out-of-workspace paths require confirmation |
+| `mcp_import` | path, server_id | Validate, atomically install, and activate a local MCP package after explicit confirmation |
 | `describe_tool` | tool_name | Meta-tool: query the full JSON schema of any registered tool |
 
 ## Development

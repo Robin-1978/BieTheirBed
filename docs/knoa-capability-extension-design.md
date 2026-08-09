@@ -186,7 +186,31 @@ deterministic and request-specific. Only matching Skills whose dependencies
 are already available are injected into the session context. A Skill cannot
 make an unavailable MCP Server available.
 
-## 7. Monitor reference integration
+## 7. Agent-assisted local import
+
+`mcp_import` lets the Agent prepare an installation while preserving user
+authority. It accepts only an existing local directory and a safe target server
+ID. Because installing an MCP package introduces executable code, the tool is
+`local_write/high` and always crosses the standard confirmation boundary.
+
+After approval Knoa:
+
+1. validates the source manifest without importing its Python modules;
+2. bounds file count, individual file size and total package size;
+3. omits symbolic links and rejects special files;
+4. omits private `.env` files, VCS metadata and local Agent metadata;
+5. copies into an isolated staging directory;
+6. validates the staged package using its final server ID;
+7. atomically moves it into `~/.pc-assistant/mcp/<server-id>`;
+8. adds and starts one provider through `ExtensionManager`;
+9. refreshes model-visible definitions before the next ReAct iteration.
+
+The model may propose the source and server ID, but cannot bypass confirmation,
+change granted capabilities or silently replace an installed package. Import
+does not download URLs, resolve marketplaces, install dependencies, upgrade or
+remove packages. Those operations require separate trust and lifecycle design.
+
+## 8. Monitor reference integration
 
 Monitor is the first real local stdio MCP package. It keeps ownership of:
 
@@ -200,12 +224,12 @@ Monitor exposes those operations with the official `mcp.server.fastmcp.FastMCP`
 SDK over stdio. Knoa sees only standard MCP discovery and calls. The earlier
 handwritten line-oriented JSON-RPC implementation has been removed.
 
-## 8. Non-goals
+## 9. Non-goals
 
 - arbitrary imported `ToolBase` subclasses;
 - direct execution of downloaded Python tool code inside Core;
 - a second external-tool category beside MCP;
-- automatic marketplace installation or network download;
+- automatic marketplace trust or unconfirmed network download;
 - trusting MCP annotations as policy;
 - exposing all process environment variables to local servers;
 - putting extension selection, credentials or business logic into Feishu;

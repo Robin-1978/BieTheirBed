@@ -85,6 +85,7 @@ def test_core_composition_builds_forward_only_registry_and_profiles(tmp_path: Pa
         "write_file",
         "screenshot",
         "mouse",
+        "mcp_import",
         "tool_help",
     } <= local
     assert {"web_search", "web_fetch", "weather", "currency"} <= remote

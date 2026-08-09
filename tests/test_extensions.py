@@ -118,6 +118,22 @@ async def test_extension_failure_isolated_from_other_providers() -> None:
 
 
 @pytest.mark.asyncio
+async def test_extension_can_be_added_and_started_while_core_is_running() -> None:
+    registry = ToolRegistry()
+    manager = ExtensionManager(registry)
+    await manager.start()
+    provider = _Provider("mcp:dynamic", (_Tool("mcp__dynamic__ping"),))
+
+    status = await manager.add_provider(provider)
+
+    assert status.state is ExtensionState.RUNNING
+    assert status.tools == ("mcp__dynamic__ping",)
+    assert registry.list_tools() == ["mcp__dynamic__ping"]
+    await manager.stop()
+    assert provider.stopped is True
+
+
+@pytest.mark.asyncio
 async def test_extension_registration_is_transactional_per_provider() -> None:
     registry = ToolRegistry()
     registry.register(_Tool("occupied"))
