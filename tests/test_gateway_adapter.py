@@ -16,7 +16,14 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
 from pc_assistant.config import AppConfig
-from pc_assistant.agent_runtime.contracts import ArtifactDownloadResult
+from pc_assistant.agent_runtime.contracts import (
+    ArtifactDownloadResult,
+    ArtifactTranscriptionResult,
+    ExtensionStatusRecord,
+    RuntimeStatus,
+    ToolDescriptorRecord,
+    ToolListResult,
+)
 from pc_assistant.artifacts import ArtifactRef
 from pc_assistant.gateway.adapter import SecureGatewayAdapter
 from pc_assistant.gateway.auth import GatewayAuthenticationRejectedError
@@ -28,6 +35,7 @@ from pc_assistant.tasks import (
     TaskCancelResult,
     TaskEvent,
     TaskEventPayload,
+    TaskPauseResult,
     TaskState,
 )
 
@@ -165,6 +173,73 @@ class _Core:
             result=TaskCancelResult(accepted=True, state=TaskState.CANCELLED)
         )
 
+    async def pause_task(self, principal_id, task_id, *, reason):
+        self.calls.append(("pause_task", principal_id, task_id, reason))
+        return SimpleNamespace(
+            result=TaskPauseResult(accepted=True, state=TaskState.PAUSED)
+        )
+
+    async def resume_task(
+        self,
+        principal_id,
+        task_id,
+        *,
+        reason,
+        acknowledge_outcome_unknown,
+    ):
+        self.calls.append(
+            (
+                "resume_task",
+                principal_id,
+                task_id,
+                reason,
+                acknowledge_outcome_unknown,
+            )
+        )
+        return SimpleNamespace(task_id=task_id, state=TaskState.QUEUED)
+
+    async def retry_task(self, principal_id, task_id, *, reason):
+        self.calls.append(("retry_task", principal_id, task_id, reason))
+        return SimpleNamespace(task_id="task-retry", state=TaskState.QUEUED)
+
+    async def transcribe_artifact(self, principal_id, session_handle, artifact_id):
+        self.calls.append(
+            ("transcribe_artifact", principal_id, session_handle, artifact_id)
+        )
+        return ArtifactTranscriptionResult(
+            artifact_id=artifact_id,
+            transcript="会议结论",
+            tool_name="speech_to_text",
+        )
+
+    async def status(self, principal_id, session_handle):
+        self.calls.append(("status", principal_id, session_handle))
+        return RuntimeStatus(
+            status="ready",
+            connected=True,
+            details={"total_tokens": 42},
+            extensions=(
+                ExtensionStatusRecord(
+                    extension_id="jira",
+                    kind="skill",
+                    state="configured",
+                ),
+            ),
+        )
+
+    async def list_tools(self, principal_id, session_handle):
+        self.calls.append(("list_tools", principal_id, session_handle))
+        descriptor = ToolDescriptorRecord(
+            name="web_search",
+            description="Search the web",
+            origin_kind="builtin",
+            extension_id="builtin",
+            effect="read_only",
+            risk="low",
+            requires_confirmation=False,
+        )
+        return ToolListResult(tools=(descriptor.name,), descriptors=(descriptor,))
+
     async def resolve_approval(self, principal_id, approval_id, *, approved):
         self.calls.append(
             ("resolve_approval", principal_id, approval_id, approved)
@@ -294,6 +369,21 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
             headers=headers,
             json={"reason": "owner request"},
         )
+        paused = await http.post(
+            "/v1/tasks/task-a/pause",
+            headers=headers,
+            json={"reason": "later"},
+        )
+        resumed = await http.post(
+            "/v1/tasks/task-a/resume",
+            headers=headers,
+            json={"reason": "continue", "acknowledge_outcome_unknown": True},
+        )
+        retried = await http.post(
+            "/v1/tasks/task-a/retry",
+            headers=headers,
+            json={"reason": "try again"},
+        )
         approval = await http.post(
             "/v1/approvals/approval-a/resolve",
             headers=headers,
@@ -308,12 +398,52 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
     assert listed.json()["next_cursor"] == "next-a"
     assert detail.json()["task"]["phase"] == "working"
     assert cancelled.json() == {"accepted": True, "state": "cancelled"}
+    assert paused.json() == {"accepted": True, "state": "paused"}
+    assert resumed.json() == {"accepted": True, "state": "queued"}
+    assert retried.status_code == 202
+    assert retried.json() == {"task_id": "task-retry", "state": "queued"}
     assert approval.json() == {
         "approval_id": "approval-a",
         "resolved": True,
         "state": "approved",
     }
     assert {call[1] for call in core.calls} == {"personal:owner"}
+
+
+@pytest.mark.asyncio
+async def test_gateway_adapter_exposes_transcription_runtime_and_tools(tmp_path) -> None:
+    core = _Core()
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=_Authentication(),
+        core=core,
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://gateway.local",
+    ) as http:
+        transcription = await http.post(
+            "/v1/artifacts/artifact-a/transcribe",
+            params={"session_handle": "session-a"},
+            headers=headers,
+        )
+        status = await http.get(
+            "/v1/runtime/status",
+            params={"session_handle": "session-a"},
+            headers=headers,
+        )
+        tools = await http.get(
+            "/v1/tools",
+            params={"session_handle": "session-a"},
+            headers=headers,
+        )
+
+    assert transcription.json()["result"]["transcript"] == "会议结论"
+    assert status.json()["result"]["details"]["total_tokens"] == 42
+    assert status.json()["result"]["extensions"][0]["extension_id"] == "jira"
+    assert tools.json()["result"]["descriptors"][0]["origin_kind"] == "builtin"
 
 
 @pytest.mark.asyncio

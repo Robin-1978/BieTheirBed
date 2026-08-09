@@ -9,6 +9,7 @@ from pydantic.json_schema import models_json_schema
 
 from pc_assistant.gateway.protocol import (
     ApprovalResolvedResponse,
+    ArtifactTranscriptionResponse,
     ArtifactResponse,
     AuthChallengeRequest,
     AuthCompleteRequest,
@@ -21,12 +22,18 @@ from pc_assistant.gateway.protocol import (
     PairChallengeRequest,
     PairCompleteRequest,
     PairCompleteResponse,
+    PauseTaskRequest,
     ResolveApprovalRequest,
+    ResumeTaskRequest,
+    RetryTaskRequest,
+    RuntimeStatusResponse,
     SessionCreatedResponse,
     SessionResponse,
     TaskAcceptedResponse,
+    TaskCommandResponse,
     TaskListResponse,
     TaskResponse,
+    ToolListResponse,
 )
 
 
@@ -47,9 +54,16 @@ _MODELS: tuple[type[BaseModel], ...] = (
     TaskResponse,
     TaskListResponse,
     CancelTaskRequest,
+    PauseTaskRequest,
+    ResumeTaskRequest,
+    RetryTaskRequest,
+    TaskCommandResponse,
     ResolveApprovalRequest,
     ApprovalResolvedResponse,
     ArtifactResponse,
+    ArtifactTranscriptionResponse,
+    RuntimeStatusResponse,
+    ToolListResponse,
 )
 
 
@@ -275,6 +289,63 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     },
                 }
             },
+            "/v1/tasks/{task_id}/pause": {
+                "post": {
+                    "operationId": "pauseTask",
+                    "security": bearer,
+                    "parameters": [
+                        {
+                            "name": "task_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "maxLength": 128},
+                        }
+                    ],
+                    "requestBody": _json_body(PauseTaskRequest),
+                    "responses": {
+                        "200": _json_response("Pause result", TaskCommandResponse),
+                        **_errors("400", "401", "404", "422", "429", "503"),
+                    },
+                }
+            },
+            "/v1/tasks/{task_id}/resume": {
+                "post": {
+                    "operationId": "resumeTask",
+                    "security": bearer,
+                    "parameters": [
+                        {
+                            "name": "task_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "maxLength": 128},
+                        }
+                    ],
+                    "requestBody": _json_body(ResumeTaskRequest),
+                    "responses": {
+                        "200": _json_response("Resume result", TaskCommandResponse),
+                        **_errors("400", "401", "404", "422", "429", "503"),
+                    },
+                }
+            },
+            "/v1/tasks/{task_id}/retry": {
+                "post": {
+                    "operationId": "retryTask",
+                    "security": bearer,
+                    "parameters": [
+                        {
+                            "name": "task_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "maxLength": 128},
+                        }
+                    ],
+                    "requestBody": _json_body(RetryTaskRequest),
+                    "responses": {
+                        "202": _json_response("Retry accepted", TaskAcceptedResponse),
+                        **_errors("400", "401", "404", "422", "429", "503"),
+                    },
+                }
+            },
             "/v1/approvals/{approval_id}/resolve": {
                 "post": {
                     "operationId": "resolveApproval",
@@ -367,6 +438,50 @@ def gateway_openapi_schema() -> dict[str, Any]:
                             },
                         },
                         **_errors("400", "401", "404", "413", "429", "503"),
+                    },
+                }
+            },
+            "/v1/artifacts/{artifact_id}/transcribe": {
+                "post": {
+                    "operationId": "transcribeArtifact",
+                    "security": bearer,
+                    "parameters": [
+                        {
+                            "name": "artifact_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "maxLength": 128},
+                        },
+                        session_query,
+                    ],
+                    "responses": {
+                        "200": _json_response(
+                            "Artifact transcription",
+                            ArtifactTranscriptionResponse,
+                        ),
+                        **_errors("400", "401", "404", "422", "429", "503"),
+                    },
+                }
+            },
+            "/v1/runtime/status": {
+                "get": {
+                    "operationId": "getRuntimeStatus",
+                    "security": bearer,
+                    "parameters": [session_query],
+                    "responses": {
+                        "200": _json_response("Runtime status", RuntimeStatusResponse),
+                        **_errors("400", "401", "404", "429", "503"),
+                    },
+                }
+            },
+            "/v1/tools": {
+                "get": {
+                    "operationId": "listTools",
+                    "security": bearer,
+                    "parameters": [session_query],
+                    "responses": {
+                        "200": _json_response("Tool inventory", ToolListResponse),
+                        **_errors("400", "401", "404", "429", "503"),
                     },
                 }
             },
