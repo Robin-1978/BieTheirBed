@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 from dataclasses import dataclass
 
 import websockets
 from websockets.asyncio.server import Server
 
+from pc_assistant.network_tls import is_loopback_host
 from pc_assistant.service.core_api import CORE_WS_MAX_SIZE
 from pc_assistant.service.core_server import CoreServer
 
@@ -29,7 +29,7 @@ class CoreServiceHost:
     ) -> None:
         if not 0 <= tcp.port <= 65535:
             raise ValueError("TCP port must be between 0 and 65535")
-        if not _is_loopback_host(tcp.host):
+        if not is_loopback_host(tcp.host):
             raise ValueError(
                 "TCP Core API must bind to loopback until TLS is configured"
             )
@@ -86,13 +86,3 @@ class CoreServiceHost:
 
     async def __aexit__(self, exc_type, exc, traceback) -> None:
         await self.stop()
-
-
-def _is_loopback_host(host: str) -> bool:
-    normalized = host.strip().lower()
-    if normalized == "localhost":
-        return True
-    try:
-        return ipaddress.ip_address(normalized).is_loopback
-    except ValueError:
-        return False

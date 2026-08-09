@@ -48,6 +48,20 @@ class TestAppConfig:
         config = AppConfig(gateway_enabled=True, gateway_port=9528)
         assert config.gateway_port == 9528
 
+    def test_gateway_remote_binding_requires_explicit_tls_configuration(self):
+        with pytest.raises(ValueError, match="remote TLS mode for non-loopback"):
+            AppConfig(gateway_enabled=True, gateway_host="0.0.0.0")
+
+        with pytest.raises(ValueError, match="requires Gateway"):
+            AppConfig(
+                gateway_remote_enabled=True,
+                gateway_tls_cert_file="/tmp/cert.pem",
+                gateway_tls_key_file="/tmp/key.pem",
+            )
+
+        with pytest.raises(ValueError, match="certificate and key"):
+            AppConfig(gateway_enabled=True, gateway_remote_enabled=True)
+
     def test_model_context_window_overrides_global_fallback(self):
         cfg = AppConfig(
             providers={"api": {"driver": "openai_compatible", "api_key": "k"}},

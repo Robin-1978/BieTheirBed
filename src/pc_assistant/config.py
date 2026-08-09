@@ -8,8 +8,9 @@ from typing import Any, get_args, get_origin, Literal, Union
 import yaml
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
-from pc_assistant.runtime import default_runtime_root
 from pc_assistant.extensions.models import MCP_SERVER_ID_PATTERN, MCPServerConfig
+from pc_assistant.network_tls import is_loopback_host
+from pc_assistant.runtime import default_runtime_root
 
 
 _MAX_CONFIG_BYTES = 1024 * 1024
@@ -187,6 +188,9 @@ class AppConfig(BaseModel):
         ge=1024 * 1024,
         le=48 * 1024 * 1024,
     )
+    gateway_remote_enabled: bool = False
+    gateway_tls_cert_file: str = ""
+    gateway_tls_key_file: str = ""
     feishu_enabled: bool = False
     feishu_app_id: str = ""
     feishu_app_secret: SecretStr = Field(default_factory=lambda: SecretStr(""))
@@ -228,6 +232,19 @@ class AppConfig(BaseModel):
                 raise ValueError("Secure Gateway and Core service ports must differ")
             if self.webhook_enabled and self.gateway_port == self.webhook_port:
                 raise ValueError("Secure Gateway and Webhook ports must differ")
+            if not self.gateway_remote_enabled and not is_loopback_host(
+                self.gateway_host
+            ):
+                raise ValueError(
+                    "Secure Gateway requires remote TLS mode for non-loopback binding"
+                )
+        if self.gateway_remote_enabled:
+            if not self.gateway_enabled:
+                raise ValueError("Secure Gateway remote TLS mode requires Gateway")
+            if not self.gateway_tls_cert_file or not self.gateway_tls_key_file:
+                raise ValueError(
+                    "Secure Gateway remote TLS mode requires certificate and key files"
+                )
         if self.feishu_enabled and (
             not self.feishu_app_id.strip()
             or not self.feishu_app_secret.get_secret_value().strip()

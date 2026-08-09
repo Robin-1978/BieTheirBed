@@ -17,6 +17,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from pc_assistant.config import AppConfig
+from pc_assistant.network_tls import is_loopback_host
 from pc_assistant.runtime import RuntimePaths
 from pc_assistant.service.core_client import CoreClient, CoreRequestError
 from pc_assistant.service.credentials import (
@@ -68,7 +69,7 @@ class WebhookAdapter:
     ) -> None:
         if not config.webhook_enabled:
             raise ValueError("WebhookAdapter requires webhook_enabled")
-        if config.webhook_host.strip().lower() not in {"127.0.0.1", "localhost", "::1"}:
+        if not is_loopback_host(config.webhook_host):
             raise ValueError(
                 "Webhook adapter must bind to loopback; expose it through a TLS reverse proxy"
             )

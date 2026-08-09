@@ -1,4 +1,4 @@
-"""Strict loopback HTTP surface for Secure Gateway device authentication."""
+"""Fail-closed HTTP/TLS surface for Secure Gateway mobile access."""
 from __future__ import annotations
 
 import asyncio
@@ -7,9 +7,12 @@ import binascii
 import contextlib
 import json
 import logging
+import os
 import re
+import stat
 import time
 from collections import defaultdict, deque
+from pathlib import Path
 from typing import Any
 
 import uvicorn
@@ -32,6 +35,7 @@ from pc_assistant.gateway.identity import (
     GatewayIdentityRepository,
     PairingGrantRejectedError,
 )
+from pc_assistant.network_tls import is_loopback_host
 from pc_assistant.runtime import RuntimePaths
 from pc_assistant.service.core_api import ArtifactInputRef
 from pc_assistant.service.core_client import (
@@ -147,7 +151,7 @@ class _EmbeddedUvicornServer(uvicorn.Server):
 
 
 class SecureGatewayAdapter:
-    """Expose authentication only on loopback; no Core command proxy yet."""
+    """Expose a bounded mobile protocol without allowing plaintext remote binds."""
 
     name = "secure_gateway"
 
@@ -162,11 +166,20 @@ class SecureGatewayAdapter:
     ) -> None:
         if not config.gateway_enabled:
             raise ValueError("SecureGatewayAdapter requires gateway_enabled")
-        if config.gateway_host.strip().lower() not in {
-            "127.0.0.1",
-            "localhost",
-            "::1",
-        }:
+        self._tls_cert_file: Path | None = None
+        self._tls_key_file: Path | None = None
+        if config.gateway_remote_enabled:
+            self._tls_cert_file = self._tls_file(
+                config.gateway_tls_cert_file,
+                label="certificate",
+                private=False,
+            )
+            self._tls_key_file = self._tls_file(
+                config.gateway_tls_key_file,
+                label="private key",
+                private=True,
+            )
+        elif not is_loopback_host(config.gateway_host):
             raise ValueError("Secure Gateway must bind to loopback before TLS")
         self._config = config
         if authentication is None:
@@ -233,6 +246,12 @@ class SecureGatewayAdapter:
                 log_config=None,
                 access_log=False,
                 lifespan="off",
+                ssl_certfile=(
+                    None if self._tls_cert_file is None else str(self._tls_cert_file)
+                ),
+                ssl_keyfile=(
+                    None if self._tls_key_file is None else str(self._tls_key_file)
+                ),
             )
         )
         task = asyncio.create_task(server.serve(), name="knoa-secure-gateway")
@@ -241,7 +260,8 @@ class SecureGatewayAdapter:
             for _ in range(500):
                 if server.started:
                     logger.info(
-                        "Secure Gateway listening on %s:%s",
+                        "Secure Gateway listening on %s://%s:%s",
+                        "https" if self._tls_cert_file is not None else "http",
                         self._config.gateway_host,
                         self.bound_port,
                     )
@@ -776,6 +796,27 @@ class SecureGatewayAdapter:
 
         encoded = quote(name or "artifact", safe="")
         return f"attachment; filename=artifact; filename*=UTF-8''{encoded}"
+
+    @staticmethod
+    def _tls_file(value: str, *, label: str, private: bool) -> Path:
+        candidate = Path(value).expanduser()
+        if not candidate.is_absolute():
+            raise ValueError(f"Secure Gateway TLS {label} path must be absolute")
+        try:
+            metadata = candidate.lstat()
+        except OSError as exc:
+            raise ValueError(f"Secure Gateway TLS {label} is unavailable") from exc
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+            raise ValueError(
+                f"Secure Gateway TLS {label} must be a regular non-symlink file"
+            )
+        if metadata.st_uid != os.geteuid():
+            raise ValueError(f"Secure Gateway TLS {label} has the wrong owner")
+        if private and stat.S_IMODE(metadata.st_mode) & 0o077:
+            raise ValueError("Secure Gateway TLS private key must be owner-only")
+        if metadata.st_size <= 0:
+            raise ValueError(f"Secure Gateway TLS {label} is empty")
+        return candidate.resolve()
 
     @staticmethod
     def _challenge_response(challenge: Any) -> JSONResponse:

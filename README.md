@@ -228,6 +228,24 @@ Send JSON to `POST /hooks/gitlab` with `X-Knoa-Event-Id` and
 bytes. Reusing an event ID is safe because Trigger ingress is durably
 idempotent.
 
+The Secure Gateway is a separate, default-off mobile API. Keep it on loopback
+for local development. A non-loopback listener is accepted only in explicit TLS
+mode with absolute service-owned certificate paths and an owner-only private
+key:
+
+```yaml
+gateway_enabled: true
+gateway_host: "0.0.0.0"
+gateway_port: 9529
+gateway_remote_enabled: true
+gateway_tls_cert_file: "/absolute/path/gateway-cert.pem"
+gateway_tls_key_file: "/absolute/path/gateway-key.pem"
+```
+
+The Gateway exposes only its allow-listed device, Task, approval, event and
+Artifact protocol; it never exposes arbitrary Core methods. DNS, certificate
+issuance and router/cloud networking remain deployment responsibilities.
+
 ### Environment variables
 
 All config fields can be overridden with `PC_` prefix:
@@ -266,6 +284,12 @@ All config fields can be overridden with `PC_` prefix:
 | `PC_WEBHOOK_ENABLED` | webhook_enabled |
 | `PC_WEBHOOK_HOST` | webhook_host |
 | `PC_WEBHOOK_PORT` | webhook_port |
+| `PC_GATEWAY_ENABLED` | gateway_enabled |
+| `PC_GATEWAY_HOST` | gateway_host |
+| `PC_GATEWAY_PORT` | gateway_port |
+| `PC_GATEWAY_REMOTE_ENABLED` | gateway_remote_enabled |
+| `PC_GATEWAY_TLS_CERT_FILE` | gateway_tls_cert_file |
+| `PC_GATEWAY_TLS_KEY_FILE` | gateway_tls_key_file |
 
 ### Runtime config
 

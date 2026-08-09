@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 import base64
+import ipaddress
+import os
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+
+os.environ.setdefault("CRYPTOGRAPHY_OPENSSL_NO_LEGACY", "1")
 
 import httpx
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 
 from pc_assistant.config import AppConfig
 from pc_assistant.agent_runtime.contracts import ArtifactDownloadResult
@@ -31,6 +40,45 @@ def _config(tmp_path) -> AppConfig:
         gateway_host="127.0.0.1",
         gateway_port=0,
         gateway_session_ttl_seconds=900,
+    )
+
+
+def _tls_config(tmp_path) -> AppConfig:
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+    now = datetime.now(UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=1))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(
+            x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]),
+            critical=False,
+        )
+        .sign(key, hashes.SHA256())
+    )
+    cert_path = tmp_path / "gateway-cert.pem"
+    key_path = tmp_path / "gateway-key.pem"
+    cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    cert_path.chmod(0o600)
+    key_path.chmod(0o600)
+    return _config(tmp_path).model_copy(
+        update={
+            "gateway_remote_enabled": True,
+            "gateway_tls_cert_file": str(cert_path),
+            "gateway_tls_key_file": str(key_path),
+        }
     )
 
 
@@ -463,3 +511,27 @@ async def test_gateway_adapter_embedded_http_lifecycle(tmp_path) -> None:
         assert response.json() == {"status": "ok", "scope": "authentication"}
     finally:
         await adapter.stop()
+
+
+@pytest.mark.asyncio
+async def test_gateway_adapter_serves_tls_when_remote_mode_is_explicit(tmp_path) -> None:
+    adapter = SecureGatewayAdapter(
+        _tls_config(tmp_path),
+        authentication=_Authentication(),
+    )
+    await adapter.start()
+    try:
+        async with httpx.AsyncClient(verify=False, trust_env=False) as http:
+            response = await http.get(f"https://127.0.0.1:{adapter.bound_port}/health")
+        assert response.json() == {"status": "ok", "scope": "authentication"}
+    finally:
+        await adapter.stop()
+
+
+def test_gateway_adapter_requires_owner_only_tls_private_key(tmp_path) -> None:
+    config = _tls_config(tmp_path)
+    key_path = tmp_path / "gateway-key.pem"
+    key_path.chmod(0o640)
+
+    with pytest.raises(ValueError, match="owner-only"):
+        SecureGatewayAdapter(config, authentication=_Authentication())

@@ -1,6 +1,7 @@
 """Process-wide TLS trust-store normalization."""
 from __future__ import annotations
 
+import ipaddress
 import os
 import ssl
 from pathlib import Path
@@ -11,6 +12,17 @@ _SYSTEM_CA_BUNDLES = (
     Path("/etc/pki/tls/certs/ca-bundle.crt"),
     Path("/etc/ssl/ca-bundle.pem"),
 )
+
+
+def is_loopback_host(host: str) -> bool:
+    """Return whether a configured listener host is strictly loopback."""
+    normalized = host.strip().lower()
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
 
 
 def ensure_default_ca_bundle() -> str | None:
