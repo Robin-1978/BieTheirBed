@@ -13,6 +13,7 @@ class TestAppConfig:
         assert cfg.max_iterations == 8
         assert cfg.context_window_budget == 8192
         assert cfg.audio_transcription.enabled is False
+        assert cfg.gateway_enabled is False
 
     def test_audio_transcription_requires_public_mcp_tool(self):
         with pytest.raises(ValueError, match="requires an MCP tool"):
@@ -24,6 +25,27 @@ class TestAppConfig:
                     "tool": "builtin_transcribe",
                 }
             )
+
+    def test_gateway_port_must_not_conflict_with_enabled_services(self):
+        with pytest.raises(ValueError, match="Gateway and Core"):
+            AppConfig(gateway_enabled=True, gateway_port=9527)
+
+        with pytest.raises(ValueError, match="Gateway and Webhook"):
+            AppConfig(
+                gateway_enabled=True,
+                gateway_port=9528,
+                webhook_enabled=True,
+                webhook_routes={
+                    "jira": {
+                        "trigger_id": "trigger-a",
+                        "principal_id": "personal:owner",
+                        "secret": "s" * 32,
+                    }
+                },
+            )
+
+        config = AppConfig(gateway_enabled=True, gateway_port=9528)
+        assert config.gateway_port == 9528
 
     def test_model_context_window_overrides_global_fallback(self):
         cfg = AppConfig(

@@ -33,6 +33,11 @@ class ApplicationDaemon:
             from pc_assistant.adapters import WebhookAdapter
 
             self._webhooks = WebhookAdapter(config)
+        self._gateway = None
+        if config.gateway_enabled:
+            from pc_assistant.gateway import SecureGatewayAdapter
+
+            self._gateway = SecureGatewayAdapter(config)
         self._started = False
 
     async def start(self) -> None:
@@ -42,18 +47,23 @@ class ApplicationDaemon:
         try:
             if self._webhooks is not None:
                 await self._webhooks.start()
+            if self._gateway is not None:
+                await self._gateway.start()
             await self._channels.start()
         except BaseException:
+            if self._gateway is not None:
+                await self._gateway.stop()
             if self._webhooks is not None:
                 await self._webhooks.stop()
             await self._core.stop()
             raise
         self._started = True
         logger.info(
-            "Application service ready (pid %d, channels=%s, webhook=%s)",
+            "Application service ready (pid %d, channels=%s, webhook=%s, gateway=%s)",
             os.getpid(),
             ",".join(self._channels.names) or "none",
             "enabled" if self._webhooks is not None else "disabled",
+            "enabled" if self._gateway is not None else "disabled",
         )
 
     async def stop(self) -> None:
@@ -62,6 +72,11 @@ class ApplicationDaemon:
             return
         self._started = False
         await self._channels.stop()
+        if self._gateway is not None:
+            try:
+                await self._gateway.stop()
+            except Exception:
+                logger.exception("Secure Gateway stop failed")
         if self._webhooks is not None:
             try:
                 await self._webhooks.stop()
