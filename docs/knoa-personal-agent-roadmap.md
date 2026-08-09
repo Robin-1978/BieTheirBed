@@ -387,8 +387,9 @@ Task 至少记录：
 > session 拒绝。默认关闭、仅允许 loopback 绑定、严格 JSON/请求体/限流约束的 Gateway
 > 认证 API 也已完成。Gateway 通过独立、principal-scoped Bridge 白名单开放会话创建、
 > Task 创建/列表/详情/取消与权限确认，不接受任意 Core method。支持 `Last-Event-ID`
-> 续传、心跳重验 session、限制设备并发连接的标准 SSE 事件流也已完成；下一步是
-> Artifact 传输与 TLS 远程部署。
+> 续传、心跳重验 session、限制设备并发连接的标准 SSE 事件流也已完成。Artifact
+> 已使用受限二进制请求/响应传输，不塞入 Gateway JSON；Gateway 预先约束大小、media
+> type 和设备身份，Core 继续校验 principal/session 所有权。下一步是 TLS 远程部署。
 
 ### 9.1 第一版范围
 

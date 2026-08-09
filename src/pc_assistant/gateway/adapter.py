@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
 import json
 import logging
+import re
 import time
 from collections import defaultdict, deque
 from typing import Any
@@ -13,8 +16,7 @@ import uvicorn
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from pc_assistant.config import AppConfig
@@ -107,6 +109,20 @@ class _EventQuery(BaseModel):
     after_id: int = Field(default=0, ge=0, le=9_223_372_036_854_775_807)
 
 
+class _ArtifactUploadQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_handle: str = Field(min_length=1, max_length=256)
+    name: str = Field(default="", max_length=160)
+    caption: str = Field(default="", max_length=1000)
+
+
+class _ArtifactDownloadQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_handle: str = Field(min_length=1, max_length=256)
+
+
 class _WindowLimiter:
     def __init__(self, *, clock=time.monotonic) -> None:
         self._clock = clock
@@ -179,6 +195,12 @@ class SecureGatewayAdapter:
                 Route("/v1/tasks", self._create_task, methods=["POST"]),
                 Route("/v1/tasks", self._list_tasks, methods=["GET"]),
                 Route("/v1/events", self._events, methods=["GET"]),
+                Route("/v1/artifacts", self._upload_artifact, methods=["POST"]),
+                Route(
+                    "/v1/artifacts/{artifact_id:str}",
+                    self._download_artifact,
+                    methods=["GET"],
+                ),
                 Route("/v1/tasks/{task_id:str}", self._get_task, methods=["GET"]),
                 Route(
                     "/v1/tasks/{task_id:str}/cancel",
@@ -525,6 +547,91 @@ class SecureGatewayAdapter:
             },
         )
 
+    async def _upload_artifact(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=20)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        try:
+            query = _ArtifactUploadQuery.model_validate(dict(request.query_params))
+        except ValidationError:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        media_type = request.headers.get("Content-Type", "").partition(";")[0].strip()
+        if not self._valid_media_type(media_type):
+            return JSONResponse({"error": "unsupported_media_type"}, status_code=415)
+        declared_length = request.headers.get("Content-Length", "").strip()
+        if declared_length:
+            if not declared_length.isdecimal():
+                return JSONResponse({"error": "invalid_request"}, status_code=400)
+            if int(declared_length) > self._config.gateway_artifact_max_bytes:
+                return JSONResponse({"error": "payload_too_large"}, status_code=413)
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > self._config.gateway_artifact_max_bytes:
+                return JSONResponse({"error": "payload_too_large"}, status_code=413)
+        if not body:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        token = self._bearer_token(request)
+        renewed = self._authenticate_token(token)
+        if renewed is None:
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        data_url = (
+            f"data:{media_type};base64,"
+            + base64.b64encode(body).decode("ascii")
+        )
+        try:
+            artifact = await self._core.upload_artifact(
+                renewed.device.principal_id,
+                query.session_handle,
+                data_url,
+                media_type=media_type,
+                name=query.name,
+                caption=query.caption,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse(
+            {"artifact": artifact.model_dump(mode="json")},
+            status_code=201,
+        )
+
+    async def _download_artifact(self, request: Request) -> JSONResponse | Response:
+        authenticated = self._authorize(request, limit=60)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        artifact_id = self._path_identifier(request, "artifact_id")
+        if artifact_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            query = _ArtifactDownloadQuery.model_validate(dict(request.query_params))
+        except ValidationError:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            result = await self._core.download_artifact(
+                authenticated.device.principal_id,
+                query.session_handle,
+                artifact_id,
+            )
+            data = self._decode_artifact_data_url(result.data_url)
+        except ValueError:
+            logger.warning("Secure Gateway received invalid Artifact data from Core")
+            return JSONResponse({"error": "unavailable"}, status_code=503)
+        except Exception as exc:
+            return self._core_error(exc)
+        if len(data) > self._config.gateway_artifact_max_bytes:
+            return JSONResponse({"error": "payload_too_large"}, status_code=413)
+        if self._authenticate_token(self._bearer_token(request)) is None:
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return Response(
+            data,
+            media_type=result.artifact.media_type,
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Disposition": self._content_disposition(result.artifact.name),
+                "X-Knoa-Artifact-Id": result.artifact.artifact_id,
+            },
+        )
+
     def _authorize(
         self,
         request: Request,
@@ -601,10 +708,13 @@ class SecureGatewayAdapter:
                 "task_not_found",
                 "session_not_found",
                 "approval_not_found",
+                "artifact_not_found",
             }:
                 return JSONResponse({"error": "not_found"}, status_code=404)
             if exc.code in {"invalid_request", "invalid_state"}:
                 return JSONResponse({"error": "rejected"}, status_code=422)
+            if exc.code == "artifact_too_large":
+                return JSONResponse({"error": "payload_too_large"}, status_code=413)
         if isinstance(
             exc,
             (CoreConnectionLostError, CoreRequestTimeoutError),
@@ -642,6 +752,30 @@ class SecureGatewayAdapter:
             )
         )
         return ("\n".join(lines) + "\n\n").encode("utf-8")
+
+    @staticmethod
+    def _valid_media_type(value: str) -> bool:
+        return bool(
+            0 < len(value) <= 128
+            and re.fullmatch(r"[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+", value)
+        )
+
+    @staticmethod
+    def _decode_artifact_data_url(data_url: str) -> bytes:
+        if not data_url.startswith("data:") or ";base64," not in data_url:
+            raise ValueError("invalid Artifact data URL")
+        _metadata, encoded = data_url.split(",", 1)
+        try:
+            return base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise ValueError("invalid Artifact data URL") from exc
+
+    @staticmethod
+    def _content_disposition(name: str) -> str:
+        from urllib.parse import quote
+
+        encoded = quote(name or "artifact", safe="")
+        return f"attachment; filename=artifact; filename*=UTF-8''{encoded}"
 
     @staticmethod
     def _challenge_response(challenge: Any) -> JSONResponse:

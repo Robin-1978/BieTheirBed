@@ -189,8 +189,10 @@ Gateway device record and are never sent to Core.
 
 > Progress: the principal Task feed is exposed as bounded standard SSE with
 > `Last-Event-ID` resumption, stable Core event names, per-device connection
-> limits and session revalidation before delivery and on heartbeats. TLS/public
-> binding and Artifact transfer remain disabled.
+> limits and session revalidation before delivery and on heartbeats. Binary
+> Artifact upload/download is principal/session scoped, bounded before Core calls,
+> delivered with no-store headers and never encoded inside Gateway JSON. TLS and
+> public binding remain disabled.
 
 ### D4 — mobile delivery
 

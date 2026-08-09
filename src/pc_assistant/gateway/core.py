@@ -6,6 +6,8 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Protocol
 
 from pc_assistant.config import AppConfig
+from pc_assistant.agent_runtime.contracts import ArtifactDownloadResult
+from pc_assistant.artifacts import ArtifactRef
 from pc_assistant.runtime import RuntimePaths
 from pc_assistant.service.core_api import (
     ApprovalResolvedMessage,
@@ -64,6 +66,22 @@ class GatewayCoreClient(Protocol):
         *,
         approved: bool,
     ) -> ApprovalResolvedMessage: ...
+
+    async def upload_artifact(
+        self,
+        session_handle: str,
+        data_url: str,
+        *,
+        media_type: str,
+        name: str,
+        caption: str,
+    ) -> ArtifactRef: ...
+
+    async def download_artifact(
+        self,
+        session_handle: str,
+        artifact_id: str,
+    ) -> ArtifactDownloadResult: ...
 
     def principal_task_events(
         self,
@@ -162,6 +180,34 @@ class GatewayCoreBridge:
     ) -> ApprovalResolvedMessage:
         client = await self._client_for(principal_id)
         return await client.resolve_approval(approval_id, approved=approved)
+
+    async def upload_artifact(
+        self,
+        principal_id: str,
+        session_handle: str,
+        data_url: str,
+        *,
+        media_type: str,
+        name: str,
+        caption: str,
+    ) -> ArtifactRef:
+        client = await self._client_for(principal_id)
+        return await client.upload_artifact(
+            session_handle,
+            data_url,
+            media_type=media_type,
+            name=name,
+            caption=caption,
+        )
+
+    async def download_artifact(
+        self,
+        principal_id: str,
+        session_handle: str,
+        artifact_id: str,
+    ) -> ArtifactDownloadResult:
+        client = await self._client_for(principal_id)
+        return await client.download_artifact(session_handle, artifact_id)
 
     async def principal_task_events(
         self,
