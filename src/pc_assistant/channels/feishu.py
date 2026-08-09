@@ -26,7 +26,11 @@ from pc_assistant.service.credentials import (
     issue_principal_credential,
     resolve_local_service_token,
 )
-from pc_assistant.tasks import TERMINAL_TASK_STATES, TaskEvent
+from pc_assistant.tasks import (
+    TERMINAL_TASK_STATES,
+    PrincipalTaskEvent,
+    TaskEvent,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -44,6 +48,8 @@ _PROGRESS_TIMELINE_CHARS = (
     + _PROGRESS_DRAFT_CHARS
 )
 _TEXT_MESSAGE_CHARS = 4000
+_PRINCIPAL_WATCH_RETRY_SECONDS = 2.0
+_TASK_TERMINAL_EVENT_TYPES = frozenset({"completed", "failed", "cancelled"})
 
 for _proxy_name in ("NO_PROXY", "no_proxy"):
     _configured = os.environ.get(_proxy_name, "")
@@ -824,8 +830,12 @@ class FeishuChannel:
         self._receive_id = config.feishu_receive_id.strip()
         self._binding_path = self._paths.data / "feishu_open_id"
         self._sessions_path = self._paths.data / "feishu_sessions.json"
+        self._notification_cursors_path = (
+            self._paths.data / "feishu_notification_cursors.json"
+        )
         self._outbox = self._paths.cache / "feishu-outbox"
         self._clients: dict[str, CoreClient] = {}
+        self._client_locks: dict[str, asyncio.Lock] = {}
         self._lark_client: Any = None
         self._lark_lock = threading.RLock()
         self._main_loop: asyncio.AbstractEventLoop | None = None
@@ -833,6 +843,10 @@ class FeishuChannel:
         self._running = False
         self._sessions: dict[str, str] = {}
         self._session_users: dict[str, str] = {}
+        self._notification_cursors: dict[str, int] = {}
+        self._principal_watchers: dict[str, asyncio.Task[None]] = {}
+        self._principal_watcher_started_at: dict[str, float] = {}
+        self._foreground_task_ids: set[str] = set()
         self._user_locks: dict[str, asyncio.Lock] = {}
         self._pending_attachments: dict[str, list[ArtifactInputRef]] = {}
         self._active_task_presentations: dict[str, _ActiveTaskPresentation] = {}
@@ -851,11 +865,14 @@ class FeishuChannel:
             raise ValueError("Feishu app_id and app_secret are required")
         self._main_loop = asyncio.get_running_loop()
         self._load_sessions()
+        self._load_notification_cursors()
         # Import and initialize the SDK before the WebSocket thread starts.
         # Concurrent first imports from REST and WS paths can deadlock inside
         # Python's module locks in lark-oapi 1.6.x.
         await asyncio.to_thread(self._get_lark_client)
         self._running = True
+        for open_id in self._sessions:
+            self._ensure_principal_watcher(open_id)
         self._ws_thread = threading.Thread(
             target=self._run_websocket,
             name="pc-assistant-feishu",
@@ -873,6 +890,15 @@ class FeishuChannel:
 
     async def stop(self) -> None:
         self._running = False
+        watchers, self._principal_watchers = (
+            tuple(self._principal_watchers.values()),
+            {},
+        )
+        for watcher in watchers:
+            watcher.cancel()
+        await asyncio.gather(*watchers, return_exceptions=True)
+        self._principal_watcher_started_at.clear()
+        self._foreground_task_ids.clear()
         receive_id = self._current_receive_id()
         if receive_id:
             try:
@@ -1353,6 +1379,7 @@ class FeishuChannel:
             async for event in client.execute_task(session, text, attachments):
                 presentation.bind_task(event.task_id)
                 self._active_task_presentations[event.task_id] = presentation
+                self._foreground_task_ids.add(event.task_id)
                 start_card()
                 payload = event.payload
                 if event.event_type == "reasoning_delta":
@@ -1604,6 +1631,7 @@ class FeishuChannel:
         self._sessions[open_id] = session
         self._session_users[session] = open_id
         self._save_sessions()
+        self._ensure_principal_watcher(open_id)
 
     def _load_sessions(self) -> None:
         try:
@@ -1633,6 +1661,152 @@ class FeishuChannel:
         temporary.chmod(0o600)
         temporary.replace(self._sessions_path)
         self._sessions_path.chmod(0o600)
+
+    def _load_notification_cursors(self) -> None:
+        try:
+            data = json.loads(
+                self._notification_cursors_path.read_text(encoding="utf-8")
+            )
+            if isinstance(data, dict):
+                self._notification_cursors = {
+                    str(open_id): int(cursor)
+                    for open_id, cursor in data.items()
+                    if str(open_id) and int(cursor) >= 0
+                }
+        except FileNotFoundError:
+            return
+        except Exception:
+            logger.warning(
+                "Ignoring invalid Feishu notification cursors",
+                exc_info=True,
+            )
+
+    def _save_notification_cursors(self) -> None:
+        path = self._notification_cursors_path
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path.parent.chmod(0o700)
+        temporary = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
+        temporary.write_text(
+            json.dumps(
+                self._notification_cursors,
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        temporary.chmod(0o600)
+        temporary.replace(path)
+        path.chmod(0o600)
+
+    def _ensure_principal_watcher(self, open_id: str) -> None:
+        if not self._running:
+            return
+        current = self._principal_watchers.get(open_id)
+        if current is not None and not current.done():
+            return
+        self._principal_watcher_started_at[open_id] = time.time()
+        watcher = asyncio.create_task(
+            self._watch_principal_tasks(open_id),
+            name=f"feishu-principal-feed-{_principal_for_log(open_id)}",
+        )
+        self._principal_watchers[open_id] = watcher
+
+    async def _watch_principal_tasks(self, open_id: str) -> None:
+        bootstrap = open_id not in self._notification_cursors
+        started_at = self._principal_watcher_started_at[open_id]
+        while self._running:
+            try:
+                client = await self._client_for(open_id)
+                cursor = self._notification_cursors.get(open_id, 0)
+                async for feed_event in client.principal_task_events(
+                    after_id=cursor
+                ):
+                    if not self._running:
+                        return
+                    cursor = feed_event.feed_event_id
+                    if bootstrap and feed_event.event.occurred_at < started_at:
+                        self._notification_cursors[open_id] = cursor
+                        continue
+                    bootstrap = False
+                    while self._running:
+                        if await self._deliver_principal_task_event(
+                            open_id,
+                            client,
+                            feed_event,
+                        ):
+                            break
+                        await asyncio.sleep(_PRINCIPAL_WATCH_RETRY_SECONDS)
+                    if not self._running:
+                        return
+                    self._notification_cursors[open_id] = cursor
+                    if feed_event.event.event_type in _TASK_TERMINAL_EVENT_TYPES:
+                        self._save_notification_cursors()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning(
+                    "Feishu principal Task feed disconnected principal=%s",
+                    _principal_for_log(open_id),
+                    exc_info=True,
+                )
+                if self._running:
+                    await asyncio.sleep(_PRINCIPAL_WATCH_RETRY_SECONDS)
+
+    async def _deliver_principal_task_event(
+        self,
+        open_id: str,
+        client: CoreClient,
+        feed_event: PrincipalTaskEvent,
+    ) -> bool:
+        event = feed_event.event
+        if event.event_type not in _TASK_TERMINAL_EVENT_TYPES:
+            return True
+        if event.task_id in self._foreground_task_ids:
+            self._foreground_task_ids.discard(event.task_id)
+            return True
+        try:
+            snapshot = await client.get_task(event.task_id)
+        except Exception:
+            logger.warning(
+                "Feishu background Task lookup failed task_id=%s",
+                event.task_id,
+                exc_info=True,
+            )
+            return False
+
+        if event.event_type == "completed":
+            text = snapshot.final_summary or event.payload.content or "已完成"
+            template = "blue"
+            title = ASSISTANT_NAME
+        elif event.event_type == "cancelled":
+            text = "已停止"
+            template = "grey"
+            title = "已停止"
+        else:
+            reason = (
+                snapshot.final_summary
+                or event.payload.content
+                or snapshot.failure_code
+                or "任务未完成"
+            )
+            text = f"× {reason}"
+            template = "red"
+            title = "处理出错"
+        try:
+            return await asyncio.to_thread(
+                self._send_card,
+                open_id,
+                text,
+                template,
+                title,
+            )
+        except Exception:
+            logger.warning(
+                "Feishu background Task notification failed task_id=%s",
+                event.task_id,
+                exc_info=True,
+            )
+            return False
 
     def _claim_message(self, message_id: str) -> bool:
         if not message_id:
@@ -1878,19 +2052,22 @@ class FeishuChannel:
         for index, chunk in enumerate(chunks, start=1):
             chunk_title = title if total == 1 else f"{title}（{index}/{total}）"
             card = self._text_card(chunk, template, chunk_title)
+            chunk_succeeded = False
             try:
                 message_id = self._send_card_returning_id(open_id, card)
             except Exception:
                 logger.exception("Feishu card send failed")
                 message_id = None
-            if message_id is None:
-                succeeded = False
+            if message_id is not None:
+                chunk_succeeded = True
+            else:
                 retry_chunks = _split_text(
                     chunk,
                     max(1000, _CARD_MARKDOWN_CHARS // 2),
                     max_tables=1,
                 )
                 if len(retry_chunks) > 1:
+                    chunk_succeeded = True
                     retry_total = len(retry_chunks)
                     for retry_index, retry_chunk in enumerate(
                         retry_chunks,
@@ -1913,15 +2090,16 @@ class FeishuChannel:
                             logger.exception("Feishu card retry failed")
                             retry_message_id = None
                         if retry_message_id is None:
-                            self._send_long_text(
+                            chunk_succeeded = self._send_long_text(
                                 open_id,
                                 f"{retry_title}\n\n{retry_chunk}",
-                            )
+                            ) and chunk_succeeded
                 else:
-                    self._send_long_text(
+                    chunk_succeeded = self._send_long_text(
                         open_id,
                         f"{chunk_title}\n\n{chunk}",
                     )
+            succeeded = succeeded and chunk_succeeded
         return succeeded
 
     def _download_image(self, message_id: str, image_key: str) -> tuple[bytes, str]:
@@ -2062,23 +2240,25 @@ class FeishuChannel:
         return sent.code == 0
 
     async def _client_for(self, open_id: str) -> CoreClient:
-        current = self._clients.get(open_id)
-        if current is not None and current.is_connected:
-            return current
-        if current is not None:
-            await current.disconnect()
-        signing_key = resolve_local_service_token(self._paths)
-        principal = f"personal:feishu:{_principal_for_log(open_id)}"
-        credential = issue_principal_credential(signing_key, principal)
+        lock = self._client_locks.setdefault(open_id, asyncio.Lock())
+        async with lock:
+            current = self._clients.get(open_id)
+            if current is not None and current.is_connected:
+                return current
+            if current is not None:
+                await current.disconnect()
+            signing_key = resolve_local_service_token(self._paths)
+            principal = f"personal:feishu:{_principal_for_log(open_id)}"
+            credential = issue_principal_credential(signing_key, principal)
 
-        async def confirm(message: TaskEvent) -> bool:
-            return await self._confirm_tool(open_id, message)
+            async def confirm(message: TaskEvent) -> bool:
+                return await self._confirm_tool(open_id, message)
 
-        client = await CoreClient.connect(
-            f"ws://{self._config.service_host}:{self._config.service_port}",
-            credential,
-            approval_handler=confirm,
-            max_buffered_task_events=4096,
-        )
-        self._clients[open_id] = client
-        return client
+            client = await CoreClient.connect(
+                f"ws://{self._config.service_host}:{self._config.service_port}",
+                credential,
+                approval_handler=confirm,
+                max_buffered_task_events=4096,
+            )
+            self._clients[open_id] = client
+            return client

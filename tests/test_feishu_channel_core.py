@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -22,6 +23,7 @@ from pc_assistant.channels.feishu import (
 from pc_assistant.config import AppConfig
 from pc_assistant.service.core_api import TaskCancelResultMessage
 from pc_assistant.tasks import (
+    PrincipalTaskEvent,
     TaskCancelResult,
     TaskEvent,
     TaskEventPayload,
@@ -667,10 +669,98 @@ def test_feishu_card_failure_retries_smaller_markdown_chunks(tmp_path) -> None:
         "| C | D |\n|---|---|\n| 3 | 4 |\n"
     )
 
-    assert not channel._send_card("ou-user", text)
+    assert channel._send_card("ou-user", text)
     assert len(attempted) == 3
     assert [_markdown_table_count(item) for item in attempted] == [2, 1, 1]
     assert plain_text == []
+
+
+@pytest.mark.asyncio
+async def test_feishu_principal_feed_notifies_background_task_and_saves_cursor(
+    tmp_path,
+) -> None:
+    feed_event = PrincipalTaskEvent(
+        feed_event_id=9,
+        principal_id="principal-a",
+        event=TaskEvent(
+            task_id="task-background",
+            event_seq=5,
+            occurred_at=time.time() + 10,
+            event_type="completed",
+            payload=TaskEventPayload(state=TaskState.COMPLETED),
+        ),
+    )
+
+    class BackgroundClient:
+        is_connected = True
+
+        async def principal_task_events(self, *, after_id=0):
+            assert after_id == 0
+            yield feed_event
+            await asyncio.Event().wait()
+
+        async def get_task(self, task_id):
+            assert task_id == "task-background"
+            return SimpleNamespace(
+                final_summary="后台工作已处理完毕。",
+                failure_code="",
+            )
+
+    channel = FeishuChannel(_config(tmp_path))
+    channel._running = True
+    channel._clients["ou-user"] = BackgroundClient()
+    cards = []
+    channel._send_card = lambda *args: cards.append(args) or True
+
+    channel._ensure_principal_watcher("ou-user")
+    for _ in range(100):
+        if channel._notification_cursors.get("ou-user") == 9:
+            break
+        await asyncio.sleep(0.01)
+
+    channel._running = False
+    watcher = channel._principal_watchers["ou-user"]
+    watcher.cancel()
+    await asyncio.gather(watcher, return_exceptions=True)
+
+    assert cards == [
+        ("ou-user", "后台工作已处理完毕。", "blue", "小诺")
+    ]
+    assert channel._notification_cursors == {"ou-user": 9}
+    persisted = json.loads(
+        (tmp_path / "data" / "feishu_notification_cursors.json").read_text()
+    )
+    assert persisted == {"ou-user": 9}
+
+
+@pytest.mark.asyncio
+async def test_feishu_principal_feed_skips_foreground_task_duplicate(
+    tmp_path,
+) -> None:
+    channel = FeishuChannel(_config(tmp_path))
+    channel._foreground_task_ids.add("task-foreground")
+    feed_event = PrincipalTaskEvent(
+        feed_event_id=4,
+        principal_id="principal-a",
+        event=TaskEvent(
+            task_id="task-foreground",
+            event_seq=5,
+            occurred_at=1.0,
+            event_type="completed",
+            payload=TaskEventPayload(state=TaskState.COMPLETED),
+        ),
+    )
+
+    class UnexpectedLookup:
+        async def get_task(self, _task_id):
+            raise AssertionError("foreground Task must not be looked up")
+
+    assert await channel._deliver_principal_task_event(
+        "ou-user",
+        UnexpectedLookup(),
+        feed_event,
+    )
+    assert "task-foreground" not in channel._foreground_task_ids
 
 
 def test_feishu_long_fenced_code_keeps_balanced_markdown() -> None:

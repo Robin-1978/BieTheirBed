@@ -181,7 +181,9 @@ channel package. Each sender is mapped to a separate signed principal and
 opaque Core session.
 The Channel adds and removes the Feishu typing reaction, projects standard Core
 events into one live-updated card, and sends long final answers as lossless
-continuation cards instead of truncating model output.
+continuation cards instead of truncating model output. It also follows the
+durable principal Task feed with a persisted cursor, so Schedule and Trigger
+results are delivered proactively without coupling Feishu to Core automation.
 
 ### Environment variables
 
