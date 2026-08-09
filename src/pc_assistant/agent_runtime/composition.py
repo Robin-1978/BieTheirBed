@@ -93,6 +93,7 @@ from pc_assistant.tools.window import WindowTool
 from pc_assistant.tools.write_file import WriteFileTool
 from pc_assistant.tasks import (
     DurableApprovalService,
+    DurableToolCommitService,
     TaskEventHub,
     TaskExecutor,
     TaskRepository,
@@ -379,10 +380,12 @@ def build_core_runtime(
     )
     task_events = TaskEventHub()
     task_approvals = DurableApprovalService(tasks, task_events)
+    task_tool_commits = DurableToolCommitService(tasks)
     task_executor = TaskExecutor(
         tasks,
         runtime,
         task_approvals,
+        task_tool_commits,
         task_events,
     )
     task_service = TaskService(

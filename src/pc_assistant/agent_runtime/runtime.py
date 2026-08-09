@@ -173,6 +173,7 @@ class AgentRuntime:
                             cancellation=context.cancellation,
                             run_id=context.run_id,
                             confirmation=context.confirmation,
+                            tool_commit=context.tool_commit,
                             system_prompt=self._system_prompt,
                             runtime_context=runtime_context,
                             prompt_budget=self._prompt_budget,

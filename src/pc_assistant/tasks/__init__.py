@@ -11,12 +11,17 @@ from pc_assistant.tasks.models import (
     ApprovalState,
     TERMINAL_TASK_STATES,
     TaskApprovalRecord,
+    TaskAttemptRecord,
+    TaskAttemptState,
     TaskCancelResult,
     TaskEvent,
     TaskEventPayload,
     TaskEventType,
+    TaskPauseResult,
     TaskRecord,
     TaskState,
+    TaskToolStepRecord,
+    TaskToolStepState,
 )
 from pc_assistant.tasks.repository import (
     TaskCapacityError,
@@ -26,12 +31,16 @@ from pc_assistant.tasks.repository import (
     TaskTransitionError,
 )
 from pc_assistant.tasks.service import TaskService
+from pc_assistant.tasks.tool_commit import DurableToolCommitService
 
 __all__ = [
     "TERMINAL_TASK_STATES",
     "ApprovalState",
     "DurableApprovalService",
+    "DurableToolCommitService",
     "TaskApprovalRecord",
+    "TaskAttemptRecord",
+    "TaskAttemptState",
     "TaskCapacityError",
     "TaskCancelResult",
     "TaskEvent",
@@ -42,9 +51,12 @@ __all__ = [
     "TaskEventType",
     "TaskIdempotencyConflictError",
     "TaskNotFoundError",
+    "TaskPauseResult",
     "TaskRecord",
     "TaskRepository",
     "TaskState",
+    "TaskToolStepRecord",
+    "TaskToolStepState",
     "TaskService",
     "TaskTransitionError",
     "TaskSubscriptionOverflowError",

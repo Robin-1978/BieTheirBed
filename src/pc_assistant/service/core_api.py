@@ -31,6 +31,7 @@ from pc_assistant.tasks import (
     ApprovalState,
     TaskCancelResult,
     TaskEvent,
+    TaskPauseResult,
     TaskRecord,
     TaskState,
 )
@@ -174,12 +175,21 @@ class CancelTaskRequest(CoreModel):
     reason: Annotated[str, StringConstraints(max_length=1000)] = ""
 
 
+class PauseTaskRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["pause_task"] = "pause_task"
+    task_id: TaskId
+    reason: Annotated[str, StringConstraints(max_length=1000)] = ""
+
+
 class ResumeTaskRequest(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
     method: Literal["resume_task"] = "resume_task"
     task_id: TaskId
     reason: Annotated[str, StringConstraints(max_length=1000)] = ""
+    acknowledge_outcome_unknown: bool = False
 
 
 class ResolveApprovalRequest(CoreModel):
@@ -246,6 +256,7 @@ CoreRequest: TypeAlias = Annotated[
     | GetTaskRequest
     | ListTasksRequest
     | CancelTaskRequest
+    | PauseTaskRequest
     | ResumeTaskRequest
     | ResolveApprovalRequest
     | GetStatusRequest
@@ -415,6 +426,13 @@ class TaskCancelResultMessage(CoreModel):
     result: TaskCancelResult
 
 
+class TaskPauseResultMessage(CoreModel):
+    message_type: Literal["task_pause_result"] = "task_pause_result"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    result: TaskPauseResult
+
+
 class TaskResumedMessage(CoreModel):
     message_type: Literal["task_resumed"] = "task_resumed"
     api_version: Literal["v1"] = "v1"
@@ -450,6 +468,7 @@ CoreServerMessage: TypeAlias = Annotated[
     | ArtifactUploadedMessage
     | ArtifactDownloadedMessage
     | TaskCancelResultMessage
+    | TaskPauseResultMessage
     | TaskResumedMessage
     | ApprovalResolvedMessage
     | CoreError,

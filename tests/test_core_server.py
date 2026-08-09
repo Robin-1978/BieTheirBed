@@ -13,6 +13,7 @@ from pc_assistant.service.core_api import (
     CreateTaskRequest,
     GetTaskRequest,
     ListTasksRequest,
+    PauseTaskRequest,
     ResumeTaskRequest,
     SubscribeTaskRequest,
     parse_core_server_message_json,
@@ -24,6 +25,7 @@ from pc_assistant.tasks import (
     TaskEvent,
     TaskEventPayload,
     TaskNotFoundError,
+    TaskPauseResult,
     TaskState,
 )
 
@@ -74,6 +76,7 @@ class FakeWebSocket:
 class FakeTasks:
     def __init__(self) -> None:
         self.cancelled: list[str] = []
+        self.paused: list[str] = []
         self.resumed: list[str] = []
         self.subscription_closed = asyncio.Event()
         self.reject_create = False
@@ -117,8 +120,20 @@ class FakeTasks:
     async def resolve_approval(self, *args, **kwargs):
         raise AssertionError("not used")
 
-    async def resume(self, principal_id: str, task_id: str, *, reason: str = ""):
+    async def pause(self, principal_id: str, task_id: str, *, reason: str = ""):
         del principal_id, reason
+        self.paused.append(task_id)
+        return TaskPauseResult(accepted=True, state=TaskState.PAUSED)
+
+    async def resume(
+        self,
+        principal_id: str,
+        task_id: str,
+        *,
+        reason: str = "",
+        acknowledge_outcome_unknown: bool = False,
+    ):
+        del principal_id, reason, acknowledge_outcome_unknown
         self.resumed.append(task_id)
         return SimpleNamespace(task_id=task_id, state=TaskState.QUEUED)
 
@@ -302,6 +317,22 @@ async def test_resume_task_is_explicit_command() -> None:
 
     assert tasks.resumed == ["task-a"]
     assert websocket.messages()[-1].message_type == "task_resumed"
+
+
+@pytest.mark.asyncio
+async def test_pause_task_is_explicit_command() -> None:
+    tasks = FakeTasks()
+    websocket = FakeWebSocket()
+    server_task = asyncio.create_task(_server(tasks).handle(websocket))
+
+    await websocket.push(AuthenticateRequest(request_id="auth", credential="token-a"))
+    await websocket.push(PauseTaskRequest(request_id="pause", task_id="task-a"))
+    await websocket.wait_sent(2)
+    await websocket.close_input()
+    await server_task
+
+    assert tasks.paused == ["task-a"]
+    assert websocket.messages()[-1].message_type == "task_pause_result"
 
 
 def test_server_rejects_non_positive_subscription_limit() -> None:

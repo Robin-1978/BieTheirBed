@@ -12,6 +12,7 @@ from pc_assistant.service.core_api import (
     DownloadArtifactRequest,
     GetTaskRequest,
     ListTasksRequest,
+    PauseTaskRequest,
     ResolveApprovalRequest,
     ResumeTaskRequest,
     SubscribeTaskRequest,
@@ -110,6 +111,7 @@ def test_core_schema_exposes_only_task_lifecycle_methods() -> None:
     assert "get_task" in rendered
     assert "list_tasks" in rendered
     assert "cancel_task" in rendered
+    assert "pause_task" in rendered
     assert "resume_task" in rendered
     assert "approval_resolve" in rendered
     assert "cancel_run" not in rendered
@@ -129,9 +131,20 @@ def test_core_schema_exposes_only_task_lifecycle_methods() -> None:
             request_id="resume-1",
             task_id="task-1",
             reason="reviewed recovery state",
+            acknowledge_outcome_unknown=True,
         ).model_dump_json()
     )
     assert isinstance(resumed, ResumeTaskRequest)
+    assert resumed.acknowledge_outcome_unknown is True
+
+    paused = parse_core_request_json(
+        PauseTaskRequest(
+            request_id="pause-1",
+            task_id="task-1",
+            reason="pause from phone",
+        ).model_dump_json()
+    )
+    assert isinstance(paused, PauseTaskRequest)
 
     detail = parse_core_request_json(
         GetTaskRequest(request_id="detail-1", task_id="task-1").model_dump_json()

@@ -262,13 +262,18 @@ Token、账号健康和重新授权。Core 只接收标准 MCP 工具，不理�
 > 进度（2026-08-09）：Phase B 正向设计已完成，详见
 > `docs/knoa-durable-task-design.md`。B1-B3 已完成：持久 Task 聚合、EventJournal、
 > 连接无关 TaskExecutor、`after_seq` 重放、持久审批以及飞书/TUI 标准确认命令均已
-> 进入生产路径；公开 Run 协议和连接所有的确认逻辑已经删除。B4 已开始：重启时
+> 进入生产路径；公开 Run 协议和连接所有的确认逻辑已经删除。B4 已完成：重启时
 > 无法证明执行结果的 `running` Task 保守进入 `paused`，只有显式 `resume_task`
 > 才会重新排队，避免外部副作用被自动重试；执行器已支持不同 session 有界并发，
 > 同一 session 仍在持久 claim 边界严格串行；Task 详情与有界游标列表已经进入
 > Core API，且不会暴露内部 lease、worker 或 revision 字段。
 > 持久创建事务同时限制全局 128 个、单 principal 32 个非终态 Task；幂等重试先于
 > 容量判断，满载时通过标准 `resource_exhausted` 返回。
+> 每次 claim 现在都会创建持久 Attempt；ToolStep 在真实提交前写入 `committing`，
+> 提交后保存 typed result。重启遇到未完成 commit 会转为 `outcome_unknown` 并暂停；
+> 恢复时必须显式设置 `acknowledge_outcome_unknown`，相同 ToolStep 仍禁止自动重放。
+> 当前进程 checkpoint 失败也会在一个事务内隔离 ToolStep、中断 Attempt 并暂停 Task；
+> `pause_task` 对运行中任务采用持久 `pause_requested` 和安全边界暂停，重启不会丢失。
 
 ### 7.1 Task 模型
 

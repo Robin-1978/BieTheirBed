@@ -146,6 +146,9 @@ def test_claim_and_transitions_append_gap_free_events(tmp_path: Path) -> None:
     assert completed.state is TaskState.COMPLETED
     assert completed.final_summary == "done"
     assert completed.lease_owner == ""
+    attempts = repository.list_attempts(scope.principal_id, task.task_id)
+    assert len(attempts) == 1
+    assert attempts[0].state.value == "completed"
     assert terminal.event_type == "completed"
     events = repository.list_events(scope.principal_id, task.task_id)
     assert [event.event_seq for event in events] == [1, 2, 3, 4]
@@ -432,6 +435,107 @@ def test_cancelling_waiting_task_cancels_pending_approval(tmp_path: Path) -> Non
     assert repository.get(scope.principal_id, task.task_id).state is (
         TaskState.CANCELLED
     )
+
+
+def test_pause_request_waits_for_running_task_safe_boundary(tmp_path: Path) -> None:
+    repository, scope = _repository(tmp_path)
+    task, _ = repository.create(
+        scope,
+        client_request_id="request-a",
+        goal="prepare the report",
+    )
+    repository.claim_next("worker-a")
+
+    result, event = repository.request_pause(
+        scope.principal_id,
+        task.task_id,
+        reason="pause from phone",
+    )
+
+    current = repository.get(scope.principal_id, task.task_id)
+    assert result.state is TaskState.RUNNING
+    assert current.state is TaskState.RUNNING
+    assert current.phase == "pause_requested"
+    assert event is not None and event.event_type == "warning"
+
+    paused, paused_event = repository.transition(
+        scope.principal_id,
+        task.task_id,
+        TaskState.PAUSED,
+        phase="manual_pause",
+        reason="safe boundary",
+    )
+    assert paused.state is TaskState.PAUSED
+    assert paused_event.payload.phase == "manual_pause"
+    assert repository.list_attempts(
+        scope.principal_id,
+        task.task_id,
+    )[0].failure_code == "paused"
+
+
+def test_pause_queued_task_is_immediate_and_idempotent(tmp_path: Path) -> None:
+    repository, scope = _repository(tmp_path)
+    task, _ = repository.create(
+        scope,
+        client_request_id="request-a",
+        goal="prepare the report",
+    )
+
+    first, event = repository.request_pause(scope.principal_id, task.task_id)
+    repeated, repeated_event = repository.request_pause(
+        scope.principal_id,
+        task.task_id,
+    )
+
+    assert first.state is TaskState.PAUSED
+    assert repeated.state is TaskState.PAUSED
+    assert event is not None and event.payload.state is TaskState.PAUSED
+    assert repeated_event is None
+
+
+def test_restart_preserves_pending_approval_and_interrupts_old_attempt(
+    tmp_path: Path,
+) -> None:
+    repository, scope = _repository(tmp_path)
+    task, _ = repository.create(
+        scope,
+        client_request_id="request-a",
+        goal="publish the report",
+    )
+    repository.claim_next("worker-a")
+    approval, _, _ = repository.request_approval(
+        scope.principal_id,
+        task.task_id,
+        tool_step_id="step-a",
+        tool_call_id="call-a",
+        tool_name="publish",
+        arguments={},
+    )
+
+    recovered = repository.recover_interrupted()
+
+    waiting = repository.get(scope.principal_id, task.task_id)
+    assert waiting.state is TaskState.WAITING_APPROVAL
+    assert waiting.lease_owner == ""
+    assert repository.get_approval(
+        scope.principal_id,
+        approval.approval_id,
+    ).state.value == "pending"
+    assert repository.list_attempts(
+        scope.principal_id,
+        task.task_id,
+    )[0].state.value == "interrupted"
+    assert recovered[-1].event_type == "warning"
+
+    repository.resolve_approval(
+        scope.principal_id,
+        approval.approval_id,
+        approved=True,
+        resume_state=TaskState.QUEUED,
+    )
+    claimed = repository.claim_next("worker-b")
+    assert claimed is not None
+    assert claimed.attempt_count == 2
 
 
 def test_approval_ownership_does_not_reveal_foreign_identity(tmp_path: Path) -> None:

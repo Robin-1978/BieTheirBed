@@ -1,6 +1,6 @@
 # Knoa Durable Task Design
 
-> Status: active forward design; B1-B3 complete, B4 in progress
+> Status: active forward design; B1-B4 complete, B5 next
 >
 > Date: 2026-08-09
 >
@@ -114,9 +114,7 @@ TaskAttempt
 ├── attempt_id
 ├── task_id
 ├── ordinal
-├── state: running | completed | failed | interrupted
-├── checkpoint_kind
-├── checkpoint_payload
+├── state: running | completed | failed | cancelled | interrupted
 ├── started_at / finished_at?
 └── failure_code?
 ```
@@ -131,23 +129,18 @@ Every proposed tool call receives a Core-generated `tool_step_id`:
 ```text
 TaskToolStep
 ├── tool_step_id
-├── task_id / attempt_id
-├── model_call_id
+├── task_id / principal_id
+├── tool_call_id
 ├── tool_name / normalized_arguments
-├── effect / risk / capabilities
-├── state
-├── commit_key
-├── output_summary?
-├── error_code?
+├── effect / risk
+├── state: committing | completed | failed | outcome_unknown
+├── typed result
 └── created_at / updated_at
 ```
 
-States are:
-
-```text
-proposed → waiting_approval → authorized → committing → completed
-    └──────── rejected           └──────── failed / outcome_unknown
-```
+Approval owns the pre-commit states. `TaskToolStep` is created atomically at the
+last boundary before registry commit, so a stored `committing` record means the
+outcome cannot be inferred after process loss.
 
 `commit_key` is unique. A known completed commit is returned from storage and
 never executed twice. If Core stops while a non-read-only step is `committing`,
@@ -276,17 +269,18 @@ Owns execution orchestration:
 6. commits terminal Task state;
 7. releases the lease.
 
-One Task has at most one live executor lease. The initial implementation uses a
-single Core process and an in-memory worker queue backed by persistent claims.
-The lease fields still make restart recovery explicit without prematurely
-building distributed workers.
+One Task has at most one live executor lease. The implementation uses one Core
+process, a bounded four-slot dispatcher and SQLite-backed claims. Different
+sessions may execute concurrently, while the claim query prevents two active
+Tasks from sharing one session. The lease fields keep restart recovery explicit
+without prematurely building distributed workers.
 
 ### 6.3 AgentRuntime
 
 AgentRuntime continues to own session serialization, context assembly, ReAct
-and transcript commit. It receives a TaskContext containing task/attempt IDs,
-cancellation and approval ports. It does not store Task state or publish to
-clients.
+and transcript commit. Its internal execution context carries Task identity,
+cancellation, durable approval and durable tool-commit ports. It does not store
+Task aggregate state or publish to clients.
 
 ### 6.4 CoreServer
 
@@ -301,14 +295,16 @@ At Core startup, RecoveryService performs one bounded pass:
 | Persisted state | Recovery action |
 |---|---|
 | `queued` | enqueue |
-| `waiting_approval` | keep waiting and republish only to new subscribers |
-| `running` | pause conservatively; explicit resume is required because the initial slice cannot yet prove the last tool boundary |
-| `running`, side-effect step `committing` | mark `outcome_unknown`, pause and notify |
+| `waiting_approval` | keep approval pending, interrupt the old attempt, clear its lease and start a new attempt after resolution |
+| `running`, no `committing` ToolStep | interrupt attempt and pause for explicit resume |
+| `running`, ToolStep `committing` | mark ToolStep `outcome_unknown`, interrupt attempt, pause and notify |
 | terminal | no action |
 
-The first implementation intentionally prefers a visible pause over speculative
-replay. Resume after `outcome_unknown` requires a later explicit recovery
-command or tool-specific reconciliation capability.
+Recovery intentionally prefers a visible pause over speculative replay. Normal
+interruption accepts `resume_task`; `outcome_unknown` additionally requires
+`acknowledge_outcome_unknown=true`. A matching ToolStep identity remains blocked
+after acknowledgement, so generic resume cannot silently repeat the uncertain
+commit. A later reconciliation command may explicitly resolve or replace it.
 
 ## 8. Cancellation
 
@@ -324,6 +320,13 @@ Cancelling while waiting approval atomically cancels the approval. Cancelling a
 completed, failed or already cancelled Task is idempotent and returns its
 terminal state.
 
+Manual pause follows the same safe-boundary rule without overloading
+cancellation. A queued or approval-blocked Task moves directly to `paused`; a
+running Task first persists `phase=pause_requested`, signals its runtime, then
+enters `paused/manual_pause` after the current non-interruptible commit boundary.
+Restart also completes a persisted pause request conservatively. Resume creates
+a new Attempt through the normal queue.
+
 ## 9. Core API target
 
 Public operations become:
@@ -336,16 +339,16 @@ subscribe_task(task_id, after_seq)
 cancel_task(task_id, reason)
 resolve_approval(approval_id, approved)
 pause_task(task_id, reason)
-resume_task(task_id)
+resume_task(task_id, acknowledge_outcome_unknown=false)
 ```
 
 Messages are `task_accepted`, `task_snapshot`, `task_list`, `task_event`,
-`task_cancelled`, `task_resumed` and `approval_resolved`. There is no public compatibility
-alias from Task back to Run.
+`task_cancel_result`, `task_pause_result`, `task_resumed` and
+`approval_resolved`. There is no public compatibility alias from Task back to
+Run.
 
-The initial protocol slice needs create, subscribe, cancel and resolve approval.
-List/pause/resume are added with recovery and multi-task management, not as
-empty placeholders.
+Create, detail, cursor list, subscribe, cancel, safe-boundary pause, resume and
+approval resolution are implemented.
 
 ## 10. SQLite ownership
 
@@ -356,7 +359,6 @@ Use dedicated tables in the existing runtime database:
 - `runtime_task_events`
 - `runtime_task_tool_steps`
 - `runtime_task_approvals`
-- `runtime_task_artifacts`
 
 Repository methods own SQL and transactions. Service and executor code operate
 on typed domain records. Every query includes principal ownership either
@@ -399,12 +401,15 @@ outside INFO logs.
 
 ## 13. Implementation sequence
 
-> Progress (2026-08-09): B1-B3 are implemented and mounted in the production
-> composition root. B4 has conservative interrupted-execution recovery and an
-> explicit resume command plus bounded cross-session concurrency with strict
-> same-session serialization. Principal-owned Task detail and bounded cursor
-> pagination are exposed through Core API v1. Durable attempt/tool-step
-> checkpoints and manual pause control remain.
+> Progress (2026-08-09): B1-B4 are implemented in the
+> production composition root. Every claim creates a durable Attempt; every
+> ToolStep records `committing` before registry execution and a terminal result
+> afterward. A terminal-checkpoint failure atomically marks unfinished steps
+> `outcome_unknown`, interrupts the Attempt and pauses the Task; restart applies
+> the same fail-closed rule. Pending approvals survive restart, uncertain resume
+> requires explicit acknowledgement, and matching ToolSteps remain blocked.
+> Bounded cross-session concurrency, same-session serialization, Task detail,
+> cursor pagination and safe-boundary manual pause are live.
 
 ### B1. Persistent Task aggregate and EventJournal
 

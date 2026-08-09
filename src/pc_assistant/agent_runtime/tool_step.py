@@ -14,6 +14,7 @@ from pc_assistant.agent_runtime.contracts import ContractModel, RuntimeScope
 from pc_assistant.tools.base import (
     ToolCapability,
     ToolEffect,
+    ToolPolicy,
     ToolRisk,
 )
 from pc_assistant.tools.registry import ToolRegistry
@@ -44,6 +45,25 @@ class ConfirmationPort(Protocol):
     ) -> bool: ...
 
 
+class ToolCommitPort(Protocol):
+    async def begin(
+        self,
+        scope: RuntimeScope,
+        task_id: str,
+        call: ProposedToolCall,
+        policy: ToolPolicy,
+    ) -> ToolStepResult | None: ...
+
+    async def finish(
+        self,
+        scope: RuntimeScope,
+        task_id: str,
+        call: ProposedToolCall,
+        policy: ToolPolicy,
+        result: ToolStepResult,
+    ) -> None: ...
+
+
 @dataclass(frozen=True)
 class ToolStepContext:
     scope: RuntimeScope
@@ -52,12 +72,17 @@ class ToolStepContext:
     capabilities: frozenset[ToolCapability]
     cancellation: asyncio.Event
     confirmation: ConfirmationPort | None = None
+    commit: ToolCommitPort | None = None
 
 
 class ToolPolicyDeniedError(PermissionError):
     def __init__(self, code: str, message: str) -> None:
         self.code = code
         super().__init__(message)
+
+
+class ToolOutcomeUnknownError(RuntimeError):
+    """Tool returned, but its durable terminal checkpoint could not be stored."""
 
 
 class ToolArgumentPolicy:
@@ -246,30 +271,61 @@ class ToolStep:
                     message="Tool execution environment is unavailable",
                 )
 
+        committed_call = call.model_copy(
+            update={"name": tool_name, "arguments": arguments}
+        )
+        if context.commit is not None:
+            prior = await context.commit.begin(
+                context.scope,
+                context.run_id,
+                committed_call,
+                policy,
+            )
+            if prior is not None:
+                return prior
+
         try:
             output = await self._registry._commit(tool_name, **arguments)
         except asyncio.CancelledError:
             raise
         except Exception:
-            return self._result(
+            result = self._result(
                 call,
                 "failed",
                 tool_name=tool_name,
                 code="tool_failed",
                 message="Tool execution failed",
             )
-        if isinstance(output, dict) and "error" in output:
-            return self._result(
-                call,
-                "failed",
-                tool_name=tool_name,
-                code="tool_failed",
-                message=str(output.get("error") or "Tool execution failed"),
-                output=output,
-            )
-        return self._result(
-            call,
-            "completed",
-            tool_name=tool_name,
-            output=output,
-        )
+        else:
+            if isinstance(output, dict) and "error" in output:
+                result = self._result(
+                    call,
+                    "failed",
+                    tool_name=tool_name,
+                    code="tool_failed",
+                    message=str(output.get("error") or "Tool execution failed"),
+                    output=output,
+                )
+            else:
+                result = self._result(
+                    call,
+                    "completed",
+                    tool_name=tool_name,
+                    output=output,
+                )
+        if context.commit is not None:
+            try:
+                await context.commit.finish(
+                    context.scope,
+                    context.run_id,
+                    committed_call,
+                    policy,
+                    result,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                raise ToolOutcomeUnknownError(
+                    "Tool outcome could not be durably checkpointed"
+                ) from exc
+        return result

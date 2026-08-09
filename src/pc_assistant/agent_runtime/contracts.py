@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 from pc_assistant.artifacts import ArtifactRef
 
 if TYPE_CHECKING:
-    from pc_assistant.agent_runtime.tool_step import ConfirmationPort
+    from pc_assistant.agent_runtime.tool_step import ConfirmationPort, ToolCommitPort
 
 
 NonEmptyString = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -199,6 +199,7 @@ class RuntimeRunContext:
     run_id: str
     cancellation: asyncio.Event
     confirmation: ConfirmationPort | None = None
+    tool_commit: ToolCommitPort | None = None
 
     def __post_init__(self) -> None:
         if not self.run_id.strip():

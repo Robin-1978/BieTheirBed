@@ -36,6 +36,21 @@ class ApprovalState(str, Enum):
     CANCELLED = "cancelled"
 
 
+class TaskAttemptState(str, Enum):
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    INTERRUPTED = "interrupted"
+
+
+class TaskToolStepState(str, Enum):
+    COMMITTING = "committing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    OUTCOME_UNKNOWN = "outcome_unknown"
+
+
 TERMINAL_TASK_STATES = frozenset(
     {
         TaskState.COMPLETED,
@@ -134,6 +149,42 @@ class TaskApprovalRecord(TaskModel):
     resolved_by: Annotated[str, StringConstraints(max_length=256)] = ""
 
 
+class TaskAttemptRecord(TaskModel):
+    attempt_id: Identifier
+    task_id: Identifier
+    ordinal: int = Field(gt=0)
+    state: TaskAttemptState
+    started_at: float = Field(ge=0.0)
+    finished_at: float | None = Field(default=None, ge=0.0)
+    failure_code: Annotated[str, StringConstraints(max_length=256)] = ""
+
+
+class TaskToolStepRecord(TaskModel):
+    tool_step_id: Identifier
+    task_id: Identifier
+    principal_id: Annotated[NonEmpty, StringConstraints(max_length=256)]
+    tool_call_id: Annotated[NonEmpty, StringConstraints(max_length=256)]
+    tool_name: Annotated[NonEmpty, StringConstraints(max_length=256)]
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    effect: Literal[
+        "read_only",
+        "local_write",
+        "external_side_effect",
+        "desktop_control",
+        "unknown",
+    ]
+    risk: Literal["low", "medium", "high"]
+    state: TaskToolStepState
+    result: dict[str, Any] = Field(default_factory=dict)
+    created_at: float = Field(ge=0.0)
+    updated_at: float = Field(ge=0.0)
+
+
 class TaskCancelResult(TaskModel):
     accepted: bool
     state: TaskState | None = None
+
+
+class TaskPauseResult(TaskModel):
+    accepted: bool
+    state: TaskState

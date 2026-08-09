@@ -16,8 +16,10 @@ from pc_assistant.agent_runtime.contracts import (
 )
 from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
 from pc_assistant.agent_runtime.tool_step import ProposedToolCall
+from pc_assistant.agent_runtime.tool_step import ToolOutcomeUnknownError
 from pc_assistant.tasks import (
     DurableApprovalService,
+    DurableToolCommitService,
     TaskEventHub,
     TaskExecutor,
     TaskRepository,
@@ -32,9 +34,11 @@ class _Runtime:
         *,
         hold: asyncio.Event | None = None,
         request_confirmation: bool = False,
+        unknown_outcome: bool = False,
     ) -> None:
         self.hold = hold
         self.request_confirmation = request_confirmation
+        self.unknown_outcome = unknown_outcome
         self.cancellations: list[CancelRequest] = []
 
     def run(self, context: RuntimeRunContext, request: RunRequest):
@@ -72,6 +76,8 @@ class _Runtime:
             )
         if context.cancellation.is_set():
             return
+        if self.unknown_outcome:
+            raise ToolOutcomeUnknownError("checkpoint failed")
         yield RuntimeEvent(
             event_type="final_output",
             payload=RuntimeEventPayload(
@@ -107,7 +113,8 @@ def _components(
     )
     hub = TaskEventHub(subscriber_capacity=32)
     approvals = DurableApprovalService(repository, hub)
-    executor = TaskExecutor(repository, runtime, approvals, hub)
+    commits = DurableToolCommitService(repository)
+    executor = TaskExecutor(repository, runtime, approvals, commits, hub)
     return TaskService(repository, executor, approvals, hub), repository, scope
 
 
@@ -124,6 +131,7 @@ def test_task_executor_rejects_unbounded_concurrency(tmp_path: Path) -> None:
             repository,
             _Runtime(),
             approvals,
+            DurableToolCommitService(repository),
             hub,
             max_concurrency=33,
         )
@@ -188,6 +196,48 @@ async def test_unsubscribe_does_not_cancel_task(tmp_path: Path) -> None:
             TaskState.COMPLETED
         )
     finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_running_task_pauses_at_runtime_safe_boundary(tmp_path: Path) -> None:
+    release = asyncio.Event()
+    service, repository, scope = _components(tmp_path, _Runtime(hold=release))
+    await service.start()
+    try:
+        task = await service.create(
+            scope,
+            client_request_id="request-a",
+            goal="finish report",
+        )
+        for _ in range(100):
+            if repository.get(scope.principal_id, task.task_id).state is (
+                TaskState.RUNNING
+            ):
+                break
+            await asyncio.sleep(0.01)
+
+        requested = await service.pause(
+            scope.principal_id,
+            task.task_id,
+            reason="pause from phone",
+        )
+        assert requested.state is TaskState.RUNNING
+        for _ in range(100):
+            current = repository.get(scope.principal_id, task.task_id)
+            if current.state is TaskState.PAUSED:
+                break
+            await asyncio.sleep(0.01)
+
+        paused = repository.get(scope.principal_id, task.task_id)
+        assert paused.state is TaskState.PAUSED
+        assert paused.phase == "manual_pause"
+        assert repository.list_attempts(
+            scope.principal_id,
+            task.task_id,
+        )[0].failure_code == "paused"
+    finally:
+        release.set()
         await service.stop()
 
 
@@ -287,3 +337,39 @@ async def test_restart_pauses_interrupted_task_until_explicit_resume(
         )
     finally:
         await second.stop()
+
+
+@pytest.mark.asyncio
+async def test_unknown_tool_outcome_pauses_instead_of_failing_task(
+    tmp_path: Path,
+) -> None:
+    service, repository, scope = _components(
+        tmp_path,
+        _Runtime(unknown_outcome=True),
+    )
+    await service.start()
+    try:
+        task = await service.create(
+            scope,
+            client_request_id="request-a",
+            goal="publish report",
+        )
+        for _ in range(100):
+            current = repository.get(scope.principal_id, task.task_id)
+            if current.state is TaskState.PAUSED:
+                break
+            await asyncio.sleep(0.01)
+
+        paused = repository.get(scope.principal_id, task.task_id)
+        assert paused.state is TaskState.PAUSED
+        assert paused.phase == "outcome_unknown"
+        assert repository.list_events(
+            scope.principal_id,
+            task.task_id,
+        )[-1].payload.reason.startswith("A tool returned")
+        assert repository.list_attempts(
+            scope.principal_id,
+            task.task_id,
+        )[0].state.value == "interrupted"
+    finally:
+        await service.stop()

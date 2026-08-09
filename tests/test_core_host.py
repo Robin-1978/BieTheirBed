@@ -32,6 +32,7 @@ from pc_assistant.service.core_server import (
 )
 from pc_assistant.tasks import (
     DurableApprovalService,
+    DurableToolCommitService,
     TaskEventHub,
     TaskExecutor,
     TaskRepository,
@@ -82,9 +83,10 @@ def _servers(tmp_path: Path):
     repository = TaskRepository(database)
     events = TaskEventHub()
     approvals = DurableApprovalService(repository, events)
+    commits = DurableToolCommitService(repository)
     tasks = TaskService(
         repository,
-        TaskExecutor(repository, EmptyRuntime(), approvals, events),
+        TaskExecutor(repository, EmptyRuntime(), approvals, commits, events),
         approvals,
         events,
     )

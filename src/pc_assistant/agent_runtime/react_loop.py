@@ -26,6 +26,7 @@ from pc_assistant.agent_runtime.tool_step import (
     ToolStep,
     ToolStepContext,
     ToolStepResult,
+    ToolCommitPort,
 )
 from pc_assistant.artifacts import ArtifactRef
 from pc_assistant.tools.base import ToolCapability
@@ -47,6 +48,7 @@ class ReActContext:
     tool_definition_provider: Callable[[], tuple[dict[str, Any], ...]] | None = None
     run_id: str = ""
     confirmation: ConfirmationPort | None = None
+    tool_commit: ToolCommitPort | None = None
     system_prompt: str = ""
     runtime_context: str = ""
     prompt_budget: int = 8192
@@ -228,6 +230,7 @@ class ReActLoop:
                             capabilities=context.capabilities,
                             cancellation=context.cancellation,
                             confirmation=context.confirmation,
+                            commit=context.tool_commit,
                         ),
                         call,
                     )
