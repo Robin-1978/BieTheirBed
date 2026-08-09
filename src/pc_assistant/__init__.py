@@ -94,13 +94,13 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
     )
     pair = gateway_commands.add_parser("pair", help="Create a single-use pairing grant")
-    pair.add_argument("--principal", default="personal:owner")
+    pair.add_argument("--principal", default=None)
     pair.add_argument("--ttl", type=_gateway_ttl, default=300)
     devices = gateway_commands.add_parser("devices", help="List paired devices")
-    devices.add_argument("--principal", default="personal:owner")
+    devices.add_argument("--principal", default=None)
     revoke = gateway_commands.add_parser("revoke", help="Revoke one paired device")
     revoke.add_argument("device_id")
-    revoke.add_argument("--principal", default="personal:owner")
+    revoke.add_argument("--principal", default=None)
     return parser
 
 

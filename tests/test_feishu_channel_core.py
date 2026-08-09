@@ -24,6 +24,7 @@ from pc_assistant.channels.feishu import (
 from pc_assistant.config import AppConfig
 from pc_assistant.service.core_api import TaskCancelResultMessage
 from pc_assistant.service.core_client import CoreRequestError
+from pc_assistant.service import credentials
 from pc_assistant.tasks import (
     PrincipalTaskEvent,
     TaskCancelResult,
@@ -181,6 +182,45 @@ def _config(tmp_path) -> AppConfig:
         feishu_app_id="app-id",
         feishu_app_secret="app-secret",
     )
+
+
+def test_feishu_owner_binding_is_first_writer_only(tmp_path) -> None:
+    channel = FeishuChannel(_config(tmp_path))
+
+    assert channel._save_binding("ou-owner") is True
+    assert channel._save_binding("ou-owner") is True
+    assert channel._save_binding("ou-intruder") is False
+    assert channel._current_receive_id() == "ou-owner"
+    assert (tmp_path / "data" / "feishu_open_id").read_text() == "ou-owner"
+
+
+@pytest.mark.asyncio
+async def test_feishu_core_client_uses_canonical_owner_principal(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    channel = FeishuChannel(_config(tmp_path))
+    captured = {}
+
+    async def connect(_uri, credential, **_kwargs):
+        captured["credential"] = credential
+        return _CoreClient()
+
+    monkeypatch.setattr(
+        "pc_assistant.channels.feishu.resolve_local_service_token",
+        lambda _paths: "local-signing-key",
+    )
+    monkeypatch.setattr(
+        "pc_assistant.channels.feishu.CoreClient.connect",
+        connect,
+    )
+
+    await channel._client_for("ou-owner")
+
+    assert credentials.verify_principal_credential(
+        "local-signing-key",
+        captured["credential"],
+    ) == "personal:owner"
 
 
 def _approval_event(

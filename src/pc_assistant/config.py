@@ -175,6 +175,8 @@ class AppConfig(BaseModel):
     service_host: str = "127.0.0.1"
     service_port: int = 9527
     service_token: str = ""
+    owner_principal_id: str = "personal:owner"
+    owner_principal_aliases: tuple[str, ...] = ("local",)
     webhook_enabled: bool = False
     webhook_host: str = "127.0.0.1"
     webhook_port: int = 9528
@@ -209,6 +211,17 @@ class AppConfig(BaseModel):
     def _validate_provider(self) -> "AppConfig":
         if not 0 <= self.service_port <= 65535:
             raise ValueError("Core WebSocket service port must be between 0 and 65535")
+        owner = self.owner_principal_id.strip()
+        if not owner or len(owner) > 256 or any(char.isspace() for char in owner):
+            raise ValueError("Owner principal ID must contain 1-256 non-space characters")
+        aliases = tuple(alias.strip() for alias in self.owner_principal_aliases)
+        if len(aliases) > 16 or any(
+            not alias or len(alias) > 256 or any(char.isspace() for char in alias)
+            for alias in aliases
+        ):
+            raise ValueError("Owner principal aliases must be 1-16 bounded IDs")
+        self.owner_principal_id = owner
+        self.owner_principal_aliases = tuple(dict.fromkeys(aliases))
         if not 0 <= self.webhook_port <= 65535:
             raise ValueError("Webhook port must be between 0 and 65535")
         if not 0 <= self.gateway_port <= 65535:
@@ -424,6 +437,7 @@ def _env_overrides() -> dict[str, Any]:
         "PC_ASSISTANT_HOME": ("runtime_root", str),
         "PC_RUNTIME_ROOT": ("runtime_root", str),
         "PC_WORKING_DIRECTORY": ("working_directory", str),
+        "PC_OWNER_PRINCIPAL_ID": ("owner_principal_id", str),
         "PC_WEBHOOK_ENABLED": ("webhook_enabled", bool),
         "PC_WEBHOOK_HOST": ("webhook_host", str),
         "PC_WEBHOOK_PORT": ("webhook_port", int),
