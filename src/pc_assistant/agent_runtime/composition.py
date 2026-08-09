@@ -48,7 +48,12 @@ from pc_assistant.context.memory_db import (
 from pc_assistant.context.prompt import build_session_context, build_system_prompt
 from pc_assistant.desktop_session import ensure_desktop_session
 from pc_assistant.extensions import ExtensionManager
+from pc_assistant.extensions.connector import (
+    ConnectorAuditRecorder,
+    build_connector_providers,
+)
 from pc_assistant.extensions.mcp import build_mcp_providers
+from pc_assistant.extensions.secrets import PrivateFileSecretStore
 from pc_assistant.extensions.skill import (
     SkillCatalog,
     build_skill_providers,
@@ -211,6 +216,8 @@ def build_core_runtime(
     )
     registry = _build_registry(config, artifacts, memory, episodic)
     skills = SkillCatalog()
+    secrets = PrivateFileSecretStore(paths.secrets)
+    connector_audit = ConnectorAuditRecorder(paths.logs / "connectors.jsonl")
     skill_roots = (
         builtin_skill_root(),
         paths.skills,
@@ -221,6 +228,11 @@ def build_core_runtime(
         (
             *build_skill_providers(skill_roots, skills),
             *build_mcp_providers(config.mcp_servers),
+            *build_connector_providers(
+                config.connectors,
+                secrets,
+                connector_audit,
+            ),
         ),
     )
 

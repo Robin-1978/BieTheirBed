@@ -36,6 +36,7 @@ class ToolCapability(str, Enum):
     MEMORY_READ = "memory_read"
     MEMORY_WRITE = "memory_write"
     MCP = "mcp"
+    CONNECTOR = "connector"
 
 
 class ToolRisk(str, Enum):

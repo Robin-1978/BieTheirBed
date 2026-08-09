@@ -9,7 +9,12 @@ import yaml
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
 from pc_assistant.runtime import default_runtime_root
-from pc_assistant.extensions.models import MCP_SERVER_ID_PATTERN, MCPServerConfig
+from pc_assistant.extensions.models import (
+    CONNECTOR_ID_PATTERN,
+    MCP_SERVER_ID_PATTERN,
+    MCPServerConfig,
+    YuqueConnectorConfig,
+)
 
 
 _MAX_CONFIG_BYTES = 1024 * 1024
@@ -134,6 +139,7 @@ class AppConfig(BaseModel):
     supports_vision: bool | None = None
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     skill_directories: tuple[str, ...] = ()
+    connectors: dict[str, YuqueConnectorConfig] = Field(default_factory=dict)
     source_config_path: str = ""
 
     @model_validator(mode="after")
@@ -152,6 +158,13 @@ class AppConfig(BaseModel):
         ]
         if invalid_mcp_ids:
             raise ValueError("MCP server IDs must contain 1-24 safe characters")
+        invalid_connector_ids = [
+            connector_id
+            for connector_id in self.connectors
+            if not CONNECTOR_ID_PATTERN.fullmatch(connector_id)
+        ]
+        if invalid_connector_ids:
+            raise ValueError("Connector IDs must contain 1-24 safe lowercase characters")
         if self.models:
             if not self.default_model:
                 raise ValueError("default_model is required when models are configured")

@@ -190,8 +190,8 @@ CLI/TUI 长期保留，用于：
 ## 6. Phase A：能力扩展平台
 
 > 进度（2026-08-09）：Phase A 已启动。A1 ExtensionManager 生命周期基础、A2
-> MCP Streamable HTTP 纵向闭环和 A3 Skill Package 基础已完成；下一步推进
-> Connector/Secret。
+> MCP Streamable HTTP 纵向闭环、A3 Skill Package 基础和 A4 Connector/Secret
+> 基础已完成。下一步补齐 Phase A 管理状态与真实账号部署验证。
 
 ### 6.1 Skill Package
 
@@ -236,6 +236,11 @@ MCP 接入必须包含：
 - 读写操作分级；
 - 外部副作用、数据外发和删除操作确认；
 - Connector 结果统一转化为工具结果或 Artifact。
+
+A4 首个纵向闭环采用语雀文档：Secret 仅通过稳定 ID 引用，从私有文件或环境
+解析；读取与更新均注册为标准 Connector 工具，更新继续经过统一权限确认；启动
+时验证授权，失效时输出重新授权状态；审计只记录操作元数据，不记录 Token、参数
+或文档正文。真实账号联调由用户本地私有配置完成，仓库和测试不携带凭据。
 
 ### 6.4 Phase A 验收
 

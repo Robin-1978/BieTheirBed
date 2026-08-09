@@ -5,17 +5,30 @@ import re
 from typing import Literal
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 from pc_assistant.tools.base import ToolCapability, ToolEffect, ToolRisk
 
 
 MCP_SERVER_ID_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,23}$")
 MCP_TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
+CONNECTOR_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,23}$")
+SECRET_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 
 
 class ExtensionConfigModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        hide_input_in_errors=True,
+    )
 
 
 class MCPToolPolicyConfig(ExtensionConfigModel):
@@ -57,4 +70,39 @@ class MCPServerConfig(ExtensionConfigModel):
         invalid = [name for name in self.tools if not MCP_TOOL_NAME_PATTERN.fullmatch(name)]
         if invalid:
             raise ValueError("MCP tool names must contain 1-32 safe characters")
+        return self
+
+
+class YuqueConnectorConfig(ExtensionConfigModel):
+    enabled: bool = False
+    driver: Literal["yuque"] = "yuque"
+    base_url: str = "https://www.yuque.com/api/v2"
+    token_secret: SecretStr = Field(default_factory=lambda: SecretStr(""))
+    timeout_seconds: float = Field(default=30.0, ge=1.0, le=300.0)
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str) -> str:
+        normalized = value.strip().rstrip("/")
+        parsed = urlparse(normalized)
+        if parsed.scheme != "https" or not parsed.hostname:
+            raise ValueError("Yuque Connector base_url must use https")
+        if parsed.username or parsed.password:
+            raise ValueError("Connector URL must not contain credentials")
+        if parsed.query or parsed.fragment:
+            raise ValueError("Connector base_url must not contain query or fragment")
+        return normalized
+
+    @field_validator("token_secret")
+    @classmethod
+    def validate_token_secret(cls, value: SecretStr) -> SecretStr:
+        normalized = value.get_secret_value().strip()
+        if normalized and not SECRET_ID_PATTERN.fullmatch(normalized):
+            raise ValueError("Connector token_secret must be a safe Secret ID")
+        return SecretStr(normalized)
+
+    @model_validator(mode="after")
+    def validate_enabled_connector(self) -> YuqueConnectorConfig:
+        if self.enabled and not self.token_secret.get_secret_value():
+            raise ValueError("Enabled Yuque Connector requires token_secret")
         return self
