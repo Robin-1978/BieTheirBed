@@ -17,16 +17,25 @@ from starlette.routing import Route
 
 from pc_assistant.config import AppConfig
 from pc_assistant.gateway.auth import (
+    AuthenticatedGatewaySession,
     GatewayAuthenticationRejectedError,
     GatewayAuthenticationService,
     GatewayAuthRepository,
 )
+from pc_assistant.gateway.core import GatewayCoreBridge
 from pc_assistant.gateway.identity import (
     DeviceAlreadyPairedError,
     GatewayIdentityRepository,
     PairingGrantRejectedError,
 )
 from pc_assistant.runtime import RuntimePaths
+from pc_assistant.service.core_api import ArtifactInputRef
+from pc_assistant.service.core_client import (
+    CoreConnectionLostError,
+    CoreRequestError,
+    CoreRequestTimeoutError,
+)
+from pc_assistant.tasks import TaskState
 
 
 logger = logging.getLogger(__name__)
@@ -58,6 +67,36 @@ class _AuthComplete(_AuthChallenge):
     challenge_id: str = Field(min_length=1, max_length=128)
     nonce: str = Field(min_length=32, max_length=256)
     signature: str = Field(min_length=80, max_length=128)
+
+
+class _CreateTask(_RequestModel):
+    session_handle: str = Field(min_length=1, max_length=256)
+    input: str = Field(default="", max_length=200_000)
+    attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
+    tools_enabled: bool = True
+    priority: int = Field(default=0, ge=0, le=9)
+    parent_task_id: str = Field(default="", max_length=128)
+
+    def require_content(self) -> None:
+        if not self.input.strip() and not self.attachments:
+            raise ValueError("Task request requires input or an attachment")
+
+
+class _CancelTask(_RequestModel):
+    reason: str = Field(default="", max_length=1000)
+
+
+class _ResolveApproval(_RequestModel):
+    approved: bool
+
+
+class _TaskListQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_handle: str = Field(default="", max_length=256)
+    state: TaskState | None = None
+    limit: int = Field(default=50, ge=1, le=100)
+    cursor: str = Field(default="", max_length=512)
 
 
 class _WindowLimiter:
@@ -93,6 +132,7 @@ class SecureGatewayAdapter:
         config: AppConfig,
         *,
         authentication: GatewayAuthenticationService | None = None,
+        core: GatewayCoreBridge | None = None,
         limiter: _WindowLimiter | None = None,
     ) -> None:
         if not config.gateway_enabled:
@@ -112,6 +152,7 @@ class SecureGatewayAdapter:
                 GatewayAuthRepository(database),
             )
         self._authentication = authentication
+        self._core = core or GatewayCoreBridge(config)
         self._limiter = limiter or _WindowLimiter()
         self._server: _EmbeddedUvicornServer | None = None
         self._server_task: asyncio.Task[None] | None = None
@@ -123,6 +164,20 @@ class SecureGatewayAdapter:
                 Route("/v1/auth/challenge", self._auth_challenge, methods=["POST"]),
                 Route("/v1/auth/complete", self._auth_complete, methods=["POST"]),
                 Route("/v1/session", self._session, methods=["GET"]),
+                Route("/v1/sessions", self._create_session, methods=["POST"]),
+                Route("/v1/tasks", self._create_task, methods=["POST"]),
+                Route("/v1/tasks", self._list_tasks, methods=["GET"]),
+                Route("/v1/tasks/{task_id:str}", self._get_task, methods=["GET"]),
+                Route(
+                    "/v1/tasks/{task_id:str}/cancel",
+                    self._cancel_task,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/approvals/{approval_id:str}/resolve",
+                    self._resolve_approval,
+                    methods=["POST"],
+                ),
             ]
         )
 
@@ -179,6 +234,7 @@ class SecureGatewayAdapter:
                     server.force_exit = True
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
+        await self._core.close()
 
     async def _health(self, _request: Request) -> JSONResponse:
         return JSONResponse({"status": "ok", "scope": "authentication"})
@@ -241,6 +297,150 @@ class SecureGatewayAdapter:
         )
 
     async def _session(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=120)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        return JSONResponse(
+            {
+                "session_id": authenticated.session_id,
+                "device_id": authenticated.device.device_id,
+                "principal_id": authenticated.device.principal_id,
+                "expires_at": authenticated.expires_at,
+            }
+        )
+
+    async def _create_session(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=30)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        try:
+            handle = await self._core.create_session(
+                authenticated.device.principal_id
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse({"session_handle": handle}, status_code=201)
+
+    async def _create_task(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=60)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        parsed = await self._parse_body(request, _CreateTask)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            parsed.require_content()
+            accepted = await self._core.create_task(
+                authenticated.device.principal_id,
+                parsed.session_handle,
+                parsed.input,
+                parsed.attachments,
+                tools_enabled=parsed.tools_enabled,
+                priority=parsed.priority,
+                parent_task_id=parsed.parent_task_id,
+            )
+        except ValueError:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse(
+            {"task_id": accepted.task_id, "state": accepted.state.value},
+            status_code=202,
+        )
+
+    async def _list_tasks(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=120)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        try:
+            query = _TaskListQuery.model_validate(dict(request.query_params))
+        except ValidationError:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            result = await self._core.list_tasks(
+                authenticated.device.principal_id,
+                session_handle=query.session_handle,
+                state=query.state,
+                limit=query.limit,
+                cursor=query.cursor,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse(
+            {
+                "tasks": [task.model_dump(mode="json") for task in result.tasks],
+                "next_cursor": result.next_cursor,
+            }
+        )
+
+    async def _get_task(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=120)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        task_id = self._path_identifier(request, "task_id")
+        if task_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            task = await self._core.get_task(
+                authenticated.device.principal_id,
+                task_id,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse({"task": task.model_dump(mode="json")})
+
+    async def _cancel_task(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=30)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        task_id = self._path_identifier(request, "task_id")
+        if task_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        parsed = await self._parse_body(request, _CancelTask)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            result = await self._core.cancel_task(
+                authenticated.device.principal_id,
+                task_id,
+                reason=parsed.reason,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse(result.result.model_dump(mode="json"))
+
+    async def _resolve_approval(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=30)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        approval_id = self._path_identifier(request, "approval_id")
+        if approval_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        parsed = await self._parse_body(request, _ResolveApproval)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            result = await self._core.resolve_approval(
+                authenticated.device.principal_id,
+                approval_id,
+                approved=parsed.approved,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse(
+            {
+                "approval_id": result.approval_id,
+                "resolved": result.resolved,
+                "state": result.state.value,
+            }
+        )
+
+    def _authorize(
+        self,
+        request: Request,
+        *,
+        limit: int,
+    ) -> AuthenticatedGatewaySession | JSONResponse:
         authorization = request.headers.get("Authorization", "")
         scheme, _space, token = authorization.partition(" ")
         if scheme.lower() != "bearer" or not token:
@@ -249,14 +449,10 @@ class SecureGatewayAdapter:
             session = self._authentication.authenticate_session(token)
         except GatewayAuthenticationRejectedError:
             return JSONResponse({"error": "unauthorized"}, status_code=401)
-        return JSONResponse(
-            {
-                "session_id": session.session_id,
-                "device_id": session.device.device_id,
-                "principal_id": session.device.principal_id,
-                "expires_at": session.expires_at,
-            }
-        )
+        key = f"authorized:{request.url.path}:{session.device.device_id}"
+        if not self._limiter.allow(key, limit=limit):
+            return JSONResponse({"error": "rate_limited"}, status_code=429)
+        return session
 
     async def _body(
         self,
@@ -269,6 +465,13 @@ class SecureGatewayAdapter:
         key = f"{request.url.path}:{host}"
         if not self._limiter.allow(key, limit=limit):
             return JSONResponse({"error": "rate_limited"}, status_code=429)
+        return await self._parse_body(request, model)
+
+    async def _parse_body(
+        self,
+        request: Request,
+        model: type[_RequestModel],
+    ) -> _RequestModel | JSONResponse:
         content_type = request.headers.get("Content-Type", "").partition(";")[0]
         if content_type.strip().lower() != "application/json":
             return JSONResponse({"error": "unsupported_media_type"}, status_code=415)
@@ -281,6 +484,32 @@ class SecureGatewayAdapter:
             return model.model_validate_json(bytes(body))
         except ValidationError:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
+
+    @staticmethod
+    def _path_identifier(request: Request, name: str) -> str | None:
+        value = str(request.path_params.get(name, "")).strip()
+        if not value or len(value) > 128:
+            return None
+        return value
+
+    @staticmethod
+    def _core_error(exc: Exception) -> JSONResponse:
+        if isinstance(exc, CoreRequestError):
+            if exc.code in {
+                "task_not_found",
+                "session_not_found",
+                "approval_not_found",
+            }:
+                return JSONResponse({"error": "not_found"}, status_code=404)
+            if exc.code in {"invalid_request", "invalid_state"}:
+                return JSONResponse({"error": "rejected"}, status_code=422)
+        if isinstance(
+            exc,
+            (CoreConnectionLostError, CoreRequestTimeoutError),
+        ):
+            return JSONResponse({"error": "unavailable"}, status_code=503)
+        logger.warning("Secure Gateway Core request failed", exc_info=exc)
+        return JSONResponse({"error": "unavailable"}, status_code=503)
 
     @staticmethod
     def _challenge_response(challenge: Any) -> JSONResponse:

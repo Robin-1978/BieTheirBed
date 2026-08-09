@@ -176,7 +176,9 @@ Gateway device record and are never sent to Core.
 > are stored only as hashes, expire within a configured short window and are
 > rejected immediately when the bound device is revoked. The listener is disabled
 > by default, accepts strict bounded JSON, applies per-route limits and refuses
-> non-loopback binding. Selected CoreClient command adaptation remains.
+> non-loopback binding. An explicit principal-scoped Core bridge now exposes only
+> session creation, Task create/list/detail/cancel and approval resolution; it
+> does not accept arbitrary Core method names. Resumable event delivery remains.
 
 ### D3 — secure remote transport
 

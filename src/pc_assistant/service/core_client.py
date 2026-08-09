@@ -618,9 +618,18 @@ class CoreClient:
         async for event in self.task_events(accepted.task_id):
             yield event
 
-    async def cancel_task(self, task_id: str) -> TaskCancelResultMessage:
+    async def cancel_task(
+        self,
+        task_id: str,
+        *,
+        reason: str = "",
+    ) -> TaskCancelResultMessage:
         response = await self._request(
-            CancelTaskRequest(request_id=self._request_id(), task_id=task_id)
+            CancelTaskRequest(
+                request_id=self._request_id(),
+                task_id=task_id,
+                reason=reason,
+            )
         )
         if not isinstance(response, TaskCancelResultMessage):
             raise RuntimeError("CoreServer returned an invalid Task cancel response")
