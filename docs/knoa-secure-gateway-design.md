@@ -201,7 +201,9 @@ Gateway device record and are never sent to Core.
 > TLS listener support is implemented and fail-closed: remote mode is explicit,
 > certificate paths must be absolute, the private key is owner-only, and
 > non-loopback plaintext is rejected. Real certificate/domain deployment remains
-> an external rollout step.
+> an external rollout step. Pairing grant creation, device listing and revocation
+> are available only through the local owner CLI; no remote administration route
+> is exposed.
 
 ### D4 — mobile delivery
 

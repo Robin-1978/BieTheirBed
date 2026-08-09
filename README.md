@@ -246,6 +246,15 @@ The Gateway exposes only its allow-listed device, Task, approval, event and
 Artifact protocol; it never exposes arbitrary Core methods. DNS, certificate
 issuance and router/cloud networking remain deployment responsibilities.
 
+Create the short-lived, single-use pairing grant locally; never expose an
+administrative grant-creation endpoint:
+
+```bash
+pca gateway pair --ttl 300
+pca gateway devices
+pca gateway revoke <device-id>
+```
+
 ### Environment variables
 
 All config fields can be overridden with `PC_` prefix:

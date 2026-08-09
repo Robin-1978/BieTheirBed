@@ -7,6 +7,16 @@ from pc_assistant.branding import ASSISTANT_IDENTITY, ASSISTANT_NAME
 __version__ = "0.1.1"
 
 
+def _gateway_ttl(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("TTL must be an integer") from exc
+    if not 30 <= parsed <= 900:
+        raise argparse.ArgumentTypeError("TTL must be between 30 and 900 seconds")
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pca",
@@ -74,6 +84,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--status", action="store_true", default=False,
         help="Show whether the service daemon is running",
     )
+    commands = parser.add_subparsers(dest="command")
+    gateway = commands.add_parser(
+        "gateway",
+        help="Manage Secure Gateway pairing and devices locally",
+    )
+    gateway_commands = gateway.add_subparsers(
+        dest="gateway_command",
+        required=True,
+    )
+    pair = gateway_commands.add_parser("pair", help="Create a single-use pairing grant")
+    pair.add_argument("--principal", default="personal:owner")
+    pair.add_argument("--ttl", type=_gateway_ttl, default=300)
+    devices = gateway_commands.add_parser("devices", help="List paired devices")
+    devices.add_argument("--principal", default="personal:owner")
+    revoke = gateway_commands.add_parser("revoke", help="Revoke one paired device")
+    revoke.add_argument("device_id")
+    revoke.add_argument("--principal", default="personal:owner")
     return parser
 
 
@@ -260,6 +287,17 @@ def main(argv: list[str] | None = None) -> int:
     config_path = args.config
     if config_path is not None:
         config_path = str(Path(config_path).resolve())
+
+    if args.command == "gateway":
+        from pc_assistant.gateway.admin import run_gateway_admin
+
+        return run_gateway_admin(
+            config_path,
+            action=args.gateway_command,
+            principal_id=args.principal,
+            ttl_seconds=getattr(args, "ttl", 300),
+            device_id=getattr(args, "device_id", ""),
+        )
 
     if args.status:
         return _service_status()
