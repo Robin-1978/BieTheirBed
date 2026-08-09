@@ -3,14 +3,26 @@ from __future__ import annotations
 from typing import Any
 
 from pc_assistant.exceptions import ToolNotFoundError
-from pc_assistant.tools.base import ToolBase, ToolCapability, ToolPolicy
+from pc_assistant.tools.base import (
+    BUILTIN_TOOL_ORIGIN,
+    ToolBase,
+    ToolCapability,
+    ToolOrigin,
+    ToolPolicy,
+)
 
 
 class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, ToolBase] = {}
+        self._origins: dict[str, ToolOrigin] = {}
 
-    def register(self, tool: ToolBase) -> None:
+    def register(
+        self,
+        tool: ToolBase,
+        *,
+        origin: ToolOrigin = BUILTIN_TOOL_ORIGIN,
+    ) -> None:
         if not tool.name:
             raise ValueError("Tool must have a non-empty name")
         if tool.name in self._tools:
@@ -21,9 +33,22 @@ class ToolRegistry:
             raise ValueError(f"Tool skim schema name does not match: {tool.name}")
         tool.validation_schema()
         self._tools[tool.name] = tool
+        self._origins[tool.name] = origin
+
+    def unregister(self, name: str, *, origin: ToolOrigin) -> None:
+        registered_origin = self._origins.get(name)
+        if registered_origin is None:
+            return
+        if registered_origin != origin:
+            raise PermissionError(f"Tool is owned by another origin: {name}")
+        self._tools.pop(name, None)
+        self._origins.pop(name, None)
 
     def get(self, name: str) -> ToolBase | None:
         return self._tools.get(name)
+
+    def origin(self, name: str) -> ToolOrigin | None:
+        return self._origins.get(name)
 
     def schemas_for(
         self,

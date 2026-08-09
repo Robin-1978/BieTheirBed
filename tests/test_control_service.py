@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import ConfigSetRequest, ConfigSetResult, RuntimeScope
+from pc_assistant.agent_runtime.contracts import (
+    ConfigSetRequest,
+    ConfigSetResult,
+    ExtensionStatusRecord,
+    RuntimeScope,
+)
 from pc_assistant.agent_runtime.control import ControlService
 from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository, SessionSnapshot
 from pc_assistant.context.memory_db import SQLiteMemoryRepository
@@ -38,6 +43,14 @@ def _service(tmp_path: Path, handles: tuple[str, ...] = ("session-a", "session-b
             "prompt_tokens": 120,
             "completion_tokens": 30,
         },
+        extension_statuses=lambda: (
+            ExtensionStatusRecord(
+                extension_id="mcp:docs",
+                kind="mcp",
+                state="running",
+                tools=("mcp__docs__search",),
+            ),
+        ),
     )
     return service, sessions, memory, config
 
@@ -74,6 +87,8 @@ async def test_history_and_status_require_owned_scope(tmp_path: Path) -> None:
         "sessions": 1,
         "available_tools": 2,
     }
+    assert status.extensions[0].extension_id == "mcp:docs"
+    assert status.extensions[0].tools == ("mcp__docs__search",)
     foreign = RuntimeScope(principal_id="principal-b", session_handle=scope.session_handle)
     with pytest.raises(SessionNotFoundError):
         await service.get_history(foreign)

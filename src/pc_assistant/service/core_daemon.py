@@ -40,10 +40,12 @@ class CoreDaemon:
             raise RuntimeError("Core daemon is already started")
         composition = build_core_runtime(self._config)
         try:
+            await composition.extensions.start()
             await composition.host.start()
             self._write_pid(composition.paths.pid)
         except BaseException:
             await composition.host.stop()
+            await composition.extensions.stop()
             raise
         self._composition = composition
         self._cleanup_task = asyncio.create_task(self._cleanup_loop())
@@ -58,6 +60,7 @@ class CoreDaemon:
         if composition is None:
             return
         await composition.host.stop()
+        await composition.extensions.stop()
         composition.paths.pid.unlink(missing_ok=True)
         logger.info("Core service stopped")
 

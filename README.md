@@ -14,7 +14,7 @@ A personal computer agent with ReAct reasoning, multi-LLM support, tool calling,
 - **Token Calibration** — Per-call token estimation calibrated against real usage
 - **Built-in Tools** — Local automation, memory, scheduling, vision observation, screenshots, and managed file preparation
 - **Core Artifact Delivery** — Tools produce opaque artifacts; Feishu/TUI/service clients adapt standard artifact events without channel logic in the Agent
-- **MCP Adapter** — Register tools from any MCP-compatible server
+- **MCP Extension Runtime** — Failure-isolated Streamable HTTP discovery with explicit local tool policy
 - **Safety Guardrails** — Dangerous command blocking, protected paths, user confirmation, typed refusal codes
 - **Idempotency** — Side-effecting tools are protected against duplicate execution on retry
 - **Scoped Memory** — Principal-scoped core/relevant preferences plus session-scoped episodes in SQLite
@@ -286,12 +286,15 @@ src/pc_assistant/
 │   ├── token_estimate.py# Token estimation with runtime calibration
 │   └── evidence.py      # Evidence policy for factual queries
 ├── tools/
-│   ├── base.py          # ToolBase ABC (is_side_effecting flag)
-│   ├── registry.py      # Name→tool map with MCP server registration
-│   ├── mcp_adapter.py   # MCP protocol tool adapter
+│   ├── base.py          # Tool contract, capability/effect/risk and origin
+│   ├── registry.py      # Validated name→tool map with origin ownership
 │   ├── describe_tool.py # Meta-tool: full schema for any registered tool
 │   ├── image_inspect.py # Structured image observation by attachment ID
 │   └── ...              # 16 built-in tool implementations
+├── extensions/
+│   ├── manager.py       # Failure-isolated extension lifecycle
+│   ├── models.py        # Strict local MCP policy configuration
+│   └── mcp.py           # Official MCP Streamable HTTP client and ToolBase adapter
 ├── harness/
 │   ├── verifier.py      # SDB: deterministic verifier (propose→verify→commit)
 │   ├── refusal.py       # Typed refusal codes & Verdict

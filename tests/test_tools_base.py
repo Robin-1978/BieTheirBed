@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 import pytest
-from pc_assistant.tools.base import ToolBase, ToolEffect, ToolRisk
+from pc_assistant.tools.base import (
+    BUILTIN_TOOL_ORIGIN,
+    ToolBase,
+    ToolEffect,
+    ToolOrigin,
+    ToolOriginKind,
+    ToolRisk,
+)
 from pc_assistant.tools.registry import ToolRegistry
 
 
@@ -36,6 +43,19 @@ def test_registry_register():
     registry.register(tool)
     assert "dummy" in registry
     assert len(registry) == 1
+    assert registry.origin("dummy") == BUILTIN_TOOL_ORIGIN
+
+
+def test_registry_unregister_requires_matching_origin():
+    registry = ToolRegistry()
+    origin = ToolOrigin(ToolOriginKind.MCP, "mcp:test")
+    registry.register(DummyTool(), origin=origin)
+
+    with pytest.raises(PermissionError, match="another origin"):
+        registry.unregister("dummy", origin=BUILTIN_TOOL_ORIGIN)
+
+    registry.unregister("dummy", origin=origin)
+    assert registry.get("dummy") is None
 
 
 def test_registry_rejects_duplicate_name():

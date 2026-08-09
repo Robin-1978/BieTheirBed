@@ -8,7 +8,12 @@ from pathlib import Path
 
 from pc_assistant.agent_runtime.artifact_service import ArtifactService
 from pc_assistant.agent_runtime.config_control import PersistentConfigController
-from pc_assistant.agent_runtime.contracts import HealthStatus, RunRequest, RuntimeScope
+from pc_assistant.agent_runtime.contracts import (
+    ExtensionStatusRecord,
+    HealthStatus,
+    RunRequest,
+    RuntimeScope,
+)
 from pc_assistant.agent_runtime.control import ControlService
 from pc_assistant.agent_runtime.core_application import CoreApplication
 from pc_assistant.agent_runtime.http_provider import (
@@ -42,6 +47,8 @@ from pc_assistant.context.memory_db import (
 )
 from pc_assistant.context.prompt import build_session_context, build_system_prompt
 from pc_assistant.desktop_session import ensure_desktop_session
+from pc_assistant.extensions import ExtensionManager
+from pc_assistant.extensions.mcp import build_mcp_providers
 from pc_assistant.observability.trace import LLMTraceRecorder, TurnRecorder
 from pc_assistant.runtime import RuntimePaths
 from pc_assistant.service.core_host import (
@@ -96,6 +103,7 @@ class CoreRuntimeComposition:
     artifact_service: ArtifactService
     llm_traces: LLMTraceRecorder
     turn_traces: TurnRecorder
+    extensions: ExtensionManager
     host: CoreServiceHost
 
 
@@ -196,6 +204,10 @@ def build_core_runtime(
         ttl_seconds=config.attachment_ttl_seconds,
     )
     registry = _build_registry(config, artifacts, memory, episodic)
+    extensions = ExtensionManager(
+        registry,
+        build_mcp_providers(config.mcp_servers),
+    )
 
     primary = provider_factory(config.resolve_model())
     provider: ModelProviderPort = primary
@@ -350,6 +362,16 @@ def build_core_runtime(
         tool_names=lambda scope: registry.list_for(capabilities_for_scope(scope)),
         config_controller=config_controller,
         status_details=status_details,
+        extension_statuses=lambda: tuple(
+            ExtensionStatusRecord(
+                extension_id=status.descriptor.extension_id,
+                kind=status.descriptor.kind.value,
+                state=status.state.value,
+                tools=status.tools,
+                detail=status.detail,
+            )
+            for status in extensions.statuses
+        ),
     )
     artifact_service = ArtifactService(sessions, artifacts)
 
@@ -385,5 +407,6 @@ def build_core_runtime(
         artifact_service=artifact_service,
         llm_traces=llm_traces,
         turn_traces=turn_traces,
+        extensions=extensions,
         host=host,
     )
