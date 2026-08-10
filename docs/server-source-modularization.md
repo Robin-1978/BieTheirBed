@@ -17,6 +17,21 @@
 
 自动生成的 App OpenAPI Schema 不纳入手写源码行数治理。
 
+## 实施结果（2026-08-11）
+
+本轮已完成无双实现拆分：
+
+| 组合入口 | 拆分后行数 | 结果 |
+| --- | ---: | --- |
+| `tasks/repository.py` | 434 | Schema、运行时、定义、执行和工具仓储已分离 |
+| `channels/feishu.py` | 374 | 只保留 Channel 生命周期与依赖装配 |
+| `gateway/adapter.py` | 362 | 路由、SSE 和 HTTP 工具已分离 |
+| `service/core_server.py` | 593 | 按 Conversation、Task、Artifact、Automation 分发 |
+| `service/core_client.py` | 约 1040 | Artifact 与 Automation 客户端操作已抽离 |
+
+`service/core_api.py` 继续作为声明性的单一协议入口；生成的 App Schema 继续不参与
+手写业务文件行数约束。
+
 ## 正向模块边界
 
 ### Task 持久化
@@ -47,6 +62,12 @@
 - `service/core_artifact_commands.py`
 - `service/core_automation_commands.py`
 - `service/core_server.py`：连接生命周期、并发订阅和命令路由。
+
+### Core 客户端
+
+- `service/core_client_artifacts.py`：Artifact 上传、下载和转写；
+- `service/core_client_automation.py`：Schedule 与 Trigger 操作；
+- `service/core_client.py`：连接、认证、订阅以及 Conversation/Task 主协议操作。
 
 ### 飞书渠道
 

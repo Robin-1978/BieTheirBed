@@ -1,23 +1,20 @@
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
-from pc_assistant.artifacts import ArtifactRef
 from pc_assistant.config import AppConfig
-from pc_assistant.tasks import TaskEvent, TaskEventPayload, TaskState
-from pc_assistant.ui.core_app import CoreChatApp
-from pc_assistant.ui.widgets import CommandOutput
+from pc_assistant.conversation import ChatTurnState
+from pc_assistant.service.core_api import (
+    ChatTimelineEntrySnapshot,
+    ChatTurnSnapshot,
+)
+from pc_assistant.ui.core_app import CoreChatApp, _TurnRenderState
+from pc_assistant.ui.widgets import AssistantMessage
 
 
 class _Client:
     def __init__(self) -> None:
-        self.handler = None
         self.sessions = 0
-
-    def set_approval_handler(self, handler) -> None:
-        self.handler = handler
 
     async def create_session(self) -> str:
         self.sessions += 1
@@ -34,41 +31,9 @@ async def test_core_chat_mounts_and_creates_core_owned_session() -> None:
     app = CoreChatApp(AppConfig(), client, "session-initial")
 
     async with app.run_test():
-        assert client.handler is not None
         await app._handle_command("/new")
         assert app._session_handle == "session-1"
         assert app.query_one("#chat-log") is not None
-
-    assert client.handler is None
-
-
-@pytest.mark.asyncio
-async def test_core_chat_confirmation_resolves_pending_future() -> None:
-    client = _Client()
-    app = CoreChatApp(AppConfig(), client, "session-a")
-    request = TaskEvent(
-        task_id="task-a",
-        event_seq=3,
-        occurred_at=3.0,
-        event_type="approval_requested",
-        payload=TaskEventPayload(
-            state=TaskState.WAITING_APPROVAL,
-            approval_id="approval-a",
-            tool_call_id="call-a",
-            tool_name="mouse",
-            tool_args={"action": "click"},
-            reason="desktop_control:high",
-        ),
-    )
-
-    async with app.run_test():
-        confirmation = asyncio.create_task(app._confirm_tool(request))
-        while app._confirm_pending is None:
-            await asyncio.sleep(0)
-        await app._handle_command("/confirm")
-
-        assert await confirmation is True
-        assert len(app.query(CommandOutput)) >= 2
 
 
 @pytest.mark.asyncio
@@ -87,23 +52,94 @@ async def test_artifact_download_failure_is_a_local_warning_and_does_not_raise(
         async def write(self, value):
             writes.append(value)
 
-    event = TaskEvent(
-        task_id="task-a",
-        event_seq=1,
-        occurred_at=1.0,
-        event_type="artifact",
-        payload=TaskEventPayload(
-            artifact=ArtifactRef(
-                artifact_id="artifact-a",
-                kind="image",
-                name="capture.png",
-                media_type="image/png",
-                size=1,
-            )
-        ),
-    )
-
     async with app.run_test():
-        await app._handle_event(event, None, Stream(), [])
+        response = AssistantMessage()
+        await app.query_one("#chat-log").mount(response)
+        await app._render_chat_snapshot(
+            _snapshot(
+                artifacts=({
+                    "artifact_id": "artifact-a",
+                    "kind": "image",
+                    "name": "capture.png",
+                    "media_type": "image/png",
+                    "size": 1,
+                },),
+            ),
+            response,
+            Stream(),
+            _TurnRenderState(),
+        )
 
     assert "Artifact download failed: disk unavailable" in "".join(writes)
+
+
+@pytest.mark.asyncio
+async def test_chat_snapshot_renders_reasoning_tools_and_authoritative_answer() -> None:
+    client = _Client()
+    app = CoreChatApp(AppConfig(), client, "session-a")
+    writes = []
+
+    class Stream:
+        async def write(self, value):
+            writes.append(value)
+
+    async with app.run_test():
+        response = AssistantMessage()
+        await app.query_one("#chat-log").mount(response)
+        await app._render_chat_snapshot(
+            _snapshot(
+                state=ChatTurnState.COMPLETED,
+                reasoning="Checking context.",
+                content="Hello from Xiao Nuo.",
+                final_output="Hello from Xiao Nuo.",
+                timeline=(
+                    ChatTimelineEntrySnapshot(
+                        kind="tool_call",
+                        tool_call_id="call-a",
+                        tool_name="status",
+                        tool_args={},
+                    ),
+                    ChatTimelineEntrySnapshot(
+                        kind="tool_result",
+                        tool_call_id="call-a",
+                        tool_name="status",
+                        tool_result={"ok": True},
+                    ),
+                ),
+            ),
+            response,
+            Stream(),
+            _TurnRenderState(),
+        )
+
+    assert writes == ["Hello from Xiao Nuo."]
+    assert app._last_answer == "Hello from Xiao Nuo."
+    assert app._state.messages[-1].content == "Hello from Xiao Nuo."
+    assert any(message.type.value == "tool_call" for message in app._state.messages)
+
+
+def _snapshot(**updates) -> ChatTurnSnapshot:
+    data = {
+        "turn_id": "turn-a",
+        "session_handle": "session-a",
+        "client_request_id": "request-a",
+        "user_input": "hello",
+        "attachments": (),
+        "tools_enabled": True,
+        "state": ChatTurnState.RUNNING,
+        "reasoning": "",
+        "content": "",
+        "final_output": "",
+        "artifacts": (),
+        "failure_code": "",
+        "cancel_requested": False,
+        "tool_steps": (),
+        "approvals": (),
+        "timeline": (),
+        "created_at": 1.0,
+        "updated_at": 1.0,
+        "finished_at": None,
+        "revision": 1,
+    }
+    data.update(updates)
+    return ChatTurnSnapshot.model_validate(data)

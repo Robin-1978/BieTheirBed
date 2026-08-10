@@ -20,7 +20,7 @@ export default function TaskDetailScreen() {
   const gateway = useGateway();
   const [task, setTask] = useState<Task | null>(null);
   const [executions, setExecutions] = useState<TaskExecution[]>([]);
-  const [working, setWorking] = useState(false);
+  const [working, setWorking] = useState("");
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
@@ -42,7 +42,7 @@ export default function TaskDetailScreen() {
 
   async function executeNow() {
     if (!task || working) return;
-    setWorking(true);
+    setWorking("execute");
     setError("");
     try {
       const execution = await gateway.runAuthenticated((client) => client.executeTask(task.task_id));
@@ -50,20 +50,20 @@ export default function TaskDetailScreen() {
     } catch {
       setError("当前无法开始执行；如果已有执行正在进行，请先查看或停止它");
     } finally {
-      setWorking(false);
+      setWorking("");
     }
   }
 
   async function setState(command: "pause" | "resume" | "archive" | "restore") {
     if (!task || working) return;
-    setWorking(true);
+    setWorking(command);
     try {
       const updated = await gateway.runAuthenticated((client) => client.taskDefinitionCommand(task.task_id, command));
       setTask(updated);
     } catch {
       setError("操作失败，请重试");
     } finally {
-      setWorking(false);
+      setWorking("");
     }
   }
 
@@ -88,13 +88,13 @@ export default function TaskDetailScreen() {
 
   async function deleteTask() {
     if (!task || working) return;
-    setWorking(true);
+    setWorking("delete");
     try {
       await gateway.runAuthenticated((client) => client.deleteTask(task.task_id));
       router.replace("/tasks");
     } catch {
       setError("任务删除失败，请确认所有执行都已结束");
-      setWorking(false);
+      setWorking("");
     }
   }
 
@@ -126,14 +126,14 @@ export default function TaskDetailScreen() {
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <View style={styles.actions}>
-        <Action label="立即执行" onPress={() => void executeNow()} disabled={working} primary />
-        <Action label="编辑" onPress={() => router.push(`/tasks/${task.task_id}/edit`)} disabled={working} />
+        <Action label="立即执行" onPress={() => void executeNow()} disabled={Boolean(working)} busy={working === "execute"} primary />
+        <Action label="编辑" onPress={() => router.push(`/tasks/${task.task_id}/edit`)} disabled={Boolean(working)} />
       </View>
       <View style={styles.actions}>
-        {task.state === "active" ? <Action label="暂停自动启动" onPress={() => void setState("pause")} disabled={working} /> : null}
-        {task.state === "paused" ? <Action label="恢复启用" onPress={() => void setState("resume")} disabled={working} /> : null}
-        {task.state === "archived" ? <Action label="恢复任务" onPress={() => void setState("restore")} disabled={working} /> : null}
-        {task.state !== "archived" ? <Action label="归档" onPress={() => void setState("archive")} disabled={working} /> : null}
+        {task.state === "active" ? <Action label="暂停自动启动" onPress={() => void setState("pause")} disabled={Boolean(working)} busy={working === "pause"} /> : null}
+        {task.state === "paused" ? <Action label="恢复启用" onPress={() => void setState("resume")} disabled={Boolean(working)} busy={working === "resume"} /> : null}
+        {task.state === "archived" ? <Action label="恢复任务" onPress={() => void setState("restore")} disabled={Boolean(working)} busy={working === "restore"} /> : null}
+        {task.state !== "archived" ? <Action label="归档" onPress={() => void setState("archive")} disabled={Boolean(working)} busy={working === "archive"} /> : null}
       </View>
 
       <View style={styles.sectionHeader}>
@@ -160,8 +160,10 @@ export default function TaskDetailScreen() {
         <View style={styles.empty}><Text style={styles.emptyText}>还没有执行记录</Text></View>
       )}
 
-      <Pressable accessibilityRole="button" onPress={confirmDelete} style={styles.deleteButton}>
-        <Text style={styles.deleteText}>删除任务和全部记录</Text>
+      <Pressable accessibilityRole="button" disabled={Boolean(working)} onPress={confirmDelete} style={styles.deleteButton}>
+        {working === "delete"
+          ? <ActivityIndicator color={colors.danger} size="small" />
+          : <Text style={styles.deleteText}>删除任务和全部记录</Text>}
       </Pressable>
     </ScrollView>
   );
@@ -187,10 +189,12 @@ function launchReasonLabel(reason: TaskExecution["launch_reason"]): string {
   return ({ created: "首次执行", manual: "手动执行", scheduled: "定时执行", event: "事件启动", rerun: "按历史配置再次执行" })[reason];
 }
 
-function Action({ label, primary = false, disabled = false, onPress }: { label: string; primary?: boolean; disabled?: boolean; onPress(): void }) {
+function Action({ label, primary = false, disabled = false, busy = false, onPress }: { label: string; primary?: boolean; disabled?: boolean; busy?: boolean; onPress(): void }) {
   return (
     <Pressable disabled={disabled} style={[styles.action, primary && styles.actionPrimary, disabled && styles.disabled]} onPress={onPress}>
-      <Text style={[styles.actionText, primary && styles.actionPrimaryText]}>{label}</Text>
+      {busy
+        ? <ActivityIndicator color={primary ? "white" : colors.accent} size="small" />
+        : <Text style={[styles.actionText, primary && styles.actionPrimaryText]}>{label}</Text>}
     </Pressable>
   );
 }

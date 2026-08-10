@@ -78,7 +78,7 @@ class ScheduleDispatcher:
         if occurrence is None:
             return False
         try:
-            schedule = await asyncio.to_thread(
+            await asyncio.to_thread(
                 self._repository.get,
                 occurrence.principal_id,
                 occurrence.schedule_id,

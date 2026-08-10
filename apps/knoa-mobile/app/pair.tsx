@@ -22,6 +22,7 @@ export default function PairScreen() {
   const [displayName, setDisplayName] = useState("我的手机");
   const [payload, setPayload] = useState("");
   const [scanning, setScanning] = useState(false);
+  const [requestingCamera, setRequestingCamera] = useState(false);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
 
@@ -74,23 +75,31 @@ export default function PairScreen() {
         placeholderTextColor={colors.muted}
       />
       <Pressable
-        style={styles.primary}
+        disabled={requestingCamera || working}
+        style={[styles.primary, (requestingCamera || working) && styles.disabled]}
         onPress={async () => {
-          if (!permission?.granted) {
-            const result = await requestPermission();
-            if (!result.granted) {
-              if (!result.canAskAgain) {
-                setError("相机权限已关闭，请在系统设置中允许后再扫描");
-              } else {
-                setError("需要相机权限才能扫描二维码");
+          setRequestingCamera(true);
+          try {
+            if (!permission?.granted) {
+              const result = await requestPermission();
+              if (!result.granted) {
+                if (!result.canAskAgain) {
+                  setError("相机权限已关闭，请在系统设置中允许后再扫描");
+                } else {
+                  setError("需要相机权限才能扫描二维码");
+                }
+                return;
               }
-              return;
             }
+            setScanning(true);
+          } finally {
+            setRequestingCamera(false);
           }
-          setScanning(true);
         }}
       >
-        <Text style={styles.primaryText}>扫描配对二维码</Text>
+        {requestingCamera
+          ? <ActivityIndicator color="white" size="small" />
+          : <Text style={styles.primaryText}>扫描配对二维码</Text>}
       </Pressable>
       {permission && !permission.granted && !permission.canAskAgain ? (
         <Pressable accessibilityRole="button" onPress={() => void Linking.openSettings()}>
@@ -127,6 +136,7 @@ const styles = StyleSheet.create({
   secondaryText: { color: colors.accent, fontWeight: "700" },
   or: { color: colors.muted, textAlign: "center" },
   error: { color: colors.danger, textAlign: "center" },
+  disabled: { opacity: 0.5 },
   settingsLink: { color: colors.accent, textAlign: "center", fontWeight: "700" },
   scanner: { flex: 1, alignItems: "center", justifyContent: "center" },
   scanFrame: { width: 260, height: 260, borderWidth: 2, borderColor: "white", borderRadius: 24 },

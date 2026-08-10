@@ -10,7 +10,7 @@ import {
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
@@ -41,6 +41,8 @@ import { AppMarkdown } from "@/components/AppMarkdown";
 import { AppPressable } from "@/components/AppPressable";
 import { ArtifactViewer } from "@/components/ArtifactViewer";
 import { PrimarySwipeNavigation } from "@/components/PrimarySwipeNavigation";
+import { TurnProgress } from "@/components/TurnProgress";
+import { saveArtifactFile } from "@/api/saveArtifactFile";
 import { loadConversationDraft, removeConversationDraft, storeConversationDraft } from "@/security/conversationDrafts";
 import { useGateway } from "@/state/GatewayProvider";
 import { loadConversationCache, storeConversationCache } from "@/storage/conversationCache";
@@ -57,6 +59,19 @@ type PendingAttachment = {
 
 type InputMode = "text" | "voice";
 
+type PendingChatTurn = {
+  localId: string;
+  requestId: string;
+  userInput: string;
+  attachments: PendingAttachment[];
+  state: "sending" | "failed";
+  error: string;
+};
+
+type ChatListItem =
+  | { kind: "turn"; key: string; turn: ChatTurnSnapshot }
+  | { kind: "pending"; key: string; pending: PendingChatTurn };
+
 const TERMINAL_STATES = new Set<ChatTurnSnapshot["state"]>(["completed", "failed", "cancelled"]);
 
 export default function ChatScreen() {
@@ -65,19 +80,22 @@ export default function ChatScreen() {
   const gatewayRef = useRef(gateway);
   gatewayRef.current = gateway;
   const params = useLocalSearchParams<{ capturedUri?: string; capturedName?: string }>();
-  const list = useRef<FlatList<ChatTurnSnapshot>>(null);
+  const list = useRef<FlatList<ChatListItem>>(null);
   const nearBottom = useRef(true);
+  const scrollMode = useRef<"none" | "instant" | "animated">("instant");
+  const displayedSession = useRef("");
   const draftReady = useRef(false);
-  const requestIdentity = useRef<{ fingerprint: string; requestId: string } | null>(null);
   const [turns, setTurns] = useState<ChatTurnSnapshot[]>([]);
+  const [pendingTurn, setPendingTurn] = useState<PendingChatTurn | null>(null);
   const [nextTurnCursor, setNextTurnCursor] = useState("");
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [text, setText] = useState("");
   const [inputMode, setInputMode] = useState<InputMode>("text");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
-  const [sending, setSending] = useState(false);
   const [startingTopic, setStartingTopic] = useState(false);
   const [resolving, setResolving] = useState("");
+  const [resolvingApproved, setResolvingApproved] = useState<boolean | null>(null);
+  const [cancelling, setCancelling] = useState("");
   const [transcribing, setTranscribing] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [imagePreview, setImagePreview] = useState<ResolvedArtifactFile | null>(null);
@@ -90,13 +108,8 @@ export default function ChatScreen() {
       (client) => client.getChatTurn(turnId),
     ),
     onSnapshot: (snapshot) => {
-      setTurns((current) => {
-        const index = current.findIndex((turn) => turn.turn_id === snapshot.turn_id);
-        if (index < 0) return [...current, snapshot];
-        const next = [...current];
-        next[index] = snapshot;
-        return next;
-      });
+      if (nearBottom.current) scrollMode.current = "animated";
+      setTurns((current) => mergeConversationTurns(current, [snapshot]));
     },
     onUnavailable: () => setMessage("暂时无法继续接收回复，请检查网络后重试"),
   }));
@@ -104,6 +117,8 @@ export default function ChatScreen() {
   const watchTurn = useCallback((turnId: string) => {
     turnWatcher.watch(turnId);
   }, [turnWatcher]);
+
+  useEffect(() => () => turnWatcher.closeAll(), [turnWatcher]);
 
   const refresh = useCallback(async () => {
     if (!gateway.client || !gateway.sessionHandle) return;
@@ -131,9 +146,16 @@ export default function ChatScreen() {
   useEffect(() => {
     let active = true;
     const sessionHandle = gateway.sessionHandle;
-    setTurns([]);
-    setNextTurnCursor("");
-    turnWatcher.closeAll();
+    const previousSession = displayedSession.current;
+    displayedSession.current = sessionHandle;
+    const switchedConversation = Boolean(previousSession && previousSession !== sessionHandle);
+    if (!sessionHandle || switchedConversation) {
+      setTurns([]);
+      setPendingTurn(null);
+      setNextTurnCursor("");
+      scrollMode.current = "instant";
+      turnWatcher.closeAll();
+    }
     if (sessionHandle) {
       void loadConversationCache(sessionHandle).then((cached) => {
         if (active && gatewayRef.current.sessionHandle === sessionHandle) {
@@ -145,7 +167,6 @@ export default function ChatScreen() {
     }
     return () => {
       active = false;
-      turnWatcher.closeAll();
     };
   }, [gateway.sessionHandle, refresh, turnWatcher]);
 
@@ -200,8 +221,25 @@ export default function ChatScreen() {
     router.setParams({ capturedUri: "", capturedName: "" });
   }, [params.capturedName, params.capturedUri]);
 
+  const activeTurn = useMemo(
+    () => [...turns].reverse().find((turn) => !TERMINAL_STATES.has(turn.state)) ?? null,
+    [turns],
+  );
+  const sending = pendingTurn?.state === "sending";
   const hasComposerContent = Boolean(text.trim() || attachments.length);
-  const canSend = Boolean(!sending && gateway.client && !gateway.requiredUpdate && hasComposerContent);
+  const canSend = Boolean(
+    !pendingTurn
+      && !activeTurn
+      && gateway.client
+      && !gateway.requiredUpdate
+      && hasComposerContent,
+  );
+  const listItems = useMemo<ChatListItem[]>(() => [
+    ...turns.map((turn) => ({ kind: "turn" as const, key: turn.turn_id, turn })),
+    ...(pendingTurn
+      ? [{ kind: "pending" as const, key: pendingTurn.localId, pending: pendingTurn }]
+      : []),
+  ], [pendingTurn, turns]);
 
   async function chooseFile() {
     const picked = await DocumentPicker.getDocumentAsync({
@@ -219,78 +257,86 @@ export default function ChatScreen() {
     ].slice(0, 8));
   }
 
-  async function send() {
-    if (!gateway.client || !canSend) return;
-    const message = text.trim() || "请看一下这些内容";
-    const pending = [...attachments];
-    setSending(true);
+  async function submitPendingTurn(pending: PendingChatTurn) {
+    if (!gateway.client) return;
+    setPendingTurn({ ...pending, state: "sending", error: "" });
     setMessage("");
     try {
+      const wasNewConversation = !gateway.sessionHandle;
       const sessionHandle = await gateway.ensureConversation();
-      const fingerprint = JSON.stringify({
-        message,
-        attachments: pending.map((item) => [item.uri, item.name, item.mediaType]),
-      });
-      if (requestIdentity.current?.fingerprint !== fingerprint) {
-        requestIdentity.current = { fingerprint, requestId: Crypto.randomUUID() };
-      }
-      const uploaded: ArtifactInput[] = [];
-      let failed = false;
-      for (let index = 0; index < pending.length; index += 1) {
-        const item = pending[index]!;
-        if (item.uploaded) {
-          uploaded.push(item.uploaded);
-          continue;
-        }
-        setAttachments((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, status: "uploading" } : value));
+      const uploadedItems = await Promise.all(pending.attachments.map(async (item) => {
+        if (item.uploaded) return { ...item, status: "uploaded" as const };
         try {
           const response = await fetch(item.uri);
           const bytes = await response.arrayBuffer();
-          const artifact = await gateway.runAuthenticated((client) => client.uploadArtifact({
+          const uploaded = await gateway.runAuthenticated((client) => client.uploadArtifact({
             sessionHandle,
             bytes,
             mediaType: item.mediaType,
             name: item.name,
             caption: item.name,
           }));
-          uploaded.push(artifact);
-          const nextItem: PendingAttachment = { ...item, status: "uploaded", uploaded: artifact };
-          pending[index] = nextItem;
-          setAttachments((current) => current.map((value, itemIndex) => itemIndex === index ? nextItem : value));
+          return { ...item, status: "uploaded" as const, uploaded };
         } catch {
-          failed = true;
-          const nextItem: PendingAttachment = { ...item, status: "failed" };
-          pending[index] = nextItem;
-          setAttachments((current) => current.map((value, itemIndex) => itemIndex === index ? nextItem : value));
+          return { ...item, status: "failed" as const };
         }
-      }
-      if (failed) {
-        setMessage("有附件上传失败，点击失败项可单独重试");
+      }));
+      if (uploadedItems.some((item) => item.status === "failed")) {
+        setPendingTurn({
+          ...pending,
+          attachments: uploadedItems,
+          state: "failed",
+          error: "有附件没有上传成功",
+        });
         return;
       }
       const accepted = await gateway.runAuthenticated((client) => client.createChatTurn({
-        clientRequestId: requestIdentity.current!.requestId,
+        clientRequestId: pending.requestId,
         sessionHandle,
-        text: message,
-        attachments: uploaded,
+        text: pending.userInput,
+        attachments: uploadedItems.flatMap((item) => item.uploaded ? [item.uploaded] : []),
       }));
-      const wasPending = !gateway.sessionHandle;
-      if (wasPending) {
-        await gateway.commitConversation(sessionHandle);
-      } else {
-        setTurns((current) => [...current, accepted]);
-        watchTurn(accepted.turn_id);
+      scrollMode.current = "animated";
+      setTurns((current) => mergeConversationTurns(current, [accepted]));
+      setPendingTurn(null);
+      watchTurn(accepted.turn_id);
+      void storeConversationDraft(sessionHandle, "");
+      if (wasNewConversation) {
+        void gateway.commitConversation(sessionHandle).catch(() => {
+          setMessage("消息已发出，但会话列表暂时没有同步");
+        });
       }
-      requestIdentity.current = null;
-      setText("");
-      await removeConversationDraft("");
-      await storeConversationDraft(sessionHandle, "");
-      setAttachments([]);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "消息没有发出去，请重试");
-    } finally {
-      setSending(false);
+      setPendingTurn({
+        ...pending,
+        state: "failed",
+        error: error instanceof Error ? error.message : "消息没有发出去",
+      });
     }
+  }
+
+  function send() {
+    if (!gateway.client || !canSend) return;
+    const pending: PendingChatTurn = {
+      localId: `pending:${Crypto.randomUUID()}`,
+      requestId: Crypto.randomUUID(),
+      userInput: text.trim() || "请看一下这些内容",
+      attachments: attachments.map((item) => ({ ...item, status: item.uploaded ? "uploaded" : "pending" })),
+      state: "sending",
+      error: "",
+    };
+    scrollMode.current = "animated";
+    setPendingTurn(pending);
+    setText("");
+    setAttachments([]);
+    void removeConversationDraft(gateway.sessionHandle);
+    void submitPendingTurn(pending);
+  }
+
+  function editPendingTurn(pending: PendingChatTurn) {
+    setText(pending.userInput);
+    setAttachments(pending.attachments.map((item) => ({ ...item, status: item.uploaded ? "uploaded" : undefined })));
+    setPendingTurn(null);
   }
 
   async function retryAttachment(index: number) {
@@ -361,38 +407,41 @@ export default function ChatScreen() {
   async function resolve(approval: ChatApproval, approved: boolean) {
     if (!gateway.client || resolving) return;
     setResolving(approval.approval_id);
-    const optimisticState = approved ? "approved" : "rejected";
-    setTurns((current) => current.map((turn) => ({
-      ...turn,
-      approvals: turn.approvals.map((item) => item.approval_id === approval.approval_id
-        ? { ...item, state: optimisticState }
-        : item),
-    })));
+    setResolvingApproved(approved);
+    const turn = turns.find((item) => item.approvals.some(
+      (candidate) => candidate.approval_id === approval.approval_id,
+    ));
     try {
       const result = await gateway.runAuthenticated(
         (client) => client.resolveChatApproval(approval.approval_id, approved),
       );
-      setMessage(approved ? "已确认，正在继续执行" : "已取消这项操作");
-      const turn = turns.find((item) => item.approvals.some(
-        (candidate) => candidate.approval_id === approval.approval_id,
-      ));
+      setTurns((current) => current.map((item) => {
+        if (!item.approvals.some((candidate) => candidate.approval_id === result.approval.approval_id)) {
+          return item;
+        }
+        return {
+          ...item,
+          approvals: item.approvals.map((candidate) => (
+            candidate.approval_id === result.approval.approval_id
+              ? result.approval
+              : candidate
+          )),
+        };
+      }));
       if (turn) {
-        const fresh = await gateway.runAuthenticated((client) => client.getChatTurn(turn.turn_id));
-        setTurns((current) => current.map((item) => item.turn_id === fresh.turn_id ? fresh : item));
-        if (!TERMINAL_STATES.has(fresh.state)) watchTurn(fresh.turn_id);
+        watchTurn(turn.turn_id);
+        void gateway.runAuthenticated((client) => client.getChatTurn(turn.turn_id)).then((fresh) => {
+          setTurns((current) => mergeConversationTurns(current, [fresh]));
+          if (!TERMINAL_STATES.has(fresh.state)) watchTurn(fresh.turn_id);
+        }).catch(() => undefined);
       } else if (result.approval.state === "pending") {
-        await refresh();
+        void refresh();
       }
     } catch (error) {
-      setTurns((current) => current.map((turn) => ({
-        ...turn,
-        approvals: turn.approvals.map((item) => item.approval_id === approval.approval_id
-          ? approval
-          : item),
-      })));
       setMessage(error instanceof Error ? error.message : "确认没有生效，请重试");
     } finally {
       setResolving("");
+      setResolvingApproved(null);
     }
   }
 
@@ -428,15 +477,29 @@ export default function ChatScreen() {
     }
   }, [loadArtifact]);
 
+  const saveArtifact = useCallback(async (item: AssistantArtifactItem) => {
+    try {
+      const resolved = await loadArtifact(item);
+      setMessage(await saveArtifactFile(resolved));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "文件保存失败，请重试");
+    }
+  }, [loadArtifact]);
+
   async function startNewTopic() {
     if (startingTopic || sending) return;
     setStartingTopic(true);
+    setTurns([]);
+    setPendingTurn(null);
+    setNextTurnCursor("");
+    scrollMode.current = "instant";
+    turnWatcher.closeAll();
+    setText("");
+    setAttachments([]);
     try {
-      await removeConversationDraft("");
+      await removeConversationDraft(gateway.sessionHandle);
       await gateway.newConversation();
-      requestIdentity.current = null;
-      setText("");
-      setAttachments([]);
+      await removeConversationDraft("");
     } finally {
       setStartingTopic(false);
     }
@@ -445,6 +508,7 @@ export default function ChatScreen() {
   async function loadOlderTurns() {
     if (!gateway.sessionHandle || !nextTurnCursor || loadingOlder) return;
     setLoadingOlder(true);
+    scrollMode.current = "none";
     try {
       const page = await gateway.runAuthenticated(
         (client) => client.listChatTurns(gateway.sessionHandle, 100, nextTurnCursor),
@@ -462,11 +526,19 @@ export default function ChatScreen() {
   }
 
   async function cancelTurn(turn: ChatTurnSnapshot) {
+    if (cancelling) return;
+    setCancelling(turn.turn_id);
+    setTurns((current) => current.map((item) => item.turn_id === turn.turn_id
+      ? { ...item, cancel_requested: true }
+      : item));
     try {
       const cancelled = await gateway.runAuthenticated((client) => client.cancelChatTurn(turn.turn_id));
       setTurns((current) => current.map((item) => item.turn_id === cancelled.turn_id ? cancelled : item));
     } catch {
+      setTurns((current) => current.map((item) => item.turn_id === turn.turn_id ? turn : item));
       setMessage("暂时无法停止这次回复，请重试");
+    } finally {
+      setCancelling("");
     }
   }
 
@@ -484,6 +556,13 @@ export default function ChatScreen() {
     setText(turn.user_input);
     setMessage("已放回输入框，修改后可以重新发送");
   }
+
+  const stoppingResponse = Boolean(activeTurn);
+  const primaryDisabled = stoppingResponse
+    ? Boolean(cancelling)
+    : inputMode === "text"
+      ? !canSend
+      : sending || transcribing || (!gateway.client && !recording.isRecording);
 
   return (
     <PrimarySwipeNavigation current="chat">
@@ -530,13 +609,17 @@ export default function ChatScreen() {
       <FlatList
         ref={list}
         style={styles.list}
-        data={turns}
-        keyExtractor={(item) => item.turn_id}
+        data={listItems}
+        keyExtractor={(item) => item.key}
         contentContainerStyle={styles.messages}
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
+        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
         onContentSizeChange={() => {
-          if (nearBottom.current) list.current?.scrollToEnd({ animated: true });
+          const mode = scrollMode.current;
+          if (mode === "none" || !nearBottom.current) return;
+          scrollMode.current = "none";
+          list.current?.scrollToEnd({ animated: mode === "animated" });
         }}
         onScroll={({ nativeEvent }) => {
           const distance = nativeEvent.contentSize.height
@@ -557,14 +640,21 @@ export default function ChatScreen() {
           </Pressable>
         ) : null}
         ListEmptyComponent={<Text style={styles.empty}>你好，我是小诺。</Text>}
-        renderItem={({ item }) => (
+        renderItem={({ item }) => item.kind === "pending" ? (
+          <PendingTurn
+            pending={item.pending}
+            onRetry={submitPendingTurn}
+            onEdit={editPendingTurn}
+          />
+        ) : (
           <ChatTurn
-            turn={item}
+            turn={item.turn}
             resolving={resolving}
+            resolvingApproved={resolvingApproved}
             onResolve={resolve}
             onLoadArtifact={loadArtifact}
             onOpenArtifact={openArtifact}
-            onCancel={cancelTurn}
+            onSaveArtifact={saveArtifact}
             onRetry={retryTurn}
             onEdit={editTurn}
           />
@@ -622,24 +712,27 @@ export default function ChatScreen() {
           />
         </View>
         <Pressable
-          accessibilityLabel={inputMode === "voice" ? recording.isRecording ? "停止录音" : "开始录音" : "发送"}
+          accessibilityLabel={stoppingResponse
+            ? "停止回复"
+            : inputMode === "voice"
+              ? recording.isRecording ? "停止录音" : "开始录音"
+              : "发送"}
           onPress={() => {
-            if (inputMode === "voice") void toggleRecording();
+            if (activeTurn) void cancelTurn(activeTurn);
+            else if (inputMode === "voice") void toggleRecording();
             else void send();
           }}
-          disabled={inputMode === "text"
-            ? !canSend
-            : sending || transcribing || (!gateway.client && !recording.isRecording)}
+          disabled={primaryDisabled}
           style={[
             styles.primaryAction,
-            recording.isRecording && styles.primaryRecording,
-            (inputMode === "text"
-              ? !canSend
-              : sending || transcribing || (!gateway.client && !recording.isRecording)) && styles.sendDisabled,
+            (recording.isRecording || stoppingResponse) && styles.primaryRecording,
+            primaryDisabled && styles.sendDisabled,
           ]}
         >
-          {sending || transcribing ? (
+          {sending || transcribing || cancelling ? (
             <ActivityIndicator color="white" size="small" />
+          ) : stoppingResponse ? (
+            <LineIcon name="stop" color="white" size={17} />
           ) : recording.isRecording ? (
             <View style={styles.recordingContent}>
               <LineIcon name="stop" color="white" size={17} />
@@ -734,22 +827,24 @@ function LineIcon({
   );
 }
 
-function ChatTurn({
+const ChatTurn = memo(function ChatTurn({
   turn,
   resolving,
+  resolvingApproved,
   onResolve,
   onLoadArtifact,
   onOpenArtifact,
-  onCancel,
+  onSaveArtifact,
   onRetry,
   onEdit,
 }: {
   turn: ChatTurnSnapshot;
   resolving: string;
+  resolvingApproved: boolean | null;
   onResolve(approval: ChatApproval, approved: boolean): void;
   onLoadArtifact(item: AssistantArtifactItem): Promise<ResolvedArtifactFile>;
   onOpenArtifact(item: AssistantArtifactItem): Promise<void>;
-  onCancel(turn: ChatTurnSnapshot): void;
+  onSaveArtifact(item: AssistantArtifactItem): Promise<void>;
   onRetry(turn: ChatTurnSnapshot): void;
   onEdit(turn: ChatTurnSnapshot): void;
 }) {
@@ -772,6 +867,7 @@ function ChatTurn({
             <Text style={styles.activity}>{activity}</Text>
           </View>
         )}
+        <TurnProgress turn={turn} />
         {artifactItems.length ? (
           <View style={styles.generatedArtifacts}>
             {artifactItems.map((item) => (
@@ -780,6 +876,7 @@ function ChatTurn({
                 item={item}
                 onLoad={onLoadArtifact}
                 onOpen={onOpenArtifact}
+                onSave={onSaveArtifact}
               />
             ))}
           </View>
@@ -789,18 +886,17 @@ function ChatTurn({
             <Text style={styles.approvalReason}>{approval.reason || approval.tool_name}</Text>
             <View style={styles.approvalActions}>
               <AppPressable style={styles.deny} disabled={Boolean(resolving)} onPress={() => onResolve(approval, false)}>
-                {resolving === approval.approval_id ? <ActivityIndicator color={colors.ink} size="small" /> : <Text style={styles.denyText}>取消</Text>}
+                {resolving === approval.approval_id && resolvingApproved === false
+                  ? <ActivityIndicator color={colors.ink} size="small" />
+                  : <Text style={styles.denyText}>取消</Text>}
               </AppPressable>
               <AppPressable style={styles.approve} disabled={Boolean(resolving)} onPress={() => onResolve(approval, true)}>
-                {resolving === approval.approval_id ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.approveText}>确认</Text>}
+                {resolving === approval.approval_id && resolvingApproved === true
+                  ? <ActivityIndicator color="white" size="small" />
+                  : <Text style={styles.approveText}>确认</Text>}
               </AppPressable>
             </View>
           </View>
-        ) : null}
-        {turn.state === "running" || turn.state === "waiting_approval" ? (
-          <Pressable accessibilityRole="button" onPress={() => onCancel(turn)} style={styles.turnAction}>
-            <Text style={styles.turnActionText}>停止</Text>
-          </Pressable>
         ) : null}
         {turn.state === "failed" || turn.state === "cancelled" ? (
           <View style={styles.turnActions}>
@@ -815,21 +911,63 @@ function ChatTurn({
       </View>
     </View>
   );
+});
+
+function PendingTurn({
+  pending,
+  onRetry,
+  onEdit,
+}: {
+  pending: PendingChatTurn;
+  onRetry(pending: PendingChatTurn): void;
+  onEdit(pending: PendingChatTurn): void;
+}) {
+  return (
+    <View style={styles.turn}>
+      <View style={styles.userBubble}>
+        <Text style={styles.userText}>{pending.userInput}</Text>
+        {pending.attachments.length
+          ? <Text style={styles.userMeta}>附件 {pending.attachments.length}</Text>
+          : null}
+      </View>
+      <View style={styles.assistantBubble}>
+        <View style={styles.activityRow}>
+          {pending.state === "sending" ? <ActivityIndicator color={colors.accent} size="small" /> : null}
+          <Text style={pending.state === "failed" ? styles.pendingError : styles.activity}>
+            {pending.state === "sending" ? "正在发送给小诺…" : pending.error || "消息没有发出去"}
+          </Text>
+        </View>
+        {pending.state === "failed" ? (
+          <View style={styles.turnActions}>
+            <AppPressable accessibilityRole="button" onPress={() => onRetry(pending)} style={styles.turnAction}>
+              <Text style={styles.turnActionText}>重试</Text>
+            </AppPressable>
+            <AppPressable accessibilityRole="button" onPress={() => onEdit(pending)} style={styles.turnAction}>
+              <Text style={styles.turnActionText}>编辑</Text>
+            </AppPressable>
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
 }
 
 function AssistantArtifact({
   item,
   onLoad,
   onOpen,
+  onSave,
 }: {
   item: AssistantArtifactItem;
   onLoad(item: AssistantArtifactItem): Promise<ResolvedArtifactFile>;
   onOpen(item: AssistantArtifactItem): Promise<void>;
+  onSave(item: AssistantArtifactItem): Promise<void>;
 }) {
   const [previewUri, setPreviewUri] = useState("");
   const [loading, setLoading] = useState(item.isImage);
   const [failed, setFailed] = useState(false);
   const [opening, setOpening] = useState(false);
+  const [saving, setSaving] = useState(false);
   const request = useRef(0);
 
   const loadPreview = useCallback(async () => {
@@ -864,6 +1002,15 @@ function AssistantArtifact({
       setOpening(false);
     }
   }, [failed, item, loadPreview, onOpen]);
+
+  const save = useCallback(async () => {
+    setSaving(true);
+    try {
+      await onSave(item);
+    } finally {
+      setSaving(false);
+    }
+  }, [item, onSave]);
 
   if (item.isImage) {
     return (
@@ -900,16 +1047,26 @@ function AssistantArtifact({
   }
 
   return (
-    <Pressable
-      accessibilityLabel={`打开 ${item.displayName}`}
-      disabled={opening}
-      onPress={() => void open()}
-      style={styles.generatedFile}
-    >
+    <View style={styles.generatedFile}>
       <View style={styles.generatedFileBadge}><Text style={styles.generatedFileBadgeText}>附件</Text></View>
       <Text style={styles.generatedArtifactName} numberOfLines={2}>{item.displayName}</Text>
-      {opening ? <ActivityIndicator color={colors.accent} size="small" /> : null}
-    </Pressable>
+      <AppPressable
+        accessibilityLabel={`打开或分享 ${item.displayName}`}
+        disabled={opening || saving}
+        onPress={() => void open()}
+        style={styles.fileAction}
+      >
+        {opening ? <ActivityIndicator color={colors.accent} size="small" /> : <Text style={styles.fileActionText}>打开</Text>}
+      </AppPressable>
+      <AppPressable
+        accessibilityLabel={`保存 ${item.displayName}`}
+        disabled={opening || saving}
+        onPress={() => void save()}
+        style={styles.fileAction}
+      >
+        {saving ? <ActivityIndicator color={colors.accent} size="small" /> : <Text style={styles.fileActionText}>保存</Text>}
+      </AppPressable>
+    </View>
   );
 }
 
@@ -950,6 +1107,7 @@ const styles = StyleSheet.create({
   markdownList: { width: "100%", alignSelf: "stretch" },
   activityRow: { flexDirection: "row", alignItems: "center", gap: 9 },
   activity: { color: colors.muted },
+  pendingError: { color: colors.danger, flex: 1 },
   approval: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 12, gap: 10 },
   approvalReason: { color: colors.ink, lineHeight: 21 },
   approvalActions: { flexDirection: "row", gap: 10 },
@@ -969,6 +1127,8 @@ const styles = StyleSheet.create({
   generatedArtifactHint: { color: colors.muted, fontSize: 13 },
   generatedArtifactError: { color: colors.danger, fontSize: 13 },
   generatedFile: { minHeight: 54, padding: 10, flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: colors.line, borderRadius: 12, backgroundColor: colors.background },
+  fileAction: { minHeight: 36, minWidth: 48, alignItems: "center", justifyContent: "center", borderRadius: 9, backgroundColor: colors.accentSoft },
+  fileActionText: { color: colors.accent, fontSize: 12, fontWeight: "700" },
   generatedFileBadge: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6, backgroundColor: colors.accentSoft },
   generatedFileBadgeText: { color: colors.accent, fontSize: 12, fontWeight: "700" },
   attachmentStrip: { paddingHorizontal: 12, paddingVertical: 8, flexDirection: "row", gap: 8, borderTopWidth: 1, borderTopColor: colors.line },

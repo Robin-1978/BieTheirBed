@@ -8,17 +8,36 @@ import { colors } from "@/theme";
 
 export default function Index() {
   const gateway = useGateway();
-  const pulse = useRef(new Animated.Value(0)).current;
+  const rotation = useRef(new Animated.Value(0)).current;
+  const breath = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    const animation = Animated.loop(Animated.timing(pulse, {
+    const orbitAnimation = Animated.loop(Animated.timing(rotation, {
       toValue: 1,
-      duration: 2200,
-      easing: Easing.inOut(Easing.ease),
+      duration: 5200,
+      easing: Easing.linear,
       useNativeDriver: true,
     }));
-    animation.start();
-    return () => animation.stop();
-  }, [pulse]);
+    const breathAnimation = Animated.loop(Animated.sequence([
+      Animated.timing(breath, {
+        toValue: 1,
+        duration: 1400,
+        easing: Easing.inOut(Easing.ease),
+        useNativeDriver: true,
+      }),
+      Animated.timing(breath, {
+        toValue: 0,
+        duration: 1400,
+        easing: Easing.inOut(Easing.ease),
+        useNativeDriver: true,
+      }),
+    ]));
+    orbitAnimation.start();
+    breathAnimation.start();
+    return () => {
+      orbitAnimation.stop();
+      breathAnimation.stop();
+    };
+  }, [breath, rotation]);
   if (gateway.status === "unpaired") return <Redirect href="/pair" />;
   if (gateway.status === "ready") return <Redirect href="/chat" />;
   const booting = gateway.status === "booting";
@@ -26,24 +45,25 @@ export default function Index() {
     <View style={styles.container}>
       <View style={styles.coreWrap}>
         <Animated.View style={[styles.orbitOuter, {
-          opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.2, 0.7] }),
-          transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1.08] }) }],
+          opacity: breath.interpolate({ inputRange: [0, 1], outputRange: [0.18, 0.52] }),
+          transform: [{ scale: breath.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1.05] }) }],
         }]} />
         <Animated.View style={[styles.orbitInner, {
-          transform: [{ rotate: pulse.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] }) }],
+          transform: [{ rotate: rotation.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] }) }],
         }]}>
           <View style={styles.orbitNode} />
+          <View style={styles.orbitNodeSecondary} />
         </Animated.View>
+        <Animated.View style={[styles.coreGlow, {
+          opacity: breath.interpolate({ inputRange: [0, 1], outputRange: [0.22, 0.48] }),
+          transform: [{ scale: breath.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1.12] }) }],
+        }]} />
         <View style={styles.core}><Text style={styles.coreText}>诺</Text></View>
       </View>
-      <Text style={styles.eyebrow}>KNOA SECURE LINK</Text>
+      <Text style={styles.eyebrow}>KNOA</Text>
       <Text style={styles.title}>{booting ? "正在唤醒小诺" : "暂时连接不上小诺"}</Text>
       {booting ? (
-        <View style={styles.statusRow}>
-          <Text style={styles.status}>安全连接</Text><View style={styles.dot} />
-          <Text style={styles.status}>身份校验</Text><View style={styles.dot} />
-          <Text style={styles.status}>会话恢复</Text>
-        </View>
+        <Text style={styles.status}>正在恢复你的安全连接和会话</Text>
       ) : null}
       {gateway.error ? <Text style={styles.detail}>{gateway.error}</Text> : null}
       {gateway.status === "error" ? (
@@ -61,13 +81,13 @@ const styles = StyleSheet.create({
   orbitOuter: { position: "absolute", width: 146, height: 146, borderRadius: 73, borderWidth: 1, borderColor: colors.accent },
   orbitInner: { position: "absolute", width: 112, height: 112, borderRadius: 56, borderWidth: 1, borderColor: colors.line },
   orbitNode: { position: "absolute", top: -5, left: 50, width: 10, height: 10, borderRadius: 5, backgroundColor: colors.accent },
+  orbitNodeSecondary: { position: "absolute", bottom: -3, left: 53, width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent, opacity: 0.45 },
+  coreGlow: { position: "absolute", width: 88, height: 88, borderRadius: 30, backgroundColor: colors.accentSoft },
   core: { width: 76, height: 76, borderRadius: 24, alignItems: "center", justifyContent: "center", backgroundColor: colors.accent, shadowColor: colors.accent, shadowOpacity: 0.32, shadowRadius: 18, elevation: 8 },
   coreText: { color: "white", fontWeight: "800", fontSize: 31 },
   eyebrow: { color: colors.accent, fontSize: 11, letterSpacing: 2.2, fontWeight: "700" },
   title: { color: colors.ink, fontSize: 24, fontWeight: "700" },
-  statusRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  status: { color: colors.muted, fontSize: 12 },
-  dot: { width: 3, height: 3, borderRadius: 2, backgroundColor: colors.accent },
+  status: { color: colors.muted, fontSize: 13 },
   detail: { color: colors.muted, textAlign: "center", maxWidth: 300 },
   button: { backgroundColor: colors.accent, paddingHorizontal: 22, paddingVertical: 12, borderRadius: 14 },
   buttonText: { color: "white", fontWeight: "600" },

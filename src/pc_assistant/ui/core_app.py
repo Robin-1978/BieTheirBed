@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -15,8 +17,13 @@ from textual.widgets import Header, Markdown, Static
 from pc_assistant.artifacts.delivery import save_download
 from pc_assistant.branding import ASSISTANT_NAME
 from pc_assistant.config import AppConfig
+from pc_assistant.conversation import ChatTurnState, TERMINAL_CHAT_TURN_STATES
+from pc_assistant.service.core_api import (
+    ChatApprovalSnapshot,
+    ChatTimelineEntrySnapshot,
+    ChatTurnSnapshot,
+)
 from pc_assistant.service.core_client import CoreClient
-from pc_assistant.tasks import TaskEvent
 from pc_assistant.ui.clipboard import copy_or_save
 from pc_assistant.ui.state import MessageType, UIState
 from pc_assistant.ui.theme import AVAILABLE_THEMES, get_palette, set_theme
@@ -55,6 +62,18 @@ _HELP = """\
 """
 
 
+@dataclass
+class _TurnRenderState:
+    revision: int = 0
+    reasoning: str = ""
+    content: str = ""
+    timeline_count: int = 0
+    artifact_ids: set[str] = field(default_factory=set)
+    tool_panels: dict[str, ToolCallPanel] = field(default_factory=dict)
+    terminal_recorded: bool = False
+    resolved_approval_ids: set[str] = field(default_factory=set)
+
+
 class CoreChatApp(App):
     CSS_PATH = "chat.tcss"
     TITLE = ASSISTANT_NAME
@@ -77,11 +96,10 @@ class CoreChatApp(App):
         self._session_handle = session_handle
         self._state = UIState()
         self._processing = False
-        self._cancelled = False
         self._last_input = ""
         self._last_answer = ""
-        self._current_tool_panel: ToolCallPanel | None = None
         self._confirm_pending: asyncio.Future[bool] | None = None
+        self._active_turn_id = ""
         set_theme(config.ui_theme)
 
     def get_css_variables(self) -> dict[str, str]:
@@ -99,10 +117,8 @@ class CoreChatApp(App):
     def on_mount(self) -> None:
         self.query_one("#chat-log", VerticalScroll).mount(CommandOutput(_WELCOME))
         self.query_one("#user-input", ChatInput).focus()
-        self._client.set_approval_handler(self._confirm_tool)
 
     def on_unmount(self) -> None:
-        self._client.set_approval_handler(None)
         pending = self._confirm_pending
         if pending is not None and not pending.done():
             pending.set_result(False)
@@ -140,7 +156,6 @@ class CoreChatApp(App):
     @work(exclusive=True)
     async def _run_turn(self, text: str) -> None:
         self._processing = True
-        self._cancelled = False
         self._set_status("thinking…")
         log = self.query_one("#chat-log", VerticalScroll)
         await log.mount(UserMessage(text))
@@ -148,72 +163,70 @@ class CoreChatApp(App):
         response = AssistantMessage()
         await log.mount(response)
         stream = Markdown.get_stream(response.markdown)
-        answer_parts: list[str] = []
+        render_state = _TurnRenderState()
         try:
-            async for event in self._client.execute_task(self._session_handle, text):
-                if self._cancelled:
-                    break
-                await self._handle_event(event, response, stream, answer_parts)
+            turn = await self._client.create_chat_turn(
+                self._session_handle,
+                text,
+                client_request_id=str(uuid.uuid4()),
+            )
+            self._active_turn_id = turn.turn_id
+            await self._render_chat_snapshot(turn, response, stream, render_state)
+            await self._resolve_pending_chat_approval(turn, render_state)
+            if turn.state not in TERMINAL_CHAT_TURN_STATES:
+                async for snapshot in self._client.chat_turn_updates(turn.turn_id):
+                    await self._render_chat_snapshot(
+                        snapshot,
+                        response,
+                        stream,
+                        render_state,
+                    )
+                    await self._resolve_pending_chat_approval(snapshot, render_state)
         except Exception as exc:
             await stream.write(f"\n\n{ICON_ERROR} **Error:** {exc}\n")
             self._state.add_message(MessageType.ERROR, str(exc))
         finally:
             await stream.stop()
+            self._active_turn_id = ""
             self._processing = False
             self._set_status("Ready")
             log.scroll_end(animate=False)
 
-    async def _handle_event(
+    async def _render_chat_snapshot(
         self,
-        event: TaskEvent,
+        snapshot: ChatTurnSnapshot,
         response: AssistantMessage,
         stream: Any,
-        answer_parts: list[str],
+        state: _TurnRenderState,
     ) -> None:
-        payload = event.payload
-        if event.event_type == "content_delta":
-            answer_parts.append(payload.content)
-            await stream.write(payload.content)
-            self._set_status("generating…")
-        elif event.event_type == "final_output":
-            answer_parts[:] = [payload.content]
-            self._last_answer = payload.content.strip()
-        elif event.event_type == "reasoning_delta":
-            response.add_thinking(payload.content)
+        if snapshot.revision <= state.revision:
+            return
+        state.revision = snapshot.revision
+
+        reasoning_delta = self._appended_text(state.reasoning, snapshot.reasoning)
+        if reasoning_delta:
+            response.add_thinking(reasoning_delta)
             self._set_status("thinking…")
-        elif event.event_type == "tool_call":
-            self._current_tool_panel = response.add_tool_call(
-                payload.tool_name,
-                payload.tool_args,
-                blocked=payload.blocked,
-                block_reason=payload.content if payload.blocked else "",
-            )
-            self._state.add_message(
-                MessageType.TOOL_CALL,
-                f"[{payload.tool_name}]",
-                tool_name=payload.tool_name,
-                tool_args=payload.tool_args,
-            )
-            self._set_status(payload.tool_name)
-        elif event.event_type == "tool_result":
-            result = payload.tool_result
-            rendered = json.dumps(result, ensure_ascii=False) if isinstance(result, dict) else str(result)
-            if self._current_tool_panel is not None:
-                self._current_tool_panel.set_result(
-                    rendered,
-                    is_error=payload.blocked,
-                )
-                self._current_tool_panel = None
-            self._state.add_message(
-                MessageType.TOOL_RESULT,
-                rendered[:200],
-                tool_name=payload.tool_name,
-            )
-        elif event.event_type == "artifact" and payload.artifact is not None:
+        state.reasoning = snapshot.reasoning
+
+        content_delta = self._appended_text(state.content, snapshot.content)
+        if content_delta:
+            await stream.write(content_delta)
+            self._set_status("generating…")
+        state.content = snapshot.content
+
+        for entry in snapshot.timeline[state.timeline_count:]:
+            self._render_timeline_entry(response, state, entry)
+        state.timeline_count = len(snapshot.timeline)
+
+        for artifact in snapshot.artifacts:
+            if artifact.artifact_id in state.artifact_ids:
+                continue
+            state.artifact_ids.add(artifact.artifact_id)
             try:
                 downloaded = await self._client.download_artifact(
                     self._session_handle,
-                    payload.artifact.artifact_id,
+                    artifact.artifact_id,
                 )
                 target = await asyncio.to_thread(
                     save_download,
@@ -226,35 +239,100 @@ class CoreChatApp(App):
                 self._state.add_message(MessageType.SYSTEM, warning)
             else:
                 await stream.write(
-                    f"\n\n*Artifact: `{payload.artifact.name}` "
-                    f"saved to `{target}`*\n"
+                    f"\n\n*Artifact: `{artifact.name}` saved to `{target}`*\n"
                 )
-        elif event.event_type == "completed":
-            self._last_answer = "".join(answer_parts).strip()
-            self._state.add_message(MessageType.ASSISTANT, self._last_answer)
-        elif event.event_type == "cancelled":
+
+        if snapshot.state is ChatTurnState.WAITING_APPROVAL:
+            self._set_status("confirmation required")
+        elif snapshot.state is ChatTurnState.CANCELLED:
             await stream.write("\n\n*Cancelled.*\n")
-        elif event.event_type == "failed":
-            await stream.write(f"\n\n{ICON_ERROR} **Error:** {payload.content}\n")
-            self._state.add_message(MessageType.ERROR, payload.content)
-        elif event.event_type == "context_compacted":
-            await stream.write("\n\n*较早对话已整理为简短工作摘要。*\n")
+        elif snapshot.state is ChatTurnState.FAILED:
+            detail = snapshot.failure_code or "The turn did not complete"
+            await stream.write(f"\n\n{ICON_ERROR} **Error:** {detail}\n")
+            self._state.add_message(MessageType.ERROR, detail)
+
+        if snapshot.state in TERMINAL_CHAT_TURN_STATES and not state.terminal_recorded:
+            state.terminal_recorded = True
+            final_answer = (snapshot.final_output or snapshot.content).strip()
+            final_delta = self._appended_text(snapshot.content, snapshot.final_output)
+            if final_delta:
+                await stream.write(final_delta)
+            self._last_answer = final_answer
+            if final_answer:
+                self._state.add_message(MessageType.ASSISTANT, final_answer)
         self.call_later(self._scroll_end)
 
-    async def _confirm_tool(self, event: TaskEvent) -> bool:
+    def _render_timeline_entry(
+        self,
+        response: AssistantMessage,
+        state: _TurnRenderState,
+        entry: ChatTimelineEntrySnapshot,
+    ) -> None:
+        if entry.kind == "tool_call":
+            panel = response.add_tool_call(
+                entry.tool_name,
+                entry.tool_args,
+                blocked=entry.blocked,
+            )
+            state.tool_panels[entry.tool_call_id] = panel
+            self._state.add_message(
+                MessageType.TOOL_CALL,
+                f"[{entry.tool_name}]",
+                tool_name=entry.tool_name,
+                tool_args=entry.tool_args,
+            )
+            self._set_status(entry.tool_name or "using tool…")
+        elif entry.kind == "tool_result":
+            result = entry.tool_result
+            rendered = json.dumps(result, ensure_ascii=False) if isinstance(result, dict) else str(result)
+            panel = state.tool_panels.pop(entry.tool_call_id, None)
+            if panel is not None:
+                panel.set_result(
+                    rendered,
+                    is_error=entry.blocked,
+                )
+            self._state.add_message(
+                MessageType.TOOL_RESULT,
+                rendered[:200],
+                tool_name=entry.tool_name,
+            )
+
+    async def _resolve_pending_chat_approval(
+        self,
+        snapshot: ChatTurnSnapshot,
+        state: _TurnRenderState,
+    ) -> None:
+        approval = next(
+            (
+                item
+                for item in snapshot.approvals
+                if item.state == "pending"
+                and item.approval_id not in state.resolved_approval_ids
+            ),
+            None,
+        )
+        if approval is None:
+            return
+        state.resolved_approval_ids.add(approval.approval_id)
+        approved = await self._confirm_chat_approval(approval)
+        await self._client.resolve_chat_approval(
+            approval.approval_id,
+            approved=approved,
+        )
+
+    async def _confirm_chat_approval(self, approval: ChatApprovalSnapshot) -> bool:
         if self._confirm_pending is not None:
             return False
-        payload = event.payload
         future = asyncio.get_running_loop().create_future()
         self._confirm_pending = future
         details = ", ".join(
-            f"{key}={value}" for key, value in list(payload.tool_args.items())[:4]
+            f"{key}={value}" for key, value in list(approval.arguments.items())[:4]
         )
         self.call_later(
             self._mount_confirmation,
-            payload.tool_name,
+            approval.tool_name,
             details,
-            payload.reason,
+            approval.reason,
         )
         try:
             return await asyncio.wait_for(future, timeout=_CONFIRM_TIMEOUT)
@@ -262,6 +340,14 @@ class CoreChatApp(App):
             return False
         finally:
             self._confirm_pending = None
+
+    @staticmethod
+    def _appended_text(previous: str, current: str) -> str:
+        if not current or current == previous:
+            return ""
+        if current.startswith(previous):
+            return current[len(previous):]
+        return current if not previous else ""
 
     def _mount_confirmation(self, tool: str, details: str, reason: str) -> None:
         self.query_one("#chat-log", VerticalScroll).mount(
@@ -356,10 +442,10 @@ class CoreChatApp(App):
         log.mount(CommandOutput("Approved." if approved else "Denied."))
 
     def action_cancel_turn(self) -> None:
-        if not self._processing:
+        if not self._processing or not self._active_turn_id:
             return
-        self._cancelled = True
-        asyncio.create_task(self._client.cancel_active_task())
+        self._set_status("stopping…")
+        asyncio.create_task(self._client.cancel_chat_turn(self._active_turn_id))
 
     def action_copy_last(self) -> None:
         text = self._selected_text() or self._last_answer
