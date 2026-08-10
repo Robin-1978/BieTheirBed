@@ -28,6 +28,7 @@ from pc_assistant.agent_runtime.contracts import (
     ToolListResult,
 )
 from pc_assistant.artifacts import ArtifactRef
+from pc_assistant.conversation import ChatTurn, ChatTurnState
 from pc_assistant.automation import (
     ScheduleRecord,
     ScheduleSpec,
@@ -42,6 +43,7 @@ from pc_assistant.tasks import (
     PrincipalTaskEvent,
     TaskCancelResult,
     TaskEvent,
+    TaskExecutionTrace,
     TaskPauseResult,
     TaskOrigin,
     TaskRecord,
@@ -53,6 +55,7 @@ NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)
 RequestId = Annotated[NonEmpty, StringConstraints(max_length=128)]
 SessionHandle = Annotated[NonEmpty, StringConstraints(max_length=256)]
 TaskId = Annotated[NonEmpty, StringConstraints(max_length=128)]
+ChatTurnId = Annotated[NonEmpty, StringConstraints(max_length=128)]
 CORE_WS_MAX_SIZE = 70 * 1024 * 1024
 
 
@@ -69,7 +72,7 @@ class TaskSnapshot(CoreModel):
     task_id: TaskId
     session_handle: SessionHandle
     client_request_id: RequestId
-    origin: TaskOrigin = TaskOrigin.CHAT
+    origin: TaskOrigin = TaskOrigin.USER
     parent_task_id: Annotated[str, StringConstraints(max_length=128)] = ""
     goal: Annotated[str, StringConstraints(max_length=200_000)]
     attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
@@ -86,14 +89,20 @@ class TaskSnapshot(CoreModel):
     started_at: float | None = Field(default=None, ge=0.0)
     finished_at: float | None = Field(default=None, ge=0.0)
     next_event_seq: int = Field(gt=0)
+    trace: TaskExecutionTrace | None = None
 
     @classmethod
-    def from_record(cls, task: TaskRecord) -> TaskSnapshot:
+    def from_record(
+        cls,
+        task: TaskRecord,
+        *,
+        trace: TaskExecutionTrace | None = None,
+    ) -> TaskSnapshot:
         return cls(
             task_id=task.task_id,
             session_handle=task.session_handle,
             client_request_id=task.client_request_id,
-            origin=getattr(task, "origin", TaskOrigin.CHAT),
+            origin=getattr(task, "origin", TaskOrigin.USER),
             parent_task_id=task.parent_task_id,
             goal=task.goal,
             attachments=tuple(
@@ -116,6 +125,105 @@ class TaskSnapshot(CoreModel):
             started_at=task.started_at,
             finished_at=task.finished_at,
             next_event_seq=task.next_event_seq,
+            trace=trace,
+        )
+
+
+class ChatToolStepSnapshot(CoreModel):
+    step_id: NonEmpty
+    tool_call_id: NonEmpty
+    tool_name: NonEmpty
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    state: str
+    result: dict[str, Any] = Field(default_factory=dict)
+    created_at: float = Field(ge=0.0)
+    updated_at: float = Field(ge=0.0)
+
+
+class ChatApprovalSnapshot(CoreModel):
+    approval_id: NonEmpty
+    step_id: NonEmpty
+    tool_call_id: NonEmpty
+    tool_name: NonEmpty
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    reason: str = ""
+    state: str
+    created_at: float = Field(ge=0.0)
+    resolved_at: float | None = Field(default=None, ge=0.0)
+    resolved_by: str = ""
+
+
+class ChatTimelineEntrySnapshot(CoreModel):
+    kind: str
+    content: str = ""
+    tool_call_id: str = ""
+    tool_name: str = ""
+    tool_args: dict[str, Any] = Field(default_factory=dict)
+    tool_result: Any = None
+    blocked: bool = False
+    iteration: int = Field(default=0, ge=0)
+
+
+class ChatTurnSnapshot(CoreModel):
+    turn_id: ChatTurnId
+    session_handle: SessionHandle
+    client_request_id: RequestId
+    user_input: Annotated[str, StringConstraints(max_length=200_000)] = ""
+    attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
+    tools_enabled: bool
+    state: ChatTurnState
+    reasoning: str = ""
+    content: str = ""
+    final_output: str = ""
+    artifacts: tuple[ArtifactRef, ...] = ()
+    failure_code: str = ""
+    cancel_requested: bool
+    tool_steps: tuple[ChatToolStepSnapshot, ...] = ()
+    approvals: tuple[ChatApprovalSnapshot, ...] = ()
+    timeline: tuple[ChatTimelineEntrySnapshot, ...] = ()
+    created_at: float = Field(ge=0.0)
+    updated_at: float = Field(ge=0.0)
+    finished_at: float | None = Field(default=None, ge=0.0)
+    revision: int = Field(ge=1)
+
+    @classmethod
+    def from_record(cls, turn: ChatTurn) -> ChatTurnSnapshot:
+        return cls(
+            turn_id=turn.turn_id,
+            session_handle=turn.session_handle,
+            client_request_id=turn.client_request_id,
+            user_input=turn.user_input,
+            attachments=tuple(
+                ArtifactInputRef(
+                    artifact_id=attachment.artifact_id,
+                    caption=attachment.caption,
+                )
+                for attachment in turn.attachments
+            ),
+            tools_enabled=turn.tools_enabled,
+            state=turn.state,
+            reasoning=turn.reasoning,
+            content=turn.content,
+            final_output=turn.final_output,
+            artifacts=turn.artifacts,
+            failure_code=turn.failure_code,
+            cancel_requested=turn.cancel_requested,
+            tool_steps=tuple(
+                ChatToolStepSnapshot.model_validate(step.model_dump())
+                for step in turn.tool_steps
+            ),
+            approvals=tuple(
+                ChatApprovalSnapshot.model_validate(approval.model_dump())
+                for approval in turn.approvals
+            ),
+            timeline=tuple(
+                ChatTimelineEntrySnapshot.model_validate(entry.model_dump())
+                for entry in turn.timeline
+            ),
+            created_at=turn.created_at,
+            updated_at=turn.updated_at,
+            finished_at=turn.finished_at,
+            revision=turn.revision,
         )
 
 
@@ -231,13 +339,66 @@ class CreateTaskRequest(CoreModel):
     tools_enabled: bool = True
     priority: int = Field(default=0, ge=0, le=9)
     parent_task_id: Annotated[str, StringConstraints(max_length=128)] = ""
-    origin: TaskOrigin = TaskOrigin.CHAT
+    origin: TaskOrigin = TaskOrigin.USER
 
     @model_validator(mode="after")
     def require_input_or_attachment(self) -> CreateTaskRequest:
         if not self.input.strip() and not self.attachments:
             raise ValueError("Task request requires input or an attachment")
         return self
+
+
+class CreateChatTurnRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["create_chat_turn"] = "create_chat_turn"
+    session_handle: SessionHandle
+    input: Annotated[str, StringConstraints(max_length=200_000)] = ""
+    attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
+    tools_enabled: bool = True
+
+    @model_validator(mode="after")
+    def require_input_or_attachment(self) -> CreateChatTurnRequest:
+        if not self.input.strip() and not self.attachments:
+            raise ValueError("ChatTurn request requires input or an attachment")
+        return self
+
+
+class GetChatTurnRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["get_chat_turn"] = "get_chat_turn"
+    turn_id: ChatTurnId
+
+
+class ListChatTurnsRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["list_chat_turns"] = "list_chat_turns"
+    session_handle: SessionHandle
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+class SubscribeChatTurnRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["subscribe_chat_turn"] = "subscribe_chat_turn"
+    turn_id: ChatTurnId
+
+
+class CancelChatTurnRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["cancel_chat_turn"] = "cancel_chat_turn"
+    turn_id: ChatTurnId
+
+
+class ResolveChatApprovalRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["resolve_chat_approval"] = "resolve_chat_approval"
+    approval_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+    approved: bool
 
 
 class SubscribeTaskRequest(CoreModel):
@@ -455,6 +616,12 @@ CoreRequest: TypeAlias = Annotated[
     | HealthRequest
     | CreateSessionRequest
     | CreateTaskRequest
+    | CreateChatTurnRequest
+    | GetChatTurnRequest
+    | ListChatTurnsRequest
+    | SubscribeChatTurnRequest
+    | CancelChatTurnRequest
+    | ResolveChatApprovalRequest
     | SubscribeTaskRequest
     | SubscribePrincipalTaskEventsRequest
     | GetTaskRequest
@@ -501,6 +668,7 @@ ErrorCode = Literal[
     "artifact_not_found",
     "artifact_too_large",
     "task_not_found",
+    "chat_turn_not_found",
     "schedule_not_found",
     "trigger_not_found",
     "capability_denied",
@@ -542,6 +710,49 @@ class TaskAcceptedMessage(CoreModel):
     request_id: RequestId
     task_id: TaskId
     state: TaskState
+
+
+class ChatTurnAcceptedMessage(CoreModel):
+    message_type: Literal["chat_turn_accepted"] = "chat_turn_accepted"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    turn: ChatTurnSnapshot
+
+
+class ChatTurnSubscribedMessage(CoreModel):
+    message_type: Literal["chat_turn_subscribed"] = "chat_turn_subscribed"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    turn_id: ChatTurnId
+
+
+class ChatTurnSnapshotMessage(CoreModel):
+    message_type: Literal["chat_turn_snapshot"] = "chat_turn_snapshot"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    turn: ChatTurnSnapshot
+
+
+class ChatTurnListMessage(CoreModel):
+    message_type: Literal["chat_turn_list"] = "chat_turn_list"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    turns: tuple[ChatTurnSnapshot, ...]
+
+
+class ChatTurnSignalMessage(CoreModel):
+    message_type: Literal["chat_turn_signal"] = "chat_turn_signal"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    turn: ChatTurnSnapshot
+
+
+class ChatApprovalResolvedMessage(CoreModel):
+    message_type: Literal["chat_approval_resolved"] = "chat_approval_resolved"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    approval: ChatApprovalSnapshot
+    resolved: bool
 
 
 class TaskSubscribedMessage(CoreModel):
@@ -744,6 +955,12 @@ CoreServerMessage: TypeAlias = Annotated[
     AuthenticatedMessage
     | SessionCreatedMessage
     | TaskAcceptedMessage
+    | ChatTurnAcceptedMessage
+    | ChatTurnSubscribedMessage
+    | ChatTurnSnapshotMessage
+    | ChatTurnListMessage
+    | ChatTurnSignalMessage
+    | ChatApprovalResolvedMessage
     | TaskSubscribedMessage
     | PrincipalTaskEventsSubscribedMessage
     | TaskSnapshotMessage

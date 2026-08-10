@@ -102,6 +102,7 @@ OS_INFO = f"{platform.system()} {platform.release()} ({platform.machine()}) | Sh
 
 def build_session_context(
     *,
+    session_history_context: str = "",
     memory_context: str = "",
     skill_context: str = "",
     os_info: str = OS_INFO,
@@ -118,6 +119,10 @@ def build_session_context(
     session_body = ["<session>"]
     if os_info:
         session_body.append(f"<os_info>{escape(os_info)}</os_info>")
+    if session_history_context:
+        session_body.append(
+            f"<session_history>\n{session_history_context}\n</session_history>"
+        )
     if memory_context:
         session_body.append(f"<user_memory>\n{memory_context}\n</user_memory>")
     if skill_context:

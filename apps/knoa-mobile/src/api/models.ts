@@ -21,11 +21,67 @@ export type TaskState =
   | "failed"
   | "cancelled";
 
-export type TaskOrigin = "chat" | "user" | "agent" | "scheduled" | "event";
+export type TaskOrigin = "user" | "agent" | "scheduled" | "event";
 
 export type ArtifactInput = {
   artifact_id: string;
   caption?: string;
+};
+
+export type ChatTurnState = "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
+
+export type ChatTimelineEntry = {
+  kind: string;
+  content: string;
+  tool_call_id: string;
+  tool_name: string;
+  tool_args: Record<string, unknown>;
+  tool_result: unknown;
+  blocked: boolean;
+  iteration: number;
+};
+
+export type ChatApproval = {
+  approval_id: string;
+  step_id: string;
+  tool_call_id: string;
+  tool_name: string;
+  arguments: Record<string, unknown>;
+  reason: string;
+  state: string;
+  created_at: number;
+  resolved_at: number | null;
+  resolved_by: string;
+};
+
+export type ChatArtifact = {
+  artifact_id: string;
+  name: string;
+  media_type: string;
+  [key: string]: unknown;
+};
+
+export type ChatTurnSnapshot = {
+  turn_id: string;
+  session_handle: string;
+  client_request_id: string;
+  user_input: string;
+  attachments: ArtifactInput[];
+  tools_enabled: boolean;
+  state: ChatTurnState;
+  reasoning: string;
+  content: string;
+  final_output: string;
+  artifacts: ChatArtifact[];
+  failure_code: string;
+  cancel_requested: boolean;
+  tool_steps: Array<Record<string, unknown>>;
+  approvals: ChatApproval[];
+  timeline: ChatTimelineEntry[];
+  created_at: number;
+  updated_at: number;
+  finished_at: number | null;
+  revision: number;
 };
 
 export type TaskSnapshot = {
@@ -49,6 +105,30 @@ export type TaskSnapshot = {
   started_at: number | null;
   finished_at: number | null;
   next_event_seq: number;
+  trace: TaskExecutionTrace | null;
+};
+
+export type TaskTraceEntry = {
+  entry_type: "reasoning" | "content" | "plan" | "tool_call" | "tool_result" | "artifact" | "context_compacted" | "warning" | "final_output";
+  iteration: number;
+  content: string;
+  tool_call_id: string;
+  tool_name: string;
+  tool_args: Record<string, unknown>;
+  tool_result: unknown;
+  artifact: ChatArtifact | null;
+  occurred_at: number;
+};
+
+export type TaskExecutionTrace = {
+  task_id: string;
+  entries: TaskTraceEntry[];
+  final_output: string;
+  created_at: number;
+  updated_at: number;
+  retained_until: number;
+  compacted_at: number | null;
+  revision: number;
 };
 
 export type TaskEvent = {

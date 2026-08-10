@@ -64,6 +64,7 @@ class BenchmarkRunner:
 
         try:
             composition = build_core_runtime(config)
+            await composition.conversation_service.start()
             await composition.task_service.start()
             await composition.host.start()
             client: CoreClient | None = None
@@ -96,6 +97,7 @@ class BenchmarkRunner:
                     await client.disconnect()
                 await composition.host.stop()
                 await composition.task_service.stop()
+                await composition.conversation_service.stop()
         except Exception as e:
             error_msg = str(e)
 

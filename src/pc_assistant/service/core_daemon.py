@@ -41,6 +41,7 @@ class CoreDaemon:
         composition = build_core_runtime(self._config)
         try:
             await composition.extensions.start()
+            await composition.conversation_service.start()
             await composition.task_service.start()
             await composition.schedule_dispatcher.start()
             await composition.trigger_dispatcher.start()
@@ -51,6 +52,7 @@ class CoreDaemon:
             await composition.trigger_dispatcher.stop()
             await composition.schedule_dispatcher.stop()
             await composition.task_service.stop()
+            await composition.conversation_service.stop()
             await composition.extensions.stop()
             raise
         self._composition = composition
@@ -69,6 +71,7 @@ class CoreDaemon:
         await composition.trigger_dispatcher.stop()
         await composition.schedule_dispatcher.stop()
         await composition.task_service.stop()
+        await composition.conversation_service.stop()
         await composition.extensions.stop()
         composition.paths.pid.unlink(missing_ok=True)
         logger.info("Core service stopped")
@@ -93,6 +96,8 @@ class CoreDaemon:
             composition = self._composition
             if composition is not None:
                 await asyncio.to_thread(composition.artifacts.cleanup_expired)
+                await composition.task_service.compact_expired_traces()
+                await composition.conversation_service.compact_expired_details()
 
     def _write_pid(self, path: Path) -> None:
         _prepare_private_file(path)

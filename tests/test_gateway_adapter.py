@@ -25,11 +25,16 @@ from pc_assistant.agent_runtime.contracts import (
     ToolListResult,
 )
 from pc_assistant.artifacts import ArtifactRef
+from pc_assistant.conversation import ChatTurnState
 from pc_assistant.gateway.adapter import SecureGatewayAdapter
 from pc_assistant.gateway.auth import GatewayAuthenticationRejectedError
 from pc_assistant.gateway.identity import PairingGrantRejectedError
 from pc_assistant.gateway.push import GatewayPushRepository
-from pc_assistant.service.core_api import TaskSnapshot
+from pc_assistant.service.core_api import (
+    ChatApprovalSnapshot,
+    ChatTurnSnapshot,
+    TaskSnapshot,
+)
 from pc_assistant.tasks import (
     ApprovalState,
     PrincipalTaskEvent,
@@ -144,6 +149,24 @@ def _task_snapshot() -> TaskSnapshot:
     )
 
 
+def _chat_snapshot(state: ChatTurnState = ChatTurnState.COMPLETED) -> ChatTurnSnapshot:
+    return ChatTurnSnapshot(
+        turn_id="turn-a",
+        session_handle="session-a",
+        client_request_id="request-a",
+        user_input="hello",
+        tools_enabled=True,
+        state=state,
+        content="你好",
+        final_output="你好",
+        cancel_requested=False,
+        created_at=1.0,
+        updated_at=2.0,
+        finished_at=2.0,
+        revision=2,
+    )
+
+
 class _Core:
     def __init__(self) -> None:
         self.calls = []
@@ -161,6 +184,42 @@ class _Core:
             ("create_task", principal_id, session_handle, user_input, attachments, kwargs)
         )
         return SimpleNamespace(task_id="task-a", state=TaskState.QUEUED)
+
+    async def create_chat_turn(self, principal_id, session_handle, user_input, attachments, **kwargs):
+        self.calls.append(
+            ("create_chat_turn", principal_id, session_handle, user_input, attachments, kwargs)
+        )
+        return _chat_snapshot(ChatTurnState.RUNNING)
+
+    async def get_chat_turn(self, principal_id, turn_id):
+        self.calls.append(("get_chat_turn", principal_id, turn_id))
+        return _chat_snapshot()
+
+    async def list_chat_turns(self, principal_id, session_handle, *, limit):
+        self.calls.append(("list_chat_turns", principal_id, session_handle, limit))
+        return (_chat_snapshot(),)
+
+    async def chat_turn_updates(self, principal_id, turn_id):
+        self.calls.append(("chat_turn_updates", principal_id, turn_id))
+        yield _chat_snapshot()
+
+    async def cancel_chat_turn(self, principal_id, turn_id):
+        self.calls.append(("cancel_chat_turn", principal_id, turn_id))
+        return _chat_snapshot(ChatTurnState.CANCELLED)
+
+    async def resolve_chat_approval(self, principal_id, approval_id, *, approved):
+        self.calls.append(("resolve_chat_approval", principal_id, approval_id, approved))
+        return SimpleNamespace(
+            approval=ChatApprovalSnapshot(
+                approval_id=approval_id,
+                step_id="step-a",
+                tool_call_id="call-a",
+                tool_name="write_file",
+                state="approved" if approved else "rejected",
+                created_at=1.0,
+            ),
+            resolved=True,
+        )
 
     async def list_tasks(self, principal_id, **kwargs):
         self.calls.append(("list_tasks", principal_id, kwargs))
@@ -372,7 +431,7 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
         created = await http.post(
             "/v1/tasks",
             headers=headers,
-            json={"session_handle": "session-a", "input": "hello"},
+            json={"input": "hello"},
         )
         listed = await http.get(
             "/v1/tasks?state=running&limit=10",
@@ -432,6 +491,58 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_gateway_conversation_uses_turn_snapshots_not_task_feed(tmp_path) -> None:
+    core = _Core()
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=_Authentication(),
+        core=core,
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://gateway.local",
+    ) as http:
+        created = await http.post(
+            "/v1/conversations/sessions/session-a/turns",
+            headers=headers,
+            json={"input": "hello"},
+        )
+        listed = await http.get(
+            "/v1/conversations/sessions/session-a/turns?limit=20",
+            headers=headers,
+        )
+        detail = await http.get(
+            "/v1/conversations/turns/turn-a",
+            headers=headers,
+        )
+        stream = await http.get(
+            "/v1/conversations/turns/turn-a/stream",
+            headers=headers,
+        )
+        cancelled = await http.post(
+            "/v1/conversations/turns/turn-a/cancel",
+            headers=headers,
+        )
+        approval = await http.post(
+            "/v1/conversations/approvals/approval-a/resolve",
+            headers=headers,
+            json={"approved": True},
+        )
+
+    assert created.status_code == 202
+    assert created.json()["turn"]["turn_id"] == "turn-a"
+    assert listed.json()["turns"][0]["final_output"] == "你好"
+    assert detail.json()["turn"]["state"] == "completed"
+    assert "event: snapshot\n" in stream.text
+    assert '"turn_id":"turn-a"' in stream.text
+    assert cancelled.json()["turn"]["state"] == "cancelled"
+    assert approval.json()["approval"]["state"] == "approved"
+    assert not any(call[0] == "principal_task_events" for call in core.calls)
+
+
+@pytest.mark.asyncio
 async def test_gateway_creates_background_task_in_detached_session(tmp_path) -> None:
     core = _Core()
     adapter = SecureGatewayAdapter(
@@ -449,9 +560,7 @@ async def test_gateway_creates_background_task_in_detached_session(tmp_path) -> 
             "/v1/tasks",
             headers=headers,
             json={
-                "session_handle": "chat-session",
                 "input": "整理资料",
-                "kind": "task",
             },
         )
 

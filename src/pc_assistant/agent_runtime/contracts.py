@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol, runtime_checkable
 
@@ -211,6 +211,8 @@ class RuntimeRunContext:
     scope: RuntimeScope
     run_id: str
     cancellation: asyncio.Event
+    messages: tuple[dict[str, Any], ...] = ()
+    commit_messages: Callable[[tuple[dict[str, Any], ...]], Awaitable[None]] | None = None
     confirmation: ConfirmationPort | None = None
     tool_commit: ToolCommitPort | None = None
 

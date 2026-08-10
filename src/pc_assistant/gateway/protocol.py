@@ -8,7 +8,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from pc_assistant.agent_runtime.contracts import RuntimeStatus, ToolListResult
 from pc_assistant.agent_runtime.contracts import ArtifactTranscriptionResult
 from pc_assistant.artifacts import ArtifactRef
-from pc_assistant.service.core_api import ArtifactInputRef, TaskSnapshot
+from pc_assistant.service.core_api import (
+    ArtifactInputRef,
+    ChatApprovalSnapshot,
+    ChatTurnSnapshot,
+    TaskSnapshot,
+)
 from pc_assistant.tasks import ApprovalState, TaskEvent, TaskState
 
 
@@ -40,17 +45,25 @@ class AuthCompleteRequest(AuthChallengeRequest):
 
 
 class CreateTaskRequest(GatewayRequest):
-    session_handle: str = Field(min_length=1, max_length=256)
     input: str = Field(default="", max_length=200_000)
     attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
     tools_enabled: bool = True
     priority: int = Field(default=0, ge=0, le=9)
     parent_task_id: str = Field(default="", max_length=128)
-    kind: Literal["chat", "task"] = "chat"
 
     def require_content(self) -> None:
         if not self.input.strip() and not self.attachments:
             raise ValueError("Task request requires input or an attachment")
+
+
+class CreateChatTurnRequest(GatewayRequest):
+    input: str = Field(default="", max_length=200_000)
+    attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
+    tools_enabled: bool = True
+
+    def require_content(self) -> None:
+        if not self.input.strip() and not self.attachments:
+            raise ValueError("ChatTurn request requires input or an attachment")
 
 
 class CancelTaskRequest(GatewayRequest):
@@ -85,7 +98,6 @@ class GatewayQuery(BaseModel):
 class TaskListQuery(GatewayQuery):
     session_handle: str = Field(default="", max_length=256)
     state: TaskState | None = None
-    kind: Literal["all", "chat", "task"] = "all"
     limit: int = Field(default=50, ge=1, le=100)
     cursor: str = Field(default="", max_length=512)
 
@@ -96,6 +108,10 @@ class EventQuery(GatewayQuery):
 
 class TaskEventQuery(GatewayQuery):
     after_seq: int = Field(default=0, ge=0)
+
+
+class ChatTurnListQuery(GatewayQuery):
+    limit: int = Field(default=100, ge=1, le=500)
 
 
 class ArtifactUploadQuery(GatewayQuery):
@@ -157,6 +173,19 @@ class SessionCreatedResponse(BaseModel):
 class TaskAcceptedResponse(BaseModel):
     task_id: str
     state: TaskState
+
+
+class ChatTurnResponse(BaseModel):
+    turn: ChatTurnSnapshot
+
+
+class ChatTurnListResponse(BaseModel):
+    turns: tuple[ChatTurnSnapshot, ...]
+
+
+class ChatApprovalResolvedResponse(BaseModel):
+    approval: ChatApprovalSnapshot
+    resolved: bool
 
 
 class TaskCommandResponse(BaseModel):

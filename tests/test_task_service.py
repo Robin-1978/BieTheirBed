@@ -114,7 +114,7 @@ def _components(
     hub = TaskEventHub(subscriber_capacity=32)
     approvals = DurableApprovalService(repository, hub)
     commits = DurableToolCommitService(repository)
-    executor = TaskExecutor(repository, runtime, approvals, commits, hub)
+    executor = TaskExecutor(repository, sessions, runtime, approvals, commits, hub)
     return TaskService(repository, executor, approvals, hub), repository, scope
 
 
@@ -129,6 +129,7 @@ def test_task_executor_rejects_unbounded_concurrency(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="concurrency"):
         TaskExecutor(
             repository,
+            sessions,
             _Runtime(),
             approvals,
             DurableToolCommitService(repository),
@@ -156,10 +157,16 @@ async def test_task_executes_without_connection_owned_run(tmp_path: Path) -> Non
         assert [event.event_type for event in events] == [
             "task_created",
             "state_changed",
-            "content_delta",
-            "final_output",
             "completed",
         ]
+        trace = repository.get_trace(scope.principal_id, task.task_id)
+        assert trace is not None
+        assert [entry.entry_type for entry in trace.entries] == [
+            "content",
+            "final_output",
+        ]
+        assert trace.entries[0].content == "working:finish report"
+        assert trace.final_output == "approved"
         assert repository.get(scope.principal_id, task.task_id).state is (
             TaskState.COMPLETED
         )
@@ -179,10 +186,7 @@ async def test_unsubscribe_does_not_cancel_task(tmp_path: Path) -> None:
             goal="finish report",
         )
         stream = service.events(scope.principal_id, task.task_id)
-        while True:
-            event = await anext(stream)
-            if event.event_type == "content_delta":
-                break
+        assert (await anext(stream)).event_type == "task_created"
         await stream.aclose()
 
         release.set()
@@ -270,8 +274,9 @@ async def test_approval_resolves_from_task_service_not_stream_connection(
                 assert approval.state.value == "approved"
 
         assert "approval_resolved" in [event.event_type for event in events]
-        assert events[-2].event_type == "final_output"
-        assert events[-2].payload.content == "approved"
+        trace = repository.get_trace(scope.principal_id, task.task_id)
+        assert trace is not None
+        assert trace.final_output == "approved"
         assert repository.get(scope.principal_id, task.task_id).state is (
             TaskState.COMPLETED
         )
@@ -389,7 +394,7 @@ async def test_principal_event_stream_replays_and_tails(tmp_path: Path) -> None:
             poll_interval=0.1,
         )
         seen = []
-        while len(seen) < 3:
+        while len(seen) < 2:
             seen.append(await anext(stream))
         release.set()
         while seen[-1].event.event_type != "completed":

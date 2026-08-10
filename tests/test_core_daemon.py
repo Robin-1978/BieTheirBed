@@ -26,7 +26,13 @@ class _Extensions(_Host):
 
 
 class _TaskService(_Host):
-    pass
+    async def compact_expired_traces(self) -> int:
+        return 0
+
+
+class _ConversationService(_Host):
+    async def compact_expired_details(self) -> int:
+        return 0
 
 
 class _ScheduleDispatcher(_Host):
@@ -45,6 +51,7 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     host = _Host()
     extensions = _Extensions()
     task_service = _TaskService()
+    conversation_service = _ConversationService()
     schedule_dispatcher = _ScheduleDispatcher()
     trigger_dispatcher = _TriggerDispatcher()
     pid = tmp_path / "service.pid"
@@ -52,6 +59,7 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
         host=host,
         extensions=extensions,
         task_service=task_service,
+        conversation_service=conversation_service,
         schedule_dispatcher=schedule_dispatcher,
         trigger_dispatcher=trigger_dispatcher,
         paths=SimpleNamespace(pid=pid),
@@ -71,6 +79,7 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     assert host.started
     assert extensions.started
     assert task_service.started
+    assert conversation_service.started
     assert schedule_dispatcher.started
     assert trigger_dispatcher.started
     assert pid.exists()
@@ -82,6 +91,7 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     assert host.stopped
     assert extensions.stopped
     assert task_service.stopped
+    assert conversation_service.stopped
     assert schedule_dispatcher.stopped
     assert trigger_dispatcher.stopped
     assert not pid.exists()

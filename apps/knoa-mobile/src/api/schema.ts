@@ -116,6 +116,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/conversations/sessions/{session_handle}/turns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listChatTurns"];
+        put?: never;
+        post: operations["createChatTurn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/turns/{turn_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getChatTurn"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/turns/{turn_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["streamChatTurn"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/turns/{turn_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancelChatTurn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/approvals/{approval_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["resolveChatApproval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/tasks": {
         parameters: {
             query?: never;
@@ -591,10 +671,217 @@ export interface components {
             /** Expires At */
             expires_at: number;
         };
-        /** CreateTaskRequest */
-        CreateTaskRequest: {
+        /** ChatApprovalResolvedResponse */
+        ChatApprovalResolvedResponse: {
+            approval: components["schemas"]["ChatApprovalSnapshot"];
+            /** Resolved */
+            resolved: boolean;
+        };
+        /** ChatApprovalSnapshot */
+        ChatApprovalSnapshot: {
+            /** Approval Id */
+            approval_id: string;
+            /** Step Id */
+            step_id: string;
+            /** Tool Call Id */
+            tool_call_id: string;
+            /** Tool Name */
+            tool_name: string;
+            /** Arguments */
+            arguments?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+            /** State */
+            state: string;
+            /** Created At */
+            created_at: number;
+            /**
+             * Resolved At
+             * @default null
+             */
+            resolved_at: number | null;
+            /**
+             * Resolved By
+             * @default
+             */
+            resolved_by: string;
+        };
+        /** ChatTimelineEntrySnapshot */
+        ChatTimelineEntrySnapshot: {
+            /** Kind */
+            kind: string;
+            /**
+             * Content
+             * @default
+             */
+            content: string;
+            /**
+             * Tool Call Id
+             * @default
+             */
+            tool_call_id: string;
+            /**
+             * Tool Name
+             * @default
+             */
+            tool_name: string;
+            /** Tool Args */
+            tool_args?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Tool Result
+             * @default null
+             */
+            tool_result: unknown;
+            /**
+             * Blocked
+             * @default false
+             */
+            blocked: boolean;
+            /**
+             * Iteration
+             * @default 0
+             */
+            iteration: number;
+        };
+        /** ChatToolStepSnapshot */
+        ChatToolStepSnapshot: {
+            /** Step Id */
+            step_id: string;
+            /** Tool Call Id */
+            tool_call_id: string;
+            /** Tool Name */
+            tool_name: string;
+            /** Arguments */
+            arguments?: {
+                [key: string]: unknown;
+            };
+            /** State */
+            state: string;
+            /** Result */
+            result?: {
+                [key: string]: unknown;
+            };
+            /** Created At */
+            created_at: number;
+            /** Updated At */
+            updated_at: number;
+        };
+        /** ChatTurnListResponse */
+        ChatTurnListResponse: {
+            /** Turns */
+            turns: components["schemas"]["ChatTurnSnapshot"][];
+        };
+        /** ChatTurnResponse */
+        ChatTurnResponse: {
+            turn: components["schemas"]["ChatTurnSnapshot"];
+        };
+        /** ChatTurnSnapshot */
+        ChatTurnSnapshot: {
+            /** Turn Id */
+            turn_id: string;
             /** Session Handle */
             session_handle: string;
+            /** Client Request Id */
+            client_request_id: string;
+            /**
+             * User Input
+             * @default
+             */
+            user_input: string;
+            /**
+             * Attachments
+             * @default []
+             */
+            attachments: components["schemas"]["ArtifactInputRef"][];
+            /** Tools Enabled */
+            tools_enabled: boolean;
+            state: components["schemas"]["ChatTurnState"];
+            /**
+             * Reasoning
+             * @default
+             */
+            reasoning: string;
+            /**
+             * Content
+             * @default
+             */
+            content: string;
+            /**
+             * Final Output
+             * @default
+             */
+            final_output: string;
+            /**
+             * Artifacts
+             * @default []
+             */
+            artifacts: components["schemas"]["ArtifactRef"][];
+            /**
+             * Failure Code
+             * @default
+             */
+            failure_code: string;
+            /** Cancel Requested */
+            cancel_requested: boolean;
+            /**
+             * Tool Steps
+             * @default []
+             */
+            tool_steps: components["schemas"]["ChatToolStepSnapshot"][];
+            /**
+             * Approvals
+             * @default []
+             */
+            approvals: components["schemas"]["ChatApprovalSnapshot"][];
+            /**
+             * Timeline
+             * @default []
+             */
+            timeline: components["schemas"]["ChatTimelineEntrySnapshot"][];
+            /** Created At */
+            created_at: number;
+            /** Updated At */
+            updated_at: number;
+            /**
+             * Finished At
+             * @default null
+             */
+            finished_at: number | null;
+            /** Revision */
+            revision: number;
+        };
+        /**
+         * ChatTurnState
+         * @enum {string}
+         */
+        ChatTurnState: "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
+        /** CreateChatTurnRequest */
+        CreateChatTurnRequest: {
+            /**
+             * Input
+             * @default
+             */
+            input: string;
+            /**
+             * Attachments
+             * @default []
+             */
+            attachments: components["schemas"]["ArtifactInputRef"][];
+            /**
+             * Tools Enabled
+             * @default true
+             */
+            tools_enabled: boolean;
+        };
+        /** CreateTaskRequest */
+        CreateTaskRequest: {
             /**
              * Input
              * @default
@@ -620,12 +907,6 @@ export interface components {
              * @default
              */
             parent_task_id: string;
-            /**
-             * Kind
-             * @default chat
-             * @enum {string}
-             */
-            kind: "chat" | "task";
         };
         /** ErrorResponse */
         ErrorResponse: {
@@ -880,6 +1161,34 @@ export interface components {
              */
             iteration: number;
         };
+        /** TaskExecutionTrace */
+        TaskExecutionTrace: {
+            /** Task Id */
+            task_id: string;
+            /**
+             * Entries
+             * @default []
+             */
+            entries: components["schemas"]["TaskTraceEntry"][];
+            /**
+             * Final Output
+             * @default
+             */
+            final_output: string;
+            /** Created At */
+            created_at: number;
+            /** Updated At */
+            updated_at: number;
+            /** Retained Until */
+            retained_until: number;
+            /**
+             * Compacted At
+             * @default null
+             */
+            compacted_at: number | null;
+            /** Revision */
+            revision: number;
+        };
         /** TaskListResponse */
         TaskListResponse: {
             /** Tasks */
@@ -894,7 +1203,7 @@ export interface components {
          * TaskOrigin
          * @enum {string}
          */
-        TaskOrigin: "chat" | "user" | "agent" | "scheduled" | "event";
+        TaskOrigin: "user" | "agent" | "scheduled" | "event";
         /** TaskResponse */
         TaskResponse: {
             task: components["schemas"]["TaskSnapshot"];
@@ -907,7 +1216,7 @@ export interface components {
             session_handle: string;
             /** Client Request Id */
             client_request_id: string;
-            /** @default chat */
+            /** @default user */
             origin: components["schemas"]["TaskOrigin"];
             /**
              * Parent Task Id
@@ -961,12 +1270,55 @@ export interface components {
             finished_at: number | null;
             /** Next Event Seq */
             next_event_seq: number;
+            /** @default null */
+            trace: components["schemas"]["TaskExecutionTrace"] | null;
         };
         /**
          * TaskState
          * @enum {string}
          */
         TaskState: "queued" | "running" | "waiting_approval" | "paused" | "completed" | "failed" | "cancelled";
+        /** TaskTraceEntry */
+        TaskTraceEntry: {
+            /**
+             * Entry Type
+             * @enum {string}
+             */
+            entry_type: "reasoning" | "content" | "plan" | "tool_call" | "tool_result" | "artifact" | "context_compacted" | "warning" | "final_output";
+            /**
+             * Iteration
+             * @default 0
+             */
+            iteration: number;
+            /**
+             * Content
+             * @default
+             */
+            content: string;
+            /**
+             * Tool Call Id
+             * @default
+             */
+            tool_call_id: string;
+            /**
+             * Tool Name
+             * @default
+             */
+            tool_name: string;
+            /** Tool Args */
+            tool_args?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Tool Result
+             * @default null
+             */
+            tool_result: unknown;
+            /** @default null */
+            artifact: components["schemas"]["ArtifactRef"] | null;
+            /** Occurred At */
+            occurred_at: number;
+        };
         /** ToolDescriptorRecord */
         ToolDescriptorRecord: {
             /** Name */
@@ -1345,6 +1697,391 @@ export interface operations {
             };
             /** @description Request rejected */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listChatTurns: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                session_handle: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Conversation history */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatTurnListResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    createChatTurn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_handle: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateChatTurnRequest"];
+            };
+        };
+        responses: {
+            /** @description ChatTurn accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatTurnResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getChatTurn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ChatTurn snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatTurnResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    streamChatTurn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Coalesced ChatTurn snapshots */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cancelChatTurn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ChatTurn cancellation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatTurnResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    resolveChatApproval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                approval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveApprovalRequest"];
+            };
+        };
+        responses: {
+            /** @description Chat approval resolved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatApprovalResolvedResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

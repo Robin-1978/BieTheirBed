@@ -22,7 +22,13 @@ from pc_assistant.channels.feishu import (
     _split_text,
 )
 from pc_assistant.config import AppConfig
-from pc_assistant.service.core_api import TaskCancelResultMessage
+from pc_assistant.conversation import ChatTurnState
+from pc_assistant.service.core_api import (
+    ChatApprovalSnapshot,
+    ChatTimelineEntrySnapshot,
+    ChatTurnSnapshot,
+    TaskCancelResultMessage,
+)
 from pc_assistant.service.core_client import CoreRequestError
 from pc_assistant.service import credentials
 from pc_assistant.tasks import (
@@ -113,65 +119,68 @@ class _CoreClient:
         self.transcriptions.append((session, artifact_id))
         return SimpleNamespace(transcript="整理这段会议录音")
 
-    async def execute_task(self, session, text, attachments):
+    async def create_chat_turn(self, session, text, attachments):
         self.runs.append((session, text, attachments))
-        yield TaskEvent(
-            task_id="task-a",
-            event_seq=1,
-            occurred_at=1.0,
-            event_type="task_created",
-            payload=TaskEventPayload(),
-        )
-        yield TaskEvent(
-            task_id="task-a",
-            event_seq=2,
-            occurred_at=2.0,
-            event_type="reasoning_delta",
-            payload=TaskEventPayload(content="分析中"),
-        )
-        yield TaskEvent(
-            task_id="task-a",
-            event_seq=3,
-            occurred_at=3.0,
-            event_type="tool_call",
-            payload=TaskEventPayload(
+        return _chat_snapshot()
+
+    async def chat_turn_updates(self, _turn_id):
+        timeline = (
+            ChatTimelineEntrySnapshot(kind="reasoning", content="分析中"),
+            ChatTimelineEntrySnapshot(
+                kind="tool_call",
                 tool_call_id="call-mouse",
                 tool_name="mouse",
                 tool_args={"action": "move"},
             ),
-        )
-        yield TaskEvent(
-            task_id="task-a",
-            event_seq=4,
-            occurred_at=4.0,
-            event_type="tool_result",
-            payload=TaskEventPayload(
+            ChatTimelineEntrySnapshot(
+                kind="tool_result",
                 tool_call_id="call-mouse",
                 tool_name="mouse",
                 tool_result={"status": "completed", "output": {"success": True}},
             ),
+            ChatTimelineEntrySnapshot(kind="content", content="完成"),
         )
-        yield TaskEvent(
-            task_id="task-a",
-            event_seq=5,
-            occurred_at=5.0,
-            event_type="content_delta",
-            payload=TaskEventPayload(content="完成"),
+        yield _chat_snapshot(
+            state=ChatTurnState.COMPLETED,
+            timeline=timeline,
+            reasoning="分析中",
+            content="完成",
+            final_output="完成",
         )
-        yield TaskEvent(
-            task_id="task-a",
-            event_seq=6,
-            occurred_at=6.0,
-            event_type="final_output",
-            payload=TaskEventPayload(content="完成"),
-        )
-        yield TaskEvent(
-            task_id="task-a",
-            event_seq=7,
-            occurred_at=7.0,
-            event_type="completed",
-            payload=TaskEventPayload(),
-        )
+
+
+def _chat_snapshot(
+    *,
+    turn_id: str = "turn-a",
+    state: ChatTurnState = ChatTurnState.RUNNING,
+    timeline: tuple[ChatTimelineEntrySnapshot, ...] = (),
+    approvals: tuple[ChatApprovalSnapshot, ...] = (),
+    artifacts: tuple[ArtifactRef, ...] = (),
+    reasoning: str = "",
+    content: str = "",
+    final_output: str = "",
+    failure_code: str = "",
+) -> ChatTurnSnapshot:
+    return ChatTurnSnapshot(
+        turn_id=turn_id,
+        session_handle="session-a",
+        client_request_id="request-a",
+        user_input="hello",
+        tools_enabled=True,
+        state=state,
+        reasoning=reasoning,
+        content=content,
+        final_output=final_output,
+        failure_code=failure_code,
+        cancel_requested=False,
+        timeline=timeline,
+        approvals=approvals,
+        artifacts=artifacts,
+        created_at=1.0,
+        updated_at=2.0,
+        finished_at=2.0 if state is not ChatTurnState.RUNNING else None,
+        revision=2 if state is not ChatTurnState.RUNNING else 1,
+    )
 
 
 def _config(tmp_path) -> AppConfig:
@@ -245,6 +254,19 @@ def _approval_event(
             tool_args=arguments or {"action": "click"},
             reason=reason,
         ),
+    )
+
+
+def _chat_approval(*, state: str = "pending") -> ChatApprovalSnapshot:
+    return ChatApprovalSnapshot(
+        approval_id="confirmation-a",
+        step_id="step-a",
+        tool_call_id="call-mouse",
+        tool_name="mouse",
+        arguments={"action": "click"},
+        reason="desktop_control:high",
+        state=state,
+        created_at=1.0,
     )
 
 
@@ -365,32 +387,22 @@ async def test_feishu_new_message_is_not_blocked_by_running_task(tmp_path) -> No
             self.both_started = asyncio.Event()
             self.release = asyncio.Event()
 
-        async def execute_task(self, _session, text, _attachments):
-            task_id = f"task-{len(self.started) + 1}"
+        async def create_chat_turn(self, _session, text, _attachments):
+            turn_id = f"turn-{len(self.started) + 1}"
             self.started.append(text)
             if len(self.started) == 2:
                 self.both_started.set()
-            yield TaskEvent(
-                task_id=task_id,
-                event_seq=1,
-                occurred_at=1.0,
-                event_type="task_created",
-                payload=TaskEventPayload(state=TaskState.QUEUED),
-            )
+            return _chat_snapshot(turn_id=turn_id)
+
+        async def chat_turn_updates(self, turn_id):
             await self.release.wait()
-            yield TaskEvent(
-                task_id=task_id,
-                event_seq=2,
-                occurred_at=2.0,
-                event_type="final_output",
-                payload=TaskEventPayload(content=f"{text} 完成"),
-            )
-            yield TaskEvent(
-                task_id=task_id,
-                event_seq=3,
-                occurred_at=3.0,
-                event_type="completed",
-                payload=TaskEventPayload(state=TaskState.COMPLETED),
+            index = int(turn_id.rsplit("-", 1)[-1]) - 1
+            text = self.started[index]
+            yield _chat_snapshot(
+                turn_id=turn_id,
+                state=ChatTurnState.COMPLETED,
+                content=f"{text} 完成",
+                final_output=f"{text} 完成",
             )
 
     channel = FeishuChannel(_config(tmp_path))
@@ -597,34 +609,15 @@ async def test_feishu_long_result_uses_preview_and_delivers_full_artifact(
     )
 
     class LongResultClient:
-        async def execute_task(self, _session, _text, _attachments):
-            yield TaskEvent(
-                task_id="task-long",
-                event_seq=1,
-                occurred_at=1.0,
-                event_type="task_created",
-                payload=TaskEventPayload(state=TaskState.QUEUED),
-            )
-            yield TaskEvent(
-                task_id="task-long",
-                event_seq=2,
-                occurred_at=2.0,
-                event_type="artifact",
-                payload=TaskEventPayload(artifact=artifact),
-            )
-            yield TaskEvent(
-                task_id="task-long",
-                event_seq=3,
-                occurred_at=3.0,
-                event_type="final_output",
-                payload=TaskEventPayload(content=final_output),
-            )
-            yield TaskEvent(
-                task_id="task-long",
-                event_seq=4,
-                occurred_at=4.0,
-                event_type="completed",
-                payload=TaskEventPayload(state=TaskState.COMPLETED),
+        async def create_chat_turn(self, _session, _text, _attachments):
+            return _chat_snapshot(turn_id="turn-long")
+
+        async def chat_turn_updates(self, _turn_id):
+            yield _chat_snapshot(
+                turn_id="turn-long",
+                state=ChatTurnState.COMPLETED,
+                final_output=final_output,
+                artifacts=(artifact,),
             )
 
     channel = FeishuChannel(_config(tmp_path))
@@ -644,7 +637,7 @@ async def test_feishu_long_result_uses_preview_and_delivers_full_artifact(
         delivered.append((open_id, session, artifact_id))
 
     channel._deliver_artifact = deliver
-    await channel._stream_core_task(
+    await channel._stream_chat_turn(
         "ou-user",
         LongResultClient(),
         "session-a",
@@ -711,60 +704,56 @@ async def test_feishu_confirmation_updates_the_single_streaming_card(
     )
 
     class ConfirmingClient:
-        async def execute_task(self, _session, _text, _attachments):
-            yield TaskEvent(
-                task_id="task-a",
-                event_seq=1,
-                occurred_at=1.0,
-                event_type="task_created",
-                payload=TaskEventPayload(),
-            )
-            yield TaskEvent(
-                task_id="task-a",
-                event_seq=2,
-                occurred_at=2.0,
-                event_type="tool_call",
-                payload=TaskEventPayload(
-                    tool_call_id="call-mouse",
-                    tool_name="mouse",
-                    tool_args={"action": "click"},
-                    iteration=1,
+        def __init__(self) -> None:
+            self.resolved = asyncio.Event()
+
+        async def create_chat_turn(self, _session, _text, _attachments):
+            return _chat_snapshot()
+
+        async def chat_turn_updates(self, _turn_id):
+            yield _chat_snapshot(
+                timeline=(
+                    ChatTimelineEntrySnapshot(
+                        kind="tool_call",
+                        tool_call_id="call-mouse",
+                        tool_name="mouse",
+                        tool_args={"action": "click"},
+                        iteration=1,
+                    ),
                 ),
+                approvals=(_chat_approval(),),
             )
-            approved = await channel._confirm_tool(
-                "ou-user",
-                _approval_event(reason="desktop_control:high"),
-            )
-            assert approved
-            yield TaskEvent(
-                task_id="task-a",
-                event_seq=3,
-                occurred_at=3.0,
-                event_type="tool_result",
-                payload=TaskEventPayload(
-                    tool_call_id="call-mouse",
-                    tool_name="mouse",
-                    tool_result={"status": "completed"},
-                    iteration=1,
+            await self.resolved.wait()
+            yield _chat_snapshot(
+                state=ChatTurnState.COMPLETED,
+                timeline=(
+                    ChatTimelineEntrySnapshot(
+                        kind="tool_call",
+                        tool_call_id="call-mouse",
+                        tool_name="mouse",
+                        tool_args={"action": "click"},
+                        iteration=1,
+                    ),
+                    ChatTimelineEntrySnapshot(
+                        kind="tool_result",
+                        tool_call_id="call-mouse",
+                        tool_name="mouse",
+                        tool_result={"status": "completed"},
+                        iteration=1,
+                    ),
                 ),
-            )
-            yield TaskEvent(
-                task_id="task-a",
-                event_seq=4,
-                occurred_at=4.0,
-                event_type="final_output",
-                payload=TaskEventPayload(content="完成", iteration=2),
-            )
-            yield TaskEvent(
-                task_id="task-a",
-                event_seq=5,
-                occurred_at=5.0,
-                event_type="completed",
-                payload=TaskEventPayload(),
+                approvals=(_chat_approval(state="approved"),),
+                final_output="完成",
             )
 
+        async def resolve_chat_approval(self, approval_id, *, approved):
+            assert approval_id == "confirmation-a"
+            assert approved is True
+            self.resolved.set()
+            return SimpleNamespace()
+
     run = asyncio.create_task(
-        channel._stream_core_task(
+        channel._stream_chat_turn(
             "ou-user",
             ConfirmingClient(),
             "session-a",
@@ -784,7 +773,7 @@ async def test_feishu_confirmation_updates_the_single_streaming_card(
         "ou-user",
         "confirmation-a",
         True,
-        task_id="task-a",
+        resource_id="turn-a",
     )
     await run
 
@@ -815,7 +804,7 @@ async def test_feishu_card_callback_confirms_and_replaces_buttons(tmp_path) -> N
                     "action": {
                         "value": {
                             "action": "confirm",
-                            "task_id": "task-a",
+                            "resource_id": "task-a",
                             "approval_id": "confirmation-a",
                         }
                     },
@@ -873,7 +862,7 @@ def test_feishu_streaming_card_uses_native_v2_confirmation_buttons() -> None:
         "cancel",
     ]
     assert all(
-        button["behaviors"][0]["value"]["task_id"] == "task-a"
+        button["behaviors"][0]["value"]["resource_id"] == "task-a"
         for button in buttons
     )
 
@@ -1219,7 +1208,7 @@ async def test_feishu_principal_feed_resolves_background_approval_in_card(
         "ou-user",
         "confirmation-a",
         True,
-        task_id="task-background",
+        resource_id="task-background",
     )
     assert not await delivery
     assert await channel._deliver_principal_task_event(
@@ -1308,35 +1297,21 @@ async def test_feishu_card_io_does_not_block_core_event_consumption(tmp_path) ->
         def __init__(self) -> None:
             self.consumed = asyncio.Event()
 
-        async def execute_task(self, _session, _text, _attachments):
-            yield TaskEvent(
-                task_id="task-burst",
-                event_seq=1,
-                occurred_at=1.0,
-                event_type="task_created",
-                payload=TaskEventPayload(),
-            )
-            for index in range(2, 1002):
-                yield TaskEvent(
-                    task_id="task-burst",
-                    event_seq=index,
-                    occurred_at=float(index),
-                    event_type="reasoning_delta",
-                    payload=TaskEventPayload(content="x"),
-                )
-            yield TaskEvent(
-                task_id="task-burst",
-                event_seq=1002,
-                occurred_at=1002.0,
-                event_type="final_output",
-                payload=TaskEventPayload(content="完成"),
-            )
-            yield TaskEvent(
-                task_id="task-burst",
-                event_seq=1003,
-                occurred_at=1003.0,
-                event_type="completed",
-                payload=TaskEventPayload(),
+        async def create_chat_turn(self, _session, _text, _attachments):
+            return _chat_snapshot(turn_id="turn-burst")
+
+        async def chat_turn_updates(self, _turn_id):
+            yield _chat_snapshot(
+                turn_id="turn-burst",
+                state=ChatTurnState.COMPLETED,
+                timeline=(
+                    ChatTimelineEntrySnapshot(
+                        kind="reasoning",
+                        content="x" * 1000,
+                    ),
+                ),
+                reasoning="x" * 1000,
+                final_output="完成",
             )
             self.consumed.set()
 
@@ -1351,7 +1326,7 @@ async def test_feishu_card_io_does_not_block_core_event_consumption(tmp_path) ->
     channel._update_card = lambda _message_id, _card: True
     client = BurstClient()
     task = asyncio.create_task(
-        channel._stream_core_task("ou-user", client, "session-a", "hello", ())
+        channel._stream_chat_turn("ou-user", client, "session-a", "hello", ())
     )
 
     await asyncio.wait_for(client.consumed.wait(), timeout=0.5)

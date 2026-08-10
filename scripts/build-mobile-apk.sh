@@ -38,7 +38,9 @@ mkdir -p "$KNOA_MOBILE_BUILD_DIR" "$MOBILE" "$KNOA_MOBILE_SOURCE_ROOT/assets" "$
 # CMake writes relative source dependencies into build.ninja. Redirecting only
 # .cxx with symlinks breaks those relations after the link is resolved. Build a
 # complete mirror on /disk instead, excluding every generated build/.cxx tree.
-rsync -a --delete --delete-excluded \
+# Excluded generated trees stay on /disk so subsequent owner builds are
+# incremental; source deletions still propagate through --delete.
+rsync -a --delete \
   --exclude='/android/build' \
   --exclude='/android/app/build' \
   --exclude='**/android/build' \

@@ -7,6 +7,9 @@
 Task 表示“小诺要做什么，以及什么时候启动”。普通聊天不是 Task；只有用户明确
 委派独立工作、在任务页创建，或任务的定时/事件条件满足时才开始一次独立执行。
 
+Conversation、ChatTurn、Session 上下文和 Channel 绑定见
+[knoa-conversation-design.md](./knoa-conversation-design.md)。
+
 ```text
 Task
   ├── 目标与附件
@@ -166,6 +169,22 @@ Task 详情先展示任务目标和启动方式，再展示执行记录。执行
 
 流式文本必须合并后渲染；Markdown 使用完整宽度；长结果不得在 Core 或 Channel
 层截断，超出单卡展示能力时附加完整 Markdown 产物。
+
+### 6.1 执行记录与 Trace 保留
+
+`TaskExecution` 的用户可见结果和 `ExecutionTrace` 使用不同生命周期：
+
+- Execution 的状态、最终结论、错误、usage 汇总、关键步骤、审批结果和 Artifact
+  引用随 Task 长期保存；
+- 完整 Trace 默认保留 90 天，用于评估、调试和复盘；
+- Trace 内按 iteration/语义段合并 reasoning 和 content draft，不保存逐 token 事件；
+- Trace 到期后压缩，保留关键工具步骤、错误、耗时、token 统计和最终结果，淘汰
+  reasoning 草稿、正文草稿及大体积原始工具结果；
+- 运行中、暂停中、待确认的 Execution 不得淘汰；
+- 删除 Task 时才级联删除其 Execution 记录，Artifact 字节按独立保留策略处理。
+
+这样 Task 详情长期可读，评估窗口内又有足够的完整运行证据，同时不会让模型 chunk
+持续撑大 principal feed 或数据库。
 
 ## 7. Channel 能力
 

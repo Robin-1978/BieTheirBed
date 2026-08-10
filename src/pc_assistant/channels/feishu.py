@@ -20,7 +20,12 @@ from pc_assistant import __version__
 from pc_assistant.branding import ASSISTANT_NAME
 from pc_assistant.config import AppConfig
 from pc_assistant.runtime import RuntimePaths
-from pc_assistant.service.core_api import ArtifactInputRef
+from pc_assistant.conversation import ChatTurnState
+from pc_assistant.service.core_api import (
+    ArtifactInputRef,
+    ChatApprovalSnapshot,
+    ChatTurnSnapshot,
+)
 from pc_assistant.service.core_client import CoreClient, CoreRequestError
 from pc_assistant.service.credentials import (
     issue_principal_credential,
@@ -313,7 +318,7 @@ class _ToolStep:
     detail: str = ""
     iteration: int = 0
     approval_id: str = ""
-    approval_task_id: str = ""
+    approval_resource_id: str = ""
     confirmation_reason: str = ""
     confirmation_status: str = ""
 
@@ -330,7 +335,7 @@ class _PendingConfirmation:
     approval_id: str
     future: asyncio.Future[bool]
     loop: asyncio.AbstractEventLoop
-    message: TaskEvent
+    resource_id: str
     presentation: _ActiveTaskPresentation
     resolved: bool = False
 
@@ -569,13 +574,83 @@ class _StreamingCardState:
             )
             self.timeline.append(step)
         step.approval_id = payload.approval_id
-        step.approval_task_id = message.task_id
+        step.approval_resource_id = message.task_id
         step.confirmation_reason = (
             payload.reason or "该操作可能改变系统状态"
         )
         step.confirmation_status = "pending"
         self.phase = "working"
         return True
+
+    def request_chat_confirmation(
+        self,
+        approval: ChatApprovalSnapshot,
+        turn_id: str,
+    ) -> bool:
+        step = next(
+            (
+                candidate
+                for candidate in reversed(self.timeline)
+                if isinstance(candidate, _ToolStep)
+                and candidate.call_id == approval.tool_call_id
+            ),
+            None,
+        )
+        if step is None:
+            step = _ToolStep(
+                call_id=approval.tool_call_id,
+                name=approval.tool_name,
+                arguments=approval.arguments,
+            )
+            self.timeline.append(step)
+        step.approval_id = approval.approval_id
+        step.approval_resource_id = turn_id
+        step.confirmation_reason = approval.reason or "该操作可能改变系统状态"
+        step.confirmation_status = (
+            "pending"
+            if approval.state == "pending"
+            else "confirmed"
+            if approval.state == "approved"
+            else "cancelled"
+        )
+        self.phase = "working"
+        return approval.state == "pending"
+
+    def load_chat_snapshot(self, snapshot: ChatTurnSnapshot) -> None:
+        self.timeline = []
+        self.final_output = ""
+        self.error = ""
+        self.phase = "thinking"
+        for entry in snapshot.timeline:
+            if entry.kind == "reasoning":
+                self.append_reasoning(entry.content, iteration=entry.iteration)
+            elif entry.kind == "content":
+                self.append_draft(entry.content, iteration=entry.iteration)
+            elif entry.kind == "tool_call":
+                self.add_tool_call(
+                    entry.tool_call_id,
+                    entry.tool_name,
+                    entry.tool_args,
+                    iteration=entry.iteration,
+                )
+            elif entry.kind == "tool_result":
+                self.add_tool_result(
+                    entry.tool_call_id,
+                    entry.tool_name,
+                    entry.tool_result,
+                    blocked=entry.blocked,
+                    iteration=entry.iteration,
+                )
+            elif entry.content:
+                self.add_notice(entry.content)
+        for approval in snapshot.approvals:
+            self.request_chat_confirmation(approval, snapshot.turn_id)
+        if snapshot.final_output:
+            self.set_final_output(snapshot.final_output)
+        elif snapshot.state is ChatTurnState.FAILED:
+            self.set_error(snapshot.failure_code or "处理失败")
+        elif snapshot.state is ChatTurnState.CANCELLED:
+            self.set_cancelled()
 
     def resolve_confirmation(
         self,
@@ -690,7 +765,7 @@ class _StreamingCardState:
                                         "type": "callback",
                                         "value": {
                                             "action": "confirm",
-                                            "task_id": step.approval_task_id,
+                                            "resource_id": step.approval_resource_id,
                                             "approval_id": step.approval_id,
                                         },
                                     }
@@ -715,7 +790,7 @@ class _StreamingCardState:
                                         "type": "callback",
                                         "value": {
                                             "action": "cancel",
-                                            "task_id": step.approval_task_id,
+                                            "resource_id": step.approval_resource_id,
                                             "approval_id": step.approval_id,
                                         },
                                     }
@@ -862,6 +937,7 @@ class FeishuChannel:
         self._principal_watchers: dict[str, asyncio.Task[None]] = {}
         self._principal_watcher_started_at: dict[str, float] = {}
         self._foreground_task_ids: set[str] = set()
+        self._active_chat_turn_ids: dict[str, str] = {}
         self._background_approval_decisions: dict[str, bool] = {}
         self._pending_attachments: dict[str, list[ArtifactInputRef]] = {}
         self._active_task_presentations: dict[str, _ActiveTaskPresentation] = {}
@@ -914,6 +990,7 @@ class FeishuChannel:
         await asyncio.gather(*watchers, return_exceptions=True)
         self._principal_watcher_started_at.clear()
         self._foreground_task_ids.clear()
+        self._active_chat_turn_ids.clear()
         self._background_approval_decisions.clear()
         receive_id = self._current_receive_id()
         if receive_id:
@@ -1067,7 +1144,7 @@ class FeishuChannel:
                         }
                     )
                 action_name = str(value.get("action", ""))
-                task_id = str(value.get("task_id", ""))
+                resource_id = str(value.get("resource_id", ""))
                 approval_id = str(value.get("approval_id", ""))
                 if action_name not in {"confirm", "cancel"}:
                     raise ValueError("unknown confirmation action")
@@ -1075,7 +1152,7 @@ class FeishuChannel:
                     open_id,
                     approval_id,
                     action_name == "confirm",
-                    task_id=task_id,
+                    resource_id=resource_id,
                 )
                 if pending is None:
                     return P2CardActionTriggerResponse(
@@ -1165,7 +1242,7 @@ class FeishuChannel:
         approval_id: str,
         approved: bool,
         *,
-        task_id: str = "",
+        resource_id: str = "",
     ) -> _PendingConfirmation | None:
         with self._pending_confirmation_lock:
             pending = self._pending_confirmations.get(open_id)
@@ -1173,7 +1250,7 @@ class FeishuChannel:
                 pending is None
                 or pending.resolved
                 or pending.approval_id != approval_id
-                or (task_id and pending.message.task_id != task_id)
+                or (resource_id and pending.resource_id != resource_id)
             ):
                 return None
             pending.resolved = True
@@ -1260,6 +1337,16 @@ class FeishuChannel:
             )
             return
         try:
+            active_turn_id = self._active_chat_turn_ids.get(open_id)
+            if active_turn_id:
+                turn = await client.cancel_chat_turn(active_turn_id)
+                message = (
+                    "正在停止当前对话。"
+                    if turn.state not in {ChatTurnState.CANCELLED, ChatTurnState.COMPLETED, ChatTurnState.FAILED}
+                    else "当前对话已经结束。"
+                )
+                await asyncio.to_thread(self._send_text, open_id, message)
+                return
             result = await client.cancel_active_task()
         except Exception:
             logger.exception(
@@ -1489,7 +1576,7 @@ class FeishuChannel:
 
         attachments = tuple(self._pending_attachments.pop(open_id, []))
         try:
-            await self._stream_core_task(
+            await self._stream_chat_turn(
                 open_id,
                 client,
                 session,
@@ -1501,7 +1588,7 @@ class FeishuChannel:
                 raise
             session = await client.create_session()
             self._bind_session(open_id, session)
-            await self._stream_core_task(
+            await self._stream_chat_turn(
                 open_id,
                 client,
                 session,
@@ -1509,7 +1596,7 @@ class FeishuChannel:
                 attachments,
             )
 
-    async def _stream_core_task(
+    async def _stream_chat_turn(
         self,
         open_id: str,
         client: CoreClient,
@@ -1530,7 +1617,7 @@ class FeishuChannel:
         last_patch = 0.0
         terminal = ""
         artifacts: list[str] = []
-        artifact_ids: set[str] = set()
+        handled_approvals: set[str] = set()
 
         async def create_initial_card(card: dict[str, Any]) -> str | None:
             try:
@@ -1581,74 +1668,51 @@ class FeishuChannel:
 
         updater = asyncio.create_task(update_worker())
         try:
-            async for event in client.execute_task(session, text, attachments):
-                presentation.bind_task(event.task_id)
-                self._active_task_presentations[event.task_id] = presentation
-                self._foreground_task_ids.add(event.task_id)
-                start_card()
-                payload = event.payload
-                if event.event_type == "reasoning_delta":
-                    state.append_reasoning(
-                        payload.content,
-                        iteration=payload.iteration,
+            accepted = await client.create_chat_turn(
+                session,
+                text,
+                attachments,
+            )
+            turn_id = accepted.turn_id
+            presentation.bind_task(turn_id)
+            self._active_chat_turn_ids[open_id] = turn_id
+            start_card()
+            async for snapshot in client.chat_turn_updates(turn_id):
+                state.load_chat_snapshot(snapshot)
+                artifacts = [artifact.artifact_id for artifact in snapshot.artifacts]
+                update_requested.set()
+                for approval in snapshot.approvals:
+                    if (
+                        approval.state != "pending"
+                        or approval.approval_id in handled_approvals
+                    ):
+                        continue
+                    handled_approvals.add(approval.approval_id)
+                    approved = await self._confirm_chat_approval(
+                        open_id,
+                        presentation,
+                        turn_id,
+                        approval,
                     )
-                    update_requested.set()
-                elif event.event_type == "content_delta":
-                    state.append_draft(
-                        payload.content,
-                        iteration=payload.iteration,
+                    await client.resolve_chat_approval(
+                        approval.approval_id,
+                        approved=approved,
                     )
-                    update_requested.set()
-                elif event.event_type == "final_output":
-                    state.set_final_output(
-                        payload.content,
-                        iteration=payload.iteration,
+                    presentation.resolve_confirmation(
+                        approval.approval_id,
+                        "confirmed" if approved else "cancelled",
                     )
-                elif event.event_type == "tool_call":
-                    state.add_tool_call(
-                        payload.tool_call_id,
-                        payload.tool_name,
-                        payload.tool_args,
-                        iteration=payload.iteration,
-                    )
-                    update_requested.set()
-                elif event.event_type == "tool_result":
-                    state.add_tool_result(
-                        payload.tool_call_id,
-                        payload.tool_name,
-                        payload.tool_result,
-                        blocked=payload.blocked,
-                        iteration=payload.iteration,
-                    )
-                    update_requested.set()
-                elif event.event_type == "artifact" and payload.artifact:
-                    artifact_id = payload.artifact.artifact_id
-                    if artifact_id not in artifact_ids:
-                        artifact_ids.add(artifact_id)
-                        artifacts.append(artifact_id)
-                elif event.event_type == "context_compacted":
-                    state.add_notice("较早对话已整理为简短工作摘要。")
-                    update_requested.set()
-                elif event.event_type in {"plan", "warning"}:
-                    state.add_notice(payload.content)
-                    update_requested.set()
-                elif event.event_type == "failed":
-                    terminal = "failed"
-                    state.set_error(payload.content or event.event_type)
-                elif event.event_type == "cancelled":
-                    terminal = "cancelled"
-                    state.set_cancelled()
-                elif event.event_type == "completed":
+                if snapshot.state is ChatTurnState.COMPLETED:
                     terminal = "completed"
+                elif snapshot.state is ChatTurnState.CANCELLED:
+                    terminal = "cancelled"
+                elif snapshot.state is ChatTurnState.FAILED:
+                    terminal = "failed"
         finally:
             stop_updates = True
             update_requested.set()
             await updater
-            if presentation.task_id:
-                self._active_task_presentations.pop(
-                    presentation.task_id,
-                    None,
-                )
+            self._active_chat_turn_ids.pop(open_id, None)
             if self._active_session_presentations.get(session) is presentation:
                 self._active_session_presentations.pop(session, None)
 
@@ -1658,7 +1722,7 @@ class FeishuChannel:
 
         if terminal == "completed":
             if state.phase != "done":
-                raise RuntimeError("Core Task completed without final_output event")
+                raise RuntimeError("ChatTurn completed without final output")
             final_output = state.final_output if state.final_output else "已完成"
             if len(final_output) > _LONG_RESULT_CARD_CHARS and artifacts:
                 preview = _split_text(
@@ -1697,7 +1761,7 @@ class FeishuChannel:
                     )
         else:
             if not terminal:
-                state.set_error("Core Task ended without a terminal event")
+                state.set_error("ChatTurn ended without a terminal state")
             final_card = state.build_card()
             if card_message_id is None or not await asyncio.to_thread(
                 self._update_card,
@@ -1942,7 +2006,7 @@ class FeishuChannel:
             approval_id=message.payload.approval_id,
             future=future,
             loop=loop,
-            message=message,
+            resource_id=message.task_id,
             presentation=presentation,
         )
         with self._pending_confirmation_lock:
@@ -1963,6 +2027,43 @@ class FeishuChannel:
                 message.payload.approval_id,
                 "expired",
             )
+            return False
+        finally:
+            with self._pending_confirmation_lock:
+                if self._pending_confirmations.get(open_id) is pending:
+                    self._pending_confirmations.pop(open_id, None)
+
+    async def _confirm_chat_approval(
+        self,
+        open_id: str,
+        presentation: _ActiveTaskPresentation,
+        turn_id: str,
+        approval: ChatApprovalSnapshot,
+    ) -> bool:
+        if not presentation.state.request_chat_confirmation(approval, turn_id):
+            return approval.state == "approved"
+        presentation.update_requested.set()
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[bool] = loop.create_future()
+        pending = _PendingConfirmation(
+            approval_id=approval.approval_id,
+            future=future,
+            loop=loop,
+            resource_id=turn_id,
+            presentation=presentation,
+        )
+        with self._pending_confirmation_lock:
+            current = self._pending_confirmations.get(open_id)
+            if current is not None and not current.resolved:
+                presentation.resolve_confirmation(approval.approval_id, "cancelled")
+                return False
+            self._pending_confirmations[open_id] = pending
+        try:
+            return await asyncio.wait_for(future, timeout=_CONFIRM_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            with self._pending_confirmation_lock:
+                pending.resolved = True
+            presentation.resolve_confirmation(approval.approval_id, "expired")
             return False
         finally:
             with self._pending_confirmation_lock:

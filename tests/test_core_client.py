@@ -34,6 +34,7 @@ from pc_assistant.automation import (
 )
 from pc_assistant.artifacts import ArtifactStore
 from pc_assistant.context.memory_db import SQLiteMemoryRepository
+from pc_assistant.conversation import ConversationRepository, ConversationService
 from pc_assistant.service.core_client import (
     CoreClient,
     CoreConnectionLostError,
@@ -167,18 +168,21 @@ class Connected:
         runtime: FakeRuntime,
         tasks: TaskService,
         repository: TaskRepository,
+        conversations: ConversationService,
         server_task: asyncio.Task[None],
     ) -> None:
         self.client = client
         self.runtime = runtime
         self.tasks = tasks
         self.repository = repository
+        self.conversations = conversations
         self.server_task = server_task
 
     async def close(self) -> None:
         await self.client.disconnect()
         await self.server_task
         await self.tasks.stop()
+        await self.conversations.stop()
 
 
 async def _connected(
@@ -201,8 +205,18 @@ async def _connected(
     hub = TaskEventHub()
     approvals = DurableApprovalService(repository, hub)
     commits = DurableToolCommitService(repository)
-    executor = TaskExecutor(repository, runtime, approvals, commits, hub)
+    executor = TaskExecutor(repository, sessions, runtime, approvals, commits, hub)
     tasks = TaskService(repository, executor, approvals, hub)
+    conversation_repository = ConversationRepository(
+        database,
+        turn_id_factory=lambda: "turn-opaque",
+        approval_id_factory=lambda: "chat-approval-opaque",
+    )
+    conversations = ConversationService(
+        sessions,
+        conversation_repository,
+        runtime,
+    )
     schedule_repository = ScheduleRepository(
         database,
         schedule_id_factory=lambda: "schedule-opaque",
@@ -232,13 +246,15 @@ async def _connected(
         control,
         artifacts,
         StaticTokenAuthenticator({"token-a": "local"}),
+        conversations=conversations,
     )
+    await conversations.start()
     await tasks.start()
     client_socket, server_socket = _socket_pair()
     server_task = asyncio.create_task(server.handle(server_socket))
     client = CoreClient(client_socket, approval_handler=approval_handler)
     await client.start("token-a")
-    return Connected(client, runtime, tasks, repository, server_task)
+    return Connected(client, runtime, tasks, repository, conversations, server_task)
 
 
 @pytest.mark.asyncio
@@ -258,15 +274,41 @@ async def test_client_auth_session_and_task_round_trip(tmp_path: Path) -> None:
         assert [event.event_type for event in events] == [
             "task_created",
             "state_changed",
-            "content_delta",
-            "final_output",
             "completed",
         ]
         assert {event.task_id for event in events} == {"task-opaque"}
         snapshot = await connected.client.get_task("task-opaque")
         listing = await connected.client.list_tasks(limit=10)
         assert snapshot.task_id == "task-opaque"
+        assert snapshot.trace is not None
+        assert snapshot.trace.final_output == "done"
         assert [task.task_id for task in listing.tasks] == ["task-opaque"]
+    finally:
+        await connected.close()
+
+
+@pytest.mark.asyncio
+async def test_client_chat_turn_round_trip_is_not_a_task(tmp_path: Path) -> None:
+    connected = await _connected(tmp_path)
+    try:
+        session_handle = await connected.client.create_session()
+        accepted = await connected.client.create_chat_turn(session_handle, "hello")
+        snapshots = [
+            snapshot
+            async for snapshot in connected.client.chat_turn_updates(accepted.turn_id)
+        ]
+
+        assert snapshots[-1].state.value == "completed"
+        assert snapshots[-1].content == "hello"
+        assert snapshots[-1].final_output == "done"
+        stored = await connected.client.get_chat_turn(accepted.turn_id)
+        assert stored.turn_id == snapshots[-1].turn_id
+        assert stored.final_output == snapshots[-1].final_output
+        assert stored.timeline == ()
+        listed = await connected.client.list_chat_turns(session_handle)
+        assert [turn.turn_id for turn in listed] == [accepted.turn_id]
+        tasks = await connected.client.list_tasks(limit=10)
+        assert tasks.tasks == ()
     finally:
         await connected.close()
 
@@ -313,8 +355,6 @@ async def test_client_replays_and_tails_principal_task_event_feed(
         assert [item.event.event_type for item in events] == [
             "task_created",
             "state_changed",
-            "content_delta",
-            "final_output",
             "completed",
         ]
         assert [item.feed_event_id for item in events] == sorted(
@@ -333,10 +373,7 @@ async def test_client_disconnect_only_closes_subscription(tmp_path: Path) -> Non
     connected.runtime.hold = True
     accepted = await connected.client.create_task(session, "long task")
     stream = connected.client.task_events(accepted.task_id)
-    while True:
-        event = await anext(stream)
-        if event.event_type == "content_delta":
-            break
+    assert (await anext(stream)).event_type == "task_created"
     await connected.client.disconnect()
     await connected.server_task
 

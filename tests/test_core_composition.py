@@ -276,9 +276,14 @@ async def test_composition_records_correlated_model_and_turn_traces(
     finally:
         await composition.task_service.stop()
 
-    final = [event for event in events if event.event_type == "final_output"]
-    assert len(final) == 1
-    assert final[0].payload.content == "done"
+    assert [event.event_type for event in events] == [
+        "task_created",
+        "state_changed",
+        "completed",
+    ]
+    execution_trace = composition.tasks.get_trace("local", task.task_id)
+    assert execution_trace is not None
+    assert execution_trace.final_output == "done"
 
     model_trace = composition.llm_traces.recent(1)[0]
     turn_trace = composition.turn_traces.recent(1)[0]

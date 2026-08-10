@@ -5,8 +5,6 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
-from dataclasses import dataclass
 from typing import Any
 
 from pc_assistant.agent_runtime.contracts import (
@@ -21,10 +19,6 @@ from pc_assistant.agent_runtime.contracts import (
 )
 from pc_assistant.agent_runtime.model_step import MessageHydratorPort
 from pc_assistant.agent_runtime.react_loop import ReActContext, ReActLoop, ReActOutcome
-from pc_assistant.agent_runtime.session_store import (
-    RuntimeSessionRepository,
-    SessionSnapshot,
-)
 from pc_assistant.artifacts import ArtifactRef, ArtifactStore
 from pc_assistant.context.scope import (
     MemoryScope,
@@ -57,18 +51,11 @@ class ArtifactMessageHydrator(MessageHydratorPort):
         )
 
 
-@dataclass
-class _SessionLockEntry:
-    lock: asyncio.Lock
-    users: int = 0
-
-
 class AgentRuntime:
-    """Own session serialization, transcript commit, and request-local scope."""
+    """Run one prepared Agent turn without owning product Session state."""
 
     def __init__(
         self,
-        sessions: RuntimeSessionRepository,
         react_loop: ReActLoop,
         registry: ToolRegistry,
         artifacts: ArtifactStore,
@@ -86,7 +73,6 @@ class AgentRuntime:
         | None = None,
         clock=time.monotonic,
     ) -> None:
-        self._sessions = sessions
         self._react_loop = react_loop
         self._registry = registry
         self._artifacts = artifacts
@@ -99,8 +85,6 @@ class AgentRuntime:
         self._runtime_context = runtime_context
         self._run_observer = run_observer
         self._clock = clock
-        self._session_locks: dict[str, _SessionLockEntry] = {}
-        self._session_locks_guard = asyncio.Lock()
         self._active_runs: dict[str, RuntimeRunContext] = {}
         self._active_runs_guard = asyncio.Lock()
 
@@ -117,88 +101,79 @@ class AgentRuntime:
         request: RunRequest,
     ) -> AsyncIterator[RuntimeEvent]:
         started = self._clock()
-        scope = await asyncio.to_thread(
-            self._sessions.resolve,
-            context.scope.principal_id,
-            context.scope.session_handle,
-        )
+        scope = context.scope
         async with self._active_runs_guard:
             if context.run_id in self._active_runs:
                 raise RuntimeError("Duplicate active run ID")
             self._active_runs[context.run_id] = context
         observed = False
         try:
-            async with self._session_lease(scope.session_handle):
-                if context.cancellation.is_set():
-                    await self._observe_run(
-                        scope,
-                        context.run_id,
-                        request,
-                        ReActOutcome(
-                            status="cancelled",
-                            messages=(),
-                            error_code="cancelled",
-                        ),
-                        started,
-                    )
-                    observed = True
-                    return
-                snapshot = await asyncio.to_thread(self._sessions.load, scope)
-                user_message = await self._user_message(scope, request)
-                messages = (*snapshot.messages, user_message)
-                scope_token = set_memory_scope(
-                    MemoryScope(
-                        principal_id=scope.principal_id,
-                        session_id=scope.session_handle,
-                    )
+            if context.cancellation.is_set():
+                await self._observe_run(
+                    scope,
+                    context.run_id,
+                    request,
+                    ReActOutcome(
+                        status="cancelled",
+                        messages=(),
+                        error_code="cancelled",
+                    ),
+                    started,
                 )
-                try:
-                    outcome: ReActOutcome | None = None
-                    capabilities = (
-                        self._capabilities_for(scope)
-                        if request.tools_enabled
-                        else frozenset()
-                    )
-                    runtime_context = (
-                        await self._runtime_context(scope, request.input)
-                        if self._runtime_context is not None
-                        else ""
-                    )
-                    def current_tool_definitions() -> tuple[dict[str, Any], ...]:
-                        return tuple(self._registry.definitions_for(capabilities))
+                observed = True
+                return
+            user_message = await self._user_message(scope, request)
+            messages = (*context.messages, user_message)
+            scope_token = set_memory_scope(
+                MemoryScope(
+                    principal_id=scope.principal_id,
+                    session_id=scope.session_handle,
+                )
+            )
+            try:
+                outcome: ReActOutcome | None = None
+                capabilities = (
+                    self._capabilities_for(scope)
+                    if request.tools_enabled
+                    else frozenset()
+                )
+                runtime_context = (
+                    await self._runtime_context(scope, request.input)
+                    if self._runtime_context is not None
+                    else ""
+                )
+                def current_tool_definitions() -> tuple[dict[str, Any], ...]:
+                    return tuple(self._registry.definitions_for(capabilities))
 
-                    async for event in self._react_loop.run(
-                        ReActContext(
-                            scope=scope,
-                            client_request_id=request.client_request_id,
-                            messages=messages,
-                            tool_definitions=current_tool_definitions(),
-                            tool_definition_provider=current_tool_definitions,
-                            capabilities=capabilities,
-                            cancellation=context.cancellation,
-                            run_id=context.run_id,
-                            confirmation=context.confirmation,
-                            tool_commit=context.tool_commit,
-                            system_prompt=self._system_prompt,
-                            runtime_context=runtime_context,
-                            prompt_budget=self._prompt_budget,
-                            max_output_tokens=self._max_output_tokens,
-                            temperature=self._temperature,
-                        )
-                    ):
-                        if event.runtime_event is not None:
-                            yield event.runtime_event
-                        else:
-                            outcome = event.outcome
-                    if outcome is None:
-                        raise RuntimeError("ReAct loop ended without an outcome")
-                    if outcome.status == "completed":
+                async for event in self._react_loop.run(
+                    ReActContext(
+                        scope=scope,
+                        client_request_id=request.client_request_id,
+                        messages=messages,
+                        tool_definitions=current_tool_definitions(),
+                        tool_definition_provider=current_tool_definitions,
+                        capabilities=capabilities,
+                        cancellation=context.cancellation,
+                        run_id=context.run_id,
+                        confirmation=context.confirmation,
+                        tool_commit=context.tool_commit,
+                        system_prompt=self._system_prompt,
+                        runtime_context=runtime_context,
+                        prompt_budget=self._prompt_budget,
+                        max_output_tokens=self._max_output_tokens,
+                        temperature=self._temperature,
+                    )
+                ):
+                    if event.runtime_event is not None:
+                        yield event.runtime_event
+                    else:
+                        outcome = event.outcome
+                if outcome is None:
+                    raise RuntimeError("ReAct loop ended without an outcome")
+                if outcome.status == "completed":
+                    if context.commit_messages is not None:
                         try:
-                            await asyncio.to_thread(
-                                self._sessions.save,
-                                scope,
-                                SessionSnapshot(messages=outcome.messages),
-                            )
+                            await context.commit_messages(outcome.messages)
                         except Exception:
                             await self._observe_run(
                                 scope,
@@ -214,48 +189,48 @@ class AgentRuntime:
                             )
                             observed = True
                             raise
-                        if len(outcome.final_content) > _LONG_RESULT_ARTIFACT_CHARS:
-                            try:
-                                result_artifact = await asyncio.to_thread(
-                                    self._artifacts.create_generated_text,
-                                    scope.session_handle,
-                                    outcome.final_content,
-                                    name=f"{context.run_id}-result.md",
-                                )
-                                yield RuntimeEvent(
-                                    event_type="artifact",
-                                    payload=RuntimeEventPayload(
-                                        artifact=ArtifactRef.model_validate(
-                                            result_artifact
-                                        ),
-                                        iteration=outcome.iterations,
+                    if len(outcome.final_content) > _LONG_RESULT_ARTIFACT_CHARS:
+                        try:
+                            result_artifact = await asyncio.to_thread(
+                                self._artifacts.create_generated_text,
+                                scope.session_handle,
+                                outcome.final_content,
+                                name=f"{context.run_id}-result.md",
+                            )
+                            yield RuntimeEvent(
+                                event_type="artifact",
+                                payload=RuntimeEventPayload(
+                                    artifact=ArtifactRef.model_validate(
+                                        result_artifact
                                     ),
-                                )
-                            except Exception:
-                                logger.warning(
-                                    "Long result artifact generation failed run_id=%s",
-                                    context.run_id,
-                                    exc_info=True,
-                                )
-                        yield RuntimeEvent(
-                            event_type="final_output",
-                            payload=RuntimeEventPayload(
-                                content=outcome.final_content,
-                                iteration=outcome.iterations,
-                            ),
-                        )
-                    await self._observe_run(
-                        scope,
-                        context.run_id,
-                        request,
-                        outcome,
-                        started,
+                                    iteration=outcome.iterations,
+                                ),
+                            )
+                        except Exception:
+                            logger.warning(
+                                "Long result artifact generation failed run_id=%s",
+                                context.run_id,
+                                exc_info=True,
+                            )
+                    yield RuntimeEvent(
+                        event_type="final_output",
+                        payload=RuntimeEventPayload(
+                            content=outcome.final_content,
+                            iteration=outcome.iterations,
+                        ),
                     )
-                    observed = True
-                    if outcome.status == "failed":
-                        raise RuntimeError(outcome.error_code or "Agent run failed")
-                finally:
-                    reset_memory_scope(scope_token)
+                await self._observe_run(
+                    scope,
+                    context.run_id,
+                    request,
+                    outcome,
+                    started,
+                )
+                observed = True
+                if outcome.status == "failed":
+                    raise RuntimeError(outcome.error_code or "Agent run failed")
+            finally:
+                reset_memory_scope(scope_token)
         except asyncio.CancelledError:
             if not observed:
                 await self._observe_run(
@@ -293,14 +268,9 @@ class AgentRuntime:
         scope: RuntimeScope,
         request: CancelRequest,
     ) -> CancelResult:
-        owned = await asyncio.to_thread(
-            self._sessions.resolve,
-            scope.principal_id,
-            scope.session_handle,
-        )
         async with self._active_runs_guard:
             context = self._active_runs.get(request.run_id)
-            if context is None or context.scope != owned:
+            if context is None or context.scope != scope:
                 return CancelResult(accepted=False, status="not_found")
             context.cancellation.set()
         return CancelResult(accepted=True, status="cancelling")
@@ -331,26 +301,6 @@ class AgentRuntime:
             )
         except Exception:
             pass
-
-    @asynccontextmanager
-    async def _session_lease(
-        self,
-        session_handle: str,
-    ) -> AsyncIterator[None]:
-        async with self._session_locks_guard:
-            entry = self._session_locks.setdefault(
-                session_handle,
-                _SessionLockEntry(lock=asyncio.Lock()),
-            )
-            entry.users += 1
-        try:
-            async with entry.lock:
-                yield
-        finally:
-            async with self._session_locks_guard:
-                entry.users -= 1
-                if entry.users == 0:
-                    self._session_locks.pop(session_handle, None)
 
     async def _user_message(
         self,

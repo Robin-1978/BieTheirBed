@@ -52,6 +52,8 @@ from pc_assistant.gateway.protocol import (
     AuthChallengeRequest,
     AuthCompleteRequest,
     CancelTaskRequest,
+    ChatTurnListQuery,
+    CreateChatTurnRequest,
     CreateTaskRequest,
     EventQuery,
     GatewayRequest,
@@ -174,6 +176,36 @@ class SecureGatewayAdapter:
                 Route("/v1/auth/complete", self._auth_complete, methods=["POST"]),
                 Route("/v1/session", self._session, methods=["GET"]),
                 Route("/v1/sessions", self._create_session, methods=["POST"]),
+                Route(
+                    "/v1/conversations/sessions/{session_handle:str}/turns",
+                    self._create_chat_turn,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/conversations/sessions/{session_handle:str}/turns",
+                    self._list_chat_turns,
+                    methods=["GET"],
+                ),
+                Route(
+                    "/v1/conversations/turns/{turn_id:str}",
+                    self._get_chat_turn,
+                    methods=["GET"],
+                ),
+                Route(
+                    "/v1/conversations/turns/{turn_id:str}/stream",
+                    self._chat_turn_stream,
+                    methods=["GET"],
+                ),
+                Route(
+                    "/v1/conversations/turns/{turn_id:str}/cancel",
+                    self._cancel_chat_turn,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/conversations/approvals/{approval_id:str}/resolve",
+                    self._resolve_chat_approval,
+                    methods=["POST"],
+                ),
                 Route("/v1/tasks", self._create_task, methods=["POST"]),
                 Route("/v1/tasks", self._list_tasks, methods=["GET"]),
                 Route("/v1/events", self._events, methods=["GET"]),
@@ -407,6 +439,181 @@ class SecureGatewayAdapter:
             return self._core_error(exc)
         return JSONResponse({"session_handle": handle}, status_code=201)
 
+    async def _create_chat_turn(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=60)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        session_handle = self._path_identifier(request, "session_handle")
+        if session_handle is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        parsed = await self._parse_body(request, CreateChatTurnRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            parsed.require_content()
+            turn = await self._core.create_chat_turn(
+                authenticated.device.principal_id,
+                session_handle,
+                parsed.input,
+                parsed.attachments,
+                tools_enabled=parsed.tools_enabled,
+            )
+        except ValueError:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse(
+            {"turn": turn.model_dump(mode="json")},
+            status_code=202,
+        )
+
+    async def _get_chat_turn(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=120)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        turn_id = self._path_identifier(request, "turn_id")
+        if turn_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            turn = await self._core.get_chat_turn(
+                authenticated.device.principal_id,
+                turn_id,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse({"turn": turn.model_dump(mode="json")})
+
+    async def _list_chat_turns(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=120)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        session_handle = self._path_identifier(request, "session_handle")
+        if session_handle is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            query = ChatTurnListQuery.model_validate(dict(request.query_params))
+            turns = await self._core.list_chat_turns(
+                authenticated.device.principal_id,
+                session_handle,
+                limit=query.limit,
+            )
+        except ValidationError:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse(
+            {"turns": [turn.model_dump(mode="json") for turn in turns]}
+        )
+
+    async def _cancel_chat_turn(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=30)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        turn_id = self._path_identifier(request, "turn_id")
+        if turn_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            turn = await self._core.cancel_chat_turn(
+                authenticated.device.principal_id,
+                turn_id,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse({"turn": turn.model_dump(mode="json")})
+
+    async def _resolve_chat_approval(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=30)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        approval_id = self._path_identifier(request, "approval_id")
+        if approval_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        parsed = await self._parse_body(request, ResolveApprovalRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            result = await self._core.resolve_chat_approval(
+                authenticated.device.principal_id,
+                approval_id,
+                approved=parsed.approved,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse(
+            {
+                "approval": result.approval.model_dump(mode="json"),
+                "resolved": result.resolved,
+            }
+        )
+
+    async def _chat_turn_stream(
+        self,
+        request: Request,
+    ) -> JSONResponse | StreamingResponse:
+        authenticated = self._authorize(request, limit=20)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        turn_id = self._path_identifier(request, "turn_id")
+        if turn_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        device_id = authenticated.device.device_id
+        if self._active_event_streams[device_id] >= 3:
+            return JSONResponse({"error": "too_many_streams"}, status_code=429)
+        self._active_event_streams[device_id] += 1
+        token = self._bearer_token(request)
+        principal_id = authenticated.device.principal_id
+
+        async def stream():
+            iterator = self._core.chat_turn_updates(principal_id, turn_id).__aiter__()
+            pending: asyncio.Task[Any] | None = None
+            try:
+                pending = asyncio.create_task(anext(iterator))
+                while True:
+                    done, _pending = await asyncio.wait(
+                        {pending},
+                        timeout=self._event_heartbeat_seconds,
+                    )
+                    if not done:
+                        if self._authenticate_token(token) is None:
+                            return
+                        yield b": keepalive\n\n"
+                        continue
+                    try:
+                        turn = pending.result()
+                    except StopAsyncIteration:
+                        return
+                    except Exception:
+                        yield self._sse("error", {"error": "unavailable"})
+                        return
+                    if self._authenticate_token(token) is None:
+                        return
+                    yield self._sse(
+                        "snapshot",
+                        {"turn": turn.model_dump(mode="json")},
+                    )
+                    pending = asyncio.create_task(anext(iterator))
+            finally:
+                if pending is not None and not pending.done():
+                    pending.cancel()
+                    await asyncio.gather(pending, return_exceptions=True)
+                close = getattr(iterator, "aclose", None)
+                if close is not None:
+                    await close()
+                remaining = self._active_event_streams.get(device_id, 1) - 1
+                if remaining > 0:
+                    self._active_event_streams[device_id] = remaining
+                else:
+                    self._active_event_streams.pop(device_id, None)
+
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-store",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     async def _create_task(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=60)
         if isinstance(authenticated, JSONResponse):
@@ -416,19 +623,15 @@ class SecureGatewayAdapter:
             return parsed
         try:
             parsed.require_content()
-            session_handle = parsed.session_handle
-            origin = TaskOrigin.CHAT
-            if parsed.kind == "task":
-                if parsed.attachments:
-                    return JSONResponse(
-                        {"error": "background_attachments_not_supported"},
-                        status_code=422,
-                    )
-                session_handle = await self._core.create_session(
-                    authenticated.device.principal_id,
-                    activate=False,
+            if parsed.attachments:
+                return JSONResponse(
+                    {"error": "background_attachments_not_supported"},
+                    status_code=422,
                 )
-                origin = TaskOrigin.USER
+            session_handle = await self._core.create_session(
+                authenticated.device.principal_id,
+                activate=False,
+            )
             accepted = await self._core.create_task(
                 authenticated.device.principal_id,
                 session_handle,
@@ -437,7 +640,7 @@ class SecureGatewayAdapter:
                 tools_enabled=parsed.tools_enabled,
                 priority=parsed.priority,
                 parent_task_id=parsed.parent_task_id,
-                origin=origin,
+                origin=TaskOrigin.USER,
             )
         except ValueError:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
@@ -457,21 +660,11 @@ class SecureGatewayAdapter:
         except ValidationError:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         try:
-            origins = {
-                "all": (),
-                "chat": (TaskOrigin.CHAT,),
-                "task": (
-                    TaskOrigin.USER,
-                    TaskOrigin.AGENT,
-                    TaskOrigin.SCHEDULED,
-                    TaskOrigin.EVENT,
-                ),
-            }[query.kind]
             result = await self._core.list_tasks(
                 authenticated.device.principal_id,
                 session_handle=query.session_handle,
                 state=query.state,
-                origins=origins,
+                origins=(),
                 limit=query.limit,
                 cursor=query.cursor,
             )
@@ -1093,6 +1286,7 @@ class SecureGatewayAdapter:
         if isinstance(exc, CoreRequestError):
             if exc.code in {
                 "task_not_found",
+                "chat_turn_not_found",
                 "session_not_found",
                 "approval_not_found",
                 "artifact_not_found",

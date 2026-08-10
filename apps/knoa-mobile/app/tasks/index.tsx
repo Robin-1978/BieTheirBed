@@ -38,7 +38,7 @@ export default function TasksScreen() {
     if (!gateway.client) return;
     setRefreshing(true);
     try {
-      const result = await gateway.client.listTasks({ kind: "task", limit: 100 });
+      const result = await gateway.client.listTasks({ limit: 100 });
       setTasks(result.tasks);
     } finally {
       setRefreshing(false);
@@ -58,13 +58,11 @@ export default function TasksScreen() {
 
   async function createTask() {
     const text = goal.trim();
-    if (!text || !gateway.client || !gateway.sessionHandle || creating) return;
+    if (!text || !gateway.client || creating) return;
     setCreating(true);
     try {
       const accepted = await gateway.client.createTask({
-        sessionHandle: gateway.sessionHandle,
         text,
-        kind: "task",
       });
       setGoal("");
       await refresh();

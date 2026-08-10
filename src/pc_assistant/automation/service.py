@@ -23,7 +23,7 @@ class TaskCreationPort(Protocol):
         goal: str,
         tools_enabled: bool = True,
         priority: int = 0,
-        origin: TaskOrigin = TaskOrigin.CHAT,
+        origin: TaskOrigin = TaskOrigin.SCHEDULED,
     ) -> TaskRecord: ...
 
 
