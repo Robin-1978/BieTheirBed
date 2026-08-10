@@ -82,8 +82,10 @@ compatible fixes rather than forcing an unverified major downgrade or override.
 - QR/manual pairing and secure device/session storage;
 - session bootstrap and expired-session re-authentication;
 - conversation-first text, photo and file input with streamed replies; the
-  composer uses one clear add button for photo/file actions, a dedicated voice
-  button and an explicit send button rather than stacked text links;
+  composer uses one clear add button for photo/file actions and one primary
+  button whose action follows the explicitly selected text/voice input mode;
+  voice mode remains active across multiple transcription segments until the
+  owner switches back to text mode to edit or send;
 - unified Task list plus execution detail, pause, resume, cancel and retry;
 - per-Task coalesced ExecutionTrace snapshot plus resumable coarse lifecycle SSE;
 - approval confirm/deny actions from replayed standard events;

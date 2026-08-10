@@ -37,17 +37,30 @@ mkdir -p "$KNOA_MOBILE_BUILD_DIR" "$MOBILE" "$KNOA_MOBILE_SOURCE_ROOT/assets" "$
 
 # CMake writes relative source dependencies into build.ninja. Redirecting only
 # .cxx with symlinks breaks those relations after the link is resolved. Build a
-# complete mirror on /disk instead, excluding every generated build/.cxx tree.
-# Excluded generated trees stay on /disk so subsequent owner builds are
-# incremental; source deletions still propagate through --delete.
-rsync -a --delete \
+# complete mirror on /disk instead. Receiver-only protect rules keep Gradle
+# output produced inside dependencies (notably the React Native and Expo
+# included builds) while normal source deletions still propagate through
+# --delete. Plain excludes are not sufficient here: node_modules contains both
+# shipped source build/ directories and Gradle-generated build/ directories.
+# Never copy source-side Gradle/Kotlin histories, and do not synchronize Unix
+# ownership or modes onto NTFS: both make unchanged inputs look modified.
+rsync -a --delete --no-owner --no-group --no-perms \
+  --filter='protect **/build/***' \
+  --filter='protect **/.gradle/***' \
+  --filter='protect **/.kotlin/***' \
+  --filter='protect **/.cxx/***' \
+  --exclude='**/.gradle' \
+  --exclude='**/.kotlin' \
+  --exclude='**/.expo' \
+  --exclude='**/.ruff_cache' \
   --exclude='/android/build' \
   --exclude='/android/app/build' \
   --exclude='**/android/build' \
   --exclude='**/.cxx' \
   --exclude='key.properties' \
   "$SOURCE_MOBILE/" "$MOBILE/"
-rsync -a --delete "$REPO/assets/branding/" "$KNOA_MOBILE_SOURCE_ROOT/assets/branding/"
+rsync -a --delete --no-owner --no-group --no-perms \
+  "$REPO/assets/branding/" "$KNOA_MOBILE_SOURCE_ROOT/assets/branding/"
 
 cp "$KEY_PROPERTIES" "$ANDROID/key.properties"
 
