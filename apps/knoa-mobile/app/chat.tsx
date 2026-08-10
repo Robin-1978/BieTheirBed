@@ -21,11 +21,11 @@ import {
   TextInput,
   View,
 } from "react-native";
-import Markdown from "react-native-marked";
 import Svg, { Circle, Line, Path, Rect } from "react-native-svg";
 
 import { subscribeChatTurn, type ChatTurnSubscription } from "@/api/chatTurns";
 import type { AndroidRelease, ArtifactInput, ChatApproval, ChatTurnSnapshot } from "@/api/models";
+import { AppMarkdown } from "@/components/AppMarkdown";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 import { isAndroidUpdateAvailable } from "@/update/androidUpdater";
@@ -426,10 +426,7 @@ function ChatTurn({
       </View>
       <View style={styles.assistantBubble}>
         {response ? (
-          <Markdown
-            value={response}
-            flatListProps={{ scrollEnabled: false, style: styles.markdownList }}
-          />
+          <AppMarkdown value={response} style={styles.markdownList} />
         ) : (
           <View style={styles.activityRow}>
             {!TERMINAL_STATES.has(turn.state) ? <ActivityIndicator color={colors.accent} size="small" /> : null}

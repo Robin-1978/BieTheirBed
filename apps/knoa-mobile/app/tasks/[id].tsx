@@ -10,9 +10,9 @@ import {
   Text,
   View,
 } from "react-native";
-import Markdown from "react-native-marked";
 
 import type { ApprovalRequest, TaskEvent, TaskSnapshot, TaskTraceEntry } from "@/api/models";
+import { AppMarkdown } from "@/components/AppMarkdown";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
@@ -126,7 +126,7 @@ export default function TaskDetailScreen() {
 
       {task.final_summary ? (
         <View style={styles.final}>
-          <Markdown value={task.final_summary} flatListProps={{ scrollEnabled: false, style: styles.markdown }} />
+          <AppMarkdown value={task.final_summary} style={styles.markdown} />
         </View>
       ) : null}
 
@@ -210,7 +210,7 @@ function TraceEntry({
     ) : null;
   }
   if (entry.entry_type === "content" || entry.entry_type === "plan") {
-    return content ? <Markdown value={content} flatListProps={{ scrollEnabled: false, style: styles.markdown }} /> : null;
+    return content ? <AppMarkdown value={content} style={styles.markdown} /> : null;
   }
   return null;
 }
