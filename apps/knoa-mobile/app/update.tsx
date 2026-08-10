@@ -42,7 +42,7 @@ export default function UpdateScreen() {
   useEffect(() => {
     if (!gateway.client) return;
     setChecking(true);
-    gateway.client.latestAndroidRelease()
+    gateway.runAuthenticated((client) => client.latestAndroidRelease())
       .then(setRelease)
       .catch((error: unknown) => {
         if (!(error instanceof GatewayError && error.status === 404)) {
@@ -50,7 +50,7 @@ export default function UpdateScreen() {
         }
       })
       .finally(() => setChecking(false));
-  }, [gateway.client]);
+  }, [gateway.client, gateway.runAuthenticated]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (next) => {

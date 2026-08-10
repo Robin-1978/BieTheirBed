@@ -38,21 +38,21 @@ export default function TasksScreen() {
     if (!gateway.client) return;
     setRefreshing(true);
     try {
-      const result = await gateway.client.listTasks({ limit: 100 });
+      const result = await gateway.runAuthenticated((client) => client.listTasks({ limit: 100 }));
       setTasks(result.tasks);
     } finally {
       setRefreshing(false);
     }
-  }, [gateway.client]);
+  }, [gateway.client, gateway.runAuthenticated]);
 
   useEffect(() => { void refresh(); }, [refresh, gateway.latestEvent]);
 
   useEffect(() => {
     if (!gateway.client) return;
-    void gateway.client.latestAndroidRelease()
+    void gateway.runAuthenticated((client) => client.latestAndroidRelease())
       .then((release) => setAvailableUpdate(isAndroidUpdateAvailable(release) ? release : null))
       .catch(() => undefined);
-  }, [gateway.client]);
+  }, [gateway.client, gateway.runAuthenticated]);
 
   const visibleTasks = useMemo(() => tasks.filter((task) => matchesFilter(task.state, filter)), [filter, tasks]);
 
@@ -61,9 +61,7 @@ export default function TasksScreen() {
     if (!text || !gateway.client || creating) return;
     setCreating(true);
     try {
-      const accepted = await gateway.client.createTask({
-        text,
-      });
+      const accepted = await gateway.runAuthenticated((client) => client.createTask({ text }));
       setGoal("");
       await refresh();
       router.push(`/tasks/${accepted.task_id}`);
