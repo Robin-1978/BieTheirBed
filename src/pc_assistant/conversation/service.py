@@ -34,7 +34,6 @@ from pc_assistant.conversation.models import (
 from pc_assistant.conversation.repository import (
     ChatTurnNotFoundError,
     ConversationSessionConflictError,
-    ConversationSessionNotFoundError,
     ConversationRepository,
 )
 from pc_assistant.context.session_context import SessionContextService
@@ -263,9 +262,6 @@ class ConversationService:
     async def compact_expired_details(self) -> int:
         return await asyncio.to_thread(self._repository.compact_expired_details)
 
-    async def register_session(self, scope: RuntimeScope, *, title: str = "新对话") -> ConversationSession:
-        return await asyncio.to_thread(self._repository.create_session, scope, title=title)
-
     async def get_session(self, principal_id: str, session_handle: str) -> ConversationSession:
         return await asyncio.to_thread(self._repository.get_session, principal_id, session_handle)
 
@@ -275,12 +271,14 @@ class ConversationService:
         *,
         include_archived: bool = False,
         limit: int = 100,
-    ) -> tuple[ConversationSession, ...]:
+        cursor: str = "",
+    ) -> tuple[tuple[ConversationSession, ...], str]:
         return await asyncio.to_thread(
             self._repository.list_sessions,
             principal_id,
             include_archived=include_archived,
             limit=limit,
+            cursor=cursor,
         )
 
     async def update_session(
@@ -309,7 +307,7 @@ class ConversationService:
 
     async def delete_session(self, principal_id: str, session_handle: str) -> None:
         scope = await asyncio.to_thread(self._sessions.resolve, principal_id, session_handle)
-        active_turns = await asyncio.to_thread(
+        active_turns, _next_cursor = await asyncio.to_thread(
             self._repository.list_session,
             principal_id,
             session_handle,
@@ -345,18 +343,6 @@ class ConversationService:
             scope.principal_id,
             scope.session_handle,
         )
-        try:
-            await asyncio.to_thread(
-                self._repository.get_session,
-                owned.principal_id,
-                owned.session_handle,
-            )
-        except ConversationSessionNotFoundError:
-            await asyncio.to_thread(
-                self._repository.create_session,
-                owned,
-                title="新对话",
-            )
         turn, created = await asyncio.to_thread(
             self._repository.create,
             owned,
@@ -366,12 +352,6 @@ class ConversationService:
             tools_enabled=tools_enabled,
         )
         if created:
-            await asyncio.to_thread(
-                self._repository.touch_session,
-                scope.principal_id,
-                scope.session_handle,
-                first_input=user_input,
-            )
             self._live[turn.turn_id] = _LiveTurn(cancellation=asyncio.Event())
             execution = asyncio.create_task(self._execute(turn))
             self._executions[turn.turn_id] = execution
@@ -402,17 +382,19 @@ class ConversationService:
         session_handle: str,
         *,
         limit: int = 100,
-    ) -> tuple[ChatTurn, ...]:
-        turns = await asyncio.to_thread(
+        cursor: str = "",
+    ) -> tuple[tuple[ChatTurn, ...], str]:
+        turns, next_cursor = await asyncio.to_thread(
             self._repository.list_session,
             principal_id,
             session_handle,
             limit=limit,
+            cursor=cursor,
         )
         resolved = []
         for turn in turns:
             resolved.append(await self.get_turn(principal_id, turn.turn_id))
-        return tuple(resolved)
+        return tuple(resolved), next_cursor
 
     async def updates(
         self,

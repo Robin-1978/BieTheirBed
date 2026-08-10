@@ -384,12 +384,15 @@ class CoreClient:
                 queue.get_nowait()
             queue.put_nowait(error)
 
-    async def create_session(self, *, activate: bool = True, title: str = "新对话") -> str:
+    async def create_session(
+        self,
+        *,
+        activate: bool = True,
+    ) -> str:
         response = await self._request(
             CreateSessionRequest(
                 request_id=self._request_id(),
                 activate=activate,
-                title=title,
             )
         )
         if not isinstance(response, SessionCreatedMessage):
@@ -410,15 +413,17 @@ class CoreClient:
         *,
         include_archived: bool = False,
         limit: int = 100,
-    ) -> tuple[ConversationSessionSnapshot, ...]:
+        cursor: str = "",
+    ) -> tuple[tuple[ConversationSessionSnapshot, ...], str]:
         response = await self._request(ListConversationSessionsRequest(
             request_id=self._request_id(),
             include_archived=include_archived,
             limit=limit,
+            cursor=cursor,
         ))
         if not isinstance(response, ConversationSessionListMessage):
             raise RuntimeError("CoreServer returned an invalid ConversationSession list")
-        return response.sessions
+        return response.sessions, response.next_cursor
 
     async def update_conversation_session(
         self,
@@ -618,11 +623,13 @@ class CoreClient:
         user_input: str = "",
         attachments: tuple[ArtifactInputRef, ...] = (),
         *,
+        client_request_id: str,
         tools_enabled: bool = True,
     ) -> ChatTurnSnapshot:
         response = await self._request(
             CreateChatTurnRequest(
                 request_id=self._request_id(),
+                client_request_id=client_request_id,
                 session_handle=session_handle,
                 input=user_input,
                 attachments=attachments,
@@ -649,17 +656,19 @@ class CoreClient:
         session_handle: str,
         *,
         limit: int = 100,
-    ) -> tuple[ChatTurnSnapshot, ...]:
+        cursor: str = "",
+    ) -> tuple[tuple[ChatTurnSnapshot, ...], str]:
         response = await self._request(
             ListChatTurnsRequest(
                 request_id=self._request_id(),
                 session_handle=session_handle,
                 limit=limit,
+                cursor=cursor,
             )
         )
         if not isinstance(response, ChatTurnListMessage):
             raise RuntimeError("CoreServer returned an invalid ChatTurn list")
-        return response.turns
+        return response.turns, response.next_cursor
 
     async def chat_turn_updates(
         self,
@@ -846,6 +855,7 @@ class CoreClient:
         session_handle: str,
         goal: str,
         *,
+        client_request_id: str,
         title: str = "",
         attachments: tuple[ArtifactInputRef, ...] = (),
         tools_enabled: bool = True,
@@ -856,6 +866,7 @@ class CoreClient:
         response = await self._request(
             CreateProductTaskRequest(
                 request_id=self._request_id(),
+                client_request_id=client_request_id,
                 session_handle=session_handle,
                 title=title,
                 goal=goal,

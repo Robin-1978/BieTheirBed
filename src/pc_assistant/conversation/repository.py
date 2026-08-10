@@ -1,7 +1,10 @@
 """SQLite persistence for Conversation ChatTurns and durable side effects."""
 from __future__ import annotations
 
+import base64
+import binascii
 import json
+import math
 import secrets
 import sqlite3
 import time
@@ -286,35 +289,6 @@ class ConversationRepository:
             revision=int(row["revision"]),
         )
 
-    def create_session(self, scope: RuntimeScope, *, title: str = "新对话") -> ConversationSession:
-        normalized_title = " ".join(title.split()) or "新对话"
-        if len(normalized_title) > 120:
-            raise ValueError("Conversation title must contain at most 120 characters")
-        now = self._clock()
-        with self._connect() as db:
-            self._owned_session(db, scope)
-            try:
-                db.execute(
-                    """INSERT INTO conversation_sessions(
-                           session_handle, principal_id, title, state,
-                           created_at, updated_at, revision
-                       ) VALUES (?, ?, ?, ?, ?, ?, 1)""",
-                    (
-                        scope.session_handle,
-                        scope.principal_id,
-                        normalized_title,
-                        ConversationSessionState.ACTIVE.value,
-                        now,
-                        now,
-                    ),
-                )
-            except sqlite3.IntegrityError as exc:
-                raise ConversationSessionConflictError(scope.session_handle) from exc
-            return self._session(
-                db,
-                self._owned_conversation_session(db, scope.principal_id, scope.session_handle),
-            )
-
     def get_session(self, principal_id: str, session_handle: str) -> ConversationSession:
         with self._connect() as db:
             return self._session(
@@ -328,18 +302,67 @@ class ConversationRepository:
         *,
         include_archived: bool = False,
         limit: int = 100,
-    ) -> tuple[ConversationSession, ...]:
+        cursor: str = "",
+    ) -> tuple[tuple[ConversationSession, ...], str]:
         if not 1 <= limit <= 200:
             raise ValueError("limit must be between 1 and 200")
+        clauses = ["principal_id=?"]
+        values: list[object] = [principal_id]
+        if not include_archived:
+            clauses.append("state=?")
+            values.append(ConversationSessionState.ACTIVE.value)
+        if cursor:
+            updated_at, cursor_handle = self._decode_session_cursor(cursor)
+            clauses.append(
+                "(updated_at<? OR (updated_at=? AND session_handle<?))"
+            )
+            values.extend((updated_at, updated_at, cursor_handle))
+        values.append(limit + 1)
         with self._connect() as db:
-            query = "SELECT * FROM conversation_sessions WHERE principal_id=?"
-            values: list[object] = [principal_id]
-            if not include_archived:
-                query += " AND state=?"
-                values.append(ConversationSessionState.ACTIVE.value)
-            query += " ORDER BY updated_at DESC, session_handle DESC LIMIT ?"
-            values.append(limit)
-            return tuple(self._session(db, row) for row in db.execute(query, values))
+            rows = db.execute(
+                "SELECT * FROM conversation_sessions WHERE "
+                + " AND ".join(clauses)
+                + " ORDER BY updated_at DESC, session_handle DESC LIMIT ?",
+                tuple(values),
+            ).fetchall()
+            page = rows[:limit]
+            sessions = tuple(self._session(db, row) for row in page)
+        next_cursor = ""
+        if len(rows) > limit and page:
+            last = page[-1]
+            next_cursor = self._encode_session_cursor(
+                float(last["updated_at"]),
+                str(last["session_handle"]),
+            )
+        return sessions, next_cursor
+
+    @staticmethod
+    def _encode_session_cursor(updated_at: float, session_handle: str) -> str:
+        raw = json.dumps([updated_at, session_handle], separators=(",", ":")).encode()
+        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+    @staticmethod
+    def _decode_session_cursor(cursor: str) -> tuple[float, str]:
+        normalized = cursor.strip()
+        if not normalized or len(normalized) > 512:
+            raise ValueError("Conversation cursor is invalid")
+        try:
+            padded = normalized + "=" * (-len(normalized) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+            if not isinstance(payload, list) or len(payload) != 2:
+                raise ValueError
+            updated_at = float(payload[0])
+            session_handle = str(payload[1]).strip()
+        except (ValueError, TypeError, UnicodeDecodeError, binascii.Error) as exc:
+            raise ValueError("Conversation cursor is invalid") from exc
+        if (
+            not math.isfinite(updated_at)
+            or updated_at < 0
+            or not session_handle
+            or len(session_handle) > 256
+        ):
+            raise ValueError("Conversation cursor is invalid")
+        return updated_at, session_handle
 
     def update_session(
         self,
@@ -495,6 +518,7 @@ class ConversationRepository:
         )
         now = self._clock()
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             self._owned_session(db, scope)
             existing = db.execute(
                 """SELECT * FROM conversation_turns
@@ -511,6 +535,34 @@ class ConversationRepository:
                 ):
                     raise ChatTurnConflictError(client_request_id)
                 return turn, False
+            conversation = db.execute(
+                """SELECT * FROM conversation_sessions
+                   WHERE session_handle=? AND principal_id=?""",
+                (scope.session_handle, scope.principal_id),
+            ).fetchone()
+            if (
+                conversation is not None
+                and str(conversation["state"]) != ConversationSessionState.ACTIVE.value
+            ):
+                raise ConversationSessionConflictError(
+                    "Archived conversations cannot accept new turns"
+                )
+            generated_title = self._title_from_first_turn(user_input, attachments)
+            if conversation is None:
+                db.execute(
+                    """INSERT INTO conversation_sessions(
+                           session_handle, principal_id, title, state,
+                           created_at, updated_at, revision
+                       ) VALUES (?, ?, ?, ?, ?, ?, 1)""",
+                    (
+                        scope.session_handle,
+                        scope.principal_id,
+                        generated_title,
+                        ConversationSessionState.ACTIVE.value,
+                        now,
+                        now,
+                    ),
+                )
             turn_id = self._turn_id_factory().strip()
             db.execute(
                 """INSERT INTO conversation_turns(
@@ -533,8 +585,29 @@ class ConversationRepository:
                     now,
                 ),
             )
+            db.execute(
+                """UPDATE conversation_sessions
+                   SET title=CASE WHEN title='新对话' THEN ? ELSE title END,
+                       updated_at=?, revision=revision+1
+                   WHERE session_handle=? AND principal_id=?""",
+                (generated_title, now, scope.session_handle, scope.principal_id),
+            )
             row = self._owned_turn(db, scope.principal_id, turn_id)
             return self._turn(db, row), True
+
+    @staticmethod
+    def _title_from_first_turn(
+        user_input: str,
+        attachments: tuple[ArtifactAttachment, ...],
+    ) -> str:
+        normalized = " ".join(user_input.strip().split())
+        if normalized:
+            return normalized[:40]
+        for attachment in attachments:
+            caption = " ".join(attachment.caption.strip().split())
+            if caption:
+                return caption[:40]
+        return "附件会话"
 
     def get(self, principal_id: str, turn_id: str) -> ChatTurn:
         with self._connect() as db:
@@ -557,17 +630,62 @@ class ConversationRepository:
         session_handle: str,
         *,
         limit: int = 100,
-    ) -> tuple[ChatTurn, ...]:
+        cursor: str = "",
+    ) -> tuple[tuple[ChatTurn, ...], str]:
         if not 1 <= limit <= 500:
             raise ValueError("limit must be between 1 and 500")
+        clauses = ["principal_id=?", "session_handle=?"]
+        values: list[object] = [principal_id, session_handle]
+        if cursor:
+            created_at, cursor_turn_id = self._decode_turn_cursor(cursor)
+            clauses.append("(created_at<? OR (created_at=? AND turn_id<?))")
+            values.extend((created_at, created_at, cursor_turn_id))
+        values.append(limit + 1)
         with self._connect() as db:
             rows = db.execute(
-                """SELECT * FROM conversation_turns
-                   WHERE principal_id=? AND session_handle=?
-                   ORDER BY created_at, turn_id LIMIT ?""",
-                (principal_id, session_handle, limit),
+                "SELECT * FROM conversation_turns WHERE "
+                + " AND ".join(clauses)
+                + " ORDER BY created_at DESC, turn_id DESC LIMIT ?",
+                tuple(values),
             ).fetchall()
-            return tuple(self._turn(db, row) for row in rows)
+            page = rows[:limit]
+            turns = tuple(self._turn(db, row) for row in reversed(page))
+        next_cursor = ""
+        if len(rows) > limit and page:
+            oldest = page[-1]
+            next_cursor = self._encode_turn_cursor(
+                float(oldest["created_at"]),
+                str(oldest["turn_id"]),
+            )
+        return turns, next_cursor
+
+    @staticmethod
+    def _encode_turn_cursor(created_at: float, turn_id: str) -> str:
+        raw = json.dumps([created_at, turn_id], separators=(",", ":")).encode()
+        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+    @staticmethod
+    def _decode_turn_cursor(cursor: str) -> tuple[float, str]:
+        normalized = cursor.strip()
+        if not normalized or len(normalized) > 512:
+            raise ValueError("ChatTurn cursor is invalid")
+        try:
+            padded = normalized + "=" * (-len(normalized) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+            if not isinstance(payload, list) or len(payload) != 2:
+                raise ValueError
+            created_at = float(payload[0])
+            turn_id = str(payload[1]).strip()
+        except (ValueError, TypeError, UnicodeDecodeError, binascii.Error) as exc:
+            raise ValueError("ChatTurn cursor is invalid") from exc
+        if (
+            not math.isfinite(created_at)
+            or created_at < 0
+            or not turn_id
+            or len(turn_id) > 128
+        ):
+            raise ValueError("ChatTurn cursor is invalid")
+        return created_at, turn_id
 
     def checkpoint(
         self,

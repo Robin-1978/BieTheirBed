@@ -19,6 +19,8 @@ import { colors } from "@/theme";
 export default function ConversationHistoryScreen() {
   const gateway = useGateway();
   const [sessions, setSessions] = useState<ConversationSession[]>([]);
+  const [nextCursor, setNextCursor] = useState("");
+  const [loadingMore, setLoadingMore] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState("");
@@ -30,8 +32,12 @@ export default function ConversationHistoryScreen() {
     setLoading(true);
     setError("");
     try {
-      const result = await gateway.runAuthenticated((client) => client.listConversationSessions(showArchived));
-      setSessions(result);
+      const result = await gateway.runAuthenticated((client) => client.listConversationSessions({
+        includeArchived: showArchived,
+        limit: 50,
+      }));
+      setSessions(result.sessions);
+      setNextCursor(result.nextCursor);
     } catch {
       setError("会话记录暂时无法加载，请检查连接后重试");
     } finally {
@@ -40,6 +46,28 @@ export default function ConversationHistoryScreen() {
   }, [gateway.runAuthenticated, showArchived]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    setError("");
+    try {
+      const result = await gateway.runAuthenticated((client) => client.listConversationSessions({
+        includeArchived: showArchived,
+        limit: 50,
+        cursor: nextCursor,
+      }));
+      setSessions((current) => {
+        const existing = new Set(current.map((session) => session.session_handle));
+        return [...current, ...result.sessions.filter((session) => !existing.has(session.session_handle))];
+      });
+      setNextCursor(result.nextCursor);
+    } catch {
+      setError("更多会话暂时无法加载，请稍后重试");
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function update(session: ConversationSession, changes: { title?: string; state?: "active" | "archived" }) {
     if (working) return;
@@ -152,6 +180,13 @@ export default function ConversationHistoryScreen() {
           </View>
         );
       })}
+      {nextCursor ? (
+        <Pressable disabled={loadingMore} onPress={() => void loadMore()} style={styles.loadMore}>
+          {loadingMore
+            ? <ActivityIndicator color={colors.accent} />
+            : <Text style={styles.loadMoreText}>加载更多会话</Text>}
+        </Pressable>
+      ) : null}
     </ScrollView>
   );
 }
@@ -178,4 +213,6 @@ const styles = StyleSheet.create({
   loading: { marginTop: 60 },
   empty: { color: colors.muted, textAlign: "center", marginTop: 60 },
   error: { color: colors.danger, lineHeight: 20 },
+  loadMore: { alignItems: "center", paddingVertical: 14 },
+  loadMoreText: { color: colors.accent, fontWeight: "700" },
 });

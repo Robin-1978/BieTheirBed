@@ -12,6 +12,7 @@ from pc_assistant.conversation import (
     ChatTurnConflictError,
     ChatTurnState,
     ConversationRepository,
+    ConversationSessionConflictError,
     ConversationSessionState,
 )
 from pc_assistant.tools.base import ToolEffect, ToolPolicy, ToolRisk
@@ -51,7 +52,7 @@ def test_turn_is_idempotent_and_scoped_to_a_session(tmp_path: Path) -> None:
     assert repeated_created is False
     assert repeated == created
     assert created.state is ChatTurnState.RUNNING
-    assert repository.list_session("principal-a", "session-a") == (created,)
+    assert repository.list_session("principal-a", "session-a") == ((created,), "")
 
     with pytest.raises(ChatTurnConflictError):
         repository.create(
@@ -232,20 +233,12 @@ def test_expired_turn_details_are_compacted_without_deleting_final_history(
 
 def test_conversation_sessions_support_history_rename_and_archive(tmp_path: Path) -> None:
     _database, scope, repository = _repository(tmp_path)
-    session = repository.create_session(scope)
     repository.create(
         scope,
         client_request_id="request-a",
         user_input="plan a weekend trip",
     )
 
-    current = repository.get_session(scope.principal_id, scope.session_handle)
-    assert current.title == "新对话"
-    repository.touch_session(
-        scope.principal_id,
-        scope.session_handle,
-        first_input="plan a weekend trip",
-    )
     current = repository.get_session(scope.principal_id, scope.session_handle)
     assert current.title == "plan a weekend trip"
     assert current.turn_count == 1
@@ -259,5 +252,83 @@ def test_conversation_sessions_support_history_rename_and_archive(tmp_path: Path
     )
     assert renamed.title == "周末计划"
     assert renamed.state is ConversationSessionState.ARCHIVED
-    assert repository.list_sessions(scope.principal_id) == ()
-    assert repository.list_sessions(scope.principal_id, include_archived=True) == (renamed,)
+    with pytest.raises(ConversationSessionConflictError):
+        repository.create(
+            scope,
+            client_request_id="request-b",
+            user_input="继续规划",
+        )
+    assert repository.list_sessions(scope.principal_id) == ((), "")
+    assert repository.list_sessions(scope.principal_id, include_archived=True) == ((renamed,), "")
+
+
+def test_runtime_session_is_not_a_conversation_until_first_turn(tmp_path: Path) -> None:
+    _database, scope, repository = _repository(tmp_path)
+
+    assert repository.list_sessions(scope.principal_id) == ((), "")
+
+    turn, created = repository.create(
+        scope,
+        client_request_id="request-a",
+        user_input="  帮我   安排周末行程  ",
+    )
+
+    assert created is True
+    assert turn.user_input == "  帮我   安排周末行程  "
+    sessions, cursor = repository.list_sessions(scope.principal_id)
+    assert cursor == ""
+    assert len(sessions) == 1
+    assert sessions[0].title == "帮我 安排周末行程"
+    assert sessions[0].turn_count == 1
+
+
+def test_conversation_and_turn_history_use_stable_keyset_pagination(tmp_path: Path) -> None:
+    database = tmp_path / "assistant.db"
+    handles = iter(("session-a", "session-b", "session-c"))
+    sessions = RuntimeSessionRepository(database, handle_factory=lambda: next(handles))
+    scopes = [sessions.create("principal-a") for _ in range(3)]
+    turn_ids = iter(("turn-a", "turn-b", "turn-c", "turn-d", "turn-e"))
+    timestamps = iter((100.0, 200.0, 300.0, 400.0, 500.0))
+    repository = ConversationRepository(
+        database,
+        turn_id_factory=lambda: next(turn_ids),
+        clock=lambda: next(timestamps),
+    )
+
+    for index, scope in enumerate(scopes):
+        repository.create(
+            scope,
+            client_request_id=f"session-request-{index}",
+            user_input=f"conversation {index}",
+        )
+
+    first_page, session_cursor = repository.list_sessions("principal-a", limit=2)
+    second_page, final_session_cursor = repository.list_sessions(
+        "principal-a",
+        limit=2,
+        cursor=session_cursor,
+    )
+    assert [item.title for item in first_page] == ["conversation 2", "conversation 1"]
+    assert [item.title for item in second_page] == ["conversation 0"]
+    assert final_session_cursor == ""
+
+    repository.create(
+        scopes[0],
+        client_request_id="turn-request-d",
+        user_input="fourth",
+    )
+    repository.create(
+        scopes[0],
+        client_request_id="turn-request-e",
+        user_input="fifth",
+    )
+    newest, turn_cursor = repository.list_session("principal-a", "session-a", limit=2)
+    older, final_turn_cursor = repository.list_session(
+        "principal-a",
+        "session-a",
+        limit=2,
+        cursor=turn_cursor,
+    )
+    assert [turn.user_input for turn in newest] == ["fourth", "fifth"]
+    assert [turn.user_input for turn in older] == ["conversation 0"]
+    assert final_turn_cursor == ""

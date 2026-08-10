@@ -1,6 +1,7 @@
 import { router } from "expo-router";
 import * as Notifications from "expo-notifications";
-import { useState } from "react";
+import * as Crypto from "expo-crypto";
+import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -31,6 +32,7 @@ export default function NewTaskScreen() {
   const [notifyFailed, setNotifyFailed] = useState(true);
   const [notifyApproval, setNotifyApproval] = useState(true);
   const [launchPolicy, setLaunchPolicy] = useState<TaskLaunchPolicy>(immediatePolicy);
+  const requestIdentity = useRef<{ fingerprint: string; requestId: string } | null>(null);
 
   async function create() {
     if (gateway.requiredUpdate) {
@@ -42,7 +44,7 @@ export default function NewTaskScreen() {
     setSaving(true);
     setError("");
     try {
-      const result = await gateway.runAuthenticated((client) => client.createTask({
+      const input = {
         title: title.trim(),
         goal: normalizedGoal,
         notificationPolicy: {
@@ -51,6 +53,17 @@ export default function NewTaskScreen() {
           waiting_approval: notifyApproval,
         },
         launchPolicy,
+      };
+      const fingerprint = JSON.stringify(input);
+      if (requestIdentity.current?.fingerprint !== fingerprint) {
+        requestIdentity.current = {
+          fingerprint,
+          requestId: Crypto.randomUUID(),
+        };
+      }
+      const result = await gateway.runAuthenticated((client) => client.createTask({
+        ...input,
+        clientRequestId: requestIdentity.current!.requestId,
       }));
       if (launchPolicy.kind !== "immediate" && gateway.client) {
         const permission = await Notifications.getPermissionsAsync();

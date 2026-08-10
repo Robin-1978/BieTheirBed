@@ -22,6 +22,8 @@ from pc_assistant.tasks import (
     DurableToolCommitService,
     TaskEventHub,
     TaskExecutor,
+    TaskLaunchKind,
+    TaskLaunchPolicy,
     TaskRepository,
     TaskService,
     TaskState,
@@ -136,6 +138,53 @@ def test_task_executor_rejects_unbounded_concurrency(tmp_path: Path) -> None:
             hub,
             max_concurrency=33,
         )
+
+
+@pytest.mark.asyncio
+async def test_immediate_definition_creates_one_execution_and_retries_idempotently(
+    tmp_path: Path,
+) -> None:
+    release = asyncio.Event()
+    service, _repository, scope = _components(
+        tmp_path,
+        _Runtime(hold=release),
+    )
+    await service.start()
+    try:
+        definition, execution = await service.create_definition(
+            scope,
+            client_request_id="definition-request-a",
+            title="Check weather",
+            goal="Check today's weather",
+            launch_policy=TaskLaunchPolicy(kind=TaskLaunchKind.IMMEDIATE),
+        )
+
+        assert execution is not None
+        assert definition.latest_execution_id == execution.execution_id
+        listed = await service.list_executions(
+            scope.principal_id,
+            definition.task_id,
+        )
+        assert [item.execution_id for item in listed] == [execution.execution_id]
+
+        retried_definition, retried_execution = await service.create_definition(
+            scope,
+            client_request_id="definition-request-a",
+            title="Check weather",
+            goal="Check today's weather",
+            launch_policy=TaskLaunchPolicy(kind=TaskLaunchKind.IMMEDIATE),
+        )
+
+        assert retried_definition.task_id == definition.task_id
+        assert retried_execution is not None
+        assert retried_execution.execution_id == execution.execution_id
+        assert len(await service.list_executions(
+            scope.principal_id,
+            definition.task_id,
+        )) == 1
+    finally:
+        release.set()
+        await service.stop()
 
 
 @pytest.mark.asyncio

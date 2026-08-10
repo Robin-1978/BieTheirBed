@@ -234,11 +234,12 @@ class _Core:
 
     async def create_product_task(
         self, principal_id, session_handle, goal, *, title, attachments,
-        tools_enabled, priority, launch_policy, notification_policy,
+        client_request_id, tools_enabled, priority, launch_policy, notification_policy,
     ):
         self.calls.append((
             "create_product_task", principal_id, session_handle, goal, title,
-            attachments, tools_enabled, priority, launch_policy, notification_policy,
+            client_request_id, attachments, tools_enabled, priority, launch_policy,
+            notification_policy,
         ))
         return SimpleNamespace(
             task=_product_task_snapshot(),
@@ -293,9 +294,9 @@ class _Core:
         self.calls.append(("get_chat_turn", principal_id, turn_id))
         return _chat_snapshot()
 
-    async def list_chat_turns(self, principal_id, session_handle, *, limit):
-        self.calls.append(("list_chat_turns", principal_id, session_handle, limit))
-        return (_chat_snapshot(),)
+    async def list_chat_turns(self, principal_id, session_handle, *, limit, cursor=""):
+        self.calls.append(("list_chat_turns", principal_id, session_handle, limit, cursor))
+        return (_chat_snapshot(),), "next-turn"
 
     async def chat_turn_updates(self, principal_id, turn_id):
         self.calls.append(("chat_turn_updates", principal_id, turn_id))
@@ -529,7 +530,7 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
         created = await http.post(
             "/v1/tasks",
             headers=headers,
-            json={"goal": "hello"},
+            json={"client_request_id": "task-request-a", "goal": "hello"},
         )
         listed = await http.get(
             "/v1/tasks?state=active&limit=10",
@@ -606,7 +607,7 @@ async def test_gateway_conversation_uses_turn_snapshots_not_task_feed(tmp_path) 
         created = await http.post(
             "/v1/conversations/sessions/session-a/turns",
             headers=headers,
-            json={"input": "hello"},
+            json={"client_request_id": "chat-request-a", "input": "hello"},
         )
         listed = await http.get(
             "/v1/conversations/sessions/session-a/turns?limit=20",
@@ -633,6 +634,9 @@ async def test_gateway_conversation_uses_turn_snapshots_not_task_feed(tmp_path) 
     assert created.status_code == 202
     assert created.json()["turn"]["turn_id"] == "turn-a"
     assert listed.json()["turns"][0]["final_output"] == "你好"
+    assert listed.json()["next_cursor"] == "next-turn"
+    create_call = next(call for call in core.calls if call[0] == "create_chat_turn")
+    assert create_call[-1]["client_request_id"] == "chat-request-a"
     assert detail.json()["turn"]["state"] == "completed"
     assert "event: snapshot\n" in stream.text
     assert '"turn_id":"turn-a"' in stream.text
@@ -659,6 +663,7 @@ async def test_gateway_creates_background_task_in_detached_session(tmp_path) -> 
             "/v1/tasks",
             headers=headers,
             json={
+                "client_request_id": "task-request-a",
                 "goal": "整理资料",
             },
         )
@@ -676,6 +681,7 @@ async def test_gateway_creates_background_task_in_detached_session(tmp_path) -> 
         "session-a",
         "整理资料",
     )
+    assert create[5] == "task-request-a"
 
 
 @pytest.mark.asyncio

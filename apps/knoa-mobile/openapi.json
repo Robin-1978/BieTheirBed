@@ -341,16 +341,6 @@
             "gatewaySession": []
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateConversationSessionRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "201": {
             "description": "Core session",
@@ -420,6 +410,15 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 200
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 512
             }
           }
         ],
@@ -854,6 +853,15 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 500
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 512
             }
           }
         ],
@@ -4690,6 +4698,11 @@
             },
             "title": "Turns",
             "type": "array"
+          },
+          "next_cursor": {
+            "default": "",
+            "title": "Next Cursor",
+            "type": "string"
           }
         },
         "required": [
@@ -4871,6 +4884,11 @@
             },
             "title": "Sessions",
             "type": "array"
+          },
+          "next_cursor": {
+            "default": "",
+            "title": "Next Cursor",
+            "type": "string"
           }
         },
         "required": [
@@ -4966,6 +4984,12 @@
       "CreateChatTurnRequest": {
         "additionalProperties": false,
         "properties": {
+          "client_request_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Client Request Id",
+            "type": "string"
+          },
           "input": {
             "default": "",
             "maxLength": 200000,
@@ -4987,25 +5011,21 @@
             "type": "boolean"
           }
         },
+        "required": [
+          "client_request_id"
+        ],
         "title": "CreateChatTurnRequest",
-        "type": "object"
-      },
-      "CreateConversationSessionRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "title": {
-            "default": "新对话",
-            "maxLength": 120,
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "title": "CreateConversationSessionRequest",
         "type": "object"
       },
       "CreateProductTaskRequest": {
         "additionalProperties": false,
         "properties": {
+          "client_request_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Client Request Id",
+            "type": "string"
+          },
           "title": {
             "default": "",
             "maxLength": 200,
@@ -5051,6 +5071,7 @@
           }
         },
         "required": [
+          "client_request_id",
           "goal"
         ],
         "title": "CreateProductTaskRequest",
@@ -5700,17 +5721,6 @@
           "session_handle": {
             "title": "Session Handle",
             "type": "string"
-          },
-          "session": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ConversationSessionSnapshot"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
           }
         },
         "required": [

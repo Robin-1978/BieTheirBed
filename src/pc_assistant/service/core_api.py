@@ -477,7 +477,6 @@ class CreateSessionRequest(CoreModel):
     request_id: RequestId
     method: Literal["create_session"] = "create_session"
     activate: bool = True
-    title: Annotated[str, StringConstraints(max_length=120)] = "新对话"
 
 
 class GetConversationSessionRequest(CoreModel):
@@ -493,6 +492,7 @@ class ListConversationSessionsRequest(CoreModel):
     method: Literal["list_conversation_sessions"] = "list_conversation_sessions"
     include_archived: bool = False
     limit: int = Field(default=100, ge=1, le=200)
+    cursor: Annotated[str, StringConstraints(max_length=512)] = ""
 
 
 class UpdateConversationSessionRequest(CoreModel):
@@ -535,6 +535,7 @@ class CreateChatTurnRequest(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
     method: Literal["create_chat_turn"] = "create_chat_turn"
+    client_request_id: RequestId
     session_handle: SessionHandle
     input: Annotated[str, StringConstraints(max_length=200_000)] = ""
     attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
@@ -560,6 +561,7 @@ class ListChatTurnsRequest(CoreModel):
     method: Literal["list_chat_turns"] = "list_chat_turns"
     session_handle: SessionHandle
     limit: int = Field(default=100, ge=1, le=500)
+    cursor: Annotated[str, StringConstraints(max_length=512)] = ""
 
 
 class SubscribeChatTurnRequest(CoreModel):
@@ -630,6 +632,7 @@ class CreateProductTaskRequest(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
     method: Literal["product_task_create"] = "product_task_create"
+    client_request_id: RequestId
     session_handle: SessionHandle
     title: Annotated[str, StringConstraints(max_length=200)] = ""
     goal: Annotated[str, StringConstraints(min_length=1, max_length=200_000)]
@@ -1004,7 +1007,6 @@ class SessionCreatedMessage(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
     session_handle: SessionHandle
-    session: ConversationSessionSnapshot | None = None
 
 
 class ConversationSessionMessage(CoreModel):
@@ -1019,6 +1021,7 @@ class ConversationSessionListMessage(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
     sessions: tuple[ConversationSessionSnapshot, ...]
+    next_cursor: Annotated[str, StringConstraints(max_length=512)] = ""
 
 
 class ConversationSessionDeletedMessage(CoreModel):
@@ -1062,6 +1065,7 @@ class ChatTurnListMessage(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
     turns: tuple[ChatTurnSnapshot, ...]
+    next_cursor: Annotated[str, StringConstraints(max_length=512)] = ""
 
 
 class ChatTurnSignalMessage(CoreModel):

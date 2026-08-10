@@ -78,19 +78,27 @@ export class GatewayClient {
     });
   }
 
-  async createSession(title = "新对话"): Promise<string> {
+  async createSession(): Promise<string> {
     const response = await this.json<{ session_handle: string }>("/v1/sessions", {
       method: "POST",
-      body: { title },
     });
     return response.session_handle;
   }
 
-  async listConversationSessions(includeArchived = false): Promise<ConversationSession[]> {
-    const response = await this.json<{ sessions: ConversationSession[] }>(
-      `/v1/conversations/sessions?include_archived=${includeArchived ? "true" : "false"}&limit=200`,
-    );
-    return response.sessions;
+  async listConversationSessions(input: {
+    includeArchived?: boolean;
+    limit?: number;
+    cursor?: string;
+  } = {}): Promise<{ sessions: ConversationSession[]; nextCursor: string }> {
+    const query = new URLSearchParams();
+    query.set("include_archived", input.includeArchived ? "true" : "false");
+    query.set("limit", String(input.limit ?? 50));
+    if (input.cursor) query.set("cursor", input.cursor);
+    const response = await this.json<{
+      sessions: ConversationSession[];
+      next_cursor?: string;
+    }>(`/v1/conversations/sessions?${query}`);
+    return { sessions: response.sessions, nextCursor: response.next_cursor ?? "" };
   }
 
   async getConversationSession(sessionHandle: string): Promise<ConversationSession> {
@@ -154,11 +162,17 @@ export class GatewayClient {
     return response.events;
   }
 
-  async listChatTurns(sessionHandle: string, limit = 100): Promise<ChatTurnSnapshot[]> {
-    const response = await this.json<{ turns: ChatTurnSnapshot[] }>(
-      `/v1/conversations/sessions/${encodeURIComponent(sessionHandle)}/turns?limit=${limit}`,
+  async listChatTurns(
+    sessionHandle: string,
+    limit = 100,
+    cursor = "",
+  ): Promise<{ turns: ChatTurnSnapshot[]; nextCursor: string }> {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (cursor) query.set("cursor", cursor);
+    const response = await this.json<{ turns: ChatTurnSnapshot[]; next_cursor?: string }>(
+      `/v1/conversations/sessions/${encodeURIComponent(sessionHandle)}/turns?${query}`,
     );
-    return response.turns;
+    return { turns: response.turns, nextCursor: response.next_cursor ?? "" };
   }
 
   async getChatTurn(turnId: string): Promise<ChatTurnSnapshot> {
@@ -169,6 +183,7 @@ export class GatewayClient {
   }
 
   async createChatTurn(input: {
+    clientRequestId: string;
     sessionHandle: string;
     text?: string;
     attachments?: ArtifactInput[];
@@ -179,6 +194,7 @@ export class GatewayClient {
       {
         method: "POST",
         body: {
+          client_request_id: input.clientRequestId,
           input: input.text ?? "",
           attachments: input.attachments ?? [],
           tools_enabled: input.toolsEnabled ?? true,
@@ -212,6 +228,7 @@ export class GatewayClient {
   }
 
   async createTask(input: {
+    clientRequestId: string;
     title?: string;
     goal: string;
     attachments?: ArtifactInput[];
@@ -222,6 +239,7 @@ export class GatewayClient {
     return this.json("/v1/tasks", {
       method: "POST",
       body: {
+        client_request_id: input.clientRequestId,
         title: input.title ?? "",
         goal: input.goal,
         attachments: input.attachments ?? [],

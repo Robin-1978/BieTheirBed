@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { parsePairingPayload } from "./gatewayClient";
+import { GatewayClient, parsePairingPayload } from "./gatewayClient";
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("parsePairingPayload", () => {
   it("accepts the canonical v1 payload", () => {
@@ -30,5 +32,46 @@ describe("parsePairingPayload", () => {
         100,
       ),
     ).toThrow("已过期");
+  });
+});
+
+describe("GatewayClient conversation requests", () => {
+  it("keeps the business request id separate from transport retries", async () => {
+    const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ turn: { turn_id: "turn-a" } }), {
+      status: 202,
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetch);
+    const client = new GatewayClient("https://knoa.example.com", "token-a");
+
+    await client.createChatTurn({
+      clientRequestId: "message-request-a",
+      sessionHandle: "session-a",
+      text: "hello",
+    });
+
+    const init = fetch.mock.calls[0]![1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      client_request_id: "message-request-a",
+      input: "hello",
+    });
+  });
+
+  it("passes and returns conversation pagination cursors", async () => {
+    const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
+      sessions: [],
+      next_cursor: "next-page",
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetch);
+    const client = new GatewayClient("https://knoa.example.com", "token-a");
+
+    const result = await client.listConversationSessions({
+      includeArchived: true,
+      limit: 50,
+      cursor: "current-page",
+    });
+
+    expect(fetch.mock.calls[0]![0]).toContain("cursor=current-page");
+    expect(result.nextCursor).toBe("next-page");
   });
 });

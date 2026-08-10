@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
@@ -164,6 +165,9 @@ from pc_assistant.service.core_api import (
     UploadArtifactRequest,
     parse_core_request_json,
 )
+
+
+logger = logging.getLogger(__name__)
 from pc_assistant.service.credentials import verify_principal_credential
 from pc_assistant.tasks import (
     TaskCapacityError,
@@ -426,6 +430,11 @@ class CoreServer:
         except asyncio.CancelledError:
             raise
         except Exception:
+            logger.exception(
+                "Core request failed method=%s request_id=%s",
+                getattr(request, "method", "unknown"),
+                getattr(request, "request_id", "unknown"),
+            )
             await send(
                 self._error(
                     request.request_id,
@@ -596,21 +605,10 @@ class CoreServer:
                         principal,
                         activate=False,
                     )
-                conversation = None
-                if self._conversations is not None:
-                    conversation = await self._conversations.register_session(
-                        scope,
-                        title=request.title,
-                    )
                 await send(
                     SessionCreatedMessage(
                         request_id=request.request_id,
                         session_handle=scope.session_handle,
-                        session=(
-                            None
-                            if conversation is None
-                            else ConversationSessionSnapshot.from_record(conversation)
-                        ),
                     )
                 )
             elif isinstance(request, GetConversationSessionRequest):
@@ -629,10 +627,11 @@ class CoreServer:
             elif isinstance(request, ListConversationSessionsRequest):
                 if self._conversations is None:
                     raise RuntimeError("Conversation service is unavailable")
-                sessions = await self._conversations.list_sessions(
+                sessions, next_cursor = await self._conversations.list_sessions(
                     principal,
                     include_archived=request.include_archived,
                     limit=request.limit,
+                    cursor=request.cursor,
                 )
                 await send(
                     ConversationSessionListMessage(
@@ -641,6 +640,7 @@ class CoreServer:
                             ConversationSessionSnapshot.from_record(item)
                             for item in sessions
                         ),
+                        next_cursor=next_cursor,
                     )
                 )
             elif isinstance(request, UpdateConversationSessionRequest):
@@ -677,7 +677,7 @@ class CoreServer:
                         principal_id=principal,
                         session_handle=request.session_handle,
                     ),
-                    client_request_id=request.request_id,
+                    client_request_id=request.client_request_id,
                     user_input=request.input,
                     attachments=tuple(
                         ArtifactAttachment(
@@ -710,15 +710,17 @@ class CoreServer:
             elif isinstance(request, ListChatTurnsRequest):
                 if self._conversations is None:
                     raise RuntimeError("Conversation service is unavailable")
-                turns = await self._conversations.list_turns(
+                turns, next_cursor = await self._conversations.list_turns(
                     principal,
                     request.session_handle,
                     limit=request.limit,
+                    cursor=request.cursor,
                 )
                 await send(
                     ChatTurnListMessage(
                         request_id=request.request_id,
                         turns=tuple(ChatTurnSnapshot.from_record(turn) for turn in turns),
+                        next_cursor=next_cursor,
                     )
                 )
             elif isinstance(request, CancelChatTurnRequest):
@@ -821,7 +823,7 @@ class CoreServer:
                         principal_id=principal,
                         session_handle=request.session_handle,
                     ),
-                    client_request_id=request.request_id,
+                    client_request_id=request.client_request_id,
                     title=request.title,
                     goal=request.goal,
                     attachments=tuple(
@@ -1578,6 +1580,11 @@ class CoreServer:
                 )
             )
         except Exception:
+            logger.exception(
+                "Core request failed method=%s request_id=%s",
+                getattr(request, "method", "unknown"),
+                getattr(request, "request_id", "unknown"),
+            )
             await send(
                 self._error(
                     request.request_id,
