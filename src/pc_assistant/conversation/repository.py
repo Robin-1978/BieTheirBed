@@ -10,7 +10,6 @@ import sqlite3
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 from pc_assistant.agent_runtime.contracts import ArtifactAttachment, RuntimeScope
 from pc_assistant.agent_runtime.tool_step import ProposedToolCall, ToolStepResult

@@ -87,13 +87,6 @@ class _Client:
                 task_id="task-a",
                 event_seq=2,
                 occurred_at=2.0,
-                event_type="content_delta",
-                payload=TaskEventPayload(content="done"),
-            )
-            yield TaskEvent(
-                task_id="task-a",
-                event_seq=3,
-                occurred_at=3.0,
                 event_type="artifact",
                 payload=TaskEventPayload(
                     artifact=ArtifactRef(
@@ -107,10 +100,13 @@ class _Client:
             )
             yield TaskEvent(
                 task_id="task-a",
-                event_seq=4,
-                occurred_at=4.0,
+                event_seq=3,
+                occurred_at=3.0,
                 event_type="completed",
-                payload=TaskEventPayload(state=TaskState.COMPLETED),
+                payload=TaskEventPayload(
+                    state=TaskState.COMPLETED,
+                    content="done",
+                ),
             )
 
         return stream()

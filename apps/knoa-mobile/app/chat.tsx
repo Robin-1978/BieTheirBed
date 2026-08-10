@@ -7,12 +7,13 @@ import {
   useAudioRecorder,
   useAudioRecorderState,
 } from "expo-audio";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
   FlatList,
   Image,
   Modal,
@@ -37,9 +38,13 @@ import {
 import { GatewayError } from "@/api/gatewayClient";
 import type { ArtifactInput, ChatApproval, ChatTurnSnapshot } from "@/api/models";
 import { AppMarkdown } from "@/components/AppMarkdown";
+import { AppPressable } from "@/components/AppPressable";
 import { ArtifactViewer } from "@/components/ArtifactViewer";
+import { PrimarySwipeNavigation } from "@/components/PrimarySwipeNavigation";
 import { loadConversationDraft, removeConversationDraft, storeConversationDraft } from "@/security/conversationDrafts";
 import { useGateway } from "@/state/GatewayProvider";
+import { loadConversationCache, storeConversationCache } from "@/storage/conversationCache";
+import { mergeConversationTurns } from "@/storage/conversationMerge";
 import { colors } from "@/theme";
 
 type PendingAttachment = {
@@ -102,11 +107,13 @@ export default function ChatScreen() {
 
   const refresh = useCallback(async () => {
     if (!gateway.client || !gateway.sessionHandle) return;
+    const sessionHandle = gateway.sessionHandle;
     try {
       const history = await gateway.runAuthenticated(
-        (client) => client.listChatTurns(gateway.sessionHandle, 100),
+        (client) => client.listChatTurns(sessionHandle, 100),
       );
-      setTurns(history.turns);
+      if (gatewayRef.current.sessionHandle !== sessionHandle) return;
+      setTurns((current) => mergeConversationTurns(current, history.turns));
       setNextTurnCursor(history.nextCursor);
       for (const turn of history.turns) {
         if (!TERMINAL_STATES.has(turn.state)) watchTurn(turn.turn_id);
@@ -117,17 +124,49 @@ export default function ChatScreen() {
         setMessage("原会话已不可用，已切换到新会话");
         return;
       }
-      throw error;
+      setMessage("暂时无法同步最新消息，已显示手机中的会话记录");
     }
   }, [gateway.client, gateway.newConversation, gateway.runAuthenticated, gateway.sessionHandle, watchTurn]);
 
   useEffect(() => {
+    let active = true;
+    const sessionHandle = gateway.sessionHandle;
     setTurns([]);
     setNextTurnCursor("");
     turnWatcher.closeAll();
-    void refresh();
-    return () => turnWatcher.closeAll();
+    if (sessionHandle) {
+      void loadConversationCache(sessionHandle).then((cached) => {
+        if (active && gatewayRef.current.sessionHandle === sessionHandle) {
+          setTurns((current) => mergeConversationTurns(current, cached));
+        }
+      }).finally(() => {
+        if (active && gatewayRef.current.sessionHandle === sessionHandle) void refresh();
+      });
+    }
+    return () => {
+      active = false;
+      turnWatcher.closeAll();
+    };
   }, [gateway.sessionHandle, refresh, turnWatcher]);
+
+  useEffect(() => {
+    if (!gateway.sessionHandle || !turns.length) return;
+    const timeout = setTimeout(() => {
+      void storeConversationCache(gateway.sessionHandle, turns);
+    }, 250);
+    return () => clearTimeout(timeout);
+  }, [gateway.sessionHandle, turns]);
+
+  useFocusEffect(useCallback(() => {
+    void refresh();
+  }, [refresh]));
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void refresh();
+    });
+    return () => subscription.remove();
+  }, [refresh]);
 
   useEffect(() => {
     let active = true;
@@ -322,10 +361,36 @@ export default function ChatScreen() {
   async function resolve(approval: ChatApproval, approved: boolean) {
     if (!gateway.client || resolving) return;
     setResolving(approval.approval_id);
+    const optimisticState = approved ? "approved" : "rejected";
+    setTurns((current) => current.map((turn) => ({
+      ...turn,
+      approvals: turn.approvals.map((item) => item.approval_id === approval.approval_id
+        ? { ...item, state: optimisticState }
+        : item),
+    })));
     try {
-      await gateway.runAuthenticated(
+      const result = await gateway.runAuthenticated(
         (client) => client.resolveChatApproval(approval.approval_id, approved),
       );
+      setMessage(approved ? "已确认，正在继续执行" : "已取消这项操作");
+      const turn = turns.find((item) => item.approvals.some(
+        (candidate) => candidate.approval_id === approval.approval_id,
+      ));
+      if (turn) {
+        const fresh = await gateway.runAuthenticated((client) => client.getChatTurn(turn.turn_id));
+        setTurns((current) => current.map((item) => item.turn_id === fresh.turn_id ? fresh : item));
+        if (!TERMINAL_STATES.has(fresh.state)) watchTurn(fresh.turn_id);
+      } else if (result.approval.state === "pending") {
+        await refresh();
+      }
+    } catch (error) {
+      setTurns((current) => current.map((turn) => ({
+        ...turn,
+        approvals: turn.approvals.map((item) => item.approval_id === approval.approval_id
+          ? approval
+          : item),
+      })));
+      setMessage(error instanceof Error ? error.message : "确认没有生效，请重试");
     } finally {
       setResolving("");
     }
@@ -335,7 +400,7 @@ export default function ChatScreen() {
     item: AssistantArtifactItem,
   ): Promise<ResolvedArtifactFile> => resolveAssistantArtifactFile(item, {
     cachedUri: (cacheFileName) => {
-      const file = new File(Paths.cache, cacheFileName);
+      const file = new File(Paths.document, `received-${cacheFileName}`);
       return file.exists ? file.uri : null;
     },
     download: (artifactId) => gateway.runAuthenticated((client) => client.downloadArtifact(
@@ -343,7 +408,7 @@ export default function ChatScreen() {
       artifactId,
     )),
     write: (cacheFileName, bytes) => {
-      const file = new File(Paths.cache, cacheFileName);
+      const file = new File(Paths.document, `received-${cacheFileName}`);
       file.create({ overwrite: true, intermediates: true });
       file.write(bytes);
       return file.uri;
@@ -421,7 +486,8 @@ export default function ChatScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
+    <PrimarySwipeNavigation current="chat">
+      <KeyboardAvoidingView
       style={styles.screen}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={insets.top + (Platform.OS === "ios" ? 44 : 56)}
@@ -429,10 +495,10 @@ export default function ChatScreen() {
       <View style={styles.topbar}>
         <Text style={styles.subtitle}>随时告诉我你想做什么</Text>
         <View style={styles.topActions}>
-          <Pressable onPress={() => void startNewTopic()} disabled={startingTopic || sending}>
+          <AppPressable onPress={() => void startNewTopic()} disabled={startingTopic || sending}>
             <Text style={styles.link}>{startingTopic ? "创建中…" : "新话题"}</Text>
-          </Pressable>
-          <Pressable onPress={() => router.push("/conversations")}><Text style={styles.link}>会话</Text></Pressable>
+          </AppPressable>
+          <AppPressable onPress={() => router.push("/conversations")}><Text style={styles.link}>会话</Text></AppPressable>
         </View>
       </View>
       {gateway.status !== "ready" ? (
@@ -441,9 +507,9 @@ export default function ChatScreen() {
             <Text style={styles.connectionTitle}>暂时没有连接到小诺</Text>
             <Text style={styles.connectionDetail}>{gateway.error || "正在重新建立安全连接"}</Text>
           </View>
-          <Pressable onPress={() => void gateway.reconnect()} style={styles.bannerButton}>
+          <AppPressable onPress={() => void gateway.reconnect()} style={styles.bannerButton}>
             <Text style={styles.bannerButtonText}>重连</Text>
-          </Pressable>
+          </AppPressable>
         </View>
       ) : null}
       {gateway.availableUpdate ? (
@@ -494,7 +560,7 @@ export default function ChatScreen() {
         renderItem={({ item }) => (
           <ChatTurn
             turn={item}
-            resolving={Boolean(resolving)}
+            resolving={resolving}
             onResolve={resolve}
             onLoadArtifact={loadArtifact}
             onOpenArtifact={openArtifact}
@@ -529,13 +595,13 @@ export default function ChatScreen() {
         </Pressable>
       ) : null}
       <View style={styles.composer}>
-        <Pressable
+        <AppPressable
           accessibilityLabel="添加照片或文件"
           onPress={() => setActionsOpen(true)}
           style={styles.roundAction}
         >
           <LineIcon name="plus" color={colors.accent} />
-        </Pressable>
+        </AppPressable>
         <View style={styles.inputShell}>
           <Pressable
             accessibilityLabel={inputMode === "text" ? "切换到语音输入" : "切换到文字输入"}
@@ -623,7 +689,8 @@ export default function ChatScreen() {
           </View>
         </View>
       </Modal>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </PrimarySwipeNavigation>
   );
 }
 
@@ -678,7 +745,7 @@ function ChatTurn({
   onEdit,
 }: {
   turn: ChatTurnSnapshot;
-  resolving: boolean;
+  resolving: string;
   onResolve(approval: ChatApproval, approved: boolean): void;
   onLoadArtifact(item: AssistantArtifactItem): Promise<ResolvedArtifactFile>;
   onOpenArtifact(item: AssistantArtifactItem): Promise<void>;
@@ -721,12 +788,12 @@ function ChatTurn({
           <View style={styles.approval}>
             <Text style={styles.approvalReason}>{approval.reason || approval.tool_name}</Text>
             <View style={styles.approvalActions}>
-              <Pressable style={styles.deny} disabled={resolving} onPress={() => onResolve(approval, false)}>
-                <Text style={styles.denyText}>取消</Text>
-              </Pressable>
-              <Pressable style={styles.approve} disabled={resolving} onPress={() => onResolve(approval, true)}>
-                <Text style={styles.approveText}>确认</Text>
-              </Pressable>
+              <AppPressable style={styles.deny} disabled={Boolean(resolving)} onPress={() => onResolve(approval, false)}>
+                {resolving === approval.approval_id ? <ActivityIndicator color={colors.ink} size="small" /> : <Text style={styles.denyText}>取消</Text>}
+              </AppPressable>
+              <AppPressable style={styles.approve} disabled={Boolean(resolving)} onPress={() => onResolve(approval, true)}>
+                {resolving === approval.approval_id ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.approveText}>确认</Text>}
+              </AppPressable>
             </View>
           </View>
         ) : null}

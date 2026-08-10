@@ -10,8 +10,6 @@ from pc_assistant.tasks import (
     TaskDefinitionState,
     TaskLaunchKind,
     TaskLaunchPolicy,
-    TaskLaunchReason,
-    TaskState,
 )
 from pc_assistant.tools.create_task import CreateTaskTool
 from pc_assistant.tools.schedule_task import ScheduleTaskTool

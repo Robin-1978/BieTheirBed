@@ -13,9 +13,7 @@ from pydantic import Field
 from pc_assistant.agent_runtime.contracts import ContractModel, RuntimeScope
 from pc_assistant.tools.base import (
     ToolCapability,
-    ToolEffect,
     ToolPolicy,
-    ToolRisk,
 )
 from pc_assistant.tools.registry import ToolRegistry
 

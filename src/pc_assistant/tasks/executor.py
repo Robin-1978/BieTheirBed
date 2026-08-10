@@ -24,7 +24,6 @@ from pc_assistant.tasks.approval import DurableApprovalService
 from pc_assistant.tasks.event_hub import TaskEventHub
 from pc_assistant.tasks.models import (
     TERMINAL_TASK_STATES,
-    TaskEvent,
     TaskRecord,
     TaskState,
     TaskTraceEntry,

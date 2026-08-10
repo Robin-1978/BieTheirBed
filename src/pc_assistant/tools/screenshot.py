@@ -12,7 +12,11 @@ from pc_assistant.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRi
 
 class ScreenshotTool(ToolBase):
     name = "screenshot"
-    description = "Capture full desktop as image."
+    description = (
+        "Capture the full desktop and immediately attach it to the user's reply. "
+        "One successful call already delivers the image; do not call screenshot, "
+        "read_artifact, or attach again."
+    )
     effect = ToolEffect.READ_ONLY
     capabilities = frozenset({ToolCapability.DESKTOP_OBSERVE})
     risk = ToolRisk.LOW
@@ -22,7 +26,7 @@ class ScreenshotTool(ToolBase):
         self._paths = ArtifactPaths(artifact_dir)
 
     async def execute(self, **kwargs: Any) -> Any:
-        save_path = self._paths.allocate(prefix="screenshot", suffix=".png")
+        save_path = self._paths.allocate(prefix="screenshot", suffix=".jpg")
         try:
             import mss
             from PIL import Image
@@ -30,17 +34,31 @@ class ScreenshotTool(ToolBase):
             with mss.mss() as sct:
                 shot = sct.grab(sct.monitors[0])
                 image = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
-                image.save(save_path, format="PNG")
+                max_width = 3200
+                if image.width > max_width:
+                    image = image.resize(
+                        (max_width, max(1, round(image.height * max_width / image.width))),
+                        Image.Resampling.LANCZOS,
+                    )
+                image.save(
+                    save_path,
+                    format="JPEG",
+                    quality=85,
+                    optimize=True,
+                    progressive=True,
+                )
             artifact = self._store.register_generated(
                 current_memory_scope().session_id,
                 save_path,
-                media_type="image/png",
+                media_type="image/jpeg",
                 retention="temporary",
             )
             artifact_id = str(artifact["artifact_id"])
             return {
                 "success": True,
                 "artifact": artifact,
+                "delivery": "already_attached_to_user_reply",
+                "instruction": "Reply now; do not capture, read, or attach another image.",
                 "image_ref": self._store.reference(
                     current_memory_scope().session_id,
                     artifact_id,

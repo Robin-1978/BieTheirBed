@@ -1,5 +1,7 @@
 # Documentation Index
 
+- [服务器巨量源码文件治理](server-source-modularization.md)
+
 ## Architecture
 
 - [PC Assistant Architecture](architecture.md)

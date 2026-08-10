@@ -39,7 +39,8 @@ from pc_assistant.service.core_client import (
     CoreClient,
     CoreConnectionLostError,
 )
-from pc_assistant.service.core_server import CoreServer, StaticTokenAuthenticator
+from pc_assistant.service.core_auth import StaticTokenAuthenticator
+from pc_assistant.service.core_server import CoreServer
 from pc_assistant.tasks import (
     DurableApprovalService,
     DurableToolCommitService,

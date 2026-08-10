@@ -10,10 +10,8 @@ from pc_assistant.tools.base import (
     BUILTIN_TOOL_ORIGIN,
     ToolBase,
     ToolCapability,
-    ToolEffect,
     ToolOrigin,
     ToolPolicy,
-    ToolRisk,
 )
 
 

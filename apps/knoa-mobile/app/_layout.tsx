@@ -2,6 +2,7 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 import { KeyboardProvider } from "react-native-keyboard-controller";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { HeaderActions } from "@/components/HeaderActions";
 import { installNotificationNavigation } from "@/notifications";
@@ -14,8 +15,9 @@ export default function RootLayout() {
     return () => subscription.remove();
   }, []);
   return (
-    <KeyboardProvider>
-      <GatewayProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <KeyboardProvider>
+        <GatewayProvider>
         <StatusBar style="dark" />
         <Stack
           screenOptions={{
@@ -49,7 +51,8 @@ export default function RootLayout() {
           <Stack.Screen name="capture" options={{ title: "拍照" }} />
           <Stack.Screen name="update" options={{ title: "版本与更新" }} />
         </Stack>
-      </GatewayProvider>
-    </KeyboardProvider>
+        </GatewayProvider>
+      </KeyboardProvider>
+    </GestureHandlerRootView>
   );
 }

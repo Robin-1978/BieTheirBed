@@ -27,10 +27,8 @@ from pc_assistant.service.core_host import (
     CoreServiceHost,
     TcpCoreEndpoint,
 )
-from pc_assistant.service.core_server import (
-    CoreServer,
-    StaticTokenAuthenticator,
-)
+from pc_assistant.service.core_auth import StaticTokenAuthenticator
+from pc_assistant.service.core_server import CoreServer
 from pc_assistant.tasks import (
     DurableApprovalService,
     DurableToolCommitService,

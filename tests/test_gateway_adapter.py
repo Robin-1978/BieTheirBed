@@ -47,7 +47,6 @@ from pc_assistant.tasks import (
     TaskDefinitionState,
     TaskLaunchPolicy,
     TaskLaunchReason,
-    TaskOrigin,
     TaskState,
 )
 

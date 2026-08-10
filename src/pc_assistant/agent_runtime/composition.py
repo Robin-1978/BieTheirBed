@@ -80,12 +80,12 @@ from pc_assistant.service.core_host import (
     CoreServiceHost,
     TcpCoreEndpoint,
 )
-from pc_assistant.service.core_server import (
+from pc_assistant.service.core_auth import (
     CompositeAuthenticator,
-    CoreServer,
     SignedPrincipalAuthenticator,
     StaticTokenAuthenticator,
 )
+from pc_assistant.service.core_server import CoreServer
 from pc_assistant.service.credentials import resolve_local_service_token
 from pc_assistant.tools.artifact_prepare import ArtifactPrepareTool
 from pc_assistant.tools.base import ToolCapability

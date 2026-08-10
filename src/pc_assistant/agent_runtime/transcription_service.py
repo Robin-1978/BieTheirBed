@@ -19,9 +19,7 @@ from pc_assistant.artifacts import ArtifactStore
 from pc_assistant.config import AudioTranscriptionConfig
 from pc_assistant.tools.base import (
     ToolCapability,
-    ToolEffect,
     ToolOriginKind,
-    ToolRisk,
 )
 from pc_assistant.tools.registry import ToolRegistry
 
