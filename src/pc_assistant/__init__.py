@@ -17,6 +17,18 @@ def _gateway_ttl(value: str) -> int:
     return parsed
 
 
+def _positive_version_code(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Version code must be an integer") from exc
+    if not 1 <= parsed <= 2_100_000_000:
+        raise argparse.ArgumentTypeError(
+            "Version code must be between 1 and 2100000000"
+        )
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pca",
@@ -101,6 +113,30 @@ def build_parser() -> argparse.ArgumentParser:
     revoke = gateway_commands.add_parser("revoke", help="Revoke one paired device")
     revoke.add_argument("device_id")
     revoke.add_argument("--principal", default=None)
+    release = gateway_commands.add_parser(
+        "release",
+        help="Manage the private Android update channel",
+    )
+    release_commands = release.add_subparsers(
+        dest="release_command",
+        required=True,
+    )
+    publish = release_commands.add_parser("publish", help="Publish one immutable APK")
+    publish.add_argument("apk_path")
+    publish.add_argument(
+        "--version-name",
+        default="",
+        help="Override the version name read from the APK manifest",
+    )
+    publish.add_argument(
+        "--version-code",
+        type=_positive_version_code,
+        default=0,
+        help="Override the version code read from the APK manifest",
+    )
+    publish.add_argument("--min-version-code", type=_positive_version_code, default=1)
+    publish.add_argument("--notes", default="")
+    release_commands.add_parser("latest", help="Show the latest published APK")
     return parser
 
 
@@ -289,12 +325,24 @@ def main(argv: list[str] | None = None) -> int:
         config_path = str(Path(config_path).resolve())
 
     if args.command == "gateway":
+        if args.gateway_command == "release":
+            from pc_assistant.gateway.release_admin import run_android_release_admin
+
+            return run_android_release_admin(
+                config_path,
+                action=args.release_command,
+                apk_path=getattr(args, "apk_path", ""),
+                version_name=getattr(args, "version_name", ""),
+                version_code=getattr(args, "version_code", 0),
+                min_version_code=getattr(args, "min_version_code", 1),
+                notes=getattr(args, "notes", ""),
+            )
         from pc_assistant.gateway.admin import run_gateway_admin
 
         return run_gateway_admin(
             config_path,
             action=args.gateway_command,
-            principal_id=args.principal,
+            principal_id=getattr(args, "principal", None),
             ttl_seconds=getattr(args, "ttl", 300),
             device_id=getattr(args, "device_id", ""),
         )

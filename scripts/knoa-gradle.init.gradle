@@ -1,0 +1,22 @@
+// Redirect generated files from included Gradle builds (React Native and Expo
+// build plugins) to the large data disk as well.
+def outputRootValue = System.getenv('KNOA_MOBILE_BUILD_DIR')
+def mainRootValue = System.getenv('KNOA_MOBILE_ANDROID_ROOT')
+
+if (outputRootValue && mainRootValue) {
+  def outputRoot = new File(outputRootValue).canonicalFile
+  def mainRoot = new File(mainRootValue).canonicalFile
+  gradle.beforeProject { project ->
+    if (project.rootDir.canonicalFile != mainRoot) {
+      def rootKey = Integer.toUnsignedString(
+        project.rootDir.canonicalPath.hashCode(),
+        16,
+      )
+      def projectKey = project.path.replace(':', '_') ?: 'root'
+      project.buildDir = new File(
+        outputRoot,
+        "included/${rootKey}/${projectKey}",
+      )
+    }
+  }
+}

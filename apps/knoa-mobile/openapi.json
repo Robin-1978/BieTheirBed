@@ -1858,6 +1858,161 @@
         }
       }
     },
+    "/v1/mobile/releases/android/latest": {
+      "get": {
+        "operationId": "getLatestAndroidRelease",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Latest personal Android release",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AndroidReleaseResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/mobile/releases/android/{version_code}/package": {
+      "get": {
+        "operationId": "downloadAndroidRelease",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "version_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "Range",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete Android APK",
+            "content": {
+              "application/vnd.android.package-archive": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "Android APK byte range",
+            "content": {
+              "application/vnd.android.package-archive": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/device/audit": {
       "get": {
         "operationId": "listDeviceAudit",
@@ -2053,6 +2208,79 @@
       }
     },
     "schemas": {
+      "AndroidReleaseResponse": {
+        "properties": {
+          "platform": {
+            "const": "android",
+            "default": "android",
+            "title": "Platform",
+            "type": "string"
+          },
+          "channel": {
+            "const": "personal",
+            "default": "personal",
+            "title": "Channel",
+            "type": "string"
+          },
+          "version_name": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Version Name",
+            "type": "string"
+          },
+          "version_code": {
+            "maximum": 2100000000,
+            "minimum": 1,
+            "title": "Version Code",
+            "type": "integer"
+          },
+          "min_supported_version_code": {
+            "maximum": 2100000000,
+            "minimum": 1,
+            "title": "Min Supported Version Code",
+            "type": "integer"
+          },
+          "size_bytes": {
+            "maximum": 1073741824,
+            "minimum": 1,
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "published_at": {
+            "exclusiveMinimum": 0,
+            "title": "Published At",
+            "type": "number"
+          },
+          "release_notes": {
+            "default": "",
+            "maxLength": 20000,
+            "title": "Release Notes",
+            "type": "string"
+          },
+          "download_path": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Download Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_name",
+          "version_code",
+          "min_supported_version_code",
+          "size_bytes",
+          "sha256",
+          "published_at",
+          "download_path"
+        ],
+        "title": "AndroidReleaseResponse",
+        "type": "object"
+      },
       "ApprovalResolvedResponse": {
         "properties": {
           "approval_id": {
@@ -2455,6 +2683,15 @@
             "default": "",
             "maxLength": 128,
             "title": "Parent Task Id",
+            "type": "string"
+          },
+          "kind": {
+            "default": "chat",
+            "enum": [
+              "chat",
+              "task"
+            ],
+            "title": "Kind",
             "type": "string"
           }
         },
@@ -3054,6 +3291,17 @@
         "title": "TaskListResponse",
         "type": "object"
       },
+      "TaskOrigin": {
+        "enum": [
+          "chat",
+          "user",
+          "agent",
+          "scheduled",
+          "event"
+        ],
+        "title": "TaskOrigin",
+        "type": "string"
+      },
       "TaskResponse": {
         "properties": {
           "task": {
@@ -3086,6 +3334,10 @@
             "minLength": 1,
             "title": "Client Request Id",
             "type": "string"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/TaskOrigin",
+            "default": "chat"
           },
           "parent_task_id": {
             "default": "",
@@ -3250,6 +3502,7 @@
           "effect": {
             "enum": [
               "read_only",
+              "internal_write",
               "local_write",
               "external_side_effect",
               "desktop_control"
@@ -3278,7 +3531,8 @@
                 "desktop_control",
                 "memory_read",
                 "memory_write",
-                "mcp"
+                "mcp",
+                "task_management"
               ],
               "type": "string"
             },

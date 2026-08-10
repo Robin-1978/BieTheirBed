@@ -148,7 +148,7 @@ class RuntimeSessionRepository:
         if row is None:
             raise SessionNotFoundError()
 
-    def create(self, principal_id: str) -> RuntimeScope:
+    def create(self, principal_id: str, *, activate: bool = True) -> RuntimeScope:
         principal = self._principal(principal_id)
         for _ in range(5):
             handle = self._handle_factory().strip()
@@ -162,15 +162,16 @@ class RuntimeSessionRepository:
                            ) VALUES (?, ?, ?, ?)""",
                         (scope.session_handle, scope.principal_id, now, now),
                     )
-                    db.execute(
-                        """INSERT INTO runtime_active_sessions(
-                               principal_id, session_handle, updated_at
-                           ) VALUES (?, ?, ?)
-                           ON CONFLICT(principal_id) DO UPDATE SET
-                               session_handle=excluded.session_handle,
-                               updated_at=excluded.updated_at""",
-                        (scope.principal_id, scope.session_handle, now),
-                    )
+                    if activate:
+                        db.execute(
+                            """INSERT INTO runtime_active_sessions(
+                                   principal_id, session_handle, updated_at
+                               ) VALUES (?, ?, ?)
+                               ON CONFLICT(principal_id) DO UPDATE SET
+                                   session_handle=excluded.session_handle,
+                                   updated_at=excluded.updated_at""",
+                            (scope.principal_id, scope.session_handle, now),
+                        )
                 return scope
             except sqlite3.IntegrityError:
                 continue

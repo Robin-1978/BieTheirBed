@@ -104,6 +104,7 @@ class ToolDescriptorRecord(ContractModel):
     extension_id: Identifier128
     effect: Literal[
         "read_only",
+        "internal_write",
         "local_write",
         "external_side_effect",
         "desktop_control",
@@ -120,6 +121,7 @@ class ToolDescriptorRecord(ContractModel):
             "memory_read",
             "memory_write",
             "mcp",
+            "task_management",
         ],
         ...,
     ] = ()

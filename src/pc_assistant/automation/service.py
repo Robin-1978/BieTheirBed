@@ -8,7 +8,7 @@ from typing import Protocol
 from pc_assistant.agent_runtime.contracts import RuntimeScope
 from pc_assistant.automation.models import ScheduleRecord, ScheduleSpec, ScheduleState
 from pc_assistant.automation.repository import ScheduleRepository
-from pc_assistant.tasks.models import TaskRecord
+from pc_assistant.tasks.models import TaskOrigin, TaskRecord
 
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,7 @@ class TaskCreationPort(Protocol):
         goal: str,
         tools_enabled: bool = True,
         priority: int = 0,
+        origin: TaskOrigin = TaskOrigin.CHAT,
     ) -> TaskRecord: ...
 
 
@@ -91,6 +92,7 @@ class ScheduleDispatcher:
                 goal=schedule.goal,
                 tools_enabled=schedule.tools_enabled,
                 priority=schedule.priority,
+                origin=TaskOrigin.SCHEDULED,
             )
             await asyncio.to_thread(
                 self._repository.mark_task_created,

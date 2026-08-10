@@ -135,7 +135,7 @@ class ArtifactTranscriptionService:
         if tool is None or origin is None or origin.kind is not ToolOriginKind.MCP:
             raise TranscriptionUnavailableError("Configured transcription MCP Tool is absent")
         policy = tool.policy
-        if policy.effect is not ToolEffect.READ_ONLY or policy.risk is ToolRisk.HIGH:
+        if policy.requires_confirmation:
             raise TranscriptionUnavailableError(
                 "Transcription MCP Tool must be read-only and non-high-risk"
             )

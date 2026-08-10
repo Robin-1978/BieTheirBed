@@ -19,6 +19,7 @@ from pc_assistant.tasks.models import (
     TaskCancelResult,
     TaskEvent,
     TaskPauseResult,
+    TaskOrigin,
     TaskRecord,
     TaskState,
 )
@@ -60,6 +61,7 @@ class TaskService:
         tools_enabled: bool = True,
         priority: int = 0,
         parent_task_id: str = "",
+        origin: TaskOrigin = TaskOrigin.CHAT,
     ) -> TaskRecord:
         task, created = await asyncio.to_thread(
             self._repository.create,
@@ -70,6 +72,7 @@ class TaskService:
             tools_enabled=tools_enabled,
             priority=priority,
             parent_task_id=parent_task_id,
+            origin=origin,
         )
         if created:
             first = await asyncio.to_thread(
@@ -97,6 +100,7 @@ class TaskService:
         *,
         session_handle: str = "",
         state: TaskState | None = None,
+        origins: tuple[TaskOrigin, ...] = (),
         limit: int = 50,
         cursor: str = "",
     ) -> tuple[tuple[TaskRecord, ...], str]:
@@ -105,6 +109,7 @@ class TaskService:
             principal_id,
             session_handle=session_handle,
             state=state,
+            origins=origins,
             limit=limit,
             cursor=cursor,
         )

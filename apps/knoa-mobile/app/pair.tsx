@@ -30,7 +30,7 @@ export default function PairScreen() {
     setError("");
     try {
       await gateway.pair(encoded.trim(), displayName.trim());
-      router.replace("/tasks");
+      router.replace("/chat");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "配对失败");
       setScanning(false);

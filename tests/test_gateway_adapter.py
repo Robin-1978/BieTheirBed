@@ -37,6 +37,7 @@ from pc_assistant.tasks import (
     TaskEvent,
     TaskEventPayload,
     TaskPauseResult,
+    TaskOrigin,
     TaskState,
 )
 
@@ -151,8 +152,8 @@ class _Core:
     async def close(self):
         self.closed = True
 
-    async def create_session(self, principal_id):
-        self.calls.append(("create_session", principal_id))
+    async def create_session(self, principal_id, **kwargs):
+        self.calls.append(("create_session", principal_id, kwargs))
         return "session-a"
 
     async def create_task(self, principal_id, session_handle, user_input, attachments, **kwargs):
@@ -428,6 +429,46 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
         "state": "approved",
     }
     assert {call[1] for call in core.calls} == {"personal:owner"}
+
+
+@pytest.mark.asyncio
+async def test_gateway_creates_background_task_in_detached_session(tmp_path) -> None:
+    core = _Core()
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=_Authentication(),
+        core=core,
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://gateway.local",
+    ) as http:
+        response = await http.post(
+            "/v1/tasks",
+            headers=headers,
+            json={
+                "session_handle": "chat-session",
+                "input": "整理资料",
+                "kind": "task",
+            },
+        )
+
+    assert response.status_code == 202
+    assert core.calls[0] == (
+        "create_session",
+        "personal:owner",
+        {"activate": False},
+    )
+    create = core.calls[1]
+    assert create[0:4] == (
+        "create_task",
+        "personal:owner",
+        "session-a",
+        "整理资料",
+    )
+    assert create[-1]["origin"] is TaskOrigin.USER
 
 
 @pytest.mark.asyncio

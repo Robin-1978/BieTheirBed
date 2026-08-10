@@ -1,6 +1,8 @@
 """Public, versioned Secure Gateway HTTP protocol models."""
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from pc_assistant.agent_runtime.contracts import RuntimeStatus, ToolListResult
@@ -44,6 +46,7 @@ class CreateTaskRequest(GatewayRequest):
     tools_enabled: bool = True
     priority: int = Field(default=0, ge=0, le=9)
     parent_task_id: str = Field(default="", max_length=128)
+    kind: Literal["chat", "task"] = "chat"
 
     def require_content(self) -> None:
         if not self.input.strip() and not self.attachments:
@@ -82,6 +85,7 @@ class GatewayQuery(BaseModel):
 class TaskListQuery(GatewayQuery):
     session_handle: str = Field(default="", max_length=256)
     state: TaskState | None = None
+    kind: Literal["all", "chat", "task"] = "all"
     limit: int = Field(default=50, ge=1, le=100)
     cursor: str = Field(default="", max_length=512)
 
@@ -210,3 +214,16 @@ class AuditListResponse(BaseModel):
 class PushRegistrationResponse(BaseModel):
     registered: bool
     provider: str = ""
+
+
+class AndroidReleaseResponse(BaseModel):
+    platform: Literal["android"] = "android"
+    channel: Literal["personal"] = "personal"
+    version_name: str = Field(min_length=1, max_length=32)
+    version_code: int = Field(ge=1, le=2_100_000_000)
+    min_supported_version_code: int = Field(ge=1, le=2_100_000_000)
+    size_bytes: int = Field(ge=1, le=1024 * 1024 * 1024)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    published_at: float = Field(gt=0)
+    release_notes: str = Field(default="", max_length=20_000)
+    download_path: str = Field(min_length=1, max_length=256)

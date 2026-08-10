@@ -28,6 +28,14 @@ class TaskState(str, Enum):
     CANCELLED = "cancelled"
 
 
+class TaskOrigin(str, Enum):
+    CHAT = "chat"
+    USER = "user"
+    AGENT = "agent"
+    SCHEDULED = "scheduled"
+    EVENT = "event"
+
+
 class ApprovalState(str, Enum):
     PENDING = "pending"
     APPROVED = "approved"
@@ -103,6 +111,7 @@ class TaskRecord(TaskModel):
     principal_id: Annotated[NonEmpty, StringConstraints(max_length=256)]
     session_handle: Annotated[NonEmpty, StringConstraints(max_length=256)]
     client_request_id: Identifier
+    origin: TaskOrigin = TaskOrigin.CHAT
     parent_task_id: Annotated[str, StringConstraints(max_length=128)] = ""
     goal: Annotated[str, StringConstraints(min_length=1, max_length=200_000)]
     attachments: tuple[ArtifactAttachment, ...] = Field(default=(), max_length=8)

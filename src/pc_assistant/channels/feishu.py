@@ -30,6 +30,7 @@ from pc_assistant.tasks import (
     TERMINAL_TASK_STATES,
     PrincipalTaskEvent,
     TaskEvent,
+    TaskOrigin,
     TaskState,
 )
 
@@ -1294,7 +1295,15 @@ class FeishuChannel:
             return
 
         if command == "/tasks" and not argument:
-            listing = await client.list_tasks(limit=10)
+            listing = await client.list_tasks(
+                origins=(
+                    TaskOrigin.USER,
+                    TaskOrigin.AGENT,
+                    TaskOrigin.SCHEDULED,
+                    TaskOrigin.EVENT,
+                ),
+                limit=10,
+            )
             if not listing.tasks:
                 await asyncio.to_thread(self._send_text, open_id, "暂无任务。")
                 return
@@ -1374,6 +1383,61 @@ class FeishuChannel:
                 else "任务已经结束。"
             )
             await asyncio.to_thread(self._send_text, open_id, message)
+            return
+
+        if command == "/pause" and argument:
+            try:
+                result = await client.pause_task(argument, reason="飞书手动暂停")
+            except CoreRequestError as exc:
+                if exc.code == "task_not_found":
+                    await asyncio.to_thread(self._send_text, open_id, "未找到该任务。")
+                    return
+                raise
+            message = "已暂停。" if result.result.state is TaskState.PAUSED else "暂停请求已提交。"
+            await asyncio.to_thread(self._send_text, open_id, message)
+            return
+
+        if command == "/resume" and argument:
+            try:
+                result = await client.resume_task(argument, reason="飞书手动恢复")
+            except CoreRequestError as exc:
+                if exc.code == "task_not_found":
+                    await asyncio.to_thread(self._send_text, open_id, "未找到该任务。")
+                    return
+                raise
+            await asyncio.to_thread(
+                self._send_text,
+                open_id,
+                "已恢复。" if result.state in {TaskState.QUEUED, TaskState.RUNNING} else "恢复请求已提交。",
+            )
+            return
+
+        if command == "/retry" and argument:
+            try:
+                previous = await client.get_task(argument)
+                if previous.state not in TERMINAL_TASK_STATES:
+                    await asyncio.to_thread(self._send_text, open_id, "任务尚未结束，无需重试。")
+                    return
+                session = await client.create_session(activate=False)
+                accepted = await client.create_task(
+                    session,
+                    previous.goal,
+                    previous.attachments,
+                    tools_enabled=previous.tools_enabled,
+                    priority=previous.priority,
+                    parent_task_id=previous.task_id,
+                    origin=previous.origin,
+                )
+            except CoreRequestError as exc:
+                if exc.code == "task_not_found":
+                    await asyncio.to_thread(self._send_text, open_id, "未找到该任务。")
+                    return
+                raise
+            await asyncio.to_thread(
+                self._send_text,
+                open_id,
+                f"已重新执行：`{accepted.task_id}`",
+            )
             return
 
         session = await self._session_for(open_id)

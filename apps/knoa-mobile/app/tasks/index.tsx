@@ -1,13 +1,5 @@
-import * as DocumentPicker from "expo-document-picker";
-import {
-  RecordingPresets,
-  requestRecordingPermissionsAsync,
-  setAudioModeAsync,
-  useAudioRecorder,
-  useAudioRecorderState,
-} from "expo-audio";
 import { router } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -19,179 +11,117 @@ import {
   View,
 } from "react-native";
 
-import type { ArtifactInput, TaskSnapshot, TaskState } from "@/api/models";
-import { subscribeTaskEvents, type TaskEventSubscription } from "@/api/taskEvents";
+import type { AndroidRelease, TaskOrigin, TaskSnapshot, TaskState } from "@/api/models";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
+import { isAndroidUpdateAvailable } from "@/update/androidUpdater";
 
-const filters: Array<{ label: string; value?: TaskState }> = [
-  { label: "全部" },
-  { label: "进行中", value: "running" },
-  { label: "待确认", value: "waiting_approval" },
+type Filter = "all" | "active" | "approval" | "completed";
+
+const filters: Array<{ label: string; value: Filter }> = [
+  { label: "全部", value: "all" },
+  { label: "进行中", value: "active" },
+  { label: "待确认", value: "approval" },
   { label: "已完成", value: "completed" },
 ];
 
-export default function TaskListScreen() {
+export default function TasksScreen() {
   const gateway = useGateway();
   const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
-  const [filter, setFilter] = useState<TaskState | undefined>();
-  const [text, setText] = useState("");
-  const [attachments, setAttachments] = useState<ArtifactInput[]>([]);
+  const [filter, setFilter] = useState<Filter>("all");
+  const [goal, setGoal] = useState("");
+  const [creating, setCreating] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
-  const recording = useAudioRecorderState(recorder, 250);
+  const [availableUpdate, setAvailableUpdate] = useState<AndroidRelease | null>(null);
 
   const refresh = useCallback(async () => {
     if (!gateway.client) return;
     setRefreshing(true);
     try {
-      const result = await gateway.client.listTasks({ state: filter });
+      const result = await gateway.client.listTasks({ kind: "task", limit: 100 });
       setTasks(result.tasks);
     } finally {
       setRefreshing(false);
     }
-  }, [filter, gateway.client]);
+  }, [gateway.client]);
+
+  useEffect(() => { void refresh(); }, [refresh, gateway.latestEvent]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh, gateway.latestEvent]);
-
-  useEffect(() => {
-    let subscription: TaskEventSubscription | null = null;
-    if (gateway.status === "ready") {
-      void subscribeTaskEvents({
-        gatewayUrl: gateway.gatewayUrl,
-        token: gateway.sessionToken,
-        onEvent: gateway.publish,
-        onError: () => undefined,
-      }).then((active) => {
-        subscription = active;
-      });
-    }
-    return () => subscription?.close();
-  }, [gateway.gatewayUrl, gateway.publish, gateway.sessionToken, gateway.status]);
-
-  async function chooseFile() {
     if (!gateway.client) return;
-    const picked = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true });
-    if (picked.canceled) return;
-    const uploaded: ArtifactInput[] = [];
-    for (const asset of picked.assets.slice(0, 8 - attachments.length)) {
-      const response = await fetch(asset.uri);
-      uploaded.push(
-        await gateway.client.uploadArtifact({
-          sessionHandle: gateway.sessionHandle,
-          bytes: await response.arrayBuffer(),
-          mediaType: asset.mimeType ?? "application/octet-stream",
-          name: asset.name,
-          caption: asset.name,
-        }),
-      );
-    }
-    setAttachments((current) => [...current, ...uploaded].slice(0, 8));
-  }
+    void gateway.client.latestAndroidRelease()
+      .then((release) => setAvailableUpdate(isAndroidUpdateAvailable(release) ? release : null))
+      .catch(() => undefined);
+  }, [gateway.client]);
+
+  const visibleTasks = useMemo(() => tasks.filter((task) => matchesFilter(task.state, filter)), [filter, tasks]);
 
   async function createTask() {
-    if (!gateway.client || (!text.trim() && attachments.length === 0)) return;
-    setSubmitting(true);
+    const text = goal.trim();
+    if (!text || !gateway.client || !gateway.sessionHandle || creating) return;
+    setCreating(true);
     try {
       const accepted = await gateway.client.createTask({
         sessionHandle: gateway.sessionHandle,
-        text: text.trim(),
-        attachments,
+        text,
+        kind: "task",
       });
-      setText("");
-      setAttachments([]);
+      setGoal("");
+      await refresh();
       router.push(`/tasks/${accepted.task_id}`);
     } finally {
-      setSubmitting(false);
+      setCreating(false);
     }
-  }
-
-  async function toggleRecording() {
-    if (!gateway.client || transcribing) return;
-    if (recording.isRecording) {
-      await recorder.stop();
-      const uri = recorder.uri;
-      if (!uri) return;
-      setTranscribing(true);
-      try {
-        await setAudioModeAsync({ allowsRecording: false });
-        const response = await fetch(uri);
-        const extension = uri.toLowerCase().endsWith(".webm") ? "webm" : "m4a";
-        const mediaType = extension === "webm" ? "audio/webm" : "audio/mp4";
-        const artifact = await gateway.client.uploadArtifact({
-          sessionHandle: gateway.sessionHandle,
-          bytes: await response.arrayBuffer(),
-          mediaType,
-          name: `voice-${Date.now()}.${extension}`,
-          caption: "语音输入",
-        });
-        const transcript = await gateway.client.transcribeArtifact(
-          gateway.sessionHandle,
-          artifact.artifact_id,
-        );
-        setText((current) => current ? `${current}\n${transcript}` : transcript);
-      } finally {
-        setTranscribing(false);
-      }
-      return;
-    }
-    const permission = await requestRecordingPermissionsAsync();
-    if (!permission.granted) return;
-    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-    await recorder.prepareToRecordAsync();
-    recorder.record();
   }
 
   return (
     <View style={styles.container}>
       <View style={styles.topline}>
-        <Text style={styles.heading}>小诺工作台</Text>
-        <Pressable onPress={() => router.push("/capabilities")}>
-          <Text style={styles.link}>能力与连接</Text>
-        </Pressable>
+        <View>
+          <Text style={styles.heading}>任务</Text>
+          <Text style={styles.description}>交给小诺在后台独立完成</Text>
+        </View>
+        <Pressable onPress={() => router.replace("/chat")}><Text style={styles.link}>返回对话</Text></Pressable>
       </View>
       <View style={styles.composer}>
         <TextInput
-          style={styles.input}
-          value={text}
-          onChangeText={setText}
-          placeholder="交给小诺一件事…"
+          value={goal}
+          onChangeText={setGoal}
+          placeholder="输入一个可独立完成的任务…"
           placeholderTextColor={colors.muted}
           multiline
+          style={styles.input}
         />
-        {attachments.length ? <Text style={styles.attachments}>已附加 {attachments.length} 个文件</Text> : null}
-        <View style={styles.actions}>
-          <View style={styles.ingress}>
-            <Pressable onPress={() => void chooseFile()}><Text style={styles.link}>添加文件</Text></Pressable>
-            <Pressable onPress={() => router.push("/capture")}><Text style={styles.link}>拍照</Text></Pressable>
-            <Pressable onPress={() => void toggleRecording()}>
-              <Text style={[styles.link, recording.isRecording && styles.recording]}>
-                {transcribing
-                  ? "转写中…"
-                  : recording.isRecording
-                    ? `停止录音 ${Math.round(recording.durationMillis / 1000)}s`
-                    : "语音输入"}
-              </Text>
-            </Pressable>
-          </View>
-          <Pressable style={styles.send} onPress={() => void createTask()} disabled={submitting}>
-            {submitting ? <ActivityIndicator color="white" /> : <Text style={styles.sendText}>开始</Text>}
-          </Pressable>
-        </View>
+        <Pressable
+          disabled={!goal.trim() || creating}
+          onPress={() => void createTask()}
+          style={[styles.create, (!goal.trim() || creating) && styles.createDisabled]}
+        >
+          {creating ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.createText}>开始</Text>}
+        </Pressable>
       </View>
+      {availableUpdate ? (
+        <Pressable style={styles.updateBanner} onPress={() => router.push("/update")}>
+          <View>
+            <Text style={styles.updateTitle}>小诺 {availableUpdate.version_name} 可以更新</Text>
+            <Text style={styles.updateDetail}>支持断点续传</Text>
+          </View>
+          <Text style={styles.updateLink}>查看</Text>
+        </Pressable>
+      ) : null}
       <View style={styles.filters}>
         {filters.map((item) => (
-          <Pressable key={item.label} onPress={() => setFilter(item.value)} style={[styles.filter, filter === item.value && styles.filterActive]}>
+          <Pressable
+            key={item.value}
+            onPress={() => setFilter(item.value)}
+            style={[styles.filter, filter === item.value && styles.filterActive]}
+          >
             <Text style={[styles.filterText, filter === item.value && styles.filterTextActive]}>{item.label}</Text>
           </Pressable>
         ))}
       </View>
       <FlatList
-        data={tasks}
+        data={visibleTasks}
         keyExtractor={(task) => task.task_id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />}
         contentContainerStyle={styles.list}
@@ -199,16 +129,30 @@ export default function TaskListScreen() {
         renderItem={({ item }) => (
           <Pressable style={styles.task} onPress={() => router.push(`/tasks/${item.task_id}`)}>
             <View style={styles.taskHeader}>
+              <Text style={styles.origin}>{originLabel(item.origin)}</Text>
               <Text style={styles.state}>{stateLabel(item.state)}</Text>
-              <Text style={styles.time}>{new Date(item.updated_at * 1000).toLocaleString()}</Text>
             </View>
             <Text style={styles.goal} numberOfLines={3}>{item.goal}</Text>
-            {item.phase ? <Text style={styles.phase}>{item.phase}</Text> : null}
+            <View style={styles.metaRow}>
+              <Text style={styles.time}>{new Date(item.updated_at * 1000).toLocaleString()}</Text>
+              <Text style={styles.attempts}>执行 {Math.max(1, item.attempt_count)} 次</Text>
+            </View>
           </Pressable>
         )}
       />
     </View>
   );
+}
+
+function matchesFilter(state: TaskState, filter: Filter): boolean {
+  if (filter === "active") return state === "queued" || state === "running" || state === "paused";
+  if (filter === "approval") return state === "waiting_approval";
+  if (filter === "completed") return state === "completed";
+  return true;
+}
+
+function originLabel(origin: TaskOrigin): string {
+  return ({ user: "立即执行", agent: "小诺创建", scheduled: "定时执行", event: "事件启动", chat: "对话" })[origin];
 }
 
 function stateLabel(state: TaskState): string {
@@ -217,28 +161,32 @@ function stateLabel(state: TaskState): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  topline: { paddingHorizontal: 18, paddingTop: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  heading: { color: colors.ink, fontSize: 20, fontWeight: "700" },
-  composer: { margin: 16, padding: 14, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, gap: 10 },
-  input: { minHeight: 72, color: colors.ink, fontSize: 16, textAlignVertical: "top" },
-  attachments: { color: colors.muted, fontSize: 13 },
-  actions: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  ingress: { flexDirection: "row", alignItems: "center", gap: 16 },
+  topline: { padding: 18, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  heading: { color: colors.ink, fontSize: 22, fontWeight: "700" },
+  description: { color: colors.muted, marginTop: 4, fontSize: 13 },
   link: { color: colors.accent, fontWeight: "600" },
-  recording: { color: colors.danger },
-  send: { minWidth: 74, alignItems: "center", backgroundColor: colors.accent, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 12 },
-  sendText: { color: "white", fontWeight: "700" },
+  composer: { marginHorizontal: 16, marginBottom: 14, padding: 12, borderRadius: 16, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, flexDirection: "row", alignItems: "flex-end", gap: 10 },
+  input: { flex: 1, minHeight: 42, maxHeight: 110, color: colors.ink, fontSize: 15, lineHeight: 21, paddingHorizontal: 4, paddingVertical: 8 },
+  create: { minWidth: 58, height: 38, paddingHorizontal: 14, borderRadius: 19, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
+  createDisabled: { opacity: 0.4 },
+  createText: { color: "white", fontWeight: "700" },
+  updateBanner: { marginHorizontal: 16, marginBottom: 14, padding: 14, borderRadius: 16, backgroundColor: colors.accentSoft, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  updateTitle: { color: colors.ink, fontWeight: "700" },
+  updateDetail: { color: colors.muted, fontSize: 12, marginTop: 3 },
+  updateLink: { color: colors.accent, fontWeight: "700" },
   filters: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 8 },
   filter: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14, backgroundColor: colors.surface },
   filterActive: { backgroundColor: colors.accentSoft },
   filterText: { color: colors.muted },
   filterTextActive: { color: colors.accent, fontWeight: "600" },
-  list: { padding: 16, gap: 12 },
+  list: { padding: 16, gap: 12, flexGrow: 1 },
   task: { padding: 16, backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.line, gap: 8 },
   taskHeader: { flexDirection: "row", justifyContent: "space-between" },
-  state: { color: colors.accent, fontWeight: "700" },
+  origin: { color: colors.ink, fontWeight: "700" },
+  state: { color: colors.accent, fontWeight: "600" },
+  metaRow: { flexDirection: "row", justifyContent: "space-between" },
   time: { color: colors.muted, fontSize: 12 },
+  attempts: { color: colors.muted, fontSize: 12 },
   goal: { color: colors.ink, fontSize: 16, lineHeight: 23 },
-  phase: { color: colors.muted, fontSize: 13 },
-  empty: { color: colors.muted, textAlign: "center", paddingTop: 48 },
+  empty: { color: colors.muted, textAlign: "center", paddingTop: 64 },
 });
