@@ -216,11 +216,11 @@ async def test_feishu_core_client_uses_canonical_owner_principal(
         return _CoreClient()
 
     monkeypatch.setattr(
-        "pc_assistant.channels.feishu.resolve_local_service_token",
+        "pc_assistant.channels.feishu_transport.resolve_local_service_token",
         lambda _paths: "local-signing-key",
     )
     monkeypatch.setattr(
-        "pc_assistant.channels.feishu.CoreClient.connect",
+        "pc_assistant.channels.feishu_transport.CoreClient.connect",
         connect,
     )
 
@@ -687,7 +687,7 @@ async def test_feishu_confirmation_updates_the_single_streaming_card(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
-        "pc_assistant.channels.feishu._STREAM_PATCH_INTERVAL_SECONDS",
+        "pc_assistant.channels.feishu_conversation._STREAM_PATCH_INTERVAL_SECONDS",
         0,
     )
     channel = FeishuChannel(_config(tmp_path))

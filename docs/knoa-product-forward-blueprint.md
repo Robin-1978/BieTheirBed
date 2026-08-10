@@ -2,7 +2,7 @@
 
 > 状态：本轮产品与领域重构的唯一总纲
 > 日期：2026-08-10
-> 适用范围：Core、Secure Gateway、Android/iOS App、飞书等 Channel
+> 适用范围：Core、Secure Gateway、CLI/TUI、Android/iOS App、飞书等 Channel
 > 前提：项目仍处于正向开发阶段，不兼容错误的旧 Task 产品语义。
 
 > 本蓝图不重新定义 Task 模型。`Task → TaskExecution → ExecutionAttempt`
@@ -55,6 +55,10 @@ Task、ConversationSession 等定义可以修改；已经发生的 ChatTurn 和 
 
 状态机、审批原子性、执行持久化、Artifact 所有权和通知决策属于 Core。App、飞书和
 其他 Channel 不通过事件顺序猜测真实状态，也不各自实现一套业务规则。
+
+CLI/TUI 是直接连接 Core API 的本机交互客户端，不是 Channel。它与 App 一样消费
+ChatTurn 快照，但不经过 Secure Gateway，也不承担外部身份映射、消息平台适配或主动
+通知职责。
 
 ## 2. 顶层领域模型
 

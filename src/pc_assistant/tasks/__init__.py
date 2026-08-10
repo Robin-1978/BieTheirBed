@@ -1,6 +1,12 @@
 """Core-owned persistent Task aggregate and event journal."""
 
 from pc_assistant.tasks.approval import DurableApprovalService
+from pc_assistant.tasks.errors import (
+    TaskCapacityError,
+    TaskIdempotencyConflictError,
+    TaskNotFoundError,
+    TaskTransitionError,
+)
 from pc_assistant.tasks.event_hub import (
     TaskEventHub,
     TaskEventSubscription,
@@ -8,38 +14,32 @@ from pc_assistant.tasks.event_hub import (
 )
 from pc_assistant.tasks.executor import TaskExecutor
 from pc_assistant.tasks.models import (
+    TERMINAL_TASK_STATES,
     ApprovalState,
     PrincipalTaskEvent,
-    TERMINAL_TASK_STATES,
     TaskApprovalRecord,
     TaskAttemptRecord,
     TaskAttemptState,
     TaskCancelResult,
+    TaskDefinitionRecord,
+    TaskDefinitionState,
     TaskEvent,
     TaskEventPayload,
     TaskEventType,
-    TaskExecutionTrace,
     TaskExecutionRecord,
-    TaskDefinitionRecord,
-    TaskDefinitionState,
+    TaskExecutionTrace,
     TaskLaunchKind,
     TaskLaunchPolicy,
     TaskLaunchReason,
-    TaskPauseResult,
     TaskOrigin,
+    TaskPauseResult,
     TaskRecord,
     TaskState,
-    TaskTraceEntry,
     TaskToolStepRecord,
     TaskToolStepState,
+    TaskTraceEntry,
 )
-from pc_assistant.tasks.repository import (
-    TaskCapacityError,
-    TaskIdempotencyConflictError,
-    TaskNotFoundError,
-    TaskRepository,
-    TaskTransitionError,
-)
+from pc_assistant.tasks.repository import TaskRepository
 from pc_assistant.tasks.service import TaskService
 from pc_assistant.tasks.tool_commit import DurableToolCommitService
 

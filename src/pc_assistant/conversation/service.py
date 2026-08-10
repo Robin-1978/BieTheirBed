@@ -364,7 +364,7 @@ class ConversationService:
     async def get_turn(self, principal_id: str, turn_id: str) -> ChatTurn:
         stored = await asyncio.to_thread(self._repository.get, principal_id, turn_id)
         live = self._live.get(turn_id)
-        if live is None:
+        if live is None or stored.state in TERMINAL_CHAT_TURN_STATES:
             return stored
         return stored.model_copy(
             update={

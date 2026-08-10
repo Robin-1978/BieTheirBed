@@ -35,4 +35,13 @@ describe("mergeConversationTurns", () => {
       [turn("latest", 3, 2)],
     )).toEqual([turn("older", 2, 1), turn("latest", 3, 2)]);
   });
+
+  it("preserves object identity when a refresh returns the same revision", () => {
+    const visible = turn("visible", 4, 2);
+    const duplicate = turn("visible", 4, 2);
+
+    const merged = mergeConversationTurns([visible], [duplicate]);
+
+    expect(merged[0]).toBe(visible);
+  });
 });

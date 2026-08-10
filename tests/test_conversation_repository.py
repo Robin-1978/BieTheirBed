@@ -130,6 +130,11 @@ def test_turn_persists_only_merged_snapshots_and_durable_side_effects(
     assert completed.final_output == "answer"
     assert len(completed.tool_steps) == 1
     assert len(completed.approvals) == 1
+    assert [entry.kind for entry in completed.timeline] == [
+        "tool_call",
+        "tool_result",
+    ]
+    assert completed.timeline[-1].tool_result["output"] == {"content": "ok"}
 
     with sqlite3.connect(database) as db:
         names = {

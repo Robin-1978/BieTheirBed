@@ -16,6 +16,7 @@ from pc_assistant.agent_runtime.tool_step import ProposedToolCall, ToolStepResul
 from pc_assistant.artifacts import ArtifactRef
 from pc_assistant.conversation.models import (
     ChatApproval,
+    ChatTimelineEntry,
     ChatToolStep,
     ChatTurn,
     ChatTurnState,
@@ -473,6 +474,27 @@ class ConversationRepository:
                 (turn_id,),
             )
         )
+        timeline: list[ChatTimelineEntry] = []
+        for step in steps:
+            timeline.append(
+                ChatTimelineEntry(
+                    kind="tool_call",
+                    tool_call_id=step.tool_call_id,
+                    tool_name=step.tool_name,
+                    tool_args=step.arguments,
+                    blocked=False,
+                )
+            )
+            if step.state != "running":
+                timeline.append(
+                    ChatTimelineEntry(
+                        kind="tool_result",
+                        tool_call_id=step.tool_call_id,
+                        tool_name=step.tool_name,
+                        tool_result=step.result,
+                        blocked=step.state != "completed",
+                    )
+                )
         return ChatTurn(
             turn_id=turn_id,
             principal_id=str(row["principal_id"]),
@@ -493,6 +515,7 @@ class ConversationRepository:
             cancel_requested=bool(row["cancel_requested"]),
             tool_steps=steps,
             approvals=approvals,
+            timeline=tuple(timeline),
             created_at=float(row["created_at"]),
             updated_at=float(row["updated_at"]),
             finished_at=(None if row["finished_at"] is None else float(row["finished_at"])),

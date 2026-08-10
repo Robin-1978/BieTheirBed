@@ -11,6 +11,7 @@ from pc_assistant.agent_runtime.contracts import (
     RuntimeScope,
 )
 from pc_assistant.tasks.approval import DurableApprovalService
+from pc_assistant.tasks.errors import TaskTransitionError
 from pc_assistant.tasks.event_hub import TaskEventHub
 from pc_assistant.tasks.executor import TaskExecutor
 from pc_assistant.tasks.models import (
@@ -18,20 +19,20 @@ from pc_assistant.tasks.models import (
     PrincipalTaskEvent,
     TaskApprovalRecord,
     TaskCancelResult,
-    TaskEvent,
-    TaskExecutionTrace,
-    TaskExecutionRecord,
     TaskDefinitionRecord,
     TaskDefinitionState,
+    TaskEvent,
+    TaskExecutionRecord,
+    TaskExecutionTrace,
     TaskLaunchKind,
     TaskLaunchPolicy,
     TaskLaunchReason,
-    TaskPauseResult,
     TaskOrigin,
+    TaskPauseResult,
     TaskRecord,
     TaskState,
 )
-from pc_assistant.tasks.repository import TaskRepository, TaskTransitionError
+from pc_assistant.tasks.repository import TaskRepository
 
 
 class TaskService:

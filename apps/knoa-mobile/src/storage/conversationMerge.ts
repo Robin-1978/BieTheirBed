@@ -7,7 +7,7 @@ export function mergeConversationTurns(
   for (const turns of collections) {
     for (const turn of turns) {
       const current = merged.get(turn.turn_id);
-      if (!current || turn.revision >= current.revision) merged.set(turn.turn_id, turn);
+      if (!current || turn.revision > current.revision) merged.set(turn.turn_id, turn);
     }
   }
   return [...merged.values()].sort(
