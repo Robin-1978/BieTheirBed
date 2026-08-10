@@ -26,13 +26,13 @@ export default function TaskDetailScreen() {
 
   const refresh = useCallback(async () => {
     if (!gateway.client || !taskId) return;
-    const [snapshot, timeline] = await Promise.all([
-      gateway.client.getTask(taskId),
-      gateway.client.taskEvents(taskId),
-    ]);
+    const [snapshot, timeline] = await gateway.runAuthenticated((client) => Promise.all([
+      client.getTask(taskId),
+      client.taskEvents(taskId),
+    ]));
     setTask(snapshot);
     setEvents(timeline);
-  }, [gateway.client, taskId]);
+  }, [gateway.client, gateway.runAuthenticated, taskId]);
 
   useEffect(() => {
     void refresh();
@@ -45,9 +45,9 @@ export default function TaskDetailScreen() {
       ? current
       : [...current, event]);
     if (["state_changed", "approval_requested", "approval_resolved", "completed", "failed", "cancelled"].includes(event.event_type)) {
-      void gateway.client?.getTask(taskId).then(setTask);
+      void gateway.runAuthenticated((client) => client.getTask(taskId)).then(setTask);
     }
-  }, [gateway.client, gateway.latestEvent, taskId]);
+  }, [gateway.latestEvent, gateway.runAuthenticated, taskId]);
 
   const approval = useMemo(() => pendingApproval(events), [events]);
   const timeline = useMemo(
@@ -62,7 +62,7 @@ export default function TaskDetailScreen() {
     if (!gateway.client || !task) return;
     setWorking(true);
     try {
-      await gateway.client.taskCommand(task.task_id, action);
+      await gateway.runAuthenticated((client) => client.taskCommand(task.task_id, action));
       await refresh();
     } finally {
       setWorking(false);
@@ -73,7 +73,9 @@ export default function TaskDetailScreen() {
     if (!gateway.client || !approval) return;
     setWorking(true);
     try {
-      await gateway.client.resolveApproval(approval.approvalId, approved);
+      await gateway.runAuthenticated(
+        (client) => client.resolveApproval(approval.approvalId, approved),
+      );
       await refresh();
     } finally {
       setWorking(false);
@@ -82,10 +84,10 @@ export default function TaskDetailScreen() {
 
   async function openArtifact(artifactId: string) {
     if (!gateway.client) return;
-    const downloaded = await gateway.client.downloadArtifact(
+    const downloaded = await gateway.runAuthenticated((client) => client.downloadArtifact(
       gateway.sessionHandle,
       artifactId,
-    );
+    ));
     const safeName = downloaded.name.replace(/[^\p{L}\p{N}._ -]/gu, "_");
     const file = new File(Paths.cache, `${artifactId}-${safeName}`);
     file.create({ overwrite: true, intermediates: true });

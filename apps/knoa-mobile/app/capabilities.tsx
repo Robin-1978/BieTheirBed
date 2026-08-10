@@ -30,11 +30,11 @@ export default function CapabilitiesScreen() {
 
   useEffect(() => {
     if (!gateway.client) return;
-    void Promise.all([
-      gateway.client.runtimeStatus(gateway.sessionHandle),
-      gateway.client.tools(gateway.sessionHandle),
-      gateway.client.deviceAudit(),
-    ]).then(([runtime, inventory, deviceAudit]) => {
+    void gateway.runAuthenticated((client) => Promise.all([
+      client.runtimeStatus(gateway.sessionHandle),
+      client.tools(gateway.sessionHandle),
+      client.deviceAudit(),
+    ])).then(([runtime, inventory, deviceAudit]) => {
       const runtimeResult = runtime.result as Record<string, unknown>;
       const inventoryResult = inventory.result as Record<string, unknown>;
       setStatus(runtimeResult.details as Record<string, unknown>);
@@ -42,7 +42,7 @@ export default function CapabilitiesScreen() {
       setTools((inventoryResult.descriptors as Descriptor[]) ?? []);
       setAudit((deviceAudit.events as Array<Record<string, unknown>>) ?? []);
     });
-  }, [gateway.client, gateway.sessionHandle]);
+  }, [gateway.client, gateway.runAuthenticated, gateway.sessionHandle]);
 
   if (!status) {
     return <View style={styles.loading}><ActivityIndicator color={colors.accent} /></View>;

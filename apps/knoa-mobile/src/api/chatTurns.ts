@@ -8,6 +8,7 @@ export function subscribeChatTurn(input: {
   gatewayUrl: string;
   token: string;
   turnId: string;
+  onOpen?(): void;
   onSnapshot(turn: ChatTurnSnapshot): void;
   onError(error: Error): void;
 }): ChatTurnSubscription {
@@ -18,6 +19,7 @@ export function subscribeChatTurn(input: {
       pollingInterval: 3000,
     },
   );
+  source.addEventListener("open", () => input.onOpen?.());
   source.addEventListener("snapshot", (message) => {
     if (!message.data) return;
     try {

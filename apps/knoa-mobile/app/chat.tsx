@@ -23,7 +23,7 @@ import {
 } from "react-native";
 import Svg, { Circle, Line, Path, Rect } from "react-native-svg";
 
-import { subscribeChatTurn, type ChatTurnSubscription } from "@/api/chatTurns";
+import { ChatTurnWatcher } from "@/api/chatTurnWatcher";
 import type { AndroidRelease, ArtifactInput, ChatApproval, ChatTurnSnapshot } from "@/api/models";
 import { AppMarkdown } from "@/components/AppMarkdown";
 import { useGateway } from "@/state/GatewayProvider";
@@ -42,9 +42,10 @@ const TERMINAL_STATES = new Set<ChatTurnSnapshot["state"]>(["completed", "failed
 
 export default function ChatScreen() {
   const gateway = useGateway();
+  const gatewayRef = useRef(gateway);
+  gatewayRef.current = gateway;
   const params = useLocalSearchParams<{ capturedUri?: string; capturedName?: string }>();
   const list = useRef<FlatList<ChatTurnSnapshot>>(null);
-  const subscriptions = useRef(new Map<string, ChatTurnSubscription>());
   const [turns, setTurns] = useState<ChatTurnSnapshot[]>([]);
   const [text, setText] = useState("");
   const [inputMode, setInputMode] = useState<InputMode>("text");
@@ -58,57 +59,51 @@ export default function ChatScreen() {
   const [availableUpdate, setAvailableUpdate] = useState<AndroidRelease | null>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recording = useAudioRecorderState(recorder, 250);
+  const [turnWatcher] = useState(() => new ChatTurnWatcher({
+    connection: () => gatewayRef.current.connection(),
+    fetchSnapshot: (turnId) => gatewayRef.current.runAuthenticated(
+      (client) => client.getChatTurn(turnId),
+    ),
+    onSnapshot: (snapshot) => {
+      setTurns((current) => {
+        const index = current.findIndex((turn) => turn.turn_id === snapshot.turn_id);
+        if (index < 0) return [...current, snapshot];
+        const next = [...current];
+        next[index] = snapshot;
+        return next;
+      });
+    },
+    onUnavailable: () => setMessage("暂时无法继续接收回复，请检查网络后重试"),
+  }));
 
   const watchTurn = useCallback((turnId: string) => {
-    if (!gateway.gatewayUrl || !gateway.sessionToken || subscriptions.current.has(turnId)) return;
-    const subscription = subscribeChatTurn({
-      gatewayUrl: gateway.gatewayUrl,
-      token: gateway.sessionToken,
-      turnId,
-      onSnapshot: (snapshot) => {
-        setTurns((current) => {
-          const index = current.findIndex((turn) => turn.turn_id === snapshot.turn_id);
-          if (index < 0) return [...current, snapshot];
-          const next = [...current];
-          next[index] = snapshot;
-          return next;
-        });
-        if (TERMINAL_STATES.has(snapshot.state)) {
-          subscriptions.current.get(snapshot.turn_id)?.close();
-          subscriptions.current.delete(snapshot.turn_id);
-        }
-      },
-      onError: () => setMessage("回复连接中断，请稍后重试"),
-    });
-    subscriptions.current.set(turnId, subscription);
-  }, [gateway.gatewayUrl, gateway.sessionToken]);
+    turnWatcher.watch(turnId);
+  }, [turnWatcher]);
 
   const refresh = useCallback(async () => {
     if (!gateway.client || !gateway.sessionHandle) return;
-    const history = await gateway.client.listChatTurns(gateway.sessionHandle, 100);
+    const history = await gateway.runAuthenticated(
+      (client) => client.listChatTurns(gateway.sessionHandle, 100),
+    );
     setTurns(history);
     for (const turn of history) {
       if (!TERMINAL_STATES.has(turn.state)) watchTurn(turn.turn_id);
     }
-  }, [gateway.client, gateway.sessionHandle, watchTurn]);
+  }, [gateway.client, gateway.runAuthenticated, gateway.sessionHandle, watchTurn]);
 
   useEffect(() => {
     setTurns([]);
-    for (const subscription of subscriptions.current.values()) subscription.close();
-    subscriptions.current.clear();
+    turnWatcher.closeAll();
     void refresh();
-    return () => {
-      for (const subscription of subscriptions.current.values()) subscription.close();
-      subscriptions.current.clear();
-    };
-  }, [gateway.sessionHandle, refresh]);
+    return () => turnWatcher.closeAll();
+  }, [gateway.sessionHandle, refresh, turnWatcher]);
 
   useEffect(() => {
     if (!gateway.client) return;
-    void gateway.client.latestAndroidRelease()
+    void gateway.runAuthenticated((client) => client.latestAndroidRelease())
       .then((release) => setAvailableUpdate(isAndroidUpdateAvailable(release) ? release : null))
       .catch(() => undefined);
-  }, [gateway.client]);
+  }, [gateway.client, gateway.runAuthenticated]);
 
   useEffect(() => {
     const uri = params.capturedUri?.trim();
@@ -151,19 +146,20 @@ export default function ChatScreen() {
     try {
       const uploaded = await Promise.all(pending.map(async (item): Promise<ArtifactInput> => {
         const response = await fetch(item.uri);
-        return gateway.client!.uploadArtifact({
+        const bytes = await response.arrayBuffer();
+        return gateway.runAuthenticated((client) => client.uploadArtifact({
           sessionHandle: gateway.sessionHandle,
-          bytes: await response.arrayBuffer(),
+          bytes,
           mediaType: item.mediaType,
           name: item.name,
           caption: item.name,
-        });
+        }));
       }));
-      const accepted = await gateway.client.createChatTurn({
+      const accepted = await gateway.runAuthenticated((client) => client.createChatTurn({
         sessionHandle: gateway.sessionHandle,
         text: message,
         attachments: uploaded,
-      });
+      }));
       setTurns((current) => [...current, accepted]);
       watchTurn(accepted.turn_id);
       setText("");
@@ -186,17 +182,18 @@ export default function ChatScreen() {
         await setAudioModeAsync({ allowsRecording: false });
         const response = await fetch(uri);
         const extension = uri.toLowerCase().endsWith(".webm") ? "webm" : "m4a";
-        const artifact = await gateway.client.uploadArtifact({
+        const bytes = await response.arrayBuffer();
+        const artifact = await gateway.runAuthenticated((client) => client.uploadArtifact({
           sessionHandle: gateway.sessionHandle,
-          bytes: await response.arrayBuffer(),
+          bytes,
           mediaType: extension === "webm" ? "audio/webm" : "audio/mp4",
           name: `voice-${Date.now()}.${extension}`,
           caption: "语音输入",
-        });
-        const transcript = await gateway.client.transcribeArtifact(
+        }));
+        const transcript = await gateway.runAuthenticated((client) => client.transcribeArtifact(
           gateway.sessionHandle,
           artifact.artifact_id,
-        );
+        ));
         setText((current) => current ? `${current}\n${transcript}` : transcript);
       } finally {
         setTranscribing(false);
@@ -214,7 +211,9 @@ export default function ChatScreen() {
     if (!gateway.client || resolving) return;
     setResolving(approval.approval_id);
     try {
-      await gateway.client.resolveChatApproval(approval.approval_id, approved);
+      await gateway.runAuthenticated(
+        (client) => client.resolveChatApproval(approval.approval_id, approved),
+      );
     } finally {
       setResolving("");
     }
@@ -235,8 +234,8 @@ export default function ChatScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.screen}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={88}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 88 : 0}
     >
       <View style={styles.topbar}>
         <Text style={styles.subtitle}>随时告诉我你想做什么</Text>
@@ -271,9 +270,12 @@ export default function ChatScreen() {
       ) : null}
       <FlatList
         ref={list}
+        style={styles.list}
         data={turns}
         keyExtractor={(item) => item.turn_id}
         contentContainerStyle={styles.messages}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
         onContentSizeChange={() => list.current?.scrollToEnd({ animated: true })}
         ListEmptyComponent={<Text style={styles.empty}>你好，我是小诺。</Text>}
         renderItem={({ item }) => (
@@ -494,6 +496,7 @@ function activityText(turn: ChatTurnSnapshot): string {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  list: { flex: 1 },
   topbar: { paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   subtitle: { color: colors.muted, fontSize: 13 },
   topActions: { flexDirection: "row", gap: 16 },
