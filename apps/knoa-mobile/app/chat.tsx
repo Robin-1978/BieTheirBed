@@ -36,6 +36,8 @@ type PendingAttachment = {
   mediaType: string;
 };
 
+type InputMode = "text" | "voice";
+
 const TERMINAL_STATES = new Set<ChatTurnSnapshot["state"]>(["completed", "failed", "cancelled"]);
 
 export default function ChatScreen() {
@@ -45,6 +47,7 @@ export default function ChatScreen() {
   const subscriptions = useRef(new Map<string, ChatTurnSubscription>());
   const [turns, setTurns] = useState<ChatTurnSnapshot[]>([]);
   const [text, setText] = useState("");
+  const [inputMode, setInputMode] = useState<InputMode>("text");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [startingTopic, setStartingTopic] = useState(false);
@@ -120,7 +123,8 @@ export default function ChatScreen() {
     router.setParams({ capturedUri: "", capturedName: "" });
   }, [params.capturedName, params.capturedUri]);
 
-  const canSend = Boolean(!sending && gateway.client && (text.trim() || attachments.length));
+  const hasComposerContent = Boolean(text.trim() || attachments.length);
+  const canSend = Boolean(!sending && gateway.client && hasComposerContent);
 
   async function chooseFile() {
     const picked = await DocumentPicker.getDocumentAsync({
@@ -308,30 +312,54 @@ export default function ChatScreen() {
         >
           <LineIcon name="plus" color={colors.accent} />
         </Pressable>
-        <TextInput
-          style={styles.input}
-          value={text}
-          onChangeText={setText}
-          placeholder="和小诺说点什么…"
-          placeholderTextColor={colors.muted}
-          multiline
-        />
+        <View style={styles.inputShell}>
+          <Pressable
+            accessibilityLabel={inputMode === "text" ? "切换到语音输入" : "切换到文字输入"}
+            disabled={recording.isRecording || transcribing}
+            onPress={() => setInputMode((current) => current === "text" ? "voice" : "text")}
+            style={styles.inputMode}
+          >
+            <LineIcon name={inputMode === "text" ? "mic" : "keyboard"} color={colors.muted} size={20} />
+          </Pressable>
+          <TextInput
+            editable={inputMode === "text"}
+            style={styles.input}
+            value={text}
+            onChangeText={setText}
+            placeholder={inputMode === "text" ? "和小诺说点什么…" : "语音转写会出现在这里"}
+            placeholderTextColor={colors.muted}
+            multiline
+          />
+        </View>
         <Pressable
-          accessibilityLabel={recording.isRecording ? "停止录音" : "语音输入"}
-          onPress={() => void toggleRecording()}
-          style={[styles.roundAction, recording.isRecording && styles.recordingAction]}
+          accessibilityLabel={inputMode === "voice" ? recording.isRecording ? "停止录音" : "开始录音" : "发送"}
+          onPress={() => {
+            if (inputMode === "voice") void toggleRecording();
+            else void send();
+          }}
+          disabled={inputMode === "text"
+            ? !canSend
+            : sending || transcribing || (!gateway.client && !recording.isRecording)}
+          style={[
+            styles.primaryAction,
+            recording.isRecording && styles.primaryRecording,
+            (inputMode === "text"
+              ? !canSend
+              : sending || transcribing || (!gateway.client && !recording.isRecording)) && styles.sendDisabled,
+          ]}
         >
-          {transcribing ? (
-            <ActivityIndicator color={colors.accent} size="small" />
+          {sending || transcribing ? (
+            <ActivityIndicator color="white" size="small" />
+          ) : recording.isRecording ? (
+            <View style={styles.recordingContent}>
+              <LineIcon name="stop" color="white" size={17} />
+              <Text style={styles.recordingTime}>{Math.round(recording.durationMillis / 1000)}s</Text>
+            </View>
+          ) : inputMode === "text" ? (
+            <Text style={styles.sendText}>发送</Text>
           ) : (
-            <LineIcon name="mic" color={recording.isRecording ? colors.danger : colors.accent} />
+            <LineIcon name="mic" color="white" />
           )}
-          {recording.isRecording ? (
-            <Text style={styles.recordingTime}>{Math.round(recording.durationMillis / 1000)}s</Text>
-          ) : null}
-        </Pressable>
-        <Pressable style={[styles.send, !canSend && styles.sendDisabled]} onPress={() => void send()} disabled={!canSend}>
-          {sending ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.sendText}>发送</Text>}
         </Pressable>
       </View>
       <Modal
@@ -384,7 +412,7 @@ function LineIcon({
   color,
   size = 22,
 }: {
-  name: "plus" | "camera" | "file" | "mic";
+  name: "plus" | "camera" | "file" | "mic" | "keyboard" | "stop";
   color: string;
   size?: number;
 }) {
@@ -402,6 +430,10 @@ function LineIcon({
       {name === "mic" ? (
         <><Rect x="9" y="3" width="6" height="11" rx="3" stroke={color} strokeWidth="1.8" /><Path d="M6.5 11.5a5.5 5.5 0 0 0 11 0M12 17v4M9 21h6" stroke={color} strokeWidth="1.8" strokeLinecap="round" /></>
       ) : null}
+      {name === "keyboard" ? (
+        <><Rect x="3" y="6" width="18" height="12" rx="2.5" stroke={color} strokeWidth="1.8" /><Path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M6.5 13.5h.01M10 13.5h.01M14 13.5h.01M17.5 13.5h.01M8 16h8" stroke={color} strokeWidth="2" strokeLinecap="round" /></>
+      ) : null}
+      {name === "stop" ? <Rect x="6" y="6" width="12" height="12" rx="2.5" fill={color} /> : null}
     </Svg>
   );
 }
@@ -502,10 +534,13 @@ const styles = StyleSheet.create({
   errorText: { color: colors.danger, textAlign: "center", fontSize: 13 },
   composer: { flexDirection: "row", alignItems: "flex-end", gap: 8, padding: 10, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.line },
   roundAction: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: colors.background, borderWidth: 1, borderColor: colors.line },
-  recordingAction: { backgroundColor: "#FFF3ED", borderColor: "#F3D7CB" },
-  recordingTime: { position: "absolute", bottom: -15, color: colors.danger, fontSize: 10, fontWeight: "600" },
-  input: { flex: 1, minHeight: 42, maxHeight: 120, color: colors.ink, backgroundColor: colors.background, borderRadius: 16, paddingHorizontal: 13, paddingVertical: 10, textAlignVertical: "top" },
-  send: { minWidth: 58, height: 42, alignItems: "center", justifyContent: "center", backgroundColor: colors.accent, borderRadius: 14 },
+  inputShell: { flex: 1, minHeight: 42, maxHeight: 120, flexDirection: "row", alignItems: "flex-end", backgroundColor: colors.background, borderRadius: 16 },
+  inputMode: { width: 40, height: 42, alignItems: "center", justifyContent: "center" },
+  input: { flex: 1, minHeight: 42, maxHeight: 120, color: colors.ink, paddingRight: 13, paddingVertical: 10, textAlignVertical: "top" },
+  primaryAction: { minWidth: 52, height: 42, paddingHorizontal: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.accent, borderRadius: 14 },
+  primaryRecording: { backgroundColor: colors.danger },
+  recordingContent: { flexDirection: "row", alignItems: "center", gap: 5 },
+  recordingTime: { color: "white", fontSize: 12, fontWeight: "700" },
   sendDisabled: { opacity: 0.45 },
   sendText: { color: "white", fontWeight: "700" },
   modalRoot: { flex: 1, justifyContent: "flex-end" },
