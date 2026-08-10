@@ -14,6 +14,7 @@ from pc_assistant.automation.models import (
 )
 from pc_assistant.automation.service import TaskCreationPort
 from pc_assistant.automation.trigger_repository import TriggerRepository
+from pc_assistant.tasks.models import TaskOrigin
 
 
 logger = logging.getLogger(__name__)
@@ -101,6 +102,7 @@ class TriggerDispatcher:
                 goal=_trigger_goal(trigger, event),
                 tools_enabled=trigger.tools_enabled,
                 priority=trigger.priority,
+                origin=TaskOrigin.EVENT,
             )
             await asyncio.to_thread(
                 self._repository.mark_task_created,

@@ -85,6 +85,7 @@ from pc_assistant.service.credentials import resolve_local_service_token
 from pc_assistant.tools.artifact_prepare import ArtifactPrepareTool
 from pc_assistant.tools.base import ToolCapability
 from pc_assistant.tools.clipboard import ClipboardTool
+from pc_assistant.tools.create_task import CreateTaskTool
 from pc_assistant.tools.describe_tool import DescribeTool
 from pc_assistant.tools.exchange import ExchangeTool
 from pc_assistant.tools.hotkey import HotkeyTool
@@ -97,8 +98,10 @@ from pc_assistant.tools.read_artifact import ReadArtifactTool
 from pc_assistant.tools.read_file import ReadFileTool
 from pc_assistant.tools.registry import ToolRegistry
 from pc_assistant.tools.screenshot import ScreenshotTool
+from pc_assistant.tools.schedule_task import ScheduleTaskTool
 from pc_assistant.tools.shell import ShellTool
 from pc_assistant.tools.type_text import TypeTextTool
+from pc_assistant.tools.task_control import TaskControlTool
 from pc_assistant.tools.weather import WeatherTool
 from pc_assistant.tools.web_fetch import WebFetchTool
 from pc_assistant.tools.web_search import WebSearchTool
@@ -426,6 +429,16 @@ def build_core_runtime(
     schedule_service = ScheduleService(schedules, schedule_dispatcher)
     trigger_dispatcher = TriggerDispatcher(triggers, task_service)
     trigger_service = TriggerService(triggers, trigger_dispatcher)
+    registry.register(CreateTaskTool(sessions, task_service))
+    registry.register(ScheduleTaskTool(sessions, schedule_service))
+    registry.register(
+        TaskControlTool(
+            sessions,
+            task_service,
+            schedule_service,
+            trigger_service,
+        )
+    )
     config_path = (
         Path(config.source_config_path).expanduser().resolve()
         if config.source_config_path

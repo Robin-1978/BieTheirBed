@@ -5,7 +5,7 @@ import pytest
 from pc_assistant.config import AppConfig
 from pc_assistant.gateway.core import GatewayCoreBridge
 from pc_assistant.service.core_api import ArtifactInputRef, TaskSnapshot
-from pc_assistant.tasks import TaskState
+from pc_assistant.tasks import TaskOrigin, TaskState
 
 
 class _Client:
@@ -15,7 +15,7 @@ class _Client:
         self.disconnected = False
         self.sessions = 0
 
-    async def create_session(self) -> str:
+    async def create_session(self, **_kwargs) -> str:
         self.sessions += 1
         return f"{self.principal_id}:{self.sessions}"
 
@@ -96,11 +96,12 @@ async def test_gateway_core_bridge_retries_as_child_task(tmp_path) -> None:
 
     assert accepted.task_id == "task-retry"
     session_handle, goal, attachments, options = client.created_task
-    assert session_handle == "session-a"
+    assert session_handle == "personal:owner:1"
     assert goal == "original goal\n\nRetry note: network recovered"
     assert attachments[0].artifact_id == "artifact-a"
     assert options == {
         "tools_enabled": True,
         "priority": 3,
         "parent_task_id": "task-failed",
+        "origin": TaskOrigin.CHAT,
     }

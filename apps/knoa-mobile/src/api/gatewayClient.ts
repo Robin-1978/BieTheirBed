@@ -1,4 +1,5 @@
 import type {
+  AndroidRelease,
   ArtifactInput,
   GatewaySession,
   PairingPayload,
@@ -72,12 +73,16 @@ export class GatewayClient {
   }
 
   async listTasks(input: {
+    sessionHandle?: string;
     state?: TaskState;
     limit?: number;
     cursor?: string;
+    kind?: "all" | "chat" | "task";
   } = {}): Promise<{ tasks: TaskSnapshot[]; next_cursor: string }> {
     const query = new URLSearchParams();
+    if (input.sessionHandle) query.set("session_handle", input.sessionHandle);
     if (input.state) query.set("state", input.state);
+    if (input.kind) query.set("kind", input.kind);
     query.set("limit", String(input.limit ?? 50));
     if (input.cursor) query.set("cursor", input.cursor);
     return this.json(`/v1/tasks?${query}`);
@@ -102,6 +107,7 @@ export class GatewayClient {
     text?: string;
     attachments?: ArtifactInput[];
     toolsEnabled?: boolean;
+    kind?: "chat" | "task";
   }): Promise<{ task_id: string; state: TaskState }> {
     return this.json("/v1/tasks", {
       method: "POST",
@@ -110,6 +116,7 @@ export class GatewayClient {
         input: input.text ?? "",
         attachments: input.attachments ?? [],
         tools_enabled: input.toolsEnabled ?? true,
+        kind: input.kind ?? "chat",
       },
     });
   }
@@ -193,6 +200,10 @@ export class GatewayClient {
 
   async deviceAudit(afterId = 0): Promise<Json> {
     return this.json(`/v1/device/audit?after_id=${afterId}&limit=100`);
+  }
+
+  async latestAndroidRelease(): Promise<AndroidRelease> {
+    return this.json("/v1/mobile/releases/android/latest");
   }
 
   async registerPush(token: string): Promise<void> {

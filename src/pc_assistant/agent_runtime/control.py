@@ -59,8 +59,17 @@ class ControlService:
             scope.session_handle,
         )
 
-    async def create_session(self, principal_id: str) -> RuntimeScope:
-        return await asyncio.to_thread(self._sessions.create, principal_id)
+    async def create_session(
+        self,
+        principal_id: str,
+        *,
+        activate: bool = True,
+    ) -> RuntimeScope:
+        return await asyncio.to_thread(
+            self._sessions.create,
+            principal_id,
+            activate=activate,
+        )
 
     async def get_status(self, scope: RuntimeScope) -> RuntimeStatus:
         owned = await self._owned_scope(scope)

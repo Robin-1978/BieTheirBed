@@ -340,6 +340,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mobile/releases/android/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getLatestAndroidRelease"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mobile/releases/android/{version_code}/package": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["downloadAndroidRelease"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/device/audit": {
         parameters: {
             query?: never;
@@ -376,6 +408,40 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AndroidReleaseResponse */
+        AndroidReleaseResponse: {
+            /**
+             * Platform
+             * @default android
+             * @constant
+             */
+            platform: "android";
+            /**
+             * Channel
+             * @default personal
+             * @constant
+             */
+            channel: "personal";
+            /** Version Name */
+            version_name: string;
+            /** Version Code */
+            version_code: number;
+            /** Min Supported Version Code */
+            min_supported_version_code: number;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Sha256 */
+            sha256: string;
+            /** Published At */
+            published_at: number;
+            /**
+             * Release Notes
+             * @default
+             */
+            release_notes: string;
+            /** Download Path */
+            download_path: string;
+        };
         /** ApprovalResolvedResponse */
         ApprovalResolvedResponse: {
             /** Approval Id */
@@ -554,6 +620,12 @@ export interface components {
              * @default
              */
             parent_task_id: string;
+            /**
+             * Kind
+             * @default chat
+             * @enum {string}
+             */
+            kind: "chat" | "task";
         };
         /** ErrorResponse */
         ErrorResponse: {
@@ -818,6 +890,11 @@ export interface components {
              */
             next_cursor: string;
         };
+        /**
+         * TaskOrigin
+         * @enum {string}
+         */
+        TaskOrigin: "chat" | "user" | "agent" | "scheduled" | "event";
         /** TaskResponse */
         TaskResponse: {
             task: components["schemas"]["TaskSnapshot"];
@@ -830,6 +907,8 @@ export interface components {
             session_handle: string;
             /** Client Request Id */
             client_request_id: string;
+            /** @default chat */
+            origin: components["schemas"]["TaskOrigin"];
             /**
              * Parent Task Id
              * @default
@@ -908,7 +987,7 @@ export interface components {
              * Effect
              * @enum {string}
              */
-            effect: "read_only" | "local_write" | "external_side_effect" | "desktop_control";
+            effect: "read_only" | "internal_write" | "local_write" | "external_side_effect" | "desktop_control";
             /**
              * Risk
              * @enum {string}
@@ -918,7 +997,7 @@ export interface components {
              * Capabilities
              * @default []
              */
-            capabilities: ("host_read" | "host_write" | "shell" | "network" | "desktop_observe" | "desktop_control" | "memory_read" | "memory_write" | "mcp")[];
+            capabilities: ("host_read" | "host_write" | "shell" | "network" | "desktop_observe" | "desktop_control" | "memory_read" | "memory_write" | "mcp" | "task_management")[];
             /** Requires Confirmation */
             requires_confirmation: boolean;
         };
@@ -2385,6 +2464,131 @@ export interface operations {
             };
             /** @description Request rejected */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getLatestAndroidRelease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Latest personal Android release */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AndroidReleaseResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    downloadAndroidRelease: {
+        parameters: {
+            query?: never;
+            header?: {
+                Range?: string;
+            };
+            path: {
+                version_code: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Complete Android APK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.android.package-archive": string;
+                };
+            };
+            /** @description Android APK byte range */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.android.package-archive": string;
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

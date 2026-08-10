@@ -24,6 +24,7 @@ class ToolDefinition(_RequiredToolDefinition, total=False):
 
 class ToolEffect(str, Enum):
     READ_ONLY = "read_only"
+    INTERNAL_WRITE = "internal_write"
     LOCAL_WRITE = "local_write"
     EXTERNAL_SIDE_EFFECT = "external_side_effect"
     DESKTOP_CONTROL = "desktop_control"
@@ -40,6 +41,7 @@ class ToolCapability(str, Enum):
     MEMORY_READ = "memory_read"
     MEMORY_WRITE = "memory_write"
     MCP = "mcp"
+    TASK_MANAGEMENT = "task_management"
 
 
 class ToolRisk(str, Enum):
@@ -81,6 +83,13 @@ class ToolPolicy:
     def configured(self) -> bool:
         return self.effect is not ToolEffect.UNKNOWN
 
+    @property
+    def requires_confirmation(self) -> bool:
+        return self.effect not in {
+            ToolEffect.READ_ONLY,
+            ToolEffect.INTERNAL_WRITE,
+        } or self.risk is ToolRisk.HIGH
+
 
 class ToolBase(ABC):
     name: str = ""
@@ -91,6 +100,10 @@ class ToolBase(ABC):
     risk: ToolRisk = ToolRisk.HIGH
     @abstractmethod
     async def execute(self, **kwargs: Any) -> Any: ...
+
+    async def execute_scoped(self, scope: Any, **kwargs: Any) -> Any:
+        del scope
+        return await self.execute(**kwargs)
 
     @abstractmethod
     def definition(self) -> ToolDefinition:

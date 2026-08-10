@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 
 import { GatewayClient } from "@/api/gatewayClient";
 import type { PrincipalTaskEvent } from "@/api/models";
+import { subscribeTaskEvents, type TaskEventSubscription } from "@/api/taskEvents";
 import { registerPush } from "@/notifications";
 import { authenticateDevice, pairDevice } from "@/security/pairing";
 import {
@@ -23,12 +24,13 @@ type GatewayState = {
   pair(encoded: string, displayName: string): Promise<void>;
   publish(event: PrincipalTaskEvent): void;
   reconnect(): Promise<void>;
+  newConversation(): Promise<void>;
 };
 
 const Context = createContext<GatewayState | null>(null);
 
 export function GatewayProvider({ children }: React.PropsWithChildren) {
-  const [state, setState] = useState<Omit<GatewayState, "pair" | "publish" | "reconnect">>({
+  const [state, setState] = useState<Omit<GatewayState, "pair" | "publish" | "reconnect" | "newConversation">>({
     status: "booting",
     client: null,
     sessionHandle: "",
@@ -96,18 +98,46 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     void connect();
   }, [connect]);
 
+  useEffect(() => {
+    let subscription: TaskEventSubscription | null = null;
+    if (state.status === "ready") {
+      void subscribeTaskEvents({
+        gatewayUrl: state.gatewayUrl,
+        token: state.sessionToken,
+        onEvent: (event) => {
+          setState((current) => ({ ...current, latestEvent: event }));
+        },
+        onError: () => undefined,
+      }).then((active) => {
+        subscription = active;
+      });
+    }
+    return () => subscription?.close();
+  }, [state.gatewayUrl, state.sessionToken, state.status]);
+
   const pair = useCallback(async (encoded: string, displayName: string) => {
     await pairDevice(encoded, displayName);
     await connect();
   }, [connect]);
+
+  const newConversation = useCallback(async () => {
+    if (!state.client) throw new Error("小诺尚未连接");
+    const sessionHandle = await state.client.createSession();
+    await storeCoreSession(sessionHandle);
+    setState((current) => ({
+      ...current,
+      sessionHandle,
+      latestEvent: null,
+    }));
+  }, [state.client]);
 
   const publish = useCallback((event: PrincipalTaskEvent) => {
     setState((current) => ({ ...current, latestEvent: event }));
   }, []);
 
   const value = useMemo<GatewayState>(
-    () => ({ ...state, pair, publish, reconnect: connect }),
-    [connect, pair, publish, state],
+    () => ({ ...state, pair, publish, reconnect: connect, newConversation }),
+    [connect, newConversation, pair, publish, state],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

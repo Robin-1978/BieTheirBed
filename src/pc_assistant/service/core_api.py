@@ -43,6 +43,7 @@ from pc_assistant.tasks import (
     TaskCancelResult,
     TaskEvent,
     TaskPauseResult,
+    TaskOrigin,
     TaskRecord,
     TaskState,
 )
@@ -68,6 +69,7 @@ class TaskSnapshot(CoreModel):
     task_id: TaskId
     session_handle: SessionHandle
     client_request_id: RequestId
+    origin: TaskOrigin = TaskOrigin.CHAT
     parent_task_id: Annotated[str, StringConstraints(max_length=128)] = ""
     goal: Annotated[str, StringConstraints(max_length=200_000)]
     attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
@@ -91,6 +93,7 @@ class TaskSnapshot(CoreModel):
             task_id=task.task_id,
             session_handle=task.session_handle,
             client_request_id=task.client_request_id,
+            origin=getattr(task, "origin", TaskOrigin.CHAT),
             parent_task_id=task.parent_task_id,
             goal=task.goal,
             attachments=tuple(
@@ -215,6 +218,7 @@ class CreateSessionRequest(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
     method: Literal["create_session"] = "create_session"
+    activate: bool = True
 
 
 class CreateTaskRequest(CoreModel):
@@ -227,6 +231,7 @@ class CreateTaskRequest(CoreModel):
     tools_enabled: bool = True
     priority: int = Field(default=0, ge=0, le=9)
     parent_task_id: Annotated[str, StringConstraints(max_length=128)] = ""
+    origin: TaskOrigin = TaskOrigin.CHAT
 
     @model_validator(mode="after")
     def require_input_or_attachment(self) -> CreateTaskRequest:
@@ -265,6 +270,7 @@ class ListTasksRequest(CoreModel):
     method: Literal["list_tasks"] = "list_tasks"
     session_handle: Annotated[str, StringConstraints(max_length=256)] = ""
     state: TaskState | None = None
+    origins: tuple[TaskOrigin, ...] = Field(default=(), max_length=5)
     limit: int = Field(default=50, ge=1, le=100)
     cursor: Annotated[str, StringConstraints(max_length=512)] = ""
 

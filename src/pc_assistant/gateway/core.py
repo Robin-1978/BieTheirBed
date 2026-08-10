@@ -29,14 +29,14 @@ from pc_assistant.service.credentials import (
     issue_principal_credential,
     resolve_local_service_token,
 )
-from pc_assistant.tasks import TaskEvent, TaskState
+from pc_assistant.tasks import TaskEvent, TaskOrigin, TaskState
 from pc_assistant.tasks import PrincipalTaskEvent
 
 
 class GatewayCoreClient(Protocol):
     is_connected: bool
 
-    async def create_session(self) -> str: ...
+    async def create_session(self, *, activate: bool = True) -> str: ...
 
     async def create_task(
         self,
@@ -47,6 +47,7 @@ class GatewayCoreClient(Protocol):
         tools_enabled: bool = True,
         priority: int = 0,
         parent_task_id: str = "",
+        origin: TaskOrigin = TaskOrigin.CHAT,
     ) -> TaskAcceptedMessage: ...
 
     async def get_task(self, task_id: str) -> TaskSnapshot: ...
@@ -56,6 +57,7 @@ class GatewayCoreClient(Protocol):
         *,
         session_handle: str = "",
         state: TaskState | None = None,
+        origins: tuple[TaskOrigin, ...] = (),
         limit: int = 50,
         cursor: str = "",
     ) -> TaskListMessage: ...
@@ -156,8 +158,11 @@ class GatewayCoreBridge:
             return_exceptions=True,
         )
 
-    async def create_session(self, principal_id: str) -> str:
-        return await (await self._client_for(principal_id)).create_session()
+    async def create_session(self, principal_id: str, *, activate: bool = True) -> str:
+        client = await self._client_for(principal_id)
+        if activate:
+            return await client.create_session()
+        return await client.create_session(activate=False)
 
     async def create_task(
         self,
@@ -169,15 +174,21 @@ class GatewayCoreBridge:
         tools_enabled: bool,
         priority: int,
         parent_task_id: str,
+        origin: TaskOrigin,
     ) -> TaskAcceptedMessage:
         client = await self._client_for(principal_id)
+        kwargs = dict(
+            tools_enabled=tools_enabled,
+            priority=priority,
+            parent_task_id=parent_task_id,
+        )
+        if origin is not TaskOrigin.CHAT:
+            kwargs["origin"] = origin
         return await client.create_task(
             session_handle,
             user_input,
             attachments,
-            tools_enabled=tools_enabled,
-            priority=priority,
-            parent_task_id=parent_task_id,
+            **kwargs,
         )
 
     async def get_task(self, principal_id: str, task_id: str) -> TaskSnapshot:
@@ -189,16 +200,20 @@ class GatewayCoreBridge:
         *,
         session_handle: str,
         state: TaskState | None,
+        origins: tuple[TaskOrigin, ...],
         limit: int,
         cursor: str,
     ) -> TaskListMessage:
         client = await self._client_for(principal_id)
-        return await client.list_tasks(
+        kwargs = dict(
             session_handle=session_handle,
             state=state,
             limit=limit,
             cursor=cursor,
         )
+        if origins:
+            kwargs["origins"] = origins
+        return await client.list_tasks(**kwargs)
 
     async def cancel_task(
         self,
@@ -254,13 +269,15 @@ class GatewayCoreBridge:
         goal = previous.goal
         if reason.strip():
             goal += f"\n\nRetry note: {reason.strip()}"
+        session_handle = await client.create_session(activate=False)
         return await client.create_task(
-            previous.session_handle,
+            session_handle,
             goal,
             previous.attachments,
             tools_enabled=previous.tools_enabled,
             priority=previous.priority,
             parent_task_id=previous.task_id,
+            origin=previous.origin,
         )
 
     async def transcribe_artifact(

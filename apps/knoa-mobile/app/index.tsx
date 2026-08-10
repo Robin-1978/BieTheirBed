@@ -7,7 +7,7 @@ import { colors } from "@/theme";
 export default function Index() {
   const gateway = useGateway();
   if (gateway.status === "unpaired") return <Redirect href="/pair" />;
-  if (gateway.status === "ready") return <Redirect href="/tasks" />;
+  if (gateway.status === "ready") return <Redirect href="/chat" />;
   return (
     <View style={styles.container}>
       {gateway.status === "booting" ? <ActivityIndicator color={colors.accent} /> : null}

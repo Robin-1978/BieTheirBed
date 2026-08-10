@@ -19,7 +19,7 @@ import uvicorn
 from pydantic import ValidationError
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from pc_assistant.config import AppConfig
@@ -42,6 +42,7 @@ from pc_assistant.gateway.push import (
     GatewayPushRepository,
     PushTransport,
 )
+from pc_assistant.gateway.releases import AndroidReleaseRepository
 from pc_assistant.network_tls import is_loopback_host
 from pc_assistant.runtime import RuntimePaths
 from pc_assistant.gateway.protocol import (
@@ -70,6 +71,7 @@ from pc_assistant.service.core_client import (
     CoreRequestError,
     CoreRequestTimeoutError,
 )
+from pc_assistant.tasks import TaskOrigin
 
 
 logger = logging.getLogger(__name__)
@@ -114,6 +116,7 @@ class SecureGatewayAdapter:
         audit: GatewayAuditRepository | None = None,
         push_repository: GatewayPushRepository | None = None,
         push_transport: PushTransport | None = None,
+        release_repository: AndroidReleaseRepository | None = None,
         event_heartbeat_seconds: float = 15.0,
     ) -> None:
         if not config.gateway_enabled:
@@ -150,6 +153,11 @@ class SecureGatewayAdapter:
             self._core,
             self._push_repository,
             push_transport or ExpoPushTransport(),
+        )
+        self._releases = release_repository or AndroidReleaseRepository(
+            RuntimePaths.from_root(config.runtime_root).data
+            / "mobile-releases"
+            / "android"
         )
         self._limiter = limiter or _WindowLimiter()
         self._event_heartbeat_seconds = max(0.01, event_heartbeat_seconds)
@@ -208,6 +216,16 @@ class SecureGatewayAdapter:
                 ),
                 Route("/v1/runtime/status", self._runtime_status, methods=["GET"]),
                 Route("/v1/tools", self._list_tools, methods=["GET"]),
+                Route(
+                    "/v1/mobile/releases/android/latest",
+                    self._latest_android_release,
+                    methods=["GET"],
+                ),
+                Route(
+                    "/v1/mobile/releases/android/{version_code:str}/package",
+                    self._download_android_release,
+                    methods=["GET"],
+                ),
                 Route("/v1/device/audit", self._device_audit, methods=["GET"]),
                 Route(
                     "/v1/device/push",
@@ -398,14 +416,28 @@ class SecureGatewayAdapter:
             return parsed
         try:
             parsed.require_content()
+            session_handle = parsed.session_handle
+            origin = TaskOrigin.CHAT
+            if parsed.kind == "task":
+                if parsed.attachments:
+                    return JSONResponse(
+                        {"error": "background_attachments_not_supported"},
+                        status_code=422,
+                    )
+                session_handle = await self._core.create_session(
+                    authenticated.device.principal_id,
+                    activate=False,
+                )
+                origin = TaskOrigin.USER
             accepted = await self._core.create_task(
                 authenticated.device.principal_id,
-                parsed.session_handle,
+                session_handle,
                 parsed.input,
                 parsed.attachments,
                 tools_enabled=parsed.tools_enabled,
                 priority=parsed.priority,
                 parent_task_id=parsed.parent_task_id,
+                origin=origin,
             )
         except ValueError:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
@@ -425,10 +457,21 @@ class SecureGatewayAdapter:
         except ValidationError:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         try:
+            origins = {
+                "all": (),
+                "chat": (TaskOrigin.CHAT,),
+                "task": (
+                    TaskOrigin.USER,
+                    TaskOrigin.AGENT,
+                    TaskOrigin.SCHEDULED,
+                    TaskOrigin.EVENT,
+                ),
+            }[query.kind]
             result = await self._core.list_tasks(
                 authenticated.device.principal_id,
                 session_handle=query.session_handle,
                 state=query.state,
+                origins=origins,
                 limit=query.limit,
                 cursor=query.cursor,
             )
@@ -616,6 +659,62 @@ class SecureGatewayAdapter:
         except Exception as exc:
             return self._core_error(exc)
         return JSONResponse({"result": result.model_dump(mode="json")})
+
+    async def _latest_android_release(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=30)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        try:
+            release = await asyncio.to_thread(self._releases.latest)
+        except LookupError:
+            return JSONResponse({"error": "not_found"}, status_code=404)
+        assert release is not None
+        return JSONResponse(
+            {
+                "platform": "android",
+                "channel": "personal",
+                "version_name": release.version_name,
+                "version_code": release.version_code,
+                "min_supported_version_code": release.min_supported_version_code,
+                "size_bytes": release.size_bytes,
+                "sha256": release.sha256,
+                "published_at": release.published_at,
+                "release_notes": release.release_notes,
+                "download_path": (
+                    f"/v1/mobile/releases/android/{release.version_code}/package"
+                ),
+            }
+        )
+
+    async def _download_android_release(
+        self, request: Request
+    ) -> JSONResponse | FileResponse:
+        authenticated = self._authorize(request, limit=20)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        raw_version_code = str(request.path_params.get("version_code", ""))
+        if not raw_version_code.isascii() or not raw_version_code.isdecimal():
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        version_code = int(raw_version_code)
+        if version_code < 1 or version_code > 2_100_000_000:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            release = await asyncio.to_thread(self._releases.get, version_code)
+            package = await asyncio.to_thread(self._releases.package_path, release)
+            metadata = await asyncio.to_thread(package.stat)
+        except LookupError:
+            return JSONResponse({"error": "not_found"}, status_code=404)
+        return FileResponse(
+            package,
+            media_type="application/vnd.android.package-archive",
+            filename=f"knoa-{release.version_name}.apk",
+            stat_result=metadata,
+            headers={
+                "Cache-Control": "private, no-cache",
+                "ETag": f'"{release.sha256}"',
+                "X-Knoa-SHA256": release.sha256,
+            },
+        )
 
     async def _device_audit(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=60)

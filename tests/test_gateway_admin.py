@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import zipfile
 
 import pytest
 
@@ -91,3 +92,46 @@ def test_gateway_admin_emits_canonical_pairing_payload_when_url_is_configured(
     assert payload["gateway_url"] == "https://knoa.example.com"
     assert payload["grant_id"]
     assert len(payload["grant_secret"]) >= 32
+
+
+def test_gateway_admin_publishes_and_inspects_private_android_release(
+    tmp_path,
+    capsys,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("PC_RUNTIME_ROOT", raising=False)
+    runtime_root = tmp_path / "runtime"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(f"runtime_root: {runtime_root}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "pc_assistant.gateway.release_admin.read_apk_version",
+        lambda _apk: ("0.2.0", 2),
+    )
+    apk = tmp_path / "knoa.apk"
+    with zipfile.ZipFile(apk, "w") as archive:
+        archive.writestr("AndroidManifest.xml", b"manifest")
+        archive.writestr("classes.dex", b"private android package")
+
+    assert (
+        main(
+            [
+                "--config",
+                str(config_path),
+                "gateway",
+                "release",
+                "publish",
+                str(apk),
+                "--notes",
+                "私人更新",
+            ]
+        )
+        == 0
+    )
+    published = capsys.readouterr().out
+    assert "version_code=2" in published
+    assert "sha256=" in published
+
+    assert main(["--config", str(config_path), "gateway", "release", "latest"]) == 0
+    latest = capsys.readouterr().out
+    assert "version_name=0.2.0" in latest
+    assert "version_code=2" in latest

@@ -117,6 +117,7 @@ from pc_assistant.tasks import (
     TaskCapacityError,
     TaskIdempotencyConflictError,
     TaskNotFoundError,
+    TaskOrigin,
     TaskService,
     TaskTransitionError,
 )
@@ -413,7 +414,13 @@ class CoreServer:
     ) -> None:
         try:
             if isinstance(request, CreateSessionRequest):
-                scope = await self._control.create_session(principal)
+                if request.activate:
+                    scope = await self._control.create_session(principal)
+                else:
+                    scope = await self._control.create_session(
+                        principal,
+                        activate=False,
+                    )
                 await send(
                     SessionCreatedMessage(
                         request_id=request.request_id,
@@ -425,8 +432,7 @@ class CoreServer:
                     principal_id=principal,
                     session_handle=request.session_handle,
                 )
-                task = await self._tasks.create(
-                    scope,
+                create_kwargs = dict(
                     client_request_id=request.request_id,
                     goal=request.input,
                     attachments=tuple(
@@ -440,6 +446,9 @@ class CoreServer:
                     priority=request.priority,
                     parent_task_id=request.parent_task_id,
                 )
+                if request.origin is not TaskOrigin.CHAT:
+                    create_kwargs["origin"] = request.origin
+                task = await self._tasks.create(scope, **create_kwargs)
                 await send(
                     TaskAcceptedMessage(
                         request_id=request.request_id,
@@ -456,13 +465,15 @@ class CoreServer:
                     )
                 )
             elif isinstance(request, ListTasksRequest):
-                tasks, next_cursor = await self._tasks.list(
-                    principal,
+                list_kwargs = dict(
                     session_handle=request.session_handle,
                     state=request.state,
                     limit=request.limit,
                     cursor=request.cursor,
                 )
+                if request.origins:
+                    list_kwargs["origins"] = request.origins
+                tasks, next_cursor = await self._tasks.list(principal, **list_kwargs)
                 await send(
                     TaskListMessage(
                         request_id=request.request_id,

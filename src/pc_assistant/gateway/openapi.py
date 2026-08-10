@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from pydantic.json_schema import models_json_schema
 
 from pc_assistant.gateway.protocol import (
+    AndroidReleaseResponse,
     ApprovalResolvedResponse,
     AuditEventResponse,
     AuditListResponse,
@@ -43,6 +44,7 @@ from pc_assistant.gateway.protocol import (
 
 
 _MODELS: tuple[type[BaseModel], ...] = (
+    AndroidReleaseResponse,
     ErrorResponse,
     HealthResponse,
     PairChallengeRequest,
@@ -511,6 +513,58 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     "responses": {
                         "200": _json_response("Tool inventory", ToolListResponse),
                         **_errors("400", "401", "404", "429", "503"),
+                    },
+                }
+            },
+            "/v1/mobile/releases/android/latest": {
+                "get": {
+                    "operationId": "getLatestAndroidRelease",
+                    "security": bearer,
+                    "responses": {
+                        "200": _json_response(
+                            "Latest personal Android release",
+                            AndroidReleaseResponse,
+                        ),
+                        **_errors("401", "404", "429"),
+                    },
+                }
+            },
+            "/v1/mobile/releases/android/{version_code}/package": {
+                "get": {
+                    "operationId": "downloadAndroidRelease",
+                    "security": bearer,
+                    "parameters": [
+                        {
+                            "name": "version_code",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "integer", "minimum": 1},
+                        },
+                        {
+                            "name": "Range",
+                            "in": "header",
+                            "required": False,
+                            "schema": {"type": "string"},
+                        },
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Complete Android APK",
+                            "content": {
+                                "application/vnd.android.package-archive": {
+                                    "schema": {"type": "string", "format": "binary"}
+                                }
+                            },
+                        },
+                        "206": {
+                            "description": "Android APK byte range",
+                            "content": {
+                                "application/vnd.android.package-archive": {
+                                    "schema": {"type": "string", "format": "binary"}
+                                }
+                            },
+                        },
+                        **_errors("400", "401", "404", "416", "429"),
                     },
                 }
             },

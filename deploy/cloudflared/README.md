@@ -10,12 +10,12 @@ Configure the Tunnel in the Cloudflare dashboard with this public hostname:
 
 | Setting | Value |
 | --- | --- |
-| Subdomain | `kona` |
+| Subdomain | `knoa` |
 | Domain | `tinydotdot.com` |
 | Service type | `HTTP` |
 | Origin URL | `127.0.0.1:9529` |
 
-The resulting public Gateway URL is `https://kona.tinydotdot.com`.
+The resulting public Gateway URL is `https://knoa.tinydotdot.com`.
 
 Do not enable "No TLS Verify": the origin is intentionally plain HTTP over the
 local connector. Device authentication remains enforced by the Gateway.
@@ -26,11 +26,12 @@ Store the remotely managed Tunnel token outside the repository:
 
 ```bash
 install -d -m 700 ~/.pc-assistant/config
-install -m 600 deploy/cloudflared/cloudflare.env.example \
-  ~/.pc-assistant/config/cloudflare.env
+install -m 600 deploy/cloudflared/cloudflare.token.example \
+  ~/.pc-assistant/config/cloudflare.token
 ```
 
-Replace the example value in `cloudflare.env`, then install the user service:
+Replace the example content in `cloudflare.token` with only the remotely
+managed Tunnel token, then install the user service:
 
 ```bash
 install -d -m 700 ~/.config/systemd/user
@@ -44,7 +45,7 @@ Verify both sides:
 
 ```bash
 curl --fail http://127.0.0.1:9529/health
-curl --fail https://kona.tinydotdot.com/health
+curl --fail https://knoa.tinydotdot.com/health
 ```
 
 The expected response is:

@@ -223,10 +223,7 @@ class ToolStep:
                 message="Run cancelled before tool execution",
             )
 
-        needs_confirmation = (
-            policy.effect is not ToolEffect.READ_ONLY
-            or policy.risk is ToolRisk.HIGH
-        )
+        needs_confirmation = policy.requires_confirmation
         if needs_confirmation:
             if context.confirmation is None:
                 return self._result(
@@ -285,7 +282,11 @@ class ToolStep:
                 return prior
 
         try:
-            output = await self._registry._commit(tool_name, **arguments)
+            output = await self._registry._commit(
+                tool_name,
+                scope=context.scope,
+                **arguments,
+            )
         except asyncio.CancelledError:
             raise
         except Exception:

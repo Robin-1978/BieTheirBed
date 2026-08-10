@@ -202,10 +202,7 @@ class ToolRegistry:
                     description=tool.description,
                     origin=self._origins[name],
                     policy=policy,
-                    requires_confirmation=(
-                        policy.effect is not ToolEffect.READ_ONLY
-                        or policy.risk is ToolRisk.HIGH
-                    ),
+                    requires_confirmation=policy.requires_confirmation,
                 )
             )
         return tuple(descriptors)
@@ -216,9 +213,15 @@ class ToolRegistry:
     def __len__(self) -> int:
         return len(self._tools)
 
-    async def _commit(self, internal_name: str, **kwargs: Any) -> Any:
+    async def _commit(
+        self,
+        internal_name: str,
+        *,
+        scope: Any = None,
+        **kwargs: Any,
+    ) -> Any:
         """Internal unchecked dispatch used only by ToolStep."""
         tool = self._tools.get(internal_name)
         if tool is None:
             raise ToolNotFoundError(internal_name)
-        return await tool.execute(**kwargs)
+        return await tool.execute_scoped(scope, **kwargs)

@@ -21,6 +21,8 @@ export type TaskState =
   | "failed"
   | "cancelled";
 
+export type TaskOrigin = "chat" | "user" | "agent" | "scheduled" | "event";
+
 export type ArtifactInput = {
   artifact_id: string;
   caption?: string;
@@ -29,6 +31,8 @@ export type ArtifactInput = {
 export type TaskSnapshot = {
   task_id: string;
   session_handle: string;
+  client_request_id: string;
+  origin: TaskOrigin;
   parent_task_id: string;
   goal: string;
   attachments: ArtifactInput[];
@@ -65,4 +69,17 @@ export type ApprovalRequest = {
   taskId: string;
   toolName: string;
   reason: string;
+};
+
+export type AndroidRelease = {
+  platform: "android";
+  channel: "personal";
+  version_name: string;
+  version_code: number;
+  min_supported_version_code: number;
+  size_bytes: number;
+  sha256: string;
+  published_at: number;
+  release_notes: string;
+  download_path: string;
 };

@@ -1,0 +1,182 @@
+# 小诺 Task 产品设计
+
+## 1. 唯一产品概念
+
+用户只需要理解一个核心概念：**任务（Task）**。
+
+Task 表示“小诺要做什么，以及什么时候启动”。普通聊天不是 Task；只有用户明确
+委派独立工作、在任务页创建，或任务的定时/事件条件满足时才开始一次独立执行。
+
+```text
+Task
+  ├── 目标与附件
+  ├── 启动方式
+  │    ├── 立即执行
+  │    ├── 定时执行
+  │    └── 事件启动
+  └── 执行记录
+       ├── 第一次执行
+       ├── 第二次执行
+       └── ...
+```
+
+产品界面不出现 Job、Trigger、Activation、Run 或 Attempt。
+
+## 2. 专业内部模型
+
+```text
+Task                 任务定义
+TaskLaunchPolicy     启动方式
+TaskLaunch           某一次启动事件，仅内部使用
+TaskExecution        某一次执行
+ExecutionAttempt     执行恢复尝试，仅内部使用
+```
+
+`TaskExecution` 使用独立 Agent Session，断开 Channel 后仍继续。第一版一个
+TaskExecution 只由一个 Agent 执行，不实现 Subagent。
+
+### 2.1 TaskLaunchPolicy
+
+```text
+immediate
+scheduled
+  ├── one_time
+  ├── interval
+  └── cron
+event
+  ├── webhook
+  ├── jira
+  ├── gitlab
+  └── file_change
+```
+
+Schedule 不再是独立产品实体；它是 Task 的一种启动方式。原 Trigger 术语从产品
+和公共领域模型中删除，事件启动只是另一种 `TaskLaunchPolicy`。
+
+### 2.2 TaskLaunch
+
+立即点击、时间到点、外部事件到达都会生成类型化 `TaskLaunch`。它负责持久去重、
+claim、lease 和有界重试。只有统一的启动分发器可以创建 `TaskExecution`。
+
+### 2.3 TaskExecution
+
+每次执行具有稳定 ID、状态、阶段、权限确认、事件时间线、产物和最终结果。
+
+```mermaid
+stateDiagram-v2
+    [*] --> queued
+    queued --> running
+    running --> waiting_approval
+    waiting_approval --> running
+    running --> paused
+    waiting_approval --> paused
+    paused --> queued: 恢复
+    queued --> cancelled
+    running --> cancelled
+    waiting_approval --> cancelled
+    paused --> cancelled
+    running --> completed
+    running --> failed
+```
+
+“再次执行”生成新的 TaskExecution；同一次执行内部因进程恢复产生的技术尝试记录为
+ExecutionAttempt，不向用户暴露。
+
+## 3. 创建闭环
+
+### 3.0 Agent 工具面
+
+Agent 只注入三个紧凑的 Task 工具，内部调度类型不进入提示词：
+
+- `create_task(goal)`：创建 `immediate` Task 并立即产生第一次执行；
+- `schedule_task(goal, run_at/interval/cron)`：创建 `scheduled` Task；
+- `task(action, task_id)`：统一 list/get/pause/resume/cancel/retry。
+
+两个创建工具返回相同语义的公开 `task_id`。`schedule_id`、`trigger_id`、Occurrence、
+Launch 和 Attempt 都是 Core 内部实现名，Agent 不应向用户复述。查询和控制必须使用
+公开 `task_id`，不能要求 Agent 先判断底层存储类型。
+
+### 3.1 聊天委派
+
+用户明确说“放后台做”“完成后告诉我”时，当前聊天 Agent 创建 Task：
+
+- 一次性工作使用 `immediate`；
+- 周期要求使用 `scheduled`；
+- 外部条件使用 `event`；
+- 当前对话立即返回任务回执，不等待执行完成。
+
+Agent 只有在目标完整、可以独立推进且不会扩大权限时才能主动建议或创建 Task。
+普通问答不能因为模型响应慢而自动变成 Task。
+
+### 3.2 任务页创建
+
+任务页支持输入目标、照片、文件和启动方式。创建 immediate Task 后立即生成第一条
+执行记录；scheduled/event Task 保存为启用状态，并允许“立即执行”。
+
+### 3.3 执行与交付
+
+```text
+TaskLaunch
+   ↓
+TaskExecution
+   ↓
+独立 Agent Session
+   ↓
+标准事件流
+   ├── App Push + 任务结果页
+   ├── 飞书结果卡片
+   └── CLI 查询
+```
+
+TaskExecution 可以读取 principal 级长期记忆，但不复制无限聊天全文。委派只传递
+明确目标、附件和有界上下文，避免阻塞或污染当前聊天。
+
+## 4. 状态和控制
+
+- 暂停发生在安全边界；
+- 恢复继续同一 TaskExecution；
+- 取消显式改变执行状态，断线本身不取消；
+- 再次执行创建新 TaskExecution，并保留历史；
+- 修改 Task 启动方式只影响未来执行；
+- 暂停 Task 表示停止未来定时/事件启动，不强制终止当前执行；
+- 当前执行的暂停/取消是独立操作。
+
+App 和飞书最终调用相同的 Core 命令，不在 Channel 中实现状态机。
+
+## 5. 查询和筛选
+
+任务列表筛选的是 Task 及其最新执行状态：
+
+- 进行中：最新执行为 queued/running/paused；
+- 待确认：最新执行为 waiting_approval；
+- 已完成：最新执行为 completed；
+- 未完成：最新执行为 failed/cancelled；
+- 已计划：启动方式为 scheduled/event 且 Task 启用。
+
+筛选必须由服务端在分页之前执行，不能先取一页内部执行记录再由客户端猜测。
+
+## 6. 结果展示
+
+Task 详情先展示任务目标和启动方式，再展示执行记录。执行详情顺序为：
+
+1. 最终结论；
+2. 产物和附件；
+3. 关键执行步骤；
+4. 可展开完整事件时间线。
+
+流式文本必须合并后渲染；Markdown 使用完整宽度；长结果不得在 Core 或 Channel
+层截断，超出单卡展示能力时附加完整 Markdown 产物。
+
+## 7. Channel 能力
+
+| 能力 | App | 飞书 |
+|---|---|---|
+| 创建 Task | 聊天委派、任务页 | 自然语言委派 |
+| 查看 Task | 列表和详情 | `/tasks`、`/task <id>` |
+| 立即执行 | 按钮 | `/execute <id>` |
+| 暂停/启用未来启动 | 按钮 | `/task-pause <id>`、`/task-resume <id>` |
+| 暂停/恢复当前执行 | 按钮 | `/pause <execution-id>`、`/resume <execution-id>` |
+| 取消当前执行 | 按钮 | `/cancel <execution-id>` |
+| 再次执行 | 按钮 | `/retry <execution-id>` |
+| 权限确认 | 执行内按钮 | 同一执行卡片按钮 |
+| 完成通知 | Push + 结果页 | 主动结果卡片 |

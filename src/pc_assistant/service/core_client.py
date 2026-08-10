@@ -94,7 +94,7 @@ from pc_assistant.service.core_api import (
     UploadArtifactRequest,
     parse_core_server_message_json,
 )
-from pc_assistant.tasks import PrincipalTaskEvent, TaskEvent, TaskState
+from pc_assistant.tasks import PrincipalTaskEvent, TaskEvent, TaskOrigin, TaskState
 
 
 class ClientWebSocket(Protocol):
@@ -316,9 +316,12 @@ class CoreClient:
                 queue.get_nowait()
             queue.put_nowait(error)
 
-    async def create_session(self) -> str:
+    async def create_session(self, *, activate: bool = True) -> str:
         response = await self._request(
-            CreateSessionRequest(request_id=self._request_id())
+            CreateSessionRequest(
+                request_id=self._request_id(),
+                activate=activate,
+            )
         )
         if not isinstance(response, SessionCreatedMessage):
             raise RuntimeError("CoreServer returned an invalid session response")
@@ -471,6 +474,7 @@ class CoreClient:
         tools_enabled: bool = True,
         priority: int = 0,
         parent_task_id: str = "",
+        origin: TaskOrigin = TaskOrigin.CHAT,
     ) -> TaskAcceptedMessage:
         response = await self._request(
             CreateTaskRequest(
@@ -481,6 +485,7 @@ class CoreClient:
                 tools_enabled=tools_enabled,
                 priority=priority,
                 parent_task_id=parent_task_id,
+                origin=origin,
             )
         )
         if not isinstance(response, TaskAcceptedMessage):
@@ -583,6 +588,7 @@ class CoreClient:
         *,
         session_handle: str = "",
         state: TaskState | None = None,
+        origins: tuple[TaskOrigin, ...] = (),
         limit: int = 50,
         cursor: str = "",
     ) -> TaskListMessage:
@@ -591,6 +597,7 @@ class CoreClient:
                 request_id=self._request_id(),
                 session_handle=session_handle,
                 state=state,
+                origins=origins,
                 limit=limit,
                 cursor=cursor,
             )

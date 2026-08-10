@@ -266,6 +266,26 @@ When enabled, `GET /openapi.json` serves the OpenAPI 3.1 source for generated
 mobile clients. Request models are shared with the running adapter, and tests
 fail if the documented allow-listed paths drift from the actual routes.
 
+The Android App can use a private, store-free update channel. Build every APK
+with the same owner-controlled signing key and increase its Android version
+code, then publish it locally:
+
+```bash
+scripts/build-mobile-apk.sh
+KNOA_MOBILE_RELEASE_NOTES="Personal release" scripts/publish-mobile-apk.sh
+pca gateway release latest
+```
+
+The build uses the Android/JDK environment in `/disk/dev/env.sh`, keeps Gradle
+caches and APK output under `/disk/dev`, and reads the fixed owner signing key
+from `~/.pc-assistant/secrets/android`. Publication reads and verifies
+`versionName` and `versionCode` directly from the compiled APK manifest.
+
+The authenticated Gateway serves an immutable release manifest and APK byte
+ranges. The App can pause and resume the download, verifies its size and SHA-256
+digest, then opens Android's system installer. No release administration
+endpoint is exposed remotely, and release storage never enters Core.
+
 ### Environment variables
 
 All config fields can be overridden with `PC_` prefix:

@@ -42,7 +42,7 @@ class _CoreClient:
         self.uploads = []
         self.is_connected = True
 
-    async def create_session(self) -> str:
+    async def create_session(self, **_kwargs) -> str:
         self.created += 1
         return f"session-{self.created}"
 
@@ -81,7 +81,7 @@ class _CoreClient:
             result=TaskCancelResult(accepted=True, state=TaskState.RUNNING),
         )
 
-    async def list_tasks(self, *, limit):
+    async def list_tasks(self, *, limit, **_kwargs):
         assert limit == 10
         return SimpleNamespace(
             tasks=(

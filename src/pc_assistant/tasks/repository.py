@@ -30,6 +30,7 @@ from pc_assistant.tasks.models import (
     TaskEventPayload,
     TaskEventType,
     TaskPauseResult,
+    TaskOrigin,
     TaskRecord,
     TaskState,
     TaskToolStepRecord,
@@ -128,6 +129,7 @@ class TaskRepository:
                     session_handle TEXT NOT NULL
                         REFERENCES runtime_sessions(session_handle) ON DELETE CASCADE,
                     client_request_id TEXT NOT NULL,
+                    origin TEXT NOT NULL DEFAULT 'chat',
                     parent_task_id TEXT
                         REFERENCES runtime_tasks(task_id) ON DELETE RESTRICT,
                     goal TEXT NOT NULL,
@@ -233,6 +235,25 @@ class TaskRepository:
                     );
                 """
             )
+            task_columns = {
+                str(row["name"])
+                for row in db.execute("PRAGMA table_info(runtime_tasks)")
+            }
+            if "origin" not in task_columns:
+                db.execute(
+                    "ALTER TABLE runtime_tasks "
+                    "ADD COLUMN origin TEXT NOT NULL DEFAULT 'chat'"
+                )
+                db.execute(
+                    """UPDATE runtime_tasks SET origin=?
+                       WHERE client_request_id LIKE 'schedule:%'""",
+                    (TaskOrigin.SCHEDULED.value,),
+                )
+                db.execute(
+                    """UPDATE runtime_tasks SET origin=?
+                       WHERE client_request_id LIKE 'trigger:%'""",
+                    (TaskOrigin.EVENT.value,),
+                )
             require_exact_table(
                 db,
                 "runtime_tasks",
@@ -241,6 +262,7 @@ class TaskRepository:
                     ("principal_id", "TEXT", True, None, 0),
                     ("session_handle", "TEXT", True, None, 0),
                     ("client_request_id", "TEXT", True, None, 0),
+                    ("origin", "TEXT", True, "'chat'", 0),
                     ("parent_task_id", "TEXT", False, None, 0),
                     ("goal", "TEXT", True, None, 0),
                     ("attachments_json", "TEXT", True, None, 0),
@@ -508,6 +530,7 @@ class TaskRepository:
             principal_id=str(row["principal_id"]),
             session_handle=str(row["session_handle"]),
             client_request_id=str(row["client_request_id"]),
+            origin=TaskOrigin(str(row["origin"])),
             parent_task_id=str(row["parent_task_id"] or ""),
             goal=str(row["goal"]),
             attachments=cls._decode_attachments(str(row["attachments_json"])),
@@ -739,6 +762,7 @@ class TaskRepository:
         tools_enabled: bool = True,
         priority: int = 0,
         parent_task_id: str = "",
+        origin: TaskOrigin = TaskOrigin.CHAT,
     ) -> tuple[TaskRecord, bool]:
         request_id = self._normalize_identifier(
             client_request_id,
@@ -771,6 +795,7 @@ class TaskRepository:
                             and str(existing["attachments_json"]) == attachment_json
                             and bool(existing["tools_enabled"]) is bool(tools_enabled)
                             and int(existing["priority"]) == priority
+                            and str(existing["origin"]) == origin.value
                             and str(existing["parent_task_id"] or "")
                             == normalized_parent
                         )
@@ -816,7 +841,7 @@ class TaskRepository:
                     db.execute(
                         """INSERT INTO runtime_tasks(
                                task_id, principal_id, session_handle,
-                               client_request_id, parent_task_id, goal,
+                               client_request_id, origin, parent_task_id, goal,
                                attachments_json, tools_enabled, priority, state,
                                phase, attempt_count, cancel_requested,
                                final_summary, failure_code, lease_owner,
@@ -824,13 +849,14 @@ class TaskRepository:
                                started_at, finished_at, next_event_seq, revision
                            ) VALUES (
                                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                               ?, ?, ?, ?, ?, ?, ?
+                               ?, ?, ?, ?, ?, ?, ?, ?
                            )""",
                         (
                             task_id,
                             scope.principal_id,
                             scope.session_handle,
                             request_id,
+                            origin.value,
                             normalized_parent or None,
                             normalized_goal,
                             attachment_json,
@@ -923,6 +949,7 @@ class TaskRepository:
         *,
         session_handle: str = "",
         state: TaskState | None = None,
+        origins: tuple[TaskOrigin, ...] = (),
         limit: int = 50,
         cursor: str = "",
     ) -> tuple[tuple[TaskRecord, ...], str]:
@@ -948,6 +975,11 @@ class TaskRepository:
         if state is not None:
             clauses.append("state=?")
             parameters.append(state.value)
+        if origins:
+            origin_values = tuple(dict.fromkeys(origin.value for origin in origins))
+            placeholders = ",".join("?" for _ in origin_values)
+            clauses.append(f"origin IN ({placeholders})")
+            parameters.extend(origin_values)
         if cursor:
             created_at, cursor_task_id = self._decode_cursor(cursor)
             clauses.append("(created_at<? OR (created_at=? AND task_id<?))")
