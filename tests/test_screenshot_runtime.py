@@ -48,4 +48,5 @@ async def test_screenshot_returns_public_artifact_and_agent_image_ref(
     assert result["image_ref"]["visibility"] == "agent"
     assert result["image_ref"]["artifact_id"] == result["artifact"]["artifact_id"]
     hydrated = store.hydrate_ref("session-a", result["image_ref"])
-    assert hydrated["image_url"].startswith("data:image/png;base64,")
+    assert hydrated["image_url"].startswith("data:image/jpeg;base64,")
+    assert result["delivery"] == "already_attached_to_user_reply"

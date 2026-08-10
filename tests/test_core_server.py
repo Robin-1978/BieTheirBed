@@ -10,6 +10,7 @@ from pc_assistant.agent_runtime.contracts import (
     HealthStatus,
     RuntimeScope,
 )
+from pc_assistant.conversation.models import ChatApproval
 from pc_assistant.service.core_api import (
     AuthenticateRequest,
     CancelTaskRequest,
@@ -19,12 +20,14 @@ from pc_assistant.service.core_api import (
     ListTasksRequest,
     PauseTaskRequest,
     ResumeTaskRequest,
+    ResolveChatApprovalRequest,
     SubscribePrincipalTaskEventsRequest,
     SubscribeTaskRequest,
     TranscribeArtifactRequest,
     parse_core_server_message_json,
 )
-from pc_assistant.service.core_server import CoreServer, StaticTokenAuthenticator
+from pc_assistant.service.core_auth import StaticTokenAuthenticator
+from pc_assistant.service.core_server import CoreServer
 from pc_assistant.tasks import (
     PrincipalTaskEvent,
     TaskCapacityError,
@@ -193,6 +196,25 @@ class FakeTranscription:
         )
 
 
+class FakeConversations:
+    async def resolve_approval(self, principal_id, approval_id, *, approved, resolved_by):
+        assert (principal_id, approval_id, approved, resolved_by) == (
+            "principal-a", "approval-a", True, "core_api",
+        )
+        return ChatApproval(
+            approval_id="approval-a",
+            step_id="step-a",
+            tool_call_id="call-a",
+            tool_name="run_command",
+            arguments={"command": "true"},
+            reason="需要确认",
+            state="approved",
+            created_at=1.0,
+            resolved_at=2.0,
+            resolved_by="core_api",
+        ), True
+
+
 def _task_record(task_id: str):
     return SimpleNamespace(
         task_id=task_id,
@@ -290,6 +312,37 @@ async def test_server_transcribes_owned_artifact_through_standard_command() -> N
     assert scope.principal_id == "principal-a"
     assert scope.session_handle == "session-a"
     assert request.artifact_id == "artifact-a"
+
+
+@pytest.mark.asyncio
+async def test_server_serializes_resolved_chat_approval_as_protocol_snapshot() -> None:
+    tasks = FakeTasks()
+    server = CoreServer(
+        tasks,
+        SimpleNamespace(),
+        SimpleNamespace(),
+        FakeControl(),
+        FakeArtifacts(),
+        StaticTokenAuthenticator({"token-a": "principal-a"}),
+        conversations=FakeConversations(),
+    )
+    websocket = FakeWebSocket()
+    server_task = asyncio.create_task(server.handle(websocket))
+
+    await websocket.push(AuthenticateRequest(request_id="auth", credential="token-a"))
+    await websocket.push(ResolveChatApprovalRequest(
+        request_id="approval",
+        approval_id="approval-a",
+        approved=True,
+    ))
+    await websocket.wait_sent(2)
+    await websocket.close_input()
+    await server_task
+
+    message = websocket.messages()[-1]
+    assert message.message_type == "chat_approval_resolved"
+    assert message.approval.approval_id == "approval-a"
+    assert message.approval.state == "approved"
 
 
 @pytest.mark.asyncio

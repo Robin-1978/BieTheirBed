@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { GatewayClient, parsePairingPayload } from "./gatewayClient";
+import { GatewayClient, GatewayError, parsePairingPayload } from "./gatewayClient";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -73,5 +73,23 @@ describe("GatewayClient conversation requests", () => {
 
     expect(fetch.mock.calls[0]![0]).toContain("cursor=current-page");
     expect(result.nextCursor).toBe("next-page");
+  });
+
+  it("turns truncated JSON into a controlled retryable gateway error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response('{"turn":', {
+      status: 202,
+      headers: { "Content-Type": "application/json" },
+    })));
+    const client = new GatewayClient("https://knoa.example.com", "token-a");
+
+    await expect(client.createChatTurn({
+      clientRequestId: "message-request-a",
+      sessionHandle: "session-a",
+      text: "hello",
+    })).rejects.toMatchObject({
+      status: 502,
+      code: "invalid_response",
+      retryable: true,
+    } satisfies Partial<GatewayError>);
   });
 });

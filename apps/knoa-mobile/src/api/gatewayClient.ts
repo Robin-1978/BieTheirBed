@@ -1,6 +1,7 @@
 import type {
   AndroidRelease,
   ArtifactInput,
+  ChatApproval,
   ChatTurnSnapshot,
   ConversationSession,
   GatewaySession,
@@ -220,8 +221,11 @@ export class GatewayClient {
     return response.turn;
   }
 
-  async resolveChatApproval(approvalId: string, approved: boolean): Promise<void> {
-    await this.json(
+  async resolveChatApproval(
+    approvalId: string,
+    approved: boolean,
+  ): Promise<{ approval: ChatApproval; resolved: boolean }> {
+    return this.json(
       `/v1/conversations/approvals/${encodeURIComponent(approvalId)}/resolve`,
       { method: "POST", body: { approved } },
     );
@@ -435,7 +439,13 @@ export class GatewayClient {
       headers: options.body ? { "Content-Type": "application/json" } : undefined,
       body: options.body ? JSON.stringify(options.body) : undefined,
     }, options.authenticated ?? true);
-    return (await response.json()) as T;
+    const raw = await response.text();
+    if (!raw.trim()) throw new GatewayError(502, "invalid_response");
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      throw new GatewayError(502, "invalid_response");
+    }
   }
 
   private async request(

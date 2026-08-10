@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  Pressable,
   RefreshControl,
   StyleSheet,
   Text,
@@ -11,6 +10,8 @@ import {
 } from "react-native";
 
 import type { Task, TaskDefinitionState } from "@/api/models";
+import { AppPressable } from "@/components/AppPressable";
+import { PrimarySwipeNavigation } from "@/components/PrimarySwipeNavigation";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
@@ -57,35 +58,36 @@ export default function TasksScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <PrimarySwipeNavigation current="tasks">
+      <View style={styles.container}>
       <View style={styles.topline}>
         <View>
           <Text style={styles.heading}>任务</Text>
           <Text style={styles.description}>管理目标、启动方式和每次执行结果</Text>
         </View>
         <View style={styles.topActions}>
-          <Pressable
+          <AppPressable
             accessibilityRole="button"
             accessibilityLabel="创建新任务"
             onPress={() => router.push("/tasks/new")}
             style={styles.newButton}
           >
             <Text style={styles.newButtonText}>新建</Text>
-          </Pressable>
+          </AppPressable>
         </View>
       </View>
       {gateway.availableUpdate ? (
-        <Pressable style={styles.updateBanner} onPress={() => router.push("/update") }>
+        <AppPressable style={styles.updateBanner} onPress={() => router.push("/update") }>
           <View>
             <Text style={styles.updateTitle}>小诺 {gateway.availableUpdate.version_name} 可以更新</Text>
             <Text style={styles.updateDetail}>支持断点续传</Text>
           </View>
           <Text style={styles.updateLink}>查看</Text>
-        </Pressable>
+        </AppPressable>
       ) : null}
       <View style={styles.filters}>
         {filters.map((item) => (
-          <Pressable
+          <AppPressable
             key={item.value}
             accessibilityRole="button"
             accessibilityState={{ selected: filter === item.value }}
@@ -93,14 +95,14 @@ export default function TasksScreen() {
             style={[styles.filter, filter === item.value && styles.filterActive]}
           >
             <Text style={[styles.filterText, filter === item.value && styles.filterTextActive]}>{item.label}</Text>
-          </Pressable>
+          </AppPressable>
         ))}
       </View>
       {loading ? <ActivityIndicator color={colors.accent} style={styles.loader} /> : null}
       {error ? (
         <View style={styles.errorCard}>
           <Text style={styles.errorText}>{error}</Text>
-          <Pressable onPress={() => void refresh()}><Text style={styles.retry}>重新加载</Text></Pressable>
+          <AppPressable onPress={() => void refresh()}><Text style={styles.retry}>重新加载</Text></AppPressable>
         </View>
       ) : null}
       <FlatList
@@ -115,7 +117,7 @@ export default function TasksScreen() {
           </View>
         ) : null}
         renderItem={({ item }) => (
-          <Pressable
+          <AppPressable
             accessibilityRole="button"
             accessibilityLabel={`${item.title}，${stateLabel(item.state)}，已执行 ${item.execution_count} 次`}
             style={styles.task}
@@ -130,10 +132,11 @@ export default function TasksScreen() {
               <Text style={styles.meta}>{launchLabel(item)}</Text>
               <Text style={styles.meta}>执行 {item.execution_count} 次</Text>
             </View>
-          </Pressable>
+          </AppPressable>
         )}
       />
-    </View>
+      </View>
+    </PrimarySwipeNavigation>
   );
 }
 

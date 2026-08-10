@@ -13,6 +13,7 @@ import httpx
 
 from pc_assistant.gateway.core import GatewayCoreBridge
 from pc_assistant.gateway.storage import prepare_owner_only_database
+from pc_assistant.service.core_client import CoreRequestError
 from pc_assistant.sqlite_schema import require_exact_table, require_index_columns
 from pc_assistant.tasks import PrincipalTaskEvent
 
@@ -313,6 +314,15 @@ class GatewayPushDispatcher:
                 self._principal_id,
                 message.execution_id,
             )
+        except CoreRequestError as exc:
+            if exc.code == "task_not_found":
+                logger.debug("Skipping Push for a non-product execution")
+                return
+            logger.warning(
+                "Skipping Push because execution lookup failed",
+                exc_info=True,
+            )
+            return
         except Exception:
             logger.warning(
                 "Skipping Push for an execution outside the product Task model",

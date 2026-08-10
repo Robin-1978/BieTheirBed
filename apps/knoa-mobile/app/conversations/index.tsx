@@ -3,7 +3,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,8 +11,10 @@ import {
 } from "react-native";
 
 import type { ConversationSession } from "@/api/models";
+import { AppPressable } from "@/components/AppPressable";
 import { removeConversationDraft } from "@/security/conversationDrafts";
 import { useGateway } from "@/state/GatewayProvider";
+import { removeConversationCache } from "@/storage/conversationCache";
 import { colors } from "@/theme";
 
 export default function ConversationHistoryScreen() {
@@ -98,6 +99,7 @@ export default function ConversationHistoryScreen() {
           try {
             await gateway.runAuthenticated((client) => client.deleteConversationSession(session.session_handle));
             await removeConversationDraft(session.session_handle);
+            removeConversationCache(session.session_handle);
             if (gateway.sessionHandle === session.session_handle) await gateway.newConversation();
             await refresh();
           } catch {
@@ -126,15 +128,15 @@ export default function ConversationHistoryScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.headerActions}>
-        <Pressable
+        <AppPressable
           style={styles.primary}
           onPress={() => void gateway.newConversation().then(() => router.replace("/chat"))}
         >
           <Text style={styles.primaryText}>新建会话</Text>
-        </Pressable>
-        <Pressable style={styles.filter} onPress={() => setShowArchived((value) => !value)}>
+        </AppPressable>
+        <AppPressable style={styles.filter} onPress={() => setShowArchived((value) => !value)}>
           <Text style={styles.filterText}>{showArchived ? "隐藏已归档" : "显示已归档"}</Text>
-        </Pressable>
+        </AppPressable>
       </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {loading ? <ActivityIndicator color={colors.accent} style={styles.loading} /> : null}
@@ -153,26 +155,26 @@ export default function ConversationHistoryScreen() {
                 value={title}
               />
             ) : (
-              <Pressable disabled={session.state === "archived"} onPress={() => void open(session)}>
+              <AppPressable disabled={session.state === "archived"} onPress={() => void open(session)}>
                 <Text style={styles.title}>{session.title}</Text>
                 <Text style={styles.meta}>
                   {isCurrent ? "当前会话 · " : ""}{session.turn_count} 轮 · {formatTime(session.last_turn_at ?? session.created_at)}
                 </Text>
-              </Pressable>
+              </AppPressable>
             )}
             <View style={styles.actions}>
               {isEditing ? (
                 <>
-                  <Pressable onPress={() => setEditing("")}><Text style={styles.actionText}>取消</Text></Pressable>
-                  <Pressable disabled={!title.trim()} onPress={() => void update(session, { title: title.trim() })}><Text style={styles.actionText}>保存</Text></Pressable>
+                  <AppPressable onPress={() => setEditing("")}><Text style={styles.actionText}>取消</Text></AppPressable>
+                  <AppPressable disabled={!title.trim()} onPress={() => void update(session, { title: title.trim() })}><Text style={styles.actionText}>保存</Text></AppPressable>
                 </>
               ) : (
                 <>
-                  <Pressable onPress={() => { setEditing(session.session_handle); setTitle(session.title); }}><Text style={styles.actionText}>重命名</Text></Pressable>
-                  <Pressable onPress={() => void update(session, { state: session.state === "archived" ? "active" : "archived" })}>
+                  <AppPressable onPress={() => { setEditing(session.session_handle); setTitle(session.title); }}><Text style={styles.actionText}>重命名</Text></AppPressable>
+                  <AppPressable onPress={() => void update(session, { state: session.state === "archived" ? "active" : "archived" })}>
                     <Text style={styles.actionText}>{session.state === "archived" ? "恢复" : "归档"}</Text>
-                  </Pressable>
-                  <Pressable onPress={() => confirmDelete(session)}><Text style={styles.deleteText}>删除</Text></Pressable>
+                  </AppPressable>
+                  <AppPressable onPress={() => confirmDelete(session)}><Text style={styles.deleteText}>删除</Text></AppPressable>
                 </>
               )}
               {working === session.session_handle ? <ActivityIndicator color={colors.accent} size="small" /> : null}
@@ -181,11 +183,11 @@ export default function ConversationHistoryScreen() {
         );
       })}
       {nextCursor ? (
-        <Pressable disabled={loadingMore} onPress={() => void loadMore()} style={styles.loadMore}>
+        <AppPressable disabled={loadingMore} onPress={() => void loadMore()} style={styles.loadMore}>
           {loadingMore
             ? <ActivityIndicator color={colors.accent} />
             : <Text style={styles.loadMoreText}>加载更多会话</Text>}
-        </Pressable>
+        </AppPressable>
       ) : null}
     </ScrollView>
   );

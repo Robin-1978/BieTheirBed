@@ -63,6 +63,8 @@ async def run_core_ask(
                     answer_parts.append(event.payload.content)
                 elif event.event_type == "final_output":
                     final_answer = event.payload.content
+                elif event.event_type == "completed" and event.payload.content:
+                    final_answer = event.payload.content
                 elif event.event_type == "tool_call":
                     tool_calls += 1
                 elif event.event_type == "artifact" and event.payload.artifact:

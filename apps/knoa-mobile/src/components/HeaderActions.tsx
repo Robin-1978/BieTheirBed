@@ -1,6 +1,7 @@
 import { router } from "expo-router";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
+import { AppPressable } from "@/components/AppPressable";
 import { colors } from "@/theme";
 
 type PrimaryScreen = "chat" | "tasks";
@@ -18,7 +19,7 @@ export function HeaderActions({ current }: { current: PrimaryScreen }) {
         selected={current === "tasks"}
         onPress={() => router.replace("/tasks")}
       />
-      <Pressable
+      <AppPressable
         accessibilityRole="button"
         accessibilityLabel="设置与状态"
         hitSlop={8}
@@ -26,7 +27,7 @@ export function HeaderActions({ current }: { current: PrimaryScreen }) {
         style={styles.action}
       >
         <Text style={styles.actionLabel}>设置</Text>
-      </Pressable>
+      </AppPressable>
     </View>
   );
 }
@@ -41,7 +42,7 @@ function HeaderTab({
   onPress(): void;
 }) {
   return (
-    <Pressable
+    <AppPressable
       accessibilityRole="tab"
       accessibilityState={{ selected }}
       accessibilityLabel={label}
@@ -52,7 +53,7 @@ function HeaderTab({
     >
       <Text style={[styles.label, selected && styles.selectedLabel]}>{label}</Text>
       <View style={[styles.indicator, selected && styles.selectedIndicator]} />
-    </Pressable>
+    </AppPressable>
   );
 }
 
