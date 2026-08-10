@@ -66,6 +66,7 @@ class CreateTaskRequest(GatewayRequest):
 
 
 class CreateProductTaskRequest(GatewayRequest):
+    client_request_id: str = Field(min_length=1, max_length=128)
     title: str = Field(default="", max_length=200)
     goal: str = Field(min_length=1, max_length=200_000)
     attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
@@ -87,6 +88,7 @@ class UpdateProductTaskRequest(GatewayRequest):
 
 
 class CreateChatTurnRequest(GatewayRequest):
+    client_request_id: str = Field(min_length=1, max_length=128)
     input: str = Field(default="", max_length=200_000)
     attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
     tools_enabled: bool = True
@@ -94,10 +96,6 @@ class CreateChatTurnRequest(GatewayRequest):
     def require_content(self) -> None:
         if not self.input.strip() and not self.attachments:
             raise ValueError("ChatTurn request requires input or an attachment")
-
-
-class CreateConversationSessionRequest(GatewayRequest):
-    title: str = Field(default="新对话", max_length=120)
 
 
 class UpdateConversationSessionRequest(GatewayRequest):
@@ -148,6 +146,12 @@ class ProductTaskListQuery(GatewayQuery):
     limit: int = Field(default=100, ge=1, le=200)
 
 
+class ConversationSessionListQuery(GatewayQuery):
+    include_archived: bool = False
+    limit: int = Field(default=50, ge=1, le=200)
+    cursor: str = Field(default="", max_length=512)
+
+
 class TaskExecutionListQuery(GatewayQuery):
     limit: int = Field(default=100, ge=1, le=200)
 
@@ -162,6 +166,7 @@ class TaskEventQuery(GatewayQuery):
 
 class ChatTurnListQuery(GatewayQuery):
     limit: int = Field(default=100, ge=1, le=500)
+    cursor: str = Field(default="", max_length=512)
 
 
 class ArtifactUploadQuery(GatewayQuery):
@@ -221,7 +226,6 @@ class SessionResponse(BaseModel):
 
 class SessionCreatedResponse(BaseModel):
     session_handle: str
-    session: ConversationSessionSnapshot | None = None
 
 
 class ConversationSessionResponse(BaseModel):
@@ -230,6 +234,7 @@ class ConversationSessionResponse(BaseModel):
 
 class ConversationSessionListResponse(BaseModel):
     sessions: tuple[ConversationSessionSnapshot, ...]
+    next_cursor: str = ""
 
 
 class TaskAcceptedResponse(BaseModel):
@@ -243,6 +248,7 @@ class ChatTurnResponse(BaseModel):
 
 class ChatTurnListResponse(BaseModel):
     turns: tuple[ChatTurnSnapshot, ...]
+    next_cursor: str = ""
 
 
 class ChatApprovalResolvedResponse(BaseModel):

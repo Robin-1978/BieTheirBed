@@ -25,7 +25,6 @@ from pc_assistant.gateway.protocol import (
     CreateProductTaskRequest,
     UpdateProductTaskRequest,
     CreateChatTurnRequest,
-    CreateConversationSessionRequest,
     UpdateConversationSessionRequest,
     ConversationSessionResponse,
     ConversationSessionListResponse,
@@ -69,7 +68,6 @@ _MODELS: tuple[type[BaseModel], ...] = (
     CreateProductTaskRequest,
     UpdateProductTaskRequest,
     CreateChatTurnRequest,
-    CreateConversationSessionRequest,
     UpdateConversationSessionRequest,
     ConversationSessionResponse,
     ConversationSessionListResponse,
@@ -222,7 +220,6 @@ def gateway_openapi_schema() -> dict[str, Any]:
                 "post": {
                     "operationId": "createCoreSession",
                     "security": bearer,
-                    "requestBody": _json_body(CreateConversationSessionRequest),
                     "responses": {
                         "201": _json_response("Core session", SessionCreatedResponse),
                         **_errors("401", "429", "503"),
@@ -236,6 +233,7 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     "parameters": [
                         _query("include_archived", {"type": "boolean"}),
                         _query("limit", {"type": "integer", "minimum": 1, "maximum": 200}),
+                        _query("cursor", {"type": "string", "maxLength": 512}),
                     ],
                     "responses": {
                         "200": _json_response("Conversation sessions", ConversationSessionListResponse),
@@ -309,6 +307,7 @@ def gateway_openapi_schema() -> dict[str, Any]:
                             "schema": {"type": "string", "minLength": 1, "maxLength": 256},
                         },
                         _query("limit", {"type": "integer", "minimum": 1, "maximum": 500}),
+                        _query("cursor", {"type": "string", "maxLength": 512}),
                     ],
                     "responses": {
                         "200": _json_response("Conversation history", ChatTurnListResponse),

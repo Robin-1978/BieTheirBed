@@ -347,16 +347,15 @@ class TaskService:
             task_id,
             limit=limit,
         )
-        return tuple(
-            execution.model_copy(update={
-                "approvals": await asyncio.to_thread(
-                    self._repository.list_approvals,
-                    principal_id,
-                    execution.execution_id,
-                )
-            })
-            for execution in executions
-        )
+        hydrated: list[TaskExecutionRecord] = []
+        for execution in executions:
+            approvals = await asyncio.to_thread(
+                self._repository.list_approvals,
+                principal_id,
+                execution.execution_id,
+            )
+            hydrated.append(execution.model_copy(update={"approvals": approvals}))
+        return tuple(hydrated)
 
     async def rerun_execution(
         self,

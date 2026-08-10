@@ -48,11 +48,11 @@ from pc_assistant.tasks import PrincipalTaskEvent
 class GatewayCoreClient(Protocol):
     is_connected: bool
 
-    async def create_session(self, *, activate: bool = True, title: str = "新对话") -> str: ...
+    async def create_session(self, *, activate: bool = True) -> str: ...
 
     async def get_conversation_session(self, session_handle: str) -> ConversationSessionSnapshot: ...
 
-    async def list_conversation_sessions(self, *, include_archived: bool = False, limit: int = 100) -> tuple[ConversationSessionSnapshot, ...]: ...
+    async def list_conversation_sessions(self, *, include_archived: bool = False, limit: int = 100, cursor: str = "") -> tuple[tuple[ConversationSessionSnapshot, ...], str]: ...
 
     async def update_conversation_session(self, session_handle: str, *, title: str | None = None, state=None, expected_revision: int | None = None) -> ConversationSessionSnapshot: ...
 
@@ -64,6 +64,7 @@ class GatewayCoreClient(Protocol):
         user_input: str = "",
         attachments: tuple[ArtifactInputRef, ...] = (),
         *,
+        client_request_id: str,
         tools_enabled: bool = True,
         priority: int = 0,
         parent_task_id: str = "",
@@ -76,6 +77,7 @@ class GatewayCoreClient(Protocol):
         user_input: str = "",
         attachments: tuple[ArtifactInputRef, ...] = (),
         *,
+        client_request_id: str,
         tools_enabled: bool = True,
     ) -> ChatTurnSnapshot: ...
 
@@ -86,7 +88,8 @@ class GatewayCoreClient(Protocol):
         session_handle: str,
         *,
         limit: int = 100,
-    ) -> tuple[ChatTurnSnapshot, ...]: ...
+        cursor: str = "",
+    ) -> tuple[tuple[ChatTurnSnapshot, ...], str]: ...
 
     def chat_turn_updates(
         self,
@@ -121,6 +124,7 @@ class GatewayCoreClient(Protocol):
         session_handle: str,
         goal: str,
         *,
+        client_request_id: str,
         title: str = "",
         attachments: tuple[ArtifactInputRef, ...] = (),
         tools_enabled: bool = True,
@@ -250,19 +254,20 @@ class GatewayCoreBridge:
             return_exceptions=True,
         )
 
-    async def create_session(self, principal_id: str, *, activate: bool = True, title: str = "新对话") -> str:
+    async def create_session(self, principal_id: str, *, activate: bool = True) -> str:
         client = await self._client_for(principal_id)
         if activate:
-            return await client.create_session(title=title)
-        return await client.create_session(activate=False, title=title)
+            return await client.create_session()
+        return await client.create_session(activate=False)
 
     async def get_conversation_session(self, principal_id: str, session_handle: str) -> ConversationSessionSnapshot:
         return await (await self._client_for(principal_id)).get_conversation_session(session_handle)
 
-    async def list_conversation_sessions(self, principal_id: str, *, include_archived: bool = False, limit: int = 100) -> tuple[ConversationSessionSnapshot, ...]:
+    async def list_conversation_sessions(self, principal_id: str, *, include_archived: bool = False, limit: int = 100, cursor: str = "") -> tuple[tuple[ConversationSessionSnapshot, ...], str]:
         return await (await self._client_for(principal_id)).list_conversation_sessions(
             include_archived=include_archived,
             limit=limit,
+            cursor=cursor,
         )
 
     async def update_conversation_session(self, principal_id: str, session_handle: str, *, title: str | None = None, state=None, expected_revision: int | None = None) -> ConversationSessionSnapshot:
@@ -283,6 +288,7 @@ class GatewayCoreBridge:
         user_input: str,
         attachments: tuple[ArtifactInputRef, ...],
         *,
+        client_request_id: str,
         tools_enabled: bool,
         priority: int,
         parent_task_id: str,
@@ -299,6 +305,7 @@ class GatewayCoreBridge:
             session_handle,
             user_input,
             attachments,
+            client_request_id=client_request_id,
             **kwargs,
         )
 
@@ -309,12 +316,14 @@ class GatewayCoreBridge:
         user_input: str,
         attachments: tuple[ArtifactInputRef, ...],
         *,
+        client_request_id: str,
         tools_enabled: bool,
     ) -> ChatTurnSnapshot:
         return await (await self._client_for(principal_id)).create_chat_turn(
             session_handle,
             user_input,
             attachments,
+            client_request_id=client_request_id,
             tools_enabled=tools_enabled,
         )
 
@@ -331,10 +340,12 @@ class GatewayCoreBridge:
         session_handle: str,
         *,
         limit: int = 100,
-    ) -> tuple[ChatTurnSnapshot, ...]:
+        cursor: str = "",
+    ) -> tuple[tuple[ChatTurnSnapshot, ...], str]:
         return await (await self._client_for(principal_id)).list_chat_turns(
             session_handle,
             limit=limit,
+            cursor=cursor,
         )
 
     async def chat_turn_updates(
@@ -402,6 +413,7 @@ class GatewayCoreBridge:
         session_handle: str,
         goal: str,
         *,
+        client_request_id: str,
         title: str = "",
         attachments: tuple[ArtifactInputRef, ...] = (),
         tools_enabled: bool = True,
@@ -412,6 +424,7 @@ class GatewayCoreBridge:
         return await (await self._client_for(principal_id)).create_product_task(
             session_handle,
             goal,
+            client_request_id=client_request_id,
             title=title,
             attachments=attachments,
             tools_enabled=tools_enabled,

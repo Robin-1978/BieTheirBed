@@ -37,7 +37,9 @@ type GatewayState = {
   reconnect(): Promise<void>;
   reauthenticate(): Promise<void>;
   removeConnection(): Promise<void>;
-  newConversation(title?: string): Promise<void>;
+  newConversation(): Promise<void>;
+  ensureConversation(): Promise<string>;
+  commitConversation(sessionHandle: string): Promise<void>;
   openConversation(sessionHandle: string): Promise<void>;
   connection(): GatewayConnection | null;
   runAuthenticated<T>(operation: (client: GatewayClient) => Promise<T>): Promise<T>;
@@ -46,7 +48,7 @@ type GatewayState = {
 const Context = createContext<GatewayState | null>(null);
 
 export function GatewayProvider({ children }: React.PropsWithChildren) {
-  type StoredState = Omit<GatewayState, "pair" | "publish" | "reconnect" | "reauthenticate" | "removeConnection" | "newConversation" | "openConversation" | "connection" | "runAuthenticated">;
+  type StoredState = Omit<GatewayState, "pair" | "publish" | "reconnect" | "reauthenticate" | "removeConnection" | "newConversation" | "ensureConversation" | "commitConversation" | "openConversation" | "connection" | "runAuthenticated">;
   const initialState: StoredState = {
     status: "booting",
     client: null,
@@ -64,6 +66,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
   const stateRef = useRef<StoredState>(initialState);
   const connectionRef = useRef<GatewayConnection | null>(null);
   const authenticationRef = useRef<Promise<GatewayClient> | null>(null);
+  const provisionalConversationRef = useRef<Promise<string> | null>(null);
 
   const commit = useCallback((patch: Partial<StoredState>) => {
     const next = { ...stateRef.current, ...patch };
@@ -72,6 +75,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
   }, []);
 
   const connect = useCallback(async () => {
+    provisionalConversationRef.current = null;
     commit({ status: "booting", error: "" });
     try {
       const identity = await loadConnectionIdentity();
@@ -105,11 +109,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         token = await loadSessionToken();
       }
       if (!token) throw new Error("未能建立安全会话");
-      let sessionHandle = await loadCoreSession();
-      if (!sessionHandle) {
-        sessionHandle = await client.createSession();
-        await storeCoreSession(sessionHandle);
-      }
+      const sessionHandle = (await loadCoreSession()) ?? "";
       connectionRef.current = { gatewayUrl: device.gatewayUrl, token };
       commit({
         status: "ready",
@@ -211,6 +211,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
   }, [commit, runAuthenticated, state.gatewayUrl, state.sessionToken, state.status]);
 
   const pair = useCallback(async (encoded: string, displayName: string) => {
+    provisionalConversationRef.current = null;
     await pairDevice(encoded, displayName);
     connectionRef.current = null;
     commit({ latestEvent: null, client: null, sessionHandle: "", sessionToken: "" });
@@ -218,6 +219,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
   }, [commit, connect]);
 
   const reauthenticate = useCallback(async () => {
+    provisionalConversationRef.current = null;
     await clearSession();
     connectionRef.current = null;
     commit({ client: null, sessionToken: "", status: "booting", error: "" });
@@ -225,6 +227,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
   }, [commit, connect]);
 
   const removeConnection = useCallback(async () => {
+    provisionalConversationRef.current = null;
     const client = stateRef.current.client;
     if (client) await client.revokeCurrentDevice();
     await clearConnectionIdentity();
@@ -244,22 +247,40 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     });
   }, [commit]);
 
-  const newConversation = useCallback(async (title = "新对话") => {
-    const sessionHandle = await runAuthenticated((client) => client.createSession(title));
-    await storeCoreSession(sessionHandle);
+  const newConversation = useCallback(async () => {
+    provisionalConversationRef.current = null;
+    await storeCoreSession("");
     commit({
-      sessionHandle,
+      sessionHandle: "",
       latestEvent: null,
     });
-  }, [commit, runAuthenticated]);
+  }, [commit]);
+
+  const ensureConversation = useCallback(async (): Promise<string> => {
+    const current = stateRef.current.sessionHandle;
+    if (current) return current;
+    if (!provisionalConversationRef.current) {
+      provisionalConversationRef.current = runAuthenticated(
+        (client) => client.createSession(),
+      ).catch((error) => {
+        provisionalConversationRef.current = null;
+        throw error;
+      });
+    }
+    return provisionalConversationRef.current;
+  }, [runAuthenticated]);
+
+  const commitConversation = useCallback(async (sessionHandle: string) => {
+    if (!sessionHandle) throw new Error("会话尚未创建");
+    await storeCoreSession(sessionHandle);
+    provisionalConversationRef.current = null;
+    commit({ sessionHandle, latestEvent: null });
+  }, [commit]);
 
   const openConversation = useCallback(async (sessionHandle: string) => {
+    provisionalConversationRef.current = null;
     const session = await runAuthenticated((client) => client.getConversationSession(sessionHandle));
     if (session.state === "archived") throw new Error("请先恢复已归档的会话");
-    await runAuthenticated((client) => client.updateConversationSession(sessionHandle, {
-      state: "active",
-      expectedRevision: session.revision,
-    }));
     await storeCoreSession(sessionHandle);
     commit({ sessionHandle, latestEvent: null });
   }, [commit, runAuthenticated]);
@@ -277,11 +298,13 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       reauthenticate,
       removeConnection,
       newConversation,
+      ensureConversation,
+      commitConversation,
       openConversation,
       connection,
       runAuthenticated,
     }),
-    [connect, connection, newConversation, openConversation, pair, publish, reauthenticate, removeConnection, runAuthenticated, state],
+    [commitConversation, connect, connection, ensureConversation, newConversation, openConversation, pair, publish, reauthenticate, removeConnection, runAuthenticated, state],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

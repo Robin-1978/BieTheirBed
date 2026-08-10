@@ -53,8 +53,8 @@ from pc_assistant.gateway.protocol import (
     AuthCompleteRequest,
     CancelTaskRequest,
     ChatTurnListQuery,
+    ConversationSessionListQuery,
     CreateChatTurnRequest,
-    CreateConversationSessionRequest,
     UpdateConversationSessionRequest,
     CreateProductTaskRequest,
     EventQuery,
@@ -489,16 +489,9 @@ class SecureGatewayAdapter:
         authenticated = self._authorize(request, limit=30)
         if isinstance(authenticated, JSONResponse):
             return authenticated
-        if request.headers.get("Content-Type"):
-            parsed = await self._parse_body(request, CreateConversationSessionRequest)
-            if isinstance(parsed, JSONResponse):
-                return parsed
-        else:
-            parsed = CreateConversationSessionRequest()
         try:
             handle = await self._core.create_session(
                 authenticated.device.principal_id,
-                title=parsed.title,
             )
         except Exception as exc:
             return self._core_error(exc)
@@ -508,21 +501,22 @@ class SecureGatewayAdapter:
         authenticated = self._authorize(request, limit=60)
         if isinstance(authenticated, JSONResponse):
             return authenticated
-        include_archived = request.query_params.get("include_archived", "false").lower() == "true"
         try:
-            limit = int(request.query_params.get("limit", "100"))
-            if not 1 <= limit <= 200:
-                raise ValueError
-            sessions = await self._core.list_conversation_sessions(
+            query = ConversationSessionListQuery.model_validate(dict(request.query_params))
+            sessions, next_cursor = await self._core.list_conversation_sessions(
                 authenticated.device.principal_id,
-                include_archived=include_archived,
-                limit=limit,
+                include_archived=query.include_archived,
+                limit=query.limit,
+                cursor=query.cursor,
             )
-        except ValueError:
+        except ValidationError:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         except Exception as exc:
             return self._core_error(exc)
-        return JSONResponse({"sessions": [item.model_dump(mode="json") for item in sessions]})
+        return JSONResponse({
+            "sessions": [item.model_dump(mode="json") for item in sessions],
+            "next_cursor": next_cursor,
+        })
 
     async def _conversation_session(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=30)
@@ -575,6 +569,7 @@ class SecureGatewayAdapter:
                 session_handle,
                 parsed.input,
                 parsed.attachments,
+                client_request_id=parsed.client_request_id,
                 tools_enabled=parsed.tools_enabled,
             )
         except ValueError:
@@ -611,17 +606,21 @@ class SecureGatewayAdapter:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         try:
             query = ChatTurnListQuery.model_validate(dict(request.query_params))
-            turns = await self._core.list_chat_turns(
+            turns, next_cursor = await self._core.list_chat_turns(
                 authenticated.device.principal_id,
                 session_handle,
                 limit=query.limit,
+                cursor=query.cursor,
             )
         except ValidationError:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         except Exception as exc:
             return self._core_error(exc)
         return JSONResponse(
-            {"turns": [turn.model_dump(mode="json") for turn in turns]}
+            {
+                "turns": [turn.model_dump(mode="json") for turn in turns],
+                "next_cursor": next_cursor,
+            }
         )
 
     async def _cancel_chat_turn(self, request: Request) -> JSONResponse:
@@ -765,6 +764,7 @@ class SecureGatewayAdapter:
                 authenticated.device.principal_id,
                 session_handle,
                 parsed.goal,
+                client_request_id=parsed.client_request_id,
                 title=parsed.title,
                 attachments=parsed.attachments,
                 tools_enabled=parsed.tools_enabled,

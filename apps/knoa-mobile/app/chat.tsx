@@ -1,4 +1,5 @@
 import * as DocumentPicker from "expo-document-picker";
+import * as Crypto from "expo-crypto";
 import {
   RecordingPresets,
   requestRecordingPermissionsAsync,
@@ -37,7 +38,7 @@ import { GatewayError } from "@/api/gatewayClient";
 import type { ArtifactInput, ChatApproval, ChatTurnSnapshot } from "@/api/models";
 import { AppMarkdown } from "@/components/AppMarkdown";
 import { ArtifactViewer } from "@/components/ArtifactViewer";
-import { loadConversationDraft, storeConversationDraft } from "@/security/conversationDrafts";
+import { loadConversationDraft, removeConversationDraft, storeConversationDraft } from "@/security/conversationDrafts";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
@@ -62,7 +63,10 @@ export default function ChatScreen() {
   const list = useRef<FlatList<ChatTurnSnapshot>>(null);
   const nearBottom = useRef(true);
   const draftReady = useRef(false);
+  const requestIdentity = useRef<{ fingerprint: string; requestId: string } | null>(null);
   const [turns, setTurns] = useState<ChatTurnSnapshot[]>([]);
+  const [nextTurnCursor, setNextTurnCursor] = useState("");
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [text, setText] = useState("");
   const [inputMode, setInputMode] = useState<InputMode>("text");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -102,14 +106,15 @@ export default function ChatScreen() {
       const history = await gateway.runAuthenticated(
         (client) => client.listChatTurns(gateway.sessionHandle, 100),
       );
-      setTurns(history);
-      for (const turn of history) {
+      setTurns(history.turns);
+      setNextTurnCursor(history.nextCursor);
+      for (const turn of history.turns) {
         if (!TERMINAL_STATES.has(turn.state)) watchTurn(turn.turn_id);
       }
     } catch (error) {
       if (error instanceof GatewayError && error.status === 404) {
         await gateway.newConversation();
-        setMessage("原会话已不可用，已为你创建一个新会话");
+        setMessage("原会话已不可用，已切换到新会话");
         return;
       }
       throw error;
@@ -118,6 +123,7 @@ export default function ChatScreen() {
 
   useEffect(() => {
     setTurns([]);
+    setNextTurnCursor("");
     turnWatcher.closeAll();
     void refresh();
     return () => turnWatcher.closeAll();
@@ -135,7 +141,7 @@ export default function ChatScreen() {
   }, [gateway.sessionHandle]);
 
   useEffect(() => {
-    if (!draftReady.current || !gateway.sessionHandle) return;
+    if (!draftReady.current) return;
     const timeout = setTimeout(() => {
       void storeConversationDraft(gateway.sessionHandle, text);
     }, 300);
@@ -181,6 +187,14 @@ export default function ChatScreen() {
     setSending(true);
     setMessage("");
     try {
+      const sessionHandle = await gateway.ensureConversation();
+      const fingerprint = JSON.stringify({
+        message,
+        attachments: pending.map((item) => [item.uri, item.name, item.mediaType]),
+      });
+      if (requestIdentity.current?.fingerprint !== fingerprint) {
+        requestIdentity.current = { fingerprint, requestId: Crypto.randomUUID() };
+      }
       const uploaded: ArtifactInput[] = [];
       let failed = false;
       for (let index = 0; index < pending.length; index += 1) {
@@ -194,7 +208,7 @@ export default function ChatScreen() {
           const response = await fetch(item.uri);
           const bytes = await response.arrayBuffer();
           const artifact = await gateway.runAuthenticated((client) => client.uploadArtifact({
-            sessionHandle: gateway.sessionHandle,
+            sessionHandle,
             bytes,
             mediaType: item.mediaType,
             name: item.name,
@@ -216,14 +230,22 @@ export default function ChatScreen() {
         return;
       }
       const accepted = await gateway.runAuthenticated((client) => client.createChatTurn({
-        sessionHandle: gateway.sessionHandle,
+        clientRequestId: requestIdentity.current!.requestId,
+        sessionHandle,
         text: message,
         attachments: uploaded,
       }));
-      setTurns((current) => [...current, accepted]);
-      watchTurn(accepted.turn_id);
+      const wasPending = !gateway.sessionHandle;
+      if (wasPending) {
+        await gateway.commitConversation(sessionHandle);
+      } else {
+        setTurns((current) => [...current, accepted]);
+        watchTurn(accepted.turn_id);
+      }
+      requestIdentity.current = null;
       setText("");
-      await storeConversationDraft(gateway.sessionHandle, "");
+      await removeConversationDraft("");
+      await storeConversationDraft(sessionHandle, "");
       setAttachments([]);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "消息没有发出去，请重试");
@@ -237,10 +259,11 @@ export default function ChatScreen() {
     if (!item || item.status !== "failed" || !gateway.client) return;
     setAttachments((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, status: "uploading" } : value));
     try {
+      const sessionHandle = await gateway.ensureConversation();
       const response = await fetch(item.uri);
       const bytes = await response.arrayBuffer();
       const uploaded = await gateway.runAuthenticated((client) => client.uploadArtifact({
-        sessionHandle: gateway.sessionHandle,
+        sessionHandle,
         bytes,
         mediaType: item.mediaType,
         name: item.name,
@@ -262,18 +285,19 @@ export default function ChatScreen() {
       if (!uri) return;
       setTranscribing(true);
       try {
+        const sessionHandle = await gateway.ensureConversation();
         const response = await fetch(uri);
         const extension = uri.toLowerCase().endsWith(".webm") ? "webm" : "m4a";
         const bytes = await response.arrayBuffer();
         const artifact = await gateway.runAuthenticated((client) => client.uploadArtifact({
-          sessionHandle: gateway.sessionHandle,
+          sessionHandle,
           bytes,
           mediaType: extension === "webm" ? "audio/webm" : "audio/mp4",
           name: `voice-${Date.now()}.${extension}`,
           caption: "语音输入",
         }));
         const transcript = await gateway.runAuthenticated((client) => client.transcribeArtifact(
-          gateway.sessionHandle,
+          sessionHandle,
           artifact.artifact_id,
         ));
         setText((current) => current ? `${current}\n${transcript}` : transcript);
@@ -343,11 +367,32 @@ export default function ChatScreen() {
     if (startingTopic || sending) return;
     setStartingTopic(true);
     try {
+      await removeConversationDraft("");
       await gateway.newConversation();
+      requestIdentity.current = null;
       setText("");
       setAttachments([]);
     } finally {
       setStartingTopic(false);
+    }
+  }
+
+  async function loadOlderTurns() {
+    if (!gateway.sessionHandle || !nextTurnCursor || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const page = await gateway.runAuthenticated(
+        (client) => client.listChatTurns(gateway.sessionHandle, 100, nextTurnCursor),
+      );
+      setTurns((current) => {
+        const existing = new Set(current.map((turn) => turn.turn_id));
+        return [...page.turns.filter((turn) => !existing.has(turn.turn_id)), ...current];
+      });
+      setNextTurnCursor(page.nextCursor);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "更早的消息暂时无法加载");
+    } finally {
+      setLoadingOlder(false);
     }
   }
 
@@ -434,6 +479,17 @@ export default function ChatScreen() {
           nearBottom.current = distance < 80;
         }}
         scrollEventThrottle={100}
+        ListHeaderComponent={nextTurnCursor ? (
+          <Pressable
+            disabled={loadingOlder}
+            onPress={() => void loadOlderTurns()}
+            style={styles.loadOlder}
+          >
+            {loadingOlder
+              ? <ActivityIndicator color={colors.accent} size="small" />
+              : <Text style={styles.loadOlderText}>加载更早消息</Text>}
+          </Pressable>
+        ) : null}
         ListEmptyComponent={<Text style={styles.empty}>你好，我是小诺。</Text>}
         renderItem={({ item }) => (
           <ChatTurn
@@ -817,6 +873,8 @@ const styles = StyleSheet.create({
   link: { color: colors.accent, fontWeight: "600" },
   messages: { padding: 16, paddingBottom: 24, gap: 18, flexGrow: 1 },
   empty: { color: colors.muted, textAlign: "center", marginTop: 80, fontSize: 17 },
+  loadOlder: { alignSelf: "center", paddingHorizontal: 14, paddingVertical: 8, marginBottom: 4 },
+  loadOlderText: { color: colors.accent, fontWeight: "600", fontSize: 13 },
   turn: { gap: 8 },
   userBubble: { alignSelf: "flex-end", maxWidth: "84%", backgroundColor: colors.accent, borderRadius: 18, borderBottomRightRadius: 5, paddingHorizontal: 15, paddingVertical: 11 },
   userText: { color: "white", fontSize: 16, lineHeight: 23 },

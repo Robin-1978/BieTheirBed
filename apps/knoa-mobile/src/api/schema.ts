@@ -953,6 +953,11 @@ export interface components {
         ChatTurnListResponse: {
             /** Turns */
             turns: components["schemas"]["ChatTurnSnapshot"][];
+            /**
+             * Next Cursor
+             * @default
+             */
+            next_cursor: string;
         };
         /** ChatTurnResponse */
         ChatTurnResponse: {
@@ -1042,6 +1047,11 @@ export interface components {
         ConversationSessionListResponse: {
             /** Sessions */
             sessions: components["schemas"]["ConversationSessionSnapshot"][];
+            /**
+             * Next Cursor
+             * @default
+             */
+            next_cursor: string;
         };
         /** ConversationSessionResponse */
         ConversationSessionResponse: {
@@ -1075,6 +1085,8 @@ export interface components {
         ConversationSessionState: "active" | "archived";
         /** CreateChatTurnRequest */
         CreateChatTurnRequest: {
+            /** Client Request Id */
+            client_request_id: string;
             /**
              * Input
              * @default
@@ -1091,16 +1103,10 @@ export interface components {
              */
             tools_enabled: boolean;
         };
-        /** CreateConversationSessionRequest */
-        CreateConversationSessionRequest: {
-            /**
-             * Title
-             * @default 新对话
-             */
-            title: string;
-        };
         /** CreateProductTaskRequest */
         CreateProductTaskRequest: {
+            /** Client Request Id */
+            client_request_id: string;
             /**
              * Title
              * @default
@@ -1407,8 +1413,6 @@ export interface components {
         SessionCreatedResponse: {
             /** Session Handle */
             session_handle: string;
-            /** @default null */
-            session: components["schemas"]["ConversationSessionSnapshot"] | null;
         };
         /** SessionResponse */
         SessionResponse: {
@@ -2086,11 +2090,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateConversationSessionRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Core session */
             201: {
@@ -2135,6 +2135,7 @@ export interface operations {
             query?: {
                 include_archived?: boolean;
                 limit?: number;
+                cursor?: string;
             };
             header?: never;
             path?: never;
@@ -2398,6 +2399,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                cursor?: string;
             };
             header?: never;
             path: {

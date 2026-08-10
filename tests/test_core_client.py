@@ -292,7 +292,12 @@ async def test_client_chat_turn_round_trip_is_not_a_task(tmp_path: Path) -> None
     connected = await _connected(tmp_path)
     try:
         session_handle = await connected.client.create_session()
-        accepted = await connected.client.create_chat_turn(session_handle, "hello")
+        before, before_cursor = await connected.client.list_conversation_sessions()
+        accepted = await connected.client.create_chat_turn(
+            session_handle,
+            "hello",
+            client_request_id="chat-request-a",
+        )
         snapshots = [
             snapshot
             async for snapshot in connected.client.chat_turn_updates(accepted.turn_id)
@@ -305,8 +310,14 @@ async def test_client_chat_turn_round_trip_is_not_a_task(tmp_path: Path) -> None
         assert stored.turn_id == snapshots[-1].turn_id
         assert stored.final_output == snapshots[-1].final_output
         assert stored.timeline == ()
-        listed = await connected.client.list_chat_turns(session_handle)
+        listed, turn_cursor = await connected.client.list_chat_turns(session_handle)
         assert [turn.turn_id for turn in listed] == [accepted.turn_id]
+        assert turn_cursor == ""
+        conversations, conversation_cursor = await connected.client.list_conversation_sessions()
+        assert before == ()
+        assert before_cursor == ""
+        assert [item.title for item in conversations] == ["hello"]
+        assert conversation_cursor == ""
         tasks = await connected.client.list_tasks(limit=10)
         assert tasks.tasks == ()
     finally:
