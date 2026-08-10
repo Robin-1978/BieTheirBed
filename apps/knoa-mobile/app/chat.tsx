@@ -7,7 +7,9 @@ import {
   useAudioRecorderState,
 } from "expo-audio";
 import { router, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { File, Paths } from "expo-file-system";
+import * as Sharing from "expo-sharing";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -24,6 +26,12 @@ import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import Svg, { Circle, Line, Path, Rect } from "react-native-svg";
 
 import { ChatTurnWatcher } from "@/api/chatTurnWatcher";
+import {
+  assistantArtifactItems,
+  resolveAssistantArtifactFile,
+  type AssistantArtifactItem,
+  type ResolvedArtifactFile,
+} from "@/api/chatArtifacts";
 import type { AndroidRelease, ArtifactInput, ChatApproval, ChatTurnSnapshot } from "@/api/models";
 import { AppMarkdown } from "@/components/AppMarkdown";
 import { useGateway } from "@/state/GatewayProvider";
@@ -219,6 +227,34 @@ export default function ChatScreen() {
     }
   }
 
+  const loadArtifact = useCallback(async (
+    item: AssistantArtifactItem,
+  ): Promise<ResolvedArtifactFile> => resolveAssistantArtifactFile(item, {
+    cachedUri: (cacheFileName) => {
+      const file = new File(Paths.cache, cacheFileName);
+      return file.exists ? file.uri : null;
+    },
+    download: (artifactId) => gateway.runAuthenticated((client) => client.downloadArtifact(
+      gateway.sessionHandle,
+      artifactId,
+    )),
+    write: (cacheFileName, bytes) => {
+      const file = new File(Paths.cache, cacheFileName);
+      file.create({ overwrite: true, intermediates: true });
+      file.write(bytes);
+      return file.uri;
+    },
+  }), [gateway.runAuthenticated, gateway.sessionHandle]);
+
+  const openArtifact = useCallback(async (item: AssistantArtifactItem) => {
+    try {
+      const resolved = await loadArtifact(item);
+      await Sharing.shareAsync(resolved.uri, { mimeType: resolved.mediaType });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "附件暂时无法打开，请重试");
+    }
+  }, [loadArtifact]);
+
   async function startNewTopic() {
     if (startingTopic || sending) return;
     setStartingTopic(true);
@@ -283,6 +319,8 @@ export default function ChatScreen() {
             turn={item}
             resolving={Boolean(resolving)}
             onResolve={resolve}
+            onLoadArtifact={loadArtifact}
+            onOpenArtifact={openArtifact}
           />
         )}
       />
@@ -444,14 +482,19 @@ function ChatTurn({
   turn,
   resolving,
   onResolve,
+  onLoadArtifact,
+  onOpenArtifact,
 }: {
   turn: ChatTurnSnapshot;
   resolving: boolean;
   onResolve(approval: ChatApproval, approved: boolean): void;
+  onLoadArtifact(item: AssistantArtifactItem): Promise<ResolvedArtifactFile>;
+  onOpenArtifact(item: AssistantArtifactItem): Promise<void>;
 }) {
   const response = turn.final_output || turn.content;
   const approval = turn.approvals.find((item) => item.state === "pending") ?? null;
   const activity = activityText(turn);
+  const artifactItems = useMemo(() => assistantArtifactItems(turn.artifacts), [turn.artifacts]);
   return (
     <View style={styles.turn}>
       <View style={styles.userBubble}>
@@ -467,6 +510,18 @@ function ChatTurn({
             <Text style={styles.activity}>{activity}</Text>
           </View>
         )}
+        {artifactItems.length ? (
+          <View style={styles.generatedArtifacts}>
+            {artifactItems.map((item) => (
+              <AssistantArtifact
+                key={item.key}
+                item={item}
+                onLoad={onLoadArtifact}
+                onOpen={onOpenArtifact}
+              />
+            ))}
+          </View>
+        ) : null}
         {approval ? (
           <View style={styles.approval}>
             <Text style={styles.approvalReason}>{approval.reason || approval.tool_name}</Text>
@@ -482,6 +537,102 @@ function ChatTurn({
         ) : null}
       </View>
     </View>
+  );
+}
+
+function AssistantArtifact({
+  item,
+  onLoad,
+  onOpen,
+}: {
+  item: AssistantArtifactItem;
+  onLoad(item: AssistantArtifactItem): Promise<ResolvedArtifactFile>;
+  onOpen(item: AssistantArtifactItem): Promise<void>;
+}) {
+  const [previewUri, setPreviewUri] = useState("");
+  const [loading, setLoading] = useState(item.isImage);
+  const [failed, setFailed] = useState(false);
+  const [opening, setOpening] = useState(false);
+  const request = useRef(0);
+
+  const loadPreview = useCallback(async () => {
+    if (!item.isImage) return;
+    const currentRequest = ++request.current;
+    setLoading(true);
+    setFailed(false);
+    try {
+      const resolved = await onLoad(item);
+      if (request.current === currentRequest) setPreviewUri(resolved.uri);
+    } catch {
+      if (request.current === currentRequest) setFailed(true);
+    } finally {
+      if (request.current === currentRequest) setLoading(false);
+    }
+  }, [item, onLoad]);
+
+  useEffect(() => {
+    void loadPreview();
+    return () => { request.current += 1; };
+  }, [loadPreview]);
+
+  const open = useCallback(async () => {
+    if (failed) {
+      await loadPreview();
+      return;
+    }
+    setOpening(true);
+    try {
+      await onOpen(item);
+    } finally {
+      setOpening(false);
+    }
+  }, [failed, item, loadPreview, onOpen]);
+
+  if (item.isImage) {
+    return (
+      <Pressable
+        accessibilityLabel={failed ? `重新加载 ${item.displayName}` : `打开 ${item.displayName}`}
+        disabled={loading || opening}
+        onPress={() => void open()}
+        style={styles.generatedImageCard}
+      >
+        {previewUri ? (
+          <Image
+            onError={() => {
+              setPreviewUri("");
+              setFailed(true);
+            }}
+            resizeMode="contain"
+            source={{ uri: previewUri }}
+            style={styles.generatedImage}
+          />
+        ) : (
+          <View style={styles.generatedImageState}>
+            {loading ? <ActivityIndicator color={colors.accent} size="small" /> : null}
+            <Text style={failed ? styles.generatedArtifactError : styles.generatedArtifactHint}>
+              {failed ? "加载失败，点击重试" : "正在加载图片…"}
+            </Text>
+          </View>
+        )}
+        <View style={styles.generatedArtifactCaption}>
+          <Text style={styles.generatedArtifactName} numberOfLines={1}>{item.displayName}</Text>
+          {opening ? <ActivityIndicator color={colors.accent} size="small" /> : null}
+        </View>
+      </Pressable>
+    );
+  }
+
+  return (
+    <Pressable
+      accessibilityLabel={`打开 ${item.displayName}`}
+      disabled={opening}
+      onPress={() => void open()}
+      style={styles.generatedFile}
+    >
+      <View style={styles.generatedFileBadge}><Text style={styles.generatedFileBadgeText}>附件</Text></View>
+      <Text style={styles.generatedArtifactName} numberOfLines={2}>{item.displayName}</Text>
+      {opening ? <ActivityIndicator color={colors.accent} size="small" /> : null}
+    </Pressable>
   );
 }
 
@@ -518,6 +669,17 @@ const styles = StyleSheet.create({
   denyText: { color: colors.ink, fontWeight: "600" },
   approve: { flex: 1, alignItems: "center", backgroundColor: colors.accent, borderRadius: 11, padding: 10 },
   approveText: { color: "white", fontWeight: "700" },
+  generatedArtifacts: { marginTop: 12, gap: 10 },
+  generatedImageCard: { overflow: "hidden", borderWidth: 1, borderColor: colors.line, borderRadius: 12, backgroundColor: colors.background },
+  generatedImage: { width: "100%", minHeight: 180, maxHeight: 360, aspectRatio: 16 / 9, backgroundColor: colors.background },
+  generatedImageState: { minHeight: 150, alignItems: "center", justifyContent: "center", gap: 9, padding: 16 },
+  generatedArtifactCaption: { minHeight: 42, paddingHorizontal: 11, paddingVertical: 9, flexDirection: "row", alignItems: "center", gap: 8, borderTopWidth: 1, borderTopColor: colors.line },
+  generatedArtifactName: { color: colors.ink, flex: 1, fontWeight: "600" },
+  generatedArtifactHint: { color: colors.muted, fontSize: 13 },
+  generatedArtifactError: { color: colors.danger, fontSize: 13 },
+  generatedFile: { minHeight: 54, padding: 10, flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: colors.line, borderRadius: 12, backgroundColor: colors.background },
+  generatedFileBadge: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6, backgroundColor: colors.accentSoft },
+  generatedFileBadgeText: { color: colors.accent, fontSize: 12, fontWeight: "700" },
   attachmentStrip: { paddingHorizontal: 12, paddingVertical: 8, flexDirection: "row", gap: 8, borderTopWidth: 1, borderTopColor: colors.line },
   attachment: { maxWidth: 150, flexDirection: "row", alignItems: "center", gap: 7, backgroundColor: colors.surface, borderRadius: 10, padding: 6, borderWidth: 1, borderColor: colors.line },
   thumbnail: { width: 34, height: 34, borderRadius: 6 },
