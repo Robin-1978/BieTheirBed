@@ -44,7 +44,6 @@ export class AndroidUpdateDownload {
 
   static async create(input: {
     gatewayUrl: string;
-    token: string;
     release: AndroidRelease;
     onProgress(progress: AndroidUpdateProgress): void;
   }): Promise<AndroidUpdateDownload> {
@@ -73,7 +72,6 @@ export class AndroidUpdateDownload {
       fileUri,
       {
         headers: {
-          Authorization: `Bearer ${input.token}`,
           "If-Range": `"${input.release.sha256}"`,
         },
       },

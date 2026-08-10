@@ -254,7 +254,7 @@ class SecureGatewayAdapter:
                     methods=["GET"],
                 ),
                 Route(
-                    "/v1/mobile/releases/android/{version_code:str}/package",
+                    "/releases/android/{version_code:str}/{sha256:str}/knoa.apk",
                     self._download_android_release,
                     methods=["GET"],
                 ),
@@ -874,7 +874,8 @@ class SecureGatewayAdapter:
                 "published_at": release.published_at,
                 "release_notes": release.release_notes,
                 "download_path": (
-                    f"/v1/mobile/releases/android/{release.version_code}/package"
+                    f"/releases/android/{release.version_code}/"
+                    f"{release.sha256}/knoa.apk"
                 ),
             }
         )
@@ -882,17 +883,22 @@ class SecureGatewayAdapter:
     async def _download_android_release(
         self, request: Request
     ) -> JSONResponse | FileResponse:
-        authenticated = self._authorize(request, limit=20)
-        if isinstance(authenticated, JSONResponse):
-            return authenticated
         raw_version_code = str(request.path_params.get("version_code", ""))
+        requested_sha256 = str(request.path_params.get("sha256", "")).lower()
         if not raw_version_code.isascii() or not raw_version_code.isdecimal():
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        if (
+            len(requested_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in requested_sha256)
+        ):
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         version_code = int(raw_version_code)
         if version_code < 1 or version_code > 2_100_000_000:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         try:
             release = await asyncio.to_thread(self._releases.get, version_code)
+            if release.sha256 != requested_sha256:
+                raise LookupError
             package = await asyncio.to_thread(self._releases.package_path, release)
             metadata = await asyncio.to_thread(package.stat)
         except LookupError:
@@ -903,9 +909,10 @@ class SecureGatewayAdapter:
             filename=f"knoa-{release.version_name}.apk",
             stat_result=metadata,
             headers={
-                "Cache-Control": "private, no-cache",
+                "Cache-Control": "public, max-age=31536000, immutable",
                 "ETag": f'"{release.sha256}"',
                 "X-Knoa-SHA256": release.sha256,
+                "X-Content-Type-Options": "nosniff",
             },
         )
 

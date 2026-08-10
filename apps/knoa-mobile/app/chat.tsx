@@ -13,6 +13,7 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -21,11 +22,13 @@ import {
   View,
 } from "react-native";
 import Markdown from "react-native-marked";
+import Svg, { Circle, Line, Path, Rect } from "react-native-svg";
 
 import { subscribeChatTurn, type ChatTurnSubscription } from "@/api/chatTurns";
-import type { ArtifactInput, ChatApproval, ChatTurnSnapshot } from "@/api/models";
+import type { AndroidRelease, ArtifactInput, ChatApproval, ChatTurnSnapshot } from "@/api/models";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
+import { isAndroidUpdateAvailable } from "@/update/androidUpdater";
 
 type PendingAttachment = {
   uri: string;
@@ -47,6 +50,9 @@ export default function ChatScreen() {
   const [startingTopic, setStartingTopic] = useState(false);
   const [resolving, setResolving] = useState("");
   const [transcribing, setTranscribing] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [message, setMessage] = useState("");
+  const [availableUpdate, setAvailableUpdate] = useState<AndroidRelease | null>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recording = useAudioRecorderState(recorder, 250);
 
@@ -69,7 +75,7 @@ export default function ChatScreen() {
           subscriptions.current.delete(snapshot.turn_id);
         }
       },
-      onError: () => undefined,
+      onError: () => setMessage("回复连接中断，请稍后重试"),
     });
     subscriptions.current.set(turnId, subscription);
   }, [gateway.gatewayUrl, gateway.sessionToken]);
@@ -93,6 +99,13 @@ export default function ChatScreen() {
       subscriptions.current.clear();
     };
   }, [gateway.sessionHandle, refresh]);
+
+  useEffect(() => {
+    if (!gateway.client) return;
+    void gateway.client.latestAndroidRelease()
+      .then((release) => setAvailableUpdate(isAndroidUpdateAvailable(release) ? release : null))
+      .catch(() => undefined);
+  }, [gateway.client]);
 
   useEffect(() => {
     const uri = params.capturedUri?.trim();
@@ -130,6 +143,7 @@ export default function ChatScreen() {
     const message = text.trim() || "请看一下这些内容";
     const pending = attachments;
     setSending(true);
+    setMessage("");
     try {
       const uploaded = await Promise.all(pending.map(async (item): Promise<ArtifactInput> => {
         const response = await fetch(item.uri);
@@ -150,6 +164,8 @@ export default function ChatScreen() {
       watchTurn(accepted.turn_id);
       setText("");
       setAttachments([]);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "消息没有发出去，请重试");
     } finally {
       setSending(false);
     }
@@ -226,8 +242,29 @@ export default function ChatScreen() {
           </Pressable>
           <Pressable onPress={() => router.push("/tasks")}><Text style={styles.link}>任务</Text></Pressable>
           <Pressable onPress={() => router.push("/capabilities")}><Text style={styles.link}>状态</Text></Pressable>
+          <Pressable onPress={() => router.push("/update")}><Text style={styles.link}>版本</Text></Pressable>
         </View>
       </View>
+      {gateway.status !== "ready" ? (
+        <View style={styles.connectionBanner}>
+          <View style={styles.bannerCopy}>
+            <Text style={styles.connectionTitle}>暂时没有连接到小诺</Text>
+            <Text style={styles.connectionDetail}>{gateway.error || "正在重新建立安全连接"}</Text>
+          </View>
+          <Pressable onPress={() => void gateway.reconnect()} style={styles.bannerButton}>
+            <Text style={styles.bannerButtonText}>重连</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {availableUpdate ? (
+        <Pressable style={styles.updateBanner} onPress={() => router.push("/update")}>
+          <View style={styles.bannerCopy}>
+            <Text style={styles.updateTitle}>小诺 {availableUpdate.version_name} 可以更新</Text>
+            <Text style={styles.updateDetail}>查看版本说明并下载安装</Text>
+          </View>
+          <Text style={styles.updateLink}>更新</Text>
+        </Pressable>
+      ) : null}
       <FlatList
         ref={list}
         data={turns}
@@ -258,16 +295,19 @@ export default function ChatScreen() {
           ))}
         </View>
       ) : null}
+      {message ? (
+        <Pressable onPress={() => setMessage("")} style={styles.errorBanner}>
+          <Text style={styles.errorText}>{message}</Text>
+        </Pressable>
+      ) : null}
       <View style={styles.composer}>
-        <View style={styles.ingress}>
-          <Pressable onPress={() => router.push("/capture")}><Text style={styles.iconButton}>相机</Text></Pressable>
-          <Pressable onPress={() => void chooseFile()}><Text style={styles.iconButton}>文件</Text></Pressable>
-          <Pressable onPress={() => void toggleRecording()}>
-            <Text style={[styles.iconButton, recording.isRecording && styles.recording]}>
-              {transcribing ? "转写…" : recording.isRecording ? `${Math.round(recording.durationMillis / 1000)}s` : "语音"}
-            </Text>
-          </Pressable>
-        </View>
+        <Pressable
+          accessibilityLabel="添加照片或文件"
+          onPress={() => setActionsOpen(true)}
+          style={styles.roundAction}
+        >
+          <LineIcon name="plus" color={colors.accent} />
+        </Pressable>
         <TextInput
           style={styles.input}
           value={text}
@@ -276,11 +316,93 @@ export default function ChatScreen() {
           placeholderTextColor={colors.muted}
           multiline
         />
+        <Pressable
+          accessibilityLabel={recording.isRecording ? "停止录音" : "语音输入"}
+          onPress={() => void toggleRecording()}
+          style={[styles.roundAction, recording.isRecording && styles.recordingAction]}
+        >
+          {transcribing ? (
+            <ActivityIndicator color={colors.accent} size="small" />
+          ) : (
+            <LineIcon name="mic" color={recording.isRecording ? colors.danger : colors.accent} />
+          )}
+          {recording.isRecording ? (
+            <Text style={styles.recordingTime}>{Math.round(recording.durationMillis / 1000)}s</Text>
+          ) : null}
+        </Pressable>
         <Pressable style={[styles.send, !canSend && styles.sendDisabled]} onPress={() => void send()} disabled={!canSend}>
           {sending ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.sendText}>发送</Text>}
         </Pressable>
       </View>
+      <Modal
+        animationType="fade"
+        onRequestClose={() => setActionsOpen(false)}
+        transparent
+        visible={actionsOpen}
+      >
+        <View style={styles.modalRoot}>
+          <Pressable style={styles.backdrop} onPress={() => setActionsOpen(false)} />
+          <View style={styles.actionSheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>添加内容</Text>
+            <View style={styles.sheetActions}>
+              <MediaAction
+                icon="camera"
+                label="拍照"
+                onPress={() => {
+                  setActionsOpen(false);
+                  router.push("/capture");
+                }}
+              />
+              <MediaAction
+                icon="file"
+                label="文件"
+                onPress={() => {
+                  setActionsOpen(false);
+                  void chooseFile();
+                }}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
+  );
+}
+
+function MediaAction({ icon, label, onPress }: { icon: "camera" | "file"; label: string; onPress(): void }) {
+  return (
+    <Pressable onPress={onPress} style={styles.mediaAction}>
+      <View style={styles.mediaIcon}><LineIcon name={icon} color={colors.accent} size={28} /></View>
+      <Text style={styles.mediaLabel}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function LineIcon({
+  name,
+  color,
+  size = 22,
+}: {
+  name: "plus" | "camera" | "file" | "mic";
+  color: string;
+  size?: number;
+}) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      {name === "plus" ? (
+        <><Line x1="12" y1="5" x2="12" y2="19" stroke={color} strokeWidth="2" strokeLinecap="round" /><Line x1="5" y1="12" x2="19" y2="12" stroke={color} strokeWidth="2" strokeLinecap="round" /></>
+      ) : null}
+      {name === "camera" ? (
+        <><Path d="M4 7.5h3l1.4-2h7.2l1.4 2h3v11H4z" stroke={color} strokeWidth="1.8" strokeLinejoin="round" /><Circle cx="12" cy="13" r="3.2" stroke={color} strokeWidth="1.8" /></>
+      ) : null}
+      {name === "file" ? (
+        <><Path d="M7 3.5h6l4 4V20.5H7z" stroke={color} strokeWidth="1.8" strokeLinejoin="round" /><Path d="M13 3.5v4h4" stroke={color} strokeWidth="1.8" strokeLinejoin="round" /><Line x1="9.5" y1="12" x2="14.5" y2="12" stroke={color} strokeWidth="1.6" strokeLinecap="round" /><Line x1="9.5" y1="15.5" x2="14.5" y2="15.5" stroke={color} strokeWidth="1.6" strokeLinecap="round" /></>
+      ) : null}
+      {name === "mic" ? (
+        <><Rect x="9" y="3" width="6" height="11" rx="3" stroke={color} strokeWidth="1.8" /><Path d="M6.5 11.5a5.5 5.5 0 0 0 11 0M12 17v4M9 21h6" stroke={color} strokeWidth="1.8" strokeLinecap="round" /></>
+      ) : null}
+    </Svg>
   );
 }
 
@@ -369,12 +491,33 @@ const styles = StyleSheet.create({
   thumbnail: { width: 34, height: 34, borderRadius: 6 },
   attachmentName: { color: colors.ink, fontSize: 12, flexShrink: 1 },
   remove: { color: colors.muted, fontSize: 18 },
+  connectionBanner: { marginHorizontal: 16, marginBottom: 8, padding: 13, borderRadius: 14, backgroundColor: "#FFF3ED", flexDirection: "row", alignItems: "center", gap: 12 },
+  bannerCopy: { flex: 1 },
+  connectionTitle: { color: colors.ink, fontWeight: "700" },
+  connectionDetail: { color: colors.muted, fontSize: 12, marginTop: 3 },
+  bannerButton: { paddingHorizontal: 13, paddingVertical: 8, borderRadius: 11, backgroundColor: colors.surface },
+  bannerButtonText: { color: colors.accent, fontWeight: "700" },
+  updateBanner: { marginHorizontal: 16, marginBottom: 8, padding: 13, borderRadius: 14, backgroundColor: colors.accentSoft, flexDirection: "row", alignItems: "center", gap: 12 },
+  updateTitle: { color: colors.ink, fontWeight: "700" },
+  updateDetail: { color: colors.muted, fontSize: 12, marginTop: 3 },
+  updateLink: { color: colors.accent, fontWeight: "700" },
+  errorBanner: { paddingHorizontal: 16, paddingVertical: 9, backgroundColor: "#FFF3ED", borderTopWidth: 1, borderTopColor: "#F3D7CB" },
+  errorText: { color: colors.danger, textAlign: "center", fontSize: 13 },
   composer: { flexDirection: "row", alignItems: "flex-end", gap: 8, padding: 10, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.line },
-  ingress: { gap: 5, paddingBottom: 3 },
-  iconButton: { color: colors.accent, fontSize: 12, fontWeight: "600" },
-  recording: { color: colors.danger },
+  roundAction: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: colors.background, borderWidth: 1, borderColor: colors.line },
+  recordingAction: { backgroundColor: "#FFF3ED", borderColor: "#F3D7CB" },
+  recordingTime: { position: "absolute", bottom: -15, color: colors.danger, fontSize: 10, fontWeight: "600" },
   input: { flex: 1, minHeight: 42, maxHeight: 120, color: colors.ink, backgroundColor: colors.background, borderRadius: 16, paddingHorizontal: 13, paddingVertical: 10, textAlignVertical: "top" },
   send: { minWidth: 58, height: 42, alignItems: "center", justifyContent: "center", backgroundColor: colors.accent, borderRadius: 14 },
   sendDisabled: { opacity: 0.45 },
   sendText: { color: "white", fontWeight: "700" },
+  modalRoot: { flex: 1, justifyContent: "flex-end" },
+  backdrop: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "rgba(25, 31, 29, 0.28)" },
+  actionSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 22, paddingTop: 10, paddingBottom: 34, gap: 18 },
+  sheetHandle: { width: 38, height: 4, borderRadius: 2, backgroundColor: colors.line, alignSelf: "center" },
+  sheetTitle: { color: colors.ink, fontSize: 17, fontWeight: "700" },
+  sheetActions: { flexDirection: "row", gap: 24 },
+  mediaAction: { width: 76, alignItems: "center", gap: 8 },
+  mediaIcon: { width: 58, height: 58, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
+  mediaLabel: { color: colors.ink, fontWeight: "600" },
 });

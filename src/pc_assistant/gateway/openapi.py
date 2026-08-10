@@ -639,16 +639,24 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     },
                 }
             },
-            "/v1/mobile/releases/android/{version_code}/package": {
+            "/releases/android/{version_code}/{sha256}/knoa.apk": {
                 "get": {
                     "operationId": "downloadAndroidRelease",
-                    "security": bearer,
                     "parameters": [
                         {
                             "name": "version_code",
                             "in": "path",
                             "required": True,
                             "schema": {"type": "integer", "minimum": 1},
+                        },
+                        {
+                            "name": "sha256",
+                            "in": "path",
+                            "required": True,
+                            "schema": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{64}$",
+                            },
                         },
                         {
                             "name": "Range",
@@ -674,7 +682,7 @@ def gateway_openapi_schema() -> dict[str, Any]:
                                 }
                             },
                         },
-                        **_errors("400", "401", "404", "416", "429"),
+                        **_errors("400", "404", "416"),
                     },
                 }
             },

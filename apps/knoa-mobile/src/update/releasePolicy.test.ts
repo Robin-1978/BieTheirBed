@@ -13,7 +13,7 @@ const release: AndroidRelease = {
   sha256: "a".repeat(64),
   published_at: 1,
   release_notes: "",
-  download_path: "/v1/mobile/releases/android/2/package",
+  download_path: `/releases/android/2/${"a".repeat(64)}/knoa.apk`,
 };
 
 describe("Android release policy", () => {

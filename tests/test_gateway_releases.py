@@ -81,7 +81,7 @@ class _Authentication:
 
 
 @pytest.mark.asyncio
-async def test_gateway_android_release_supports_authenticated_byte_ranges(
+async def test_gateway_android_release_uses_public_immutable_byte_ranges(
     tmp_path,
 ) -> None:
     repository = AndroidReleaseRepository(tmp_path / "releases")
@@ -107,7 +107,10 @@ async def test_gateway_android_release_supports_authenticated_byte_ranges(
         latest = await http.get("/v1/mobile/releases/android/latest", headers=headers)
         ranged = await http.get(
             latest.json()["download_path"],
-            headers={**headers, "Range": "bytes=100-299"},
+            headers={"Range": "bytes=100-299"},
+        )
+        wrong_digest = await http.get(
+            f"/releases/android/2/{'0' * 64}/knoa.apk"
         )
 
     assert missing_auth.status_code == 401
@@ -119,3 +122,6 @@ async def test_gateway_android_release_supports_authenticated_byte_ranges(
     assert ranged.headers["content-range"] == f"bytes 100-299/{len(payload)}"
     assert ranged.headers["accept-ranges"] == "bytes"
     assert ranged.headers["etag"] == f'"{release.sha256}"'
+    assert ranged.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert ranged.headers["x-content-type-options"] == "nosniff"
+    assert wrong_digest.status_code == 404
