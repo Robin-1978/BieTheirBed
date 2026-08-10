@@ -5,7 +5,7 @@ import asyncio
 import logging
 import sqlite3
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -34,6 +34,7 @@ class GatewayPushRegistration:
 class GatewayPushMessage:
     category: str
     task_id: str
+    execution_id: str
     approval_id: str
     title: str
     body: str
@@ -73,6 +74,7 @@ class ExpoPushTransport:
                     "data": {
                         "category": message.category,
                         "task_id": message.task_id,
+                        "execution_id": message.execution_id,
                         "approval_id": message.approval_id,
                     },
                 },
@@ -306,6 +308,35 @@ class GatewayPushDispatcher:
         message = self.message_for(feed)
         if message is None:
             return
+        try:
+            execution = await self._core.get_product_task_execution(
+                self._principal_id,
+                message.execution_id,
+            )
+        except Exception:
+            logger.warning(
+                "Skipping Push for an execution outside the product Task model",
+                exc_info=True,
+            )
+            return
+        message = replace(message, task_id=execution.task_id)
+        try:
+            task = await self._core.get_product_task(
+                self._principal_id,
+                execution.task_id,
+            )
+        except Exception:
+            logger.warning("Skipping Push because Task notification policy is unavailable", exc_info=True)
+            return
+        policy_key = {
+            "approval": "waiting_approval",
+            "task_completed": "completed",
+            "task_failed": "failed",
+            "task_cancelled": "cancelled",
+        }[message.category]
+        default_enabled = policy_key in {"waiting_approval", "completed", "failed"}
+        if not task.notification_policy.get(policy_key, default_enabled):
+            return
         registrations = await asyncio.to_thread(
             self._repository.list_for_principal,
             self._principal_id,
@@ -337,7 +368,8 @@ class GatewayPushDispatcher:
         category, title, body = selected
         return GatewayPushMessage(
             category=category,
-            task_id=event.task_id,
+            task_id="",
+            execution_id=event.task_id,
             approval_id=event.payload.approval_id,
             title=title,
             body=body,

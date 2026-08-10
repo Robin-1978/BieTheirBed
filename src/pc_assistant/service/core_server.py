@@ -30,7 +30,12 @@ from pc_assistant.agent_runtime.contracts import (
     ControlServicePort,
     RuntimeScope,
 )
-from pc_assistant.automation import ScheduleService, TriggerService
+from pc_assistant.automation import (
+    ScheduleKind,
+    ScheduleService,
+    ScheduleSpec,
+    TriggerService,
+)
 from pc_assistant.automation.repository import (
     ScheduleIdempotencyConflictError,
     ScheduleNotFoundError,
@@ -45,6 +50,8 @@ from pc_assistant.exceptions import SessionNotFoundError
 from pc_assistant.conversation import (
     ChatTurnConflictError,
     ChatTurnNotFoundError,
+    ConversationSessionConflictError,
+    ConversationSessionNotFoundError,
     ConversationService,
 )
 from pc_assistant.service.core_api import (
@@ -56,6 +63,7 @@ from pc_assistant.service.core_api import (
     ArtifactUploadedMessage,
     CancelTaskRequest,
     CancelChatTurnRequest,
+    RetryChatTurnRequest,
     ChatApprovalResolvedMessage,
     ChatTurnAcceptedMessage,
     ChatTurnListMessage,
@@ -69,11 +77,18 @@ from pc_assistant.service.core_api import (
     CreateScheduleRequest,
     CreateTriggerRequest,
     CreateSessionRequest,
+    GetConversationSessionRequest,
+    ListConversationSessionsRequest,
+    UpdateConversationSessionRequest,
+    DeleteConversationSessionRequest,
     CreateTaskRequest,
+    CreateProductTaskRequest,
     CreateChatTurnRequest,
     DownloadArtifactRequest,
     FireTriggerRequest,
     GetTaskRequest,
+    GetProductTaskRequest,
+    GetProductTaskExecutionRequest,
     GetChatTurnRequest,
     GetHistoryRequest,
     GetStatusRequest,
@@ -85,6 +100,8 @@ from pc_assistant.service.core_api import (
     ListMemoryRequest,
     ListSchedulesRequest,
     ListTasksRequest,
+    ListProductTasksRequest,
+    ListProductTaskExecutionsRequest,
     ListChatTurnsRequest,
     ListToolsRequest,
     ListTriggersRequest,
@@ -100,7 +117,17 @@ from pc_assistant.service.core_api import (
     ResumeScheduleRequest,
     ResumeTaskRequest,
     ResumeTriggerRequest,
+    UpdateProductTaskRequest,
+    SetProductTaskStateRequest,
+    DeleteProductTaskRequest,
+    ExecuteProductTaskRequest,
+    DeleteProductTaskExecutionRequest,
+    RerunProductTaskExecutionRequest,
     SessionCreatedMessage,
+    ConversationSessionMessage,
+    ConversationSessionListMessage,
+    ConversationSessionDeletedMessage,
+    ConversationSessionSnapshot,
     ScheduleAcceptedMessage,
     ScheduleListMessage,
     ScheduleSnapshot,
@@ -119,6 +146,13 @@ from pc_assistant.service.core_api import (
     TaskResumedMessage,
     TaskSnapshot,
     TaskSnapshotMessage,
+    ProductTaskMessage,
+    ProductTaskListMessage,
+    ProductTaskExecutionMessage,
+    ProductTaskExecutionListMessage,
+    ProductTaskDeletedMessage,
+    ProductTaskSnapshot,
+    ProductTaskExecutionSnapshot,
     TaskSubscribedMessage,
     ToolsMessage,
     TriggerAcceptedMessage,
@@ -133,9 +167,11 @@ from pc_assistant.service.core_api import (
 from pc_assistant.service.credentials import verify_principal_credential
 from pc_assistant.tasks import (
     TaskCapacityError,
+    TaskDefinitionState,
     TaskIdempotencyConflictError,
     TaskNotFoundError,
     TaskOrigin,
+    TaskLaunchKind,
     TaskService,
     TaskTransitionError,
 )
@@ -484,6 +520,67 @@ class CoreServer:
                 )
             )
 
+    async def _remove_task_launch_provider(
+        self,
+        principal: str,
+        task_id: str,
+    ) -> None:
+        binding = await self._tasks.unbind_launch(principal, task_id)
+        if binding is None:
+            return
+        provider_kind, provider_id = binding
+        if provider_kind == "schedule":
+            await self._schedules.delete(principal, provider_id)
+        elif provider_kind == "event":
+            await self._triggers.delete(principal, provider_id)
+
+    async def _replace_task_launch_provider(self, principal: str, task: Any) -> None:
+        await self._remove_task_launch_provider(principal, task.task_id)
+        policy = task.launch_policy
+        if policy.kind is TaskLaunchKind.IMMEDIATE:
+            return
+        scope = RuntimeScope(
+            principal_id=principal,
+            session_handle=task.session_handle,
+        )
+        client_request_id = f"task-launch:{task.task_id}:r{task.revision}"
+        if policy.kind is TaskLaunchKind.SCHEDULED:
+            schedule = await self._schedules.create(
+                scope,
+                client_request_id=client_request_id,
+                goal=task.goal,
+                spec=ScheduleSpec(
+                    kind=ScheduleKind(policy.schedule_type),
+                    run_at=policy.run_at,
+                    interval_seconds=policy.interval_seconds,
+                    cron_expression=policy.cron,
+                    timezone=policy.timezone,
+                ),
+                tools_enabled=task.tools_enabled,
+                priority=task.priority,
+            )
+            await self._tasks.bind_launch(
+                principal,
+                task.task_id,
+                provider_kind="schedule",
+                provider_id=schedule.schedule_id,
+            )
+            return
+        trigger = await self._triggers.create(
+            scope,
+            client_request_id=client_request_id,
+            name=task.title,
+            goal=task.goal,
+            tools_enabled=task.tools_enabled,
+            priority=task.priority,
+        )
+        await self._tasks.bind_launch(
+            principal,
+            task.task_id,
+            provider_kind="event",
+            provider_id=trigger.trigger_id,
+        )
+
     async def _dispatch_scalar(
         self,
         principal: str,
@@ -499,11 +596,78 @@ class CoreServer:
                         principal,
                         activate=False,
                     )
+                conversation = None
+                if self._conversations is not None:
+                    conversation = await self._conversations.register_session(
+                        scope,
+                        title=request.title,
+                    )
                 await send(
                     SessionCreatedMessage(
                         request_id=request.request_id,
                         session_handle=scope.session_handle,
+                        session=(
+                            None
+                            if conversation is None
+                            else ConversationSessionSnapshot.from_record(conversation)
+                        ),
                     )
+                )
+            elif isinstance(request, GetConversationSessionRequest):
+                if self._conversations is None:
+                    raise RuntimeError("Conversation service is unavailable")
+                session = await self._conversations.get_session(
+                    principal,
+                    request.session_handle,
+                )
+                await send(
+                    ConversationSessionMessage(
+                        request_id=request.request_id,
+                        session=ConversationSessionSnapshot.from_record(session),
+                    )
+                )
+            elif isinstance(request, ListConversationSessionsRequest):
+                if self._conversations is None:
+                    raise RuntimeError("Conversation service is unavailable")
+                sessions = await self._conversations.list_sessions(
+                    principal,
+                    include_archived=request.include_archived,
+                    limit=request.limit,
+                )
+                await send(
+                    ConversationSessionListMessage(
+                        request_id=request.request_id,
+                        sessions=tuple(
+                            ConversationSessionSnapshot.from_record(item)
+                            for item in sessions
+                        ),
+                    )
+                )
+            elif isinstance(request, UpdateConversationSessionRequest):
+                if self._conversations is None:
+                    raise RuntimeError("Conversation service is unavailable")
+                session = await self._conversations.update_session(
+                    principal,
+                    request.session_handle,
+                    title=request.title,
+                    state=request.state,
+                    expected_revision=request.expected_revision,
+                )
+                await send(
+                    ConversationSessionMessage(
+                        request_id=request.request_id,
+                        session=ConversationSessionSnapshot.from_record(session),
+                    )
+                )
+            elif isinstance(request, DeleteConversationSessionRequest):
+                if self._conversations is None:
+                    raise RuntimeError("Conversation service is unavailable")
+                await self._conversations.delete_session(
+                    principal,
+                    request.session_handle,
+                )
+                await send(
+                    ConversationSessionDeletedMessage(request_id=request.request_id)
                 )
             elif isinstance(request, CreateChatTurnRequest):
                 if self._conversations is None:
@@ -563,6 +727,20 @@ class CoreServer:
                 turn = await self._conversations.cancel(principal, request.turn_id)
                 await send(
                     ChatTurnSnapshotMessage(
+                        request_id=request.request_id,
+                        turn=ChatTurnSnapshot.from_record(turn),
+                    )
+                )
+            elif isinstance(request, RetryChatTurnRequest):
+                if self._conversations is None:
+                    raise RuntimeError("Conversation service is unavailable")
+                turn = await self._conversations.retry_turn(
+                    principal,
+                    request.turn_id,
+                    client_request_id=request.request_id,
+                )
+                await send(
+                    ChatTurnAcceptedMessage(
                         request_id=request.request_id,
                         turn=ChatTurnSnapshot.from_record(turn),
                     )
@@ -635,6 +813,238 @@ class CoreServer:
                         request_id=request.request_id,
                         tasks=tuple(TaskSnapshot.from_record(task) for task in tasks),
                         next_cursor=next_cursor,
+                    )
+                )
+            elif isinstance(request, CreateProductTaskRequest):
+                task, execution = await self._tasks.create_definition(
+                    RuntimeScope(
+                        principal_id=principal,
+                        session_handle=request.session_handle,
+                    ),
+                    client_request_id=request.request_id,
+                    title=request.title,
+                    goal=request.goal,
+                    attachments=tuple(
+                        ArtifactAttachment(
+                            artifact_id=item.artifact_id,
+                            caption=item.caption,
+                        )
+                        for item in request.attachments
+                    ),
+                    tools_enabled=request.tools_enabled,
+                    priority=request.priority,
+                    launch_policy=request.launch_policy,
+                    notification_policy=request.notification_policy or None,
+                )
+                if task.launch_policy.kind is TaskLaunchKind.SCHEDULED:
+                    if task.launch_policy.schedule_type is None:
+                        raise ValueError("Scheduled Task requires schedule_type")
+                    schedule = await self._schedules.create(
+                        RuntimeScope(
+                            principal_id=principal,
+                            session_handle=request.session_handle,
+                        ),
+                        client_request_id=f"task-launch:{task.task_id}",
+                        goal=task.goal,
+                        spec=ScheduleSpec(
+                            kind=ScheduleKind(task.launch_policy.schedule_type),
+                            run_at=task.launch_policy.run_at,
+                            interval_seconds=task.launch_policy.interval_seconds,
+                            cron_expression=task.launch_policy.cron,
+                            timezone=task.launch_policy.timezone,
+                        ),
+                        tools_enabled=task.tools_enabled,
+                        priority=task.priority,
+                    )
+                    await self._tasks.bind_launch(
+                        principal,
+                        task.task_id,
+                        provider_kind="schedule",
+                        provider_id=schedule.schedule_id,
+                    )
+                elif task.launch_policy.kind is TaskLaunchKind.EVENT:
+                    trigger = await self._triggers.create(
+                        RuntimeScope(
+                            principal_id=principal,
+                            session_handle=request.session_handle,
+                        ),
+                        client_request_id=f"task-launch:{task.task_id}",
+                        name=task.title,
+                        goal=task.goal,
+                        tools_enabled=task.tools_enabled,
+                        priority=task.priority,
+                    )
+                    await self._tasks.bind_launch(
+                        principal,
+                        task.task_id,
+                        provider_kind="event",
+                        provider_id=trigger.trigger_id,
+                    )
+                await send(
+                    ProductTaskMessage(
+                        request_id=request.request_id,
+                        task=ProductTaskSnapshot.from_record(task),
+                        execution=(
+                            None
+                            if execution is None
+                            else ProductTaskExecutionSnapshot.from_record(execution)
+                        ),
+                    )
+                )
+            elif isinstance(request, GetProductTaskRequest):
+                task = await self._tasks.get_definition(principal, request.task_id)
+                await send(
+                    ProductTaskMessage(
+                        request_id=request.request_id,
+                        task=ProductTaskSnapshot.from_record(task),
+                    )
+                )
+            elif isinstance(request, ListProductTasksRequest):
+                tasks = await self._tasks.list_definitions(
+                    principal,
+                    state=request.state,
+                    include_archived=request.include_archived,
+                    limit=request.limit,
+                )
+                await send(
+                    ProductTaskListMessage(
+                        request_id=request.request_id,
+                        tasks=tuple(ProductTaskSnapshot.from_record(task) for task in tasks),
+                    )
+                )
+            elif isinstance(request, UpdateProductTaskRequest):
+                changes: dict[str, Any] = {
+                    "title": request.title,
+                    "goal": request.goal,
+                    "tools_enabled": request.tools_enabled,
+                    "priority": request.priority,
+                    "launch_policy": request.launch_policy,
+                    "notification_policy": request.notification_policy,
+                    "expected_revision": request.expected_revision,
+                }
+                if request.attachments is not None:
+                    changes["attachments"] = tuple(
+                        ArtifactAttachment(
+                            artifact_id=item.artifact_id,
+                            caption=item.caption,
+                        )
+                        for item in request.attachments
+                    )
+                changes = {key: value for key, value in changes.items() if value is not None}
+                task = await self._tasks.update_definition(
+                    principal,
+                    request.task_id,
+                    **changes,
+                )
+                if any(
+                    value is not None
+                    for value in (
+                        request.title,
+                        request.goal,
+                        request.tools_enabled,
+                        request.priority,
+                        request.launch_policy,
+                    )
+                ):
+                    await self._replace_task_launch_provider(principal, task)
+                await send(
+                    ProductTaskMessage(
+                        request_id=request.request_id,
+                        task=ProductTaskSnapshot.from_record(task),
+                    )
+                )
+            elif isinstance(request, SetProductTaskStateRequest):
+                binding = await self._tasks.launch_binding(principal, request.task_id)
+                if binding is not None:
+                    provider_kind, provider_id = binding
+                    paused = request.state is not TaskDefinitionState.ACTIVE
+                    if provider_kind == "schedule":
+                        if paused:
+                            await self._schedules.pause(principal, provider_id)
+                        else:
+                            await self._schedules.resume(principal, provider_id)
+                    elif provider_kind == "event":
+                        await self._triggers.set_paused(
+                            principal,
+                            provider_id,
+                            paused=paused,
+                        )
+                task = await self._tasks.set_definition_state(
+                    principal,
+                    request.task_id,
+                    request.state,
+                )
+                await send(
+                    ProductTaskMessage(
+                        request_id=request.request_id,
+                        task=ProductTaskSnapshot.from_record(task),
+                    )
+                )
+            elif isinstance(request, DeleteProductTaskRequest):
+                await self._remove_task_launch_provider(principal, request.task_id)
+                await self._tasks.delete_definition(principal, request.task_id)
+                await send(
+                    ProductTaskDeletedMessage(
+                        request_id=request.request_id,
+                        task_id=request.task_id,
+                    )
+                )
+            elif isinstance(request, ExecuteProductTaskRequest):
+                execution = await self._tasks.execute_definition(
+                    principal,
+                    request.task_id,
+                    client_request_id=request.request_id,
+                )
+                await send(
+                    ProductTaskExecutionMessage(
+                        request_id=request.request_id,
+                        execution=ProductTaskExecutionSnapshot.from_record(execution),
+                    )
+                )
+            elif isinstance(request, GetProductTaskExecutionRequest):
+                execution = await self._tasks.get_execution(
+                    principal,
+                    request.execution_id,
+                )
+                await send(
+                    ProductTaskExecutionMessage(
+                        request_id=request.request_id,
+                        execution=ProductTaskExecutionSnapshot.from_record(execution),
+                    )
+                )
+            elif isinstance(request, ListProductTaskExecutionsRequest):
+                executions = await self._tasks.list_executions(
+                    principal,
+                    request.task_id,
+                    limit=request.limit,
+                )
+                await send(
+                    ProductTaskExecutionListMessage(
+                        request_id=request.request_id,
+                        executions=tuple(
+                            ProductTaskExecutionSnapshot.from_record(execution)
+                            for execution in executions
+                        ),
+                    )
+                )
+            elif isinstance(request, DeleteProductTaskExecutionRequest):
+                await self._tasks.delete_execution(principal, request.execution_id)
+                await send(
+                    ProductTaskDeletedMessage(
+                        request_id=request.request_id,
+                        execution_id=request.execution_id,
+                    )
+                )
+            elif isinstance(request, RerunProductTaskExecutionRequest):
+                execution = await self._tasks.rerun_execution(
+                    principal,
+                    request.execution_id,
+                    client_request_id=request.request_id,
+                )
+                await send(
+                    ProductTaskExecutionMessage(
+                        request_id=request.request_id,
+                        execution=ProductTaskExecutionSnapshot.from_record(execution),
                     )
                 )
             elif isinstance(request, CreateScheduleRequest):
@@ -1021,6 +1431,22 @@ class CoreServer:
                     request.request_id,
                     "invalid_request",
                     "ChatTurn request ID conflicts with an existing turn",
+                )
+            )
+        except ConversationSessionNotFoundError:
+            await send(
+                self._error(
+                    request.request_id,
+                    "session_not_found",
+                    "Conversation session not found",
+                )
+            )
+        except ConversationSessionConflictError:
+            await send(
+                self._error(
+                    request.request_id,
+                    "invalid_request",
+                    "Conversation session conflicts with the requested operation",
                 )
             )
         except ScheduleNotFoundError:

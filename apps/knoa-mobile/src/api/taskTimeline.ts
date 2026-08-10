@@ -17,7 +17,7 @@ export function reduceTimeline(
   if (feed.event.event_type === "approval_requested") {
     approval = {
       approvalId: String(payload.approval_id ?? ""),
-      taskId: feed.event.task_id,
+      executionId: feed.event.task_id,
       toolName: String(payload.tool_name ?? ""),
       reason: String(payload.reason ?? ""),
     };

@@ -10,6 +10,7 @@ import type { AndroidRelease } from "@/api/models";
 import { isNewerAndroidRelease } from "./releasePolicy";
 
 const RESUME_KEY = "knoa.android-update.resume.v1";
+const READY_KEY = "knoa.android-update.ready.v1";
 const APK_MIME = "application/vnd.android.package-archive";
 const FLAG_GRANT_READ_URI_PERMISSION = 1;
 
@@ -17,6 +18,12 @@ type StoredResume = {
   versionCode: number;
   fileUri: string;
   resumeData: string;
+};
+
+type StoredReady = {
+  versionCode: number;
+  sha256: string;
+  fileUri: string;
 };
 
 export type AndroidUpdateProgress = {
@@ -96,6 +103,11 @@ export class AndroidUpdateDownload {
     try {
       await verifyPackage(result.uri, this.release);
       await SecureStore.deleteItemAsync(RESUME_KEY);
+      await SecureStore.setItemAsync(READY_KEY, JSON.stringify({
+        versionCode: this.release.version_code,
+        sha256: this.release.sha256,
+        fileUri: result.uri,
+      } satisfies StoredReady));
       return result.uri;
     } catch (error) {
       await SecureStore.deleteItemAsync(RESUME_KEY);
@@ -113,6 +125,27 @@ export class AndroidUpdateDownload {
       resumeData: paused.resumeData,
     };
     await SecureStore.setItemAsync(RESUME_KEY, JSON.stringify(stored));
+  }
+}
+
+export async function loadReadyAndroidPackage(release: AndroidRelease): Promise<string> {
+  const raw = await SecureStore.getItemAsync(READY_KEY);
+  if (!raw) return "";
+  try {
+    const stored = JSON.parse(raw) as StoredReady;
+    if (stored.versionCode !== release.version_code || stored.sha256 !== release.sha256) {
+      await SecureStore.deleteItemAsync(READY_KEY);
+      return "";
+    }
+    const file = new File(stored.fileUri);
+    if (!file.exists) {
+      await SecureStore.deleteItemAsync(READY_KEY);
+      return "";
+    }
+    return file.uri;
+  } catch {
+    await SecureStore.deleteItemAsync(READY_KEY);
+    return "";
   }
 }
 

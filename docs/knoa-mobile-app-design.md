@@ -1,5 +1,11 @@
 # Knoa Mobile App Forward Design
 
+> The canonical cross-feature product contract and implementation order are now
+> [knoa-product-forward-blueprint.md](./knoa-product-forward-blueprint.md) and
+> [knoa-product-forward-implementation-plan.md](./knoa-product-forward-implementation-plan.md).
+> This document remains a detailed Mobile boundary reference where it does not
+> conflict with those documents.
+
 配套 UI 线框与交互说明见
 [knoa-mobile-ui-design.md](./knoa-mobile-ui-design.md)。
 Task 的创建、启动方式、执行记录、控制和交付闭环见

@@ -1,18 +1,22 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
-import { GatewayClient } from "@/api/gatewayClient";
-import type { PrincipalTaskEvent } from "@/api/models";
+import { GatewayClient, GatewayError } from "@/api/gatewayClient";
+import type { AndroidRelease, PrincipalTaskEvent } from "@/api/models";
 import { subscribeTaskEvents, type TaskEventSubscription } from "@/api/taskEvents";
 import { registerPush } from "@/notifications";
 import { authenticateDevice, pairDevice } from "@/security/pairing";
 import {
   clearSession,
+  clearConnectionIdentity,
+  loadConnectionIdentity,
   loadCoreSession,
   loadDevice,
   loadSessionToken,
   storeCoreSession,
 } from "@/security/deviceIdentity";
 import { withAuthenticationRetry } from "./authenticationRecovery";
+import { installedAndroidVersionCode, isAndroidUpdateAvailable } from "@/update/androidUpdater";
+import { requiresAndroidUpdate } from "@/update/releasePolicy";
 
 type GatewayConnection = { gatewayUrl: string; token: string };
 
@@ -24,10 +28,17 @@ type GatewayState = {
   sessionToken: string;
   latestEvent: PrincipalTaskEvent | null;
   error: string;
+  deviceId: string;
+  lastConnectedAt: number;
+  requiredUpdate: AndroidRelease | null;
+  availableUpdate: AndroidRelease | null;
   pair(encoded: string, displayName: string): Promise<void>;
   publish(event: PrincipalTaskEvent): void;
   reconnect(): Promise<void>;
-  newConversation(): Promise<void>;
+  reauthenticate(): Promise<void>;
+  removeConnection(): Promise<void>;
+  newConversation(title?: string): Promise<void>;
+  openConversation(sessionHandle: string): Promise<void>;
   connection(): GatewayConnection | null;
   runAuthenticated<T>(operation: (client: GatewayClient) => Promise<T>): Promise<T>;
 };
@@ -35,7 +46,7 @@ type GatewayState = {
 const Context = createContext<GatewayState | null>(null);
 
 export function GatewayProvider({ children }: React.PropsWithChildren) {
-  type StoredState = Omit<GatewayState, "pair" | "publish" | "reconnect" | "newConversation" | "connection" | "runAuthenticated">;
+  type StoredState = Omit<GatewayState, "pair" | "publish" | "reconnect" | "reauthenticate" | "removeConnection" | "newConversation" | "openConversation" | "connection" | "runAuthenticated">;
   const initialState: StoredState = {
     status: "booting",
     client: null,
@@ -44,6 +55,10 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     sessionToken: "",
     latestEvent: null,
     error: "",
+    deviceId: "",
+    lastConnectedAt: 0,
+    requiredUpdate: null,
+    availableUpdate: null,
   };
   const [state, setState] = useState<StoredState>(initialState);
   const stateRef = useRef<StoredState>(initialState);
@@ -59,19 +74,21 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
   const connect = useCallback(async () => {
     commit({ status: "booting", error: "" });
     try {
-      const device = await loadDevice();
-      if (!device) {
+      const identity = await loadConnectionIdentity();
+      if (!identity) {
         connectionRef.current = null;
-        commit({ status: "unpaired", client: null, gatewayUrl: "", sessionToken: "" });
+        commit({ status: "unpaired", client: null, gatewayUrl: "", sessionToken: "", sessionHandle: "", deviceId: "", lastConnectedAt: 0, requiredUpdate: null, availableUpdate: null });
         return;
       }
+      const device = { deviceId: identity.deviceId, gatewayUrl: identity.gatewayUrl };
       let token = await loadSessionToken();
       let client: GatewayClient;
       if (token) {
         client = new GatewayClient(device.gatewayUrl, token);
         try {
           await client.gatewaySession();
-        } catch {
+        } catch (error) {
+          if (!(error instanceof GatewayError) || error.status !== 401) throw error;
           await clearSession();
           token = null;
           client = await authenticateDevice({
@@ -100,8 +117,16 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         sessionHandle,
         gatewayUrl: device.gatewayUrl,
         sessionToken: token,
+        deviceId: device.deviceId,
+        lastConnectedAt: Date.now() / 1000,
       });
       void registerPush(client).catch(() => undefined);
+      void client.latestAndroidRelease()
+        .then((release) => commit({
+          requiredUpdate: requiresAndroidUpdate(release, installedAndroidVersionCode()) ? release : null,
+          availableUpdate: isAndroidUpdateAvailable(release, installedAndroidVersionCode()) ? release : null,
+        }))
+        .catch(() => undefined);
     } catch (error) {
       commit({
         status: "error",
@@ -130,6 +155,12 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         error: "",
       });
       void registerPush(client).catch(() => undefined);
+      void client.latestAndroidRelease()
+        .then((release) => commit({
+          requiredUpdate: requiresAndroidUpdate(release, installedAndroidVersionCode()) ? release : null,
+          availableUpdate: isAndroidUpdateAvailable(release, installedAndroidVersionCode()) ? release : null,
+        }))
+        .catch(() => undefined);
       return client;
     })();
     authenticationRef.current = pending;
@@ -181,16 +212,56 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
 
   const pair = useCallback(async (encoded: string, displayName: string) => {
     await pairDevice(encoded, displayName);
+    connectionRef.current = null;
+    commit({ latestEvent: null, client: null, sessionHandle: "", sessionToken: "" });
     await connect();
-  }, [connect]);
+  }, [commit, connect]);
 
-  const newConversation = useCallback(async () => {
-    const sessionHandle = await runAuthenticated((client) => client.createSession());
+  const reauthenticate = useCallback(async () => {
+    await clearSession();
+    connectionRef.current = null;
+    commit({ client: null, sessionToken: "", status: "booting", error: "" });
+    await connect();
+  }, [commit, connect]);
+
+  const removeConnection = useCallback(async () => {
+    const client = stateRef.current.client;
+    if (client) await client.revokeCurrentDevice();
+    await clearConnectionIdentity();
+    connectionRef.current = null;
+    commit({
+      status: "unpaired",
+      client: null,
+      sessionHandle: "",
+      gatewayUrl: "",
+      sessionToken: "",
+      latestEvent: null,
+      error: "",
+      deviceId: "",
+      lastConnectedAt: 0,
+      requiredUpdate: null,
+      availableUpdate: null,
+    });
+  }, [commit]);
+
+  const newConversation = useCallback(async (title = "新对话") => {
+    const sessionHandle = await runAuthenticated((client) => client.createSession(title));
     await storeCoreSession(sessionHandle);
     commit({
       sessionHandle,
       latestEvent: null,
     });
+  }, [commit, runAuthenticated]);
+
+  const openConversation = useCallback(async (sessionHandle: string) => {
+    const session = await runAuthenticated((client) => client.getConversationSession(sessionHandle));
+    if (session.state === "archived") throw new Error("请先恢复已归档的会话");
+    await runAuthenticated((client) => client.updateConversationSession(sessionHandle, {
+      state: "active",
+      expectedRevision: session.revision,
+    }));
+    await storeCoreSession(sessionHandle);
+    commit({ sessionHandle, latestEvent: null });
   }, [commit, runAuthenticated]);
 
   const publish = useCallback((event: PrincipalTaskEvent) => {
@@ -203,11 +274,14 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       pair,
       publish,
       reconnect: connect,
+      reauthenticate,
+      removeConnection,
       newConversation,
+      openConversation,
       connection,
       runAuthenticated,
     }),
-    [connect, connection, newConversation, pair, publish, runAuthenticated, state],
+    [connect, connection, newConversation, openConversation, pair, publish, reauthenticate, removeConnection, runAuthenticated, state],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

@@ -4,7 +4,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from pc_assistant.agent_runtime.contracts import ArtifactAttachment
 from pc_assistant.artifacts import ArtifactRef
@@ -238,3 +238,97 @@ class TaskCancelResult(TaskModel):
 class TaskPauseResult(TaskModel):
     accepted: bool
     state: TaskState
+
+
+class TaskDefinitionState(str, Enum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    ARCHIVED = "archived"
+
+
+class TaskLaunchKind(str, Enum):
+    IMMEDIATE = "immediate"
+    SCHEDULED = "scheduled"
+    EVENT = "event"
+
+
+class TaskLaunchReason(str, Enum):
+    CREATED = "created"
+    MANUAL = "manual"
+    SCHEDULED = "scheduled"
+    EVENT = "event"
+    RERUN = "rerun"
+
+
+class TaskLaunchPolicy(TaskModel):
+    kind: TaskLaunchKind = TaskLaunchKind.IMMEDIATE
+    schedule_type: Literal["one_time", "interval", "cron"] | None = None
+    run_at: float | None = Field(default=None, ge=0.0)
+    interval_seconds: float | None = Field(default=None, gt=0.0)
+    cron: Annotated[str, StringConstraints(max_length=256)] = ""
+    timezone: Annotated[str, StringConstraints(max_length=128)] = "Asia/Shanghai"
+    event_source: Annotated[str, StringConstraints(max_length=128)] = ""
+    source_config: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_kind_fields(self) -> TaskLaunchPolicy:
+        if self.kind is TaskLaunchKind.IMMEDIATE:
+            if self.schedule_type is not None or self.run_at is not None or self.interval_seconds is not None or self.cron or self.event_source or self.source_config:
+                raise ValueError("Immediate launch policy cannot contain schedule or event fields")
+        elif self.kind is TaskLaunchKind.SCHEDULED:
+            if self.schedule_type is None:
+                raise ValueError("Scheduled launch policy requires schedule_type")
+            if self.event_source or self.source_config:
+                raise ValueError("Scheduled launch policy cannot contain event fields")
+            if self.schedule_type == "one_time" and self.run_at is None:
+                raise ValueError("One-time launch policy requires run_at")
+            if self.schedule_type == "interval" and self.interval_seconds is None:
+                raise ValueError("Interval launch policy requires interval_seconds")
+            if self.schedule_type == "cron" and not self.cron.strip():
+                raise ValueError("Cron launch policy requires cron")
+        else:
+            if not self.event_source.strip():
+                raise ValueError("Event launch policy requires event_source")
+            if self.schedule_type is not None or self.run_at is not None or self.interval_seconds is not None or self.cron:
+                raise ValueError("Event launch policy cannot contain schedule fields")
+        return self
+
+
+class TaskDefinitionRecord(TaskModel):
+    task_id: Identifier
+    principal_id: Annotated[NonEmpty, StringConstraints(max_length=256)]
+    session_handle: Annotated[NonEmpty, StringConstraints(max_length=256)]
+    title: Annotated[NonEmpty, StringConstraints(max_length=200)]
+    goal: Annotated[str, StringConstraints(min_length=1, max_length=200_000)]
+    attachments: tuple[ArtifactAttachment, ...] = Field(default=(), max_length=8)
+    tools_enabled: bool = True
+    priority: int = Field(default=0, ge=0, le=9)
+    launch_policy: TaskLaunchPolicy = Field(default_factory=TaskLaunchPolicy)
+    notification_policy: dict[str, bool] = Field(default_factory=dict)
+    state: TaskDefinitionState = TaskDefinitionState.ACTIVE
+    revision: int = Field(ge=1)
+    latest_execution_id: Annotated[str, StringConstraints(max_length=128)] = ""
+    execution_count: int = Field(default=0, ge=0)
+    created_at: float = Field(ge=0.0)
+    updated_at: float = Field(ge=0.0)
+
+
+class TaskExecutionRecord(TaskModel):
+    execution_id: Identifier
+    task_id: Identifier
+    task_revision: int = Field(ge=1)
+    launch_reason: TaskLaunchReason
+    goal_snapshot: Annotated[str, StringConstraints(min_length=1, max_length=200_000)]
+    attachment_snapshots: tuple[ArtifactAttachment, ...] = Field(default=(), max_length=8)
+    policy_snapshot: TaskLaunchPolicy
+    state: TaskState
+    phase: Annotated[str, StringConstraints(max_length=256)] = ""
+    cancel_requested: bool = False
+    final_result: Annotated[str, StringConstraints(max_length=200_000)] = ""
+    failure_code: Annotated[str, StringConstraints(max_length=256)] = ""
+    created_at: float = Field(ge=0.0)
+    updated_at: float = Field(ge=0.0)
+    started_at: float | None = Field(default=None, ge=0.0)
+    finished_at: float | None = Field(default=None, ge=0.0)
+    trace: TaskExecutionTrace | None = None
+    approvals: tuple[TaskApprovalRecord, ...] = ()

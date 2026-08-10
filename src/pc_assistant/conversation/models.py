@@ -21,6 +21,11 @@ class ChatTurnState(str, Enum):
     CANCELLED = "cancelled"
 
 
+class ConversationSessionState(str, Enum):
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
 TERMINAL_CHAT_TURN_STATES = frozenset(
     {ChatTurnState.COMPLETED, ChatTurnState.FAILED, ChatTurnState.CANCELLED}
 )
@@ -28,6 +33,18 @@ TERMINAL_CHAT_TURN_STATES = frozenset(
 
 class ConversationModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+
+class ConversationSession(ConversationModel):
+    session_handle: NonEmpty
+    principal_id: NonEmpty
+    title: NonEmpty
+    state: ConversationSessionState
+    turn_count: int = Field(ge=0)
+    last_turn_at: float | None = Field(default=None, ge=0.0)
+    created_at: float = Field(ge=0.0)
+    updated_at: float = Field(ge=0.0)
+    revision: int = Field(ge=1)
 
 
 class ChatToolStep(ConversationModel):

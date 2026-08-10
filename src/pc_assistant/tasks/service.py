@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 from collections.abc import AsyncIterator
 
 from pc_assistant.agent_runtime.contracts import (
@@ -19,12 +20,18 @@ from pc_assistant.tasks.models import (
     TaskCancelResult,
     TaskEvent,
     TaskExecutionTrace,
+    TaskExecutionRecord,
+    TaskDefinitionRecord,
+    TaskDefinitionState,
+    TaskLaunchKind,
+    TaskLaunchPolicy,
+    TaskLaunchReason,
     TaskPauseResult,
     TaskOrigin,
     TaskRecord,
     TaskState,
 )
-from pc_assistant.tasks.repository import TaskRepository
+from pc_assistant.tasks.repository import TaskRepository, TaskTransitionError
 
 
 class TaskService:
@@ -87,6 +94,301 @@ class TaskService:
                 await self._events.publish(first[0])
             self._executor.wake()
         return task
+
+    async def create_definition(
+        self,
+        scope: RuntimeScope,
+        *,
+        client_request_id: str,
+        title: str,
+        goal: str,
+        attachments: tuple[ArtifactAttachment, ...] = (),
+        tools_enabled: bool = True,
+        priority: int = 0,
+        launch_policy: TaskLaunchPolicy | None = None,
+        notification_policy: dict[str, bool] | None = None,
+    ) -> tuple[TaskDefinitionRecord, TaskExecutionRecord | None]:
+        definition, created = await asyncio.to_thread(
+            self._repository.create_task_definition,
+            scope,
+            client_request_id=client_request_id,
+            title=title,
+            goal=goal,
+            attachments=attachments,
+            tools_enabled=tools_enabled,
+            priority=priority,
+            launch_policy=launch_policy,
+            notification_policy=notification_policy,
+        )
+        executions = await self.list_executions(
+            scope.principal_id,
+            definition.task_id,
+            limit=1,
+        )
+        if executions:
+            return definition, executions[0]
+        if not created or definition.launch_policy.kind is not TaskLaunchKind.IMMEDIATE:
+            return definition, None
+        execution = await self.execute_definition(
+            scope.principal_id,
+            definition.task_id,
+            client_request_id=f"execute:{client_request_id}",
+            launch_reason=TaskLaunchReason.CREATED,
+        )
+        return await self.get_definition(scope.principal_id, definition.task_id), execution
+
+    async def get_definition(
+        self,
+        principal_id: str,
+        task_id: str,
+    ) -> TaskDefinitionRecord:
+        return await asyncio.to_thread(
+            self._repository.get_task_definition,
+            principal_id,
+            task_id,
+        )
+
+    async def list_definitions(
+        self,
+        principal_id: str,
+        *,
+        state: TaskDefinitionState | None = None,
+        include_archived: bool = False,
+        limit: int = 100,
+    ) -> tuple[TaskDefinitionRecord, ...]:
+        return await asyncio.to_thread(
+            self._repository.list_task_definitions,
+            principal_id,
+            state=state,
+            include_archived=include_archived,
+            limit=limit,
+        )
+
+    async def update_definition(
+        self,
+        principal_id: str,
+        task_id: str,
+        **changes,
+    ) -> TaskDefinitionRecord:
+        return await asyncio.to_thread(
+            self._repository.update_task_definition,
+            principal_id,
+            task_id,
+            **changes,
+        )
+
+    async def set_definition_state(
+        self,
+        principal_id: str,
+        task_id: str,
+        state: TaskDefinitionState,
+    ) -> TaskDefinitionRecord:
+        return await asyncio.to_thread(
+            self._repository.set_task_definition_state,
+            principal_id,
+            task_id,
+            state,
+        )
+
+    async def bind_launch(
+        self,
+        principal_id: str,
+        task_id: str,
+        *,
+        provider_kind: str,
+        provider_id: str,
+    ) -> None:
+        await asyncio.to_thread(
+            self._repository.bind_task_launch,
+            principal_id,
+            task_id,
+            provider_kind=provider_kind,
+            provider_id=provider_id,
+        )
+
+    async def launch_binding(
+        self,
+        principal_id: str,
+        task_id: str,
+    ) -> tuple[str, str] | None:
+        return await asyncio.to_thread(
+            self._repository.launch_binding_for_task,
+            principal_id,
+            task_id,
+        )
+
+    async def unbind_launch(self, principal_id: str, task_id: str) -> tuple[str, str] | None:
+        return await asyncio.to_thread(
+            self._repository.unbind_launch,
+            principal_id,
+            task_id,
+        )
+
+    async def execute_bound_launch(
+        self,
+        principal_id: str,
+        *,
+        provider_kind: str,
+        provider_id: str,
+        client_request_id: str,
+        launch_reason: TaskLaunchReason,
+        goal_override: str = "",
+    ) -> TaskExecutionRecord:
+        definition = await asyncio.to_thread(
+            self._repository.task_for_launch,
+            principal_id,
+            provider_kind=provider_kind,
+            provider_id=provider_id,
+        )
+        if definition.state is not TaskDefinitionState.ACTIVE:
+            raise TaskTransitionError("Task is not active")
+        return await self.execute_definition(
+            principal_id,
+            definition.task_id,
+            client_request_id=client_request_id,
+            launch_reason=launch_reason,
+            goal_override=goal_override,
+        )
+
+    async def execute_definition(
+        self,
+        principal_id: str,
+        task_id: str,
+        *,
+        client_request_id: str = "",
+        launch_reason: TaskLaunchReason = TaskLaunchReason.MANUAL,
+        snapshot: TaskExecutionRecord | None = None,
+        goal_override: str = "",
+    ) -> TaskExecutionRecord:
+        definition = await self.get_definition(principal_id, task_id)
+        active = tuple(
+            execution
+            for execution in await self.list_executions(
+                principal_id, task_id, limit=200
+            )
+            if execution.state not in TERMINAL_TASK_STATES
+        )
+        if active:
+            raise TaskTransitionError("Task already has an active execution")
+        scope = RuntimeScope(
+            principal_id=definition.principal_id,
+            session_handle=definition.session_handle,
+        )
+        request_id = client_request_id.strip() or (
+            f"execution:{definition.task_id}:{secrets.token_urlsafe(12)}"
+        )
+        goal = definition.goal if snapshot is None else snapshot.goal_snapshot
+        if goal_override.strip():
+            goal = goal_override.strip()
+        attachments = (
+            definition.attachments
+            if snapshot is None
+            else snapshot.attachment_snapshots
+        )
+        policy = (
+            definition.launch_policy if snapshot is None else snapshot.policy_snapshot
+        )
+        revision = definition.revision if snapshot is None else snapshot.task_revision
+        origin = {
+            TaskLaunchReason.SCHEDULED: TaskOrigin.SCHEDULED,
+            TaskLaunchReason.EVENT: TaskOrigin.EVENT,
+        }.get(launch_reason, TaskOrigin.USER)
+        execution = await self.create(
+            scope,
+            client_request_id=request_id,
+            goal=goal,
+            attachments=attachments,
+            tools_enabled=definition.tools_enabled,
+            priority=definition.priority,
+            origin=origin,
+        )
+        return await asyncio.to_thread(
+            self._repository.link_task_execution,
+            principal_id,
+            definition.task_id,
+            execution.task_id,
+            launch_reason=launch_reason,
+            goal_snapshot=goal,
+            attachments_snapshot=attachments,
+            policy_snapshot=policy,
+            task_revision=revision,
+        )
+
+    async def get_execution(
+        self,
+        principal_id: str,
+        execution_id: str,
+        *,
+        include_trace: bool = True,
+    ) -> TaskExecutionRecord:
+        execution = await asyncio.to_thread(
+            self._repository.get_task_execution,
+            principal_id,
+            execution_id,
+            include_trace=include_trace,
+        )
+        approvals = await asyncio.to_thread(
+            self._repository.list_approvals,
+            principal_id,
+            execution.execution_id,
+        )
+        return execution.model_copy(update={"approvals": approvals})
+
+    async def list_executions(
+        self,
+        principal_id: str,
+        task_id: str,
+        *,
+        limit: int = 100,
+    ) -> tuple[TaskExecutionRecord, ...]:
+        executions = await asyncio.to_thread(
+            self._repository.list_task_executions,
+            principal_id,
+            task_id,
+            limit=limit,
+        )
+        return tuple(
+            execution.model_copy(update={
+                "approvals": await asyncio.to_thread(
+                    self._repository.list_approvals,
+                    principal_id,
+                    execution.execution_id,
+                )
+            })
+            for execution in executions
+        )
+
+    async def rerun_execution(
+        self,
+        principal_id: str,
+        execution_id: str,
+        *,
+        client_request_id: str = "",
+    ) -> TaskExecutionRecord:
+        previous = await self.get_execution(principal_id, execution_id)
+        if previous.state not in TERMINAL_TASK_STATES:
+            raise TaskTransitionError("Only terminal TaskExecutions can be rerun")
+        return await self.execute_definition(
+            principal_id,
+            previous.task_id,
+            client_request_id=client_request_id,
+            launch_reason=TaskLaunchReason.RERUN,
+            snapshot=previous,
+        )
+
+    async def delete_execution(self, principal_id: str, execution_id: str) -> None:
+        await asyncio.to_thread(
+            self._repository.delete_task_execution,
+            principal_id,
+            execution_id,
+        )
+
+    async def delete_definition(self, principal_id: str, task_id: str) -> None:
+        await asyncio.to_thread(
+            self._repository.delete_task_definition,
+            principal_id,
+            task_id,
+        )
 
     async def get(self, principal_id: str, task_id: str) -> TaskRecord:
         return await asyncio.to_thread(

@@ -4,7 +4,7 @@ import {
   loadOrCreatePrivateKey,
   publicKey,
   sign,
-  storeDevice,
+  replaceConnectionIdentity,
   storeSession,
 } from "./deviceIdentity";
 import { authenticationProof, pairingProof } from "./proof";
@@ -37,7 +37,7 @@ export async function pairDevice(
     public_key: publicKeyValue,
     signature,
   });
-  await storeDevice({ deviceId: paired.device_id, gatewayUrl: payload.gateway_url });
+  await replaceConnectionIdentity({ deviceId: paired.device_id, gatewayUrl: payload.gateway_url });
   return { gatewayUrl: payload.gateway_url, deviceId: paired.device_id };
 }
 

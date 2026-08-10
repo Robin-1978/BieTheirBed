@@ -1,10 +1,9 @@
-import * as SecureStore from "expo-secure-store";
 import EventSource from "react-native-sse";
 
+import { loadEventCursor, storeEventCursor } from "@/security/deviceIdentity";
 import type { PrincipalTaskEvent } from "./models";
 import { EventCursor } from "./eventCursor";
 
-const CURSOR_KEY = "knoa.gateway.event-cursor.v1";
 const TASK_EVENT_TYPES = [
   "task_created",
   "state_changed",
@@ -35,10 +34,10 @@ export async function subscribeTaskEvents(input: {
 }): Promise<TaskEventSubscription> {
   const cursor = new EventCursor({
     async load() {
-      return Number((await SecureStore.getItemAsync(CURSOR_KEY)) ?? 0);
+      return loadEventCursor();
     },
     async save(value) {
-      await SecureStore.setItemAsync(CURSOR_KEY, String(value));
+      await storeEventCursor(value);
     },
   });
   const afterId = await cursor.initialize();

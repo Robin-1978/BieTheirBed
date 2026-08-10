@@ -13,6 +13,10 @@ from pc_assistant.tasks import (
     TaskIdempotencyConflictError,
     TaskNotFoundError,
     TaskRepository,
+    TaskDefinitionState,
+    TaskLaunchPolicy,
+    TaskLaunchKind,
+    TaskLaunchReason,
     TaskState,
     TaskTraceEntry,
     TaskTransitionError,
@@ -386,6 +390,116 @@ def test_repository_reopens_persisted_task_and_events(tmp_path: Path) -> None:
     assert reopened.list_events(scope.principal_id, task.task_id)[0].event_type == (
         "task_created"
     )
+
+
+def test_task_definition_keeps_multiple_execution_snapshots(tmp_path: Path) -> None:
+    database = tmp_path / "assistant.db"
+    sessions = RuntimeSessionRepository(database, handle_factory=lambda: "session-a")
+    scope = sessions.create("principal-a")
+    execution_ids = iter(("execution-a", "execution-b"))
+    repository = TaskRepository(
+        database,
+        task_id_factory=lambda: next(execution_ids),
+        definition_id_factory=lambda: "task-a",
+        clock=lambda: 1000.0,
+    )
+    definition, created = repository.create_task_definition(
+        scope,
+        client_request_id="definition-request-a",
+        title="Weekly report",
+        goal="Prepare the first report",
+        launch_policy=TaskLaunchPolicy(),
+    )
+    assert created is True
+    assert definition.task_id == "task-a"
+    assert definition.state is TaskDefinitionState.ACTIVE
+    assert definition.execution_count == 0
+
+    first, _ = repository.create(
+        scope,
+        client_request_id="execution-request-a",
+        goal=definition.goal,
+    )
+    first_snapshot = repository.link_task_execution(
+        scope.principal_id,
+        definition.task_id,
+        first.task_id,
+        launch_reason=TaskLaunchReason.CREATED,
+    )
+    repository.request_cancel(scope.principal_id, first.task_id)
+    updated = repository.update_task_definition(
+        scope.principal_id,
+        definition.task_id,
+        goal="Prepare the revised report",
+        expected_revision=1,
+    )
+    second, _ = repository.create(
+        scope,
+        client_request_id="execution-request-b",
+        goal=updated.goal,
+    )
+    repository.link_task_execution(
+        scope.principal_id,
+        definition.task_id,
+        second.task_id,
+        launch_reason=TaskLaunchReason.MANUAL,
+    )
+
+    executions = repository.list_task_executions(
+        scope.principal_id,
+        definition.task_id,
+    )
+    current = repository.get_task_definition(scope.principal_id, definition.task_id)
+    assert current.goal == "Prepare the revised report"
+    assert current.revision == 2
+    assert current.execution_count == 2
+    assert current.latest_execution_id == "execution-b"
+    assert [item.execution_id for item in executions] == ["execution-b", "execution-a"]
+    assert executions[0].goal_snapshot == "Prepare the revised report"
+    assert executions[1].goal_snapshot == first_snapshot.goal_snapshot
+    assert executions[1].goal_snapshot == "Prepare the first report"
+
+
+def test_task_definition_delete_cascades_terminal_executions(tmp_path: Path) -> None:
+    database = tmp_path / "assistant.db"
+    sessions = RuntimeSessionRepository(database, handle_factory=lambda: "session-a")
+    scope = sessions.create("principal-a")
+    repository = TaskRepository(
+        database,
+        task_id_factory=lambda: "execution-a",
+        definition_id_factory=lambda: "task-a",
+    )
+    definition, _ = repository.create_task_definition(
+        scope,
+        client_request_id="definition-request-a",
+        title="Report",
+        goal="Prepare report",
+    )
+    execution, _ = repository.create(
+        scope,
+        client_request_id="execution-request-a",
+        goal=definition.goal,
+    )
+    repository.link_task_execution(
+        scope.principal_id,
+        definition.task_id,
+        execution.task_id,
+        launch_reason=TaskLaunchReason.CREATED,
+    )
+    with pytest.raises(TaskTransitionError, match="active executions"):
+        repository.delete_task_definition(scope.principal_id, definition.task_id)
+    repository.request_cancel(scope.principal_id, execution.task_id)
+
+    deleted = repository.delete_task_definition(
+        scope.principal_id,
+        definition.task_id,
+    )
+
+    assert deleted == ("execution-a",)
+    with pytest.raises(TaskNotFoundError):
+        repository.get_task_definition(scope.principal_id, definition.task_id)
+    with pytest.raises(TaskNotFoundError):
+        repository.get(scope.principal_id, execution.task_id)
 
 
 def test_repository_migrates_legacy_stream_events_into_execution_trace(
@@ -797,3 +911,27 @@ def test_principal_event_feed_is_ordered_and_owner_scoped(tmp_path: Path) -> Non
         scope_a.principal_id,
         after_id=feed_a[1].feed_event_id,
     ) == ()
+
+
+def test_task_launch_policy_rejects_mixed_or_incomplete_configuration() -> None:
+    with pytest.raises(ValueError):
+        TaskLaunchPolicy(kind=TaskLaunchKind.SCHEDULED)
+    with pytest.raises(ValueError):
+        TaskLaunchPolicy(
+            kind=TaskLaunchKind.EVENT,
+            event_source="webhook",
+            interval_seconds=60,
+        )
+
+    scheduled = TaskLaunchPolicy(
+        kind=TaskLaunchKind.SCHEDULED,
+        schedule_type="interval",
+        interval_seconds=300,
+    )
+    event = TaskLaunchPolicy(
+        kind=TaskLaunchKind.EVENT,
+        event_source="webhook",
+        source_config={"topic": "build.completed"},
+    )
+    assert scheduled.interval_seconds == 300
+    assert event.event_source == "webhook"

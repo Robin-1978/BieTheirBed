@@ -2,22 +2,38 @@ import type {
   AndroidRelease,
   ArtifactInput,
   ChatTurnSnapshot,
+  ConversationSession,
   GatewaySession,
   PairingPayload,
-  TaskSnapshot,
+  Task,
+  TaskDefinitionState,
+  TaskExecution,
   TaskEvent,
-  TaskState,
+  TaskLaunchPolicy,
 } from "./models";
 
 type Json = Record<string, unknown>;
 
 export class GatewayError extends Error {
+  readonly retryable: boolean;
+
   constructor(
     readonly status: number,
     readonly code: string,
   ) {
-    super(`Gateway request failed: ${code}`);
+    super(userMessage(status, code));
+    this.retryable = status === 408 || status === 429 || status >= 500;
   }
+}
+
+function userMessage(status: number, code: string): string {
+  if (status === 401) return "连接认证已失效，正在尝试重新认证";
+  if (status === 404) return "内容不存在或已经被删除";
+  if (status === 413 || code === "payload_too_large") return "内容过大，请减少附件后重试";
+  if (status === 422 || code === "rejected") return "当前状态不允许这个操作，请刷新后重试";
+  if (status === 429) return "操作太频繁，请稍后再试";
+  if (status >= 500 || code === "unavailable") return "小诺服务暂时不可用，请稍后重试";
+  return "请求未完成，请检查输入后重试";
 }
 
 export class GatewayClient {
@@ -62,11 +78,50 @@ export class GatewayClient {
     });
   }
 
-  async createSession(): Promise<string> {
+  async createSession(title = "新对话"): Promise<string> {
     const response = await this.json<{ session_handle: string }>("/v1/sessions", {
       method: "POST",
+      body: { title },
     });
     return response.session_handle;
+  }
+
+  async listConversationSessions(includeArchived = false): Promise<ConversationSession[]> {
+    const response = await this.json<{ sessions: ConversationSession[] }>(
+      `/v1/conversations/sessions?include_archived=${includeArchived ? "true" : "false"}&limit=200`,
+    );
+    return response.sessions;
+  }
+
+  async getConversationSession(sessionHandle: string): Promise<ConversationSession> {
+    const response = await this.json<{ session: ConversationSession }>(
+      `/v1/conversations/sessions/${encodeURIComponent(sessionHandle)}`,
+    );
+    return response.session;
+  }
+
+  async updateConversationSession(
+    sessionHandle: string,
+    changes: { title?: string; state?: "active" | "archived"; expectedRevision: number },
+  ): Promise<ConversationSession> {
+    const response = await this.json<{ session: ConversationSession }>(
+      `/v1/conversations/sessions/${encodeURIComponent(sessionHandle)}`,
+      {
+        method: "PATCH",
+        body: {
+          title: changes.title,
+          state: changes.state,
+          expected_revision: changes.expectedRevision,
+        },
+      },
+    );
+    return response.session;
+  }
+
+  async deleteConversationSession(sessionHandle: string): Promise<void> {
+    await this.json(`/v1/conversations/sessions/${encodeURIComponent(sessionHandle)}`, {
+      method: "DELETE",
+    });
   }
 
   async gatewaySession(): Promise<{ expires_at: number }> {
@@ -74,29 +129,27 @@ export class GatewayClient {
   }
 
   async listTasks(input: {
-    sessionHandle?: string;
-    state?: TaskState;
+    state?: TaskDefinitionState;
+    includeArchived?: boolean;
     limit?: number;
-    cursor?: string;
-  } = {}): Promise<{ tasks: TaskSnapshot[]; next_cursor: string }> {
+  } = {}): Promise<{ tasks: Task[] }> {
     const query = new URLSearchParams();
-    if (input.sessionHandle) query.set("session_handle", input.sessionHandle);
     if (input.state) query.set("state", input.state);
-    query.set("limit", String(input.limit ?? 50));
-    if (input.cursor) query.set("cursor", input.cursor);
+    if (input.includeArchived) query.set("include_archived", "true");
+    query.set("limit", String(input.limit ?? 100));
     return this.json(`/v1/tasks?${query}`);
   }
 
-  async getTask(taskId: string): Promise<TaskSnapshot> {
-    const response = await this.json<{ task: TaskSnapshot }>(
+  async getTask(taskId: string): Promise<Task> {
+    const response = await this.json<{ task: Task }>(
       `/v1/tasks/${encodeURIComponent(taskId)}`,
     );
     return response.task;
   }
 
-  async taskEvents(taskId: string, afterSeq = 0): Promise<TaskEvent[]> {
+  async taskExecutionEvents(executionId: string, afterSeq = 0): Promise<TaskEvent[]> {
     const response = await this.json<{ events: TaskEvent[] }>(
-      `/v1/tasks/${encodeURIComponent(taskId)}/events?after_seq=${afterSeq}`,
+      `/v1/task-executions/${encodeURIComponent(executionId)}/events?after_seq=${afterSeq}`,
     );
     return response.events;
   }
@@ -143,6 +196,14 @@ export class GatewayClient {
     return response.turn;
   }
 
+  async retryChatTurn(turnId: string): Promise<ChatTurnSnapshot> {
+    const response = await this.json<{ turn: ChatTurnSnapshot }>(
+      `/v1/conversations/turns/${encodeURIComponent(turnId)}/retry`,
+      { method: "POST" },
+    );
+    return response.turn;
+  }
+
   async resolveChatApproval(approvalId: string, approved: boolean): Promise<void> {
     await this.json(
       `/v1/conversations/approvals/${encodeURIComponent(approvalId)}/resolve`,
@@ -151,29 +212,107 @@ export class GatewayClient {
   }
 
   async createTask(input: {
-    text?: string;
+    title?: string;
+    goal: string;
     attachments?: ArtifactInput[];
     toolsEnabled?: boolean;
-  }): Promise<{ task_id: string; state: TaskState }> {
+    launchPolicy?: TaskLaunchPolicy;
+    notificationPolicy?: Record<string, boolean>;
+  }): Promise<{ task: Task; execution: TaskExecution | null }> {
     return this.json("/v1/tasks", {
       method: "POST",
       body: {
-        input: input.text ?? "",
+        title: input.title ?? "",
+        goal: input.goal,
         attachments: input.attachments ?? [],
         tools_enabled: input.toolsEnabled ?? true,
+        launch_policy: input.launchPolicy,
+        notification_policy: input.notificationPolicy ?? {},
       },
     });
   }
 
-  async taskCommand(
+  async updateTask(
     taskId: string,
-    command: "cancel" | "pause" | "resume" | "retry",
-    reason = "",
-  ): Promise<Json> {
-    return this.json(
-      `/v1/tasks/${encodeURIComponent(taskId)}/${command}`,
-      { method: "POST", body: { reason } },
+    changes: {
+      title?: string;
+      goal?: string;
+      toolsEnabled?: boolean;
+      launchPolicy?: TaskLaunchPolicy;
+      notificationPolicy?: Record<string, boolean>;
+      expectedRevision: number;
+    },
+  ): Promise<Task> {
+    const response = await this.json<{ task: Task }>(
+      `/v1/tasks/${encodeURIComponent(taskId)}`,
+      {
+        method: "PATCH",
+        body: {
+          title: changes.title,
+          goal: changes.goal,
+          tools_enabled: changes.toolsEnabled,
+          launch_policy: changes.launchPolicy,
+          notification_policy: changes.notificationPolicy,
+          expected_revision: changes.expectedRevision,
+        },
+      },
     );
+    return response.task;
+  }
+
+  async taskDefinitionCommand(
+    taskId: string,
+    command: "pause" | "resume" | "archive" | "restore",
+  ): Promise<Task> {
+    const response = await this.json<{ task: Task }>(
+      `/v1/tasks/${encodeURIComponent(taskId)}/${command}`,
+      { method: "POST" },
+    );
+    return response.task;
+  }
+
+  async deleteTask(taskId: string): Promise<void> {
+    await this.json(`/v1/tasks/${encodeURIComponent(taskId)}`, { method: "DELETE" });
+  }
+
+  async executeTask(taskId: string): Promise<TaskExecution> {
+    const response = await this.json<{ execution: TaskExecution }>(
+      `/v1/tasks/${encodeURIComponent(taskId)}/execute`,
+      { method: "POST" },
+    );
+    return response.execution;
+  }
+
+  async listTaskExecutions(taskId: string): Promise<TaskExecution[]> {
+    const response = await this.json<{ executions: TaskExecution[] }>(
+      `/v1/tasks/${encodeURIComponent(taskId)}/executions?limit=200`,
+    );
+    return response.executions;
+  }
+
+  async getTaskExecution(executionId: string): Promise<TaskExecution> {
+    const response = await this.json<{ execution: TaskExecution }>(
+      `/v1/task-executions/${encodeURIComponent(executionId)}`,
+    );
+    return response.execution;
+  }
+
+  async taskExecutionCommand(
+    executionId: string,
+    command: "cancel" | "pause" | "resume" | "rerun",
+    reason = "",
+  ): Promise<TaskExecution | null> {
+    const response = await this.json<Json>(
+      `/v1/task-executions/${encodeURIComponent(executionId)}/${command}`,
+      command === "rerun" ? { method: "POST" } : { method: "POST", body: { reason } },
+    );
+    return "execution" in response ? response.execution as TaskExecution : null;
+  }
+
+  async deleteTaskExecution(executionId: string): Promise<void> {
+    await this.json(`/v1/task-executions/${encodeURIComponent(executionId)}`, {
+      method: "DELETE",
+    });
   }
 
   async resolveApproval(approvalId: string, approved: boolean): Promise<Json> {
@@ -259,6 +398,10 @@ export class GatewayClient {
 
   async unregisterPush(): Promise<void> {
     await this.json("/v1/device/push", { method: "DELETE" });
+  }
+
+  async revokeCurrentDevice(): Promise<void> {
+    await this.json("/v1/device", { method: "DELETE" });
   }
 
   private async json<T>(

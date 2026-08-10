@@ -1,28 +1,26 @@
 """Compact Agent query/control surface for Tasks and their executions."""
 from __future__ import annotations
 
-import asyncio
-import secrets
 from typing import Any
 
 from pc_assistant.agent_runtime.contracts import RuntimeScope
-from pc_assistant.automation import ScheduleState, TriggerState
-from pc_assistant.tasks import TERMINAL_TASK_STATES, TaskOrigin, TaskState
+from pc_assistant.tasks import TaskDefinitionState
 from pc_assistant.tools.base import ToolBase, ToolCapability, ToolEffect, ToolPolicy, ToolRisk
 
 
 class TaskControlTool(ToolBase):
     name = "task"
-    description = "List, inspect, pause, resume, cancel, or retry Tasks by public task_id."
+    description = (
+        "List or inspect stable Tasks, control future launches, execute the current "
+        "Task definition, or control/rerun one TaskExecution."
+    )
     effect = ToolEffect.INTERNAL_WRITE
     capabilities = frozenset({ToolCapability.TASK_MANAGEMENT})
     risk = ToolRisk.LOW
 
-    def __init__(self, sessions: Any, executions: Any, schedules: Any, triggers: Any) -> None:
-        self._sessions = sessions
-        self._executions = executions
-        self._schedules = schedules
-        self._triggers = triggers
+    def __init__(self, sessions: Any, tasks: Any, schedules: Any = None, triggers: Any = None) -> None:
+        del sessions, schedules, triggers
+        self._tasks = tasks
 
     def policy_for(self, arguments: dict[str, Any]) -> ToolPolicy:
         if arguments.get("action") in {"list", "get"}:
@@ -40,124 +38,114 @@ class TaskControlTool(ToolBase):
     async def execute_scoped(self, scope: RuntimeScope, **kwargs: Any) -> Any:
         action = str(kwargs.get("action", "")).strip()
         task_id = str(kwargs.get("task_id", "")).strip()
+        execution_id = str(kwargs.get("execution_id", "")).strip()
         if action == "list":
-            executions, _cursor = await self._executions.list(
+            tasks = await self._tasks.list_definitions(
                 scope.principal_id,
-                origins=(TaskOrigin.USER, TaskOrigin.AGENT),
+                include_archived=bool(kwargs.get("include_archived", False)),
                 limit=50,
             )
-            schedules = await self._schedules.list(scope.principal_id, limit=50)
-            triggers = await self._triggers.list(scope.principal_id, limit=50)
-            items = [
-                {
-                    "task_id": item.task_id,
-                    "goal": item.goal,
-                    "launch_policy": "immediate",
-                    "state": item.state.value,
-                    "latest_execution_id": item.task_id,
-                }
-                for item in executions
-            ]
-            items.extend(
-                {
-                    "task_id": item.schedule_id,
-                    "goal": item.goal,
-                    "launch_policy": "scheduled",
-                    "state": item.state.value,
-                    "next_fire_at": item.next_fire_at,
-                }
-                for item in schedules
-            )
-            items.extend(
-                {
-                    "task_id": item.trigger_id,
-                    "goal": item.goal,
-                    "launch_policy": "event",
-                    "state": item.state.value,
-                }
-                for item in triggers
-            )
-            return {"tasks": items}
-        if not task_id:
-            return {"error": "task_id is required"}
-        target = await self._resolve(scope.principal_id, task_id)
-        if target is None:
-            return {"error": "Task not found"}
-        kind, record = target
+            return {
+                "tasks": [
+                    {
+                        "task_id": item.task_id,
+                        "title": item.title,
+                        "goal": item.goal,
+                        "launch_policy": item.launch_policy.kind.value,
+                        "state": item.state.value,
+                        "latest_execution_id": item.latest_execution_id,
+                        "execution_count": item.execution_count,
+                    }
+                    for item in tasks
+                ]
+            }
         if action == "get":
-            return self._snapshot(kind, record)
-        if action == "pause":
-            if kind == "execution":
-                record = await self._executions.pause(scope.principal_id, task_id, reason="Agent request")
-                return {"task_id": task_id, "state": record.state.value}
-            if kind == "scheduled":
-                record = await self._schedules.pause(scope.principal_id, task_id)
-            else:
-                record = await self._triggers.set_paused(scope.principal_id, task_id, paused=True)
-            return {"task_id": task_id, "state": record.state.value}
-        if action == "resume":
-            if kind == "execution":
-                record = await self._executions.resume(scope.principal_id, task_id, reason="Agent request")
-            elif kind == "scheduled":
-                record = await self._schedules.resume(scope.principal_id, task_id)
-            else:
-                record = await self._triggers.set_paused(scope.principal_id, task_id, paused=False)
-            return {"task_id": task_id, "state": record.state.value}
-        if action == "cancel":
-            if kind != "execution":
-                return {"error": "Pause the Task to disable future launches"}
-            result = await self._executions.cancel(scope.principal_id, task_id, reason="Agent request")
-            return {"task_id": task_id, "state": result.state.value, "accepted": result.accepted}
-        if action == "retry":
-            if kind != "execution" or record.state not in TERMINAL_TASK_STATES:
-                return {"error": "Only a finished execution can be retried"}
-            detached = await asyncio.to_thread(
-                self._sessions.create,
+            if not task_id:
+                return {"error": "task_id is required"}
+            try:
+                task = await self._tasks.get_definition(scope.principal_id, task_id)
+                executions = await self._tasks.list_executions(
+                    scope.principal_id,
+                    task_id,
+                    limit=20,
+                )
+            except LookupError:
+                return {"error": "Task not found"}
+            return {
+                "task_id": task.task_id,
+                "title": task.title,
+                "goal": task.goal,
+                "launch_policy": task.launch_policy.model_dump(mode="json"),
+                "state": task.state.value,
+                "revision": task.revision,
+                "executions": [self._execution_snapshot(item) for item in executions],
+            }
+        if action in {"pause", "resume", "archive", "restore", "execute"}:
+            if not task_id:
+                return {"error": "task_id is required"}
+            if action == "execute":
+                execution = await self._tasks.execute_definition(
+                    scope.principal_id,
+                    task_id,
+                )
+                return self._execution_snapshot(execution)
+            state = {
+                "pause": TaskDefinitionState.PAUSED,
+                "resume": TaskDefinitionState.ACTIVE,
+                "archive": TaskDefinitionState.ARCHIVED,
+                "restore": TaskDefinitionState.ACTIVE,
+            }[action]
+            task = await self._tasks.set_definition_state(
                 scope.principal_id,
-                activate=False,
+                task_id,
+                state,
             )
-            retried = await self._executions.create(
-                detached,
-                client_request_id=f"retry:{secrets.token_urlsafe(16)}",
-                goal=record.goal,
-                attachments=record.attachments,
-                tools_enabled=record.tools_enabled,
-                priority=record.priority,
-                parent_task_id=record.task_id,
-                origin=record.origin,
+            return {"task_id": task.task_id, "state": task.state.value}
+        if action in {"cancel_execution", "pause_execution", "resume_execution", "rerun"}:
+            if not execution_id:
+                return {"error": "execution_id is required"}
+            if action == "cancel_execution":
+                result = await self._tasks.cancel(
+                    scope.principal_id,
+                    execution_id,
+                    reason="Agent request",
+                )
+                return {
+                    "execution_id": execution_id,
+                    "accepted": result.accepted,
+                    "state": None if result.state is None else result.state.value,
+                }
+            if action == "pause_execution":
+                result = await self._tasks.pause(
+                    scope.principal_id,
+                    execution_id,
+                    reason="Agent request",
+                )
+                return {"execution_id": execution_id, "state": result.state.value}
+            if action == "resume_execution":
+                resumed = await self._tasks.resume(
+                    scope.principal_id,
+                    execution_id,
+                    reason="Agent request",
+                )
+                return {"execution_id": execution_id, "state": resumed.state.value}
+            execution = await self._tasks.rerun_execution(
+                scope.principal_id,
+                execution_id,
             )
-            return {"task_id": record.task_id, "execution_id": retried.task_id, "state": retried.state.value}
+            return self._execution_snapshot(execution)
         return {"error": "Unknown action"}
 
-    async def _resolve(self, principal_id: str, task_id: str) -> tuple[str, Any] | None:
-        for kind, service in (
-            ("execution", self._executions),
-            ("scheduled", self._schedules),
-            ("event", self._triggers),
-        ):
-            try:
-                return kind, await service.get(principal_id, task_id)
-            except LookupError:
-                continue
-        return None
-
     @staticmethod
-    def _snapshot(kind: str, record: Any) -> dict[str, Any]:
-        if kind == "execution":
-            return {
-                "task_id": record.task_id,
-                "launch_policy": "immediate" if record.origin in {TaskOrigin.USER, TaskOrigin.AGENT} else record.origin.value,
-                "state": record.state.value,
-                "goal": record.goal,
-                "latest_execution_id": record.task_id,
-                "result": record.final_summary,
-            }
+    def _execution_snapshot(record: Any) -> dict[str, Any]:
         return {
-            "task_id": record.schedule_id if kind == "scheduled" else record.trigger_id,
-            "launch_policy": kind,
+            "task_id": record.task_id,
+            "execution_id": record.execution_id,
+            "task_revision": record.task_revision,
+            "launch_reason": record.launch_reason.value,
             "state": record.state.value,
-            "goal": record.goal,
-            "next_fire_at": getattr(record, "next_fire_at", None),
+            "result": record.final_result,
+            "failure_code": record.failure_code,
         }
 
     def definition(self) -> dict[str, Any]:
@@ -167,8 +155,25 @@ class TaskControlTool(ToolBase):
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["list", "get", "pause", "resume", "cancel", "retry"]},
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "list",
+                            "get",
+                            "pause",
+                            "resume",
+                            "archive",
+                            "restore",
+                            "execute",
+                            "cancel_execution",
+                            "pause_execution",
+                            "resume_execution",
+                            "rerun",
+                        ],
+                    },
                     "task_id": {"type": "string", "maxLength": 128},
+                    "execution_id": {"type": "string", "maxLength": 128},
+                    "include_archived": {"type": "boolean", "default": False},
                 },
                 "required": ["action"],
                 "additionalProperties": False,

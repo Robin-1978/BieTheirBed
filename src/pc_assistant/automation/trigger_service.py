@@ -14,7 +14,7 @@ from pc_assistant.automation.models import (
 )
 from pc_assistant.automation.service import TaskCreationPort
 from pc_assistant.automation.trigger_repository import TriggerRepository
-from pc_assistant.tasks.models import TaskOrigin
+from pc_assistant.tasks.models import TaskLaunchReason
 
 
 logger = logging.getLogger(__name__)
@@ -93,21 +93,18 @@ class TriggerDispatcher:
                 event.principal_id,
                 event.trigger_id,
             )
-            task = await self._tasks.create(
-                RuntimeScope(
-                    principal_id=event.principal_id,
-                    session_handle=event.session_handle,
-                ),
+            execution = await self._tasks.execute_bound_launch(
+                event.principal_id,
+                provider_kind="event",
+                provider_id=event.trigger_id,
                 client_request_id=f"trigger:{event.trigger_event_id}",
-                goal=_trigger_goal(trigger, event),
-                tools_enabled=trigger.tools_enabled,
-                priority=trigger.priority,
-                origin=TaskOrigin.EVENT,
+                launch_reason=TaskLaunchReason.EVENT,
+                goal_override=_trigger_goal(trigger, event),
             )
             await asyncio.to_thread(
                 self._repository.mark_task_created,
                 event.trigger_event_id,
-                task.task_id,
+                execution.execution_id,
             )
         except asyncio.CancelledError:
             raise
@@ -211,6 +208,9 @@ class TriggerService:
             trigger_id,
             paused=paused,
         )
+
+    async def delete(self, principal_id: str, trigger_id: str) -> None:
+        await asyncio.to_thread(self._repository.delete, principal_id, trigger_id)
 
     async def receive(
         self,

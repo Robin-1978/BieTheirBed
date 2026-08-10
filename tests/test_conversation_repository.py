@@ -12,6 +12,7 @@ from pc_assistant.conversation import (
     ChatTurnConflictError,
     ChatTurnState,
     ConversationRepository,
+    ConversationSessionState,
 )
 from pc_assistant.tools.base import ToolEffect, ToolPolicy, ToolRisk
 
@@ -227,3 +228,36 @@ def test_expired_turn_details_are_compacted_without_deleting_final_history(
     assert compacted.tool_steps[0].tool_name == "read_file"
     assert compacted.tool_steps[0].result == {}
     assert repository.compact_expired_details() == 0
+
+
+def test_conversation_sessions_support_history_rename_and_archive(tmp_path: Path) -> None:
+    _database, scope, repository = _repository(tmp_path)
+    session = repository.create_session(scope)
+    repository.create(
+        scope,
+        client_request_id="request-a",
+        user_input="plan a weekend trip",
+    )
+
+    current = repository.get_session(scope.principal_id, scope.session_handle)
+    assert current.title == "新对话"
+    repository.touch_session(
+        scope.principal_id,
+        scope.session_handle,
+        first_input="plan a weekend trip",
+    )
+    current = repository.get_session(scope.principal_id, scope.session_handle)
+    assert current.title == "plan a weekend trip"
+    assert current.turn_count == 1
+
+    renamed = repository.update_session(
+        scope.principal_id,
+        scope.session_handle,
+        title="周末计划",
+        state=ConversationSessionState.ARCHIVED,
+        expected_revision=current.revision,
+    )
+    assert renamed.title == "周末计划"
+    assert renamed.state is ConversationSessionState.ARCHIVED
+    assert repository.list_sessions(scope.principal_id) == ()
+    assert repository.list_sessions(scope.principal_id, include_archived=True) == (renamed,)

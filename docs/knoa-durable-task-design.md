@@ -1,5 +1,10 @@
 # Knoa Durable Task Design
 
+> Historical implementation design. The old document used public `Task` as an
+> execution aggregate. The forward product model now separates stable `Task`
+> definitions from `TaskExecution`; implementation must follow
+> [knoa-product-forward-blueprint.md](./knoa-product-forward-blueprint.md).
+
 > Status: active forward design; B1-B5 complete
 >
 > Date: 2026-08-09

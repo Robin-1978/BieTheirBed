@@ -6,7 +6,7 @@ import secrets
 from typing import Any, Protocol
 
 from pc_assistant.agent_runtime.contracts import RuntimeScope
-from pc_assistant.tasks import TaskOrigin, TaskRecord
+from pc_assistant.tasks import TaskDefinitionRecord, TaskExecutionRecord
 from pc_assistant.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRisk
 
 
@@ -15,14 +15,14 @@ class DetachedSessionPort(Protocol):
 
 
 class BackgroundTaskPort(Protocol):
-    async def create(
+    async def create_definition(
         self,
         scope: RuntimeScope,
         *,
         client_request_id: str,
+        title: str,
         goal: str,
-        origin: TaskOrigin,
-    ) -> TaskRecord: ...
+    ) -> tuple[TaskDefinitionRecord, TaskExecutionRecord | None]: ...
 
 
 class CreateTaskTool(ToolBase):
@@ -50,14 +50,15 @@ class CreateTaskTool(ToolBase):
             scope.principal_id,
             activate=False,
         )
-        task = await self._tasks.create(
+        task, execution = await self._tasks.create_definition(
             detached,
             client_request_id=f"agent:{secrets.token_urlsafe(18)}",
+            title=str(kwargs.get("title", "")).strip(),
             goal=goal,
-            origin=TaskOrigin.AGENT,
         )
         return {
             "task_id": task.task_id,
+            "execution_id": "" if execution is None else execution.execution_id,
             "state": task.state.value,
             "message": "任务已在后台开始",
         }
@@ -74,7 +75,8 @@ class CreateTaskTool(ToolBase):
                         "minLength": 1,
                         "maxLength": 200000,
                         "description": "Self-contained goal for the independent task.",
-                    }
+                    },
+                    "title": {"type": "string", "maxLength": 200},
                 },
                 "required": ["goal"],
                 "additionalProperties": False,

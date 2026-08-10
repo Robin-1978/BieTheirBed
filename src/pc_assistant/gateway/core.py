@@ -19,26 +19,44 @@ from pc_assistant.service.core_api import (
     ArtifactInputRef,
     ChatApprovalResolvedMessage,
     ChatTurnSnapshot,
+    ConversationSessionSnapshot,
     TaskAcceptedMessage,
     TaskCancelResultMessage,
     TaskListMessage,
     TaskPauseResultMessage,
     TaskResumedMessage,
     TaskSnapshot,
+    ProductTaskMessage,
+    ProductTaskSnapshot,
+    ProductTaskExecutionSnapshot,
 )
 from pc_assistant.service.core_client import CoreClient
 from pc_assistant.service.credentials import (
     issue_principal_credential,
     resolve_local_service_token,
 )
-from pc_assistant.tasks import TaskEvent, TaskOrigin, TaskState
+from pc_assistant.tasks import (
+    TaskDefinitionState,
+    TaskEvent,
+    TaskLaunchPolicy,
+    TaskOrigin,
+    TaskState,
+)
 from pc_assistant.tasks import PrincipalTaskEvent
 
 
 class GatewayCoreClient(Protocol):
     is_connected: bool
 
-    async def create_session(self, *, activate: bool = True) -> str: ...
+    async def create_session(self, *, activate: bool = True, title: str = "新对话") -> str: ...
+
+    async def get_conversation_session(self, session_handle: str) -> ConversationSessionSnapshot: ...
+
+    async def list_conversation_sessions(self, *, include_archived: bool = False, limit: int = 100) -> tuple[ConversationSessionSnapshot, ...]: ...
+
+    async def update_conversation_session(self, session_handle: str, *, title: str | None = None, state=None, expected_revision: int | None = None) -> ConversationSessionSnapshot: ...
+
+    async def delete_conversation_session(self, session_handle: str) -> None: ...
 
     async def create_task(
         self,
@@ -77,6 +95,8 @@ class GatewayCoreClient(Protocol):
 
     async def cancel_chat_turn(self, turn_id: str) -> ChatTurnSnapshot: ...
 
+    async def retry_chat_turn(self, turn_id: str) -> ChatTurnSnapshot: ...
+
     async def resolve_chat_approval(
         self,
         approval_id: str,
@@ -95,6 +115,44 @@ class GatewayCoreClient(Protocol):
         limit: int = 50,
         cursor: str = "",
     ) -> TaskListMessage: ...
+
+    async def create_product_task(
+        self,
+        session_handle: str,
+        goal: str,
+        *,
+        title: str = "",
+        attachments: tuple[ArtifactInputRef, ...] = (),
+        tools_enabled: bool = True,
+        priority: int = 0,
+        launch_policy: TaskLaunchPolicy | None = None,
+        notification_policy: dict[str, bool] | None = None,
+    ) -> ProductTaskMessage: ...
+
+    async def get_product_task(self, task_id: str) -> ProductTaskSnapshot: ...
+
+    async def list_product_tasks(
+        self,
+        *,
+        state: TaskDefinitionState | None = None,
+        include_archived: bool = False,
+        limit: int = 100,
+    ) -> tuple[ProductTaskSnapshot, ...]: ...
+
+    async def update_product_task(self, task_id: str, **changes) -> ProductTaskSnapshot: ...
+
+    async def set_product_task_state(
+        self, task_id: str, state: TaskDefinitionState
+    ) -> ProductTaskSnapshot: ...
+
+    async def delete_product_task(self, task_id: str) -> None: ...
+    async def execute_product_task(self, task_id: str) -> ProductTaskExecutionSnapshot: ...
+    async def get_product_task_execution(self, execution_id: str) -> ProductTaskExecutionSnapshot: ...
+    async def list_product_task_executions(
+        self, task_id: str, *, limit: int = 100
+    ) -> tuple[ProductTaskExecutionSnapshot, ...]: ...
+    async def delete_product_task_execution(self, execution_id: str) -> None: ...
+    async def rerun_product_task_execution(self, execution_id: str) -> ProductTaskExecutionSnapshot: ...
 
     async def cancel_task(
         self,
@@ -192,11 +250,31 @@ class GatewayCoreBridge:
             return_exceptions=True,
         )
 
-    async def create_session(self, principal_id: str, *, activate: bool = True) -> str:
+    async def create_session(self, principal_id: str, *, activate: bool = True, title: str = "新对话") -> str:
         client = await self._client_for(principal_id)
         if activate:
-            return await client.create_session()
-        return await client.create_session(activate=False)
+            return await client.create_session(title=title)
+        return await client.create_session(activate=False, title=title)
+
+    async def get_conversation_session(self, principal_id: str, session_handle: str) -> ConversationSessionSnapshot:
+        return await (await self._client_for(principal_id)).get_conversation_session(session_handle)
+
+    async def list_conversation_sessions(self, principal_id: str, *, include_archived: bool = False, limit: int = 100) -> tuple[ConversationSessionSnapshot, ...]:
+        return await (await self._client_for(principal_id)).list_conversation_sessions(
+            include_archived=include_archived,
+            limit=limit,
+        )
+
+    async def update_conversation_session(self, principal_id: str, session_handle: str, *, title: str | None = None, state=None, expected_revision: int | None = None) -> ConversationSessionSnapshot:
+        return await (await self._client_for(principal_id)).update_conversation_session(
+            session_handle,
+            title=title,
+            state=state,
+            expected_revision=expected_revision,
+        )
+
+    async def delete_conversation_session(self, principal_id: str, session_handle: str) -> None:
+        await (await self._client_for(principal_id)).delete_conversation_session(session_handle)
 
     async def create_task(
         self,
@@ -275,6 +353,13 @@ class GatewayCoreBridge:
     ) -> ChatTurnSnapshot:
         return await (await self._client_for(principal_id)).cancel_chat_turn(turn_id)
 
+    async def retry_chat_turn(
+        self,
+        principal_id: str,
+        turn_id: str,
+    ) -> ChatTurnSnapshot:
+        return await (await self._client_for(principal_id)).retry_chat_turn(turn_id)
+
     async def resolve_chat_approval(
         self,
         principal_id: str,
@@ -310,6 +395,121 @@ class GatewayCoreBridge:
         if origins:
             kwargs["origins"] = origins
         return await client.list_tasks(**kwargs)
+
+    async def create_product_task(
+        self,
+        principal_id: str,
+        session_handle: str,
+        goal: str,
+        *,
+        title: str = "",
+        attachments: tuple[ArtifactInputRef, ...] = (),
+        tools_enabled: bool = True,
+        priority: int = 0,
+        launch_policy: TaskLaunchPolicy | None = None,
+        notification_policy: dict[str, bool] | None = None,
+    ) -> ProductTaskMessage:
+        return await (await self._client_for(principal_id)).create_product_task(
+            session_handle,
+            goal,
+            title=title,
+            attachments=attachments,
+            tools_enabled=tools_enabled,
+            priority=priority,
+            launch_policy=launch_policy,
+            notification_policy=notification_policy,
+        )
+
+    async def get_product_task(
+        self,
+        principal_id: str,
+        task_id: str,
+    ) -> ProductTaskSnapshot:
+        return await (await self._client_for(principal_id)).get_product_task(task_id)
+
+    async def list_product_tasks(
+        self,
+        principal_id: str,
+        *,
+        state: TaskDefinitionState | None = None,
+        include_archived: bool = False,
+        limit: int = 100,
+    ) -> tuple[ProductTaskSnapshot, ...]:
+        return await (await self._client_for(principal_id)).list_product_tasks(
+            state=state,
+            include_archived=include_archived,
+            limit=limit,
+        )
+
+    async def update_product_task(
+        self,
+        principal_id: str,
+        task_id: str,
+        **changes,
+    ) -> ProductTaskSnapshot:
+        return await (await self._client_for(principal_id)).update_product_task(
+            task_id,
+            **changes,
+        )
+
+    async def set_product_task_state(
+        self,
+        principal_id: str,
+        task_id: str,
+        state: TaskDefinitionState,
+    ) -> ProductTaskSnapshot:
+        return await (await self._client_for(principal_id)).set_product_task_state(
+            task_id,
+            state,
+        )
+
+    async def delete_product_task(self, principal_id: str, task_id: str) -> None:
+        await (await self._client_for(principal_id)).delete_product_task(task_id)
+
+    async def execute_product_task(
+        self,
+        principal_id: str,
+        task_id: str,
+    ) -> ProductTaskExecutionSnapshot:
+        return await (await self._client_for(principal_id)).execute_product_task(task_id)
+
+    async def get_product_task_execution(
+        self,
+        principal_id: str,
+        execution_id: str,
+    ) -> ProductTaskExecutionSnapshot:
+        return await (
+            await self._client_for(principal_id)
+        ).get_product_task_execution(execution_id)
+
+    async def list_product_task_executions(
+        self,
+        principal_id: str,
+        task_id: str,
+        *,
+        limit: int = 100,
+    ) -> tuple[ProductTaskExecutionSnapshot, ...]:
+        return await (
+            await self._client_for(principal_id)
+        ).list_product_task_executions(task_id, limit=limit)
+
+    async def delete_product_task_execution(
+        self,
+        principal_id: str,
+        execution_id: str,
+    ) -> None:
+        await (
+            await self._client_for(principal_id)
+        ).delete_product_task_execution(execution_id)
+
+    async def rerun_product_task_execution(
+        self,
+        principal_id: str,
+        execution_id: str,
+    ) -> ProductTaskExecutionSnapshot:
+        return await (
+            await self._client_for(principal_id)
+        ).rerun_product_task_execution(execution_id)
 
     async def cancel_task(
         self,

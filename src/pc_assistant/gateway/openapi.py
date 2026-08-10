@@ -22,8 +22,13 @@ from pc_assistant.gateway.protocol import (
     ChatTurnListResponse,
     ChatTurnResponse,
     ChallengeResponse,
-    CreateTaskRequest,
+    CreateProductTaskRequest,
+    UpdateProductTaskRequest,
     CreateChatTurnRequest,
+    CreateConversationSessionRequest,
+    UpdateConversationSessionRequest,
+    ConversationSessionResponse,
+    ConversationSessionListResponse,
     ErrorResponse,
     HealthResponse,
     PairChallengeRequest,
@@ -34,15 +39,16 @@ from pc_assistant.gateway.protocol import (
     RegisterPushRequest,
     ResolveApprovalRequest,
     ResumeTaskRequest,
-    RetryTaskRequest,
     RuntimeStatusResponse,
     SessionCreatedResponse,
     SessionResponse,
-    TaskAcceptedResponse,
-    TaskCommandResponse,
+    ProductTaskResponse,
+    ProductTaskListResponse,
+    ProductTaskExecutionResponse,
+    ProductTaskExecutionListResponse,
+    DeletedResponse,
+    DeviceRevokedResponse,
     TaskEventListResponse,
-    TaskListResponse,
-    TaskResponse,
     ToolListResponse,
 )
 
@@ -60,21 +66,27 @@ _MODELS: tuple[type[BaseModel], ...] = (
     AuthCompleteResponse,
     SessionResponse,
     SessionCreatedResponse,
-    CreateTaskRequest,
+    CreateProductTaskRequest,
+    UpdateProductTaskRequest,
     CreateChatTurnRequest,
+    CreateConversationSessionRequest,
+    UpdateConversationSessionRequest,
+    ConversationSessionResponse,
+    ConversationSessionListResponse,
     ChatTurnResponse,
     ChatTurnListResponse,
     ChatApprovalResolvedResponse,
-    TaskAcceptedResponse,
-    TaskResponse,
-    TaskListResponse,
+    ProductTaskResponse,
+    ProductTaskListResponse,
+    ProductTaskExecutionResponse,
+    ProductTaskExecutionListResponse,
+    DeletedResponse,
+    DeviceRevokedResponse,
     CancelTaskRequest,
     PauseTaskRequest,
     RegisterPushRequest,
     PushRegistrationResponse,
     ResumeTaskRequest,
-    RetryTaskRequest,
-    TaskCommandResponse,
     TaskEventListResponse,
     ResolveApprovalRequest,
     ApprovalResolvedResponse,
@@ -210,11 +222,65 @@ def gateway_openapi_schema() -> dict[str, Any]:
                 "post": {
                     "operationId": "createCoreSession",
                     "security": bearer,
+                    "requestBody": _json_body(CreateConversationSessionRequest),
                     "responses": {
                         "201": _json_response("Core session", SessionCreatedResponse),
                         **_errors("401", "429", "503"),
                     },
                 }
+            },
+            "/v1/conversations/sessions": {
+                "get": {
+                    "operationId": "listConversationSessions",
+                    "security": bearer,
+                    "parameters": [
+                        _query("include_archived", {"type": "boolean"}),
+                        _query("limit", {"type": "integer", "minimum": 1, "maximum": 200}),
+                    ],
+                    "responses": {
+                        "200": _json_response("Conversation sessions", ConversationSessionListResponse),
+                        **_errors("400", "401", "429", "503"),
+                    },
+                }
+            },
+            "/v1/conversations/sessions/{session_handle}": {
+                "get": {
+                    "operationId": "getConversationSession",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "session_handle", "in": "path", "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 256},
+                    }],
+                    "responses": {
+                        "200": _json_response("Conversation session", ConversationSessionResponse),
+                        **_errors("401", "404", "429", "503"),
+                    },
+                },
+                "patch": {
+                    "operationId": "updateConversationSession",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "session_handle", "in": "path", "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 256},
+                    }],
+                    "requestBody": _json_body(UpdateConversationSessionRequest),
+                    "responses": {
+                        "200": _json_response("Updated conversation session", ConversationSessionResponse),
+                        **_errors("400", "401", "404", "422", "429", "503"),
+                    },
+                },
+                "delete": {
+                    "operationId": "deleteConversationSession",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "session_handle", "in": "path", "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 256},
+                    }],
+                    "responses": {
+                        "200": _json_response("Deleted conversation session", DeletedResponse),
+                        **_errors("401", "404", "422", "429", "503"),
+                    },
+                },
             },
             "/v1/conversations/sessions/{session_handle}/turns": {
                 "post": {
@@ -301,6 +367,20 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     },
                 }
             },
+            "/v1/conversations/turns/{turn_id}/retry": {
+                "post": {
+                    "operationId": "retryChatTurn",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "turn_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                    }],
+                    "responses": {
+                        "202": _json_response("Retried ChatTurn", ChatTurnResponse),
+                        **_errors("401", "404", "422", "429", "503"),
+                    },
+                }
+            },
             "/v1/conversations/approvals/{approval_id}/resolve": {
                 "post": {
                     "operationId": "resolveChatApproval",
@@ -322,9 +402,9 @@ def gateway_openapi_schema() -> dict[str, Any]:
                 "post": {
                     "operationId": "createTask",
                     "security": bearer,
-                    "requestBody": _json_body(CreateTaskRequest),
+                    "requestBody": _json_body(CreateProductTaskRequest),
                     "responses": {
-                        "202": _json_response("Task accepted", TaskAcceptedResponse),
+                        "201": _json_response("Task created", ProductTaskResponse),
                         **_errors("400", "401", "404", "422", "429", "503"),
                     },
                 },
@@ -332,30 +412,21 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     "operationId": "listTasks",
                     "security": bearer,
                     "parameters": [
-                        _query("session_handle", {"type": "string", "maxLength": 256}),
                         _query(
                             "state",
                             {
                                 "type": "string",
-                                "enum": [
-                                    "queued",
-                                    "running",
-                                    "waiting_approval",
-                                    "paused",
-                                    "completed",
-                                    "failed",
-                                    "cancelled",
-                                ],
+                                "enum": ["active", "paused", "archived"],
                             },
                         ),
+                        _query("include_archived", {"type": "boolean"}),
                         _query(
                             "limit",
-                            {"type": "integer", "minimum": 1, "maximum": 100},
+                            {"type": "integer", "minimum": 1, "maximum": 200},
                         ),
-                        _query("cursor", {"type": "string", "maxLength": 512}),
                     ],
                     "responses": {
-                        "200": _json_response("Owned Tasks", TaskListResponse),
+                        "200": _json_response("Owned Tasks", ProductTaskListResponse),
                         **_errors("400", "401", "429", "503"),
                     },
                 },
@@ -373,60 +444,66 @@ def gateway_openapi_schema() -> dict[str, Any]:
                         }
                     ],
                     "responses": {
-                        "200": _json_response("Owned Task", TaskResponse),
+                        "200": _json_response("Owned Task", ProductTaskResponse),
                         **_errors("400", "401", "404", "429", "503"),
                     },
-                }
-            },
-            "/v1/tasks/{task_id}/events": {
-                "get": {
-                    "operationId": "listTaskEvents",
+                },
+                "patch": {
+                    "operationId": "updateTask",
                     "security": bearer,
-                    "parameters": [
-                        {
-                            "name": "task_id",
-                            "in": "path",
-                            "required": True,
-                            "schema": {"type": "string", "maxLength": 128},
-                        },
-                        _query("after_seq", {"type": "integer", "minimum": 0}),
-                    ],
+                    "parameters": [{
+                        "name": "task_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "maxLength": 128},
+                    }],
+                    "requestBody": _json_body(UpdateProductTaskRequest),
                     "responses": {
-                        "200": _json_response("Task event timeline", TaskEventListResponse),
-                        **_errors("400", "401", "404", "429", "503"),
-                    },
-                }
-            },
-            "/v1/tasks/{task_id}/cancel": {
-                "post": {
-                    "operationId": "cancelTask",
-                    "security": bearer,
-                    "parameters": [
-                        {
-                            "name": "task_id",
-                            "in": "path",
-                            "required": True,
-                            "schema": {"type": "string", "maxLength": 128},
-                        }
-                    ],
-                    "requestBody": _json_body(CancelTaskRequest),
-                    "responses": {
-                        "200": {
-                            "description": "Cancellation result",
-                            "content": {
-                                "application/json": {
-                                    "schema": {
-                                        "type": "object",
-                                        "required": ["accepted"],
-                                        "properties": {
-                                            "accepted": {"type": "boolean"},
-                                            "state": {"type": ["string", "null"]},
-                                        },
-                                    }
-                                }
-                            },
-                        },
+                        "200": _json_response("Updated Task", ProductTaskResponse),
                         **_errors("400", "401", "404", "422", "429", "503"),
+                    },
+                },
+                "delete": {
+                    "operationId": "deleteTask",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "task_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "maxLength": 128},
+                    }],
+                    "responses": {
+                        "200": _json_response("Task deleted", DeletedResponse),
+                        **_errors("400", "401", "404", "409", "429", "503"),
+                    },
+                }
+            },
+            "/v1/tasks/{task_id}/execute": {
+                "post": {
+                    "operationId": "executeTask",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "task_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "maxLength": 128},
+                    }],
+                    "responses": {
+                        "202": _json_response("Execution accepted", ProductTaskExecutionResponse),
+                        **_errors("400", "401", "404", "409", "422", "429", "503"),
+                    },
+                }
+            },
+            "/v1/tasks/{task_id}/executions": {
+                "get": {
+                    "operationId": "listTaskExecutions",
+                    "security": bearer,
+                    "parameters": [
+                        {
+                            "name": "task_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "maxLength": 128},
+                        },
+                        _query("limit", {"type": "integer", "minimum": 1, "maximum": 200}),
+                    ],
+                    "responses": {
+                        "200": _json_response("Task executions", ProductTaskExecutionListResponse),
+                        **_errors("400", "401", "404", "429", "503"),
                     },
                 }
             },
@@ -442,9 +519,8 @@ def gateway_openapi_schema() -> dict[str, Any]:
                             "schema": {"type": "string", "maxLength": 128},
                         }
                     ],
-                    "requestBody": _json_body(PauseTaskRequest),
                     "responses": {
-                        "200": _json_response("Pause result", TaskCommandResponse),
+                        "200": _json_response("Paused Task", ProductTaskResponse),
                         **_errors("400", "401", "404", "422", "429", "503"),
                     },
                 }
@@ -461,28 +537,118 @@ def gateway_openapi_schema() -> dict[str, Any]:
                             "schema": {"type": "string", "maxLength": 128},
                         }
                     ],
-                    "requestBody": _json_body(ResumeTaskRequest),
                     "responses": {
-                        "200": _json_response("Resume result", TaskCommandResponse),
+                        "200": _json_response("Active Task", ProductTaskResponse),
                         **_errors("400", "401", "404", "422", "429", "503"),
                     },
                 }
             },
-            "/v1/tasks/{task_id}/retry": {
+            "/v1/tasks/{task_id}/archive": {
                 "post": {
-                    "operationId": "retryTask",
+                    "operationId": "archiveTask",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "task_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "maxLength": 128},
+                    }],
+                    "responses": {
+                        "200": _json_response("Archived Task", ProductTaskResponse),
+                        **_errors("400", "401", "404", "422", "429", "503"),
+                    },
+                }
+            },
+            "/v1/tasks/{task_id}/restore": {
+                "post": {
+                    "operationId": "restoreTask",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "task_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "maxLength": 128},
+                    }],
+                    "responses": {
+                        "200": _json_response("Restored Task", ProductTaskResponse),
+                        **_errors("400", "401", "404", "422", "429", "503"),
+                    },
+                }
+            },
+            "/v1/task-executions/{execution_id}": {
+                "get": {
+                    "operationId": "getTaskExecution",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "execution_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "maxLength": 128},
+                    }],
+                    "responses": {
+                        "200": _json_response("Task execution", ProductTaskExecutionResponse),
+                        **_errors("400", "401", "404", "429", "503"),
+                    },
+                },
+                "delete": {
+                    "operationId": "deleteTaskExecution",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "execution_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "maxLength": 128},
+                    }],
+                    "responses": {
+                        "200": _json_response("Task execution deleted", DeletedResponse),
+                        **_errors("400", "401", "404", "409", "429", "503"),
+                    },
+                },
+            },
+            "/v1/task-executions/{execution_id}/events": {
+                "get": {
+                    "operationId": "listTaskExecutionEvents",
                     "security": bearer,
                     "parameters": [
-                        {
-                            "name": "task_id",
-                            "in": "path",
-                            "required": True,
-                            "schema": {"type": "string", "maxLength": 128},
-                        }
+                        {"name": "execution_id", "in": "path", "required": True,
+                         "schema": {"type": "string", "maxLength": 128}},
+                        _query("after_seq", {"type": "integer", "minimum": 0}),
                     ],
-                    "requestBody": _json_body(RetryTaskRequest),
                     "responses": {
-                        "202": _json_response("Retry accepted", TaskAcceptedResponse),
+                        "200": _json_response("Execution event timeline", TaskEventListResponse),
+                        **_errors("400", "401", "404", "429", "503"),
+                    },
+                }
+            },
+            "/v1/task-executions/{execution_id}/cancel": {
+                "post": {
+                    "operationId": "cancelTaskExecution", "security": bearer,
+                    "parameters": [{"name": "execution_id", "in": "path", "required": True,
+                                    "schema": {"type": "string", "maxLength": 128}}],
+                    "requestBody": _json_body(CancelTaskRequest),
+                    "responses": {"200": {"description": "Cancellation result"},
+                                  **_errors("400", "401", "404", "422", "429", "503")},
+                }
+            },
+            "/v1/task-executions/{execution_id}/pause": {
+                "post": {
+                    "operationId": "pauseTaskExecution", "security": bearer,
+                    "parameters": [{"name": "execution_id", "in": "path", "required": True,
+                                    "schema": {"type": "string", "maxLength": 128}}],
+                    "requestBody": _json_body(PauseTaskRequest),
+                    "responses": {"200": {"description": "Pause result"},
+                                  **_errors("400", "401", "404", "422", "429", "503")},
+                }
+            },
+            "/v1/task-executions/{execution_id}/resume": {
+                "post": {
+                    "operationId": "resumeTaskExecution", "security": bearer,
+                    "parameters": [{"name": "execution_id", "in": "path", "required": True,
+                                    "schema": {"type": "string", "maxLength": 128}}],
+                    "requestBody": _json_body(ResumeTaskRequest),
+                    "responses": {"200": {"description": "Resume result"},
+                                  **_errors("400", "401", "404", "422", "429", "503")},
+                }
+            },
+            "/v1/task-executions/{execution_id}/rerun": {
+                "post": {
+                    "operationId": "rerunTaskExecution", "security": bearer,
+                    "parameters": [{"name": "execution_id", "in": "path", "required": True,
+                                    "schema": {"type": "string", "maxLength": 128}}],
+                    "responses": {
+                        "202": _json_response("Rerun accepted", ProductTaskExecutionResponse),
                         **_errors("400", "401", "404", "422", "429", "503"),
                     },
                 }
@@ -700,6 +866,19 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     "responses": {
                         "200": _json_response("Device audit events", AuditListResponse),
                         **_errors("400", "401", "429"),
+                    },
+                }
+            },
+            "/v1/device": {
+                "delete": {
+                    "operationId": "revokeCurrentDevice",
+                    "security": bearer,
+                    "responses": {
+                        "200": _json_response(
+                            "Current device revoked",
+                            DeviceRevokedResponse,
+                        ),
+                        **_errors("401", "404", "429"),
                     },
                 }
             },

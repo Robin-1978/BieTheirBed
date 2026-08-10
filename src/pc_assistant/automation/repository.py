@@ -367,6 +367,14 @@ class ScheduleRepository:
             raise ScheduleNotFoundError("Schedule not found")
         return self._record(row)
 
+    def delete(self, principal_id: str, schedule_id: str) -> None:
+        schedule = self.get(principal_id, schedule_id)
+        with self._connect() as db:
+            db.execute(
+                "DELETE FROM runtime_schedules WHERE schedule_id=? AND principal_id=?",
+                (schedule.schedule_id, schedule.principal_id),
+            )
+
     def get_occurrence(self, occurrence_id: str) -> ScheduleOccurrenceRecord:
         normalized_id = self._identifier(occurrence_id, label="occurrence_id")
         with self._connect() as db:

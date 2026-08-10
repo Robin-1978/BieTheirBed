@@ -3,7 +3,7 @@
     "name": "小诺",
     "slug": "knoa-mobile",
     "scheme": "knoa",
-    "version": "0.1.9",
+    "version": "0.2.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "icon": "../../assets/branding/xiaonuo-avatar-tech.png",
@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "dev.knoa.mobile",
-      "versionCode": 10,
+      "versionCode": 11,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "REQUEST_INSTALL_PACKAGES"
@@ -27,6 +27,13 @@
       "expo-router",
       "expo-secure-store",
       "expo-notifications",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "允许小诺读取你选择的照片",
+          "savePhotosPermission": "允许小诺把图片保存到手机相册"
+        }
+      ],
       [
         "expo-audio",
         {

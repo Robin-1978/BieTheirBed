@@ -341,6 +341,16 @@
             "gatewaySession": []
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationSessionRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "description": "Core session",
@@ -353,6 +363,346 @@
             }
           },
           "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/conversations/sessions": {
+      "get": {
+        "operationId": "listConversationSessions",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "include_archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Conversation sessions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationSessionListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/conversations/sessions/{session_handle}": {
+      "get": {
+        "operationId": "getConversationSession",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Conversation session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationSessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateConversationSession",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateConversationSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated conversation session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteConversationSession",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted conversation session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
             "description": "Request rejected",
             "content": {
               "application/json": {
@@ -793,6 +1143,90 @@
         }
       }
     },
+    "/v1/conversations/turns/{turn_id}/retry": {
+      "post": {
+        "operationId": "retryChatTurn",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "turn_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Retried ChatTurn",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatTurnResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/conversations/approvals/{approval_id}/resolve": {
       "post": {
         "operationId": "resolveChatApproval",
@@ -900,18 +1334,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateTaskRequest"
+                "$ref": "#/components/schemas/CreateProductTaskRequest"
               }
             }
           }
         },
         "responses": {
-          "202": {
-            "description": "Task accepted",
+          "201": {
+            "description": "Task created",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TaskAcceptedResponse"
+                  "$ref": "#/components/schemas/ProductTaskResponse"
                 }
               }
             }
@@ -987,29 +1421,24 @@
         ],
         "parameters": [
           {
-            "name": "session_handle",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "maxLength": 256
-            }
-          },
-          {
             "name": "state",
             "in": "query",
             "required": false,
             "schema": {
               "type": "string",
               "enum": [
-                "queued",
-                "running",
-                "waiting_approval",
+                "active",
                 "paused",
-                "completed",
-                "failed",
-                "cancelled"
+                "archived"
               ]
+            }
+          },
+          {
+            "name": "include_archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           },
           {
@@ -1019,16 +1448,7 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 100
-            }
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "maxLength": 512
+              "maximum": 200
             }
           }
         ],
@@ -1038,7 +1458,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TaskListResponse"
+                  "$ref": "#/components/schemas/ProductTaskListResponse"
                 }
               }
             }
@@ -1111,7 +1531,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TaskResponse"
+                  "$ref": "#/components/schemas/ProductTaskResponse"
                 }
               }
             }
@@ -1167,103 +1587,9 @@
             }
           }
         }
-      }
-    },
-    "/v1/tasks/{task_id}/events": {
-      "get": {
-        "operationId": "listTaskEvents",
-        "security": [
-          {
-            "gatewaySession": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "task_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "maxLength": 128
-            }
-          },
-          {
-            "name": "after_seq",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Task event timeline",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskEventListResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/tasks/{task_id}/cancel": {
-      "post": {
-        "operationId": "cancelTask",
+      },
+      "patch": {
+        "operationId": "updateTask",
         "security": [
           {
             "gatewaySession": []
@@ -1285,32 +1611,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CancelTaskRequest"
+                "$ref": "#/components/schemas/UpdateProductTaskRequest"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Cancellation result",
+            "description": "Updated Task",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": [
-                    "accepted"
-                  ],
-                  "properties": {
-                    "accepted": {
-                      "type": "boolean"
-                    },
-                    "state": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  }
+                  "$ref": "#/components/schemas/ProductTaskResponse"
                 }
               }
             }
@@ -1376,6 +1688,293 @@
             }
           }
         }
+      },
+      "delete": {
+        "operationId": "deleteTask",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tasks/{task_id}/execute": {
+      "post": {
+        "operationId": "executeTask",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Execution accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductTaskExecutionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tasks/{task_id}/executions": {
+      "get": {
+        "operationId": "listTaskExecutions",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task executions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductTaskExecutionListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/tasks/{task_id}/pause": {
@@ -1397,23 +1996,13 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PauseTaskRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
-            "description": "Pause result",
+            "description": "Paused Task",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TaskCommandResponse"
+                  "$ref": "#/components/schemas/ProductTaskResponse"
                 }
               }
             }
@@ -1500,23 +2089,13 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ResumeTaskRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
-            "description": "Resume result",
+            "description": "Active Task",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TaskCommandResponse"
+                  "$ref": "#/components/schemas/ProductTaskResponse"
                 }
               }
             }
@@ -1584,9 +2163,9 @@
         }
       }
     },
-    "/v1/tasks/{task_id}/retry": {
+    "/v1/tasks/{task_id}/archive": {
       "post": {
-        "operationId": "retryTask",
+        "operationId": "archiveTask",
         "security": [
           {
             "gatewaySession": []
@@ -1603,23 +2182,753 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "Archived Task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductTaskResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tasks/{task_id}/restore": {
+      "post": {
+        "operationId": "restoreTask",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Restored Task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductTaskResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-executions/{execution_id}": {
+      "get": {
+        "operationId": "getTaskExecution",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task execution",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductTaskExecutionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteTaskExecution",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task execution deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-executions/{execution_id}/events": {
+      "get": {
+        "operationId": "listTaskExecutionEvents",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Execution event timeline",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskEventListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-executions/{execution_id}/cancel": {
+      "post": {
+        "operationId": "cancelTaskExecution",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RetryTaskRequest"
+                "$ref": "#/components/schemas/CancelTaskRequest"
               }
             }
           }
         },
         "responses": {
-          "202": {
-            "description": "Retry accepted",
+          "200": {
+            "description": "Cancellation result"
+          },
+          "400": {
+            "description": "Request rejected",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TaskAcceptedResponse"
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-executions/{execution_id}/pause": {
+      "post": {
+        "operationId": "pauseTaskExecution",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PauseTaskRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pause result"
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-executions/{execution_id}/resume": {
+      "post": {
+        "operationId": "resumeTaskExecution",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeTaskRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resume result"
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-executions/{execution_id}/rerun": {
+      "post": {
+        "operationId": "rerunTaskExecution",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Rerun accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductTaskExecutionResponse"
                 }
               }
             }
@@ -2572,6 +3881,58 @@
         }
       }
     },
+    "/v1/device": {
+      "delete": {
+        "operationId": "revokeCurrentDevice",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current device revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceRevokedResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/device/push": {
       "put": {
         "operationId": "registerDevicePush",
@@ -3502,6 +4863,106 @@
         "title": "ChatTurnState",
         "type": "string"
       },
+      "ConversationSessionListResponse": {
+        "properties": {
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationSessionSnapshot"
+            },
+            "title": "Sessions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "title": "ConversationSessionListResponse",
+        "type": "object"
+      },
+      "ConversationSessionResponse": {
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/ConversationSessionSnapshot"
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "title": "ConversationSessionResponse",
+        "type": "object"
+      },
+      "ConversationSessionSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "session_handle": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Session Handle",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ConversationSessionState"
+          },
+          "turn_count": {
+            "minimum": 0,
+            "title": "Turn Count",
+            "type": "integer"
+          },
+          "last_turn_at": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Last Turn At"
+          },
+          "created_at": {
+            "minimum": 0.0,
+            "title": "Created At",
+            "type": "number"
+          },
+          "updated_at": {
+            "minimum": 0.0,
+            "title": "Updated At",
+            "type": "number"
+          },
+          "revision": {
+            "minimum": 1,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_handle",
+          "title",
+          "state",
+          "turn_count",
+          "created_at",
+          "updated_at",
+          "revision"
+        ],
+        "title": "ConversationSessionSnapshot",
+        "type": "object"
+      },
+      "ConversationSessionState": {
+        "enum": [
+          "active",
+          "archived"
+        ],
+        "title": "ConversationSessionState",
+        "type": "string"
+      },
       "CreateChatTurnRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3529,13 +4990,32 @@
         "title": "CreateChatTurnRequest",
         "type": "object"
       },
-      "CreateTaskRequest": {
+      "CreateConversationSessionRequest": {
         "additionalProperties": false,
         "properties": {
-          "input": {
+          "title": {
+            "default": "新对话",
+            "maxLength": 120,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "title": "CreateConversationSessionRequest",
+        "type": "object"
+      },
+      "CreateProductTaskRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "title": {
             "default": "",
+            "maxLength": 200,
+            "title": "Title",
+            "type": "string"
+          },
+          "goal": {
             "maxLength": 200000,
-            "title": "Input",
+            "minLength": 1,
+            "title": "Goal",
             "type": "string"
           },
           "attachments": {
@@ -3559,20 +5039,66 @@
             "title": "Priority",
             "type": "integer"
           },
-          "parent_task_id": {
-            "default": "",
-            "maxLength": 128,
-            "title": "Parent Task Id",
-            "type": "string"
+          "launch_policy": {
+            "$ref": "#/components/schemas/TaskLaunchPolicy"
+          },
+          "notification_policy": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Notification Policy",
+            "type": "object"
           }
         },
-        "title": "CreateTaskRequest",
+        "required": [
+          "goal"
+        ],
+        "title": "CreateProductTaskRequest",
+        "type": "object"
+      },
+      "DeletedResponse": {
+        "properties": {
+          "deleted": {
+            "default": true,
+            "title": "Deleted",
+            "type": "boolean"
+          }
+        },
+        "title": "DeletedResponse",
+        "type": "object"
+      },
+      "DeviceRevokedResponse": {
+        "properties": {
+          "revoked": {
+            "title": "Revoked",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "revoked"
+        ],
+        "title": "DeviceRevokedResponse",
         "type": "object"
       },
       "ErrorResponse": {
         "properties": {
           "error": {
             "title": "Error",
+            "type": "string"
+          },
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "retryable": {
+            "default": false,
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "correlation_id": {
+            "default": "",
+            "title": "Correlation Id",
             "type": "string"
           }
         },
@@ -3756,6 +5282,302 @@
         "title": "PauseTaskRequest",
         "type": "object"
       },
+      "ProductTaskExecutionListResponse": {
+        "properties": {
+          "executions": {
+            "items": {
+              "$ref": "#/components/schemas/ProductTaskExecutionSnapshot"
+            },
+            "title": "Executions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "executions"
+        ],
+        "title": "ProductTaskExecutionListResponse",
+        "type": "object"
+      },
+      "ProductTaskExecutionResponse": {
+        "properties": {
+          "execution": {
+            "$ref": "#/components/schemas/ProductTaskExecutionSnapshot"
+          }
+        },
+        "required": [
+          "execution"
+        ],
+        "title": "ProductTaskExecutionResponse",
+        "type": "object"
+      },
+      "ProductTaskExecutionSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "execution_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Execution Id",
+            "type": "string"
+          },
+          "task_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Task Id",
+            "type": "string"
+          },
+          "task_revision": {
+            "minimum": 1,
+            "title": "Task Revision",
+            "type": "integer"
+          },
+          "launch_reason": {
+            "$ref": "#/components/schemas/TaskLaunchReason"
+          },
+          "goal_snapshot": {
+            "maxLength": 200000,
+            "minLength": 1,
+            "title": "Goal Snapshot",
+            "type": "string"
+          },
+          "attachment_snapshots": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ArtifactInputRef"
+            },
+            "maxItems": 8,
+            "title": "Attachment Snapshots",
+            "type": "array"
+          },
+          "policy_snapshot": {
+            "$ref": "#/components/schemas/TaskLaunchPolicy"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TaskState"
+          },
+          "phase": {
+            "default": "",
+            "title": "Phase",
+            "type": "string"
+          },
+          "cancel_requested": {
+            "default": false,
+            "title": "Cancel Requested",
+            "type": "boolean"
+          },
+          "final_result": {
+            "default": "",
+            "title": "Final Result",
+            "type": "string"
+          },
+          "failure_code": {
+            "default": "",
+            "title": "Failure Code",
+            "type": "string"
+          },
+          "created_at": {
+            "minimum": 0.0,
+            "title": "Created At",
+            "type": "number"
+          },
+          "updated_at": {
+            "minimum": 0.0,
+            "title": "Updated At",
+            "type": "number"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Finished At"
+          },
+          "trace": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskExecutionTrace"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "approvals": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/TaskApprovalSnapshot"
+            },
+            "title": "Approvals",
+            "type": "array"
+          }
+        },
+        "required": [
+          "execution_id",
+          "task_id",
+          "task_revision",
+          "launch_reason",
+          "goal_snapshot",
+          "policy_snapshot",
+          "state",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ProductTaskExecutionSnapshot",
+        "type": "object"
+      },
+      "ProductTaskListResponse": {
+        "properties": {
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/ProductTaskSnapshot"
+            },
+            "title": "Tasks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tasks"
+        ],
+        "title": "ProductTaskListResponse",
+        "type": "object"
+      },
+      "ProductTaskResponse": {
+        "properties": {
+          "task": {
+            "$ref": "#/components/schemas/ProductTaskSnapshot"
+          },
+          "execution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProductTaskExecutionSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "title": "ProductTaskResponse",
+        "type": "object"
+      },
+      "ProductTaskSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Task Id",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "goal": {
+            "maxLength": 200000,
+            "minLength": 1,
+            "title": "Goal",
+            "type": "string"
+          },
+          "attachments": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ArtifactInputRef"
+            },
+            "maxItems": 8,
+            "title": "Attachments",
+            "type": "array"
+          },
+          "tools_enabled": {
+            "title": "Tools Enabled",
+            "type": "boolean"
+          },
+          "priority": {
+            "maximum": 9,
+            "minimum": 0,
+            "title": "Priority",
+            "type": "integer"
+          },
+          "launch_policy": {
+            "$ref": "#/components/schemas/TaskLaunchPolicy"
+          },
+          "notification_policy": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Notification Policy",
+            "type": "object"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TaskDefinitionState"
+          },
+          "revision": {
+            "minimum": 1,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "latest_execution_id": {
+            "default": "",
+            "title": "Latest Execution Id",
+            "type": "string"
+          },
+          "execution_count": {
+            "minimum": 0,
+            "title": "Execution Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "minimum": 0.0,
+            "title": "Created At",
+            "type": "number"
+          },
+          "updated_at": {
+            "minimum": 0.0,
+            "title": "Updated At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "task_id",
+          "title",
+          "goal",
+          "tools_enabled",
+          "priority",
+          "launch_policy",
+          "state",
+          "revision",
+          "execution_count",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ProductTaskSnapshot",
+        "type": "object"
+      },
       "PushRegistrationResponse": {
         "properties": {
           "registered": {
@@ -3828,19 +5650,6 @@
         "title": "ResumeTaskRequest",
         "type": "object"
       },
-      "RetryTaskRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "reason": {
-            "default": "",
-            "maxLength": 1000,
-            "title": "Reason",
-            "type": "string"
-          }
-        },
-        "title": "RetryTaskRequest",
-        "type": "object"
-      },
       "RuntimeStatus": {
         "additionalProperties": false,
         "properties": {
@@ -3891,6 +5700,17 @@
           "session_handle": {
             "title": "Session Handle",
             "type": "string"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationSessionSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -3927,39 +5747,68 @@
         "title": "SessionResponse",
         "type": "object"
       },
-      "TaskAcceptedResponse": {
+      "TaskApprovalSnapshot": {
+        "additionalProperties": false,
         "properties": {
-          "task_id": {
-            "title": "Task Id",
+          "approval_id": {
+            "minLength": 1,
+            "title": "Approval Id",
+            "type": "string"
+          },
+          "tool_name": {
+            "minLength": 1,
+            "title": "Tool Name",
+            "type": "string"
+          },
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
             "type": "string"
           },
           "state": {
-            "$ref": "#/components/schemas/TaskState"
+            "$ref": "#/components/schemas/ApprovalState"
+          },
+          "created_at": {
+            "minimum": 0.0,
+            "title": "Created At",
+            "type": "number"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resolved At"
           }
         },
         "required": [
-          "task_id",
-          "state"
+          "approval_id",
+          "tool_name",
+          "state",
+          "created_at"
         ],
-        "title": "TaskAcceptedResponse",
+        "title": "TaskApprovalSnapshot",
         "type": "object"
       },
-      "TaskCommandResponse": {
-        "properties": {
-          "accepted": {
-            "title": "Accepted",
-            "type": "boolean"
-          },
-          "state": {
-            "$ref": "#/components/schemas/TaskState"
-          }
-        },
-        "required": [
-          "accepted",
-          "state"
+      "TaskDefinitionState": {
+        "enum": [
+          "active",
+          "paused",
+          "archived"
         ],
-        "title": "TaskCommandResponse",
-        "type": "object"
+        "title": "TaskDefinitionState",
+        "type": "string"
       },
       "TaskEvent": {
         "additionalProperties": false,
@@ -4205,145 +6054,40 @@
         "title": "TaskExecutionTrace",
         "type": "object"
       },
-      "TaskListResponse": {
-        "properties": {
-          "tasks": {
-            "items": {
-              "$ref": "#/components/schemas/TaskSnapshot"
-            },
-            "title": "Tasks",
-            "type": "array"
-          },
-          "next_cursor": {
-            "default": "",
-            "title": "Next Cursor",
-            "type": "string"
-          }
-        },
-        "required": [
-          "tasks"
-        ],
-        "title": "TaskListResponse",
-        "type": "object"
-      },
-      "TaskOrigin": {
+      "TaskLaunchKind": {
         "enum": [
-          "user",
-          "agent",
+          "immediate",
           "scheduled",
           "event"
         ],
-        "title": "TaskOrigin",
+        "title": "TaskLaunchKind",
         "type": "string"
       },
-      "TaskResponse": {
-        "properties": {
-          "task": {
-            "$ref": "#/components/schemas/TaskSnapshot"
-          }
-        },
-        "required": [
-          "task"
-        ],
-        "title": "TaskResponse",
-        "type": "object"
-      },
-      "TaskSnapshot": {
+      "TaskLaunchPolicy": {
         "additionalProperties": false,
         "properties": {
-          "task_id": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Task Id",
-            "type": "string"
+          "kind": {
+            "$ref": "#/components/schemas/TaskLaunchKind",
+            "default": "immediate"
           },
-          "session_handle": {
-            "maxLength": 256,
-            "minLength": 1,
-            "title": "Session Handle",
-            "type": "string"
+          "schedule_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "one_time",
+                  "interval",
+                  "cron"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Schedule Type"
           },
-          "client_request_id": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Client Request Id",
-            "type": "string"
-          },
-          "origin": {
-            "$ref": "#/components/schemas/TaskOrigin",
-            "default": "user"
-          },
-          "parent_task_id": {
-            "default": "",
-            "maxLength": 128,
-            "title": "Parent Task Id",
-            "type": "string"
-          },
-          "goal": {
-            "maxLength": 200000,
-            "title": "Goal",
-            "type": "string"
-          },
-          "attachments": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/ArtifactInputRef"
-            },
-            "maxItems": 8,
-            "title": "Attachments",
-            "type": "array"
-          },
-          "tools_enabled": {
-            "title": "Tools Enabled",
-            "type": "boolean"
-          },
-          "priority": {
-            "maximum": 9,
-            "minimum": 0,
-            "title": "Priority",
-            "type": "integer"
-          },
-          "state": {
-            "$ref": "#/components/schemas/TaskState"
-          },
-          "phase": {
-            "default": "",
-            "maxLength": 256,
-            "title": "Phase",
-            "type": "string"
-          },
-          "attempt_count": {
-            "minimum": 0,
-            "title": "Attempt Count",
-            "type": "integer"
-          },
-          "cancel_requested": {
-            "title": "Cancel Requested",
-            "type": "boolean"
-          },
-          "final_summary": {
-            "default": "",
-            "maxLength": 200000,
-            "title": "Final Summary",
-            "type": "string"
-          },
-          "failure_code": {
-            "default": "",
-            "maxLength": 256,
-            "title": "Failure Code",
-            "type": "string"
-          },
-          "created_at": {
-            "minimum": 0.0,
-            "title": "Created At",
-            "type": "number"
-          },
-          "updated_at": {
-            "minimum": 0.0,
-            "title": "Updated At",
-            "type": "number"
-          },
-          "started_at": {
+          "run_at": {
             "anyOf": [
               {
                 "minimum": 0.0,
@@ -4354,12 +6098,12 @@
               }
             ],
             "default": null,
-            "title": "Started At"
+            "title": "Run At"
           },
-          "finished_at": {
+          "interval_seconds": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "exclusiveMinimum": 0.0,
                 "type": "number"
               },
               {
@@ -4367,41 +6111,45 @@
               }
             ],
             "default": null,
-            "title": "Finished At"
+            "title": "Interval Seconds"
           },
-          "next_event_seq": {
-            "exclusiveMinimum": 0,
-            "title": "Next Event Seq",
-            "type": "integer"
+          "cron": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Cron",
+            "type": "string"
           },
-          "trace": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/TaskExecutionTrace"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
+          "timezone": {
+            "default": "Asia/Shanghai",
+            "maxLength": 128,
+            "title": "Timezone",
+            "type": "string"
+          },
+          "event_source": {
+            "default": "",
+            "maxLength": 128,
+            "title": "Event Source",
+            "type": "string"
+          },
+          "source_config": {
+            "additionalProperties": true,
+            "title": "Source Config",
+            "type": "object"
           }
         },
-        "required": [
-          "task_id",
-          "session_handle",
-          "client_request_id",
-          "goal",
-          "tools_enabled",
-          "priority",
-          "state",
-          "attempt_count",
-          "cancel_requested",
-          "created_at",
-          "updated_at",
-          "next_event_seq"
-        ],
-        "title": "TaskSnapshot",
+        "title": "TaskLaunchPolicy",
         "type": "object"
+      },
+      "TaskLaunchReason": {
+        "enum": [
+          "created",
+          "manual",
+          "scheduled",
+          "event",
+          "rerun"
+        ],
+        "title": "TaskLaunchReason",
+        "type": "string"
       },
       "TaskState": {
         "enum": [
@@ -4608,6 +6356,171 @@
           }
         },
         "title": "ToolListResult",
+        "type": "object"
+      },
+      "UpdateConversationSessionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Title"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "active",
+                  "archived"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "State"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          }
+        },
+        "title": "UpdateConversationSessionRequest",
+        "type": "object"
+      },
+      "UpdateProductTaskRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Title"
+          },
+          "goal": {
+            "anyOf": [
+              {
+                "maxLength": 200000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Goal"
+          },
+          "attachments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ArtifactInputRef"
+                },
+                "maxItems": 8,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Attachments"
+          },
+          "tools_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tools Enabled"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "maximum": 9,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Priority"
+          },
+          "launch_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskLaunchPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "notification_policy": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Notification Policy"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          }
+        },
+        "title": "UpdateProductTaskRequest",
         "type": "object"
       }
     }

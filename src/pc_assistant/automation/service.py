@@ -8,23 +8,23 @@ from typing import Protocol
 from pc_assistant.agent_runtime.contracts import RuntimeScope
 from pc_assistant.automation.models import ScheduleRecord, ScheduleSpec, ScheduleState
 from pc_assistant.automation.repository import ScheduleRepository
-from pc_assistant.tasks.models import TaskOrigin, TaskRecord
+from pc_assistant.tasks.models import TaskExecutionRecord, TaskLaunchReason
 
 
 logger = logging.getLogger(__name__)
 
 
 class TaskCreationPort(Protocol):
-    async def create(
+    async def execute_bound_launch(
         self,
-        scope: RuntimeScope,
+        principal_id: str,
         *,
+        provider_kind: str,
+        provider_id: str,
         client_request_id: str,
-        goal: str,
-        tools_enabled: bool = True,
-        priority: int = 0,
-        origin: TaskOrigin = TaskOrigin.SCHEDULED,
-    ) -> TaskRecord: ...
+        launch_reason: TaskLaunchReason,
+        goal_override: str = "",
+    ) -> TaskExecutionRecord: ...
 
 
 class ScheduleDispatcher:
@@ -83,21 +83,17 @@ class ScheduleDispatcher:
                 occurrence.principal_id,
                 occurrence.schedule_id,
             )
-            task = await self._tasks.create(
-                RuntimeScope(
-                    principal_id=occurrence.principal_id,
-                    session_handle=occurrence.session_handle,
-                ),
+            execution = await self._tasks.execute_bound_launch(
+                occurrence.principal_id,
+                provider_kind="schedule",
+                provider_id=occurrence.schedule_id,
                 client_request_id=f"schedule:{occurrence.occurrence_id}",
-                goal=schedule.goal,
-                tools_enabled=schedule.tools_enabled,
-                priority=schedule.priority,
-                origin=TaskOrigin.SCHEDULED,
+                launch_reason=TaskLaunchReason.SCHEDULED,
             )
             await asyncio.to_thread(
                 self._repository.mark_task_created,
                 occurrence.occurrence_id,
-                task.task_id,
+                execution.execution_id,
             )
         except asyncio.CancelledError:
             raise
@@ -209,3 +205,6 @@ class ScheduleService:
         if schedule.state is ScheduleState.ACTIVE:
             self._dispatcher.wake()
         return schedule
+
+    async def delete(self, principal_id: str, schedule_id: str) -> None:
+        await asyncio.to_thread(self._repository.delete, principal_id, schedule_id)

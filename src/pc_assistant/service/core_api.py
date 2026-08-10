@@ -28,7 +28,12 @@ from pc_assistant.agent_runtime.contracts import (
     ToolListResult,
 )
 from pc_assistant.artifacts import ArtifactRef
-from pc_assistant.conversation import ChatTurn, ChatTurnState
+from pc_assistant.conversation import (
+    ChatTurn,
+    ChatTurnState,
+    ConversationSession,
+    ConversationSessionState,
+)
 from pc_assistant.automation import (
     ScheduleRecord,
     ScheduleSpec,
@@ -43,7 +48,12 @@ from pc_assistant.tasks import (
     PrincipalTaskEvent,
     TaskCancelResult,
     TaskEvent,
+    TaskExecutionRecord,
     TaskExecutionTrace,
+    TaskDefinitionRecord,
+    TaskDefinitionState,
+    TaskLaunchPolicy,
+    TaskLaunchReason,
     TaskPauseResult,
     TaskOrigin,
     TaskRecord,
@@ -127,6 +137,122 @@ class TaskSnapshot(CoreModel):
             next_event_seq=task.next_event_seq,
             trace=trace,
         )
+
+
+class ProductTaskSnapshot(CoreModel):
+    task_id: TaskId
+    title: Annotated[NonEmpty, StringConstraints(max_length=200)]
+    goal: Annotated[str, StringConstraints(min_length=1, max_length=200_000)]
+    attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
+    tools_enabled: bool
+    priority: int = Field(ge=0, le=9)
+    launch_policy: TaskLaunchPolicy
+    notification_policy: dict[str, bool] = Field(default_factory=dict)
+    state: TaskDefinitionState
+    revision: int = Field(ge=1)
+    latest_execution_id: str = ""
+    execution_count: int = Field(ge=0)
+    created_at: float = Field(ge=0.0)
+    updated_at: float = Field(ge=0.0)
+
+    @classmethod
+    def from_record(cls, task: TaskDefinitionRecord) -> ProductTaskSnapshot:
+        return cls(
+            task_id=task.task_id,
+            title=task.title,
+            goal=task.goal,
+            attachments=tuple(
+                ArtifactInputRef(
+                    artifact_id=attachment.artifact_id,
+                    caption=attachment.caption,
+                )
+                for attachment in task.attachments
+            ),
+            tools_enabled=task.tools_enabled,
+            priority=task.priority,
+            launch_policy=task.launch_policy,
+            notification_policy=task.notification_policy,
+            state=task.state,
+            revision=task.revision,
+            latest_execution_id=task.latest_execution_id,
+            execution_count=task.execution_count,
+            created_at=task.created_at,
+            updated_at=task.updated_at,
+        )
+
+
+class ProductTaskExecutionSnapshot(CoreModel):
+    execution_id: TaskId
+    task_id: TaskId
+    task_revision: int = Field(ge=1)
+    launch_reason: TaskLaunchReason
+    goal_snapshot: Annotated[str, StringConstraints(min_length=1, max_length=200_000)]
+    attachment_snapshots: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
+    policy_snapshot: TaskLaunchPolicy
+    state: TaskState
+    phase: str = ""
+    cancel_requested: bool = False
+    final_result: str = ""
+    failure_code: str = ""
+    created_at: float = Field(ge=0.0)
+    updated_at: float = Field(ge=0.0)
+    started_at: float | None = Field(default=None, ge=0.0)
+    finished_at: float | None = Field(default=None, ge=0.0)
+    trace: TaskExecutionTrace | None = None
+    approvals: tuple[TaskApprovalSnapshot, ...] = ()
+
+    @classmethod
+    def from_record(
+        cls,
+        execution: TaskExecutionRecord,
+    ) -> ProductTaskExecutionSnapshot:
+        return cls(
+            execution_id=execution.execution_id,
+            task_id=execution.task_id,
+            task_revision=execution.task_revision,
+            launch_reason=execution.launch_reason,
+            goal_snapshot=execution.goal_snapshot,
+            attachment_snapshots=tuple(
+                ArtifactInputRef(
+                    artifact_id=attachment.artifact_id,
+                    caption=attachment.caption,
+                )
+                for attachment in execution.attachment_snapshots
+            ),
+            policy_snapshot=execution.policy_snapshot,
+            state=execution.state,
+            phase=execution.phase,
+            cancel_requested=execution.cancel_requested,
+            final_result=execution.final_result,
+            failure_code=execution.failure_code,
+            created_at=execution.created_at,
+            updated_at=execution.updated_at,
+            started_at=execution.started_at,
+            finished_at=execution.finished_at,
+            trace=execution.trace,
+            approvals=tuple(
+                TaskApprovalSnapshot(
+                    approval_id=approval.approval_id,
+                    tool_name=approval.tool_name,
+                    arguments=approval.arguments,
+                    reason=approval.reason,
+                    state=approval.state,
+                    created_at=approval.created_at,
+                    resolved_at=approval.resolved_at,
+                )
+                for approval in execution.approvals
+            ),
+        )
+
+
+class TaskApprovalSnapshot(CoreModel):
+    approval_id: NonEmpty
+    tool_name: NonEmpty
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    reason: str = ""
+    state: ApprovalState
+    created_at: float = Field(ge=0.0)
+    resolved_at: float | None = Field(default=None, ge=0.0)
 
 
 class ChatToolStepSnapshot(CoreModel):
@@ -224,6 +350,30 @@ class ChatTurnSnapshot(CoreModel):
             updated_at=turn.updated_at,
             finished_at=turn.finished_at,
             revision=turn.revision,
+        )
+
+
+class ConversationSessionSnapshot(CoreModel):
+    session_handle: SessionHandle
+    title: Annotated[NonEmpty, StringConstraints(max_length=120)]
+    state: ConversationSessionState
+    turn_count: int = Field(ge=0)
+    last_turn_at: float | None = Field(default=None, ge=0.0)
+    created_at: float = Field(ge=0.0)
+    updated_at: float = Field(ge=0.0)
+    revision: int = Field(ge=1)
+
+    @classmethod
+    def from_record(cls, session: ConversationSession) -> ConversationSessionSnapshot:
+        return cls(
+            session_handle=session.session_handle,
+            title=session.title,
+            state=session.state,
+            turn_count=session.turn_count,
+            last_turn_at=session.last_turn_at,
+            created_at=session.created_at,
+            updated_at=session.updated_at,
+            revision=session.revision,
         )
 
 
@@ -327,6 +477,39 @@ class CreateSessionRequest(CoreModel):
     request_id: RequestId
     method: Literal["create_session"] = "create_session"
     activate: bool = True
+    title: Annotated[str, StringConstraints(max_length=120)] = "新对话"
+
+
+class GetConversationSessionRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["get_conversation_session"] = "get_conversation_session"
+    session_handle: SessionHandle
+
+
+class ListConversationSessionsRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["list_conversation_sessions"] = "list_conversation_sessions"
+    include_archived: bool = False
+    limit: int = Field(default=100, ge=1, le=200)
+
+
+class UpdateConversationSessionRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["update_conversation_session"] = "update_conversation_session"
+    session_handle: SessionHandle
+    title: Annotated[str, StringConstraints(min_length=1, max_length=120)] | None = None
+    state: ConversationSessionState | None = None
+    expected_revision: int | None = Field(default=None, ge=1)
+
+
+class DeleteConversationSessionRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["delete_conversation_session"] = "delete_conversation_session"
+    session_handle: SessionHandle
 
 
 class CreateTaskRequest(CoreModel):
@@ -393,6 +576,13 @@ class CancelChatTurnRequest(CoreModel):
     turn_id: ChatTurnId
 
 
+class RetryChatTurnRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["retry_chat_turn"] = "retry_chat_turn"
+    turn_id: ChatTurnId
+
+
 class ResolveChatApprovalRequest(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
@@ -434,6 +624,102 @@ class ListTasksRequest(CoreModel):
     origins: tuple[TaskOrigin, ...] = Field(default=(), max_length=5)
     limit: int = Field(default=50, ge=1, le=100)
     cursor: Annotated[str, StringConstraints(max_length=512)] = ""
+
+
+class CreateProductTaskRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["product_task_create"] = "product_task_create"
+    session_handle: SessionHandle
+    title: Annotated[str, StringConstraints(max_length=200)] = ""
+    goal: Annotated[str, StringConstraints(min_length=1, max_length=200_000)]
+    attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
+    tools_enabled: bool = True
+    priority: int = Field(default=0, ge=0, le=9)
+    launch_policy: TaskLaunchPolicy = Field(default_factory=TaskLaunchPolicy)
+    notification_policy: dict[str, bool] = Field(default_factory=dict)
+
+
+class GetProductTaskRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["product_task_get"] = "product_task_get"
+    task_id: TaskId
+
+
+class ListProductTasksRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["product_task_list"] = "product_task_list"
+    state: TaskDefinitionState | None = None
+    include_archived: bool = False
+    limit: int = Field(default=100, ge=1, le=200)
+
+
+class UpdateProductTaskRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["product_task_update"] = "product_task_update"
+    task_id: TaskId
+    title: Annotated[str, StringConstraints(max_length=200)] | None = None
+    goal: Annotated[str, StringConstraints(min_length=1, max_length=200_000)] | None = None
+    attachments: tuple[ArtifactInputRef, ...] | None = Field(default=None, max_length=8)
+    tools_enabled: bool | None = None
+    priority: int | None = Field(default=None, ge=0, le=9)
+    launch_policy: TaskLaunchPolicy | None = None
+    notification_policy: dict[str, bool] | None = None
+    expected_revision: int | None = Field(default=None, ge=1)
+
+
+class SetProductTaskStateRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["product_task_set_state"] = "product_task_set_state"
+    task_id: TaskId
+    state: TaskDefinitionState
+
+
+class DeleteProductTaskRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["product_task_delete"] = "product_task_delete"
+    task_id: TaskId
+
+
+class ExecuteProductTaskRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["product_task_execute"] = "product_task_execute"
+    task_id: TaskId
+
+
+class GetProductTaskExecutionRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["product_task_execution_get"] = "product_task_execution_get"
+    execution_id: TaskId
+
+
+class ListProductTaskExecutionsRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["product_task_execution_list"] = "product_task_execution_list"
+    task_id: TaskId
+    limit: int = Field(default=100, ge=1, le=200)
+
+
+class DeleteProductTaskExecutionRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["product_task_execution_delete"] = "product_task_execution_delete"
+    execution_id: TaskId
+
+
+class RerunProductTaskExecutionRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["product_task_execution_rerun"] = "product_task_execution_rerun"
+    execution_id: TaskId
 
 
 class CancelTaskRequest(CoreModel):
@@ -615,17 +901,33 @@ CoreRequest: TypeAlias = Annotated[
     AuthenticateRequest
     | HealthRequest
     | CreateSessionRequest
+    | GetConversationSessionRequest
+    | ListConversationSessionsRequest
+    | UpdateConversationSessionRequest
+    | DeleteConversationSessionRequest
     | CreateTaskRequest
     | CreateChatTurnRequest
     | GetChatTurnRequest
     | ListChatTurnsRequest
     | SubscribeChatTurnRequest
     | CancelChatTurnRequest
+    | RetryChatTurnRequest
     | ResolveChatApprovalRequest
     | SubscribeTaskRequest
     | SubscribePrincipalTaskEventsRequest
     | GetTaskRequest
     | ListTasksRequest
+    | CreateProductTaskRequest
+    | GetProductTaskRequest
+    | ListProductTasksRequest
+    | UpdateProductTaskRequest
+    | SetProductTaskStateRequest
+    | DeleteProductTaskRequest
+    | ExecuteProductTaskRequest
+    | GetProductTaskExecutionRequest
+    | ListProductTaskExecutionsRequest
+    | DeleteProductTaskExecutionRequest
+    | RerunProductTaskExecutionRequest
     | CancelTaskRequest
     | PauseTaskRequest
     | ResumeTaskRequest
@@ -702,6 +1004,28 @@ class SessionCreatedMessage(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
     session_handle: SessionHandle
+    session: ConversationSessionSnapshot | None = None
+
+
+class ConversationSessionMessage(CoreModel):
+    message_type: Literal["conversation_session"] = "conversation_session"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    session: ConversationSessionSnapshot
+
+
+class ConversationSessionListMessage(CoreModel):
+    message_type: Literal["conversation_session_list"] = "conversation_session_list"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    sessions: tuple[ConversationSessionSnapshot, ...]
+
+
+class ConversationSessionDeletedMessage(CoreModel):
+    message_type: Literal["conversation_session_deleted"] = "conversation_session_deleted"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    deleted: bool = True
 
 
 class TaskAcceptedMessage(CoreModel):
@@ -785,6 +1109,44 @@ class TaskListMessage(CoreModel):
     request_id: RequestId
     tasks: tuple[TaskSnapshot, ...]
     next_cursor: Annotated[str, StringConstraints(max_length=512)] = ""
+
+
+class ProductTaskMessage(CoreModel):
+    message_type: Literal["product_task"] = "product_task"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    task: ProductTaskSnapshot
+    execution: ProductTaskExecutionSnapshot | None = None
+
+
+class ProductTaskListMessage(CoreModel):
+    message_type: Literal["product_task_list"] = "product_task_list"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    tasks: tuple[ProductTaskSnapshot, ...]
+
+
+class ProductTaskExecutionMessage(CoreModel):
+    message_type: Literal["product_task_execution"] = "product_task_execution"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    execution: ProductTaskExecutionSnapshot
+
+
+class ProductTaskExecutionListMessage(CoreModel):
+    message_type: Literal["product_task_execution_list"] = "product_task_execution_list"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    executions: tuple[ProductTaskExecutionSnapshot, ...]
+
+
+class ProductTaskDeletedMessage(CoreModel):
+    message_type: Literal["product_task_deleted"] = "product_task_deleted"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    deleted: bool = True
+    task_id: str = ""
+    execution_id: str = ""
 
 
 class TaskEventMessage(CoreModel):
@@ -954,6 +1316,9 @@ class TriggerEventAcceptedMessage(CoreModel):
 CoreServerMessage: TypeAlias = Annotated[
     AuthenticatedMessage
     | SessionCreatedMessage
+    | ConversationSessionMessage
+    | ConversationSessionListMessage
+    | ConversationSessionDeletedMessage
     | TaskAcceptedMessage
     | ChatTurnAcceptedMessage
     | ChatTurnSubscribedMessage
@@ -965,6 +1330,11 @@ CoreServerMessage: TypeAlias = Annotated[
     | PrincipalTaskEventsSubscribedMessage
     | TaskSnapshotMessage
     | TaskListMessage
+    | ProductTaskMessage
+    | ProductTaskListMessage
+    | ProductTaskExecutionMessage
+    | ProductTaskExecutionListMessage
+    | ProductTaskDeletedMessage
     | TaskEventMessage
     | PrincipalTaskEventMessage
     | HealthMessage
