@@ -22,7 +22,10 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Line, Path, Rect } from "react-native-svg";
 
 import { ChatTurnWatcher } from "@/api/chatTurnWatcher";
@@ -50,6 +53,7 @@ const TERMINAL_STATES = new Set<ChatTurnSnapshot["state"]>(["completed", "failed
 
 export default function ChatScreen() {
   const gateway = useGateway();
+  const insets = useSafeAreaInsets();
   const gatewayRef = useRef(gateway);
   gatewayRef.current = gateway;
   const params = useLocalSearchParams<{ capturedUri?: string; capturedName?: string }>();
@@ -63,6 +67,7 @@ export default function ChatScreen() {
   const [resolving, setResolving] = useState("");
   const [transcribing, setTranscribing] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [imagePreview, setImagePreview] = useState<ResolvedArtifactFile | null>(null);
   const [message, setMessage] = useState("");
   const [availableUpdate, setAvailableUpdate] = useState<AndroidRelease | null>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -249,11 +254,24 @@ export default function ChatScreen() {
   const openArtifact = useCallback(async (item: AssistantArtifactItem) => {
     try {
       const resolved = await loadArtifact(item);
-      await Sharing.shareAsync(resolved.uri, { mimeType: resolved.mediaType });
+      if (item.isImage) {
+        setImagePreview(resolved);
+      } else {
+        await Sharing.shareAsync(resolved.uri, { mimeType: resolved.mediaType });
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "附件暂时无法打开，请重试");
     }
   }, [loadArtifact]);
+
+  const sharePreview = useCallback(async () => {
+    if (!imagePreview) return;
+    try {
+      await Sharing.shareAsync(imagePreview.uri, { mimeType: imagePreview.mediaType });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "图片暂时无法保存或分享");
+    }
+  }, [imagePreview]);
 
   async function startNewTopic() {
     if (startingTopic || sending) return;
@@ -271,7 +289,7 @@ export default function ChatScreen() {
     <KeyboardAvoidingView
       style={styles.screen}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
-      automaticOffset
+      keyboardVerticalOffset={insets.top + (Platform.OS === "ios" ? 44 : 56)}
     >
       <View style={styles.topbar}>
         <Text style={styles.subtitle}>随时告诉我你想做什么</Text>
@@ -404,6 +422,20 @@ export default function ChatScreen() {
       </View>
       <Modal
         animationType="fade"
+        onRequestClose={() => setImagePreview(null)}
+        transparent
+        visible={Boolean(imagePreview)}
+      >
+        {imagePreview ? (
+          <ImagePreview
+            file={imagePreview}
+            onClose={() => setImagePreview(null)}
+            onShare={() => void sharePreview()}
+          />
+        ) : null}
+      </Modal>
+      <Modal
+        animationType="fade"
         onRequestClose={() => setActionsOpen(false)}
         transparent
         visible={actionsOpen}
@@ -435,6 +467,99 @@ export default function ChatScreen() {
         </View>
       </Modal>
     </KeyboardAvoidingView>
+  );
+}
+
+function ImagePreview({
+  file,
+  onClose,
+  onShare,
+}: {
+  file: ResolvedArtifactFile;
+  onClose(): void;
+  onShare(): void;
+}) {
+  const previewInsets = useSafeAreaInsets();
+  const scale = useSharedValue(1);
+  const savedScale = useSharedValue(1);
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const savedTranslateX = useSharedValue(0);
+  const savedTranslateY = useSharedValue(0);
+
+  const reset = useCallback(() => {
+    "worklet";
+    scale.value = withTiming(1);
+    savedScale.value = 1;
+    translateX.value = withTiming(0);
+    translateY.value = withTiming(0);
+    savedTranslateX.value = 0;
+    savedTranslateY.value = 0;
+  }, [savedScale, savedTranslateX, savedTranslateY, scale, translateX, translateY]);
+
+  const pinch = Gesture.Pinch()
+    .onUpdate((event) => {
+      scale.value = Math.min(5, Math.max(1, savedScale.value * event.scale));
+    })
+    .onEnd(() => {
+      savedScale.value = scale.value;
+      if (scale.value <= 1.05) reset();
+    });
+
+  const pan = Gesture.Pan()
+    .onUpdate((event) => {
+      if (scale.value <= 1) return;
+      translateX.value = savedTranslateX.value + event.translationX;
+      translateY.value = savedTranslateY.value + event.translationY;
+    })
+    .onEnd(() => {
+      savedTranslateX.value = translateX.value;
+      savedTranslateY.value = translateY.value;
+    });
+
+  const doubleTap = Gesture.Tap()
+    .numberOfTaps(2)
+    .maxDuration(280)
+    .onEnd(() => {
+      if (scale.value > 1) {
+        reset();
+      } else {
+        scale.value = withTiming(2.5);
+        savedScale.value = 2.5;
+      }
+    });
+
+  const gesture = Gesture.Race(doubleTap, Gesture.Simultaneous(pinch, pan));
+  const imageStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { scale: scale.value },
+    ],
+  }));
+
+  return (
+    <GestureHandlerRootView style={styles.previewRoot}>
+      <View style={[styles.previewToolbar, { paddingTop: previewInsets.top + 6 }]}>
+        <Pressable accessibilityLabel="关闭图片预览" onPress={onClose} style={styles.previewButton}>
+          <Text style={styles.previewButtonText}>关闭</Text>
+        </Pressable>
+        <Text numberOfLines={1} style={styles.previewName}>{file.name}</Text>
+        <Pressable accessibilityLabel="保存或分享图片" onPress={onShare} style={styles.previewButton}>
+          <Text style={styles.previewButtonText}>保存/分享</Text>
+        </Pressable>
+      </View>
+      <GestureDetector gesture={gesture}>
+        <Animated.View style={styles.previewCanvas}>
+          <Animated.Image
+            resizeMode="contain"
+            source={{ uri: file.uri }}
+            style={[styles.previewImage, imageStyle]}
+          />
+        </Animated.View>
+      </GestureDetector>
+      <Text style={[styles.previewHint, { bottom: previewInsets.bottom + 16 }]}>双击或双指缩放，放大后可拖动</Text>
+    </GestureHandlerRootView>
   );
 }
 
@@ -717,4 +842,12 @@ const styles = StyleSheet.create({
   mediaAction: { width: 76, alignItems: "center", gap: 8 },
   mediaIcon: { width: 58, height: 58, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
   mediaLabel: { color: colors.ink, fontWeight: "600" },
+  previewRoot: { flex: 1, backgroundColor: "#090B0A" },
+  previewToolbar: { position: "absolute", top: 0, left: 0, right: 0, zIndex: 2, minHeight: 64, paddingHorizontal: 14, paddingBottom: 6, flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "rgba(9, 11, 10, 0.82)" },
+  previewButton: { minHeight: 40, justifyContent: "center", paddingHorizontal: 8 },
+  previewButtonText: { color: "white", fontWeight: "700" },
+  previewName: { color: "white", flex: 1, textAlign: "center", fontSize: 13 },
+  previewCanvas: { flex: 1, alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  previewImage: { width: "100%", height: "100%" },
+  previewHint: { position: "absolute", alignSelf: "center", color: "rgba(255, 255, 255, 0.72)", fontSize: 12, backgroundColor: "rgba(9, 11, 10, 0.62)", borderRadius: 14, paddingHorizontal: 12, paddingVertical: 7 },
 });
