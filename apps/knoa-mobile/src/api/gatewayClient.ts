@@ -1,6 +1,7 @@
 import type {
   AndroidRelease,
   ArtifactInput,
+  ChatTurnSnapshot,
   GatewaySession,
   PairingPayload,
   TaskSnapshot,
@@ -77,12 +78,10 @@ export class GatewayClient {
     state?: TaskState;
     limit?: number;
     cursor?: string;
-    kind?: "all" | "chat" | "task";
   } = {}): Promise<{ tasks: TaskSnapshot[]; next_cursor: string }> {
     const query = new URLSearchParams();
     if (input.sessionHandle) query.set("session_handle", input.sessionHandle);
     if (input.state) query.set("state", input.state);
-    if (input.kind) query.set("kind", input.kind);
     query.set("limit", String(input.limit ?? 50));
     if (input.cursor) query.set("cursor", input.cursor);
     return this.json(`/v1/tasks?${query}`);
@@ -102,21 +101,66 @@ export class GatewayClient {
     return response.events;
   }
 
-  async createTask(input: {
+  async listChatTurns(sessionHandle: string, limit = 100): Promise<ChatTurnSnapshot[]> {
+    const response = await this.json<{ turns: ChatTurnSnapshot[] }>(
+      `/v1/conversations/sessions/${encodeURIComponent(sessionHandle)}/turns?limit=${limit}`,
+    );
+    return response.turns;
+  }
+
+  async getChatTurn(turnId: string): Promise<ChatTurnSnapshot> {
+    const response = await this.json<{ turn: ChatTurnSnapshot }>(
+      `/v1/conversations/turns/${encodeURIComponent(turnId)}`,
+    );
+    return response.turn;
+  }
+
+  async createChatTurn(input: {
     sessionHandle: string;
     text?: string;
     attachments?: ArtifactInput[];
     toolsEnabled?: boolean;
-    kind?: "chat" | "task";
+  }): Promise<ChatTurnSnapshot> {
+    const response = await this.json<{ turn: ChatTurnSnapshot }>(
+      `/v1/conversations/sessions/${encodeURIComponent(input.sessionHandle)}/turns`,
+      {
+        method: "POST",
+        body: {
+          input: input.text ?? "",
+          attachments: input.attachments ?? [],
+          tools_enabled: input.toolsEnabled ?? true,
+        },
+      },
+    );
+    return response.turn;
+  }
+
+  async cancelChatTurn(turnId: string): Promise<ChatTurnSnapshot> {
+    const response = await this.json<{ turn: ChatTurnSnapshot }>(
+      `/v1/conversations/turns/${encodeURIComponent(turnId)}/cancel`,
+      { method: "POST" },
+    );
+    return response.turn;
+  }
+
+  async resolveChatApproval(approvalId: string, approved: boolean): Promise<void> {
+    await this.json(
+      `/v1/conversations/approvals/${encodeURIComponent(approvalId)}/resolve`,
+      { method: "POST", body: { approved } },
+    );
+  }
+
+  async createTask(input: {
+    text?: string;
+    attachments?: ArtifactInput[];
+    toolsEnabled?: boolean;
   }): Promise<{ task_id: string; state: TaskState }> {
     return this.json("/v1/tasks", {
       method: "POST",
       body: {
-        session_handle: input.sessionHandle,
         input: input.text ?? "",
         attachments: input.attachments ?? [],
         tools_enabled: input.toolsEnabled ?? true,
-        kind: input.kind ?? "chat",
       },
     });
   }

@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import cast
+import time
+from typing import Any
 
 from pc_assistant.agent_runtime.contracts import (
     AgentRuntimePort,
@@ -13,16 +14,20 @@ from pc_assistant.agent_runtime.contracts import (
     RuntimeRunContext,
     RuntimeScope,
 )
+from pc_assistant.agent_runtime.session_store import (
+    RuntimeSessionRepository,
+    SessionSnapshot,
+)
 from pc_assistant.agent_runtime.tool_step import ToolOutcomeUnknownError
+from pc_assistant.context.session_context import SessionContextService
 from pc_assistant.tasks.approval import DurableApprovalService
 from pc_assistant.tasks.event_hub import TaskEventHub
 from pc_assistant.tasks.models import (
     TERMINAL_TASK_STATES,
     TaskEvent,
-    TaskEventPayload,
-    TaskEventType,
     TaskRecord,
     TaskState,
+    TaskTraceEntry,
 )
 from pc_assistant.tasks.repository import TaskRepository
 from pc_assistant.tasks.tool_commit import DurableToolCommitService
@@ -37,6 +42,7 @@ class TaskExecutor:
     def __init__(
         self,
         repository: TaskRepository,
+        sessions: RuntimeSessionRepository,
         runtime: AgentRuntimePort,
         approvals: DurableApprovalService,
         tool_commits: DurableToolCommitService,
@@ -45,10 +51,12 @@ class TaskExecutor:
         worker_id: str = "core-worker",
         lease_seconds: float = 60.0,
         max_concurrency: int = 4,
+        session_context: SessionContextService | None = None,
     ) -> None:
         if not 1 <= max_concurrency <= 32:
             raise ValueError("Task concurrency must be between 1 and 32")
         self._repository = repository
+        self._sessions = sessions
         self._runtime = runtime
         self._approvals = approvals
         self._tool_commits = tool_commits
@@ -56,6 +64,7 @@ class TaskExecutor:
         self._worker_id = worker_id
         self._lease_seconds = lease_seconds
         self._max_concurrency = max_concurrency
+        self._session_context = session_context
         self._wake = asyncio.Event()
         self._worker: asyncio.Task[None] | None = None
         self._executions: set[asyncio.Task[None]] = set()
@@ -120,36 +129,65 @@ class TaskExecutor:
             await self._wake.wait()
 
     @staticmethod
-    def _payload(event: RuntimeEvent) -> TaskEventPayload:
+    def _trace_entry(event: RuntimeEvent) -> TaskTraceEntry:
         payload = event.payload
-        return TaskEventPayload(
+        entry_type = {
+            "reasoning_delta": "reasoning",
+            "content_delta": "content",
+            "plan": "plan",
+            "tool_call": "tool_call",
+            "tool_result": "tool_result",
+            "artifact": "artifact",
+            "context_compacted": "context_compacted",
+            "warning": "warning",
+            "final_output": "final_output",
+        }[event.event_type]
+        return TaskTraceEntry(
+            entry_type=entry_type,
+            iteration=payload.iteration,
             content=payload.content,
             tool_call_id=payload.tool_call_id,
             tool_name=payload.tool_name,
             tool_args=payload.tool_args,
             tool_result=payload.tool_result,
             artifact=payload.artifact,
-            artifact_id=(
-                payload.artifact.artifact_id if payload.artifact is not None else ""
-            ),
-            blocked=payload.blocked,
-            iteration=payload.iteration,
+            occurred_at=time.time(),
         )
 
-    async def _persist_runtime_event(
+    @staticmethod
+    def _append_trace_entry(
+        entries: list[TaskTraceEntry],
+        entry: TaskTraceEntry,
+    ) -> None:
+        if (
+            entry.entry_type in {"reasoning", "content"}
+            and entries
+            and entries[-1].entry_type == entry.entry_type
+            and entries[-1].iteration == entry.iteration
+        ):
+            previous = entries[-1]
+            entries[-1] = previous.model_copy(
+                update={
+                    "content": previous.content + entry.content,
+                    "occurred_at": entry.occurred_at,
+                }
+            )
+            return
+        entries.append(entry)
+
+    async def _save_trace(
         self,
         task: TaskRecord,
-        runtime_event: RuntimeEvent,
-    ) -> TaskEvent:
-        event = await asyncio.to_thread(
-            self._repository.append_event,
+        entries: list[TaskTraceEntry],
+        final_output: str,
+    ) -> None:
+        await asyncio.to_thread(
+            self._repository.save_trace,
             task.principal_id,
             task.task_id,
-            cast(TaskEventType, runtime_event.event_type),
-            self._payload(runtime_event),
+            entries=tuple(entries),
+            final_output=final_output,
         )
-        await self._events.publish(event)
-        return event
 
     async def _transition(
         self,
@@ -170,8 +208,35 @@ class TaskExecutor:
     async def _execute(self, task: TaskRecord) -> None:
         cancellation = asyncio.Event()
         self._active[task.task_id] = cancellation
-        final_output = ""
+        existing_trace = await asyncio.to_thread(
+            self._repository.get_trace,
+            task.principal_id,
+            task.task_id,
+        )
+        entries = list(existing_trace.entries) if existing_trace is not None else []
+        final_output = existing_trace.final_output if existing_trace is not None else ""
+        trace_dirty = False
+        last_trace_flush = time.monotonic()
         try:
+            scope = RuntimeScope(
+                principal_id=task.principal_id,
+                session_handle=task.session_handle,
+            )
+            snapshot = await asyncio.to_thread(self._sessions.load, scope)
+
+            async def commit_messages(messages: tuple[dict[str, Any], ...]) -> None:
+                await asyncio.to_thread(
+                    self._sessions.save,
+                    scope,
+                    SessionSnapshot(messages=messages),
+                )
+                if self._session_context is not None:
+                    await asyncio.to_thread(
+                        self._session_context.compact,
+                        scope,
+                        messages,
+                    )
+
             request = RunRequest(
                 client_request_id=task.client_request_id,
                 input=task.goal,
@@ -179,12 +244,11 @@ class TaskExecutor:
                 tools_enabled=task.tools_enabled,
             )
             context = RuntimeRunContext(
-                scope=RuntimeScope(
-                    principal_id=task.principal_id,
-                    session_handle=task.session_handle,
-                ),
+                scope=scope,
                 run_id=task.task_id,
                 cancellation=cancellation,
+                messages=snapshot.messages,
+                commit_messages=commit_messages,
                 confirmation=self._approvals,
                 tool_commit=self._tool_commits,
             )
@@ -203,9 +267,19 @@ class TaskExecutor:
                     cancellation.set()
                 if cancellation.is_set():
                     break
-                await self._persist_runtime_event(task, runtime_event)
+                self._append_trace_entry(entries, self._trace_entry(runtime_event))
+                trace_dirty = True
                 if runtime_event.event_type == "final_output":
                     final_output = runtime_event.payload.content
+                now = time.monotonic()
+                if (
+                    runtime_event.event_type
+                    not in {"reasoning_delta", "content_delta"}
+                    or now - last_trace_flush >= 0.5
+                ):
+                    await self._save_trace(task, entries, final_output)
+                    trace_dirty = False
+                    last_trace_flush = now
 
             current = await asyncio.to_thread(
                 self._repository.get,
@@ -284,4 +358,9 @@ class TaskExecutor:
             except Exception:
                 logger.exception("Task failure state could not be persisted")
         finally:
+            if trace_dirty:
+                try:
+                    await self._save_trace(task, entries, final_output)
+                except Exception:
+                    logger.exception("Task execution trace could not be persisted")
             self._active.pop(task.task_id, None)

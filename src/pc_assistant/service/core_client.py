@@ -31,6 +31,14 @@ from pc_assistant.service.core_api import (
     ArtifactUploadedMessage,
     CORE_WS_MAX_SIZE,
     CancelTaskRequest,
+    CancelChatTurnRequest,
+    ChatApprovalResolvedMessage,
+    ChatTurnAcceptedMessage,
+    ChatTurnListMessage,
+    ChatTurnSignalMessage,
+    ChatTurnSnapshot,
+    ChatTurnSnapshotMessage,
+    ChatTurnSubscribedMessage,
     ClearMemoryRequest,
     ConfigSetMessage,
     CoreError,
@@ -39,9 +47,11 @@ from pc_assistant.service.core_api import (
     CreateTriggerRequest,
     CreateSessionRequest,
     CreateTaskRequest,
+    CreateChatTurnRequest,
     DownloadArtifactRequest,
     FireTriggerRequest,
     GetTaskRequest,
+    GetChatTurnRequest,
     GetHistoryRequest,
     GetStatusRequest,
     GetScheduleRequest,
@@ -52,6 +62,7 @@ from pc_assistant.service.core_api import (
     ListMemoryRequest,
     ListSchedulesRequest,
     ListTasksRequest,
+    ListChatTurnsRequest,
     ListToolsRequest,
     ListTriggersRequest,
     MemoryClearedMessage,
@@ -62,6 +73,7 @@ from pc_assistant.service.core_api import (
     PrincipalTaskEventMessage,
     PrincipalTaskEventsSubscribedMessage,
     ResolveApprovalRequest,
+    ResolveChatApprovalRequest,
     ResumeScheduleRequest,
     ScheduleAcceptedMessage,
     ScheduleListMessage,
@@ -73,6 +85,7 @@ from pc_assistant.service.core_api import (
     SetConfigRequest,
     StatusMessage,
     SubscribeTaskRequest,
+    SubscribeChatTurnRequest,
     SubscribePrincipalTaskEventsRequest,
     TaskAcceptedMessage,
     TaskCancelResultMessage,
@@ -95,6 +108,7 @@ from pc_assistant.service.core_api import (
     parse_core_server_message_json,
 )
 from pc_assistant.tasks import PrincipalTaskEvent, TaskEvent, TaskOrigin, TaskState
+from pc_assistant.conversation import TERMINAL_CHAT_TURN_STATES
 
 
 class ClientWebSocket(Protocol):
@@ -144,7 +158,7 @@ class CoreClient:
         self._pending: dict[str, asyncio.Future[CoreServerMessage]] = {}
         self._subscription_queues: dict[
             str,
-            asyncio.Queue[TaskEvent | PrincipalTaskEvent | Exception],
+            asyncio.Queue[TaskEvent | PrincipalTaskEvent | ChatTurnSnapshot | Exception],
         ] = {}
         self._active_tasks: list[str] = []
         self._send_lock = asyncio.Lock()
@@ -274,9 +288,23 @@ class CoreClient:
                             await self._websocket.close()
                             break
                     continue
+                if isinstance(message, ChatTurnSignalMessage):
+                    queue = self._subscription_queues.get(message.request_id)
+                    if queue is not None:
+                        if queue.full():
+                            try:
+                                queue.get_nowait()
+                            except asyncio.QueueEmpty:
+                                pass
+                        queue.put_nowait(message.turn)
+                    continue
                 if isinstance(
                     message,
-                    (TaskSubscribedMessage, PrincipalTaskEventsSubscribedMessage),
+                    (
+                        TaskSubscribedMessage,
+                        PrincipalTaskEventsSubscribedMessage,
+                        ChatTurnSubscribedMessage,
+                    ),
                 ):
                     future = self._pending.get(message.request_id)
                     if future is None or future.done():
@@ -287,7 +315,13 @@ class CoreClient:
                         break
                     self._subscription_queues.setdefault(
                         message.request_id,
-                        asyncio.Queue(maxsize=self._max_buffered_task_events),
+                        asyncio.Queue(
+                            maxsize=(
+                                1
+                                if isinstance(message, ChatTurnSubscribedMessage)
+                                else self._max_buffered_task_events
+                            )
+                        ),
                     )
                 if isinstance(message, CoreError):
                     queue = self._subscription_queues.get(message.request_id)
@@ -474,7 +508,7 @@ class CoreClient:
         tools_enabled: bool = True,
         priority: int = 0,
         parent_task_id: str = "",
-        origin: TaskOrigin = TaskOrigin.CHAT,
+        origin: TaskOrigin = TaskOrigin.USER,
     ) -> TaskAcceptedMessage:
         response = await self._request(
             CreateTaskRequest(
@@ -490,6 +524,112 @@ class CoreClient:
         )
         if not isinstance(response, TaskAcceptedMessage):
             raise RuntimeError("CoreServer returned an invalid Task response")
+        return response
+
+    async def create_chat_turn(
+        self,
+        session_handle: str,
+        user_input: str = "",
+        attachments: tuple[ArtifactInputRef, ...] = (),
+        *,
+        tools_enabled: bool = True,
+    ) -> ChatTurnSnapshot:
+        response = await self._request(
+            CreateChatTurnRequest(
+                request_id=self._request_id(),
+                session_handle=session_handle,
+                input=user_input,
+                attachments=attachments,
+                tools_enabled=tools_enabled,
+            )
+        )
+        if not isinstance(response, ChatTurnAcceptedMessage):
+            raise RuntimeError("CoreServer returned an invalid ChatTurn response")
+        return response.turn
+
+    async def get_chat_turn(self, turn_id: str) -> ChatTurnSnapshot:
+        response = await self._request(
+            GetChatTurnRequest(
+                request_id=self._request_id(),
+                turn_id=turn_id,
+            )
+        )
+        if not isinstance(response, ChatTurnSnapshotMessage):
+            raise RuntimeError("CoreServer returned an invalid ChatTurn snapshot")
+        return response.turn
+
+    async def list_chat_turns(
+        self,
+        session_handle: str,
+        *,
+        limit: int = 100,
+    ) -> tuple[ChatTurnSnapshot, ...]:
+        response = await self._request(
+            ListChatTurnsRequest(
+                request_id=self._request_id(),
+                session_handle=session_handle,
+                limit=limit,
+            )
+        )
+        if not isinstance(response, ChatTurnListMessage):
+            raise RuntimeError("CoreServer returned an invalid ChatTurn list")
+        return response.turns
+
+    async def chat_turn_updates(
+        self,
+        turn_id: str,
+    ) -> AsyncIterator[ChatTurnSnapshot]:
+        request_id = self._request_id()
+        response = await self._request(
+            SubscribeChatTurnRequest(
+                request_id=request_id,
+                turn_id=turn_id,
+            )
+        )
+        if not isinstance(response, ChatTurnSubscribedMessage):
+            raise RuntimeError("CoreServer returned an invalid ChatTurn subscription")
+        queue = self._subscription_queues[request_id]
+        try:
+            while True:
+                item = await queue.get()
+                if isinstance(item, Exception):
+                    raise item
+                if not isinstance(item, ChatTurnSnapshot):
+                    raise CoreConnectionLostError(
+                        "Core protocol mixed ChatTurn subscription event types"
+                    )
+                yield item
+                if item.state in TERMINAL_CHAT_TURN_STATES:
+                    return
+        finally:
+            self._subscription_queues.pop(request_id, None)
+
+    async def cancel_chat_turn(self, turn_id: str) -> ChatTurnSnapshot:
+        response = await self._request(
+            CancelChatTurnRequest(
+                request_id=self._request_id(),
+                turn_id=turn_id,
+            )
+        )
+        if not isinstance(response, ChatTurnSnapshotMessage):
+            raise RuntimeError("CoreServer returned an invalid ChatTurn cancel response")
+        return response.turn
+
+    async def resolve_chat_approval(
+        self,
+        approval_id: str,
+        *,
+        approved: bool,
+    ) -> ChatApprovalResolvedMessage:
+        response = await self._request(
+            ResolveChatApprovalRequest(
+                request_id=self._request_id(),
+                approval_id=approval_id,
+                approved=approved,
+            )
+        )
+        if not isinstance(response, ChatApprovalResolvedMessage):
+            raise RuntimeError("CoreServer returned an invalid Chat approval response")
         return response
 
     async def task_events(

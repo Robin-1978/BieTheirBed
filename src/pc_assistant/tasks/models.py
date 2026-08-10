@@ -29,7 +29,6 @@ class TaskState(str, Enum):
 
 
 class TaskOrigin(str, Enum):
-    CHAT = "chat"
     USER = "user"
     AGENT = "agent"
     SCHEDULED = "scheduled"
@@ -88,6 +87,19 @@ TaskEventType = Literal[
 ]
 
 
+TaskTraceEntryType = Literal[
+    "reasoning",
+    "content",
+    "plan",
+    "tool_call",
+    "tool_result",
+    "artifact",
+    "context_compacted",
+    "warning",
+    "final_output",
+]
+
+
 class TaskEventPayload(TaskModel):
     content: str = ""
     previous_state: TaskState | None = None
@@ -111,7 +123,7 @@ class TaskRecord(TaskModel):
     principal_id: Annotated[NonEmpty, StringConstraints(max_length=256)]
     session_handle: Annotated[NonEmpty, StringConstraints(max_length=256)]
     client_request_id: Identifier
-    origin: TaskOrigin = TaskOrigin.CHAT
+    origin: TaskOrigin = TaskOrigin.USER
     parent_task_id: Annotated[str, StringConstraints(max_length=128)] = ""
     goal: Annotated[str, StringConstraints(min_length=1, max_length=200_000)]
     attachments: tuple[ArtifactAttachment, ...] = Field(default=(), max_length=8)
@@ -145,6 +157,29 @@ class PrincipalTaskEvent(TaskModel):
     feed_event_id: int = Field(gt=0)
     principal_id: Annotated[NonEmpty, StringConstraints(max_length=256)]
     event: TaskEvent
+
+
+class TaskTraceEntry(TaskModel):
+    entry_type: TaskTraceEntryType
+    iteration: int = Field(default=0, ge=0)
+    content: str = ""
+    tool_call_id: Annotated[str, StringConstraints(max_length=256)] = ""
+    tool_name: Annotated[str, StringConstraints(max_length=256)] = ""
+    tool_args: dict[str, Any] = Field(default_factory=dict)
+    tool_result: Any = None
+    artifact: ArtifactRef | None = None
+    occurred_at: float = Field(ge=0.0)
+
+
+class TaskExecutionTrace(TaskModel):
+    task_id: Identifier
+    entries: tuple[TaskTraceEntry, ...] = ()
+    final_output: Annotated[str, StringConstraints(max_length=200_000)] = ""
+    created_at: float = Field(ge=0.0)
+    updated_at: float = Field(ge=0.0)
+    retained_until: float = Field(ge=0.0)
+    compacted_at: float | None = Field(default=None, ge=0.0)
+    revision: int = Field(ge=0)
 
 
 class TaskApprovalRecord(TaskModel):

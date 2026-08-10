@@ -7,7 +7,7 @@ import {
   useAudioRecorderState,
 } from "expo-audio";
 import { router, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -22,7 +22,8 @@ import {
 } from "react-native";
 import Markdown from "react-native-marked";
 
-import type { ApprovalRequest, ArtifactInput, TaskEvent, TaskSnapshot, TaskState } from "@/api/models";
+import { subscribeChatTurn, type ChatTurnSubscription } from "@/api/chatTurns";
+import type { ArtifactInput, ChatApproval, ChatTurnSnapshot } from "@/api/models";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
@@ -32,14 +33,14 @@ type PendingAttachment = {
   mediaType: string;
 };
 
-const TERMINAL_STATES = new Set<TaskState>(["completed", "failed", "cancelled"]);
+const TERMINAL_STATES = new Set<ChatTurnSnapshot["state"]>(["completed", "failed", "cancelled"]);
 
 export default function ChatScreen() {
   const gateway = useGateway();
   const params = useLocalSearchParams<{ capturedUri?: string; capturedName?: string }>();
-  const list = useRef<FlatList<TaskSnapshot>>(null);
-  const [turns, setTurns] = useState<TaskSnapshot[]>([]);
-  const [events, setEvents] = useState<Record<string, TaskEvent[]>>({});
+  const list = useRef<FlatList<ChatTurnSnapshot>>(null);
+  const subscriptions = useRef(new Map<string, ChatTurnSubscription>());
+  const [turns, setTurns] = useState<ChatTurnSnapshot[]>([]);
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [sending, setSending] = useState(false);
@@ -49,29 +50,48 @@ export default function ChatScreen() {
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recording = useAudioRecorderState(recorder, 250);
 
+  const watchTurn = useCallback((turnId: string) => {
+    if (!gateway.gatewayUrl || !gateway.sessionToken || subscriptions.current.has(turnId)) return;
+    const subscription = subscribeChatTurn({
+      gatewayUrl: gateway.gatewayUrl,
+      token: gateway.sessionToken,
+      turnId,
+      onSnapshot: (snapshot) => {
+        setTurns((current) => {
+          const index = current.findIndex((turn) => turn.turn_id === snapshot.turn_id);
+          if (index < 0) return [...current, snapshot];
+          const next = [...current];
+          next[index] = snapshot;
+          return next;
+        });
+        if (TERMINAL_STATES.has(snapshot.state)) {
+          subscriptions.current.get(snapshot.turn_id)?.close();
+          subscriptions.current.delete(snapshot.turn_id);
+        }
+      },
+      onError: () => undefined,
+    });
+    subscriptions.current.set(turnId, subscription);
+  }, [gateway.gatewayUrl, gateway.sessionToken]);
+
   const refresh = useCallback(async () => {
     if (!gateway.client || !gateway.sessionHandle) return;
-    const result = await gateway.client.listTasks({
-      sessionHandle: gateway.sessionHandle,
-      kind: "chat",
-      limit: 50,
-    });
-    const interactive = result.tasks
-      .reverse();
-    setTurns(interactive);
-    const active = interactive.filter((task) => !TERMINAL_STATES.has(task.state));
-    const timelines = await Promise.all(
-      active.map(async (task) => [task.task_id, await gateway.client!.taskEvents(task.task_id)] as const),
-    );
-    if (timelines.length) {
-      setEvents((current) => ({ ...current, ...Object.fromEntries(timelines) }));
+    const history = await gateway.client.listChatTurns(gateway.sessionHandle, 100);
+    setTurns(history);
+    for (const turn of history) {
+      if (!TERMINAL_STATES.has(turn.state)) watchTurn(turn.turn_id);
     }
-  }, [gateway.client, gateway.sessionHandle]);
+  }, [gateway.client, gateway.sessionHandle, watchTurn]);
 
   useEffect(() => {
     setTurns([]);
-    setEvents({});
+    for (const subscription of subscriptions.current.values()) subscription.close();
+    subscriptions.current.clear();
     void refresh();
+    return () => {
+      for (const subscription of subscriptions.current.values()) subscription.close();
+      subscriptions.current.clear();
+    };
   }, [gateway.sessionHandle, refresh]);
 
   useEffect(() => {
@@ -86,27 +106,6 @@ export default function ChatScreen() {
         }]);
     router.setParams({ capturedUri: "", capturedName: "" });
   }, [params.capturedName, params.capturedUri]);
-
-  useEffect(() => {
-    const feed = gateway.latestEvent;
-    if (!feed) return;
-    const event = feed.event;
-    setEvents((current) => {
-      const timeline = current[event.task_id] ?? [];
-      if (timeline.some((item) => item.event_seq === event.event_seq)) return current;
-      return { ...current, [event.task_id]: [...timeline, event] };
-    });
-    setTurns((current) => current.map((turn) => {
-      if (turn.task_id !== event.task_id) return turn;
-      const state = eventState(event) ?? turn.state;
-      return { ...turn, state, phase: String(event.payload.phase ?? turn.phase) };
-    }));
-    if (isTerminalEvent(event) && gateway.client) {
-      void gateway.client.getTask(event.task_id).then((snapshot) => {
-        setTurns((current) => current.map((turn) => turn.task_id === snapshot.task_id ? snapshot : turn));
-      });
-    }
-  }, [gateway.client, gateway.latestEvent]);
 
   const canSend = Boolean(!sending && gateway.client && (text.trim() || attachments.length));
 
@@ -142,34 +141,13 @@ export default function ChatScreen() {
           caption: item.name,
         });
       }));
-      const accepted = await gateway.client.createTask({
+      const accepted = await gateway.client.createChatTurn({
         sessionHandle: gateway.sessionHandle,
         text: message,
         attachments: uploaded,
       });
-      const now = Date.now() / 1000;
-      setTurns((current) => [...current, {
-        task_id: accepted.task_id,
-        session_handle: gateway.sessionHandle,
-        client_request_id: "interactive",
-        origin: "chat",
-        parent_task_id: "",
-        goal: message,
-        attachments: uploaded,
-        tools_enabled: true,
-        priority: 0,
-        state: accepted.state,
-        phase: "",
-        attempt_count: 0,
-        cancel_requested: false,
-        final_summary: "",
-        failure_code: "",
-        created_at: now,
-        updated_at: now,
-        started_at: null,
-        finished_at: null,
-        next_event_seq: 1,
-      }]);
+      setTurns((current) => [...current, accepted]);
+      watchTurn(accepted.turn_id);
       setText("");
       setAttachments([]);
     } finally {
@@ -212,11 +190,11 @@ export default function ChatScreen() {
     recorder.record();
   }
 
-  async function resolve(approval: ApprovalRequest, approved: boolean) {
+  async function resolve(approval: ChatApproval, approved: boolean) {
     if (!gateway.client || resolving) return;
-    setResolving(approval.approvalId);
+    setResolving(approval.approval_id);
     try {
-      await gateway.client.resolveApproval(approval.approvalId, approved);
+      await gateway.client.resolveChatApproval(approval.approval_id, approved);
     } finally {
       setResolving("");
     }
@@ -253,14 +231,13 @@ export default function ChatScreen() {
       <FlatList
         ref={list}
         data={turns}
-        keyExtractor={(item) => item.task_id}
+        keyExtractor={(item) => item.turn_id}
         contentContainerStyle={styles.messages}
         onContentSizeChange={() => list.current?.scrollToEnd({ animated: true })}
         ListEmptyComponent={<Text style={styles.empty}>你好，我是小诺。</Text>}
         renderItem={({ item }) => (
           <ChatTurn
-            task={item}
-            events={events[item.task_id] ?? []}
+            turn={item}
             resolving={Boolean(resolving)}
             onResolve={resolve}
           />
@@ -308,24 +285,22 @@ export default function ChatScreen() {
 }
 
 function ChatTurn({
-  task,
-  events,
+  turn,
   resolving,
   onResolve,
 }: {
-  task: TaskSnapshot;
-  events: TaskEvent[];
+  turn: ChatTurnSnapshot;
   resolving: boolean;
-  onResolve(approval: ApprovalRequest, approved: boolean): void;
+  onResolve(approval: ChatApproval, approved: boolean): void;
 }) {
-  const response = useMemo(() => responseContent(task, events), [events, task]);
-  const approval = useMemo(() => pendingApproval(events), [events]);
-  const activity = activityText(task, events);
+  const response = turn.final_output || turn.content;
+  const approval = turn.approvals.find((item) => item.state === "pending") ?? null;
+  const activity = activityText(turn);
   return (
     <View style={styles.turn}>
       <View style={styles.userBubble}>
-        <Text style={styles.userText}>{task.goal}</Text>
-        {task.attachments.length ? <Text style={styles.userMeta}>附件 {task.attachments.length}</Text> : null}
+        <Text style={styles.userText}>{turn.user_input}</Text>
+        {turn.attachments.length ? <Text style={styles.userMeta}>附件 {turn.attachments.length}</Text> : null}
       </View>
       <View style={styles.assistantBubble}>
         {response ? (
@@ -335,13 +310,13 @@ function ChatTurn({
           />
         ) : (
           <View style={styles.activityRow}>
-            {!TERMINAL_STATES.has(task.state) ? <ActivityIndicator color={colors.accent} size="small" /> : null}
+            {!TERMINAL_STATES.has(turn.state) ? <ActivityIndicator color={colors.accent} size="small" /> : null}
             <Text style={styles.activity}>{activity}</Text>
           </View>
         )}
         {approval ? (
           <View style={styles.approval}>
-            <Text style={styles.approvalReason}>{approval.reason || approval.toolName}</Text>
+            <Text style={styles.approvalReason}>{approval.reason || approval.tool_name}</Text>
             <View style={styles.approvalActions}>
               <Pressable style={styles.deny} disabled={resolving} onPress={() => onResolve(approval, false)}>
                 <Text style={styles.denyText}>取消</Text>
@@ -357,58 +332,13 @@ function ChatTurn({
   );
 }
 
-function eventState(event: TaskEvent): TaskState | null {
-  const state = event.payload.state;
-  if (typeof state === "string" && ["queued", "running", "waiting_approval", "paused", "completed", "failed", "cancelled"].includes(state)) {
-    return state as TaskState;
-  }
-  if (event.event_type === "completed" || event.event_type === "failed" || event.event_type === "cancelled") {
-    return event.event_type;
-  }
-  return null;
-}
-
-function isTerminalEvent(event: TaskEvent): boolean {
-  return event.event_type === "completed" || event.event_type === "failed" || event.event_type === "cancelled";
-}
-
-function responseContent(task: TaskSnapshot, events: TaskEvent[]): string {
-  if (task.final_summary) return task.final_summary;
-  const final = [...events].reverse().find((event) => event.event_type === "final_output");
-  if (final) return String(final.payload.content ?? "");
-  const contentEvents = events.filter((event) => event.event_type === "content_delta");
-  const latestIteration = Math.max(0, ...contentEvents.map((event) => Number(event.payload.iteration ?? 0)));
-  return contentEvents
-    .filter((event) => Number(event.payload.iteration ?? 0) === latestIteration)
-    .map((event) => String(event.payload.content ?? ""))
-    .join("");
-}
-
-function activityText(task: TaskSnapshot, events: TaskEvent[]): string {
-  if (task.state === "failed") return "这次没有完成";
-  if (task.state === "cancelled") return "已停止";
-  if (task.state === "paused") return "已暂停";
-  if (task.state === "waiting_approval") return "等你确认";
-  const tool = [...events].reverse().find((event) => event.event_type === "tool_call");
-  if (tool) return `正在使用 ${String(tool.payload.tool_name ?? "工具")}`;
-  return task.state === "queued" ? "马上开始" : "正在思考…";
-}
-
-function pendingApproval(events: TaskEvent[]): ApprovalRequest | null {
-  let pending: ApprovalRequest | null = null;
-  for (const event of events) {
-    if (event.event_type === "approval_requested") {
-      pending = {
-        approvalId: String(event.payload.approval_id ?? ""),
-        taskId: event.task_id,
-        toolName: String(event.payload.tool_name ?? ""),
-        reason: String(event.payload.reason ?? ""),
-      };
-    } else if (event.event_type === "approval_resolved") {
-      pending = null;
-    }
-  }
-  return pending?.approvalId ? pending : null;
+function activityText(turn: ChatTurnSnapshot): string {
+  if (turn.state === "failed") return "这次没有完成";
+  if (turn.state === "cancelled") return "已停止";
+  if (turn.state === "waiting_approval") return "等你确认";
+  const tool = [...turn.timeline].reverse().find((entry) => entry.kind === "tool_call");
+  if (tool) return `正在使用 ${tool.tool_name || "工具"}`;
+  return "正在思考…";
 }
 
 const styles = StyleSheet.create({

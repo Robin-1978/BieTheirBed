@@ -18,8 +18,12 @@ from pc_assistant.gateway.protocol import (
     AuthCompleteRequest,
     AuthCompleteResponse,
     CancelTaskRequest,
+    ChatApprovalResolvedResponse,
+    ChatTurnListResponse,
+    ChatTurnResponse,
     ChallengeResponse,
     CreateTaskRequest,
+    CreateChatTurnRequest,
     ErrorResponse,
     HealthResponse,
     PairChallengeRequest,
@@ -57,6 +61,10 @@ _MODELS: tuple[type[BaseModel], ...] = (
     SessionResponse,
     SessionCreatedResponse,
     CreateTaskRequest,
+    CreateChatTurnRequest,
+    ChatTurnResponse,
+    ChatTurnListResponse,
+    ChatApprovalResolvedResponse,
     TaskAcceptedResponse,
     TaskResponse,
     TaskListResponse,
@@ -205,6 +213,108 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     "responses": {
                         "201": _json_response("Core session", SessionCreatedResponse),
                         **_errors("401", "429", "503"),
+                    },
+                }
+            },
+            "/v1/conversations/sessions/{session_handle}/turns": {
+                "post": {
+                    "operationId": "createChatTurn",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "session_handle",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 256},
+                    }],
+                    "requestBody": _json_body(CreateChatTurnRequest),
+                    "responses": {
+                        "202": _json_response("ChatTurn accepted", ChatTurnResponse),
+                        **_errors("400", "401", "404", "429", "503"),
+                    },
+                },
+                "get": {
+                    "operationId": "listChatTurns",
+                    "security": bearer,
+                    "parameters": [
+                        {
+                            "name": "session_handle",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "minLength": 1, "maxLength": 256},
+                        },
+                        _query("limit", {"type": "integer", "minimum": 1, "maximum": 500}),
+                    ],
+                    "responses": {
+                        "200": _json_response("Conversation history", ChatTurnListResponse),
+                        **_errors("400", "401", "404", "429", "503"),
+                    },
+                },
+            },
+            "/v1/conversations/turns/{turn_id}": {
+                "get": {
+                    "operationId": "getChatTurn",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "turn_id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                    }],
+                    "responses": {
+                        "200": _json_response("ChatTurn snapshot", ChatTurnResponse),
+                        **_errors("401", "404", "429", "503"),
+                    },
+                }
+            },
+            "/v1/conversations/turns/{turn_id}/stream": {
+                "get": {
+                    "operationId": "streamChatTurn",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "turn_id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                    }],
+                    "responses": {
+                        "200": {
+                            "description": "Coalesced ChatTurn snapshots",
+                            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+                        },
+                        **_errors("401", "404", "429", "503"),
+                    },
+                }
+            },
+            "/v1/conversations/turns/{turn_id}/cancel": {
+                "post": {
+                    "operationId": "cancelChatTurn",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "turn_id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                    }],
+                    "responses": {
+                        "200": _json_response("ChatTurn cancellation", ChatTurnResponse),
+                        **_errors("401", "404", "429", "503"),
+                    },
+                }
+            },
+            "/v1/conversations/approvals/{approval_id}/resolve": {
+                "post": {
+                    "operationId": "resolveChatApproval",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "approval_id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                    }],
+                    "requestBody": _json_body(ResolveApprovalRequest),
+                    "responses": {
+                        "200": _json_response("Chat approval resolved", ChatApprovalResolvedResponse),
+                        **_errors("400", "401", "404", "429", "503"),
                     },
                 }
             },

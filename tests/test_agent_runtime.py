@@ -100,7 +100,6 @@ def _runtime(tmp_path: Path, loop: FakeLoop, *, run_observer=None):
         db_path=tmp_path / "assistant.db",
     )
     runtime = AgentRuntime(
-        sessions,
         loop,
         ToolRegistry(),
         artifacts,
@@ -112,11 +111,22 @@ def _runtime(tmp_path: Path, loop: FakeLoop, *, run_observer=None):
     return runtime, sessions, artifacts
 
 
-def _context(scope, run_id: str) -> RuntimeRunContext:
+def _context(
+    scope,
+    run_id: str,
+    sessions: RuntimeSessionRepository,
+) -> RuntimeRunContext:
+    snapshot = sessions.load(scope)
+
+    async def commit(messages) -> None:
+        sessions.save(scope, SessionSnapshot(messages=messages))
+
     return RuntimeRunContext(
         scope=scope,
         run_id=run_id,
         cancellation=asyncio.Event(),
+        messages=snapshot.messages,
+        commit_messages=commit,
     )
 
 
@@ -130,7 +140,7 @@ async def test_completed_turn_commits_scoped_transcript_and_events(tmp_path: Pat
     events = [
         event
         async for event in runtime.run(
-            _context(scope, "run-a"),
+            _context(scope, "run-a", sessions),
             RunRequest(client_request_id="request-a", input="hello"),
         )
     ]
@@ -169,7 +179,7 @@ async def test_completed_turn_is_observed_only_after_transcript_commit(
     scope = sessions.create("principal-a")
 
     async for _event in runtime.run(
-        _context(scope, "run-a"),
+        _context(scope, "run-a", sessions),
         RunRequest(client_request_id="request-a", input="hello"),
     ):
         pass
@@ -209,7 +219,7 @@ async def test_transcript_commit_failure_is_observed_as_failed(
 
     with pytest.raises(OSError, match="disk full"):
         async for _event in runtime.run(
-            _context(scope, "run-a"),
+            _context(scope, "run-a", sessions),
             RunRequest(client_request_id="request-a", input="hello"),
         ):
             pass
@@ -232,7 +242,7 @@ async def test_failed_turn_rolls_back_to_snapshot(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="provider_failed"):
         async for _event in runtime.run(
-            _context(scope, "run-a"),
+            _context(scope, "run-a", sessions),
             RunRequest(client_request_id="request-a", input="new"),
         ):
             pass
@@ -245,7 +255,7 @@ async def test_cancel_targets_active_run_and_does_not_persist(tmp_path: Path) ->
     loop = FakeLoop("cancelled", wait_for_cancel=True)
     runtime, sessions, _artifacts = _runtime(tmp_path, loop)
     scope = sessions.create("principal-a")
-    context = _context(scope, "run-a")
+    context = _context(scope, "run-a", sessions)
 
     async def consume() -> None:
         async for _event in runtime.run(
@@ -278,7 +288,7 @@ async def test_pre_start_cancellation_is_observed_as_cancelled(tmp_path: Path) -
         run_observer=observe,
     )
     scope = sessions.create("principal-a")
-    context = _context(scope, "run-a")
+    context = _context(scope, "run-a", sessions)
     context.cancellation.set()
 
     events = [
@@ -312,7 +322,6 @@ async def test_pre_react_failure_is_observed_as_failed(tmp_path: Path) -> None:
         db_path=tmp_path / "assistant.db",
     )
     runtime = AgentRuntime(
-        sessions,
         loop,
         ToolRegistry(),
         artifacts,
@@ -326,7 +335,7 @@ async def test_pre_react_failure_is_observed_as_failed(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="context unavailable"):
         async for _event in runtime.run(
-            _context(scope, "run-a"),
+            _context(scope, "run-a", sessions),
             RunRequest(client_request_id="request-a", input="hello"),
         ):
             pass
@@ -337,14 +346,14 @@ async def test_pre_react_failure_is_observed_as_failed(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_same_session_turns_are_serialized(tmp_path: Path) -> None:
+async def test_runtime_does_not_own_product_session_serialization(tmp_path: Path) -> None:
     loop = FakeLoop()
     runtime, sessions, _artifacts = _runtime(tmp_path, loop)
     scope = sessions.create("principal-a")
 
     async def consume(run_id: str) -> None:
         async for _event in runtime.run(
-            _context(scope, run_id),
+            _context(scope, run_id, sessions),
             RunRequest(client_request_id=f"request-{run_id}", input=run_id),
         ):
             pass
@@ -354,11 +363,10 @@ async def test_same_session_turns_are_serialized(tmp_path: Path) -> None:
     second = asyncio.create_task(consume("run-b"))
     await asyncio.sleep(0)
 
-    assert loop.max_active == 1
+    assert loop.max_active == 2
     loop.release.set()
     await asyncio.gather(first, second)
-    assert loop.max_active == 1
-    assert runtime._session_locks == {}
+    assert loop.max_active == 2
 
 
 @pytest.mark.asyncio
@@ -372,7 +380,7 @@ async def test_attachment_history_stores_reference_and_hydration_is_ephemeral(
     raw_ref = artifacts.put_data_url(scope.session_handle, DATA_URL)
 
     async for _event in runtime.run(
-        _context(scope, "run-a"),
+        _context(scope, "run-a", sessions),
         RunRequest(
             client_request_id="request-a",
             attachments=(ArtifactAttachment(artifact_id=raw_ref["artifact_id"]),),
@@ -401,7 +409,7 @@ async def test_long_final_output_creates_persistent_markdown_artifact(
     events = [
         event
         async for event in runtime.run(
-            _context(scope, "run-long"),
+            _context(scope, "run-long", sessions),
             RunRequest(client_request_id="request-long", input="生成报告"),
         )
     ]
@@ -440,7 +448,7 @@ async def test_long_result_artifact_failure_keeps_full_final_output(
     events = [
         event
         async for event in runtime.run(
-            _context(scope, "run-fallback"),
+            _context(scope, "run-fallback", sessions),
             RunRequest(client_request_id="request-fallback", input="生成报告"),
         )
     ]
@@ -487,7 +495,7 @@ async def test_run_can_disable_all_tools_without_mutating_registry(tmp_path: Pat
     scope = sessions.create("principal-a")
 
     async for _event in runtime.run(
-        _context(scope, "run-a"),
+        _context(scope, "run-a", sessions),
         RunRequest(
             client_request_id="request-a",
             input="hello",

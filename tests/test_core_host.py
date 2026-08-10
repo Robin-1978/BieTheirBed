@@ -87,7 +87,7 @@ def _servers(tmp_path: Path):
     commits = DurableToolCommitService(repository)
     tasks = TaskService(
         repository,
-        TaskExecutor(repository, EmptyRuntime(), approvals, commits, events),
+        TaskExecutor(repository, sessions, EmptyRuntime(), approvals, commits, events),
         approvals,
         events,
     )

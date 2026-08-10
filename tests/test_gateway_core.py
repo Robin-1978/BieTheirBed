@@ -103,5 +103,5 @@ async def test_gateway_core_bridge_retries_as_child_task(tmp_path) -> None:
         "tools_enabled": True,
         "priority": 3,
         "parent_task_id": "task-failed",
-        "origin": TaskOrigin.CHAT,
+        "origin": TaskOrigin.USER,
     }

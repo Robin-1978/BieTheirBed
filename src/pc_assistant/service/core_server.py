@@ -42,6 +42,11 @@ from pc_assistant.automation.trigger_repository import (
     TriggerTransitionError,
 )
 from pc_assistant.exceptions import SessionNotFoundError
+from pc_assistant.conversation import (
+    ChatTurnConflictError,
+    ChatTurnNotFoundError,
+    ConversationService,
+)
 from pc_assistant.service.core_api import (
     ApprovalResolvedMessage,
     AuthenticateRequest,
@@ -50,6 +55,14 @@ from pc_assistant.service.core_api import (
     ArtifactTranscribedMessage,
     ArtifactUploadedMessage,
     CancelTaskRequest,
+    CancelChatTurnRequest,
+    ChatApprovalResolvedMessage,
+    ChatTurnAcceptedMessage,
+    ChatTurnListMessage,
+    ChatTurnSignalMessage,
+    ChatTurnSnapshot,
+    ChatTurnSnapshotMessage,
+    ChatTurnSubscribedMessage,
     ClearMemoryRequest,
     ConfigSetMessage,
     CoreError,
@@ -57,9 +70,11 @@ from pc_assistant.service.core_api import (
     CreateTriggerRequest,
     CreateSessionRequest,
     CreateTaskRequest,
+    CreateChatTurnRequest,
     DownloadArtifactRequest,
     FireTriggerRequest,
     GetTaskRequest,
+    GetChatTurnRequest,
     GetHistoryRequest,
     GetStatusRequest,
     GetScheduleRequest,
@@ -70,6 +85,7 @@ from pc_assistant.service.core_api import (
     ListMemoryRequest,
     ListSchedulesRequest,
     ListTasksRequest,
+    ListChatTurnsRequest,
     ListToolsRequest,
     ListTriggersRequest,
     MemoryClearedMessage,
@@ -80,6 +96,7 @@ from pc_assistant.service.core_api import (
     PrincipalTaskEventMessage,
     PrincipalTaskEventsSubscribedMessage,
     ResolveApprovalRequest,
+    ResolveChatApprovalRequest,
     ResumeScheduleRequest,
     ResumeTaskRequest,
     ResumeTriggerRequest,
@@ -91,6 +108,7 @@ from pc_assistant.service.core_api import (
     SetConfigRequest,
     StatusMessage,
     SubscribeTaskRequest,
+    SubscribeChatTurnRequest,
     TranscribeArtifactRequest,
     SubscribePrincipalTaskEventsRequest,
     TaskAcceptedMessage,
@@ -193,6 +211,7 @@ class CoreServer:
         artifacts: ArtifactServicePort,
         authenticator: PrincipalAuthenticator,
         *,
+        conversations: ConversationService | None = None,
         transcription: ArtifactTranscriptionServicePort | None = None,
         authentication_timeout_seconds: float = 10.0,
         max_subscriptions_per_connection: int = 8,
@@ -204,6 +223,7 @@ class CoreServer:
         self._triggers = triggers
         self._control = control
         self._artifacts = artifacts
+        self._conversations = conversations
         self._transcription = transcription
         self._authenticator = authenticator
         self._authentication_timeout = max(0.01, authentication_timeout_seconds)
@@ -284,7 +304,11 @@ class CoreServer:
                     continue
                 if isinstance(
                     request,
-                    (SubscribeTaskRequest, SubscribePrincipalTaskEventsRequest),
+                    (
+                        SubscribeTaskRequest,
+                        SubscribePrincipalTaskEventsRequest,
+                        SubscribeChatTurnRequest,
+                    ),
                 ):
                     if request.request_id in subscriptions:
                         await send(
@@ -304,11 +328,13 @@ class CoreServer:
                             )
                         )
                         continue
-                    subscription = asyncio.create_task(
-                        self._stream_task(principal, request, send)
-                        if isinstance(request, SubscribeTaskRequest)
-                        else self._stream_principal_tasks(principal, request, send)
-                    )
+                    if isinstance(request, SubscribeTaskRequest):
+                        stream = self._stream_task(principal, request, send)
+                    elif isinstance(request, SubscribeChatTurnRequest):
+                        stream = self._stream_chat_turn(principal, request, send)
+                    else:
+                        stream = self._stream_principal_tasks(principal, request, send)
+                    subscription = asyncio.create_task(stream)
                     subscriptions[request.request_id] = subscription
                     subscription.add_done_callback(
                         lambda _task, request_id=request.request_id: (
@@ -406,6 +432,58 @@ class CoreServer:
                 )
             )
 
+    async def _stream_chat_turn(
+        self,
+        principal: str,
+        request: SubscribeChatTurnRequest,
+        send: Callable[[Any], Awaitable[None]],
+    ) -> None:
+        if self._conversations is None:
+            await send(
+                self._error(
+                    request.request_id,
+                    "invalid_request",
+                    "Conversation service is unavailable",
+                )
+            )
+            return
+        try:
+            await self._conversations.get_turn(principal, request.turn_id)
+            await send(
+                ChatTurnSubscribedMessage(
+                    request_id=request.request_id,
+                    turn_id=request.turn_id,
+                )
+            )
+            async for signal in self._conversations.updates(
+                principal,
+                request.turn_id,
+            ):
+                await send(
+                    ChatTurnSignalMessage(
+                        request_id=request.request_id,
+                        turn=ChatTurnSnapshot.from_record(signal.turn),
+                    )
+                )
+        except ChatTurnNotFoundError:
+            await send(
+                self._error(
+                    request.request_id,
+                    "chat_turn_not_found",
+                    "ChatTurn not found",
+                )
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            await send(
+                self._error(
+                    request.request_id,
+                    "internal_error",
+                    "ChatTurn subscription failed",
+                )
+            )
+
     async def _dispatch_scalar(
         self,
         principal: str,
@@ -427,6 +505,84 @@ class CoreServer:
                         session_handle=scope.session_handle,
                     )
                 )
+            elif isinstance(request, CreateChatTurnRequest):
+                if self._conversations is None:
+                    raise RuntimeError("Conversation service is unavailable")
+                turn = await self._conversations.create_turn(
+                    RuntimeScope(
+                        principal_id=principal,
+                        session_handle=request.session_handle,
+                    ),
+                    client_request_id=request.request_id,
+                    user_input=request.input,
+                    attachments=tuple(
+                        ArtifactAttachment(
+                            artifact_id=item.artifact_id,
+                            caption=item.caption,
+                        )
+                        for item in request.attachments
+                    ),
+                    tools_enabled=request.tools_enabled,
+                )
+                await send(
+                    ChatTurnAcceptedMessage(
+                        request_id=request.request_id,
+                        turn=ChatTurnSnapshot.from_record(turn),
+                    )
+                )
+            elif isinstance(request, GetChatTurnRequest):
+                if self._conversations is None:
+                    raise RuntimeError("Conversation service is unavailable")
+                turn = await self._conversations.get_turn(
+                    principal,
+                    request.turn_id,
+                )
+                await send(
+                    ChatTurnSnapshotMessage(
+                        request_id=request.request_id,
+                        turn=ChatTurnSnapshot.from_record(turn),
+                    )
+                )
+            elif isinstance(request, ListChatTurnsRequest):
+                if self._conversations is None:
+                    raise RuntimeError("Conversation service is unavailable")
+                turns = await self._conversations.list_turns(
+                    principal,
+                    request.session_handle,
+                    limit=request.limit,
+                )
+                await send(
+                    ChatTurnListMessage(
+                        request_id=request.request_id,
+                        turns=tuple(ChatTurnSnapshot.from_record(turn) for turn in turns),
+                    )
+                )
+            elif isinstance(request, CancelChatTurnRequest):
+                if self._conversations is None:
+                    raise RuntimeError("Conversation service is unavailable")
+                turn = await self._conversations.cancel(principal, request.turn_id)
+                await send(
+                    ChatTurnSnapshotMessage(
+                        request_id=request.request_id,
+                        turn=ChatTurnSnapshot.from_record(turn),
+                    )
+                )
+            elif isinstance(request, ResolveChatApprovalRequest):
+                if self._conversations is None:
+                    raise RuntimeError("Conversation service is unavailable")
+                approval, changed = await self._conversations.resolve_approval(
+                    principal,
+                    request.approval_id,
+                    approved=request.approved,
+                    resolved_by="core_api",
+                )
+                await send(
+                    ChatApprovalResolvedMessage(
+                        request_id=request.request_id,
+                        approval=approval,
+                        resolved=changed,
+                    )
+                )
             elif isinstance(request, CreateTaskRequest):
                 scope = RuntimeScope(
                     principal_id=principal,
@@ -446,8 +602,7 @@ class CoreServer:
                     priority=request.priority,
                     parent_task_id=request.parent_task_id,
                 )
-                if request.origin is not TaskOrigin.CHAT:
-                    create_kwargs["origin"] = request.origin
+                create_kwargs["origin"] = request.origin
                 task = await self._tasks.create(scope, **create_kwargs)
                 await send(
                     TaskAcceptedMessage(
@@ -458,10 +613,11 @@ class CoreServer:
                 )
             elif isinstance(request, GetTaskRequest):
                 task = await self._tasks.get(principal, request.task_id)
+                trace = await self._tasks.get_trace(principal, request.task_id)
                 await send(
                     TaskSnapshotMessage(
                         request_id=request.request_id,
-                        task=TaskSnapshot.from_record(task),
+                        task=TaskSnapshot.from_record(task, trace=trace),
                     )
                 )
             elif isinstance(request, ListTasksRequest):
@@ -849,6 +1005,22 @@ class CoreServer:
                     request.request_id,
                     "task_not_found",
                     "Task not found",
+                )
+            )
+        except ChatTurnNotFoundError:
+            await send(
+                self._error(
+                    request.request_id,
+                    "chat_turn_not_found",
+                    "ChatTurn not found",
+                )
+            )
+        except ChatTurnConflictError:
+            await send(
+                self._error(
+                    request.request_id,
+                    "invalid_request",
+                    "ChatTurn request ID conflicts with an existing turn",
                 )
             )
         except ScheduleNotFoundError:

@@ -4,6 +4,8 @@
 [knoa-mobile-ui-design.md](./knoa-mobile-ui-design.md)。
 Task 的创建、启动方式、执行记录、控制和交付闭环见
 [knoa-task-product-design.md](./knoa-task-product-design.md)。
+Conversation、ChatTurn 和持久化 Session 压缩见
+[knoa-conversation-design.md](./knoa-conversation-design.md)。
 
 ## 1. Product boundary
 
@@ -25,8 +27,8 @@ Knoa Mobile
 The product vocabulary is deliberately smaller than Core's execution model:
 
 - a **conversation turn** is an owner's message and the Agent's streamed reply;
-- a conversation turn uses a durable execution envelope but is never listed as
-  a user-facing Task;
+- a conversation turn is owned by Conversation and invokes the shared
+  AgentRuntime directly; it is never persisted or transported as a Task;
 - a **Task** is an independently delegated goal with an immediate, scheduled or
   event launch policy;
 - every launch produces a durable **TaskExecution** in an isolated Core Session;
@@ -80,7 +82,7 @@ compatible fixes rather than forcing an unverified major downgrade or override.
 - session bootstrap and expired-session re-authentication;
 - conversation-first text, photo and file input with streamed replies;
 - unified Task list plus execution detail, pause, resume, cancel and retry;
-- per-Task durable timeline replay plus resumable principal SSE updates;
+- per-Task coalesced ExecutionTrace snapshot plus resumable coarse lifecycle SSE;
 - approval confirm/deny actions from replayed standard events;
 - document upload and Artifact download/share;
 - Markdown, code and table capable final-result rendering;

@@ -14,6 +14,7 @@ from pc_assistant.tasks import (
     TaskNotFoundError,
     TaskRepository,
     TaskState,
+    TaskTraceEntry,
     TaskTransitionError,
 )
 
@@ -134,7 +135,7 @@ def test_claim_and_transitions_append_gap_free_events(tmp_path: Path) -> None:
     repository.append_event(
         scope.principal_id,
         task.task_id,
-        "content_delta",
+        "warning",
         TaskEventPayload(content="working"),
     )
     completed, terminal = repository.transition(
@@ -156,7 +157,7 @@ def test_claim_and_transitions_append_gap_free_events(tmp_path: Path) -> None:
     assert [event.event_type for event in events] == [
         "task_created",
         "state_changed",
-        "content_delta",
+        "warning",
         "completed",
     ]
 
@@ -243,6 +244,83 @@ def test_terminal_task_rejects_events_and_transitions(tmp_path: Path) -> None:
         )
 
 
+def test_streaming_output_is_rejected_from_durable_event_journal(
+    tmp_path: Path,
+) -> None:
+    repository, scope = _repository(tmp_path)
+    task, _ = repository.create(
+        scope,
+        client_request_id="request-a",
+        goal="finish the report",
+    )
+    repository.claim_next("worker-a")
+
+    with pytest.raises(ValueError, match="ExecutionTrace"):
+        repository.append_event(
+            scope.principal_id,
+            task.task_id,
+            "content_delta",
+            TaskEventPayload(content="token"),
+        )
+
+
+def test_expired_terminal_trace_is_compacted_without_losing_result(
+    tmp_path: Path,
+) -> None:
+    now = [1000.0]
+    database = tmp_path / "trace-retention.db"
+    sessions = RuntimeSessionRepository(database, handle_factory=lambda: "session-a")
+    scope = sessions.create("principal-a")
+    repository = TaskRepository(
+        database,
+        task_id_factory=lambda: "task-a",
+        clock=lambda: now[0],
+        trace_retention_seconds=60,
+    )
+    task, _ = repository.create(
+        scope,
+        client_request_id="request-a",
+        goal="finish the report",
+    )
+    repository.claim_next("worker-a")
+    repository.save_trace(
+        scope.principal_id,
+        task.task_id,
+        entries=(
+            TaskTraceEntry(
+                entry_type="reasoning",
+                iteration=1,
+                content="private draft",
+                occurred_at=now[0],
+            ),
+            TaskTraceEntry(
+                entry_type="tool_call",
+                iteration=1,
+                tool_name="read_file",
+                tool_args={"path": "/tmp/a"},
+                occurred_at=now[0],
+            ),
+        ),
+        final_output="done",
+    )
+    repository.transition(
+        scope.principal_id,
+        task.task_id,
+        TaskState.COMPLETED,
+        final_summary="done",
+    )
+
+    now[0] += 61
+    assert repository.compact_expired_traces() == 1
+    trace = repository.get_trace(scope.principal_id, task.task_id)
+    assert trace is not None
+    assert trace.compacted_at == now[0]
+    assert trace.final_output == "done"
+    assert [entry.entry_type for entry in trace.entries] == ["tool_call"]
+    assert trace.entries[0].tool_args == {}
+    assert repository.get(scope.principal_id, task.task_id).final_summary == "done"
+
+
 def test_task_ownership_does_not_reveal_foreign_identity(tmp_path: Path) -> None:
     repository, scope = _repository(tmp_path)
     task, _ = repository.create(
@@ -308,6 +386,65 @@ def test_repository_reopens_persisted_task_and_events(tmp_path: Path) -> None:
     assert reopened.list_events(scope.principal_id, task.task_id)[0].event_type == (
         "task_created"
     )
+
+
+def test_repository_migrates_legacy_stream_events_into_execution_trace(
+    tmp_path: Path,
+) -> None:
+    repository, scope = _repository(tmp_path)
+    task, _ = repository.create(
+        scope,
+        client_request_id="request-a",
+        goal="finish the report",
+    )
+    with sqlite3.connect(tmp_path / "assistant.db") as db:
+        payloads = (
+            TaskEventPayload(content="think ", iteration=1),
+            TaskEventPayload(content="carefully", iteration=1),
+            TaskEventPayload(content="done", iteration=1),
+        )
+        for sequence, (event_type, payload) in enumerate(
+            zip(
+                ("reasoning_delta", "reasoning_delta", "final_output"),
+                payloads,
+                strict=True,
+            ),
+            start=2,
+        ):
+            db.execute(
+                """INSERT INTO runtime_task_events(
+                       task_id, event_seq, event_type, payload_json, occurred_at
+                   ) VALUES (?, ?, ?, ?, ?)""",
+                (task.task_id, sequence, event_type, payload.model_dump_json(), 1000.0),
+            )
+            db.execute(
+                """INSERT INTO runtime_principal_task_events(
+                       principal_id, task_id, task_event_seq, occurred_at
+                   ) VALUES (?, ?, ?, ?)""",
+                (scope.principal_id, task.task_id, sequence, 1000.0),
+            )
+        db.execute(
+            "UPDATE runtime_tasks SET next_event_seq=5 WHERE task_id=?",
+            (task.task_id,),
+        )
+
+    reopened = TaskRepository(tmp_path / "assistant.db", clock=lambda: 1000.0)
+    trace = reopened.get_trace(scope.principal_id, task.task_id)
+
+    assert trace is not None
+    assert [entry.entry_type for entry in trace.entries] == [
+        "reasoning",
+        "final_output",
+    ]
+    assert trace.entries[0].content == "think carefully"
+    assert trace.final_output == "done"
+    assert [event.event_type for event in reopened.list_events(
+        scope.principal_id,
+        task.task_id,
+    )] == ["task_created"]
+    assert [item.event.event_type for item in reopened.list_principal_events(
+        scope.principal_id,
+    )] == ["task_created"]
 
 
 def test_repository_migrates_legacy_task_table_with_origin_at_end(
@@ -641,7 +778,7 @@ def test_principal_event_feed_is_ordered_and_owner_scoped(tmp_path: Path) -> Non
     repository.append_event(
         scope_a.principal_id,
         task_a.task_id,
-        "content_delta",
+        "warning",
         TaskEventPayload(content="working"),
     )
 
@@ -654,10 +791,9 @@ def test_principal_event_feed_is_ordered_and_owner_scoped(tmp_path: Path) -> Non
     assert [item.event.event_type for item in feed_a] == [
         "task_created",
         "state_changed",
-        "content_delta",
     ]
     assert [item.event.event_type for item in feed_b] == ["task_created"]
     assert repository.list_principal_events(
         scope_a.principal_id,
         after_id=feed_a[1].feed_event_id,
-    ) == (feed_a[2],)
+    ) == ()

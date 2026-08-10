@@ -17,6 +17,8 @@ from pc_assistant.runtime import RuntimePaths
 from pc_assistant.service.core_api import (
     ApprovalResolvedMessage,
     ArtifactInputRef,
+    ChatApprovalResolvedMessage,
+    ChatTurnSnapshot,
     TaskAcceptedMessage,
     TaskCancelResultMessage,
     TaskListMessage,
@@ -47,8 +49,40 @@ class GatewayCoreClient(Protocol):
         tools_enabled: bool = True,
         priority: int = 0,
         parent_task_id: str = "",
-        origin: TaskOrigin = TaskOrigin.CHAT,
+        origin: TaskOrigin = TaskOrigin.USER,
     ) -> TaskAcceptedMessage: ...
+
+    async def create_chat_turn(
+        self,
+        session_handle: str,
+        user_input: str = "",
+        attachments: tuple[ArtifactInputRef, ...] = (),
+        *,
+        tools_enabled: bool = True,
+    ) -> ChatTurnSnapshot: ...
+
+    async def get_chat_turn(self, turn_id: str) -> ChatTurnSnapshot: ...
+
+    async def list_chat_turns(
+        self,
+        session_handle: str,
+        *,
+        limit: int = 100,
+    ) -> tuple[ChatTurnSnapshot, ...]: ...
+
+    def chat_turn_updates(
+        self,
+        turn_id: str,
+    ) -> AsyncIterator[ChatTurnSnapshot]: ...
+
+    async def cancel_chat_turn(self, turn_id: str) -> ChatTurnSnapshot: ...
+
+    async def resolve_chat_approval(
+        self,
+        approval_id: str,
+        *,
+        approved: bool,
+    ) -> ChatApprovalResolvedMessage: ...
 
     async def get_task(self, task_id: str) -> TaskSnapshot: ...
 
@@ -182,13 +216,75 @@ class GatewayCoreBridge:
             priority=priority,
             parent_task_id=parent_task_id,
         )
-        if origin is not TaskOrigin.CHAT:
-            kwargs["origin"] = origin
+        kwargs["origin"] = origin
         return await client.create_task(
             session_handle,
             user_input,
             attachments,
             **kwargs,
+        )
+
+    async def create_chat_turn(
+        self,
+        principal_id: str,
+        session_handle: str,
+        user_input: str,
+        attachments: tuple[ArtifactInputRef, ...],
+        *,
+        tools_enabled: bool,
+    ) -> ChatTurnSnapshot:
+        return await (await self._client_for(principal_id)).create_chat_turn(
+            session_handle,
+            user_input,
+            attachments,
+            tools_enabled=tools_enabled,
+        )
+
+    async def get_chat_turn(
+        self,
+        principal_id: str,
+        turn_id: str,
+    ) -> ChatTurnSnapshot:
+        return await (await self._client_for(principal_id)).get_chat_turn(turn_id)
+
+    async def list_chat_turns(
+        self,
+        principal_id: str,
+        session_handle: str,
+        *,
+        limit: int = 100,
+    ) -> tuple[ChatTurnSnapshot, ...]:
+        return await (await self._client_for(principal_id)).list_chat_turns(
+            session_handle,
+            limit=limit,
+        )
+
+    async def chat_turn_updates(
+        self,
+        principal_id: str,
+        turn_id: str,
+    ) -> AsyncIterator[ChatTurnSnapshot]:
+        client = await self._client_for(principal_id)
+        async for snapshot in client.chat_turn_updates(turn_id):
+            yield snapshot
+
+    async def cancel_chat_turn(
+        self,
+        principal_id: str,
+        turn_id: str,
+    ) -> ChatTurnSnapshot:
+        return await (await self._client_for(principal_id)).cancel_chat_turn(turn_id)
+
+    async def resolve_chat_approval(
+        self,
+        principal_id: str,
+        approval_id: str,
+        *,
+        approved: bool,
+    ) -> ChatApprovalResolvedMessage:
+        return await (await self._client_for(principal_id)).resolve_chat_approval(
+            approval_id,
+            approved=approved,
         )
 
     async def get_task(self, principal_id: str, task_id: str) -> TaskSnapshot:

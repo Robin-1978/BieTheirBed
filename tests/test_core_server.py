@@ -99,6 +99,10 @@ class FakeTasks:
             raise TaskNotFoundError("Task not found")
         return _task_record(task_id)
 
+    async def get_trace(self, principal_id: str, task_id: str):
+        await self.get(principal_id, task_id)
+        return None
+
     async def list(self, principal_id: str, **kwargs):
         del kwargs
         if principal_id != "principal-a":

@@ -385,6 +385,508 @@
         }
       }
     },
+    "/v1/conversations/sessions/{session_handle}/turns": {
+      "post": {
+        "operationId": "createChatTurn",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateChatTurnRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "ChatTurn accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatTurnResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listChatTurns",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Conversation history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatTurnListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/conversations/turns/{turn_id}": {
+      "get": {
+        "operationId": "getChatTurn",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "turn_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ChatTurn snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatTurnResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/conversations/turns/{turn_id}/stream": {
+      "get": {
+        "operationId": "streamChatTurn",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "turn_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Coalesced ChatTurn snapshots",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/conversations/turns/{turn_id}/cancel": {
+      "post": {
+        "operationId": "cancelChatTurn",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "turn_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ChatTurn cancellation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatTurnResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/conversations/approvals/{approval_id}/resolve": {
+      "post": {
+        "operationId": "resolveChatApproval",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveApprovalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Chat approval resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatApprovalResolvedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tasks": {
       "post": {
         "operationId": "createTask",
@@ -2643,15 +3145,409 @@
         "title": "ChallengeResponse",
         "type": "object"
       },
-      "CreateTaskRequest": {
+      "ChatApprovalResolvedResponse": {
+        "properties": {
+          "approval": {
+            "$ref": "#/components/schemas/ChatApprovalSnapshot"
+          },
+          "resolved": {
+            "title": "Resolved",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "approval",
+          "resolved"
+        ],
+        "title": "ChatApprovalResolvedResponse",
+        "type": "object"
+      },
+      "ChatApprovalSnapshot": {
         "additionalProperties": false,
         "properties": {
+          "approval_id": {
+            "minLength": 1,
+            "title": "Approval Id",
+            "type": "string"
+          },
+          "step_id": {
+            "minLength": 1,
+            "title": "Step Id",
+            "type": "string"
+          },
+          "tool_call_id": {
+            "minLength": 1,
+            "title": "Tool Call Id",
+            "type": "string"
+          },
+          "tool_name": {
+            "minLength": 1,
+            "title": "Tool Name",
+            "type": "string"
+          },
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "created_at": {
+            "minimum": 0.0,
+            "title": "Created At",
+            "type": "number"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resolved At"
+          },
+          "resolved_by": {
+            "default": "",
+            "title": "Resolved By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "approval_id",
+          "step_id",
+          "tool_call_id",
+          "tool_name",
+          "state",
+          "created_at"
+        ],
+        "title": "ChatApprovalSnapshot",
+        "type": "object"
+      },
+      "ChatTimelineEntrySnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "content": {
+            "default": "",
+            "title": "Content",
+            "type": "string"
+          },
+          "tool_call_id": {
+            "default": "",
+            "title": "Tool Call Id",
+            "type": "string"
+          },
+          "tool_name": {
+            "default": "",
+            "title": "Tool Name",
+            "type": "string"
+          },
+          "tool_args": {
+            "additionalProperties": true,
+            "title": "Tool Args",
+            "type": "object"
+          },
+          "tool_result": {
+            "default": null,
+            "title": "Tool Result"
+          },
+          "blocked": {
+            "default": false,
+            "title": "Blocked",
+            "type": "boolean"
+          },
+          "iteration": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Iteration",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "ChatTimelineEntrySnapshot",
+        "type": "object"
+      },
+      "ChatToolStepSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "step_id": {
+            "minLength": 1,
+            "title": "Step Id",
+            "type": "string"
+          },
+          "tool_call_id": {
+            "minLength": 1,
+            "title": "Tool Call Id",
+            "type": "string"
+          },
+          "tool_name": {
+            "minLength": 1,
+            "title": "Tool Name",
+            "type": "string"
+          },
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          },
+          "created_at": {
+            "minimum": 0.0,
+            "title": "Created At",
+            "type": "number"
+          },
+          "updated_at": {
+            "minimum": 0.0,
+            "title": "Updated At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "step_id",
+          "tool_call_id",
+          "tool_name",
+          "state",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ChatToolStepSnapshot",
+        "type": "object"
+      },
+      "ChatTurnListResponse": {
+        "properties": {
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/ChatTurnSnapshot"
+            },
+            "title": "Turns",
+            "type": "array"
+          }
+        },
+        "required": [
+          "turns"
+        ],
+        "title": "ChatTurnListResponse",
+        "type": "object"
+      },
+      "ChatTurnResponse": {
+        "properties": {
+          "turn": {
+            "$ref": "#/components/schemas/ChatTurnSnapshot"
+          }
+        },
+        "required": [
+          "turn"
+        ],
+        "title": "ChatTurnResponse",
+        "type": "object"
+      },
+      "ChatTurnSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "turn_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Turn Id",
+            "type": "string"
+          },
           "session_handle": {
             "maxLength": 256,
             "minLength": 1,
             "title": "Session Handle",
             "type": "string"
           },
+          "client_request_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Client Request Id",
+            "type": "string"
+          },
+          "user_input": {
+            "default": "",
+            "maxLength": 200000,
+            "title": "User Input",
+            "type": "string"
+          },
+          "attachments": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ArtifactInputRef"
+            },
+            "maxItems": 8,
+            "title": "Attachments",
+            "type": "array"
+          },
+          "tools_enabled": {
+            "title": "Tools Enabled",
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ChatTurnState"
+          },
+          "reasoning": {
+            "default": "",
+            "title": "Reasoning",
+            "type": "string"
+          },
+          "content": {
+            "default": "",
+            "title": "Content",
+            "type": "string"
+          },
+          "final_output": {
+            "default": "",
+            "title": "Final Output",
+            "type": "string"
+          },
+          "artifacts": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ArtifactRef"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "failure_code": {
+            "default": "",
+            "title": "Failure Code",
+            "type": "string"
+          },
+          "cancel_requested": {
+            "title": "Cancel Requested",
+            "type": "boolean"
+          },
+          "tool_steps": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ChatToolStepSnapshot"
+            },
+            "title": "Tool Steps",
+            "type": "array"
+          },
+          "approvals": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ChatApprovalSnapshot"
+            },
+            "title": "Approvals",
+            "type": "array"
+          },
+          "timeline": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ChatTimelineEntrySnapshot"
+            },
+            "title": "Timeline",
+            "type": "array"
+          },
+          "created_at": {
+            "minimum": 0.0,
+            "title": "Created At",
+            "type": "number"
+          },
+          "updated_at": {
+            "minimum": 0.0,
+            "title": "Updated At",
+            "type": "number"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Finished At"
+          },
+          "revision": {
+            "minimum": 1,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "turn_id",
+          "session_handle",
+          "client_request_id",
+          "tools_enabled",
+          "state",
+          "cancel_requested",
+          "created_at",
+          "updated_at",
+          "revision"
+        ],
+        "title": "ChatTurnSnapshot",
+        "type": "object"
+      },
+      "ChatTurnState": {
+        "enum": [
+          "running",
+          "waiting_approval",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "title": "ChatTurnState",
+        "type": "string"
+      },
+      "CreateChatTurnRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "input": {
+            "default": "",
+            "maxLength": 200000,
+            "title": "Input",
+            "type": "string"
+          },
+          "attachments": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ArtifactInputRef"
+            },
+            "maxItems": 8,
+            "title": "Attachments",
+            "type": "array"
+          },
+          "tools_enabled": {
+            "default": true,
+            "title": "Tools Enabled",
+            "type": "boolean"
+          }
+        },
+        "title": "CreateChatTurnRequest",
+        "type": "object"
+      },
+      "CreateTaskRequest": {
+        "additionalProperties": false,
+        "properties": {
           "input": {
             "default": "",
             "maxLength": 200000,
@@ -2684,20 +3580,8 @@
             "maxLength": 128,
             "title": "Parent Task Id",
             "type": "string"
-          },
-          "kind": {
-            "default": "chat",
-            "enum": [
-              "chat",
-              "task"
-            ],
-            "title": "Kind",
-            "type": "string"
           }
         },
-        "required": [
-          "session_handle"
-        ],
         "title": "CreateTaskRequest",
         "type": "object"
       },
@@ -3270,6 +4154,73 @@
         "title": "TaskEventPayload",
         "type": "object"
       },
+      "TaskExecutionTrace": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Task Id",
+            "type": "string"
+          },
+          "entries": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/TaskTraceEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "final_output": {
+            "default": "",
+            "maxLength": 200000,
+            "title": "Final Output",
+            "type": "string"
+          },
+          "created_at": {
+            "minimum": 0.0,
+            "title": "Created At",
+            "type": "number"
+          },
+          "updated_at": {
+            "minimum": 0.0,
+            "title": "Updated At",
+            "type": "number"
+          },
+          "retained_until": {
+            "minimum": 0.0,
+            "title": "Retained Until",
+            "type": "number"
+          },
+          "compacted_at": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Compacted At"
+          },
+          "revision": {
+            "minimum": 0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "task_id",
+          "created_at",
+          "updated_at",
+          "retained_until",
+          "revision"
+        ],
+        "title": "TaskExecutionTrace",
+        "type": "object"
+      },
       "TaskListResponse": {
         "properties": {
           "tasks": {
@@ -3293,7 +4244,6 @@
       },
       "TaskOrigin": {
         "enum": [
-          "chat",
           "user",
           "agent",
           "scheduled",
@@ -3337,7 +4287,7 @@
           },
           "origin": {
             "$ref": "#/components/schemas/TaskOrigin",
-            "default": "chat"
+            "default": "user"
           },
           "parent_task_id": {
             "default": "",
@@ -3439,6 +4389,17 @@
             "exclusiveMinimum": 0,
             "title": "Next Event Seq",
             "type": "integer"
+          },
+          "trace": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskExecutionTrace"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -3470,6 +4431,80 @@
         ],
         "title": "TaskState",
         "type": "string"
+      },
+      "TaskTraceEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "entry_type": {
+            "enum": [
+              "reasoning",
+              "content",
+              "plan",
+              "tool_call",
+              "tool_result",
+              "artifact",
+              "context_compacted",
+              "warning",
+              "final_output"
+            ],
+            "title": "Entry Type",
+            "type": "string"
+          },
+          "iteration": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Iteration",
+            "type": "integer"
+          },
+          "content": {
+            "default": "",
+            "title": "Content",
+            "type": "string"
+          },
+          "tool_call_id": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Tool Call Id",
+            "type": "string"
+          },
+          "tool_name": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Tool Name",
+            "type": "string"
+          },
+          "tool_args": {
+            "additionalProperties": true,
+            "title": "Tool Args",
+            "type": "object"
+          },
+          "tool_result": {
+            "default": null,
+            "title": "Tool Result"
+          },
+          "artifact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArtifactRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "occurred_at": {
+            "minimum": 0.0,
+            "title": "Occurred At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "entry_type",
+          "occurred_at"
+        ],
+        "title": "TaskTraceEntry",
+        "type": "object"
       },
       "ToolDescriptorRecord": {
         "additionalProperties": false,

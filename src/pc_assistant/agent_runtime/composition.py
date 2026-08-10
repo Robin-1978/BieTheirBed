@@ -56,6 +56,11 @@ from pc_assistant.context.memory_db import (
     ScopedUserMemory,
 )
 from pc_assistant.context.prompt import build_session_context, build_system_prompt
+from pc_assistant.context.session_context import (
+    SessionContextRepository,
+    SessionContextService,
+)
+from pc_assistant.conversation import ConversationRepository, ConversationService
 from pc_assistant.desktop_session import ensure_desktop_session
 from pc_assistant.extensions import ExtensionManager
 from pc_assistant.extensions.mcp import build_mcp_providers
@@ -127,8 +132,11 @@ class CoreRuntimeComposition:
 
     paths: RuntimePaths
     sessions: RuntimeSessionRepository
+    session_context: SessionContextService
     tasks: TaskRepository
     task_service: TaskService
+    conversations: ConversationRepository
+    conversation_service: ConversationService
     schedules: ScheduleRepository
     schedule_dispatcher: ScheduleDispatcher
     schedule_service: ScheduleService
@@ -243,7 +251,18 @@ def build_core_runtime(
     )
     database = paths.data / "assistant.db"
     sessions = RuntimeSessionRepository(database)
-    tasks = TaskRepository(database)
+    prompt_budget = max(
+        257,
+        config.effective_context_window_budget() - config.max_tokens,
+    )
+    session_context = SessionContextService(
+        SessionContextRepository(database),
+        soft_token_limit=max(256, int(prompt_budget * 0.65)),
+    )
+    tasks = TaskRepository(
+        database,
+        trace_retention_seconds=config.task_trace_retention_days * 24 * 60 * 60,
+    )
     schedules = ScheduleRepository(database)
     triggers = TriggerRepository(database)
     memory_repository = SQLiteMemoryRepository(database)
@@ -308,12 +327,16 @@ def build_core_runtime(
             available_tools=frozenset(registry.list_for(capabilities)),
             capabilities=capabilities,
         )
-        sections = [
+        history_context = await asyncio.to_thread(session_context.context, scope)
+        memory_sections = [
             memory.build_context_string(query=query),
             episodic.build_context_string(query=query),
         ]
         return build_session_context(
-            memory_context="\n\n".join(section for section in sections if section),
+            session_history_context=history_context,
+            memory_context="\n\n".join(
+                section for section in memory_sections if section
+            ),
             skill_context=skill_context,
         )
 
@@ -393,17 +416,13 @@ def build_core_runtime(
             elapsed_ms=elapsed_ms,
         )
     runtime = AgentRuntime(
-        sessions,
         react_loop,
         registry,
         artifacts,
         capabilities_for=capabilities_for_scope,
         health_probe=health_probe,
         system_prompt=build_system_prompt(),
-        prompt_budget=max(
-            257,
-            config.effective_context_window_budget() - config.max_tokens,
-        ),
+        prompt_budget=prompt_budget,
         max_output_tokens=config.max_tokens,
         temperature=config.llm_temperature,
         runtime_context=runtime_context,
@@ -414,16 +433,30 @@ def build_core_runtime(
     task_tool_commits = DurableToolCommitService(tasks)
     task_executor = TaskExecutor(
         tasks,
+        sessions,
         runtime,
         task_approvals,
         task_tool_commits,
         task_events,
+        session_context=session_context,
     )
     task_service = TaskService(
         tasks,
         task_executor,
         task_approvals,
         task_events,
+    )
+    conversations = ConversationRepository(
+        database,
+        detail_retention_seconds=(
+            config.conversation_detail_retention_days * 24 * 60 * 60
+        ),
+    )
+    conversation_service = ConversationService(
+        sessions,
+        conversations,
+        runtime,
+        session_context=session_context,
     )
     schedule_dispatcher = ScheduleDispatcher(schedules, task_service)
     schedule_service = ScheduleService(schedules, schedule_dispatcher)
@@ -520,6 +553,7 @@ def build_core_runtime(
             StaticTokenAuthenticator(credentials),
             SignedPrincipalAuthenticator(local_token),
         ),
+        conversations=conversation_service,
         transcription=transcription_service,
     )
     host = CoreServiceHost(
@@ -532,8 +566,11 @@ def build_core_runtime(
     return CoreRuntimeComposition(
         paths=paths,
         sessions=sessions,
+        session_context=session_context,
         tasks=tasks,
         task_service=task_service,
+        conversations=conversations,
+        conversation_service=conversation_service,
         schedules=schedules,
         schedule_dispatcher=schedule_dispatcher,
         schedule_service=schedule_service,

@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import Markdown from "react-native-marked";
 
-import type { ApprovalRequest, TaskEvent, TaskSnapshot } from "@/api/models";
+import type { ApprovalRequest, TaskEvent, TaskSnapshot, TaskTraceEntry } from "@/api/models";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
@@ -51,10 +51,11 @@ export default function TaskDetailScreen() {
 
   const approval = useMemo(() => pendingApproval(events), [events]);
   const timeline = useMemo(
-    () => collapseTimeline(events).filter(
-      (event) => event.event_type !== "content_delta" || !task?.final_summary,
+    () => (task?.trace?.entries ?? []).filter(
+      (entry) => entry.entry_type !== "final_output"
+        && (entry.entry_type !== "content" || !task?.final_summary),
     ),
-    [events, task?.final_summary],
+    [task?.final_summary, task?.trace?.entries],
   );
 
   async function command(action: "cancel" | "pause" | "resume" | "retry") {
@@ -130,10 +131,10 @@ export default function TaskDetailScreen() {
       ) : null}
 
       <View style={styles.timeline}>
-        {timeline.map((event) => (
-          <TimelineEvent
-            key={`${event.task_id}:${event.event_seq}`}
-            event={event}
+        {timeline.map((entry, index) => (
+          <TraceEntry
+            key={`${entry.entry_type}:${entry.iteration}:${entry.occurred_at}:${index}`}
+            entry={entry}
             onArtifact={(artifactId) => void openArtifact(artifactId)}
           />
         ))}
@@ -173,72 +174,45 @@ function pendingApproval(events: TaskEvent[]): ApprovalRequest | null {
 }
 
 function originLabel(origin: TaskSnapshot["origin"]): string {
-  return ({ chat: "对话", user: "立即执行", agent: "小诺创建", scheduled: "定时执行", event: "事件启动" })[origin];
+  return ({ user: "立即执行", agent: "小诺创建", scheduled: "定时执行", event: "事件启动" })[origin];
 }
 
 function stateLabel(state: TaskSnapshot["state"]): string {
   return ({ queued: "排队中", running: "进行中", waiting_approval: "待确认", paused: "已暂停", completed: "已完成", failed: "失败", cancelled: "已取消" })[state];
 }
 
-function TimelineEvent({
-  event,
+function TraceEntry({
+  entry,
   onArtifact,
 }: {
-  event: TaskEvent;
+  entry: TaskTraceEntry;
   onArtifact(artifactId: string): void;
 }) {
-  const content = String(event.payload.content ?? "");
-  if (event.event_type === "reasoning_delta") {
+  const content = entry.content;
+  if (entry.entry_type === "reasoning") {
     return content ? <Text style={styles.reasoning}>{content}</Text> : null;
   }
-  if (event.event_type === "tool_call") {
-    return <Text style={styles.toolLine}>⌁ {String(event.payload.tool_name ?? "工具")}</Text>;
+  if (entry.entry_type === "tool_call") {
+    return <Text style={styles.toolLine}>⌁ {entry.tool_name || "工具"}</Text>;
   }
-  if (event.event_type === "tool_result") {
-    return <Text style={styles.toolResult}>✓ {String(event.payload.tool_name ?? "完成")}</Text>;
+  if (entry.entry_type === "tool_result") {
+    return <Text style={styles.toolResult}>✓ {entry.tool_name || "完成"}</Text>;
   }
-  if (event.event_type === "warning") {
+  if (entry.entry_type === "warning") {
     return <Text style={styles.warning}>{content}</Text>;
   }
-  if (event.event_type === "artifact") {
-    const artifactId = String(event.payload.artifact_id ?? "");
+  if (entry.entry_type === "artifact") {
+    const artifactId = entry.artifact?.artifact_id ?? "";
     return artifactId ? (
       <Pressable onPress={() => onArtifact(artifactId)}>
         <Text style={styles.artifact}>附件 · 点击查看</Text>
       </Pressable>
     ) : null;
   }
-  if (event.event_type === "content_delta" || event.event_type === "final_output") {
+  if (entry.entry_type === "content" || entry.entry_type === "plan") {
     return content ? <Markdown value={content} flatListProps={{ scrollEnabled: false, style: styles.markdown }} /> : null;
   }
   return null;
-}
-
-function collapseTimeline(events: TaskEvent[]): TaskEvent[] {
-  const collapsed: TaskEvent[] = [];
-  for (const event of events) {
-    if (event.event_type === "final_output") continue;
-    const previous = collapsed.at(-1);
-    const mergeable = event.event_type === "reasoning_delta" || event.event_type === "content_delta";
-    if (
-      mergeable
-      && previous?.event_type === event.event_type
-      && Number(previous.payload.iteration ?? 0) === Number(event.payload.iteration ?? 0)
-    ) {
-      collapsed[collapsed.length - 1] = {
-        ...previous,
-        event_seq: event.event_seq,
-        occurred_at: event.occurred_at,
-        payload: {
-          ...previous.payload,
-          content: `${String(previous.payload.content ?? "")}${String(event.payload.content ?? "")}`,
-        },
-      };
-    } else {
-      collapsed.push(event);
-    }
-  }
-  return collapsed;
 }
 
 function Action({ label, danger = false, onPress }: { label: string; danger?: boolean; onPress(): void }) {

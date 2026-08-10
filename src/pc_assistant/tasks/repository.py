@@ -29,16 +29,31 @@ from pc_assistant.tasks.models import (
     TaskEvent,
     TaskEventPayload,
     TaskEventType,
+    TaskExecutionTrace,
     TaskPauseResult,
     TaskOrigin,
     TaskRecord,
     TaskState,
+    TaskTraceEntry,
     TaskToolStepRecord,
     TaskToolStepState,
 )
 
 
 _MAX_EVENT_BYTES = 512 * 1024
+_DEFAULT_TRACE_RETENTION_SECONDS = 90 * 24 * 60 * 60
+_PRINCIPAL_FEED_EVENT_TYPES = frozenset(
+    {
+        "task_created",
+        "state_changed",
+        "approval_requested",
+        "approval_resolved",
+        "completed",
+        "failed",
+        "cancelled",
+    }
+)
+_DURABLE_TASK_EVENT_TYPES = _PRINCIPAL_FEED_EVENT_TYPES | {"warning"}
 _TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.QUEUED: frozenset({TaskState.RUNNING, TaskState.CANCELLED}),
     TaskState.RUNNING: frozenset(
@@ -90,6 +105,7 @@ class TaskRepository:
         clock: Callable[[], float] = time.time,
         max_active_tasks: int = 128,
         max_active_tasks_per_principal: int = 32,
+        trace_retention_seconds: float = _DEFAULT_TRACE_RETENTION_SECONDS,
     ) -> None:
         if not 1 <= max_active_tasks <= 10_000:
             raise ValueError("Global active Task limit must be between 1 and 10000")
@@ -97,6 +113,8 @@ class TaskRepository:
             raise ValueError(
                 "Per-principal active Task limit must be between 1 and the global limit"
             )
+        if not 60 <= trace_retention_seconds <= 10 * 365 * 24 * 60 * 60:
+            raise ValueError("Task trace retention must be between 60 seconds and 10 years")
         self._path = Path(db_path).expanduser().resolve()
         self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._path.parent.chmod(0o700)
@@ -109,6 +127,7 @@ class TaskRepository:
         self._clock = clock
         self._max_active_tasks = max_active_tasks
         self._max_active_tasks_per_principal = max_active_tasks_per_principal
+        self._trace_retention_seconds = float(trace_retention_seconds)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
@@ -181,6 +200,17 @@ class TaskRepository:
                     failure_code TEXT NOT NULL,
                     UNIQUE(task_id, ordinal)
                 );
+                CREATE TABLE IF NOT EXISTS runtime_task_execution_traces (
+                    task_id TEXT PRIMARY KEY
+                        REFERENCES runtime_tasks(task_id) ON DELETE CASCADE,
+                    entries_json TEXT NOT NULL,
+                    final_output TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    retained_until REAL NOT NULL,
+                    compacted_at REAL,
+                    revision INTEGER NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS runtime_task_tool_steps (
                     tool_step_id TEXT PRIMARY KEY,
                     task_id TEXT NOT NULL
@@ -227,6 +257,8 @@ class TaskRepository:
                     );
                 CREATE INDEX IF NOT EXISTS runtime_task_attempts_by_task
                     ON runtime_task_attempts(task_id, ordinal);
+                CREATE INDEX IF NOT EXISTS runtime_task_traces_by_retention
+                    ON runtime_task_execution_traces(retained_until, compacted_at);
                 CREATE INDEX IF NOT EXISTS runtime_task_tool_steps_by_task_state
                     ON runtime_task_tool_steps(task_id, state, created_at);
                 CREATE INDEX IF NOT EXISTS runtime_principal_task_events_by_owner
@@ -254,6 +286,10 @@ class TaskRepository:
                        WHERE client_request_id LIKE 'trigger:%'""",
                     (TaskOrigin.EVENT.value,),
                 )
+            db.execute(
+                "UPDATE runtime_tasks SET origin=? WHERE origin='chat'",
+                (TaskOrigin.USER.value,),
+            )
             require_exact_table(
                 db,
                 "runtime_tasks",
@@ -310,6 +346,21 @@ class TaskRepository:
                     ("failure_code", "TEXT", True, None, 0),
                 ),
                 label="Runtime Task attempt",
+            )
+            require_exact_table(
+                db,
+                "runtime_task_execution_traces",
+                (
+                    ("task_id", "TEXT", False, None, 1),
+                    ("entries_json", "TEXT", True, None, 0),
+                    ("final_output", "TEXT", True, None, 0),
+                    ("created_at", "REAL", True, None, 0),
+                    ("updated_at", "REAL", True, None, 0),
+                    ("retained_until", "REAL", True, None, 0),
+                    ("compacted_at", "REAL", False, None, 0),
+                    ("revision", "INTEGER", True, None, 0),
+                ),
+                label="Runtime Task execution trace",
             )
             require_exact_table(
                 db,
@@ -414,6 +465,20 @@ class TaskRepository:
             )
             require_foreign_keys(
                 db,
+                "runtime_task_execution_traces",
+                (
+                    (
+                        "runtime_tasks",
+                        "task_id",
+                        "task_id",
+                        "NO ACTION",
+                        "CASCADE",
+                    ),
+                ),
+                label="Runtime Task execution trace",
+            )
+            require_foreign_keys(
+                db,
                 "runtime_principal_task_events",
                 (
                     (
@@ -480,6 +545,12 @@ class TaskRepository:
             )
             require_index_columns(
                 db,
+                "runtime_task_traces_by_retention",
+                ("retained_until", "compacted_at"),
+                label="Runtime Task execution trace",
+            )
+            require_index_columns(
+                db,
                 "runtime_task_tool_steps_by_task_state",
                 ("task_id", "state", "created_at"),
                 label="Runtime Task tool step",
@@ -490,6 +561,7 @@ class TaskRepository:
                 ("principal_id", "feed_event_id"),
                 label="Runtime principal Task event",
             )
+            self._migrate_legacy_runtime_events(db)
 
     @staticmethod
     def _normalize_identifier(value: str, *, label: str, limit: int) -> str:
@@ -689,6 +761,146 @@ class TaskRepository:
             raise ValueError("Task event payload exceeds the size limit")
         return encoded
 
+    @staticmethod
+    def _trace_entries_json(entries: tuple[TaskTraceEntry, ...]) -> str:
+        encoded = json.dumps(
+            [entry.model_dump(mode="json") for entry in entries],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        if len(encoded.encode("utf-8")) > 16 * 1024 * 1024:
+            raise ValueError("Task execution trace exceeds the size limit")
+        return encoded
+
+    @staticmethod
+    def _trace_record(row: sqlite3.Row) -> TaskExecutionTrace:
+        try:
+            raw_entries = json.loads(str(row["entries_json"]))
+            if not isinstance(raw_entries, list):
+                raise ValueError
+            entries = tuple(TaskTraceEntry.model_validate(item) for item in raw_entries)
+        except Exception as exc:
+            raise RuntimeError("Task execution trace is corrupt") from exc
+        return TaskExecutionTrace(
+            task_id=str(row["task_id"]),
+            entries=entries,
+            final_output=str(row["final_output"]),
+            created_at=float(row["created_at"]),
+            updated_at=float(row["updated_at"]),
+            retained_until=float(row["retained_until"]),
+            compacted_at=(
+                None if row["compacted_at"] is None else float(row["compacted_at"])
+            ),
+            revision=int(row["revision"]),
+        )
+
+    def _migrate_legacy_runtime_events(self, db: sqlite3.Connection) -> None:
+        """Move old streaming events into one coalesced trace per Task."""
+        placeholders = ",".join("?" for _ in _DURABLE_TASK_EVENT_TYPES)
+        task_rows = db.execute(
+            f"""SELECT DISTINCT task_id FROM runtime_task_events
+                WHERE event_type NOT IN ({placeholders})""",
+            tuple(sorted(_DURABLE_TASK_EVENT_TYPES)),
+        ).fetchall()
+        for task_row in task_rows:
+            task_id = str(task_row["task_id"])
+            existing = db.execute(
+                "SELECT 1 FROM runtime_task_execution_traces WHERE task_id=?",
+                (task_id,),
+            ).fetchone()
+            if existing is None:
+                entries: list[TaskTraceEntry] = []
+                final_output = ""
+                rows = db.execute(
+                    f"""SELECT event_type, payload_json, occurred_at
+                        FROM runtime_task_events
+                        WHERE task_id=? AND event_type NOT IN ({placeholders})
+                        ORDER BY event_seq""",
+                    (task_id, *tuple(sorted(_DURABLE_TASK_EVENT_TYPES))),
+                ).fetchall()
+                for row in rows:
+                    try:
+                        payload = TaskEventPayload.model_validate_json(
+                            str(row["payload_json"])
+                        )
+                    except Exception:
+                        continue
+                    event_type = str(row["event_type"])
+                    entry_type = {
+                        "reasoning_delta": "reasoning",
+                        "content_delta": "content",
+                        "plan": "plan",
+                        "tool_call": "tool_call",
+                        "tool_result": "tool_result",
+                        "artifact": "artifact",
+                        "context_compacted": "context_compacted",
+                        "final_output": "final_output",
+                    }.get(event_type)
+                    if entry_type is None:
+                        continue
+                    occurred_at = float(row["occurred_at"])
+                    if event_type == "final_output":
+                        final_output = payload.content
+                    if (
+                        entry_type in {"reasoning", "content"}
+                        and entries
+                        and entries[-1].entry_type == entry_type
+                        and entries[-1].iteration == payload.iteration
+                    ):
+                        previous = entries[-1]
+                        entries[-1] = previous.model_copy(
+                            update={
+                                "content": previous.content + payload.content,
+                                "occurred_at": occurred_at,
+                            }
+                        )
+                        continue
+                    entries.append(
+                        TaskTraceEntry(
+                            entry_type=entry_type,
+                            iteration=payload.iteration,
+                            content=payload.content,
+                            tool_call_id=payload.tool_call_id,
+                            tool_name=payload.tool_name,
+                            tool_args=payload.tool_args,
+                            tool_result=payload.tool_result,
+                            artifact=payload.artifact,
+                            occurred_at=occurred_at,
+                        )
+                    )
+                if entries:
+                    created_at = entries[0].occurred_at
+                    updated_at = entries[-1].occurred_at
+                    db.execute(
+                        """INSERT INTO runtime_task_execution_traces(
+                               task_id, entries_json, final_output, created_at,
+                               updated_at, retained_until, compacted_at, revision
+                           ) VALUES (?, ?, ?, ?, ?, ?, NULL, 0)""",
+                        (
+                            task_id,
+                            self._trace_entries_json(tuple(entries)),
+                            final_output,
+                            created_at,
+                            updated_at,
+                            updated_at + self._trace_retention_seconds,
+                        ),
+                    )
+
+        db.execute(
+            f"""DELETE FROM runtime_principal_task_events
+                WHERE EXISTS (
+                    SELECT 1 FROM runtime_task_events event
+                    WHERE event.task_id=runtime_principal_task_events.task_id
+                      AND event.event_seq=runtime_principal_task_events.task_event_seq
+                      AND event.event_type NOT IN ({','.join('?' for _ in _PRINCIPAL_FEED_EVENT_TYPES)})
+                )""",
+            tuple(sorted(_PRINCIPAL_FEED_EVENT_TYPES)),
+        )
+        db.execute(
+            f"DELETE FROM runtime_task_events WHERE event_type NOT IN ({placeholders})",
+            tuple(sorted(_DURABLE_TASK_EVENT_TYPES)),
+        )
+
     @classmethod
     def _append_event(
         cls,
@@ -711,17 +923,18 @@ class TaskRepository:
                 occurred_at,
             ),
         )
-        db.execute(
-            """INSERT INTO runtime_principal_task_events(
-                   principal_id, task_id, task_event_seq, occurred_at
-               ) VALUES (?, ?, ?, ?)""",
-            (
-                str(row["principal_id"]),
-                str(row["task_id"]),
-                event_seq,
-                occurred_at,
-            ),
-        )
+        if event_type in _PRINCIPAL_FEED_EVENT_TYPES:
+            db.execute(
+                """INSERT INTO runtime_principal_task_events(
+                       principal_id, task_id, task_event_seq, occurred_at
+                   ) VALUES (?, ?, ?, ?)""",
+                (
+                    str(row["principal_id"]),
+                    str(row["task_id"]),
+                    event_seq,
+                    occurred_at,
+                ),
+            )
         return TaskEvent(
             task_id=str(row["task_id"]),
             event_seq=event_seq,
@@ -762,7 +975,7 @@ class TaskRepository:
         tools_enabled: bool = True,
         priority: int = 0,
         parent_task_id: str = "",
-        origin: TaskOrigin = TaskOrigin.CHAT,
+        origin: TaskOrigin = TaskOrigin.USER,
     ) -> tuple[TaskRecord, bool]:
         request_id = self._normalize_identifier(
             client_request_id,
@@ -1390,6 +1603,10 @@ class TaskRepository:
         event_type: TaskEventType,
         payload: TaskEventPayload,
     ) -> TaskEvent:
+        if event_type not in _DURABLE_TASK_EVENT_TYPES:
+            raise ValueError(
+                "Streaming model output belongs to Task ExecutionTrace, not the event journal"
+            )
         principal = self._normalize_identifier(
             principal_id,
             label="principal_id",
@@ -1414,6 +1631,146 @@ class TaskRepository:
                 (event.event_seq + 1, now, normalized_task_id),
             )
             return event
+
+    def get_trace(
+        self,
+        principal_id: str,
+        task_id: str,
+    ) -> TaskExecutionTrace | None:
+        principal = self._normalize_identifier(
+            principal_id,
+            label="principal_id",
+            limit=256,
+        )
+        normalized_task_id = self._normalize_identifier(
+            task_id,
+            label="task_id",
+            limit=128,
+        )
+        with self._connect() as db:
+            self._owned_task(db, principal, normalized_task_id)
+            row = db.execute(
+                "SELECT * FROM runtime_task_execution_traces WHERE task_id=?",
+                (normalized_task_id,),
+            ).fetchone()
+            return None if row is None else self._trace_record(row)
+
+    def save_trace(
+        self,
+        principal_id: str,
+        task_id: str,
+        *,
+        entries: tuple[TaskTraceEntry, ...],
+        final_output: str = "",
+    ) -> TaskExecutionTrace:
+        principal = self._normalize_identifier(
+            principal_id,
+            label="principal_id",
+            limit=256,
+        )
+        normalized_task_id = self._normalize_identifier(
+            task_id,
+            label="task_id",
+            limit=128,
+        )
+        if len(final_output) > 200_000:
+            raise ValueError("Task trace final output exceeds 200000 characters")
+        encoded = self._trace_entries_json(entries)
+        now = self._clock()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._owned_task(db, principal, normalized_task_id)
+            existing = db.execute(
+                "SELECT created_at, revision FROM runtime_task_execution_traces WHERE task_id=?",
+                (normalized_task_id,),
+            ).fetchone()
+            if existing is None:
+                db.execute(
+                    """INSERT INTO runtime_task_execution_traces(
+                           task_id, entries_json, final_output, created_at,
+                           updated_at, retained_until, compacted_at, revision
+                       ) VALUES (?, ?, ?, ?, ?, ?, NULL, 0)""",
+                    (
+                        normalized_task_id,
+                        encoded,
+                        final_output,
+                        now,
+                        now,
+                        now + self._trace_retention_seconds,
+                    ),
+                )
+            else:
+                db.execute(
+                    """UPDATE runtime_task_execution_traces SET
+                           entries_json=?, final_output=?, updated_at=?,
+                           retained_until=?, compacted_at=NULL, revision=revision+1
+                       WHERE task_id=?""",
+                    (
+                        encoded,
+                        final_output,
+                        now,
+                        now + self._trace_retention_seconds,
+                        normalized_task_id,
+                    ),
+                )
+            row = db.execute(
+                "SELECT * FROM runtime_task_execution_traces WHERE task_id=?",
+                (normalized_task_id,),
+            ).fetchone()
+            assert row is not None
+            return self._trace_record(row)
+
+    def compact_expired_traces(self) -> int:
+        """Drop verbose drafts after retention while preserving Task results."""
+        now = self._clock()
+        terminal_values = tuple(state.value for state in TERMINAL_TASK_STATES)
+        placeholders = ",".join("?" for _ in terminal_values)
+        compacted = 0
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute(
+                f"""SELECT trace.* FROM runtime_task_execution_traces trace
+                    JOIN runtime_tasks task ON task.task_id=trace.task_id
+                    WHERE trace.compacted_at IS NULL
+                      AND trace.retained_until<=?
+                      AND task.state IN ({placeholders})""",
+                (now, *terminal_values),
+            ).fetchall()
+            for row in rows:
+                trace = self._trace_record(row)
+                compact_entries = tuple(
+                    entry.model_copy(
+                        update={
+                            "tool_args": {},
+                            "tool_result": None,
+                        }
+                    )
+                    for entry in trace.entries
+                    if entry.entry_type
+                    in {
+                        "plan",
+                        "tool_call",
+                        "tool_result",
+                        "artifact",
+                        "context_compacted",
+                        "warning",
+                        "final_output",
+                    }
+                )
+                db.execute(
+                    """UPDATE runtime_task_execution_traces SET
+                           entries_json=?, compacted_at=?, updated_at=?,
+                           revision=revision+1
+                       WHERE task_id=? AND compacted_at IS NULL""",
+                    (
+                        self._trace_entries_json(compact_entries),
+                        now,
+                        now,
+                        trace.task_id,
+                    ),
+                )
+                compacted += 1
+        return compacted
 
     def request_cancel(
         self,

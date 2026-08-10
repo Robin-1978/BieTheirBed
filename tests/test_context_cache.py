@@ -96,15 +96,30 @@ def test_truncate_keeps_runtime_context_before_current_turn() -> None:
 
 def test_runtime_context_orders_stable_fields_before_current_time() -> None:
     context = build_session_context(
+        session_history_context="<compacted_history>earlier turns</compacted_history>",
         memory_context="preferred_language=zh",
         skill_context="<active_skills>research</active_skills>",
         os_info="Linux test",
     )
 
-    assert context.index("<os_info>") < context.index("<user_memory>")
+    assert context.index("<os_info>") < context.index("<session_history>")
+    assert context.index("<session_history>") < context.index("<user_memory>")
     assert context.index("<user_memory>") < context.index("<active_skills>")
     assert context.index("<active_skills>") < context.index("<current_time>")
     assert "<working_directory>" not in context
+
+
+def test_session_history_is_never_nested_in_user_memory() -> None:
+    context = build_session_context(
+        session_history_context="<compacted_history>old</compacted_history>",
+        memory_context="preferred_language=zh",
+        os_info="Linux test",
+    )
+
+    history = context[context.index("<session_history>"):context.index("</session_history>")]
+    memory = context[context.index("<user_memory>"):context.index("</user_memory>")]
+    assert "<compacted_history>old</compacted_history>" in history
+    assert "compacted_history" not in memory
 
 
 def test_evidence_instruction_is_attached_to_current_turn() -> None:

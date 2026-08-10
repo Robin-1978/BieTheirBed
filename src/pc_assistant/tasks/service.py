@@ -18,6 +18,7 @@ from pc_assistant.tasks.models import (
     TaskApprovalRecord,
     TaskCancelResult,
     TaskEvent,
+    TaskExecutionTrace,
     TaskPauseResult,
     TaskOrigin,
     TaskRecord,
@@ -61,7 +62,7 @@ class TaskService:
         tools_enabled: bool = True,
         priority: int = 0,
         parent_task_id: str = "",
-        origin: TaskOrigin = TaskOrigin.CHAT,
+        origin: TaskOrigin = TaskOrigin.USER,
     ) -> TaskRecord:
         task, created = await asyncio.to_thread(
             self._repository.create,
@@ -93,6 +94,20 @@ class TaskService:
             principal_id,
             task_id,
         )
+
+    async def get_trace(
+        self,
+        principal_id: str,
+        task_id: str,
+    ) -> TaskExecutionTrace | None:
+        return await asyncio.to_thread(
+            self._repository.get_trace,
+            principal_id,
+            task_id,
+        )
+
+    async def compact_expired_traces(self) -> int:
+        return await asyncio.to_thread(self._repository.compact_expired_traces)
 
     async def list(
         self,

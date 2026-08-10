@@ -201,6 +201,8 @@ class AppConfig(BaseModel):
     feishu_receive_id: str = ""
     attachment_ttl_seconds: int = 3600
     attachment_cleanup_interval_seconds: int = 300
+    task_trace_retention_days: int = Field(default=90, ge=1, le=3650)
+    conversation_detail_retention_days: int = Field(default=30, ge=1, le=3650)
     audio_transcription: AudioTranscriptionConfig = Field(
         default_factory=AudioTranscriptionConfig
     )
@@ -470,6 +472,11 @@ def _env_overrides() -> dict[str, Any]:
         "PC_FEISHU_RECEIVE_ID": ("feishu_receive_id", str),
         "PC_ATTACHMENT_TTL_SECONDS": ("attachment_ttl_seconds", int),
         "PC_ATTACHMENT_CLEANUP_INTERVAL_SECONDS": ("attachment_cleanup_interval_seconds", int),
+        "PC_TASK_TRACE_RETENTION_DAYS": ("task_trace_retention_days", int),
+        "PC_CONVERSATION_DETAIL_RETENTION_DAYS": (
+            "conversation_detail_retention_days",
+            int,
+        ),
         "PC_SUPPORTS_VISION": ("supports_vision", bool),
     }
     overrides: dict[str, Any] = {}
