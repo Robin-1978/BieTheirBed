@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -307,6 +308,55 @@ def test_repository_reopens_persisted_task_and_events(tmp_path: Path) -> None:
     assert reopened.list_events(scope.principal_id, task.task_id)[0].event_type == (
         "task_created"
     )
+
+
+def test_repository_migrates_legacy_task_table_with_origin_at_end(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "assistant.db"
+    RuntimeSessionRepository(database)
+    with sqlite3.connect(database) as connection:
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute(
+            """
+            CREATE TABLE runtime_tasks (
+                task_id TEXT PRIMARY KEY,
+                principal_id TEXT NOT NULL,
+                session_handle TEXT NOT NULL
+                    REFERENCES runtime_sessions(session_handle) ON DELETE CASCADE,
+                client_request_id TEXT NOT NULL,
+                parent_task_id TEXT
+                    REFERENCES runtime_tasks(task_id) ON DELETE RESTRICT,
+                goal TEXT NOT NULL,
+                attachments_json TEXT NOT NULL,
+                tools_enabled INTEGER NOT NULL,
+                priority INTEGER NOT NULL,
+                state TEXT NOT NULL,
+                phase TEXT NOT NULL,
+                attempt_count INTEGER NOT NULL,
+                cancel_requested INTEGER NOT NULL,
+                final_summary TEXT NOT NULL,
+                failure_code TEXT NOT NULL,
+                lease_owner TEXT NOT NULL,
+                lease_expires_at REAL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                started_at REAL,
+                finished_at REAL,
+                next_event_seq INTEGER NOT NULL,
+                revision INTEGER NOT NULL,
+                UNIQUE(principal_id, client_request_id)
+            )
+            """
+        )
+
+    TaskRepository(database)
+
+    with sqlite3.connect(database) as connection:
+        columns = connection.execute(
+            "PRAGMA table_info(runtime_tasks)"
+        ).fetchall()
+    assert columns[-1][1:5] == ("origin", "TEXT", 1, "'chat'")
 
 
 def test_paused_task_requires_explicit_resume(tmp_path: Path) -> None:
