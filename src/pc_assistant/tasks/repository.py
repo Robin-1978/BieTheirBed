@@ -129,7 +129,6 @@ class TaskRepository:
                     session_handle TEXT NOT NULL
                         REFERENCES runtime_sessions(session_handle) ON DELETE CASCADE,
                     client_request_id TEXT NOT NULL,
-                    origin TEXT NOT NULL DEFAULT 'chat',
                     parent_task_id TEXT
                         REFERENCES runtime_tasks(task_id) ON DELETE RESTRICT,
                     goal TEXT NOT NULL,
@@ -150,6 +149,7 @@ class TaskRepository:
                     finished_at REAL,
                     next_event_seq INTEGER NOT NULL,
                     revision INTEGER NOT NULL,
+                    origin TEXT NOT NULL DEFAULT 'chat',
                     UNIQUE(principal_id, client_request_id)
                 );
                 CREATE TABLE IF NOT EXISTS runtime_task_events (
@@ -262,7 +262,6 @@ class TaskRepository:
                     ("principal_id", "TEXT", True, None, 0),
                     ("session_handle", "TEXT", True, None, 0),
                     ("client_request_id", "TEXT", True, None, 0),
-                    ("origin", "TEXT", True, "'chat'", 0),
                     ("parent_task_id", "TEXT", False, None, 0),
                     ("goal", "TEXT", True, None, 0),
                     ("attachments_json", "TEXT", True, None, 0),
@@ -282,6 +281,7 @@ class TaskRepository:
                     ("finished_at", "REAL", False, None, 0),
                     ("next_event_seq", "INTEGER", True, None, 0),
                     ("revision", "INTEGER", True, None, 0),
+                    ("origin", "TEXT", True, "'chat'", 0),
                 ),
                 label="Runtime Task",
             )
