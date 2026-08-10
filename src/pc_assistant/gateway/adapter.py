@@ -54,7 +54,9 @@ from pc_assistant.gateway.protocol import (
     CancelTaskRequest,
     ChatTurnListQuery,
     CreateChatTurnRequest,
-    CreateTaskRequest,
+    CreateConversationSessionRequest,
+    UpdateConversationSessionRequest,
+    CreateProductTaskRequest,
     EventQuery,
     GatewayRequest,
     PairChallengeRequest,
@@ -63,9 +65,10 @@ from pc_assistant.gateway.protocol import (
     RegisterPushRequest,
     ResolveApprovalRequest,
     ResumeTaskRequest,
-    RetryTaskRequest,
+    UpdateProductTaskRequest,
     RuntimeQuery,
-    TaskListQuery,
+    ProductTaskListQuery,
+    TaskExecutionListQuery,
     TaskEventQuery,
 )
 from pc_assistant.service.core_client import (
@@ -73,7 +76,8 @@ from pc_assistant.service.core_client import (
     CoreRequestError,
     CoreRequestTimeoutError,
 )
-from pc_assistant.tasks import TaskOrigin
+from pc_assistant.tasks import TaskDefinitionState
+from pc_assistant.conversation import ConversationSessionState
 
 
 logger = logging.getLogger(__name__)
@@ -176,6 +180,12 @@ class SecureGatewayAdapter:
                 Route("/v1/auth/complete", self._auth_complete, methods=["POST"]),
                 Route("/v1/session", self._session, methods=["GET"]),
                 Route("/v1/sessions", self._create_session, methods=["POST"]),
+                Route("/v1/conversations/sessions", self._list_conversation_sessions, methods=["GET"]),
+                Route(
+                    "/v1/conversations/sessions/{session_handle:str}",
+                    self._conversation_session,
+                    methods=["GET", "PATCH", "DELETE"],
+                ),
                 Route(
                     "/v1/conversations/sessions/{session_handle:str}/turns",
                     self._create_chat_turn,
@@ -202,6 +212,11 @@ class SecureGatewayAdapter:
                     methods=["POST"],
                 ),
                 Route(
+                    "/v1/conversations/turns/{turn_id:str}/retry",
+                    self._retry_chat_turn,
+                    methods=["POST"],
+                ),
+                Route(
                     "/v1/conversations/approvals/{approval_id:str}/resolve",
                     self._resolve_chat_approval,
                     methods=["POST"],
@@ -216,29 +231,71 @@ class SecureGatewayAdapter:
                     methods=["GET"],
                 ),
                 Route("/v1/tasks/{task_id:str}", self._get_task, methods=["GET"]),
+                Route("/v1/tasks/{task_id:str}", self._update_task, methods=["PATCH"]),
+                Route("/v1/tasks/{task_id:str}", self._delete_task, methods=["DELETE"]),
                 Route(
-                    "/v1/tasks/{task_id:str}/events",
-                    self._task_events,
-                    methods=["GET"],
-                ),
-                Route(
-                    "/v1/tasks/{task_id:str}/cancel",
-                    self._cancel_task,
+                    "/v1/tasks/{task_id:str}/execute",
+                    self._execute_task,
                     methods=["POST"],
                 ),
                 Route(
+                    "/v1/tasks/{task_id:str}/executions",
+                    self._list_task_executions,
+                    methods=["GET"],
+                ),
+                Route(
                     "/v1/tasks/{task_id:str}/pause",
-                    self._pause_task,
+                    self._pause_task_definition,
                     methods=["POST"],
                 ),
                 Route(
                     "/v1/tasks/{task_id:str}/resume",
-                    self._resume_task,
+                    self._resume_task_definition,
                     methods=["POST"],
                 ),
                 Route(
-                    "/v1/tasks/{task_id:str}/retry",
-                    self._retry_task,
+                    "/v1/tasks/{task_id:str}/archive",
+                    self._archive_task,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/tasks/{task_id:str}/restore",
+                    self._restore_task,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/task-executions/{execution_id:str}",
+                    self._get_task_execution,
+                    methods=["GET"],
+                ),
+                Route(
+                    "/v1/task-executions/{execution_id:str}",
+                    self._delete_task_execution,
+                    methods=["DELETE"],
+                ),
+                Route(
+                    "/v1/task-executions/{execution_id:str}/events",
+                    self._task_execution_events,
+                    methods=["GET"],
+                ),
+                Route(
+                    "/v1/task-executions/{execution_id:str}/cancel",
+                    self._cancel_task_execution,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/task-executions/{execution_id:str}/pause",
+                    self._pause_task_execution,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/task-executions/{execution_id:str}/resume",
+                    self._resume_task_execution,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/task-executions/{execution_id:str}/rerun",
+                    self._rerun_task_execution,
                     methods=["POST"],
                 ),
                 Route(
@@ -259,6 +316,7 @@ class SecureGatewayAdapter:
                     methods=["GET"],
                 ),
                 Route("/v1/device/audit", self._device_audit, methods=["GET"]),
+                Route("/v1/device", self._device, methods=["DELETE"]),
                 Route(
                     "/v1/device/push",
                     self._device_push,
@@ -431,13 +489,74 @@ class SecureGatewayAdapter:
         authenticated = self._authorize(request, limit=30)
         if isinstance(authenticated, JSONResponse):
             return authenticated
+        if request.headers.get("Content-Type"):
+            parsed = await self._parse_body(request, CreateConversationSessionRequest)
+            if isinstance(parsed, JSONResponse):
+                return parsed
+        else:
+            parsed = CreateConversationSessionRequest()
         try:
             handle = await self._core.create_session(
-                authenticated.device.principal_id
+                authenticated.device.principal_id,
+                title=parsed.title,
             )
         except Exception as exc:
             return self._core_error(exc)
         return JSONResponse({"session_handle": handle}, status_code=201)
+
+    async def _list_conversation_sessions(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=60)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        include_archived = request.query_params.get("include_archived", "false").lower() == "true"
+        try:
+            limit = int(request.query_params.get("limit", "100"))
+            if not 1 <= limit <= 200:
+                raise ValueError
+            sessions = await self._core.list_conversation_sessions(
+                authenticated.device.principal_id,
+                include_archived=include_archived,
+                limit=limit,
+            )
+        except ValueError:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse({"sessions": [item.model_dump(mode="json") for item in sessions]})
+
+    async def _conversation_session(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=30)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        session_handle = self._path_identifier(request, "session_handle")
+        if session_handle is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            if request.method == "GET":
+                session = await self._core.get_conversation_session(
+                    authenticated.device.principal_id,
+                    session_handle,
+                )
+            elif request.method == "PATCH":
+                parsed = await self._parse_body(request, UpdateConversationSessionRequest)
+                if isinstance(parsed, JSONResponse):
+                    return parsed
+                session = await self._core.update_conversation_session(
+                    authenticated.device.principal_id,
+                    session_handle,
+                    title=parsed.title,
+                    state=(None if parsed.state is None else ConversationSessionState(parsed.state)),
+                    expected_revision=parsed.expected_revision,
+                )
+            else:
+                await self._core.delete_conversation_session(
+                    authenticated.device.principal_id,
+                    session_handle,
+                )
+                return JSONResponse({"deleted": True})
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse({"session": session.model_dump(mode="json")})
 
     async def _create_chat_turn(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=60)
@@ -520,6 +639,22 @@ class SecureGatewayAdapter:
         except Exception as exc:
             return self._core_error(exc)
         return JSONResponse({"turn": turn.model_dump(mode="json")})
+
+    async def _retry_chat_turn(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=30)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        turn_id = self._path_identifier(request, "turn_id")
+        if turn_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            turn = await self._core.retry_chat_turn(
+                authenticated.device.principal_id,
+                turn_id,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse({"turn": turn.model_dump(mode="json")}, status_code=202)
 
     async def _resolve_chat_approval(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=30)
@@ -618,37 +753,37 @@ class SecureGatewayAdapter:
         authenticated = self._authorize(request, limit=60)
         if isinstance(authenticated, JSONResponse):
             return authenticated
-        parsed = await self._parse_body(request, CreateTaskRequest)
+        parsed = await self._parse_body(request, CreateProductTaskRequest)
         if isinstance(parsed, JSONResponse):
             return parsed
         try:
-            parsed.require_content()
-            if parsed.attachments:
-                return JSONResponse(
-                    {"error": "background_attachments_not_supported"},
-                    status_code=422,
-                )
             session_handle = await self._core.create_session(
                 authenticated.device.principal_id,
                 activate=False,
             )
-            accepted = await self._core.create_task(
+            result = await self._core.create_product_task(
                 authenticated.device.principal_id,
                 session_handle,
-                parsed.input,
-                parsed.attachments,
+                parsed.goal,
+                title=parsed.title,
+                attachments=parsed.attachments,
                 tools_enabled=parsed.tools_enabled,
                 priority=parsed.priority,
-                parent_task_id=parsed.parent_task_id,
-                origin=TaskOrigin.USER,
+                launch_policy=parsed.launch_policy,
+                notification_policy=parsed.notification_policy or None,
             )
-        except ValueError:
-            return JSONResponse({"error": "invalid_request"}, status_code=400)
         except Exception as exc:
             return self._core_error(exc)
         return JSONResponse(
-            {"task_id": accepted.task_id, "state": accepted.state.value},
-            status_code=202,
+            {
+                "task": result.task.model_dump(mode="json"),
+                "execution": (
+                    None
+                    if result.execution is None
+                    else result.execution.model_dump(mode="json")
+                ),
+            },
+            status_code=201,
         )
 
     async def _list_tasks(self, request: Request) -> JSONResponse:
@@ -656,24 +791,21 @@ class SecureGatewayAdapter:
         if isinstance(authenticated, JSONResponse):
             return authenticated
         try:
-            query = TaskListQuery.model_validate(dict(request.query_params))
+            query = ProductTaskListQuery.model_validate(dict(request.query_params))
         except ValidationError:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         try:
-            result = await self._core.list_tasks(
+            tasks = await self._core.list_product_tasks(
                 authenticated.device.principal_id,
-                session_handle=query.session_handle,
                 state=query.state,
-                origins=(),
+                include_archived=query.include_archived,
                 limit=query.limit,
-                cursor=query.cursor,
             )
         except Exception as exc:
             return self._core_error(exc)
         return JSONResponse(
             {
-                "tasks": [task.model_dump(mode="json") for task in result.tasks],
-                "next_cursor": result.next_cursor,
+                "tasks": [task.model_dump(mode="json") for task in tasks],
             }
         )
 
@@ -685,7 +817,7 @@ class SecureGatewayAdapter:
         if task_id is None:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         try:
-            task = await self._core.get_task(
+            task = await self._core.get_product_task(
                 authenticated.device.principal_id,
                 task_id,
             )
@@ -693,7 +825,96 @@ class SecureGatewayAdapter:
             return self._core_error(exc)
         return JSONResponse({"task": task.model_dump(mode="json")})
 
-    async def _task_events(self, request: Request) -> JSONResponse:
+    async def _update_task(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=30)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        task_id = self._path_identifier(request, "task_id")
+        if task_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        parsed = await self._parse_body(request, UpdateProductTaskRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        changes = parsed.model_dump(exclude_none=True)
+        try:
+            task = await self._core.update_product_task(
+                authenticated.device.principal_id,
+                task_id,
+                **changes,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse({"task": task.model_dump(mode="json")})
+
+    async def _delete_task(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=15)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        task_id = self._path_identifier(request, "task_id")
+        if task_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            await self._core.delete_product_task(
+                authenticated.device.principal_id,
+                task_id,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse({"deleted": True})
+
+    async def _set_task_definition_state(
+        self,
+        request: Request,
+        state: TaskDefinitionState,
+    ) -> JSONResponse:
+        authenticated = self._authorize(request, limit=30)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        task_id = self._path_identifier(request, "task_id")
+        if task_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            task = await self._core.set_product_task_state(
+                authenticated.device.principal_id,
+                task_id,
+                state,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse({"task": task.model_dump(mode="json")})
+
+    async def _pause_task_definition(self, request: Request) -> JSONResponse:
+        return await self._set_task_definition_state(request, TaskDefinitionState.PAUSED)
+
+    async def _resume_task_definition(self, request: Request) -> JSONResponse:
+        return await self._set_task_definition_state(request, TaskDefinitionState.ACTIVE)
+
+    async def _archive_task(self, request: Request) -> JSONResponse:
+        return await self._set_task_definition_state(request, TaskDefinitionState.ARCHIVED)
+
+    async def _restore_task(self, request: Request) -> JSONResponse:
+        return await self._set_task_definition_state(request, TaskDefinitionState.ACTIVE)
+
+    async def _execute_task(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=30)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        task_id = self._path_identifier(request, "task_id")
+        if task_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            execution = await self._core.execute_product_task(
+                authenticated.device.principal_id,
+                task_id,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse(
+            {"execution": execution.model_dump(mode="json")},
+            status_code=202,
+        )
+
+    async def _list_task_executions(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=120)
         if isinstance(authenticated, JSONResponse):
             return authenticated
@@ -701,10 +922,64 @@ class SecureGatewayAdapter:
         if task_id is None:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         try:
+            query = TaskExecutionListQuery.model_validate(dict(request.query_params))
+            executions = await self._core.list_product_task_executions(
+                authenticated.device.principal_id,
+                task_id,
+                limit=query.limit,
+            )
+        except ValidationError:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse(
+            {"executions": [item.model_dump(mode="json") for item in executions]}
+        )
+
+    async def _get_task_execution(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=120)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        execution_id = self._path_identifier(request, "execution_id")
+        if execution_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            execution = await self._core.get_product_task_execution(
+                authenticated.device.principal_id,
+                execution_id,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse({"execution": execution.model_dump(mode="json")})
+
+    async def _delete_task_execution(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=15)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        execution_id = self._path_identifier(request, "execution_id")
+        if execution_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            await self._core.delete_product_task_execution(
+                authenticated.device.principal_id,
+                execution_id,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse({"deleted": True})
+
+    async def _task_execution_events(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=120)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        execution_id = self._path_identifier(request, "execution_id")
+        if execution_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
             query = TaskEventQuery.model_validate(dict(request.query_params))
             events = await self._core.task_events(
                 authenticated.device.principal_id,
-                task_id,
+                execution_id,
                 after_seq=query.after_seq,
             )
         except ValidationError:
@@ -715,12 +990,12 @@ class SecureGatewayAdapter:
             {"events": [event.model_dump(mode="json") for event in events]}
         )
 
-    async def _cancel_task(self, request: Request) -> JSONResponse:
+    async def _cancel_task_execution(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=30)
         if isinstance(authenticated, JSONResponse):
             return authenticated
-        task_id = self._path_identifier(request, "task_id")
-        if task_id is None:
+        execution_id = self._path_identifier(request, "execution_id")
+        if execution_id is None:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         parsed = await self._parse_body(request, CancelTaskRequest)
         if isinstance(parsed, JSONResponse):
@@ -728,19 +1003,19 @@ class SecureGatewayAdapter:
         try:
             result = await self._core.cancel_task(
                 authenticated.device.principal_id,
-                task_id,
+                execution_id,
                 reason=parsed.reason,
             )
         except Exception as exc:
             return self._core_error(exc)
         return JSONResponse(result.result.model_dump(mode="json"))
 
-    async def _pause_task(self, request: Request) -> JSONResponse:
+    async def _pause_task_execution(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=30)
         if isinstance(authenticated, JSONResponse):
             return authenticated
-        task_id = self._path_identifier(request, "task_id")
-        if task_id is None:
+        execution_id = self._path_identifier(request, "execution_id")
+        if execution_id is None:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         parsed = await self._parse_body(request, PauseTaskRequest)
         if isinstance(parsed, JSONResponse):
@@ -748,19 +1023,19 @@ class SecureGatewayAdapter:
         try:
             result = await self._core.pause_task(
                 authenticated.device.principal_id,
-                task_id,
+                execution_id,
                 reason=parsed.reason,
             )
         except Exception as exc:
             return self._core_error(exc)
         return JSONResponse(result.result.model_dump(mode="json"))
 
-    async def _resume_task(self, request: Request) -> JSONResponse:
+    async def _resume_task_execution(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=30)
         if isinstance(authenticated, JSONResponse):
             return authenticated
-        task_id = self._path_identifier(request, "task_id")
-        if task_id is None:
+        execution_id = self._path_identifier(request, "execution_id")
+        if execution_id is None:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         parsed = await self._parse_body(request, ResumeTaskRequest)
         if isinstance(parsed, JSONResponse):
@@ -768,7 +1043,7 @@ class SecureGatewayAdapter:
         try:
             result = await self._core.resume_task(
                 authenticated.device.principal_id,
-                task_id,
+                execution_id,
                 reason=parsed.reason,
                 acknowledge_outcome_unknown=parsed.acknowledge_outcome_unknown,
             )
@@ -776,28 +1051,22 @@ class SecureGatewayAdapter:
             return self._core_error(exc)
         return JSONResponse({"accepted": True, "state": result.state.value})
 
-    async def _retry_task(self, request: Request) -> JSONResponse:
+    async def _rerun_task_execution(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=30)
         if isinstance(authenticated, JSONResponse):
             return authenticated
-        task_id = self._path_identifier(request, "task_id")
-        if task_id is None:
+        execution_id = self._path_identifier(request, "execution_id")
+        if execution_id is None:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
-        parsed = await self._parse_body(request, RetryTaskRequest)
-        if isinstance(parsed, JSONResponse):
-            return parsed
         try:
-            result = await self._core.retry_task(
+            execution = await self._core.rerun_product_task_execution(
                 authenticated.device.principal_id,
-                task_id,
-                reason=parsed.reason,
+                execution_id,
             )
-        except ValueError:
-            return JSONResponse({"error": "rejected"}, status_code=422)
         except Exception as exc:
             return self._core_error(exc)
         return JSONResponse(
-            {"task_id": result.task_id, "state": result.state.value},
+            {"execution": execution.model_dump(mode="json")},
             status_code=202,
         )
 
@@ -986,6 +1255,32 @@ class SecureGatewayAdapter:
         return JSONResponse(
             {"registered": True, "provider": registration.provider}
         )
+
+    async def _device(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=10)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        device = authenticated.device
+        await asyncio.to_thread(
+            self._push_repository.unregister,
+            device.principal_id,
+            device.device_id,
+        )
+        try:
+            await asyncio.to_thread(
+                self._authentication.revoke_device,
+                device.principal_id,
+                device.device_id,
+            )
+        except (ValueError, LookupError):
+            return JSONResponse({"error": "not_found"}, status_code=404)
+        self._record_audit(
+            "device_revoked",
+            request=request,
+            device_id=device.device_id,
+            principal_id=device.principal_id,
+        )
+        return JSONResponse({"revoked": True})
 
     async def _resolve_approval(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=30)

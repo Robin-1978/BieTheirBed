@@ -32,6 +32,7 @@ from pc_assistant.service.core_api import (
     CORE_WS_MAX_SIZE,
     CancelTaskRequest,
     CancelChatTurnRequest,
+    RetryChatTurnRequest,
     ChatApprovalResolvedMessage,
     ChatTurnAcceptedMessage,
     ChatTurnListMessage,
@@ -46,11 +47,18 @@ from pc_assistant.service.core_api import (
     CreateScheduleRequest,
     CreateTriggerRequest,
     CreateSessionRequest,
+    GetConversationSessionRequest,
+    ListConversationSessionsRequest,
+    UpdateConversationSessionRequest,
+    DeleteConversationSessionRequest,
     CreateTaskRequest,
+    CreateProductTaskRequest,
     CreateChatTurnRequest,
     DownloadArtifactRequest,
     FireTriggerRequest,
     GetTaskRequest,
+    GetProductTaskRequest,
+    GetProductTaskExecutionRequest,
     GetChatTurnRequest,
     GetHistoryRequest,
     GetStatusRequest,
@@ -62,6 +70,8 @@ from pc_assistant.service.core_api import (
     ListMemoryRequest,
     ListSchedulesRequest,
     ListTasksRequest,
+    ListProductTasksRequest,
+    ListProductTaskExecutionsRequest,
     ListChatTurnsRequest,
     ListToolsRequest,
     ListTriggersRequest,
@@ -82,6 +92,10 @@ from pc_assistant.service.core_api import (
     ResumeTaskRequest,
     ResumeTriggerRequest,
     SessionCreatedMessage,
+    ConversationSessionMessage,
+    ConversationSessionListMessage,
+    ConversationSessionDeletedMessage,
+    ConversationSessionSnapshot,
     SetConfigRequest,
     StatusMessage,
     SubscribeTaskRequest,
@@ -95,6 +109,19 @@ from pc_assistant.service.core_api import (
     TaskResumedMessage,
     TaskSnapshot,
     TaskSnapshotMessage,
+    ProductTaskMessage,
+    ProductTaskListMessage,
+    ProductTaskExecutionMessage,
+    ProductTaskExecutionListMessage,
+    ProductTaskDeletedMessage,
+    ProductTaskSnapshot,
+    ProductTaskExecutionSnapshot,
+    UpdateProductTaskRequest,
+    SetProductTaskStateRequest,
+    DeleteProductTaskRequest,
+    ExecuteProductTaskRequest,
+    DeleteProductTaskExecutionRequest,
+    RerunProductTaskExecutionRequest,
     TaskSubscribedMessage,
     TranscribeArtifactRequest,
     ToolsMessage,
@@ -107,7 +134,14 @@ from pc_assistant.service.core_api import (
     UploadArtifactRequest,
     parse_core_server_message_json,
 )
-from pc_assistant.tasks import PrincipalTaskEvent, TaskEvent, TaskOrigin, TaskState
+from pc_assistant.tasks import (
+    PrincipalTaskEvent,
+    TaskDefinitionState,
+    TaskEvent,
+    TaskLaunchPolicy,
+    TaskOrigin,
+    TaskState,
+)
 from pc_assistant.conversation import TERMINAL_CHAT_TURN_STATES
 
 
@@ -350,16 +384,68 @@ class CoreClient:
                 queue.get_nowait()
             queue.put_nowait(error)
 
-    async def create_session(self, *, activate: bool = True) -> str:
+    async def create_session(self, *, activate: bool = True, title: str = "新对话") -> str:
         response = await self._request(
             CreateSessionRequest(
                 request_id=self._request_id(),
                 activate=activate,
+                title=title,
             )
         )
         if not isinstance(response, SessionCreatedMessage):
             raise RuntimeError("CoreServer returned an invalid session response")
         return response.session_handle
+
+    async def get_conversation_session(self, session_handle: str) -> ConversationSessionSnapshot:
+        response = await self._request(GetConversationSessionRequest(
+            request_id=self._request_id(),
+            session_handle=session_handle,
+        ))
+        if not isinstance(response, ConversationSessionMessage):
+            raise RuntimeError("CoreServer returned an invalid ConversationSession response")
+        return response.session
+
+    async def list_conversation_sessions(
+        self,
+        *,
+        include_archived: bool = False,
+        limit: int = 100,
+    ) -> tuple[ConversationSessionSnapshot, ...]:
+        response = await self._request(ListConversationSessionsRequest(
+            request_id=self._request_id(),
+            include_archived=include_archived,
+            limit=limit,
+        ))
+        if not isinstance(response, ConversationSessionListMessage):
+            raise RuntimeError("CoreServer returned an invalid ConversationSession list")
+        return response.sessions
+
+    async def update_conversation_session(
+        self,
+        session_handle: str,
+        *,
+        title: str | None = None,
+        state=None,
+        expected_revision: int | None = None,
+    ) -> ConversationSessionSnapshot:
+        response = await self._request(UpdateConversationSessionRequest(
+            request_id=self._request_id(),
+            session_handle=session_handle,
+            title=title,
+            state=state,
+            expected_revision=expected_revision,
+        ))
+        if not isinstance(response, ConversationSessionMessage):
+            raise RuntimeError("CoreServer returned an invalid ConversationSession update")
+        return response.session
+
+    async def delete_conversation_session(self, session_handle: str) -> None:
+        response = await self._request(DeleteConversationSessionRequest(
+            request_id=self._request_id(),
+            session_handle=session_handle,
+        ))
+        if not isinstance(response, ConversationSessionDeletedMessage):
+            raise RuntimeError("CoreServer returned an invalid ConversationSession deletion")
 
     async def health(self) -> HealthStatus:
         response = await self._request(HealthRequest(request_id=self._request_id()))
@@ -615,6 +701,15 @@ class CoreClient:
             raise RuntimeError("CoreServer returned an invalid ChatTurn cancel response")
         return response.turn
 
+    async def retry_chat_turn(self, turn_id: str) -> ChatTurnSnapshot:
+        response = await self._request(RetryChatTurnRequest(
+            request_id=self._request_id(),
+            turn_id=turn_id,
+        ))
+        if not isinstance(response, ChatTurnAcceptedMessage):
+            raise RuntimeError("CoreServer returned an invalid ChatTurn retry response")
+        return response.turn
+
     async def resolve_chat_approval(
         self,
         approval_id: str,
@@ -745,6 +840,188 @@ class CoreClient:
         if not isinstance(response, TaskListMessage):
             raise RuntimeError("CoreServer returned an invalid Task list")
         return response
+
+    async def create_product_task(
+        self,
+        session_handle: str,
+        goal: str,
+        *,
+        title: str = "",
+        attachments: tuple[ArtifactInputRef, ...] = (),
+        tools_enabled: bool = True,
+        priority: int = 0,
+        launch_policy: TaskLaunchPolicy | None = None,
+        notification_policy: dict[str, bool] | None = None,
+    ) -> ProductTaskMessage:
+        response = await self._request(
+            CreateProductTaskRequest(
+                request_id=self._request_id(),
+                session_handle=session_handle,
+                title=title,
+                goal=goal,
+                attachments=attachments,
+                tools_enabled=tools_enabled,
+                priority=priority,
+                launch_policy=launch_policy or TaskLaunchPolicy(),
+                notification_policy=notification_policy or {},
+            )
+        )
+        if not isinstance(response, ProductTaskMessage):
+            raise RuntimeError("CoreServer returned an invalid product Task response")
+        return response
+
+    async def get_product_task(self, task_id: str) -> ProductTaskSnapshot:
+        response = await self._request(
+            GetProductTaskRequest(request_id=self._request_id(), task_id=task_id)
+        )
+        if not isinstance(response, ProductTaskMessage):
+            raise RuntimeError("CoreServer returned an invalid product Task snapshot")
+        return response.task
+
+    async def list_product_tasks(
+        self,
+        *,
+        state: TaskDefinitionState | None = None,
+        include_archived: bool = False,
+        limit: int = 100,
+    ) -> tuple[ProductTaskSnapshot, ...]:
+        response = await self._request(
+            ListProductTasksRequest(
+                request_id=self._request_id(),
+                state=state,
+                include_archived=include_archived,
+                limit=limit,
+            )
+        )
+        if not isinstance(response, ProductTaskListMessage):
+            raise RuntimeError("CoreServer returned an invalid product Task list")
+        return response.tasks
+
+    async def update_product_task(
+        self,
+        task_id: str,
+        *,
+        title: str | None = None,
+        goal: str | None = None,
+        attachments: tuple[ArtifactInputRef, ...] | None = None,
+        tools_enabled: bool | None = None,
+        priority: int | None = None,
+        launch_policy: TaskLaunchPolicy | None = None,
+        notification_policy: dict[str, bool] | None = None,
+        expected_revision: int | None = None,
+    ) -> ProductTaskSnapshot:
+        response = await self._request(
+            UpdateProductTaskRequest(
+                request_id=self._request_id(),
+                task_id=task_id,
+                title=title,
+                goal=goal,
+                attachments=attachments,
+                tools_enabled=tools_enabled,
+                priority=priority,
+                launch_policy=launch_policy,
+                notification_policy=notification_policy,
+                expected_revision=expected_revision,
+            )
+        )
+        if not isinstance(response, ProductTaskMessage):
+            raise RuntimeError("CoreServer returned an invalid updated product Task")
+        return response.task
+
+    async def set_product_task_state(
+        self,
+        task_id: str,
+        state: TaskDefinitionState,
+    ) -> ProductTaskSnapshot:
+        response = await self._request(
+            SetProductTaskStateRequest(
+                request_id=self._request_id(),
+                task_id=task_id,
+                state=state,
+            )
+        )
+        if not isinstance(response, ProductTaskMessage):
+            raise RuntimeError("CoreServer returned an invalid product Task state")
+        return response.task
+
+    async def delete_product_task(self, task_id: str) -> None:
+        response = await self._request(
+            DeleteProductTaskRequest(
+                request_id=self._request_id(),
+                task_id=task_id,
+            )
+        )
+        if not isinstance(response, ProductTaskDeletedMessage) or not response.deleted:
+            raise RuntimeError("CoreServer returned an invalid product Task deletion")
+
+    async def execute_product_task(
+        self,
+        task_id: str,
+    ) -> ProductTaskExecutionSnapshot:
+        response = await self._request(
+            ExecuteProductTaskRequest(
+                request_id=self._request_id(),
+                task_id=task_id,
+            )
+        )
+        if not isinstance(response, ProductTaskExecutionMessage):
+            raise RuntimeError("CoreServer returned an invalid TaskExecution")
+        return response.execution
+
+    async def get_product_task_execution(
+        self,
+        execution_id: str,
+    ) -> ProductTaskExecutionSnapshot:
+        response = await self._request(
+            GetProductTaskExecutionRequest(
+                request_id=self._request_id(),
+                execution_id=execution_id,
+            )
+        )
+        if not isinstance(response, ProductTaskExecutionMessage):
+            raise RuntimeError("CoreServer returned an invalid TaskExecution snapshot")
+        return response.execution
+
+    async def list_product_task_executions(
+        self,
+        task_id: str,
+        *,
+        limit: int = 100,
+    ) -> tuple[ProductTaskExecutionSnapshot, ...]:
+        response = await self._request(
+            ListProductTaskExecutionsRequest(
+                request_id=self._request_id(),
+                task_id=task_id,
+                limit=limit,
+            )
+        )
+        if not isinstance(response, ProductTaskExecutionListMessage):
+            raise RuntimeError("CoreServer returned an invalid TaskExecution list")
+        return response.executions
+
+    async def delete_product_task_execution(self, execution_id: str) -> None:
+        response = await self._request(
+            DeleteProductTaskExecutionRequest(
+                request_id=self._request_id(),
+                execution_id=execution_id,
+            )
+        )
+        if not isinstance(response, ProductTaskDeletedMessage) or not response.deleted:
+            raise RuntimeError("CoreServer returned an invalid TaskExecution deletion")
+
+    async def rerun_product_task_execution(
+        self,
+        execution_id: str,
+    ) -> ProductTaskExecutionSnapshot:
+        response = await self._request(
+            RerunProductTaskExecutionRequest(
+                request_id=self._request_id(),
+                execution_id=execution_id,
+            )
+        )
+        if not isinstance(response, ProductTaskExecutionMessage):
+            raise RuntimeError("CoreServer returned an invalid rerun TaskExecution")
+        return response.execution
 
     async def execute_task(
         self,

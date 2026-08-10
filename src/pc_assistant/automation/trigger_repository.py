@@ -363,6 +363,14 @@ class TriggerRepository:
             raise TriggerNotFoundError("Trigger not found")
         return self._record(row)
 
+    def delete(self, principal_id: str, trigger_id: str) -> None:
+        trigger = self.get(principal_id, trigger_id)
+        with self._connect() as db:
+            db.execute(
+                "DELETE FROM runtime_triggers WHERE trigger_id=? AND principal_id=?",
+                (trigger.trigger_id, trigger.principal_id),
+            )
+
     def list(
         self,
         principal_id: str,

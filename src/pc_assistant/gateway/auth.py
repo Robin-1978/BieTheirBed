@@ -380,7 +380,20 @@ class GatewayAuthRepository:
                 """,
                 (now, normalized),
             )
-        return updated.rowcount == 1
+            return updated.rowcount == 1
+
+    def revoke_sessions_for_device(self, device_id: str) -> int:
+        normalized_device = self._identifier(device_id, "Device ID")
+        with self._connect() as connection:
+            updated = connection.execute(
+                """
+                UPDATE gateway_sessions
+                SET revoked_at = ?
+                WHERE device_id = ? AND revoked_at IS NULL
+                """,
+                (float(self._clock()), normalized_device),
+            )
+            return int(updated.rowcount)
 
     @staticmethod
     def _hash(value: str) -> str:
@@ -508,6 +521,12 @@ class GatewayAuthenticationService:
             created_at=identity.created_at,
             expires_at=identity.expires_at,
         )
+
+    def revoke_device(self, principal_id: str, device_id: str) -> GatewayDevice:
+        """Revoke a paired device and every active session issued to it."""
+        device = self._identities.revoke_device(principal_id, device_id)
+        self._auth.revoke_sessions_for_device(device.device_id)
+        return device
 
     @staticmethod
     def pairing_payload(

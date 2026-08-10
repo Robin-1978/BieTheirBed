@@ -29,11 +29,11 @@ class _Tasks:
         self.fail = fail
         self.calls = []
 
-    async def create(self, scope, **kwargs):
-        self.calls.append((scope, kwargs))
+    async def execute_bound_launch(self, principal_id, **kwargs):
+        self.calls.append((principal_id, kwargs))
         if self.fail:
             raise RuntimeError("task service unavailable")
-        return SimpleNamespace(task_id="task-a")
+        return SimpleNamespace(execution_id="execution-a")
 
 
 def _components(tmp_path: Path, clock: _Clock, tasks: _Tasks):
@@ -73,16 +73,15 @@ async def test_dispatcher_creates_task_with_stable_occurrence_request_id(
     assert await dispatcher.dispatch_once() is True
     assert await dispatcher.dispatch_once() is False
 
-    called_scope, request = tasks.calls[0]
-    assert called_scope == scope
+    called_principal, request = tasks.calls[0]
+    assert called_principal == scope.principal_id
+    assert request["provider_kind"] == "schedule"
+    assert request["provider_id"] == "schedule-a"
     assert request["client_request_id"].startswith("schedule:")
-    assert request["goal"] == "prepare report"
-    assert request["tools_enabled"] is False
-    assert request["priority"] == 4
     occurrence_id = request["client_request_id"].removeprefix("schedule:")
     occurrence = repository.get_occurrence(occurrence_id)
     assert occurrence.state is OccurrenceState.TASK_CREATED
-    assert occurrence.task_id == "task-a"
+    assert occurrence.task_id == "execution-a"
 
 
 @pytest.mark.asyncio

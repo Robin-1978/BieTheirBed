@@ -463,7 +463,7 @@ def build_core_runtime(
     trigger_dispatcher = TriggerDispatcher(triggers, task_service)
     trigger_service = TriggerService(triggers, trigger_dispatcher)
     registry.register(CreateTaskTool(sessions, task_service))
-    registry.register(ScheduleTaskTool(sessions, schedule_service))
+    registry.register(ScheduleTaskTool(sessions, task_service, schedule_service))
     registry.register(
         TaskControlTool(
             sessions,

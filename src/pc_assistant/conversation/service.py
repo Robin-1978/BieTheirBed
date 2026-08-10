@@ -26,11 +26,15 @@ from pc_assistant.conversation.models import (
     ChatTurn,
     ChatTurnSignal,
     ChatTurnState,
+    ConversationSession,
+    ConversationSessionState,
     ChatTimelineEntry,
     TERMINAL_CHAT_TURN_STATES,
 )
 from pc_assistant.conversation.repository import (
     ChatTurnNotFoundError,
+    ConversationSessionConflictError,
+    ConversationSessionNotFoundError,
     ConversationRepository,
 )
 from pc_assistant.context.session_context import SessionContextService
@@ -259,6 +263,74 @@ class ConversationService:
     async def compact_expired_details(self) -> int:
         return await asyncio.to_thread(self._repository.compact_expired_details)
 
+    async def register_session(self, scope: RuntimeScope, *, title: str = "新对话") -> ConversationSession:
+        return await asyncio.to_thread(self._repository.create_session, scope, title=title)
+
+    async def get_session(self, principal_id: str, session_handle: str) -> ConversationSession:
+        return await asyncio.to_thread(self._repository.get_session, principal_id, session_handle)
+
+    async def list_sessions(
+        self,
+        principal_id: str,
+        *,
+        include_archived: bool = False,
+        limit: int = 100,
+    ) -> tuple[ConversationSession, ...]:
+        return await asyncio.to_thread(
+            self._repository.list_sessions,
+            principal_id,
+            include_archived=include_archived,
+            limit=limit,
+        )
+
+    async def update_session(
+        self,
+        principal_id: str,
+        session_handle: str,
+        *,
+        title: str | None = None,
+        state: ConversationSessionState | None = None,
+        expected_revision: int | None = None,
+    ) -> ConversationSession:
+        session = await asyncio.to_thread(
+            self._repository.update_session,
+            principal_id,
+            session_handle,
+            title=title,
+            state=state,
+            expected_revision=expected_revision,
+        )
+        if state is ConversationSessionState.ACTIVE:
+            await asyncio.to_thread(
+                self._sessions.set_active,
+                RuntimeScope(principal_id=principal_id, session_handle=session_handle),
+            )
+        return session
+
+    async def delete_session(self, principal_id: str, session_handle: str) -> None:
+        scope = await asyncio.to_thread(self._sessions.resolve, principal_id, session_handle)
+        active_turns = await asyncio.to_thread(
+            self._repository.list_session,
+            principal_id,
+            session_handle,
+            limit=500,
+        )
+        if any(turn.state not in TERMINAL_CHAT_TURN_STATES for turn in active_turns):
+            raise ConversationSessionConflictError("Conversation has an active turn")
+        await asyncio.to_thread(self._sessions.delete, scope)
+
+    async def retry_turn(self, principal_id: str, turn_id: str, *, client_request_id: str) -> ChatTurn:
+        previous = await self.get_turn(principal_id, turn_id)
+        if previous.state not in {ChatTurnState.FAILED, ChatTurnState.CANCELLED}:
+            raise ValueError("Only failed or cancelled ChatTurns can be retried")
+        return await self.create_turn(
+            RuntimeScope(principal_id=principal_id, session_handle=previous.session_handle),
+            client_request_id=client_request_id,
+            user_input=previous.user_input,
+            attachments=previous.attachments,
+            tools_enabled=previous.tools_enabled,
+        )
+
     async def create_turn(
         self,
         scope: RuntimeScope,
@@ -273,6 +345,18 @@ class ConversationService:
             scope.principal_id,
             scope.session_handle,
         )
+        try:
+            await asyncio.to_thread(
+                self._repository.get_session,
+                owned.principal_id,
+                owned.session_handle,
+            )
+        except ConversationSessionNotFoundError:
+            await asyncio.to_thread(
+                self._repository.create_session,
+                owned,
+                title="新对话",
+            )
         turn, created = await asyncio.to_thread(
             self._repository.create,
             owned,
@@ -282,6 +366,12 @@ class ConversationService:
             tools_enabled=tools_enabled,
         )
         if created:
+            await asyncio.to_thread(
+                self._repository.touch_session,
+                scope.principal_id,
+                scope.session_handle,
+                first_input=user_input,
+            )
             self._live[turn.turn_id] = _LiveTurn(cancellation=asyncio.Event())
             execution = asyncio.create_task(self._execute(turn))
             self._executions[turn.turn_id] = execution

@@ -13,11 +13,11 @@ Notifications.setNotificationHandler({
   }),
 });
 
-export async function registerPush(client: GatewayClient): Promise<boolean> {
+export async function registerPush(client: GatewayClient, requestPermission = false): Promise<boolean> {
   const projectId = Constants.easConfig?.projectId;
   if (!projectId) return false;
   let permission = await Notifications.getPermissionsAsync();
-  if (permission.status !== "granted") {
+  if (permission.status !== "granted" && requestPermission) {
     permission = await Notifications.requestPermissionsAsync();
   }
   if (permission.status !== "granted") return false;
@@ -26,10 +26,28 @@ export async function registerPush(client: GatewayClient): Promise<boolean> {
   return true;
 }
 
-export function installNotificationNavigation(): { remove(): void } {
-  return Notifications.addNotificationResponseReceivedListener((response) => {
-    const data = response.notification.request.content.data ?? {};
-    const taskId = typeof data.task_id === "string" ? data.task_id : "";
-    if (taskId) router.push(`/tasks/${taskId}`);
+export async function sendTestNotification(): Promise<void> {
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: "小诺通知测试",
+      body: "通知已经可以正常送达这台手机。",
+    },
+    trigger: null,
   });
+}
+
+export function installNotificationNavigation(): { remove(): void } {
+  const navigate = (response: Notifications.NotificationResponse) => {
+    const data = response.notification.request.content.data ?? {};
+    const executionId = typeof data.execution_id === "string" ? data.execution_id : "";
+    const taskId = typeof data.task_id === "string" ? data.task_id : "";
+    if (executionId) router.push(`/task-executions/${executionId}`);
+    else if (taskId) router.push(`/tasks/${taskId}`);
+  };
+  void Notifications.getLastNotificationResponseAsync().then((response) => {
+    if (!response) return;
+    navigate(response);
+    return Notifications.clearLastNotificationResponseAsync();
+  });
+  return Notifications.addNotificationResponseReceivedListener(navigate);
 }

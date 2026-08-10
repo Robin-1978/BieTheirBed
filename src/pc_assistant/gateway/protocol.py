@@ -12,9 +12,18 @@ from pc_assistant.service.core_api import (
     ArtifactInputRef,
     ChatApprovalSnapshot,
     ChatTurnSnapshot,
+    ConversationSessionSnapshot,
     TaskSnapshot,
+    ProductTaskSnapshot,
+    ProductTaskExecutionSnapshot,
 )
-from pc_assistant.tasks import ApprovalState, TaskEvent, TaskState
+from pc_assistant.tasks import (
+    ApprovalState,
+    TaskDefinitionState,
+    TaskEvent,
+    TaskLaunchPolicy,
+    TaskState,
+)
 
 
 class GatewayRequest(BaseModel):
@@ -56,6 +65,27 @@ class CreateTaskRequest(GatewayRequest):
             raise ValueError("Task request requires input or an attachment")
 
 
+class CreateProductTaskRequest(GatewayRequest):
+    title: str = Field(default="", max_length=200)
+    goal: str = Field(min_length=1, max_length=200_000)
+    attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
+    tools_enabled: bool = True
+    priority: int = Field(default=0, ge=0, le=9)
+    launch_policy: TaskLaunchPolicy = Field(default_factory=TaskLaunchPolicy)
+    notification_policy: dict[str, bool] = Field(default_factory=dict)
+
+
+class UpdateProductTaskRequest(GatewayRequest):
+    title: str | None = Field(default=None, max_length=200)
+    goal: str | None = Field(default=None, min_length=1, max_length=200_000)
+    attachments: tuple[ArtifactInputRef, ...] | None = Field(default=None, max_length=8)
+    tools_enabled: bool | None = None
+    priority: int | None = Field(default=None, ge=0, le=9)
+    launch_policy: TaskLaunchPolicy | None = None
+    notification_policy: dict[str, bool] | None = None
+    expected_revision: int | None = Field(default=None, ge=1)
+
+
 class CreateChatTurnRequest(GatewayRequest):
     input: str = Field(default="", max_length=200_000)
     attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
@@ -64,6 +94,16 @@ class CreateChatTurnRequest(GatewayRequest):
     def require_content(self) -> None:
         if not self.input.strip() and not self.attachments:
             raise ValueError("ChatTurn request requires input or an attachment")
+
+
+class CreateConversationSessionRequest(GatewayRequest):
+    title: str = Field(default="新对话", max_length=120)
+
+
+class UpdateConversationSessionRequest(GatewayRequest):
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    state: Literal["active", "archived"] | None = None
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 class CancelTaskRequest(GatewayRequest):
@@ -102,6 +142,16 @@ class TaskListQuery(GatewayQuery):
     cursor: str = Field(default="", max_length=512)
 
 
+class ProductTaskListQuery(GatewayQuery):
+    state: TaskDefinitionState | None = None
+    include_archived: bool = False
+    limit: int = Field(default=100, ge=1, le=200)
+
+
+class TaskExecutionListQuery(GatewayQuery):
+    limit: int = Field(default=100, ge=1, le=200)
+
+
 class EventQuery(GatewayQuery):
     after_id: int = Field(default=0, ge=0, le=9_223_372_036_854_775_807)
 
@@ -135,6 +185,9 @@ class AuditQuery(GatewayQuery):
 
 class ErrorResponse(BaseModel):
     error: str
+    message: str = ""
+    retryable: bool = False
+    correlation_id: str = ""
 
 
 class HealthResponse(BaseModel):
@@ -168,6 +221,15 @@ class SessionResponse(BaseModel):
 
 class SessionCreatedResponse(BaseModel):
     session_handle: str
+    session: ConversationSessionSnapshot | None = None
+
+
+class ConversationSessionResponse(BaseModel):
+    session: ConversationSessionSnapshot
+
+
+class ConversationSessionListResponse(BaseModel):
+    sessions: tuple[ConversationSessionSnapshot, ...]
 
 
 class TaskAcceptedResponse(BaseModel):
@@ -204,6 +266,27 @@ class TaskListResponse(BaseModel):
 
 class TaskEventListResponse(BaseModel):
     events: tuple[TaskEvent, ...]
+
+
+class ProductTaskResponse(BaseModel):
+    task: ProductTaskSnapshot
+    execution: ProductTaskExecutionSnapshot | None = None
+
+
+class ProductTaskListResponse(BaseModel):
+    tasks: tuple[ProductTaskSnapshot, ...]
+
+
+class ProductTaskExecutionResponse(BaseModel):
+    execution: ProductTaskExecutionSnapshot
+
+
+class ProductTaskExecutionListResponse(BaseModel):
+    executions: tuple[ProductTaskExecutionSnapshot, ...]
+
+
+class DeletedResponse(BaseModel):
+    deleted: bool = True
 
 
 class ApprovalResolvedResponse(BaseModel):
@@ -243,6 +326,10 @@ class AuditListResponse(BaseModel):
 class PushRegistrationResponse(BaseModel):
     registered: bool
     provider: str = ""
+
+
+class DeviceRevokedResponse(BaseModel):
+    revoked: bool
 
 
 class AndroidReleaseResponse(BaseModel):

@@ -21,7 +21,22 @@ export type TaskState =
   | "failed"
   | "cancelled";
 
-export type TaskOrigin = "user" | "agent" | "scheduled" | "event";
+export type TaskDefinitionState = "active" | "paused" | "archived";
+
+export type TaskLaunchKind = "immediate" | "scheduled" | "event";
+
+export type TaskLaunchPolicy = {
+  kind: TaskLaunchKind;
+  schedule_type: "one_time" | "interval" | "cron" | null;
+  run_at: number | null;
+  interval_seconds: number | null;
+  cron: string;
+  timezone: string;
+  event_source: string;
+  source_config: Record<string, unknown>;
+};
+
+export type TaskLaunchReason = "created" | "manual" | "scheduled" | "event" | "rerun";
 
 export type ArtifactInput = {
   artifact_id: string;
@@ -29,6 +44,17 @@ export type ArtifactInput = {
 };
 
 export type ChatTurnState = "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
+
+export type ConversationSession = {
+  session_handle: string;
+  title: string;
+  state: "active" | "archived";
+  turn_count: number;
+  last_turn_at: number | null;
+  created_at: number;
+  updated_at: number;
+  revision: number;
+};
 
 export type ChatTimelineEntry = {
   kind: string;
@@ -84,28 +110,52 @@ export type ChatTurnSnapshot = {
   revision: number;
 };
 
-export type TaskSnapshot = {
+export type Task = {
   task_id: string;
-  session_handle: string;
-  client_request_id: string;
-  origin: TaskOrigin;
-  parent_task_id: string;
+  title: string;
   goal: string;
   attachments: ArtifactInput[];
   tools_enabled: boolean;
   priority: number;
+  launch_policy: TaskLaunchPolicy;
+  notification_policy: Record<string, boolean>;
+  state: TaskDefinitionState;
+  revision: number;
+  latest_execution_id: string;
+  execution_count: number;
+  created_at: number;
+  updated_at: number;
+};
+
+export type TaskExecution = {
+  execution_id: string;
+  task_id: string;
+  task_revision: number;
+  launch_reason: TaskLaunchReason;
+  goal_snapshot: string;
+  attachment_snapshots: ArtifactInput[];
+  policy_snapshot: TaskLaunchPolicy;
   state: TaskState;
   phase: string;
-  attempt_count: number;
   cancel_requested: boolean;
-  final_summary: string;
+  final_result: string;
   failure_code: string;
   created_at: number;
   updated_at: number;
   started_at: number | null;
   finished_at: number | null;
-  next_event_seq: number;
   trace: TaskExecutionTrace | null;
+  approvals: TaskApproval[];
+};
+
+export type TaskApproval = {
+  approval_id: string;
+  tool_name: string;
+  arguments: Record<string, unknown>;
+  reason: string;
+  state: "pending" | "approved" | "denied" | "expired";
+  created_at: number;
+  resolved_at: number | null;
 };
 
 export type TaskTraceEntry = {
@@ -146,9 +196,16 @@ export type PrincipalTaskEvent = {
 
 export type ApprovalRequest = {
   approvalId: string;
-  taskId: string;
+  executionId: string;
   toolName: string;
   reason: string;
+};
+
+export type UserFacingError = {
+  code: string;
+  message: string;
+  retryable: boolean;
+  suggestedAction?: string;
 };
 
 export type AndroidRelease = {

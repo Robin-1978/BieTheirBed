@@ -30,6 +30,11 @@ from pc_assistant.tasks.models import (
     TaskEventPayload,
     TaskEventType,
     TaskExecutionTrace,
+    TaskExecutionRecord,
+    TaskDefinitionRecord,
+    TaskDefinitionState,
+    TaskLaunchPolicy,
+    TaskLaunchReason,
     TaskPauseResult,
     TaskOrigin,
     TaskRecord,
@@ -101,6 +106,7 @@ class TaskRepository:
         db_path: str | Path,
         *,
         task_id_factory: Callable[[], str] | None = None,
+        definition_id_factory: Callable[[], str] | None = None,
         approval_id_factory: Callable[[], str] | None = None,
         clock: Callable[[], float] = time.time,
         max_active_tasks: int = 128,
@@ -119,6 +125,9 @@ class TaskRepository:
         self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._path.parent.chmod(0o700)
         self._task_id_factory = task_id_factory or (
+            lambda: secrets.token_urlsafe(18)
+        )
+        self._definition_id_factory = definition_id_factory or (
             lambda: secrets.token_urlsafe(18)
         )
         self._approval_id_factory = approval_id_factory or (
@@ -265,6 +274,55 @@ class TaskRepository:
                     ON runtime_principal_task_events(
                         principal_id, feed_event_id
                     );
+                CREATE TABLE IF NOT EXISTS tasks (
+                    task_id TEXT PRIMARY KEY,
+                    principal_id TEXT NOT NULL,
+                    client_request_id TEXT NOT NULL,
+                    session_handle TEXT NOT NULL
+                        REFERENCES runtime_sessions(session_handle) ON DELETE CASCADE,
+                    title TEXT NOT NULL,
+                    goal TEXT NOT NULL,
+                    attachments_json TEXT NOT NULL,
+                    tools_enabled INTEGER NOT NULL,
+                    priority INTEGER NOT NULL,
+                    notification_policy_json TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    latest_execution_id TEXT,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    UNIQUE(principal_id, client_request_id)
+                );
+                CREATE TABLE IF NOT EXISTS task_launch_policies (
+                    task_id TEXT PRIMARY KEY
+                        REFERENCES tasks(task_id) ON DELETE CASCADE,
+                    policy_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS task_executions (
+                    execution_id TEXT PRIMARY KEY
+                        REFERENCES runtime_tasks(task_id) ON DELETE CASCADE,
+                    task_id TEXT NOT NULL
+                        REFERENCES tasks(task_id) ON DELETE CASCADE,
+                    task_revision INTEGER NOT NULL,
+                    launch_reason TEXT NOT NULL,
+                    goal_snapshot TEXT NOT NULL,
+                    attachments_json TEXT NOT NULL,
+                    policy_snapshot_json TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    UNIQUE(task_id, execution_id)
+                );
+                CREATE TABLE IF NOT EXISTS task_launch_bindings (
+                    task_id TEXT NOT NULL
+                        REFERENCES tasks(task_id) ON DELETE CASCADE,
+                    provider_kind TEXT NOT NULL,
+                    provider_id TEXT NOT NULL,
+                    PRIMARY KEY(provider_kind, provider_id),
+                    UNIQUE(task_id, provider_kind)
+                );
+                CREATE INDEX IF NOT EXISTS tasks_by_owner_state
+                    ON tasks(principal_id, state, updated_at DESC, task_id DESC);
+                CREATE INDEX IF NOT EXISTS task_executions_by_task
+                    ON task_executions(task_id, created_at DESC, execution_id DESC);
                 """
             )
             task_columns = {
@@ -630,6 +688,77 @@ class TaskRepository:
             ),
             next_event_seq=int(row["next_event_seq"]),
             revision=int(row["revision"]),
+        )
+
+    @classmethod
+    def _definition_record(
+        cls,
+        row: sqlite3.Row,
+        *,
+        execution_count: int | None = None,
+    ) -> TaskDefinitionRecord:
+        notification_raw = cls._json_object(
+            str(row["notification_policy_json"]),
+            label="notification policy",
+        )
+        if not all(isinstance(value, bool) for value in notification_raw.values()):
+            raise ValueError("Task notification policy must contain booleans")
+        return TaskDefinitionRecord(
+            task_id=str(row["task_id"]),
+            principal_id=str(row["principal_id"]),
+            session_handle=str(row["session_handle"]),
+            title=str(row["title"]),
+            goal=str(row["goal"]),
+            attachments=cls._decode_attachments(str(row["attachments_json"])),
+            tools_enabled=bool(row["tools_enabled"]),
+            priority=int(row["priority"]),
+            launch_policy=TaskLaunchPolicy.model_validate_json(
+                str(row["policy_json"])
+            ),
+            notification_policy={
+                str(key): bool(value) for key, value in notification_raw.items()
+            },
+            state=TaskDefinitionState(str(row["state"])),
+            revision=int(row["revision"]),
+            latest_execution_id=str(row["latest_execution_id"] or ""),
+            execution_count=(
+                int(row["execution_count"])
+                if execution_count is None and "execution_count" in row.keys()
+                else int(execution_count or 0)
+            ),
+            created_at=float(row["created_at"]),
+            updated_at=float(row["updated_at"]),
+        )
+
+    @staticmethod
+    def _execution_record(
+        mapping: sqlite3.Row,
+        execution: TaskRecord,
+        *,
+        trace: TaskExecutionTrace | None = None,
+    ) -> TaskExecutionRecord:
+        return TaskExecutionRecord(
+            execution_id=execution.task_id,
+            task_id=str(mapping["task_id"]),
+            task_revision=int(mapping["task_revision"]),
+            launch_reason=TaskLaunchReason(str(mapping["launch_reason"])),
+            goal_snapshot=str(mapping["goal_snapshot"]),
+            attachment_snapshots=TaskRepository._decode_attachments(
+                str(mapping["attachments_json"])
+            ),
+            policy_snapshot=TaskLaunchPolicy.model_validate_json(
+                str(mapping["policy_snapshot_json"])
+            ),
+            state=execution.state,
+            phase=execution.phase,
+            cancel_requested=execution.cancel_requested,
+            final_result=execution.final_summary,
+            failure_code=execution.failure_code,
+            created_at=execution.created_at,
+            updated_at=execution.updated_at,
+            started_at=execution.started_at,
+            finished_at=execution.finished_at,
+            trace=trace,
         )
 
     @staticmethod
@@ -1216,6 +1345,550 @@ class TaskRepository:
                 str(last["task_id"]),
             )
         return tasks, next_cursor
+
+    @staticmethod
+    def _task_title(title: str, goal: str) -> str:
+        normalized = " ".join(title.strip().split())
+        if not normalized:
+            normalized = " ".join(goal.strip().splitlines()[0].split())
+        if not normalized:
+            raise ValueError("Task title must not be empty")
+        return normalized[:200]
+
+    @staticmethod
+    def _notification_policy_payload(policy: dict[str, bool]) -> str:
+        if len(policy) > 32 or any(
+            not isinstance(key, str)
+            or not key.strip()
+            or len(key) > 64
+            or not isinstance(value, bool)
+            for key, value in policy.items()
+        ):
+            raise ValueError("Task notification policy is invalid")
+        return json.dumps(policy, separators=(",", ":"), sort_keys=True)
+
+    def create_task_definition(
+        self,
+        scope: RuntimeScope,
+        *,
+        client_request_id: str,
+        title: str,
+        goal: str,
+        attachments: tuple[ArtifactAttachment, ...] = (),
+        tools_enabled: bool = True,
+        priority: int = 0,
+        launch_policy: TaskLaunchPolicy | None = None,
+        notification_policy: dict[str, bool] | None = None,
+    ) -> tuple[TaskDefinitionRecord, bool]:
+        request_id = self._normalize_identifier(
+            client_request_id,
+            label="client_request_id",
+            limit=128,
+        )
+        normalized_goal = goal.strip()
+        if not normalized_goal or len(normalized_goal) > 200_000:
+            raise ValueError("Task goal must contain 1-200000 characters")
+        if not 0 <= priority <= 9:
+            raise ValueError("Task priority must be between 0 and 9")
+        normalized_title = self._task_title(title, normalized_goal)
+        attachment_json = self._attachments_payload(attachments)
+        policy = launch_policy or TaskLaunchPolicy()
+        policy_json = policy.model_dump_json()
+        notifications_json = self._notification_policy_payload(
+            notification_policy or {
+                "completed": True,
+                "failed": True,
+                "waiting_approval": True,
+            }
+        )
+        now = self._clock()
+        for _ in range(5):
+            try:
+                with self._connect() as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._owned_session(db, scope)
+                    existing = db.execute(
+                        """SELECT tasks.*, task_launch_policies.policy_json,
+                                  (SELECT COUNT(*) FROM task_executions
+                                   WHERE task_executions.task_id=tasks.task_id)
+                                      AS execution_count
+                           FROM tasks
+                           JOIN task_launch_policies USING(task_id)
+                           WHERE principal_id=? AND client_request_id=?""",
+                        (scope.principal_id, request_id),
+                    ).fetchone()
+                    if existing is not None:
+                        same = (
+                            str(existing["session_handle"]) == scope.session_handle
+                            and str(existing["title"]) == normalized_title
+                            and str(existing["goal"]) == normalized_goal
+                            and str(existing["attachments_json"]) == attachment_json
+                            and bool(existing["tools_enabled"]) is bool(tools_enabled)
+                            and int(existing["priority"]) == priority
+                            and str(existing["policy_json"]) == policy_json
+                            and str(existing["notification_policy_json"])
+                            == notifications_json
+                        )
+                        if not same:
+                            raise TaskIdempotencyConflictError(
+                                "client_request_id already belongs to another Task definition"
+                            )
+                        return self._definition_record(existing), False
+                    task_id = self._normalize_identifier(
+                        self._definition_id_factory(),
+                        label="task_id",
+                        limit=128,
+                    )
+                    db.execute(
+                        """INSERT INTO tasks(
+                               task_id, principal_id, client_request_id,
+                               session_handle, title, goal, attachments_json,
+                               tools_enabled, priority, notification_policy_json,
+                               state, revision, latest_execution_id,
+                               created_at, updated_at
+                           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            task_id,
+                            scope.principal_id,
+                            request_id,
+                            scope.session_handle,
+                            normalized_title,
+                            normalized_goal,
+                            attachment_json,
+                            int(tools_enabled),
+                            priority,
+                            notifications_json,
+                            TaskDefinitionState.ACTIVE.value,
+                            1,
+                            None,
+                            now,
+                            now,
+                        ),
+                    )
+                    db.execute(
+                        "INSERT INTO task_launch_policies(task_id, policy_json) VALUES (?, ?)",
+                        (task_id, policy_json),
+                    )
+                    row = db.execute(
+                        """SELECT tasks.*, task_launch_policies.policy_json,
+                                  0 AS execution_count
+                           FROM tasks JOIN task_launch_policies USING(task_id)
+                           WHERE task_id=?""",
+                        (task_id,),
+                    ).fetchone()
+                    if row is None:
+                        raise RuntimeError("Task definition was not persisted")
+                    return self._definition_record(row), True
+            except sqlite3.IntegrityError as exc:
+                if "tasks.task_id" in str(exc):
+                    continue
+                raise
+        raise RuntimeError("Could not allocate a unique Task definition ID")
+
+    def get_task_definition(
+        self,
+        principal_id: str,
+        task_id: str,
+    ) -> TaskDefinitionRecord:
+        principal = self._normalize_identifier(
+            principal_id, label="principal_id", limit=256
+        )
+        normalized_task_id = self._normalize_identifier(
+            task_id, label="task_id", limit=128
+        )
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT tasks.*, task_launch_policies.policy_json,
+                          (SELECT COUNT(*) FROM task_executions
+                           WHERE task_executions.task_id=tasks.task_id)
+                              AS execution_count
+                   FROM tasks JOIN task_launch_policies USING(task_id)
+                   WHERE tasks.principal_id=? AND tasks.task_id=?""",
+                (principal, normalized_task_id),
+            ).fetchone()
+        if row is None:
+            raise TaskNotFoundError("Task not found")
+        return self._definition_record(row)
+
+    def list_task_definitions(
+        self,
+        principal_id: str,
+        *,
+        state: TaskDefinitionState | None = None,
+        include_archived: bool = False,
+        limit: int = 100,
+    ) -> tuple[TaskDefinitionRecord, ...]:
+        principal = self._normalize_identifier(
+            principal_id, label="principal_id", limit=256
+        )
+        if not 1 <= limit <= 200:
+            raise ValueError("Task list limit must be between 1 and 200")
+        clauses = ["tasks.principal_id=?"]
+        parameters: list[object] = [principal]
+        if state is not None:
+            clauses.append("tasks.state=?")
+            parameters.append(state.value)
+        elif not include_archived:
+            clauses.append("tasks.state<>?")
+            parameters.append(TaskDefinitionState.ARCHIVED.value)
+        parameters.append(limit)
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT tasks.*, task_launch_policies.policy_json,
+                          (SELECT COUNT(*) FROM task_executions
+                           WHERE task_executions.task_id=tasks.task_id)
+                              AS execution_count
+                   FROM tasks JOIN task_launch_policies USING(task_id)
+                   WHERE """
+                + " AND ".join(clauses)
+                + " ORDER BY tasks.updated_at DESC, tasks.task_id DESC LIMIT ?",
+                tuple(parameters),
+            ).fetchall()
+        return tuple(self._definition_record(row) for row in rows)
+
+    def update_task_definition(
+        self,
+        principal_id: str,
+        task_id: str,
+        *,
+        title: str | None = None,
+        goal: str | None = None,
+        attachments: tuple[ArtifactAttachment, ...] | None = None,
+        tools_enabled: bool | None = None,
+        priority: int | None = None,
+        launch_policy: TaskLaunchPolicy | None = None,
+        notification_policy: dict[str, bool] | None = None,
+        expected_revision: int | None = None,
+    ) -> TaskDefinitionRecord:
+        current = self.get_task_definition(principal_id, task_id)
+        if expected_revision is not None and current.revision != expected_revision:
+            raise TaskTransitionError("Task definition changed; refresh before editing")
+        next_goal = current.goal if goal is None else goal.strip()
+        if not next_goal or len(next_goal) > 200_000:
+            raise ValueError("Task goal must contain 1-200000 characters")
+        next_title = self._task_title(
+            current.title if title is None else title,
+            next_goal,
+        )
+        next_priority = current.priority if priority is None else priority
+        if not 0 <= next_priority <= 9:
+            raise ValueError("Task priority must be between 0 and 9")
+        next_attachments = current.attachments if attachments is None else attachments
+        next_notifications = (
+            current.notification_policy
+            if notification_policy is None
+            else notification_policy
+        )
+        now = self._clock()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            changed = db.execute(
+                """UPDATE tasks SET title=?, goal=?, attachments_json=?,
+                       tools_enabled=?, priority=?, notification_policy_json=?,
+                       revision=revision+1, updated_at=?
+                   WHERE principal_id=? AND task_id=? AND revision=?""",
+                (
+                    next_title,
+                    next_goal,
+                    self._attachments_payload(next_attachments),
+                    int(current.tools_enabled if tools_enabled is None else tools_enabled),
+                    next_priority,
+                    self._notification_policy_payload(next_notifications),
+                    now,
+                    current.principal_id,
+                    current.task_id,
+                    current.revision,
+                ),
+            ).rowcount
+            if changed != 1:
+                raise TaskTransitionError("Task definition changed; refresh before editing")
+            if launch_policy is not None:
+                db.execute(
+                    "UPDATE task_launch_policies SET policy_json=? WHERE task_id=?",
+                    (launch_policy.model_dump_json(), current.task_id),
+                )
+        return self.get_task_definition(principal_id, task_id)
+
+    def set_task_definition_state(
+        self,
+        principal_id: str,
+        task_id: str,
+        state: TaskDefinitionState,
+    ) -> TaskDefinitionRecord:
+        current = self.get_task_definition(principal_id, task_id)
+        if current.state is state:
+            return current
+        now = self._clock()
+        with self._connect() as db:
+            db.execute(
+                """UPDATE tasks SET state=?, revision=revision+1, updated_at=?
+                   WHERE principal_id=? AND task_id=?""",
+                (state.value, now, current.principal_id, current.task_id),
+            )
+        return self.get_task_definition(principal_id, task_id)
+
+    def bind_task_launch(
+        self,
+        principal_id: str,
+        task_id: str,
+        *,
+        provider_kind: str,
+        provider_id: str,
+    ) -> None:
+        definition = self.get_task_definition(principal_id, task_id)
+        kind = provider_kind.strip()
+        if kind not in {"schedule", "event"}:
+            raise ValueError("Task launch provider kind is invalid")
+        normalized_provider_id = self._normalize_identifier(
+            provider_id,
+            label="provider_id",
+            limit=128,
+        )
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO task_launch_bindings(task_id, provider_kind, provider_id)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(provider_kind, provider_id) DO UPDATE SET
+                       task_id=excluded.task_id""",
+                (definition.task_id, kind, normalized_provider_id),
+            )
+
+    def task_for_launch(
+        self,
+        principal_id: str,
+        *,
+        provider_kind: str,
+        provider_id: str,
+    ) -> TaskDefinitionRecord:
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT tasks.*, task_launch_policies.policy_json,
+                          (SELECT COUNT(*) FROM task_executions
+                           WHERE task_executions.task_id=tasks.task_id)
+                              AS execution_count
+                   FROM task_launch_bindings
+                   JOIN tasks USING(task_id)
+                   JOIN task_launch_policies USING(task_id)
+                   WHERE tasks.principal_id=? AND provider_kind=? AND provider_id=?""",
+                (principal_id, provider_kind.strip(), provider_id.strip()),
+            ).fetchone()
+        if row is None:
+            raise TaskNotFoundError("Task launch binding not found")
+        return self._definition_record(row)
+
+    def launch_binding_for_task(
+        self,
+        principal_id: str,
+        task_id: str,
+    ) -> tuple[str, str] | None:
+        definition = self.get_task_definition(principal_id, task_id)
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT provider_kind, provider_id FROM task_launch_bindings
+                   WHERE task_id=?""",
+                (definition.task_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return str(row["provider_kind"]), str(row["provider_id"])
+
+    def unbind_launch(self, principal_id: str, task_id: str) -> tuple[str, str] | None:
+        definition = self.get_task_definition(principal_id, task_id)
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT provider_kind, provider_id FROM task_launch_bindings WHERE task_id=?",
+                (definition.task_id,),
+            ).fetchone()
+            db.execute("DELETE FROM task_launch_bindings WHERE task_id=?", (definition.task_id,))
+        if row is None:
+            return None
+        return str(row["provider_kind"]), str(row["provider_id"])
+
+    def link_task_execution(
+        self,
+        principal_id: str,
+        task_id: str,
+        execution_id: str,
+        *,
+        launch_reason: TaskLaunchReason,
+        goal_snapshot: str | None = None,
+        attachments_snapshot: tuple[ArtifactAttachment, ...] | None = None,
+        policy_snapshot: TaskLaunchPolicy | None = None,
+        task_revision: int | None = None,
+    ) -> TaskExecutionRecord:
+        definition = self.get_task_definition(principal_id, task_id)
+        execution = self.get(principal_id, execution_id)
+        revision = definition.revision if task_revision is None else task_revision
+        goal = definition.goal if goal_snapshot is None else goal_snapshot.strip()
+        if not goal:
+            raise ValueError("Execution goal snapshot must not be empty")
+        attachments = (
+            definition.attachments
+            if attachments_snapshot is None
+            else attachments_snapshot
+        )
+        policy = definition.launch_policy if policy_snapshot is None else policy_snapshot
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            existing = db.execute(
+                "SELECT * FROM task_executions WHERE execution_id=?",
+                (execution.task_id,),
+            ).fetchone()
+            if existing is None:
+                db.execute(
+                    """INSERT INTO task_executions(
+                           execution_id, task_id, task_revision, launch_reason,
+                           goal_snapshot, attachments_json, policy_snapshot_json,
+                           created_at
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        execution.task_id,
+                        definition.task_id,
+                        revision,
+                        launch_reason.value,
+                        goal,
+                        self._attachments_payload(attachments),
+                        policy.model_dump_json(),
+                        execution.created_at,
+                    ),
+                )
+            elif str(existing["task_id"]) != definition.task_id:
+                raise TaskIdempotencyConflictError(
+                    "Execution already belongs to another Task"
+                )
+            db.execute(
+                """UPDATE tasks SET latest_execution_id=?, updated_at=?
+                   WHERE task_id=?""",
+                (execution.task_id, self._clock(), definition.task_id),
+            )
+            mapping = db.execute(
+                "SELECT * FROM task_executions WHERE execution_id=?",
+                (execution.task_id,),
+            ).fetchone()
+        if mapping is None:
+            raise RuntimeError("Task execution link was not persisted")
+        return self._execution_record(mapping, execution)
+
+    def get_task_execution(
+        self,
+        principal_id: str,
+        execution_id: str,
+        *,
+        include_trace: bool = True,
+    ) -> TaskExecutionRecord:
+        execution = self.get(principal_id, execution_id)
+        with self._connect() as db:
+            mapping = db.execute(
+                """SELECT task_executions.* FROM task_executions
+                   JOIN tasks USING(task_id)
+                   WHERE tasks.principal_id=? AND execution_id=?""",
+                (principal_id, execution.task_id),
+            ).fetchone()
+        if mapping is None:
+            raise TaskNotFoundError("Task execution not found")
+        trace = self.get_trace(principal_id, execution.task_id) if include_trace else None
+        return self._execution_record(mapping, execution, trace=trace)
+
+    def list_task_executions(
+        self,
+        principal_id: str,
+        task_id: str,
+        *,
+        limit: int = 100,
+    ) -> tuple[TaskExecutionRecord, ...]:
+        definition = self.get_task_definition(principal_id, task_id)
+        if not 1 <= limit <= 200:
+            raise ValueError("Execution list limit must be between 1 and 200")
+        with self._connect() as db:
+            mappings = db.execute(
+                """SELECT * FROM task_executions WHERE task_id=?
+                   ORDER BY created_at DESC, execution_id DESC LIMIT ?""",
+                (definition.task_id, limit),
+            ).fetchall()
+        return tuple(
+            self._execution_record(
+                mapping,
+                self.get(principal_id, str(mapping["execution_id"])),
+            )
+            for mapping in mappings
+        )
+
+    def task_for_execution(
+        self,
+        principal_id: str,
+        execution_id: str,
+    ) -> TaskDefinitionRecord:
+        normalized_execution_id = self._normalize_identifier(
+            execution_id, label="execution_id", limit=128
+        )
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT tasks.*, task_launch_policies.policy_json,
+                          (SELECT COUNT(*) FROM task_executions AS counted
+                           WHERE counted.task_id=tasks.task_id) AS execution_count
+                   FROM task_executions
+                   JOIN tasks USING(task_id)
+                   JOIN task_launch_policies USING(task_id)
+                   WHERE tasks.principal_id=?
+                     AND task_executions.execution_id=?""",
+                (principal_id, normalized_execution_id),
+            ).fetchone()
+        if row is None:
+            raise TaskNotFoundError("Task execution not found")
+        return self._definition_record(row)
+
+    def delete_task_execution(self, principal_id: str, execution_id: str) -> None:
+        execution = self.get_task_execution(
+            principal_id, execution_id, include_trace=False
+        )
+        if execution.state not in TERMINAL_TASK_STATES:
+            raise TaskTransitionError("Active TaskExecution cannot be deleted")
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("DELETE FROM runtime_tasks WHERE task_id=?", (execution.execution_id,))
+            latest = db.execute(
+                """SELECT execution_id FROM task_executions
+                   WHERE task_id=? ORDER BY created_at DESC, execution_id DESC LIMIT 1""",
+                (execution.task_id,),
+            ).fetchone()
+            db.execute(
+                """UPDATE tasks SET latest_execution_id=?, updated_at=?
+                   WHERE task_id=?""",
+                (
+                    None if latest is None else str(latest["execution_id"]),
+                    self._clock(),
+                    execution.task_id,
+                ),
+            )
+
+    def delete_task_definition(
+        self,
+        principal_id: str,
+        task_id: str,
+        *,
+        allow_active: bool = False,
+    ) -> tuple[str, ...]:
+        definition = self.get_task_definition(principal_id, task_id)
+        executions = self.list_task_executions(principal_id, task_id, limit=200)
+        active = tuple(
+            execution.execution_id
+            for execution in executions
+            if execution.state not in TERMINAL_TASK_STATES
+        )
+        if active and not allow_active:
+            raise TaskTransitionError(
+                "Task has active executions; stop them before deleting"
+            )
+        execution_ids = tuple(execution.execution_id for execution in executions)
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            for execution_id in execution_ids:
+                db.execute("DELETE FROM runtime_tasks WHERE task_id=?", (execution_id,))
+            db.execute(
+                "DELETE FROM tasks WHERE principal_id=? AND task_id=?",
+                (definition.principal_id, definition.task_id),
+            )
+        return execution_ids
 
     def list_attempts(
         self,
@@ -2327,6 +3000,31 @@ class TaskRepository:
             return self._approval_record(
                 self._owned_approval(db, principal, normalized_approval_id)
             )
+
+    def list_approvals(
+        self,
+        principal_id: str,
+        task_id: str,
+    ) -> tuple[TaskApprovalRecord, ...]:
+        principal = self._normalize_identifier(
+            principal_id,
+            label="principal_id",
+            limit=256,
+        )
+        normalized_task_id = self._normalize_identifier(
+            task_id,
+            label="task_id",
+            limit=128,
+        )
+        with self._connect() as db:
+            self._owned_task(db, principal, normalized_task_id)
+            rows = db.execute(
+                """SELECT * FROM runtime_task_approvals
+                   WHERE principal_id=? AND task_id=?
+                   ORDER BY created_at, approval_id""",
+                (principal, normalized_task_id),
+            ).fetchall()
+            return tuple(self._approval_record(row) for row in rows)
 
     def transition(
         self,

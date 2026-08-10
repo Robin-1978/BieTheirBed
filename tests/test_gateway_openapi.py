@@ -33,20 +33,29 @@ def test_gateway_openapi_matches_the_allow_listed_http_surface(tmp_path) -> None
         "properties"
     ]
     assert not any("method" in path for path in schema["paths"])
-    assert schema["paths"]["/v1/tasks/{task_id}/retry"]["post"][
+    assert schema["paths"]["/v1/task-executions/{execution_id}/rerun"]["post"][
         "operationId"
-    ] == "retryTask"
+    ] == "rerunTaskExecution"
     assert schema["paths"]["/v1/runtime/status"]["get"]["operationId"] == (
         "getRuntimeStatus"
     )
     assert schema["paths"]["/v1/device/audit"]["get"]["operationId"] == (
         "listDeviceAudit"
     )
-    assert schema["paths"]["/v1/tasks/{task_id}/events"]["get"][
+    assert schema["paths"]["/v1/task-executions/{execution_id}/events"]["get"][
         "operationId"
-    ] == "listTaskEvents"
+    ] == "listTaskExecutionEvents"
     assert schema["paths"]["/v1/device/push"]["put"]["operationId"] == (
         "registerDevicePush"
+    )
+    assert schema["paths"]["/v1/device"]["delete"]["operationId"] == (
+        "revokeCurrentDevice"
+    )
+    assert schema["paths"]["/v1/conversations/sessions"]["get"]["operationId"] == (
+        "listConversationSessions"
+    )
+    assert schema["paths"]["/v1/conversations/turns/{turn_id}/retry"]["post"]["operationId"] == (
+        "retryChatTurn"
     )
 
 

@@ -20,6 +20,7 @@ import {
   installAndroidPackage,
   installedAndroidVersionCode,
   isAndroidUpdateAvailable,
+  loadReadyAndroidPackage,
   openUnknownSourcesSettings,
   type AndroidUpdateProgress,
 } from "@/update/androidUpdater";
@@ -37,6 +38,7 @@ export default function UpdateScreen() {
   const [message, setMessage] = useState("");
   const download = useRef<AndroidUpdateDownload | null>(null);
   const pausing = useRef(false);
+  const installAfterSettings = useRef(false);
   const currentVersionCode = installedAndroidVersionCode();
 
   useEffect(() => {
@@ -53,11 +55,27 @@ export default function UpdateScreen() {
   }, [gateway.client, gateway.runAuthenticated]);
 
   useEffect(() => {
+    if (!release || !isAndroidUpdateAvailable(release, currentVersionCode)) return;
+    void loadReadyAndroidPackage(release).then((uri) => {
+      if (!uri) return;
+      setPackageUri(uri);
+      setProgress({ downloaded: release.size_bytes, total: release.size_bytes });
+      setState("ready");
+    });
+  }, [currentVersionCode, release]);
+
+  useEffect(() => {
     const subscription = AppState.addEventListener("change", (next) => {
       if (next !== "active" && state === "downloading") void pauseDownload();
+      if (next === "active" && installAfterSettings.current && packageUri) {
+        installAfterSettings.current = false;
+        void installAndroidPackage(packageUri).catch((error) => {
+          setMessage(error instanceof Error ? error.message : "无法打开系统安装器");
+        });
+      }
     });
     return () => subscription.remove();
-  }, [state]);
+  }, [packageUri, state]);
 
   useEffect(() => () => {
     if (download.current) void download.current.pause();
@@ -108,6 +126,16 @@ export default function UpdateScreen() {
       await installAndroidPackage(packageUri);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "无法打开系统安装器");
+    }
+  }
+
+  async function allowUnknownSources() {
+    installAfterSettings.current = Boolean(packageUri);
+    try {
+      await openUnknownSourcesSettings();
+    } catch (error) {
+      installAfterSettings.current = false;
+      setMessage(error instanceof Error ? error.message : "无法打开安装权限设置");
     }
   }
 
@@ -167,7 +195,7 @@ export default function UpdateScreen() {
             {state === "ready" ? <Button label="安装更新" onPress={() => void install()} /> : null}
           </View>
           <Text style={styles.tip}>离开页面或 App 进入后台时会保存断点，下次从断点继续。</Text>
-          <Pressable onPress={() => void openUnknownSourcesSettings()}>
+          <Pressable onPress={() => void allowUnknownSources()}>
             <Text style={styles.link}>允许小诺安装未知来源应用</Text>
           </Pressable>
         </View>

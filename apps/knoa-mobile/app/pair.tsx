@@ -1,4 +1,5 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
+import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import { useState } from "react";
 import {
@@ -78,7 +79,11 @@ export default function PairScreen() {
           if (!permission?.granted) {
             const result = await requestPermission();
             if (!result.granted) {
-              setError("需要相机权限才能扫描二维码");
+              if (!result.canAskAgain) {
+                setError("相机权限已关闭，请在系统设置中允许后再扫描");
+              } else {
+                setError("需要相机权限才能扫描二维码");
+              }
               return;
             }
           }
@@ -87,6 +92,11 @@ export default function PairScreen() {
       >
         <Text style={styles.primaryText}>扫描配对二维码</Text>
       </Pressable>
+      {permission && !permission.granted && !permission.canAskAgain ? (
+        <Pressable accessibilityRole="button" onPress={() => void Linking.openSettings()}>
+          <Text style={styles.settingsLink}>打开系统设置</Text>
+        </Pressable>
+      ) : null}
       <Text style={styles.or}>或粘贴 pairing_json</Text>
       <TextInput
         style={[styles.input, styles.payload]}
@@ -117,6 +127,7 @@ const styles = StyleSheet.create({
   secondaryText: { color: colors.accent, fontWeight: "700" },
   or: { color: colors.muted, textAlign: "center" },
   error: { color: colors.danger, textAlign: "center" },
+  settingsLink: { color: colors.accent, textAlign: "center", fontWeight: "700" },
   scanner: { flex: 1, alignItems: "center", justifyContent: "center" },
   scanFrame: { width: 260, height: 260, borderWidth: 2, borderColor: "white", borderRadius: 24 },
   cancel: { position: "absolute", bottom: 56, backgroundColor: "rgba(0,0,0,0.65)", paddingHorizontal: 20, paddingVertical: 12, borderRadius: 20 },

@@ -7,99 +7,81 @@ import {
   RefreshControl,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 
-import type { AndroidRelease, TaskOrigin, TaskSnapshot, TaskState } from "@/api/models";
+import type { Task, TaskDefinitionState } from "@/api/models";
 import { useGateway } from "@/state/GatewayProvider";
+import { PrimaryNav } from "@/components/PrimaryNav";
 import { colors } from "@/theme";
-import { isAndroidUpdateAvailable } from "@/update/androidUpdater";
 
-type Filter = "all" | "active" | "approval" | "completed";
+type Filter = "current" | TaskDefinitionState;
 
 const filters: Array<{ label: string; value: Filter }> = [
-  { label: "全部", value: "all" },
-  { label: "进行中", value: "active" },
-  { label: "待确认", value: "approval" },
-  { label: "已完成", value: "completed" },
+  { label: "当前", value: "current" },
+  { label: "启用", value: "active" },
+  { label: "已暂停", value: "paused" },
+  { label: "已归档", value: "archived" },
 ];
 
 export default function TasksScreen() {
   const gateway = useGateway();
-  const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
-  const [filter, setFilter] = useState<Filter>("all");
-  const [goal, setGoal] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [filter, setFilter] = useState<Filter>("current");
   const [refreshing, setRefreshing] = useState(false);
-  const [availableUpdate, setAvailableUpdate] = useState<AndroidRelease | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
     if (!gateway.client) return;
     setRefreshing(true);
+    setError("");
     try {
-      const result = await gateway.runAuthenticated((client) => client.listTasks({ limit: 100 }));
+      const result = await gateway.runAuthenticated((client) => client.listTasks({
+        includeArchived: true,
+        limit: 200,
+      }));
       setTasks(result.tasks);
+    } catch {
+      setError("任务暂时加载失败，请检查连接后重试");
     } finally {
       setRefreshing(false);
+      setLoading(false);
     }
   }, [gateway.client, gateway.runAuthenticated]);
 
   useEffect(() => { void refresh(); }, [refresh, gateway.latestEvent]);
 
-  useEffect(() => {
-    if (!gateway.client) return;
-    void gateway.runAuthenticated((client) => client.latestAndroidRelease())
-      .then((release) => setAvailableUpdate(isAndroidUpdateAvailable(release) ? release : null))
-      .catch(() => undefined);
-  }, [gateway.client, gateway.runAuthenticated]);
-
-  const visibleTasks = useMemo(() => tasks.filter((task) => matchesFilter(task.state, filter)), [filter, tasks]);
-
-  async function createTask() {
-    const text = goal.trim();
-    if (!text || !gateway.client || creating) return;
-    setCreating(true);
-    try {
-      const accepted = await gateway.runAuthenticated((client) => client.createTask({ text }));
-      setGoal("");
-      await refresh();
-      router.push(`/tasks/${accepted.task_id}`);
-    } finally {
-      setCreating(false);
-    }
-  }
+  const visibleTasks = useMemo(
+    () => tasks.filter((task) => filter === "current" ? task.state !== "archived" : task.state === filter),
+    [filter, tasks],
+  );
 
   return (
     <View style={styles.container}>
       <View style={styles.topline}>
         <View>
           <Text style={styles.heading}>任务</Text>
-          <Text style={styles.description}>交给小诺在后台独立完成</Text>
+          <Text style={styles.description}>管理目标、启动方式和每次执行结果</Text>
         </View>
-        <Pressable onPress={() => router.replace("/chat")}><Text style={styles.link}>返回对话</Text></Pressable>
+        <View style={styles.topActions}>
+          <Pressable accessibilityRole="button" accessibilityLabel="设置与状态" onPress={() => router.push("/capabilities")}>
+            <Text style={styles.settings}>设置</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="创建新任务"
+            onPress={() => router.push("/tasks/new")}
+            style={styles.newButton}
+          >
+            <Text style={styles.newButtonText}>新建</Text>
+          </Pressable>
+        </View>
       </View>
-      <View style={styles.composer}>
-        <TextInput
-          value={goal}
-          onChangeText={setGoal}
-          placeholder="输入一个可独立完成的任务…"
-          placeholderTextColor={colors.muted}
-          multiline
-          style={styles.input}
-        />
-        <Pressable
-          disabled={!goal.trim() || creating}
-          onPress={() => void createTask()}
-          style={[styles.create, (!goal.trim() || creating) && styles.createDisabled]}
-        >
-          {creating ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.createText}>开始</Text>}
-        </Pressable>
-      </View>
-      {availableUpdate ? (
-        <Pressable style={styles.updateBanner} onPress={() => router.push("/update")}>
+      {gateway.availableUpdate ? (
+        <Pressable style={styles.updateBanner} onPress={() => router.push("/update") }>
           <View>
-            <Text style={styles.updateTitle}>小诺 {availableUpdate.version_name} 可以更新</Text>
+            <Text style={styles.updateTitle}>小诺 {gateway.availableUpdate.version_name} 可以更新</Text>
             <Text style={styles.updateDetail}>支持断点续传</Text>
           </View>
           <Text style={styles.updateLink}>查看</Text>
@@ -109,6 +91,8 @@ export default function TasksScreen() {
         {filters.map((item) => (
           <Pressable
             key={item.value}
+            accessibilityRole="button"
+            accessibilityState={{ selected: filter === item.value }}
             onPress={() => setFilter(item.value)}
             style={[styles.filter, filter === item.value && styles.filterActive]}
           >
@@ -116,56 +100,67 @@ export default function TasksScreen() {
           </Pressable>
         ))}
       </View>
+      {loading ? <ActivityIndicator color={colors.accent} style={styles.loader} /> : null}
+      {error ? (
+        <View style={styles.errorCard}>
+          <Text style={styles.errorText}>{error}</Text>
+          <Pressable onPress={() => void refresh()}><Text style={styles.retry}>重新加载</Text></Pressable>
+        </View>
+      ) : null}
       <FlatList
         data={visibleTasks}
         keyExtractor={(task) => task.task_id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />}
         contentContainerStyle={styles.list}
-        ListEmptyComponent={<Text style={styles.empty}>这里还没有任务</Text>}
+        ListEmptyComponent={!loading && !error ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyTitle}>这里还没有任务</Text>
+            <Text style={styles.emptyText}>创建任务后，可以反复执行并保留每次结果。</Text>
+          </View>
+        ) : null}
         renderItem={({ item }) => (
-          <Pressable style={styles.task} onPress={() => router.push(`/tasks/${item.task_id}`)}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${item.title}，${stateLabel(item.state)}，已执行 ${item.execution_count} 次`}
+            style={styles.task}
+            onPress={() => router.push(`/tasks/${item.task_id}`)}
+          >
             <View style={styles.taskHeader}>
-              <Text style={styles.origin}>{originLabel(item.origin)}</Text>
-              <Text style={styles.state}>{stateLabel(item.state)}</Text>
+              <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
+              <Text style={[styles.state, item.state === "paused" && styles.paused]}>{stateLabel(item.state)}</Text>
             </View>
             <Text style={styles.goal} numberOfLines={3}>{item.goal}</Text>
             <View style={styles.metaRow}>
-              <Text style={styles.time}>{new Date(item.updated_at * 1000).toLocaleString()}</Text>
-              <Text style={styles.attempts}>执行 {Math.max(1, item.attempt_count)} 次</Text>
+              <Text style={styles.meta}>{launchLabel(item)}</Text>
+              <Text style={styles.meta}>执行 {item.execution_count} 次</Text>
             </View>
           </Pressable>
         )}
       />
+      <PrimaryNav current="tasks" />
     </View>
   );
 }
 
-function matchesFilter(state: TaskState, filter: Filter): boolean {
-  if (filter === "active") return state === "queued" || state === "running" || state === "paused";
-  if (filter === "approval") return state === "waiting_approval";
-  if (filter === "completed") return state === "completed";
-  return true;
+function stateLabel(state: TaskDefinitionState): string {
+  return ({ active: "已启用", paused: "已暂停", archived: "已归档" })[state];
 }
 
-function originLabel(origin: TaskOrigin): string {
-  return ({ user: "立即执行", agent: "小诺创建", scheduled: "定时执行", event: "事件启动", chat: "对话" })[origin];
-}
-
-function stateLabel(state: TaskState): string {
-  return ({ queued: "排队中", running: "进行中", waiting_approval: "待确认", paused: "已暂停", completed: "已完成", failed: "失败", cancelled: "已取消" })[state];
+function launchLabel(task: Task): string {
+  if (task.launch_policy.kind === "scheduled") return "定时启动";
+  if (task.launch_policy.kind === "event") return "事件启动";
+  return "手动启动";
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
   topline: { padding: 18, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  heading: { color: colors.ink, fontSize: 22, fontWeight: "700" },
+  heading: { color: colors.ink, fontSize: 24, fontWeight: "700" },
   description: { color: colors.muted, marginTop: 4, fontSize: 13 },
-  link: { color: colors.accent, fontWeight: "600" },
-  composer: { marginHorizontal: 16, marginBottom: 14, padding: 12, borderRadius: 16, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, flexDirection: "row", alignItems: "flex-end", gap: 10 },
-  input: { flex: 1, minHeight: 42, maxHeight: 110, color: colors.ink, fontSize: 15, lineHeight: 21, paddingHorizontal: 4, paddingVertical: 8 },
-  create: { minWidth: 58, height: 38, paddingHorizontal: 14, borderRadius: 19, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
-  createDisabled: { opacity: 0.4 },
-  createText: { color: "white", fontWeight: "700" },
+  newButton: { backgroundColor: colors.accent, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20 },
+  newButtonText: { color: "white", fontWeight: "700" },
+  topActions: { flexDirection: "row", alignItems: "center", gap: 14 },
+  settings: { color: colors.accent, fontWeight: "700" },
   updateBanner: { marginHorizontal: 16, marginBottom: 14, padding: 14, borderRadius: 16, backgroundColor: colors.accentSoft, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   updateTitle: { color: colors.ink, fontWeight: "700" },
   updateDetail: { color: colors.muted, fontSize: 12, marginTop: 3 },
@@ -175,14 +170,20 @@ const styles = StyleSheet.create({
   filterActive: { backgroundColor: colors.accentSoft },
   filterText: { color: colors.muted },
   filterTextActive: { color: colors.accent, fontWeight: "600" },
+  loader: { marginTop: 32 },
+  errorCard: { margin: 16, padding: 16, borderRadius: 14, backgroundColor: "#FCE9E7", gap: 8 },
+  errorText: { color: colors.danger },
+  retry: { color: colors.accent, fontWeight: "700" },
   list: { padding: 16, gap: 12, flexGrow: 1 },
   task: { padding: 16, backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.line, gap: 8 },
-  taskHeader: { flexDirection: "row", justifyContent: "space-between" },
-  origin: { color: colors.ink, fontWeight: "700" },
-  state: { color: colors.accent, fontWeight: "600" },
+  taskHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  title: { flex: 1, color: colors.ink, fontWeight: "700", fontSize: 17 },
+  state: { color: colors.accent, fontWeight: "600", fontSize: 12 },
+  paused: { color: colors.warning },
+  goal: { color: colors.ink, fontSize: 15, lineHeight: 22 },
   metaRow: { flexDirection: "row", justifyContent: "space-between" },
-  time: { color: colors.muted, fontSize: 12 },
-  attempts: { color: colors.muted, fontSize: 12 },
-  goal: { color: colors.ink, fontSize: 16, lineHeight: 23 },
-  empty: { color: colors.muted, textAlign: "center", paddingTop: 64 },
+  meta: { color: colors.muted, fontSize: 12 },
+  empty: { alignItems: "center", paddingTop: 64, gap: 8 },
+  emptyTitle: { color: colors.ink, fontWeight: "700", fontSize: 17 },
+  emptyText: { color: colors.muted, textAlign: "center" },
 });

@@ -33,6 +33,8 @@ from pc_assistant.gateway.push import GatewayPushRepository
 from pc_assistant.service.core_api import (
     ChatApprovalSnapshot,
     ChatTurnSnapshot,
+    ProductTaskExecutionSnapshot,
+    ProductTaskSnapshot,
     TaskSnapshot,
 )
 from pc_assistant.tasks import (
@@ -42,6 +44,9 @@ from pc_assistant.tasks import (
     TaskEvent,
     TaskEventPayload,
     TaskPauseResult,
+    TaskDefinitionState,
+    TaskLaunchPolicy,
+    TaskLaunchReason,
     TaskOrigin,
     TaskState,
 )
@@ -130,6 +135,11 @@ class _Authentication:
             ),
         )
 
+    def revoke_device(self, principal_id, device_id):
+        assert principal_id == "personal:owner"
+        assert device_id == "dev-a"
+        return SimpleNamespace(device_id=device_id, principal_id=principal_id)
+
 
 def _task_snapshot() -> TaskSnapshot:
     return TaskSnapshot(
@@ -146,6 +156,43 @@ def _task_snapshot() -> TaskSnapshot:
         created_at=1.0,
         updated_at=2.0,
         next_event_seq=3,
+    )
+
+
+def _product_task_snapshot(
+    state: TaskDefinitionState = TaskDefinitionState.ACTIVE,
+) -> ProductTaskSnapshot:
+    return ProductTaskSnapshot(
+        task_id="task-a",
+        title="hello",
+        goal="hello",
+        tools_enabled=True,
+        priority=0,
+        launch_policy=TaskLaunchPolicy(),
+        notification_policy={"completed": True},
+        state=state,
+        revision=1,
+        latest_execution_id="execution-a",
+        execution_count=1,
+        created_at=1.0,
+        updated_at=2.0,
+    )
+
+
+def _product_execution_snapshot(
+    state: TaskState = TaskState.RUNNING,
+) -> ProductTaskExecutionSnapshot:
+    return ProductTaskExecutionSnapshot(
+        execution_id="execution-a",
+        task_id="task-a",
+        task_revision=1,
+        launch_reason=TaskLaunchReason.CREATED,
+        goal_snapshot="hello",
+        policy_snapshot=TaskLaunchPolicy(),
+        state=state,
+        phase="working",
+        created_at=1.0,
+        updated_at=2.0,
     )
 
 
@@ -184,6 +231,57 @@ class _Core:
             ("create_task", principal_id, session_handle, user_input, attachments, kwargs)
         )
         return SimpleNamespace(task_id="task-a", state=TaskState.QUEUED)
+
+    async def create_product_task(
+        self, principal_id, session_handle, goal, *, title, attachments,
+        tools_enabled, priority, launch_policy, notification_policy,
+    ):
+        self.calls.append((
+            "create_product_task", principal_id, session_handle, goal, title,
+            attachments, tools_enabled, priority, launch_policy, notification_policy,
+        ))
+        return SimpleNamespace(
+            task=_product_task_snapshot(),
+            execution=_product_execution_snapshot(),
+        )
+
+    async def get_product_task(self, principal_id, task_id):
+        self.calls.append(("get_product_task", principal_id, task_id))
+        return _product_task_snapshot()
+
+    async def list_product_tasks(self, principal_id, **kwargs):
+        self.calls.append(("list_product_tasks", principal_id, kwargs))
+        return (_product_task_snapshot(),)
+
+    async def update_product_task(self, principal_id, task_id, **changes):
+        self.calls.append(("update_product_task", principal_id, task_id, changes))
+        return _product_task_snapshot()
+
+    async def set_product_task_state(self, principal_id, task_id, state):
+        self.calls.append(("set_product_task_state", principal_id, task_id, state))
+        return _product_task_snapshot(state)
+
+    async def delete_product_task(self, principal_id, task_id):
+        self.calls.append(("delete_product_task", principal_id, task_id))
+
+    async def execute_product_task(self, principal_id, task_id):
+        self.calls.append(("execute_product_task", principal_id, task_id))
+        return _product_execution_snapshot()
+
+    async def list_product_task_executions(self, principal_id, task_id, *, limit):
+        self.calls.append(("list_product_task_executions", principal_id, task_id, limit))
+        return (_product_execution_snapshot(),)
+
+    async def get_product_task_execution(self, principal_id, execution_id):
+        self.calls.append(("get_product_task_execution", principal_id, execution_id))
+        return _product_execution_snapshot()
+
+    async def delete_product_task_execution(self, principal_id, execution_id):
+        self.calls.append(("delete_product_task_execution", principal_id, execution_id))
+
+    async def rerun_product_task_execution(self, principal_id, execution_id):
+        self.calls.append(("rerun_product_task_execution", principal_id, execution_id))
+        return _product_execution_snapshot(TaskState.QUEUED)
 
     async def create_chat_turn(self, principal_id, session_handle, user_input, attachments, **kwargs):
         self.calls.append(
@@ -431,36 +529,35 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
         created = await http.post(
             "/v1/tasks",
             headers=headers,
-            json={"input": "hello"},
+            json={"goal": "hello"},
         )
         listed = await http.get(
-            "/v1/tasks?state=running&limit=10",
+            "/v1/tasks?state=active&limit=10",
             headers=headers,
         )
         detail = await http.get("/v1/tasks/task-a", headers=headers)
         timeline = await http.get(
-            "/v1/tasks/task-a/events?after_seq=2",
+            "/v1/task-executions/execution-a/events?after_seq=2",
             headers=headers,
         )
         cancelled = await http.post(
-            "/v1/tasks/task-a/cancel",
+            "/v1/task-executions/execution-a/cancel",
             headers=headers,
             json={"reason": "owner request"},
         )
         paused = await http.post(
-            "/v1/tasks/task-a/pause",
+            "/v1/task-executions/execution-a/pause",
             headers=headers,
             json={"reason": "later"},
         )
         resumed = await http.post(
-            "/v1/tasks/task-a/resume",
+            "/v1/task-executions/execution-a/resume",
             headers=headers,
             json={"reason": "continue", "acknowledge_outcome_unknown": True},
         )
         retried = await http.post(
-            "/v1/tasks/task-a/retry",
+            "/v1/task-executions/execution-a/rerun",
             headers=headers,
-            json={"reason": "try again"},
         )
         approval = await http.post(
             "/v1/approvals/approval-a/resolve",
@@ -470,18 +567,20 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
 
     assert session.status_code == 201
     assert session.json() == {"session_handle": "session-a"}
-    assert created.status_code == 202
-    assert created.json() == {"task_id": "task-a", "state": "queued"}
+    assert created.status_code == 201
+    assert created.json()["task"]["task_id"] == "task-a"
+    assert created.json()["execution"]["execution_id"] == "execution-a"
     assert listed.json()["tasks"][0]["task_id"] == "task-a"
-    assert listed.json()["next_cursor"] == "next-a"
-    assert detail.json()["task"]["phase"] == "working"
+    assert listed.json()["tasks"][0]["execution_count"] == 1
+    assert detail.json()["task"]["state"] == "active"
     assert timeline.json()["events"][0]["event_seq"] == 3
     assert timeline.json()["events"][0]["payload"]["content"] == "分析中"
     assert cancelled.json() == {"accepted": True, "state": "cancelled"}
     assert paused.json() == {"accepted": True, "state": "paused"}
     assert resumed.json() == {"accepted": True, "state": "queued"}
     assert retried.status_code == 202
-    assert retried.json() == {"task_id": "task-retry", "state": "queued"}
+    assert retried.json()["execution"]["task_id"] == "task-a"
+    assert retried.json()["execution"]["state"] == "queued"
     assert approval.json() == {
         "approval_id": "approval-a",
         "resolved": True,
@@ -560,11 +659,11 @@ async def test_gateway_creates_background_task_in_detached_session(tmp_path) -> 
             "/v1/tasks",
             headers=headers,
             json={
-                "input": "整理资料",
+                "goal": "整理资料",
             },
         )
 
-    assert response.status_code == 202
+    assert response.status_code == 201
     assert core.calls[0] == (
         "create_session",
         "personal:owner",
@@ -572,12 +671,11 @@ async def test_gateway_creates_background_task_in_detached_session(tmp_path) -> 
     )
     create = core.calls[1]
     assert create[0:4] == (
-        "create_task",
+        "create_product_task",
         "personal:owner",
         "session-a",
         "整理资料",
     )
-    assert create[-1]["origin"] is TaskOrigin.USER
 
 
 @pytest.mark.asyncio
@@ -669,6 +767,26 @@ async def test_gateway_adapter_registers_and_removes_current_device_push(tmp_pat
 
     assert registered.json() == {"registered": True, "provider": "expo"}
     assert removed.json() == {"registered": False, "provider": ""}
+    assert repository.list_for_principal("personal:owner") == ()
+
+
+@pytest.mark.asyncio
+async def test_gateway_adapter_revokes_current_device_and_removes_push(tmp_path) -> None:
+    repository = GatewayPushRepository(tmp_path / "data" / "gateway.db")
+    repository.register("dev-a", "personal:owner", "expo", "ExponentPushToken[token-a]")
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=_Authentication(),
+        core=_Core(),
+        push_repository=repository,
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
+    async with httpx.AsyncClient(transport=transport, base_url="http://gateway.local") as http:
+        response = await http.delete("/v1/device", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == {"revoked": True}
     assert repository.list_for_principal("personal:owner") == ()
 
 

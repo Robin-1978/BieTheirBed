@@ -19,6 +19,21 @@ class _Transport:
         self.sent.append((registration, message))
 
 
+class _Core:
+    def __init__(self, notification_policy=None) -> None:
+        self.notification_policy = notification_policy or {}
+
+    async def get_product_task_execution(self, principal_id, execution_id):
+        assert principal_id == "personal:owner"
+        assert execution_id == "task-a"
+        return type("Execution", (), {"task_id": "stable-task-a"})()
+
+    async def get_product_task(self, principal_id, task_id):
+        assert principal_id == "personal:owner"
+        assert task_id == "stable-task-a"
+        return type("Task", (), {"notification_policy": self.notification_policy})()
+
+
 def _feed(event_type: str, *, approval_id: str = "") -> PrincipalTaskEvent:
     return PrincipalTaskEvent(
         feed_event_id=4,
@@ -72,7 +87,7 @@ async def test_gateway_push_dispatcher_maps_only_actionable_standard_events(
     transport = _Transport()
     dispatcher = GatewayPushDispatcher(
         "personal:owner",
-        object(),
+        _Core(),
         repository,
         transport,
     )
@@ -86,7 +101,25 @@ async def test_gateway_push_dispatcher_maps_only_actionable_standard_events(
         "task_completed",
     ]
     assert transport.sent[0][1].approval_id == "approval-a"
-    assert transport.sent[0][1].task_id == "task-a"
+    assert transport.sent[0][1].task_id == "stable-task-a"
+    assert transport.sent[0][1].execution_id == "task-a"
+
+
+async def test_gateway_push_dispatcher_honors_task_notification_policy(tmp_path) -> None:
+    repository = GatewayPushRepository(tmp_path / "data" / "gateway.db")
+    repository.register("dev-a", "personal:owner", "expo", "ExponentPushToken[token-a]")
+    transport = _Transport()
+    dispatcher = GatewayPushDispatcher(
+        "personal:owner",
+        _Core({"completed": False, "failed": True}),
+        repository,
+        transport,
+    )
+
+    await dispatcher._deliver(_feed("completed"))
+    await dispatcher._deliver(_feed("failed"))
+
+    assert [message.category for _registration, message in transport.sent] == ["task_failed"]
 
 
 def test_gateway_push_cursor_is_monotonic(tmp_path) -> None:

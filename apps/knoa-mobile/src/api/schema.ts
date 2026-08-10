@@ -116,6 +116,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/conversations/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listConversationSessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/sessions/{session_handle}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getConversationSession"];
+        put?: never;
+        post?: never;
+        delete: operations["deleteConversationSession"];
+        options?: never;
+        head?: never;
+        patch: operations["updateConversationSession"];
+        trace?: never;
+    };
     "/v1/conversations/sessions/{session_handle}/turns": {
         parameters: {
             query?: never;
@@ -180,6 +212,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/conversations/turns/{turn_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["retryChatTurn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/conversations/approvals/{approval_id}/resolve": {
         parameters: {
             query?: never;
@@ -222,29 +270,13 @@ export interface paths {
         get: operations["getTask"];
         put?: never;
         post?: never;
-        delete?: never;
+        delete: operations["deleteTask"];
         options?: never;
         head?: never;
-        patch?: never;
+        patch: operations["updateTask"];
         trace?: never;
     };
-    "/v1/tasks/{task_id}/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["listTaskEvents"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{task_id}/cancel": {
+    "/v1/tasks/{task_id}/execute": {
         parameters: {
             query?: never;
             header?: never;
@@ -253,7 +285,23 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["cancelTask"];
+        post: operations["executeTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tasks/{task_id}/executions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listTaskExecutions"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -292,7 +340,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/tasks/{task_id}/retry": {
+    "/v1/tasks/{task_id}/archive": {
         parameters: {
             query?: never;
             header?: never;
@@ -301,7 +349,119 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["retryTask"];
+        post: operations["archiveTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tasks/{task_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["restoreTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/task-executions/{execution_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getTaskExecution"];
+        put?: never;
+        post?: never;
+        delete: operations["deleteTaskExecution"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/task-executions/{execution_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listTaskExecutionEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/task-executions/{execution_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancelTaskExecution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/task-executions/{execution_id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["pauseTaskExecution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/task-executions/{execution_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["resumeTaskExecution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/task-executions/{execution_id}/rerun": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["rerunTaskExecution"];
         delete?: never;
         options?: never;
         head?: never;
@@ -463,6 +623,22 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/device": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["revokeCurrentDevice"];
         options?: never;
         head?: never;
         patch?: never;
@@ -862,6 +1038,41 @@ export interface components {
          * @enum {string}
          */
         ChatTurnState: "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
+        /** ConversationSessionListResponse */
+        ConversationSessionListResponse: {
+            /** Sessions */
+            sessions: components["schemas"]["ConversationSessionSnapshot"][];
+        };
+        /** ConversationSessionResponse */
+        ConversationSessionResponse: {
+            session: components["schemas"]["ConversationSessionSnapshot"];
+        };
+        /** ConversationSessionSnapshot */
+        ConversationSessionSnapshot: {
+            /** Session Handle */
+            session_handle: string;
+            /** Title */
+            title: string;
+            state: components["schemas"]["ConversationSessionState"];
+            /** Turn Count */
+            turn_count: number;
+            /**
+             * Last Turn At
+             * @default null
+             */
+            last_turn_at: number | null;
+            /** Created At */
+            created_at: number;
+            /** Updated At */
+            updated_at: number;
+            /** Revision */
+            revision: number;
+        };
+        /**
+         * ConversationSessionState
+         * @enum {string}
+         */
+        ConversationSessionState: "active" | "archived";
         /** CreateChatTurnRequest */
         CreateChatTurnRequest: {
             /**
@@ -880,13 +1091,23 @@ export interface components {
              */
             tools_enabled: boolean;
         };
-        /** CreateTaskRequest */
-        CreateTaskRequest: {
+        /** CreateConversationSessionRequest */
+        CreateConversationSessionRequest: {
             /**
-             * Input
+             * Title
+             * @default 新对话
+             */
+            title: string;
+        };
+        /** CreateProductTaskRequest */
+        CreateProductTaskRequest: {
+            /**
+             * Title
              * @default
              */
-            input: string;
+            title: string;
+            /** Goal */
+            goal: string;
             /**
              * Attachments
              * @default []
@@ -902,16 +1123,44 @@ export interface components {
              * @default 0
              */
             priority: number;
+            launch_policy?: components["schemas"]["TaskLaunchPolicy"];
+            /** Notification Policy */
+            notification_policy?: {
+                [key: string]: boolean;
+            };
+        };
+        /** DeletedResponse */
+        DeletedResponse: {
             /**
-             * Parent Task Id
-             * @default
+             * Deleted
+             * @default true
              */
-            parent_task_id: string;
+            deleted: boolean;
+        };
+        /** DeviceRevokedResponse */
+        DeviceRevokedResponse: {
+            /** Revoked */
+            revoked: boolean;
         };
         /** ErrorResponse */
         ErrorResponse: {
             /** Error */
             error: string;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /**
+             * Retryable
+             * @default false
+             */
+            retryable: boolean;
+            /**
+             * Correlation Id
+             * @default
+             */
+            correlation_id: string;
         };
         /** ExtensionStatusRecord */
         ExtensionStatusRecord: {
@@ -982,6 +1231,123 @@ export interface components {
              */
             reason: string;
         };
+        /** ProductTaskExecutionListResponse */
+        ProductTaskExecutionListResponse: {
+            /** Executions */
+            executions: components["schemas"]["ProductTaskExecutionSnapshot"][];
+        };
+        /** ProductTaskExecutionResponse */
+        ProductTaskExecutionResponse: {
+            execution: components["schemas"]["ProductTaskExecutionSnapshot"];
+        };
+        /** ProductTaskExecutionSnapshot */
+        ProductTaskExecutionSnapshot: {
+            /** Execution Id */
+            execution_id: string;
+            /** Task Id */
+            task_id: string;
+            /** Task Revision */
+            task_revision: number;
+            launch_reason: components["schemas"]["TaskLaunchReason"];
+            /** Goal Snapshot */
+            goal_snapshot: string;
+            /**
+             * Attachment Snapshots
+             * @default []
+             */
+            attachment_snapshots: components["schemas"]["ArtifactInputRef"][];
+            policy_snapshot: components["schemas"]["TaskLaunchPolicy"];
+            state: components["schemas"]["TaskState"];
+            /**
+             * Phase
+             * @default
+             */
+            phase: string;
+            /**
+             * Cancel Requested
+             * @default false
+             */
+            cancel_requested: boolean;
+            /**
+             * Final Result
+             * @default
+             */
+            final_result: string;
+            /**
+             * Failure Code
+             * @default
+             */
+            failure_code: string;
+            /** Created At */
+            created_at: number;
+            /** Updated At */
+            updated_at: number;
+            /**
+             * Started At
+             * @default null
+             */
+            started_at: number | null;
+            /**
+             * Finished At
+             * @default null
+             */
+            finished_at: number | null;
+            /** @default null */
+            trace: components["schemas"]["TaskExecutionTrace"] | null;
+            /**
+             * Approvals
+             * @default []
+             */
+            approvals: components["schemas"]["TaskApprovalSnapshot"][];
+        };
+        /** ProductTaskListResponse */
+        ProductTaskListResponse: {
+            /** Tasks */
+            tasks: components["schemas"]["ProductTaskSnapshot"][];
+        };
+        /** ProductTaskResponse */
+        ProductTaskResponse: {
+            task: components["schemas"]["ProductTaskSnapshot"];
+            /** @default null */
+            execution: components["schemas"]["ProductTaskExecutionSnapshot"] | null;
+        };
+        /** ProductTaskSnapshot */
+        ProductTaskSnapshot: {
+            /** Task Id */
+            task_id: string;
+            /** Title */
+            title: string;
+            /** Goal */
+            goal: string;
+            /**
+             * Attachments
+             * @default []
+             */
+            attachments: components["schemas"]["ArtifactInputRef"][];
+            /** Tools Enabled */
+            tools_enabled: boolean;
+            /** Priority */
+            priority: number;
+            launch_policy: components["schemas"]["TaskLaunchPolicy"];
+            /** Notification Policy */
+            notification_policy?: {
+                [key: string]: boolean;
+            };
+            state: components["schemas"]["TaskDefinitionState"];
+            /** Revision */
+            revision: number;
+            /**
+             * Latest Execution Id
+             * @default
+             */
+            latest_execution_id: string;
+            /** Execution Count */
+            execution_count: number;
+            /** Created At */
+            created_at: number;
+            /** Updated At */
+            updated_at: number;
+        };
         /** PushRegistrationResponse */
         PushRegistrationResponse: {
             /** Registered */
@@ -1017,14 +1383,6 @@ export interface components {
              */
             acknowledge_outcome_unknown: boolean;
         };
-        /** RetryTaskRequest */
-        RetryTaskRequest: {
-            /**
-             * Reason
-             * @default
-             */
-            reason: string;
-        };
         /** RuntimeStatus */
         RuntimeStatus: {
             /** Status */
@@ -1049,6 +1407,8 @@ export interface components {
         SessionCreatedResponse: {
             /** Session Handle */
             session_handle: string;
+            /** @default null */
+            session: components["schemas"]["ConversationSessionSnapshot"] | null;
         };
         /** SessionResponse */
         SessionResponse: {
@@ -1061,18 +1421,35 @@ export interface components {
             /** Expires At */
             expires_at: number;
         };
-        /** TaskAcceptedResponse */
-        TaskAcceptedResponse: {
-            /** Task Id */
-            task_id: string;
-            state: components["schemas"]["TaskState"];
+        /** TaskApprovalSnapshot */
+        TaskApprovalSnapshot: {
+            /** Approval Id */
+            approval_id: string;
+            /** Tool Name */
+            tool_name: string;
+            /** Arguments */
+            arguments?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+            state: components["schemas"]["ApprovalState"];
+            /** Created At */
+            created_at: number;
+            /**
+             * Resolved At
+             * @default null
+             */
+            resolved_at: number | null;
         };
-        /** TaskCommandResponse */
-        TaskCommandResponse: {
-            /** Accepted */
-            accepted: boolean;
-            state: components["schemas"]["TaskState"];
-        };
+        /**
+         * TaskDefinitionState
+         * @enum {string}
+         */
+        TaskDefinitionState: "active" | "paused" | "archived";
         /** TaskEvent */
         TaskEvent: {
             /** Task Id */
@@ -1189,90 +1566,55 @@ export interface components {
             /** Revision */
             revision: number;
         };
-        /** TaskListResponse */
-        TaskListResponse: {
-            /** Tasks */
-            tasks: components["schemas"]["TaskSnapshot"][];
-            /**
-             * Next Cursor
-             * @default
-             */
-            next_cursor: string;
-        };
         /**
-         * TaskOrigin
+         * TaskLaunchKind
          * @enum {string}
          */
-        TaskOrigin: "user" | "agent" | "scheduled" | "event";
-        /** TaskResponse */
-        TaskResponse: {
-            task: components["schemas"]["TaskSnapshot"];
-        };
-        /** TaskSnapshot */
-        TaskSnapshot: {
-            /** Task Id */
-            task_id: string;
-            /** Session Handle */
-            session_handle: string;
-            /** Client Request Id */
-            client_request_id: string;
-            /** @default user */
-            origin: components["schemas"]["TaskOrigin"];
+        TaskLaunchKind: "immediate" | "scheduled" | "event";
+        /** TaskLaunchPolicy */
+        TaskLaunchPolicy: {
+            /** @default immediate */
+            kind: components["schemas"]["TaskLaunchKind"];
             /**
-             * Parent Task Id
-             * @default
-             */
-            parent_task_id: string;
-            /** Goal */
-            goal: string;
-            /**
-             * Attachments
-             * @default []
-             */
-            attachments: components["schemas"]["ArtifactInputRef"][];
-            /** Tools Enabled */
-            tools_enabled: boolean;
-            /** Priority */
-            priority: number;
-            state: components["schemas"]["TaskState"];
-            /**
-             * Phase
-             * @default
-             */
-            phase: string;
-            /** Attempt Count */
-            attempt_count: number;
-            /** Cancel Requested */
-            cancel_requested: boolean;
-            /**
-             * Final Summary
-             * @default
-             */
-            final_summary: string;
-            /**
-             * Failure Code
-             * @default
-             */
-            failure_code: string;
-            /** Created At */
-            created_at: number;
-            /** Updated At */
-            updated_at: number;
-            /**
-             * Started At
+             * Schedule Type
              * @default null
              */
-            started_at: number | null;
+            schedule_type: ("one_time" | "interval" | "cron") | null;
             /**
-             * Finished At
+             * Run At
              * @default null
              */
-            finished_at: number | null;
-            /** Next Event Seq */
-            next_event_seq: number;
-            /** @default null */
-            trace: components["schemas"]["TaskExecutionTrace"] | null;
+            run_at: number | null;
+            /**
+             * Interval Seconds
+             * @default null
+             */
+            interval_seconds: number | null;
+            /**
+             * Cron
+             * @default
+             */
+            cron: string;
+            /**
+             * Timezone
+             * @default Asia/Shanghai
+             */
+            timezone: string;
+            /**
+             * Event Source
+             * @default
+             */
+            event_source: string;
+            /** Source Config */
+            source_config?: {
+                [key: string]: unknown;
+            };
         };
+        /**
+         * TaskLaunchReason
+         * @enum {string}
+         */
+        TaskLaunchReason: "created" | "manual" | "scheduled" | "event" | "rerun";
         /**
          * TaskState
          * @enum {string}
@@ -1369,6 +1711,66 @@ export interface components {
              * @default []
              */
             descriptors: components["schemas"]["ToolDescriptorRecord"][];
+        };
+        /** UpdateConversationSessionRequest */
+        UpdateConversationSessionRequest: {
+            /**
+             * Title
+             * @default null
+             */
+            title: string | null;
+            /**
+             * State
+             * @default null
+             */
+            state: ("active" | "archived") | null;
+            /**
+             * Expected Revision
+             * @default null
+             */
+            expected_revision: number | null;
+        };
+        /** UpdateProductTaskRequest */
+        UpdateProductTaskRequest: {
+            /**
+             * Title
+             * @default null
+             */
+            title: string | null;
+            /**
+             * Goal
+             * @default null
+             */
+            goal: string | null;
+            /**
+             * Attachments
+             * @default null
+             */
+            attachments: components["schemas"]["ArtifactInputRef"][] | null;
+            /**
+             * Tools Enabled
+             * @default null
+             */
+            tools_enabled: boolean | null;
+            /**
+             * Priority
+             * @default null
+             */
+            priority: number | null;
+            /** @default null */
+            launch_policy: components["schemas"]["TaskLaunchPolicy"] | null;
+            /**
+             * Notification Policy
+             * @default null
+             */
+            notification_policy: {
+                [key: string]: boolean;
+            } | null;
+            /**
+             * Expected Revision
+             * @default null
+             */
+            expected_revision: number | null;
         };
     };
     responses: never;
@@ -1684,7 +2086,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateConversationSessionRequest"];
+            };
+        };
         responses: {
             /** @description Core session */
             201: {
@@ -1697,6 +2103,270 @@ export interface operations {
             };
             /** @description Request rejected */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listConversationSessions: {
+        parameters: {
+            query?: {
+                include_archived?: boolean;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Conversation sessions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationSessionListResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getConversationSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_handle: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Conversation session */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationSessionResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    deleteConversationSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_handle: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted conversation session */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    updateConversationSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_handle: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateConversationSessionRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated conversation session */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationSessionResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2038,6 +2708,73 @@ export interface operations {
             };
         };
     };
+    retryChatTurn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Retried ChatTurn */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatTurnResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     resolveChatApproval: {
         parameters: {
             query?: never;
@@ -2112,10 +2849,9 @@ export interface operations {
     listTasks: {
         parameters: {
             query?: {
-                session_handle?: string;
-                state?: "queued" | "running" | "waiting_approval" | "paused" | "completed" | "failed" | "cancelled";
+                state?: "active" | "paused" | "archived";
+                include_archived?: boolean;
                 limit?: number;
-                cursor?: string;
             };
             header?: never;
             path?: never;
@@ -2129,7 +2865,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TaskListResponse"];
+                    "application/json": components["schemas"]["ProductTaskListResponse"];
                 };
             };
             /** @description Request rejected */
@@ -2179,17 +2915,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateTaskRequest"];
+                "application/json": components["schemas"]["CreateProductTaskRequest"];
             };
         };
         responses: {
-            /** @description Task accepted */
-            202: {
+            /** @description Task created */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TaskAcceptedResponse"];
+                    "application/json": components["schemas"]["ProductTaskResponse"];
                 };
             };
             /** @description Request rejected */
@@ -2265,7 +3001,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TaskResponse"];
+                    "application/json": components["schemas"]["ProductTaskResponse"];
                 };
             };
             /** @description Request rejected */
@@ -2315,11 +3051,9 @@ export interface operations {
             };
         };
     };
-    listTaskEvents: {
+    deleteTask: {
         parameters: {
-            query?: {
-                after_seq?: number;
-            };
+            query?: never;
             header?: never;
             path: {
                 task_id: string;
@@ -2328,13 +3062,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Task event timeline */
+            /** @description Task deleted */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TaskEventListResponse"];
+                    "application/json": components["schemas"]["DeletedResponse"];
                 };
             };
             /** @description Request rejected */
@@ -2365,6 +3099,15 @@ export interface operations {
                 };
             };
             /** @description Request rejected */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -2384,7 +3127,7 @@ export interface operations {
             };
         };
     };
-    cancelTask: {
+    updateTask: {
         parameters: {
             query?: never;
             header?: never;
@@ -2395,20 +3138,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CancelTaskRequest"];
+                "application/json": components["schemas"]["UpdateProductTaskRequest"];
             };
         };
         responses: {
-            /** @description Cancellation result */
+            /** @description Updated Task */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        accepted: boolean;
-                        state?: string | null;
-                    };
+                    "application/json": components["schemas"]["ProductTaskResponse"];
                 };
             };
             /** @description Request rejected */
@@ -2467,6 +3207,160 @@ export interface operations {
             };
         };
     };
+    executeTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Execution accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductTaskExecutionResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listTaskExecutions: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Task executions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductTaskExecutionListResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     pauseTask: {
         parameters: {
             query?: never;
@@ -2476,19 +3370,15 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PauseTaskRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
-            /** @description Pause result */
+            /** @description Paused Task */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TaskCommandResponse"];
+                    "application/json": components["schemas"]["ProductTaskResponse"];
                 };
             };
             /** @description Request rejected */
@@ -2556,19 +3446,15 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ResumeTaskRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
-            /** @description Resume result */
+            /** @description Active Task */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TaskCommandResponse"];
+                    "application/json": components["schemas"]["ProductTaskResponse"];
                 };
             };
             /** @description Request rejected */
@@ -2627,7 +3513,7 @@ export interface operations {
             };
         };
     };
-    retryTask: {
+    archiveTask: {
         parameters: {
             query?: never;
             header?: never;
@@ -2636,19 +3522,613 @@ export interface operations {
             };
             cookie?: never;
         };
+        requestBody?: never;
+        responses: {
+            /** @description Archived Task */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductTaskResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    restoreTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Restored Task */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductTaskResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getTaskExecution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Task execution */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductTaskExecutionResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    deleteTaskExecution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Task execution deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listTaskExecutionEvents: {
+        parameters: {
+            query?: {
+                after_seq?: number;
+            };
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Execution event timeline */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskEventListResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cancelTaskExecution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RetryTaskRequest"];
+                "application/json": components["schemas"]["CancelTaskRequest"];
             };
         };
         responses: {
-            /** @description Retry accepted */
+            /** @description Cancellation result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    pauseTaskExecution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PauseTaskRequest"];
+            };
+        };
+        responses: {
+            /** @description Pause result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    resumeTaskExecution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResumeTaskRequest"];
+            };
+        };
+        responses: {
+            /** @description Resume result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    rerunTaskExecution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rerun accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TaskAcceptedResponse"];
+                    "application/json": components["schemas"]["ProductTaskExecutionResponse"];
                 };
             };
             /** @description Request rejected */
@@ -3350,6 +4830,53 @@ export interface operations {
             };
             /** @description Request rejected */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    revokeCurrentDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current device revoked */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceRevokedResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

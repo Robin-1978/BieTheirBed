@@ -17,6 +17,8 @@ from pc_assistant.conversation.models import (
     ChatToolStep,
     ChatTurn,
     ChatTurnState,
+    ConversationSession,
+    ConversationSessionState,
     TERMINAL_CHAT_TURN_STATES,
 )
 from pc_assistant.exceptions import SessionNotFoundError
@@ -29,6 +31,14 @@ class ChatTurnNotFoundError(LookupError):
 
 
 class ChatTurnConflictError(RuntimeError):
+    pass
+
+
+class ConversationSessionNotFoundError(LookupError):
+    pass
+
+
+class ConversationSessionConflictError(RuntimeError):
     pass
 
 
@@ -66,6 +76,16 @@ class ConversationRepository:
         with self._connect() as db:
             db.executescript(
                 """
+                CREATE TABLE IF NOT EXISTS conversation_sessions (
+                    session_handle TEXT PRIMARY KEY
+                        REFERENCES runtime_sessions(session_handle) ON DELETE CASCADE,
+                    principal_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    revision INTEGER NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS conversation_turns (
                     turn_id TEXT PRIMARY KEY,
                     principal_id TEXT NOT NULL,
@@ -118,9 +138,31 @@ class ConversationRepository:
                 );
                 CREATE INDEX IF NOT EXISTS conversation_turns_by_session
                     ON conversation_turns(session_handle, created_at, turn_id);
+                CREATE INDEX IF NOT EXISTS conversation_sessions_by_principal
+                    ON conversation_sessions(principal_id, state, updated_at DESC);
                 CREATE INDEX IF NOT EXISTS conversation_approvals_by_turn_state
                     ON conversation_approvals(turn_id, state, created_at);
                 """
+            )
+            require_exact_table(
+                db,
+                "conversation_sessions",
+                (
+                    ("session_handle", "TEXT", False, None, 1),
+                    ("principal_id", "TEXT", True, None, 0),
+                    ("title", "TEXT", True, None, 0),
+                    ("state", "TEXT", True, None, 0),
+                    ("created_at", "REAL", True, None, 0),
+                    ("updated_at", "REAL", True, None, 0),
+                    ("revision", "INTEGER", True, None, 0),
+                ),
+                label="Conversation Session",
+            )
+            require_foreign_keys(
+                db,
+                "conversation_sessions",
+                (("runtime_sessions", "session_handle", "session_handle", "NO ACTION", "CASCADE"),),
+                label="Conversation Session",
             )
             require_exact_table(
                 db,
@@ -209,6 +251,145 @@ class ConversationRepository:
         ).fetchone()
         if row is None:
             raise SessionNotFoundError()
+
+    @staticmethod
+    def _owned_conversation_session(
+        db: sqlite3.Connection,
+        principal_id: str,
+        session_handle: str,
+    ) -> sqlite3.Row:
+        row = db.execute(
+            """SELECT * FROM conversation_sessions
+               WHERE session_handle=? AND principal_id=?""",
+            (session_handle, principal_id),
+        ).fetchone()
+        if row is None:
+            raise ConversationSessionNotFoundError(session_handle)
+        return row
+
+    @staticmethod
+    def _session(db: sqlite3.Connection, row: sqlite3.Row) -> ConversationSession:
+        aggregate = db.execute(
+            """SELECT COUNT(*) AS turn_count, MAX(created_at) AS last_turn_at
+               FROM conversation_turns WHERE session_handle=?""",
+            (str(row["session_handle"]),),
+        ).fetchone()
+        return ConversationSession(
+            session_handle=str(row["session_handle"]),
+            principal_id=str(row["principal_id"]),
+            title=str(row["title"]),
+            state=ConversationSessionState(str(row["state"])),
+            turn_count=int(aggregate["turn_count"]),
+            last_turn_at=(None if aggregate["last_turn_at"] is None else float(aggregate["last_turn_at"])),
+            created_at=float(row["created_at"]),
+            updated_at=float(row["updated_at"]),
+            revision=int(row["revision"]),
+        )
+
+    def create_session(self, scope: RuntimeScope, *, title: str = "新对话") -> ConversationSession:
+        normalized_title = " ".join(title.split()) or "新对话"
+        if len(normalized_title) > 120:
+            raise ValueError("Conversation title must contain at most 120 characters")
+        now = self._clock()
+        with self._connect() as db:
+            self._owned_session(db, scope)
+            try:
+                db.execute(
+                    """INSERT INTO conversation_sessions(
+                           session_handle, principal_id, title, state,
+                           created_at, updated_at, revision
+                       ) VALUES (?, ?, ?, ?, ?, ?, 1)""",
+                    (
+                        scope.session_handle,
+                        scope.principal_id,
+                        normalized_title,
+                        ConversationSessionState.ACTIVE.value,
+                        now,
+                        now,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ConversationSessionConflictError(scope.session_handle) from exc
+            return self._session(
+                db,
+                self._owned_conversation_session(db, scope.principal_id, scope.session_handle),
+            )
+
+    def get_session(self, principal_id: str, session_handle: str) -> ConversationSession:
+        with self._connect() as db:
+            return self._session(
+                db,
+                self._owned_conversation_session(db, principal_id, session_handle),
+            )
+
+    def list_sessions(
+        self,
+        principal_id: str,
+        *,
+        include_archived: bool = False,
+        limit: int = 100,
+    ) -> tuple[ConversationSession, ...]:
+        if not 1 <= limit <= 200:
+            raise ValueError("limit must be between 1 and 200")
+        with self._connect() as db:
+            query = "SELECT * FROM conversation_sessions WHERE principal_id=?"
+            values: list[object] = [principal_id]
+            if not include_archived:
+                query += " AND state=?"
+                values.append(ConversationSessionState.ACTIVE.value)
+            query += " ORDER BY updated_at DESC, session_handle DESC LIMIT ?"
+            values.append(limit)
+            return tuple(self._session(db, row) for row in db.execute(query, values))
+
+    def update_session(
+        self,
+        principal_id: str,
+        session_handle: str,
+        *,
+        title: str | None = None,
+        state: ConversationSessionState | None = None,
+        expected_revision: int | None = None,
+    ) -> ConversationSession:
+        now = self._clock()
+        with self._connect() as db:
+            row = self._owned_conversation_session(db, principal_id, session_handle)
+            if expected_revision is not None and int(row["revision"]) != expected_revision:
+                raise ConversationSessionConflictError(session_handle)
+            normalized_title = str(row["title"])
+            if title is not None:
+                normalized_title = " ".join(title.split())
+                if not normalized_title or len(normalized_title) > 120:
+                    raise ValueError("Conversation title must contain 1-120 characters")
+            db.execute(
+                """UPDATE conversation_sessions
+                   SET title=?, state=?, updated_at=?, revision=revision+1
+                   WHERE session_handle=? AND principal_id=?""",
+                (
+                    normalized_title,
+                    (state or ConversationSessionState(str(row["state"]))).value,
+                    now,
+                    session_handle,
+                    principal_id,
+                ),
+            )
+            return self._session(
+                db,
+                self._owned_conversation_session(db, principal_id, session_handle),
+            )
+
+    def touch_session(self, principal_id: str, session_handle: str, *, first_input: str = "") -> None:
+        now = self._clock()
+        with self._connect() as db:
+            row = self._owned_conversation_session(db, principal_id, session_handle)
+            title = str(row["title"])
+            if title == "新对话" and first_input.strip():
+                title = " ".join(first_input.split())[:40]
+            db.execute(
+                """UPDATE conversation_sessions
+                   SET title=?, updated_at=?, revision=revision+1
+                   WHERE session_handle=? AND principal_id=?""",
+                (title, now, session_handle, principal_id),
+            )
 
     @staticmethod
     def _owned_turn(
