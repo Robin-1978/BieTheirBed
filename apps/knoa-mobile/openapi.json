@@ -2412,14 +2412,9 @@
         }
       }
     },
-    "/v1/mobile/releases/android/{version_code}/package": {
+    "/releases/android/{version_code}/{sha256}/knoa.apk": {
       "get": {
         "operationId": "downloadAndroidRelease",
-        "security": [
-          {
-            "gatewaySession": []
-          }
-        ],
         "parameters": [
           {
             "name": "version_code",
@@ -2428,6 +2423,15 @@
             "schema": {
               "type": "integer",
               "minimum": 1
+            }
+          },
+          {
+            "name": "sha256",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
             }
           },
           {
@@ -2472,16 +2476,6 @@
               }
             }
           },
-          "401": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "404": {
             "description": "Request rejected",
             "content": {
@@ -2493,16 +2487,6 @@
             }
           },
           "416": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
             "description": "Request rejected",
             "content": {
               "application/json": {

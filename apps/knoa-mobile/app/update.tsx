@@ -64,7 +64,7 @@ export default function UpdateScreen() {
   }, []);
 
   async function startDownload() {
-    if (!release || !gateway.sessionToken) return;
+    if (!release) return;
     setMessage("");
     setPackageUri("");
     setState("downloading");
@@ -72,7 +72,6 @@ export default function UpdateScreen() {
     try {
       const controller = await AndroidUpdateDownload.create({
         gatewayUrl: gateway.gatewayUrl,
-        token: gateway.sessionToken,
         release,
         onProgress: setProgress,
       });
@@ -122,7 +121,7 @@ export default function UpdateScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.card}>
-        <Text style={styles.title}>小诺私人更新通道</Text>
+        <Text style={styles.title}>小诺</Text>
         <Text style={styles.meta}>
           当前版本 {Application.nativeApplicationVersion ?? "—"} · build {currentVersionCode}
         </Text>

@@ -436,7 +436,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/mobile/releases/android/{version_code}/package": {
+    "/releases/android/{version_code}/{sha256}/knoa.apk": {
         parameters: {
             query?: never;
             header?: never;
@@ -3265,6 +3265,7 @@ export interface operations {
             };
             path: {
                 version_code: number;
+                sha256: string;
             };
             cookie?: never;
         };
@@ -3298,15 +3299,6 @@ export interface operations {
                 };
             };
             /** @description Request rejected */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Request rejected */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -3317,15 +3309,6 @@ export interface operations {
             };
             /** @description Request rejected */
             416: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Request rejected */
-            429: {
                 headers: {
                     [name: string]: unknown;
                 };

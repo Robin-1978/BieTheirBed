@@ -69,9 +69,10 @@ compatible fixes rather than forcing an unverified major downgrade or override.
 6. SSE cursors are persisted and only strictly newer events advance the cursor.
 7. Artifact bytes use the bounded binary Gateway endpoints and temporary local
    files are created only for explicit user preview/share.
-8. Private Android releases are owner-published locally, authenticated by the
-   Gateway and immutable by monotonically increasing version code. The APK
-   remains outside Core and is served with byte-range support.
+8. Android release metadata remains device-authenticated. APK bytes use a
+   public, content-addressed URL containing version code and SHA-256, remain
+   outside Core, and are served as immutable byte-range resources suitable for
+   Cloudflare CDN caching. Published APKs must contain no credentials.
 9. The App persists only native download resume data in SecureStore, verifies
    the final size and SHA-256 digest, and delegates package-signature validation
    and installation confirmation to Android.
@@ -80,7 +81,9 @@ compatible fixes rather than forcing an unverified major downgrade or override.
 
 - QR/manual pairing and secure device/session storage;
 - session bootstrap and expired-session re-authentication;
-- conversation-first text, photo and file input with streamed replies;
+- conversation-first text, photo and file input with streamed replies; the
+  composer uses one clear add button for photo/file actions, a dedicated voice
+  button and an explicit send button rather than stacked text links;
 - unified Task list plus execution detail, pause, resume, cancel and retry;
 - per-Task coalesced ExecutionTrace snapshot plus resumable coarse lifecycle SSE;
 - approval confirm/deny actions from replayed standard events;
@@ -94,8 +97,9 @@ compatible fixes rather than forcing an unverified major downgrade or override.
 - native audio recording routed through Artifact upload and the configured Core
   transcription capability; camera capture returns immediately to the chat
   composer as a pending attachment and uploads only when the message is sent;
-- private Android update discovery, pause/resume across background transitions,
-  authenticated Range download, SHA-256 verification and system-installer handoff;
+- version/update page, proactive update discovery on the chat home, pause/resume
+  across background transitions, CDN-cacheable Range download, SHA-256
+  verification and system-installer handoff;
 - generated OpenAPI TypeScript contract, strict typecheck and unit tests.
 
 ## 5. Next slices

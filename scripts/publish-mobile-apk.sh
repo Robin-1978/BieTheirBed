@@ -8,6 +8,7 @@ DISK_DEV="${DISK_DEV:-/disk/dev}"
 ENV_SH="$DISK_DEV/env.sh"
 APK="${1:-$DISK_DEV/knoa-mobile-out/app/outputs/apk/release/app-release.apk}"
 NOTES="${KNOA_MOBILE_RELEASE_NOTES:-}"
+MIN_VERSION_CODE="${KNOA_MOBILE_MIN_VERSION_CODE:-1}"
 
 if [[ -f "$ENV_SH" ]]; then
   # shellcheck source=/dev/null
@@ -22,4 +23,6 @@ PCA_BIN="${PCA_BIN:-$REPO/.venv/bin/pca}"
 if [[ ! -x "$PCA_BIN" ]]; then
   PCA_BIN="$(command -v pca)"
 fi
-exec "$PCA_BIN" gateway release publish "$APK" --notes "$NOTES"
+exec "$PCA_BIN" gateway release publish "$APK" \
+  --min-version-code "$MIN_VERSION_CODE" \
+  --notes "$NOTES"
