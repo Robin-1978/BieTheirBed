@@ -385,4 +385,22 @@ APK: /disk/dev/knoa-mobile-out/app/outputs/apk/release/app-release.apk (44 MB)
 SHA-256: 7f676a8e6601cd97aff487fccbc788c97be63a627ace375154913d59e208560c
 ```
 
-发布前剩余证据：Gateway 重启、健康检查与 APK 私有渠道发布。完成后将线上校验结果补入本节。
+### 发布验证
+
+```text
+pca --restart
+Service started (pid 3129513); Core 9527 and Gateway 9529 ready
+
+GET http://127.0.0.1:9529/health
+200 {"status":"ok","scope":"authentication"}
+
+scripts/publish-mobile-apk.sh app-release.apk
+Published 0.2.0 (versionCode 11), minSupportedVersionCode 1
+Published package SHA-256 matches the signed build
+
+HEAD /releases/android/11/7f676a8e.../knoa.apk
+200; content-type application/vnd.android.package-archive; content-length 45466962
+ETag and X-Knoa-Sha256 match 7f676a8e6601cd97aff487fccbc788c97be63a627ace375154913d59e208560c
+```
+
+本轮 Phase A-H、Gateway 发布和 Android 私有渠道发布均已完成。
