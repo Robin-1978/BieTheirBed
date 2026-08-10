@@ -12,7 +12,6 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -21,6 +20,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import Svg, { Circle, Line, Path, Rect } from "react-native-svg";
 
 import { ChatTurnWatcher } from "@/api/chatTurnWatcher";
@@ -235,7 +235,7 @@ export default function ChatScreen() {
     <KeyboardAvoidingView
       style={styles.screen}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 88 : 0}
+      automaticOffset
     >
       <View style={styles.topbar}>
         <Text style={styles.subtitle}>随时告诉我你想做什么</Text>
