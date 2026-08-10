@@ -220,7 +220,7 @@ class GatewayIdentityRepository:
         normalized_key = self._public_key(public_key)
         supplied_hash = self._secret_hash(secret.strip())
         now = float(self._clock())
-        device_id = self._identifier(self._device_id_factory(), "Device ID")
+        device_id = ""
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
@@ -242,26 +242,51 @@ class GatewayIdentityRepository:
             if not (valid_secret and valid_state):
                 raise PairingGrantRejectedError("Pairing grant rejected")
             principal_id = str(row["principal_id"])
-            try:
+            existing = connection.execute(
+                """
+                SELECT device_id, principal_id, display_name, public_key,
+                       state, created_at, last_seen_at, revoked_at
+                FROM gateway_devices
+                WHERE public_key = ?
+                """,
+                (normalized_key,),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["principal_id"]) != principal_id:
+                    raise DeviceAlreadyPairedError(
+                        "Device public key is already paired"
+                    )
+                device_id = str(existing["device_id"])
                 connection.execute(
                     """
-                    INSERT INTO gateway_devices (
-                        device_id, principal_id, display_name, public_key,
-                        state, created_at, last_seen_at, revoked_at
-                    ) VALUES (?, ?, ?, ?, 'active', ?, NULL, NULL)
+                    UPDATE gateway_devices
+                    SET display_name = ?, state = 'active', revoked_at = NULL
+                    WHERE device_id = ?
                     """,
-                    (
-                        device_id,
-                        principal_id,
-                        normalized_name,
-                        normalized_key,
-                        now,
-                    ),
+                    (normalized_name, device_id),
                 )
-            except sqlite3.IntegrityError as exc:
-                raise DeviceAlreadyPairedError(
-                    "Device public key is already paired"
-                ) from exc
+            else:
+                device_id = self._identifier(self._device_id_factory(), "Device ID")
+                try:
+                    connection.execute(
+                        """
+                        INSERT INTO gateway_devices (
+                            device_id, principal_id, display_name, public_key,
+                            state, created_at, last_seen_at, revoked_at
+                        ) VALUES (?, ?, ?, ?, 'active', ?, NULL, NULL)
+                        """,
+                        (
+                            device_id,
+                            principal_id,
+                            normalized_name,
+                            normalized_key,
+                            now,
+                        ),
+                    )
+                except sqlite3.IntegrityError as exc:
+                    raise DeviceAlreadyPairedError(
+                        "Device public key is already paired"
+                    ) from exc
             updated = connection.execute(
                 """
                 UPDATE gateway_pairing_grants
@@ -278,16 +303,7 @@ class GatewayIdentityRepository:
             raise
         finally:
             connection.close()
-        return GatewayDevice(
-            device_id=device_id,
-            principal_id=principal_id,
-            display_name=normalized_name,
-            public_key=normalized_key,
-            state="active",
-            created_at=now,
-            last_seen_at=None,
-            revoked_at=None,
-        )
+        return self.active_device(principal_id, device_id)
 
     def list_devices(self, principal_id: str) -> tuple[GatewayDevice, ...]:
         principal = self._principal(principal_id)

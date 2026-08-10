@@ -74,6 +74,31 @@ def test_wrong_pairing_secret_does_not_consume_grant(tmp_path) -> None:
     assert device.state == "active"
 
 
+def test_same_owner_can_repair_existing_device_with_same_public_key(tmp_path) -> None:
+    now = [100.0]
+    repository = _repository(tmp_path, now)
+    first_grant = repository.create_pairing_grant("personal:owner")
+    first = repository.register_verified_device(
+        first_grant.grant_id,
+        first_grant.secret,
+        display_name="Old name",
+        public_key=_public_key(1),
+    )
+
+    second_grant = repository.create_pairing_grant("personal:owner")
+    repaired = repository.register_verified_device(
+        second_grant.grant_id,
+        second_grant.secret,
+        display_name="My phone",
+        public_key=_public_key(1),
+    )
+
+    assert repaired.device_id == first.device_id
+    assert repaired.display_name == "My phone"
+    assert repaired.state == "active"
+    assert len(repository.list_devices("personal:owner")) == 1
+
+
 def test_expired_pairing_grant_is_rejected(tmp_path) -> None:
     now = [100.0]
     repository = _repository(tmp_path, now)

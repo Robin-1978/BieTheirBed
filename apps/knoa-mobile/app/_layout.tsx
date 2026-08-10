@@ -3,6 +3,7 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 
+import { HeaderActions } from "@/components/HeaderActions";
 import { installNotificationNavigation } from "@/notifications";
 import { GatewayProvider } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
@@ -25,9 +26,21 @@ export default function RootLayout() {
         >
           <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="pair" options={{ title: "连接小诺" }} />
-          <Stack.Screen name="chat" options={{ title: "小诺" }} />
+          <Stack.Screen
+            name="chat"
+            options={{
+              title: "小诺",
+              headerRight: () => <HeaderActions current="chat" />,
+            }}
+          />
           <Stack.Screen name="conversations/index" options={{ title: "会话记录" }} />
-          <Stack.Screen name="tasks/index" options={{ title: "任务" }} />
+          <Stack.Screen
+            name="tasks/index"
+            options={{
+              title: "小诺",
+              headerRight: () => <HeaderActions current="tasks" />,
+            }}
+          />
           <Stack.Screen name="tasks/new" options={{ title: "新建任务" }} />
           <Stack.Screen name="tasks/[id]" options={{ title: "任务详情" }} />
           <Stack.Screen name="tasks/[id]/edit" options={{ title: "编辑任务" }} />

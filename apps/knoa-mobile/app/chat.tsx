@@ -37,7 +37,6 @@ import { GatewayError } from "@/api/gatewayClient";
 import type { ArtifactInput, ChatApproval, ChatTurnSnapshot } from "@/api/models";
 import { AppMarkdown } from "@/components/AppMarkdown";
 import { ArtifactViewer } from "@/components/ArtifactViewer";
-import { PrimaryNav } from "@/components/PrimaryNav";
 import { loadConversationDraft, storeConversationDraft } from "@/security/conversationDrafts";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
@@ -389,7 +388,6 @@ export default function ChatScreen() {
             <Text style={styles.link}>{startingTopic ? "创建中…" : "新话题"}</Text>
           </Pressable>
           <Pressable onPress={() => router.push("/conversations")}><Text style={styles.link}>会话</Text></Pressable>
-          <Pressable accessibilityLabel="设置与状态" onPress={() => router.push("/capabilities")}><Text style={styles.link}>设置</Text></Pressable>
         </View>
       </View>
       {gateway.status !== "ready" ? (
@@ -532,7 +530,6 @@ export default function ChatScreen() {
           )}
         </Pressable>
       </View>
-      <PrimaryNav current="chat" />
       <ArtifactViewer
         file={imagePreview}
         onClose={() => setImagePreview(null)}

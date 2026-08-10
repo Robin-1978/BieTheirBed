@@ -12,7 +12,6 @@ import {
 
 import type { Task, TaskDefinitionState } from "@/api/models";
 import { useGateway } from "@/state/GatewayProvider";
-import { PrimaryNav } from "@/components/PrimaryNav";
 import { colors } from "@/theme";
 
 type Filter = "current" | TaskDefinitionState;
@@ -65,9 +64,6 @@ export default function TasksScreen() {
           <Text style={styles.description}>管理目标、启动方式和每次执行结果</Text>
         </View>
         <View style={styles.topActions}>
-          <Pressable accessibilityRole="button" accessibilityLabel="设置与状态" onPress={() => router.push("/capabilities")}>
-            <Text style={styles.settings}>设置</Text>
-          </Pressable>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="创建新任务"
@@ -137,7 +133,6 @@ export default function TasksScreen() {
           </Pressable>
         )}
       />
-      <PrimaryNav current="tasks" />
     </View>
   );
 }
@@ -160,7 +155,6 @@ const styles = StyleSheet.create({
   newButton: { backgroundColor: colors.accent, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20 },
   newButtonText: { color: "white", fontWeight: "700" },
   topActions: { flexDirection: "row", alignItems: "center", gap: 14 },
-  settings: { color: colors.accent, fontWeight: "700" },
   updateBanner: { marginHorizontal: 16, marginBottom: 14, padding: 14, borderRadius: 16, backgroundColor: colors.accentSoft, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   updateTitle: { color: colors.ink, fontWeight: "700" },
   updateDetail: { color: colors.muted, fontSize: 12, marginTop: 3 },
