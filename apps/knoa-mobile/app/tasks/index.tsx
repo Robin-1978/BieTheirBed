@@ -10,22 +10,24 @@ import {
 } from "react-native";
 
 import type { Task, TaskDefinitionState } from "@/api/models";
+import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { PrimarySwipeNavigation } from "@/components/PrimarySwipeNavigation";
+import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
 type Filter = "current" | TaskDefinitionState;
 
-const filters: Array<{ label: string; value: Filter }> = [
-  { label: "当前", value: "current" },
-  { label: "启用", value: "active" },
-  { label: "已暂停", value: "paused" },
-  { label: "已归档", value: "archived" },
-];
-
 export default function TasksScreen() {
   const gateway = useGateway();
+  const { t } = useI18n();
+  const filters: Array<{ label: string; value: Filter }> = [
+    { label: t("tasks.filter.current"), value: "current" },
+    { label: t("tasks.filter.active"), value: "active" },
+    { label: t("tasks.filter.paused"), value: "paused" },
+    { label: t("tasks.filter.archived"), value: "archived" },
+  ];
   const [tasks, setTasks] = useState<Task[]>([]);
   const [filter, setFilter] = useState<Filter>("current");
   const [refreshing, setRefreshing] = useState(false);
@@ -62,17 +64,17 @@ export default function TasksScreen() {
       <View style={styles.container}>
       <View style={styles.topline}>
         <View>
-          <Text style={styles.heading}>任务</Text>
-          <Text style={styles.description}>管理目标、启动方式和每次执行结果</Text>
+          <Text style={styles.heading}>{t("tasks.title")}</Text>
+          <Text style={styles.description}>{t("tasks.description")}</Text>
         </View>
         <View style={styles.topActions}>
           <AppPressable
             accessibilityRole="button"
-            accessibilityLabel="创建新任务"
+            accessibilityLabel={t("tasks.new")}
             onPress={() => router.push("/tasks/new")}
             style={styles.newButton}
           >
-            <Text style={styles.newButtonText}>新建</Text>
+            <AppIcon name="plus" color={colors.white} size={22} />
           </AppPressable>
         </View>
       </View>
@@ -102,7 +104,7 @@ export default function TasksScreen() {
       {error ? (
         <View style={styles.errorCard}>
           <Text style={styles.errorText}>{error}</Text>
-          <AppPressable onPress={() => void refresh()}><Text style={styles.retry}>重新加载</Text></AppPressable>
+          <AppPressable onPress={() => void refresh()}><Text style={styles.retry}>{t("tasks.reload")}</Text></AppPressable>
         </View>
       ) : null}
       <FlatList
@@ -112,8 +114,8 @@ export default function TasksScreen() {
         contentContainerStyle={styles.list}
         ListEmptyComponent={!loading && !error ? (
           <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>这里还没有任务</Text>
-            <Text style={styles.emptyText}>创建任务后，可以反复执行并保留每次结果。</Text>
+            <Text style={styles.emptyTitle}>{t("tasks.emptyTitle")}</Text>
+            <Text style={styles.emptyText}>{t("tasks.emptyBody")}</Text>
           </View>
         ) : null}
         renderItem={({ item }) => (
@@ -129,8 +131,11 @@ export default function TasksScreen() {
             </View>
             <Text style={styles.goal} numberOfLines={3}>{item.goal}</Text>
             <View style={styles.metaRow}>
-              <Text style={styles.meta}>{launchLabel(item)}</Text>
-              <Text style={styles.meta}>执行 {item.execution_count} 次</Text>
+              <View style={styles.metaCopy}>
+                <Text style={styles.meta}>{launchLabel(item)}</Text>
+                <Text style={styles.meta}>{t("tasks.executions", { count: item.execution_count })}</Text>
+              </View>
+              <AppIcon name="chevron-right" color={colors.muted} size={18} />
             </View>
           </AppPressable>
         )}
@@ -155,8 +160,7 @@ const styles = StyleSheet.create({
   topline: { padding: 18, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   heading: { color: colors.ink, fontSize: 24, fontWeight: "700" },
   description: { color: colors.muted, marginTop: 4, fontSize: 13 },
-  newButton: { backgroundColor: colors.accent, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20 },
-  newButtonText: { color: "white", fontWeight: "700" },
+  newButton: { width: 42, height: 42, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center", borderRadius: 14 },
   topActions: { flexDirection: "row", alignItems: "center", gap: 14 },
   updateBanner: { marginHorizontal: 16, marginBottom: 14, padding: 14, borderRadius: 16, backgroundColor: colors.accentSoft, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   updateTitle: { color: colors.ink, fontWeight: "700" },
@@ -168,7 +172,7 @@ const styles = StyleSheet.create({
   filterText: { color: colors.muted },
   filterTextActive: { color: colors.accent, fontWeight: "600" },
   loader: { marginTop: 32 },
-  errorCard: { margin: 16, padding: 16, borderRadius: 14, backgroundColor: "#FCE9E7", gap: 8 },
+  errorCard: { margin: 16, padding: 16, borderRadius: 14, backgroundColor: colors.dangerSoft, gap: 8 },
   errorText: { color: colors.danger },
   retry: { color: colors.accent, fontWeight: "700" },
   list: { padding: 16, gap: 12, flexGrow: 1 },
@@ -178,7 +182,8 @@ const styles = StyleSheet.create({
   state: { color: colors.accent, fontWeight: "600", fontSize: 12 },
   paused: { color: colors.warning },
   goal: { color: colors.ink, fontSize: 15, lineHeight: 22 },
-  metaRow: { flexDirection: "row", justifyContent: "space-between" },
+  metaRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  metaCopy: { flexDirection: "row", justifyContent: "space-between", flex: 1, marginRight: 8 },
   meta: { color: colors.muted, fontSize: 12 },
   empty: { alignItems: "center", paddingTop: 64, gap: 8 },
   emptyTitle: { color: colors.ink, fontWeight: "700", fontSize: 17 },

@@ -3,11 +3,13 @@ import { useEffect, useRef } from "react";
 import { Animated, Easing, StyleSheet, Text, View } from "react-native";
 
 import { AppPressable } from "@/components/AppPressable";
+import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
 export default function Index() {
   const gateway = useGateway();
+  const { t } = useI18n();
   const rotation = useRef(new Animated.Value(0)).current;
   const breath = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -61,14 +63,14 @@ export default function Index() {
         <View style={styles.core}><Text style={styles.coreText}>诺</Text></View>
       </View>
       <Text style={styles.eyebrow}>KNOA</Text>
-      <Text style={styles.title}>{booting ? "正在唤醒小诺" : "暂时连接不上小诺"}</Text>
+      <Text style={styles.title}>{booting ? t("splash.waking") : t("splash.unavailable")}</Text>
       {booting ? (
-        <Text style={styles.status}>正在恢复你的安全连接和会话</Text>
+        <Text style={styles.status}>{t("splash.restoring")}</Text>
       ) : null}
       {gateway.error ? <Text style={styles.detail}>{gateway.error}</Text> : null}
       {gateway.status === "error" ? (
         <AppPressable style={styles.button} onPress={() => void gateway.reconnect()}>
-          <Text style={styles.buttonText}>重新连接</Text>
+          <Text style={styles.buttonText}>{t("common.reconnect")}</Text>
         </AppPressable>
       ) : null}
     </View>

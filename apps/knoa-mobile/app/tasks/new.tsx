@@ -158,7 +158,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   container: { padding: 16, paddingBottom: 48 },
   card: { backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.line, padding: 18, gap: 10 },
-  updateRequired: { marginBottom: 12, padding: 14, borderRadius: 12, backgroundColor: "#FCE9E7", gap: 4 },
+  updateRequired: { marginBottom: 12, padding: 14, borderRadius: 12, backgroundColor: colors.dangerSoft, gap: 4 },
   updateRequiredTitle: { color: colors.danger, fontWeight: "700" },
   label: { color: colors.ink, fontWeight: "700", marginTop: 4 },
   titleInput: { minHeight: 46, borderWidth: 1, borderColor: colors.line, borderRadius: 12, paddingHorizontal: 12, color: colors.ink, fontSize: 16 },

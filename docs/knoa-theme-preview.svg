@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="900" viewBox="0 0 1400 900">
+  <rect width="1400" height="900" fill="#E9E5DC"/>
+  <text x="700" y="54" text-anchor="middle" font-family="sans-serif" font-size="26" font-weight="700" fill="#232823">小诺 · 暖纸张主题 / 深色主题</text>
+  <text x="700" y="82" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#747B73">危险红只用于删除与失败，停止回复使用协调的灰绿色</text>
+
+  <g transform="translate(155 110)">
+    <rect width="480" height="720" rx="48" fill="#151A18"/>
+    <rect x="12" y="12" width="456" height="696" rx="38" fill="#F4F0E8"/>
+    <rect x="184" y="24" width="112" height="22" rx="11" fill="#232823"/>
+    <text x="32" y="82" font-family="sans-serif" font-size="21" font-weight="700" fill="#232823">小诺</text>
+    <rect x="289" y="58" width="36" height="34" rx="11" fill="#DCEAE4"/><path d="M298 68h18v11h-9l-5 4v-4h-4z" stroke="#2F6658" fill="none" stroke-width="1.8" stroke-linejoin="round"/>
+    <rect x="338" y="58" width="36" height="34" rx="11" fill="transparent"/><rect x="347" y="67" width="17" height="15" rx="2" stroke="#747B73" fill="none" stroke-width="1.7"/><path d="m350 72 2 2 4-4m-6 8h10" stroke="#747B73" fill="none" stroke-width="1.5"/>
+    <circle cx="420" cy="75" r="16" fill="#ECE8DF"/><path d="M414 75a6 6 0 1 0 12 0 6 6 0 0 0-12 0m6-12v4m0 16v4m-12-12h4m16 0h4" stroke="#52645E" fill="none" stroke-width="1.6"/>
+    <line x1="12" y1="108" x2="468" y2="108" stroke="#D9D5CC"/>
+    <text x="30" y="140" font-family="sans-serif" font-size="13" fill="#747B73">随时告诉我你想做什么</text>
+    <circle cx="387" cy="135" r="18" fill="#EDF5F1"/><path d="M380 141l2-7 9-9 5 5-9 9z" stroke="#2F6658" fill="none" stroke-width="1.8"/>
+    <circle cx="430" cy="135" r="18" fill="#EDF5F1"/><path d="M431 128a8 8 0 1 0 6 3m-6-3v5h5" stroke="#2F6658" fill="none" stroke-width="1.8"/>
+    <rect x="164" y="180" width="280" height="66" rx="19" fill="#2F6658"/>
+    <text x="185" y="219" font-family="sans-serif" font-size="16" fill="#FFFFFF">帮我整理今天的项目进展</text>
+    <rect x="28" y="267" width="416" height="228" rx="19" fill="#FFFCF6" stroke="#D9D5CC"/>
+    <circle cx="50" cy="297" r="8" fill="#DCEAE4"/><path d="m46 297 3 3 6-7" stroke="#2F6658" fill="none" stroke-width="1.6"/>
+    <text x="68" y="302" font-family="sans-serif" font-size="14" font-weight="600" fill="#52645E">读取项目记录 · 已完成</text>
+    <text x="48" y="345" font-family="sans-serif" font-size="17" font-weight="700" fill="#232823">今天的项目进展</text>
+    <text x="48" y="378" font-family="sans-serif" font-size="15" fill="#232823">• 修复了聊天实时执行过程</text>
+    <text x="48" y="408" font-family="sans-serif" font-size="15" fill="#232823">• 统一了任务与会话体验</text>
+    <text x="48" y="438" font-family="sans-serif" font-size="15" fill="#232823">• 增加主题与多语言基础</text>
+    <rect x="28" y="584" width="42" height="42" rx="14" fill="#ECE8DF" stroke="#D9D5CC"/><path d="M49 596v18m-9-9h18" stroke="#2F6658" stroke-width="2"/>
+    <rect x="79" y="584" width="290" height="42" rx="16" fill="#ECE8DF"/><text x="101" y="611" font-family="sans-serif" font-size="14" fill="#747B73">和小诺说点什么…</text>
+    <rect x="378" y="584" width="66" height="42" rx="14" fill="#52645E"/><rect x="403" y="597" width="16" height="16" rx="3" fill="#FFFFFF"/>
+    <text x="240" y="670" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#2F6658">暖色浅色 · Warm Paper</text>
+  </g>
+
+  <g transform="translate(765 110)">
+    <rect width="480" height="720" rx="48" fill="#070A09"/>
+    <rect x="12" y="12" width="456" height="696" rx="38" fill="#141A18"/>
+    <rect x="184" y="24" width="112" height="22" rx="11" fill="#050706"/>
+    <text x="32" y="82" font-family="sans-serif" font-size="21" font-weight="700" fill="#F2F0E8">小诺</text>
+    <rect x="289" y="58" width="36" height="34" rx="11" fill="#284038"/><path d="M298 68h18v11h-9l-5 4v-4h-4z" stroke="#7DBAA8" fill="none" stroke-width="1.8" stroke-linejoin="round"/>
+    <rect x="338" y="58" width="36" height="34" rx="11" fill="transparent"/><rect x="347" y="67" width="17" height="15" rx="2" stroke="#A6ADA8" fill="none" stroke-width="1.7"/><path d="m350 72 2 2 4-4m-6 8h10" stroke="#A6ADA8" fill="none" stroke-width="1.5"/>
+    <circle cx="420" cy="75" r="16" fill="#202A26"/><path d="M414 75a6 6 0 1 0 12 0 6 6 0 0 0-12 0m6-12v4m0 16v4m-12-12h4m16 0h4" stroke="#8EAAA1" fill="none" stroke-width="1.6"/>
+    <line x1="12" y1="108" x2="468" y2="108" stroke="#34413C"/>
+    <text x="30" y="140" font-family="sans-serif" font-size="13" fill="#A6ADA8">随时告诉我你想做什么</text>
+    <circle cx="387" cy="135" r="18" fill="#1C3029"/><path d="M380 141l2-7 9-9 5 5-9 9z" stroke="#7DBAA8" fill="none" stroke-width="1.8"/>
+    <circle cx="430" cy="135" r="18" fill="#1C3029"/><path d="M431 128a8 8 0 1 0 6 3m-6-3v5h5" stroke="#7DBAA8" fill="none" stroke-width="1.8"/>
+    <rect x="164" y="180" width="280" height="66" rx="19" fill="#7DBAA8"/>
+    <text x="185" y="219" font-family="sans-serif" font-size="16" fill="#10201B">帮我整理今天的项目进展</text>
+    <rect x="28" y="267" width="416" height="228" rx="19" fill="#1D2522" stroke="#34413C"/>
+    <circle cx="50" cy="297" r="8" fill="#284038"/><path d="m46 297 3 3 6-7" stroke="#7DBAA8" fill="none" stroke-width="1.6"/>
+    <text x="68" y="302" font-family="sans-serif" font-size="14" font-weight="600" fill="#8EAAA1">读取项目记录 · 已完成</text>
+    <text x="48" y="345" font-family="sans-serif" font-size="17" font-weight="700" fill="#F2F0E8">今天的项目进展</text>
+    <text x="48" y="378" font-family="sans-serif" font-size="15" fill="#F2F0E8">• 修复了聊天实时执行过程</text>
+    <text x="48" y="408" font-family="sans-serif" font-size="15" fill="#F2F0E8">• 统一了任务与会话体验</text>
+    <text x="48" y="438" font-family="sans-serif" font-size="15" fill="#F2F0E8">• 增加主题与多语言基础</text>
+    <rect x="28" y="584" width="42" height="42" rx="14" fill="#202A26" stroke="#34413C"/><path d="M49 596v18m-9-9h18" stroke="#7DBAA8" stroke-width="2"/>
+    <rect x="79" y="584" width="290" height="42" rx="16" fill="#202A26"/><text x="101" y="611" font-family="sans-serif" font-size="14" fill="#A6ADA8">和小诺说点什么…</text>
+    <rect x="378" y="584" width="66" height="42" rx="14" fill="#8EAAA1"/><rect x="403" y="597" width="16" height="16" rx="3" fill="#141A18"/>
+    <text x="240" y="670" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#7DBAA8">深色 · Dark</text>
+  </g>
+</svg>

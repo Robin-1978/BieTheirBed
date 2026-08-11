@@ -13,7 +13,10 @@ import {
   View,
 } from "react-native";
 
+import { AppIcon } from "@/components/AppIcon";
+import { useI18n, type LanguageMode } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
+import { useThemePreference, type ThemeMode } from "@/state/ThemeProvider";
 import { registerPush, sendTestNotification } from "@/notifications";
 import { colors } from "@/theme";
 
@@ -42,6 +45,8 @@ type Diagnostic = {
 
 export default function CapabilitiesScreen() {
   const gateway = useGateway();
+  const theme = useThemePreference();
+  const i18n = useI18n();
   const [diagnostic, setDiagnostic] = useState<Diagnostic>({
     status: null,
     extensions: [],
@@ -123,6 +128,24 @@ export default function CapabilitiesScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
+      <Section title={i18n.t("settings.appearance")}>
+        <Text style={styles.themeHint}>{i18n.t("settings.appearanceHint")}</Text>
+        <View accessibilityRole="radiogroup" style={styles.themeChoices}>
+          <ThemeChoice label={i18n.t("settings.theme.system")} mode="system" selected={theme.mode === "system"} onPress={theme.setMode} />
+          <ThemeChoice label={i18n.t("settings.theme.light")} mode="light" selected={theme.mode === "light"} onPress={theme.setMode} />
+          <ThemeChoice label={i18n.t("settings.theme.dark")} mode="dark" selected={theme.mode === "dark"} onPress={theme.setMode} />
+        </View>
+      </Section>
+
+      <Section title={i18n.t("settings.language")}>
+        <Text style={styles.themeHint}>{i18n.t("settings.languageHint")}</Text>
+        <View accessibilityRole="radiogroup" style={styles.themeChoices}>
+          <LanguageChoice label={i18n.t("settings.language.system")} mode="system" selected={i18n.mode === "system"} onPress={i18n.setMode} />
+          <LanguageChoice label={i18n.t("settings.language.zh")} mode="zh-CN" selected={i18n.mode === "zh-CN"} onPress={i18n.setMode} />
+          <LanguageChoice label={i18n.t("settings.language.en")} mode="en-US" selected={i18n.mode === "en-US"} onPress={i18n.setMode} />
+        </View>
+      </Section>
+
       <Section title="连接状态">
         <Metric label="小诺服务" value={serviceLabel} tone={gateway.status === "error" ? "danger" : "normal"} />
         <Metric label="服务地址" value={gateway.gatewayUrl || "—"} />
@@ -239,6 +262,38 @@ export default function CapabilitiesScreen() {
   );
 }
 
+function LanguageChoice({ label, mode, selected, onPress }: { label: string; mode: LanguageMode; selected: boolean; onPress(mode: LanguageMode): Promise<void> }) {
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityState={{ checked: selected }}
+      onPress={() => void onPress(mode)}
+      style={({ pressed }) => [styles.themeChoice, selected && styles.themeChoiceSelected, pressed && styles.pressed]}
+    >
+      <View style={[styles.radio, selected && styles.radioSelected]}>
+        {selected ? <View style={styles.radioDot} /> : null}
+      </View>
+      <Text style={[styles.themeLabel, selected && styles.themeLabelSelected]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function ThemeChoice({ label, mode, selected, onPress }: { label: string; mode: ThemeMode; selected: boolean; onPress(mode: ThemeMode): Promise<void> }) {
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityState={{ checked: selected }}
+      onPress={() => void onPress(mode)}
+      style={({ pressed }) => [styles.themeChoice, selected && styles.themeChoiceSelected, pressed && styles.pressed]}
+    >
+      <View style={[styles.radio, selected && styles.radioSelected]}>
+        {selected ? <View style={styles.radioDot} /> : null}
+      </View>
+      <Text style={[styles.themeLabel, selected && styles.themeLabelSelected]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 function Section({ title, children }: React.PropsWithChildren<{ title: string }>) {
   return <View style={styles.section}><Text style={styles.sectionTitle}>{title}</Text>{children}</View>;
 }
@@ -265,7 +320,7 @@ function Action({ label, detail, onPress, danger = false, busy = false }: { labe
         <Text style={[styles.actionTitle, danger && styles.danger]}>{label}</Text>
         <Text style={styles.meta}>{detail}</Text>
       </View>
-      {busy ? <ActivityIndicator color={colors.accent} /> : <Text style={[styles.chevron, danger && styles.danger]}>›</Text>}
+      {busy ? <ActivityIndicator color={colors.accent} /> : <AppIcon name="chevron-right" color={danger ? colors.danger : colors.accent} size={19} />}
     </Pressable>
   );
 }
@@ -279,13 +334,21 @@ const styles = StyleSheet.create({
   container: { padding: 16, gap: 14, paddingBottom: 48 },
   section: { backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.line, padding: 16, gap: 12 },
   sectionTitle: { color: colors.ink, fontSize: 18, fontWeight: "700", marginBottom: 2 },
+  themeHint: { color: colors.muted, fontSize: 13 },
+  themeChoices: { flexDirection: "row", gap: 8 },
+  themeChoice: { flex: 1, minHeight: 72, justifyContent: "center", alignItems: "center", gap: 8, borderRadius: 13, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.background },
+  themeChoiceSelected: { borderColor: colors.accent, backgroundColor: colors.accentFaint },
+  themeLabel: { color: colors.muted, fontSize: 13, fontWeight: "600", textAlign: "center" },
+  themeLabelSelected: { color: colors.accent },
+  radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: colors.lineStrong, alignItems: "center", justifyContent: "center" },
+  radioSelected: { borderColor: colors.accent },
+  radioDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.accent },
   metric: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 16 },
   metricValue: { color: colors.ink, fontWeight: "700", textAlign: "right", flexShrink: 1 },
   compact: { fontSize: 12 },
   action: { borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 12, flexDirection: "row", alignItems: "center", gap: 12 },
   actionCopy: { flex: 1, gap: 3 },
   actionTitle: { color: colors.accent, fontWeight: "700", fontSize: 16 },
-  chevron: { color: colors.accent, fontSize: 26 },
   pressed: { opacity: 0.65 },
   advancedToggle: { borderRadius: 18, borderWidth: 1, borderColor: colors.line, padding: 16, backgroundColor: colors.surface, gap: 4 },
   advancedTitle: { color: colors.ink, fontWeight: "700", fontSize: 16 },

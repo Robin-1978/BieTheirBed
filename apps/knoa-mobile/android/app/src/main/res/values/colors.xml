@@ -1,5 +1,24 @@
 <resources>
-  <color name="splashscreen_background">#FFFFFF</color>
+  <color name="splashscreen_background">#F4F0E8</color>
   <color name="iconBackground">#F4F0E8</color>
-  <color name="colorPrimary">#023c69</color>
+  <color name="colorPrimary">#2F6658</color>
+  <color name="knoa_background">#F4F0E8</color>
+  <color name="knoa_surface">#FFFCF6</color>
+  <color name="knoa_surface_elevated">#FFFFFF</color>
+  <color name="knoa_surface_muted">#ECE8DF</color>
+  <color name="knoa_ink">#232823</color>
+  <color name="knoa_muted">#747B73</color>
+  <color name="knoa_accent">#2F6658</color>
+  <color name="knoa_accent_pressed">#275548</color>
+  <color name="knoa_accent_soft">#DCEAE4</color>
+  <color name="knoa_accent_faint">#EDF5F1</color>
+  <color name="knoa_line">#D9D5CC</color>
+  <color name="knoa_line_strong">#C6C2B9</color>
+  <color name="knoa_danger">#9B3E38</color>
+  <color name="knoa_danger_soft">#F7E9E6</color>
+  <color name="knoa_warning">#9B6A27</color>
+  <color name="knoa_warning_soft">#F7EEDC</color>
+  <color name="knoa_stop">#52645E</color>
+  <color name="knoa_stop_soft">#E3E9E6</color>
+  <color name="knoa_overlay">#47191F1D</color>
 </resources>

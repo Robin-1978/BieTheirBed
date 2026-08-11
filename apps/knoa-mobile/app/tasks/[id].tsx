@@ -11,6 +11,7 @@ import {
 } from "react-native";
 
 import type { Task, TaskExecution, TaskState } from "@/api/models";
+import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
@@ -126,14 +127,14 @@ export default function TaskDetailScreen() {
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <View style={styles.actions}>
-        <Action label="立即执行" onPress={() => void executeNow()} disabled={Boolean(working)} busy={working === "execute"} primary />
-        <Action label="编辑" onPress={() => router.push(`/tasks/${task.task_id}/edit`)} disabled={Boolean(working)} />
+        <Action icon="play" label="立即执行" onPress={() => void executeNow()} disabled={Boolean(working)} busy={working === "execute"} primary />
+        <Action icon="edit" label="编辑" onPress={() => router.push(`/tasks/${task.task_id}/edit`)} disabled={Boolean(working)} />
       </View>
       <View style={styles.actions}>
-        {task.state === "active" ? <Action label="暂停自动启动" onPress={() => void setState("pause")} disabled={Boolean(working)} busy={working === "pause"} /> : null}
-        {task.state === "paused" ? <Action label="恢复启用" onPress={() => void setState("resume")} disabled={Boolean(working)} busy={working === "resume"} /> : null}
-        {task.state === "archived" ? <Action label="恢复任务" onPress={() => void setState("restore")} disabled={Boolean(working)} busy={working === "restore"} /> : null}
-        {task.state !== "archived" ? <Action label="归档" onPress={() => void setState("archive")} disabled={Boolean(working)} busy={working === "archive"} /> : null}
+        {task.state === "active" ? <Action icon="pause" label="暂停自动启动" onPress={() => void setState("pause")} disabled={Boolean(working)} busy={working === "pause"} /> : null}
+        {task.state === "paused" ? <Action icon="play" label="恢复启用" onPress={() => void setState("resume")} disabled={Boolean(working)} busy={working === "resume"} /> : null}
+        {task.state === "archived" ? <Action icon="restore" label="恢复任务" onPress={() => void setState("restore")} disabled={Boolean(working)} busy={working === "restore"} /> : null}
+        {task.state !== "archived" ? <Action icon="archive" label="归档" onPress={() => void setState("archive")} disabled={Boolean(working)} busy={working === "archive"} /> : null}
       </View>
 
       <View style={styles.sectionHeader}>
@@ -163,7 +164,7 @@ export default function TaskDetailScreen() {
       <Pressable accessibilityRole="button" disabled={Boolean(working)} onPress={confirmDelete} style={styles.deleteButton}>
         {working === "delete"
           ? <ActivityIndicator color={colors.danger} size="small" />
-          : <Text style={styles.deleteText}>删除任务和全部记录</Text>}
+          : <View style={styles.deleteContent}><AppIcon name="trash" color={colors.danger} size={18} /><Text style={styles.deleteText}>删除任务和全部记录</Text></View>}
       </Pressable>
     </ScrollView>
   );
@@ -189,12 +190,12 @@ function launchReasonLabel(reason: TaskExecution["launch_reason"]): string {
   return ({ created: "首次执行", manual: "手动执行", scheduled: "定时执行", event: "事件启动", rerun: "按历史配置再次执行" })[reason];
 }
 
-function Action({ label, primary = false, disabled = false, busy = false, onPress }: { label: string; primary?: boolean; disabled?: boolean; busy?: boolean; onPress(): void }) {
+function Action({ icon, label, primary = false, disabled = false, busy = false, onPress }: { icon: AppIconName; label: string; primary?: boolean; disabled?: boolean; busy?: boolean; onPress(): void }) {
   return (
     <Pressable disabled={disabled} style={[styles.action, primary && styles.actionPrimary, disabled && styles.disabled]} onPress={onPress}>
       {busy
         ? <ActivityIndicator color={primary ? "white" : colors.accent} size="small" />
-        : <Text style={[styles.actionText, primary && styles.actionPrimaryText]}>{label}</Text>}
+        : <><AppIcon name={icon} color={primary ? colors.white : colors.accent} size={18} /><Text style={[styles.actionText, primary && styles.actionPrimaryText]}>{label}</Text></>}
     </Pressable>
   );
 }
@@ -210,7 +211,7 @@ const styles = StyleSheet.create({
   goal: { color: colors.ink, fontSize: 16, lineHeight: 24 },
   policy: { color: colors.muted, marginTop: 4 },
   actions: { flexDirection: "row", gap: 10 },
-  action: { flex: 1, minHeight: 44, alignItems: "center", justifyContent: "center", borderRadius: 13, backgroundColor: colors.accentSoft },
+  action: { flex: 1, minHeight: 44, flexDirection: "row", gap: 7, alignItems: "center", justifyContent: "center", borderRadius: 13, backgroundColor: colors.accentSoft },
   actionPrimary: { backgroundColor: colors.accent },
   actionText: { color: colors.accent, fontWeight: "700" },
   actionPrimaryText: { color: "white" },
@@ -230,5 +231,6 @@ const styles = StyleSheet.create({
   error: { color: colors.danger, lineHeight: 21 },
   link: { color: colors.accent, fontWeight: "700" },
   deleteButton: { alignItems: "center", padding: 14, marginTop: 12 },
+  deleteContent: { flexDirection: "row", alignItems: "center", gap: 7 },
   deleteText: { color: colors.danger, fontWeight: "600" },
 });
