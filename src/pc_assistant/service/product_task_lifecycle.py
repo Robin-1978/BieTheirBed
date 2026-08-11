@@ -254,13 +254,16 @@ class ProductTaskLifecycle:
     ) -> TaskDefinitionRecord:
         previous = await self._tasks.get_definition(principal_id, task_id)
         task = await self._tasks.update_definition(principal_id, task_id, **changes)
-        if {
-            "title",
+        provider_fields_changed = bool({
             "goal",
             "tools_enabled",
             "priority",
             "launch_policy",
-        } & changes.keys():
+        } & changes.keys()) or (
+            "title" in changes
+            and previous.launch_policy.kind is TaskLaunchKind.EVENT
+        )
+        if provider_fields_changed:
             try:
                 await self._remove_launch_provider(principal_id, task.task_id)
                 await self._create_launch_provider(

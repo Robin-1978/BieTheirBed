@@ -461,6 +461,40 @@ async def test_task_tool_updates_launch_and_replaces_bound_schedule() -> None:
 
 
 @pytest.mark.asyncio
+async def test_task_title_update_keeps_existing_schedule() -> None:
+    sessions = _Sessions()
+    tasks = _Executions()
+    schedules = _Schedules()
+    control = TaskControlTool(sessions, tasks, schedules, _Triggers())
+    scope = RuntimeScope(
+        principal_id="personal:owner",
+        session_handle="chat-a",
+    )
+    await CreateTaskTool(sessions, tasks, schedules).execute_scoped(
+        scope,
+        title="Evening job",
+        goal="Run every evening",
+        launch={
+            "kind": "cron",
+            "cron": "30 18 * * *",
+            "timezone": "Asia/Shanghai",
+        },
+    )
+
+    result = await control.execute_scoped(
+        scope,
+        action="update",
+        task_id="task-a",
+        title="Renamed evening job",
+    )
+
+    assert result["title"] == "Renamed evening job"
+    assert tasks.bound == ("schedule", "task-scheduled")
+    assert len(schedules.created) == 1
+    assert schedules.deleted == []
+
+
+@pytest.mark.asyncio
 async def test_task_update_restores_previous_definition_when_provider_fails() -> None:
     sessions = _Sessions()
     tasks = _Executions()

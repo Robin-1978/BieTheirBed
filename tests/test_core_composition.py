@@ -23,6 +23,8 @@ from pc_assistant.service.credentials import (
     issue_principal_credential,
     resolve_local_service_token,
 )
+from pc_assistant.service.product_task_lifecycle import ProductTaskLifecycle
+from pc_assistant.tasks import TaskDefinitionState, TaskLaunchKind, TaskLaunchPolicy
 
 
 class _OfflineProvider:
@@ -209,6 +211,78 @@ async def test_agent_task_lifecycle_keeps_schedule_and_task_in_sync(
     assert deleted == {"task_id": task_id, "deleted": True}
     with pytest.raises(LookupError):
         await composition.schedule_service.get(
+            scope.principal_id,
+            replacement_binding[1],
+        )
+
+
+@pytest.mark.asyncio
+async def test_shared_task_lifecycle_keeps_event_trigger_in_sync(
+    tmp_path: Path,
+) -> None:
+    composition = build_core_runtime(
+        _config(tmp_path, service_port=0),
+        provider_factory=_OfflineProvider,
+    )
+    lifecycle = ProductTaskLifecycle(
+        composition.task_service,
+        composition.schedule_service,
+        composition.trigger_service,
+    )
+    scope = composition.sessions.create("personal:owner", activate=False)
+
+    task, execution, provider = await lifecycle.create_definition(
+        scope,
+        client_request_id="event-task-a",
+        title="Webhook import",
+        goal="Import and summarize the webhook payload.",
+        launch_policy=TaskLaunchPolicy(
+            kind=TaskLaunchKind.EVENT,
+            event_source="webhook",
+        ),
+    )
+    original_binding = await composition.task_service.launch_binding(
+        scope.principal_id,
+        task.task_id,
+    )
+    assert execution is None
+    assert provider.state == "active"
+    assert original_binding is not None
+    assert original_binding[0] == "event"
+
+    paused = await lifecycle.set_definition_state(
+        scope.principal_id,
+        task.task_id,
+        TaskDefinitionState.PAUSED,
+    )
+    updated = await lifecycle.update_definition(
+        scope.principal_id,
+        task.task_id,
+        title="Renamed webhook import",
+    )
+    replacement_binding = await composition.task_service.launch_binding(
+        scope.principal_id,
+        task.task_id,
+    )
+
+    assert paused.state is TaskDefinitionState.PAUSED
+    assert updated.title == "Renamed webhook import"
+    assert replacement_binding is not None
+    assert replacement_binding != original_binding
+    replacement = await composition.trigger_service.get(
+        scope.principal_id,
+        replacement_binding[1],
+    )
+    assert replacement.state.value == "paused"
+    with pytest.raises(LookupError):
+        await composition.trigger_service.get(
+            scope.principal_id,
+            original_binding[1],
+        )
+
+    await lifecycle.delete_definition(scope.principal_id, task.task_id)
+    with pytest.raises(LookupError):
+        await composition.trigger_service.get(
             scope.principal_id,
             replacement_binding[1],
         )
