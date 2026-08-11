@@ -13,6 +13,7 @@ export type AppIconName =
   | "history"
   | "keyboard"
   | "mic"
+  | "new-topic"
   | "pause"
   | "play"
   | "plus"
@@ -39,6 +40,7 @@ const glyphs: Record<AppIconName, React.ComponentProps<typeof Ionicons>["name"]>
   history: "time-outline",
   keyboard: "keypad-outline",
   mic: "mic-outline",
+  "new-topic": "add-circle",
   pause: "pause",
   play: "play",
   plus: "add",
@@ -46,7 +48,7 @@ const glyphs: Record<AppIconName, React.ComponentProps<typeof Ionicons>["name"]>
   restore: "arrow-undo-outline",
   save: "save-outline",
   send: "arrow-up",
-  settings: "settings-outline",
+  settings: "settings",
   share: "share-outline",
   stop: "stop",
   tasks: "checkbox-outline",
