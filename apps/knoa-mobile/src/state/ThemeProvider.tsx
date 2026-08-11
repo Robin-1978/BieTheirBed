@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
-import { NativeModules, Platform, useColorScheme } from "react-native";
+import { Appearance, NativeModules, Platform, useColorScheme } from "react-native";
 
 export type ThemeMode = "system" | "light" | "dark";
 
@@ -37,12 +37,17 @@ export function ThemeProvider({ children }: PropsWithChildren) {
 
   const setMode = useCallback(async (next: ThemeMode) => {
     setStoredMode(next);
+    // The native preference is applied before React Native starts on the next
+    // launch. Appearance is only changed for an explicit user action so the
+    // current view updates immediately without re-applying the mode during
+    // startup and causing an Activity restart loop.
+    Appearance.setColorScheme(next === "system" ? "unspecified" : next);
     if (Platform.OS === "android" && nativeTheme) await nativeTheme.setMode(next);
   }, []);
 
   const value = useMemo<ThemePreference>(() => ({
     mode,
-    resolved: scheme === "dark" ? "dark" : "light",
+    resolved: mode === "system" ? (scheme === "dark" ? "dark" : "light") : mode,
     setMode,
   }), [mode, scheme, setMode]);
 
