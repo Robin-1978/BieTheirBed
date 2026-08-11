@@ -575,11 +575,14 @@ class TaskService:
         principal_id: str,
         *,
         after_id: int = 0,
-        poll_interval: float = 0.5,
+        reconciliation_interval: float = 15.0,
     ) -> AsyncIterator[PrincipalTaskEvent]:
-        if not 0.1 <= poll_interval <= 10.0:
-            raise ValueError("Principal event poll interval must be 0.1-10 seconds")
+        if not 1.0 <= reconciliation_interval <= 300.0:
+            raise ValueError(
+                "Principal event reconciliation interval must be 1-300 seconds"
+            )
         cursor = after_id
+        feed_version = await self._events.feed_version()
         while True:
             page = await asyncio.to_thread(
                 self._repository.list_principal_events,
@@ -588,7 +591,10 @@ class TaskService:
                 limit=200,
             )
             if not page:
-                await asyncio.sleep(poll_interval)
+                feed_version = await self._events.wait_for_feed_change(
+                    feed_version,
+                    timeout=reconciliation_interval,
+                )
                 continue
             for feed_event in page:
                 cursor = feed_event.feed_event_id

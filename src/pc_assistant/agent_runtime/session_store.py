@@ -13,12 +13,12 @@ from pydantic import BaseModel, ConfigDict
 
 from pc_assistant.agent_runtime.contracts import RuntimeScope
 from pc_assistant.exceptions import SessionNotFoundError
+from pc_assistant.sqlite_connection import connect_sqlite, initialize_wal
 from pc_assistant.sqlite_schema import (
     require_exact_table,
     require_foreign_keys,
     require_index_columns,
 )
-
 
 _MAX_TRANSCRIPT_BYTES = 16 * 1024 * 1024
 
@@ -42,14 +42,12 @@ class RuntimeSessionRepository:
         self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._path.parent.chmod(0o700)
         self._handle_factory = handle_factory or (lambda: secrets.token_urlsafe(24))
+        initialize_wal(self._path)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._path, timeout=5.0)
+        connection = connect_sqlite(self._path, foreign_keys=True)
         self._path.chmod(0o600)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA journal_mode=WAL")
         return connection
 
     def _initialize(self) -> None:

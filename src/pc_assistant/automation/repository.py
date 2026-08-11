@@ -19,6 +19,7 @@ from pc_assistant.automation.models import (
 )
 from pc_assistant.automation.recurrence import next_fire_at
 from pc_assistant.exceptions import SessionNotFoundError
+from pc_assistant.sqlite_connection import connect_sqlite, initialize_wal
 from pc_assistant.sqlite_schema import (
     require_exact_table,
     require_foreign_keys,
@@ -63,14 +64,12 @@ class ScheduleRepository:
         self._clock = clock
         self._max_delivery_attempts = max_delivery_attempts
         self._retry_base_seconds = retry_base_seconds
+        initialize_wal(self._path)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._path, timeout=5.0)
+        connection = connect_sqlite(self._path, foreign_keys=True)
         self._path.chmod(0o600)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA journal_mode=WAL")
         return connection
 
     def _initialize(self) -> None:
@@ -595,6 +594,34 @@ class ScheduleRepository:
             ).fetchone()
             assert row is not None
             return self._occurrence(row)
+
+    def seconds_until_next_dispatch(self) -> float | None:
+        """Return the delay until the next schedule, retry, or lease is due."""
+
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT MIN(due_at) FROM (
+                       SELECT next_fire_at AS due_at
+                       FROM runtime_schedules
+                       WHERE state=? AND next_fire_at IS NOT NULL
+                       UNION ALL
+                       SELECT next_attempt_at AS due_at
+                       FROM runtime_schedule_occurrences
+                       WHERE state=? AND next_attempt_at IS NOT NULL
+                       UNION ALL
+                       SELECT lease_expires_at AS due_at
+                       FROM runtime_schedule_occurrences
+                       WHERE state=? AND lease_expires_at IS NOT NULL
+                   )""",
+                (
+                    ScheduleState.ACTIVE.value,
+                    OccurrenceState.RETRY_WAIT.value,
+                    OccurrenceState.CLAIMED.value,
+                ),
+            ).fetchone()
+        if row is None or row[0] is None:
+            return None
+        return max(0.0, float(row[0]) - float(self._clock()))
 
     def mark_task_created(
         self,

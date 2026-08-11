@@ -15,8 +15,10 @@ from pc_assistant.agent_runtime.contracts import (
     RuntimeRunContext,
 )
 from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
-from pc_assistant.agent_runtime.tool_step import ProposedToolCall
-from pc_assistant.agent_runtime.tool_step import ToolOutcomeUnknownError
+from pc_assistant.agent_runtime.tool_step import (
+    ProposedToolCall,
+    ToolOutcomeUnknownError,
+)
 from pc_assistant.tasks import (
     DurableApprovalService,
     DurableToolCommitService,
@@ -440,7 +442,7 @@ async def test_principal_event_stream_replays_and_tails(tmp_path: Path) -> None:
         )
         stream = service.principal_events(
             scope.principal_id,
-            poll_interval=0.1,
+            reconciliation_interval=1.0,
         )
         seen = []
         while len(seen) < 2:

@@ -16,7 +16,6 @@ from pc_assistant.automation.service import TaskCreationPort
 from pc_assistant.automation.trigger_repository import TriggerRepository
 from pc_assistant.tasks.models import TaskLaunchReason
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -47,15 +46,17 @@ class TriggerDispatcher:
         *,
         worker_id: str = "trigger-worker",
         lease_seconds: float = 60.0,
-        poll_interval: float = 1.0,
+        reconciliation_interval: float = 15.0,
     ) -> None:
-        if not 0.1 <= poll_interval <= 60.0:
-            raise ValueError("Trigger poll interval must be between 0.1 and 60 seconds")
+        if not 1.0 <= reconciliation_interval <= 300.0:
+            raise ValueError(
+                "Trigger reconciliation interval must be between 1 and 300 seconds"
+            )
         self._repository = repository
         self._tasks = tasks
         self._worker_id = worker_id
         self._lease_seconds = lease_seconds
-        self._poll_interval = poll_interval
+        self._reconciliation_interval = reconciliation_interval
         self._wake = asyncio.Event()
         self._worker: asyncio.Task[None] | None = None
 
@@ -133,10 +134,21 @@ class TriggerDispatcher:
                 raise
             except Exception:
                 logger.exception("Trigger dispatcher iteration failed")
+            delay = self._reconciliation_interval
+            try:
+                next_due = await asyncio.to_thread(
+                    self._repository.seconds_until_next_dispatch
+                )
+                if next_due is not None:
+                    delay = min(delay, next_due)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Trigger dispatcher deadline lookup failed")
             try:
                 await asyncio.wait_for(
                     self._wake.wait(),
-                    timeout=self._poll_interval,
+                    timeout=delay,
                 )
             except TimeoutError:
                 pass
@@ -202,12 +214,15 @@ class TriggerService:
         *,
         paused: bool,
     ) -> TriggerRecord:
-        return await asyncio.to_thread(
+        trigger = await asyncio.to_thread(
             self._repository.set_paused,
             principal_id,
             trigger_id,
             paused=paused,
         )
+        if trigger.state is TriggerState.ACTIVE:
+            self._dispatcher.wake()
+        return trigger
 
     async def delete(self, principal_id: str, trigger_id: str) -> None:
         await asyncio.to_thread(self._repository.delete, principal_id, trigger_id)
