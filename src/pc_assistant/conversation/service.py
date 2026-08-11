@@ -44,6 +44,7 @@ from pc_assistant.tools.base import ToolPolicy
 @dataclass
 class _LiveTurn:
     cancellation: asyncio.Event
+    revision: int
     reasoning: str = ""
     content: str = ""
     final_output: str = ""
@@ -352,7 +353,10 @@ class ConversationService:
             tools_enabled=tools_enabled,
         )
         if created:
-            self._live[turn.turn_id] = _LiveTurn(cancellation=asyncio.Event())
+            self._live[turn.turn_id] = _LiveTurn(
+                cancellation=asyncio.Event(),
+                revision=turn.revision,
+            )
             execution = asyncio.create_task(self._execute(turn))
             self._executions[turn.turn_id] = execution
             execution.add_done_callback(
@@ -366,6 +370,7 @@ class ConversationService:
         live = self._live.get(turn_id)
         if live is None or stored.state in TERMINAL_CHAT_TURN_STATES:
             return stored
+        live.revision = max(live.revision, stored.revision)
         return stored.model_copy(
             update={
                 "reasoning": live.reasoning,
@@ -373,6 +378,7 @@ class ConversationService:
                 "final_output": live.final_output,
                 "timeline": tuple(live.timeline),
                 "artifacts": tuple(live.artifacts),
+                "revision": live.revision,
             }
         )
 
@@ -534,8 +540,10 @@ class ConversationService:
                 reasoning=live.reasoning,
                 content=live.content,
                 final_output=live.final_output or live.content,
+                timeline=tuple(live.timeline),
                 artifacts=tuple(live.artifacts),
                 failure_code=failure_code,
+                revision=live.revision + 1,
                 finished=True,
             )
         except asyncio.CancelledError:
@@ -548,9 +556,11 @@ class ConversationService:
                 reasoning=live.reasoning,
                 content=live.content,
                 final_output=live.final_output,
+                timeline=tuple(live.timeline),
                 artifacts=tuple(live.artifacts),
                 failure_code="cancelled",
                 cancel_requested=True,
+                revision=live.revision + 1,
                 finished=True,
             )
             raise
@@ -567,8 +577,10 @@ class ConversationService:
                 reasoning=live.reasoning,
                 content=live.content,
                 final_output=live.final_output,
+                timeline=tuple(live.timeline),
                 artifacts=tuple(live.artifacts),
                 failure_code=("cancelled" if live.cancellation.is_set() else "runtime_failed"),
+                revision=live.revision + 1,
                 finished=True,
             )
         finally:
@@ -595,6 +607,7 @@ class ConversationService:
         live: _LiveTurn,
         event: RuntimeEvent,
     ) -> None:
+        changed = True
         if event.event_type == "reasoning_delta":
             live.reasoning += event.payload.content
             self._append_timeline_text(live, "reasoning", event)
@@ -629,6 +642,10 @@ class ConversationService:
                     iteration=event.payload.iteration,
                 )
             )
+        else:
+            changed = False
+        if changed:
+            live.revision += 1
         self._schedule_notify(turn.turn_id)
 
     @staticmethod
@@ -639,10 +656,15 @@ class ConversationService:
     ) -> None:
         if not event.payload.content:
             return
-        if live.timeline:
-            current = live.timeline[-1]
-            if current.kind == kind and current.iteration == event.payload.iteration:
-                live.timeline[-1] = current.model_copy(
+        for index in range(len(live.timeline) - 1, -1, -1):
+            current = live.timeline[index]
+            if current.iteration != event.payload.iteration or current.kind not in {
+                "reasoning",
+                "content",
+            }:
+                break
+            if current.kind == kind:
+                live.timeline[index] = current.model_copy(
                     update={"content": current.content + event.payload.content}
                 )
                 return

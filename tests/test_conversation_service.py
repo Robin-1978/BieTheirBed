@@ -74,6 +74,47 @@ class SerialRuntime(ChunkRuntime):
             self.active -= 1
 
 
+class ProgressRuntime(ChunkRuntime):
+    def __init__(self) -> None:
+        super().__init__(chunks=0)
+
+    async def run(self, context: RuntimeRunContext, request: RunRequest):
+        del context, request
+        self.started.set()
+        yield RuntimeEvent(
+            event_type="reasoning_delta",
+            payload=RuntimeEventPayload(content="先检查状态", iteration=1),
+        )
+        await asyncio.sleep(0.08)
+        yield RuntimeEvent(
+            event_type="tool_call",
+            payload=RuntimeEventPayload(
+                tool_call_id="call-a",
+                tool_name="status",
+                iteration=1,
+            ),
+        )
+        await asyncio.sleep(0.08)
+        yield RuntimeEvent(
+            event_type="tool_result",
+            payload=RuntimeEventPayload(
+                tool_call_id="call-a",
+                tool_name="status",
+                tool_result={"ok": True},
+                iteration=1,
+            ),
+        )
+        await asyncio.sleep(0.08)
+        yield RuntimeEvent(
+            event_type="content_delta",
+            payload=RuntimeEventPayload(content="检查完成", iteration=2),
+        )
+        yield RuntimeEvent(
+            event_type="final_output",
+            payload=RuntimeEventPayload(content="检查完成", iteration=2),
+        )
+
+
 def _service(tmp_path: Path, runtime: ChunkRuntime):
     database = tmp_path / "assistant.db"
     sessions = RuntimeSessionRepository(database, handle_factory=lambda: "session-a")
@@ -98,7 +139,15 @@ async def test_stream_coalesces_chunks_without_persisting_events(tmp_path: Path)
     assert completed.reasoning == "r" * 1000
     assert completed.content == "x" * 1000
     assert completed.final_output == "done"
+    assert [entry.kind for entry in completed.timeline] == ["reasoning", "content"]
+    assert all(
+        current.turn.revision < following.turn.revision
+        for current, following in zip(snapshots, snapshots[1:])
+    )
     assert len(snapshots) < 50
+
+    persisted = _repository.get(scope.principal_id, turn.turn_id)
+    assert persisted.timeline == completed.timeline
 
     with sqlite3.connect(database) as db:
         conversation_rows = db.execute("SELECT COUNT(*) FROM conversation_turns").fetchone()[0]
@@ -107,6 +156,40 @@ async def test_stream_coalesces_chunks_without_persisting_events(tmp_path: Path)
         ).fetchone()
     assert conversation_rows == 1
     assert task_table is None
+    await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_stream_publishes_monotonic_ordered_progress_snapshots(tmp_path: Path) -> None:
+    _database, scope, repository, service = _service(tmp_path, ProgressRuntime())
+    await service.start()
+    turn = await service.create_turn(
+        scope,
+        client_request_id="request-a",
+        user_input="check",
+    )
+
+    snapshots = [signal.turn async for signal in service.updates(scope.principal_id, turn.turn_id)]
+
+    assert len(snapshots) >= 4
+    assert all(
+        current.revision <= following.revision
+        for current, following in zip(snapshots, snapshots[1:])
+    )
+    assert all(
+        following.revision > current.revision
+        for current, following in zip(snapshots, snapshots[1:])
+        if following.timeline != current.timeline
+        or following.state != current.state
+        or following.final_output != current.final_output
+    )
+    assert [entry.kind for entry in snapshots[-1].timeline] == [
+        "reasoning",
+        "tool_call",
+        "tool_result",
+        "content",
+    ]
+    assert repository.get(scope.principal_id, turn.turn_id).timeline == snapshots[-1].timeline
     await service.stop()
 
 
