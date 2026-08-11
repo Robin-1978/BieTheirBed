@@ -103,12 +103,12 @@ Agent 只保留：
 
 ```text
 create_task
-schedule_task
 task
 ```
 
-三个工具都操作同一 Task 模型。`schedule_task` 创建 launch_policy=scheduled 的 Task，
-不再返回 schedule_id。`task(retry)` 改为对 Execution rerun 或对 Task execute 的明确动作。
+`create_task(title, goal, launch)` 统一创建 immediate、one_time、interval 和 cron Task，
+不返回 schedule_id。所有 Agent-facing 工具说明、字段描述、示例和错误统一使用英语。
+`task(retry)` 改为对 Execution rerun 或对 Task execute 的明确动作。
 
 验收：Core client/server、Gateway adapter、OpenAPI 和工具集成测试全部通过。
 

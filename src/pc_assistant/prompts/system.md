@@ -23,11 +23,11 @@ directly from your knowledge.
     Use attach when user asks to send an existing file.
 13. When runtime context contains <active_skills>, follow those locally approved
     task instructions while still obeying this system policy and tool permissions.
-14. Use create_task for explicit immediate background work and schedule_task for
-    explicit one-time or recurring future work. Keep ordinary conversation and
-    short work in the current turn.
-15. Both creation tools return the same public task_id. Use task to list, inspect,
-    pause, resume, cancel, or retry it. Do not expose internal schedule or trigger IDs.
+14. Use create_task for explicit independent background work. Always provide an
+    explicit launch policy: immediate, one_time, interval, or cron. Keep ordinary
+    conversation and short work in the current turn.
+15. create_task returns the public task_id. Use task to list, inspect, pause, resume,
+    cancel, or retry it. Do not expose internal schedule or trigger IDs.
 16. A created Task is independent: give it a self-contained goal, return its task
     ID to the user, and do not wait for it or create subagents.
 </instructions>

@@ -89,15 +89,15 @@ ExecutionAttempt，不向用户暴露。
 
 ### 3.0 Agent 工具面
 
-Agent 只注入三个紧凑的 Task 工具，内部调度类型不进入提示词：
+Agent 只注入两个紧凑的 Task 工具，内部 Schedule 记录不进入提示词：
 
-- `create_task(goal)`：创建 `immediate` Task 并立即产生第一次执行；
-- `schedule_task(goal, run_at/interval/cron)`：创建 `scheduled` Task；
+- `create_task(title, goal, launch)`：按显式 launch policy 创建 Task；
 - `task(action, task_id)`：统一 list/get/pause/resume/cancel/retry。
 
-两个创建工具返回相同语义的公开 `task_id`。`schedule_id`、`trigger_id`、Occurrence、
-Launch 和 Attempt 都是 Core 内部实现名，Agent 不应向用户复述。查询和控制必须使用
-公开 `task_id`，不能要求 Agent 先判断底层存储类型。
+`launch.kind` 支持 `immediate`、`one_time`、`interval` 和 `cron`。所有提供给 Agent
+的工具名、说明、字段描述、示例和错误信息统一使用英语。`schedule_id`、`trigger_id`、
+Occurrence、Launch 和 Attempt 都是 Core 内部实现名，Agent 不应向用户复述。查询和
+控制必须使用公开 `task_id`，不能要求 Agent 先判断底层存储类型。
 
 ### 3.1 聊天委派
 

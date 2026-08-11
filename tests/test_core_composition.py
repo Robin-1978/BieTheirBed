@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 
 import pytest
@@ -97,6 +99,28 @@ def test_core_composition_builds_forward_only_registry_and_profiles(tmp_path: Pa
         "tool_help",
     } & remote
     assert not {"screen", "ui", "schedule", "inspect_image"} & local
+    assert "create_task" in local
+    assert "schedule_task" not in local
+
+
+def test_builtin_agent_tool_contracts_are_english_only(tmp_path: Path) -> None:
+    composition = build_core_runtime(
+        _config(tmp_path, service_port=0),
+        provider_factory=_OfflineProvider,
+    )
+
+    rendered = json.dumps(
+        {
+            name: composition.registry.detailed_schema(name)
+            for name in composition.registry.list_tools()
+        },
+        ensure_ascii=False,
+    )
+
+    assert re.search(
+        r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]",
+        rendered,
+    ) is None
 
 
 @pytest.mark.asyncio
