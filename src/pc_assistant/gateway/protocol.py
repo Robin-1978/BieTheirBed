@@ -5,17 +5,20 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from pc_assistant.agent_runtime.contracts import RuntimeStatus, ToolListResult
-from pc_assistant.agent_runtime.contracts import ArtifactTranscriptionResult
+from pc_assistant.agent_runtime.contracts import (
+    ArtifactTranscriptionResult,
+    RuntimeStatus,
+    ToolListResult,
+)
 from pc_assistant.artifacts import ArtifactRef
 from pc_assistant.service.core_api import (
     ArtifactInputRef,
     ChatApprovalSnapshot,
     ChatTurnSnapshot,
     ConversationSessionSnapshot,
-    TaskSnapshot,
-    ProductTaskSnapshot,
     ProductTaskExecutionSnapshot,
+    ProductTaskSnapshot,
+    TaskSnapshot,
 )
 from pc_assistant.tasks import (
     ApprovalState,
@@ -332,6 +335,10 @@ class AuditListResponse(BaseModel):
 class PushRegistrationResponse(BaseModel):
     registered: bool
     provider: str = ""
+
+
+class PushTestResponse(BaseModel):
+    sent: bool
 
 
 class DeviceRevokedResponse(BaseModel):

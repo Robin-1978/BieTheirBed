@@ -62,3 +62,18 @@ Android always shows a system installation confirmation unless the device is
 managed or rooted. The first installation must also allow this App to install
 unknown-source packages. Expo Go cannot exercise this flow; use an installable
 native APK signed by the same private key.
+
+## Android Push configuration
+
+Release builds require both files below in the private Android secrets
+directory (by default `~/.pc-assistant/secrets/android`):
+
+- `expo-project-id`: the Expo/EAS project UUID used to obtain an Expo Push token.
+- `google-services.json`: the Firebase Android app configuration for
+  `dev.knoa.mobile`.
+
+The Expo project must also have the matching FCM v1 service-account credential
+configured for Android Push delivery. The build script embeds the project ID,
+copies `google-services.json` only into the temporary build mirror, and prints
+prominent warnings when either configuration is missing. In that case the App
+shows that server Push is not configured instead of silently claiming success.

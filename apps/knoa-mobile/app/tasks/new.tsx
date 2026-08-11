@@ -19,7 +19,6 @@ import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 import { immediatePolicy, isLaunchPolicyValid, TaskLaunchEditor } from "@/components/TaskLaunchEditor";
 import type { TaskLaunchPolicy } from "@/api/models";
-import { registerPush } from "@/notifications";
 import { useI18n } from "@/i18n";
 import { AppPressable } from "@/components/AppPressable";
 
@@ -69,7 +68,10 @@ export default function NewTaskScreen() {
       }));
       if (launchPolicy.kind !== "immediate" && gateway.client) {
         const permission = await Notifications.getPermissionsAsync();
-        if (permission.status !== "granted") {
+        if (
+          permission.status !== "granted"
+          || gateway.pushRegistration.status !== "registered"
+        ) {
           Alert.alert(
             t("taskNew.notificationTitle"),
             t("taskNew.notificationBody"),
@@ -77,8 +79,7 @@ export default function NewTaskScreen() {
               { text: t("taskNew.later"), onPress: () => router.replace(`/tasks/${result.task.task_id}`) },
               {
                 text: t("taskNew.enableNotifications"),
-                onPress: () => void registerPush(gateway.client!, true)
-                  .catch(() => undefined)
+                onPress: () => void gateway.registerNotifications(true)
                   .finally(() => router.replace(`/tasks/${result.task.task_id}`)),
               },
             ],

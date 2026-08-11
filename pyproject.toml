@@ -30,6 +30,7 @@ dependencies = [
     "mcp>=1.27,<2",
     "cryptography>=42,<46",
     "qrcode>=8,<9",
+    "tzdata>=2025.2",
 ]
 
 [project.optional-dependencies]
