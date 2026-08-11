@@ -11,6 +11,7 @@ import {
 } from "react-native";
 
 import type { ConversationSession } from "@/api/models";
+import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { removeConversationDraft } from "@/security/conversationDrafts";
 import { useGateway } from "@/state/GatewayProvider";
@@ -129,10 +130,11 @@ export default function ConversationHistoryScreen() {
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.headerActions}>
         <AppPressable
+          accessibilityLabel="新建会话"
           style={styles.primary}
           onPress={() => void gateway.newConversation().then(() => router.replace("/chat"))}
         >
-          <Text style={styles.primaryText}>新建会话</Text>
+          <AppIcon name="plus" color={colors.white} size={21} />
         </AppPressable>
         <AppPressable style={styles.filter} onPress={() => setShowArchived((value) => !value)}>
           <Text style={styles.filterText}>{showArchived ? "隐藏已归档" : "显示已归档"}</Text>
@@ -165,16 +167,18 @@ export default function ConversationHistoryScreen() {
             <View style={styles.actions}>
               {isEditing ? (
                 <>
-                  <AppPressable onPress={() => setEditing("")}><Text style={styles.actionText}>取消</Text></AppPressable>
-                  <AppPressable disabled={!title.trim()} onPress={() => void update(session, { title: title.trim() })}><Text style={styles.actionText}>保存</Text></AppPressable>
+                  <IconAction label="取消编辑" icon="x" onPress={() => setEditing("")} />
+                  <IconAction label="保存名称" icon="check" disabled={!title.trim()} onPress={() => void update(session, { title: title.trim() })} />
                 </>
               ) : (
                 <>
-                  <AppPressable onPress={() => { setEditing(session.session_handle); setTitle(session.title); }}><Text style={styles.actionText}>重命名</Text></AppPressable>
-                  <AppPressable onPress={() => void update(session, { state: session.state === "archived" ? "active" : "archived" })}>
-                    <Text style={styles.actionText}>{session.state === "archived" ? "恢复" : "归档"}</Text>
-                  </AppPressable>
-                  <AppPressable onPress={() => confirmDelete(session)}><Text style={styles.deleteText}>删除</Text></AppPressable>
+                  <IconAction label="重命名" icon="edit" onPress={() => { setEditing(session.session_handle); setTitle(session.title); }} />
+                  <IconAction
+                    label={session.state === "archived" ? "恢复" : "归档"}
+                    icon={session.state === "archived" ? "restore" : "archive"}
+                    onPress={() => void update(session, { state: session.state === "archived" ? "active" : "archived" })}
+                  />
+                  <IconAction label="删除" icon="trash" danger onPress={() => confirmDelete(session)} />
                 </>
               )}
               {working === session.session_handle ? <ActivityIndicator color={colors.accent} size="small" /> : null}
@@ -193,6 +197,19 @@ export default function ConversationHistoryScreen() {
   );
 }
 
+function IconAction({ label, icon, danger = false, disabled = false, onPress }: { label: string; icon: "archive" | "check" | "edit" | "restore" | "trash" | "x"; danger?: boolean; disabled?: boolean; onPress(): void }) {
+  return (
+    <AppPressable
+      accessibilityLabel={label}
+      disabled={disabled}
+      onPress={onPress}
+      style={styles.iconAction}
+    >
+      <AppIcon name={icon} color={danger ? colors.danger : colors.accent} size={19} />
+    </AppPressable>
+  );
+}
+
 function formatTime(value: number): string {
   return new Date(value * 1000).toLocaleString("zh-CN", { hour12: false });
 }
@@ -200,8 +217,7 @@ function formatTime(value: number): string {
 const styles = StyleSheet.create({
   container: { padding: 16, gap: 12, paddingBottom: 48 },
   headerActions: { flexDirection: "row", gap: 10 },
-  primary: { backgroundColor: colors.accent, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 11 },
-  primaryText: { color: "white", fontWeight: "700" },
+  primary: { backgroundColor: colors.accent, borderRadius: 12, width: 44, minHeight: 42, alignItems: "center", justifyContent: "center" },
   filter: { borderColor: colors.line, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, backgroundColor: colors.surface },
   filterText: { color: colors.accent, fontWeight: "600" },
   card: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.line, padding: 15, gap: 12 },
@@ -210,8 +226,7 @@ const styles = StyleSheet.create({
   meta: { color: colors.muted, fontSize: 13 },
   titleInput: { color: colors.ink, borderWidth: 1, borderColor: colors.accent, borderRadius: 10, padding: 10, backgroundColor: colors.background },
   actions: { flexDirection: "row", gap: 18, alignItems: "center" },
-  actionText: { color: colors.accent, fontWeight: "600" },
-  deleteText: { color: colors.danger, fontWeight: "600" },
+  iconAction: { width: 38, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.background },
   loading: { marginTop: 60 },
   empty: { color: colors.muted, textAlign: "center", marginTop: 60 },
   error: { color: colors.danger, lineHeight: 20 },

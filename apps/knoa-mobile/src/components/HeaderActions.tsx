@@ -1,42 +1,48 @@
 import { router } from "expo-router";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
+import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { navigatePrimary, type PrimaryScreen } from "@/components/PrimarySwipeNavigation";
+import { useI18n } from "@/i18n";
 import { colors } from "@/theme";
 
-type PrimaryScreen = "chat" | "tasks";
-
 export function HeaderActions({ current }: { current: PrimaryScreen }) {
+  const { t } = useI18n();
   return (
     <View style={styles.container}>
       <HeaderTab
-        label="对话"
+        icon="chat"
+        label={t("header.chat")}
         selected={current === "chat"}
-        onPress={() => router.replace("/chat")}
+        onPress={() => navigatePrimary(current, "chat")}
       />
       <HeaderTab
-        label="任务"
+        icon="tasks"
+        label={t("header.tasks")}
         selected={current === "tasks"}
-        onPress={() => router.replace("/tasks")}
+        onPress={() => navigatePrimary(current, "tasks")}
       />
       <AppPressable
         accessibilityRole="button"
-        accessibilityLabel="设置与状态"
+        accessibilityLabel={t("common.settings")}
         hitSlop={8}
         onPress={() => router.push("/capabilities")}
         style={styles.action}
       >
-        <Text style={styles.actionLabel}>设置</Text>
+        <AppIcon name="settings" color={colors.ink} size={21} />
       </AppPressable>
     </View>
   );
 }
 
 function HeaderTab({
+  icon,
   label,
   selected,
   onPress,
 }: {
+  icon: "chat" | "tasks";
   label: string;
   selected: boolean;
   onPress(): void;
@@ -51,8 +57,9 @@ function HeaderTab({
       onPress={onPress}
       style={styles.action}
     >
-      <Text style={[styles.label, selected && styles.selectedLabel]}>{label}</Text>
-      <View style={[styles.indicator, selected && styles.selectedIndicator]} />
+      <View style={[styles.tabIcon, selected && styles.selectedTabIcon]}>
+        <AppIcon name={icon} color={selected ? colors.accent : colors.muted} size={21} />
+      </View>
     </AppPressable>
   );
 }
@@ -61,37 +68,16 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 14,
+    gap: 4,
     marginRight: 2,
   },
   action: {
-    minHeight: 36,
+    width: 40,
+    height: 40,
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 2,
+    borderRadius: 13,
   },
-  label: {
-    color: colors.muted,
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  selectedLabel: {
-    color: colors.accent,
-  },
-  actionLabel: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  indicator: {
-    position: "absolute",
-    bottom: 2,
-    width: 16,
-    height: 2,
-    borderRadius: 1,
-    backgroundColor: "transparent",
-  },
-  selectedIndicator: {
-    backgroundColor: colors.accent,
-  },
+  tabIcon: { width: 36, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 11 },
+  selectedTabIcon: { backgroundColor: colors.accentSoft },
 });

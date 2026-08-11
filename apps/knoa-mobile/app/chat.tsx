@@ -26,7 +26,6 @@ import {
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Svg, { Circle, Line, Path, Rect } from "react-native-svg";
 
 import { ChatTurnWatcher } from "@/api/chatTurnWatcher";
 import {
@@ -37,11 +36,13 @@ import {
 } from "@/api/chatArtifacts";
 import { GatewayError } from "@/api/gatewayClient";
 import type { ArtifactInput, ChatApproval, ChatTurnSnapshot } from "@/api/models";
+import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { AppMarkdown } from "@/components/AppMarkdown";
 import { AppPressable } from "@/components/AppPressable";
 import { ArtifactViewer } from "@/components/ArtifactViewer";
 import { PrimarySwipeNavigation } from "@/components/PrimarySwipeNavigation";
 import { TurnProgress } from "@/components/TurnProgress";
+import { useI18n } from "@/i18n";
 import { saveArtifactFile } from "@/api/saveArtifactFile";
 import { loadConversationDraft, removeConversationDraft, storeConversationDraft } from "@/security/conversationDrafts";
 import { useGateway } from "@/state/GatewayProvider";
@@ -76,20 +77,24 @@ const TERMINAL_STATES = new Set<ChatTurnSnapshot["state"]>(["completed", "failed
 
 export default function ChatScreen() {
   const gateway = useGateway();
+  const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const gatewayRef = useRef(gateway);
   gatewayRef.current = gateway;
   const params = useLocalSearchParams<{ capturedUri?: string; capturedName?: string }>();
   const list = useRef<FlatList<ChatListItem>>(null);
-  const nearBottom = useRef(true);
+  const followLatest = useRef(true);
+  const userDragging = useRef(false);
   const initialScrollPending = useRef(true);
-  const scrollMode = useRef<"none" | "instant" | "animated">("instant");
+  const scrollIntent = useRef<"none" | "instant" | "smooth">("instant");
+  const scrollFrame = useRef<number | null>(null);
   const displayedSession = useRef("");
   const draftReady = useRef(false);
   const [turns, setTurns] = useState<ChatTurnSnapshot[]>([]);
   const [pendingTurn, setPendingTurn] = useState<PendingChatTurn | null>(null);
   const [nextTurnCursor, setNextTurnCursor] = useState("");
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [preservingOlder, setPreservingOlder] = useState(false);
   const [text, setText] = useState("");
   const [inputMode, setInputMode] = useState<InputMode>("text");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -109,7 +114,6 @@ export default function ChatScreen() {
       (client) => client.getChatTurn(turnId),
     ),
     onSnapshot: (snapshot) => {
-      if (nearBottom.current) scrollMode.current = "animated";
       setTurns((current) => mergeConversationTurns(current, [snapshot]));
     },
     onUnavailable: () => setMessage("暂时无法继续接收回复，请检查网络后重试"),
@@ -119,7 +123,10 @@ export default function ChatScreen() {
     turnWatcher.watch(turnId);
   }, [turnWatcher]);
 
-  useEffect(() => () => turnWatcher.closeAll(), [turnWatcher]);
+  useEffect(() => () => {
+    turnWatcher.closeAll();
+    if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
+  }, [turnWatcher]);
 
   const refresh = useCallback(async () => {
     if (!gateway.client || !gateway.sessionHandle) return;
@@ -154,9 +161,10 @@ export default function ChatScreen() {
       setTurns([]);
       setPendingTurn(null);
       setNextTurnCursor("");
+      setPreservingOlder(false);
       initialScrollPending.current = Boolean(sessionHandle);
-      nearBottom.current = true;
-      scrollMode.current = "instant";
+      followLatest.current = true;
+      scrollIntent.current = "instant";
       turnWatcher.closeAll();
     }
     if (sessionHandle) {
@@ -299,7 +307,6 @@ export default function ChatScreen() {
         text: pending.userInput,
         attachments: uploadedItems.flatMap((item) => item.uploaded ? [item.uploaded] : []),
       }));
-      scrollMode.current = "animated";
       setTurns((current) => mergeConversationTurns(current, [accepted]));
       setPendingTurn(null);
       watchTurn(accepted.turn_id);
@@ -328,8 +335,8 @@ export default function ChatScreen() {
       state: "sending",
       error: "",
     };
-    scrollMode.current = "animated";
-    nearBottom.current = true;
+    scrollIntent.current = "smooth";
+    followLatest.current = true;
     setPendingTurn(pending);
     setText("");
     setAttachments([]);
@@ -496,7 +503,7 @@ export default function ChatScreen() {
     setTurns([]);
     setPendingTurn(null);
     setNextTurnCursor("");
-    scrollMode.current = "instant";
+    scrollIntent.current = "instant";
     turnWatcher.closeAll();
     setText("");
     setAttachments([]);
@@ -512,11 +519,12 @@ export default function ChatScreen() {
   async function loadOlderTurns() {
     if (!gateway.sessionHandle || !nextTurnCursor || loadingOlder) return;
     setLoadingOlder(true);
-    scrollMode.current = "none";
+    scrollIntent.current = "none";
     try {
       const page = await gateway.runAuthenticated(
         (client) => client.listChatTurns(gateway.sessionHandle, 100, nextTurnCursor),
       );
+      setPreservingOlder(true);
       setTurns((current) => {
         const existing = new Set(current.map((turn) => turn.turn_id));
         return [...page.turns.filter((turn) => !existing.has(turn.turn_id)), ...current];
@@ -576,22 +584,35 @@ export default function ChatScreen() {
       keyboardVerticalOffset={insets.top + (Platform.OS === "ios" ? 44 : 56)}
     >
       <View style={styles.topbar}>
-        <Text style={styles.subtitle}>随时告诉我你想做什么</Text>
+        <Text style={styles.subtitle}>{t("chat.subtitle")}</Text>
         <View style={styles.topActions}>
-          <AppPressable onPress={() => void startNewTopic()} disabled={startingTopic || sending}>
-            <Text style={styles.link}>{startingTopic ? "创建中…" : "新话题"}</Text>
+          <AppPressable
+            accessibilityLabel={t("chat.newTopic")}
+            onPress={() => void startNewTopic()}
+            disabled={startingTopic || sending}
+            style={styles.topAction}
+          >
+            {startingTopic
+              ? <ActivityIndicator color={colors.accent} size="small" />
+              : <AppIcon name="edit" color={colors.accent} size={20} />}
           </AppPressable>
-          <AppPressable onPress={() => router.push("/conversations")}><Text style={styles.link}>会话</Text></AppPressable>
+          <AppPressable
+            accessibilityLabel={t("chat.history")}
+            onPress={() => router.push("/conversations")}
+            style={styles.topAction}
+          >
+            <AppIcon name="history" color={colors.accent} size={21} />
+          </AppPressable>
         </View>
       </View>
       {gateway.status !== "ready" ? (
         <View style={styles.connectionBanner}>
           <View style={styles.bannerCopy}>
-            <Text style={styles.connectionTitle}>暂时没有连接到小诺</Text>
-            <Text style={styles.connectionDetail}>{gateway.error || "正在重新建立安全连接"}</Text>
+            <Text style={styles.connectionTitle}>{t("chat.disconnected")}</Text>
+            <Text style={styles.connectionDetail}>{gateway.error || t("chat.reconnecting")}</Text>
           </View>
           <AppPressable onPress={() => void gateway.reconnect()} style={styles.bannerButton}>
-            <Text style={styles.bannerButtonText}>重连</Text>
+            <Text style={styles.bannerButtonText}>{t("chat.retryConnection")}</Text>
           </AppPressable>
         </View>
       ) : null}
@@ -618,39 +639,66 @@ export default function ChatScreen() {
         contentContainerStyle={styles.messages}
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
-        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+        maintainVisibleContentPosition={preservingOlder ? { minIndexForVisible: 0 } : undefined}
         onContentSizeChange={() => {
-          if (initialScrollPending.current && listItems.length) {
-            initialScrollPending.current = false;
-            nearBottom.current = true;
-            scrollMode.current = "none";
-            requestAnimationFrame(() => list.current?.scrollToEnd({ animated: false }));
+          if (preservingOlder) {
+            requestAnimationFrame(() => setPreservingOlder(false));
             return;
           }
-          const mode = scrollMode.current;
-          if (mode === "none" || !nearBottom.current) return;
-          scrollMode.current = "none";
-          list.current?.scrollToEnd({ animated: mode === "animated" });
+          if (initialScrollPending.current && listItems.length) {
+            initialScrollPending.current = false;
+            followLatest.current = true;
+            scrollIntent.current = "none";
+            if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
+            scrollFrame.current = requestAnimationFrame(() => {
+              scrollFrame.current = null;
+              list.current?.scrollToEnd({ animated: false });
+            });
+            return;
+          }
+          if (!followLatest.current || loadingOlder) return;
+          const mode = scrollIntent.current;
+          scrollIntent.current = "none";
+          if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
+          scrollFrame.current = requestAnimationFrame(() => {
+            scrollFrame.current = null;
+            list.current?.scrollToEnd({ animated: mode === "smooth" });
+          });
         }}
+        onScrollBeginDrag={() => { userDragging.current = true; }}
         onScroll={({ nativeEvent }) => {
+          if (!userDragging.current) return;
           const distance = nativeEvent.contentSize.height
             - nativeEvent.layoutMeasurement.height
             - nativeEvent.contentOffset.y;
-          nearBottom.current = distance < 80;
+          followLatest.current = distance < 80;
         }}
-        scrollEventThrottle={100}
+        onScrollEndDrag={({ nativeEvent }) => {
+          const distance = nativeEvent.contentSize.height
+            - nativeEvent.layoutMeasurement.height
+            - nativeEvent.contentOffset.y;
+          followLatest.current = distance < 80;
+          userDragging.current = false;
+        }}
+        onMomentumScrollEnd={({ nativeEvent }) => {
+          const distance = nativeEvent.contentSize.height
+            - nativeEvent.layoutMeasurement.height
+            - nativeEvent.contentOffset.y;
+          followLatest.current = distance < 80;
+        }}
+        scrollEventThrottle={32}
         ListHeaderComponent={nextTurnCursor ? (
-          <Pressable
+          <AppPressable
             disabled={loadingOlder}
             onPress={() => void loadOlderTurns()}
             style={styles.loadOlder}
           >
             {loadingOlder
               ? <ActivityIndicator color={colors.accent} size="small" />
-              : <Text style={styles.loadOlderText}>加载更早消息</Text>}
-          </Pressable>
+              : <Text style={styles.loadOlderText}>{t("chat.loadOlder")}</Text>}
+          </AppPressable>
         ) : null}
-        ListEmptyComponent={<Text style={styles.empty}>你好，我是小诺。</Text>}
+        ListEmptyComponent={<Text style={styles.empty}>{t("chat.empty")}</Text>}
         renderItem={({ item }) => item.kind === "pending" ? (
           <PendingTurn
             pending={item.pending}
@@ -683,9 +731,9 @@ export default function ChatScreen() {
                 <Text style={styles.attachmentName} numberOfLines={1}>{item.name}</Text>
                 {item.status ? <Text style={[styles.attachmentStatus, item.status === "failed" && styles.attachmentFailed]}>{attachmentStatusLabel(item.status)}</Text> : null}
               </Pressable>
-              <Pressable accessibilityLabel={`移除 ${item.name}`} onPress={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
-                <Text style={styles.remove}>×</Text>
-              </Pressable>
+              <AppPressable accessibilityLabel={`移除 ${item.name}`} onPress={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} style={styles.removeAction}>
+                <AppIcon name="x" color={colors.muted} size={17} />
+              </AppPressable>
             </View>
           ))}
         </View>
@@ -697,37 +745,37 @@ export default function ChatScreen() {
       ) : null}
       <View style={styles.composer}>
         <AppPressable
-          accessibilityLabel="添加照片或文件"
+          accessibilityLabel={t("chat.add")}
           onPress={() => setActionsOpen(true)}
           style={styles.roundAction}
         >
-          <LineIcon name="plus" color={colors.accent} />
+          <AppIcon name="plus" color={colors.accent} />
         </AppPressable>
         <View style={styles.inputShell}>
-          <Pressable
-            accessibilityLabel={inputMode === "text" ? "切换到语音输入" : "切换到文字输入"}
+          <AppPressable
+            accessibilityLabel={inputMode === "text" ? t("chat.switchVoice") : t("chat.switchText")}
             disabled={recording.isRecording || transcribing}
             onPress={() => setInputMode((current) => current === "text" ? "voice" : "text")}
             style={styles.inputMode}
           >
-            <LineIcon name={inputMode === "text" ? "mic" : "keyboard"} color={colors.muted} size={20} />
-          </Pressable>
+            <AppIcon name={inputMode === "text" ? "mic" : "keyboard"} color={colors.muted} size={20} />
+          </AppPressable>
           <TextInput
             editable={inputMode === "text"}
             style={styles.input}
             value={text}
             onChangeText={setText}
-            placeholder={inputMode === "text" ? "和小诺说点什么…" : "语音转写会出现在这里"}
+            placeholder={inputMode === "text" ? t("chat.placeholder") : t("chat.voicePlaceholder")}
             placeholderTextColor={colors.muted}
             multiline
           />
         </View>
-        <Pressable
+        <AppPressable
           accessibilityLabel={stoppingResponse
-            ? "停止回复"
+            ? t("chat.stop")
             : inputMode === "voice"
-              ? recording.isRecording ? "停止录音" : "开始录音"
-              : "发送"}
+              ? recording.isRecording ? t("chat.stopRecording") : t("chat.startRecording")
+              : t("chat.send")}
           onPress={() => {
             if (activeTurn) void cancelTurn(activeTurn);
             else if (inputMode === "voice") void toggleRecording();
@@ -736,25 +784,26 @@ export default function ChatScreen() {
           disabled={primaryDisabled}
           style={[
             styles.primaryAction,
-            (recording.isRecording || stoppingResponse) && styles.primaryRecording,
+            recording.isRecording && styles.primaryRecording,
+            stoppingResponse && styles.primaryStopping,
             primaryDisabled && styles.sendDisabled,
           ]}
         >
           {sending || transcribing || cancelling ? (
             <ActivityIndicator color="white" size="small" />
           ) : stoppingResponse ? (
-            <LineIcon name="stop" color="white" size={17} />
+            <AppIcon name="stop" color="white" size={17} />
           ) : recording.isRecording ? (
             <View style={styles.recordingContent}>
-              <LineIcon name="stop" color="white" size={17} />
+              <AppIcon name="stop" color="white" size={17} />
               <Text style={styles.recordingTime}>{Math.round(recording.durationMillis / 1000)}s</Text>
             </View>
           ) : inputMode === "text" ? (
-            <Text style={styles.sendText}>发送</Text>
+            <AppIcon name="send" color="white" size={19} />
           ) : (
-            <LineIcon name="mic" color="white" />
+            <AppIcon name="mic" color="white" />
           )}
-        </Pressable>
+        </AppPressable>
       </View>
       <ArtifactViewer
         file={imagePreview}
@@ -771,11 +820,11 @@ export default function ChatScreen() {
           <Pressable style={styles.backdrop} onPress={() => setActionsOpen(false)} />
           <View style={styles.actionSheet}>
             <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>添加内容</Text>
+            <Text style={styles.sheetTitle}>{t("chat.addContent")}</Text>
             <View style={styles.sheetActions}>
               <MediaAction
                 icon="camera"
-                label="拍照"
+                label={t("chat.camera")}
                 onPress={() => {
                   setActionsOpen(false);
                   router.push("/capture");
@@ -783,7 +832,7 @@ export default function ChatScreen() {
               />
               <MediaAction
                 icon="file"
-                label="文件"
+                label={t("chat.file")}
                 onPress={() => {
                   setActionsOpen(false);
                   void chooseFile();
@@ -798,43 +847,12 @@ export default function ChatScreen() {
   );
 }
 
-function MediaAction({ icon, label, onPress }: { icon: "camera" | "file"; label: string; onPress(): void }) {
+function MediaAction({ icon, label, onPress }: { icon: AppIconName; label: string; onPress(): void }) {
   return (
     <Pressable onPress={onPress} style={styles.mediaAction}>
-      <View style={styles.mediaIcon}><LineIcon name={icon} color={colors.accent} size={28} /></View>
+      <View style={styles.mediaIcon}><AppIcon name={icon} color={colors.accent} size={28} /></View>
       <Text style={styles.mediaLabel}>{label}</Text>
     </Pressable>
-  );
-}
-
-function LineIcon({
-  name,
-  color,
-  size = 22,
-}: {
-  name: "plus" | "camera" | "file" | "mic" | "keyboard" | "stop";
-  color: string;
-  size?: number;
-}) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      {name === "plus" ? (
-        <><Line x1="12" y1="5" x2="12" y2="19" stroke={color} strokeWidth="2" strokeLinecap="round" /><Line x1="5" y1="12" x2="19" y2="12" stroke={color} strokeWidth="2" strokeLinecap="round" /></>
-      ) : null}
-      {name === "camera" ? (
-        <><Path d="M4 7.5h3l1.4-2h7.2l1.4 2h3v11H4z" stroke={color} strokeWidth="1.8" strokeLinejoin="round" /><Circle cx="12" cy="13" r="3.2" stroke={color} strokeWidth="1.8" /></>
-      ) : null}
-      {name === "file" ? (
-        <><Path d="M7 3.5h6l4 4V20.5H7z" stroke={color} strokeWidth="1.8" strokeLinejoin="round" /><Path d="M13 3.5v4h4" stroke={color} strokeWidth="1.8" strokeLinejoin="round" /><Line x1="9.5" y1="12" x2="14.5" y2="12" stroke={color} strokeWidth="1.6" strokeLinecap="round" /><Line x1="9.5" y1="15.5" x2="14.5" y2="15.5" stroke={color} strokeWidth="1.6" strokeLinecap="round" /></>
-      ) : null}
-      {name === "mic" ? (
-        <><Rect x="9" y="3" width="6" height="11" rx="3" stroke={color} strokeWidth="1.8" /><Path d="M6.5 11.5a5.5 5.5 0 0 0 11 0M12 17v4M9 21h6" stroke={color} strokeWidth="1.8" strokeLinecap="round" /></>
-      ) : null}
-      {name === "keyboard" ? (
-        <><Rect x="3" y="6" width="18" height="12" rx="2.5" stroke={color} strokeWidth="1.8" /><Path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M6.5 13.5h.01M10 13.5h.01M14 13.5h.01M17.5 13.5h.01M8 16h8" stroke={color} strokeWidth="2" strokeLinecap="round" /></>
-      ) : null}
-      {name === "stop" ? <Rect x="6" y="6" width="12" height="12" rx="2.5" fill={color} /> : null}
-    </Svg>
   );
 }
 
@@ -1088,8 +1106,8 @@ const styles = StyleSheet.create({
   list: { flex: 1 },
   topbar: { paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   subtitle: { color: colors.muted, fontSize: 13 },
-  topActions: { flexDirection: "row", gap: 16 },
-  link: { color: colors.accent, fontWeight: "600" },
+  topActions: { flexDirection: "row", gap: 6 },
+  topAction: { width: 38, height: 36, alignItems: "center", justifyContent: "center", borderRadius: 12 },
   messages: { padding: 16, paddingBottom: 24, gap: 18, flexGrow: 1 },
   empty: { color: colors.muted, textAlign: "center", marginTop: 80, fontSize: 17 },
   loadOlder: { alignSelf: "center", paddingHorizontal: 14, paddingVertical: 8, marginBottom: 4 },
@@ -1097,7 +1115,7 @@ const styles = StyleSheet.create({
   turn: { gap: 8 },
   userBubble: { alignSelf: "flex-end", maxWidth: "84%", backgroundColor: colors.accent, borderRadius: 18, borderBottomRightRadius: 5, paddingHorizontal: 15, paddingVertical: 11 },
   userText: { color: "white", fontSize: 16, lineHeight: 23 },
-  userMeta: { color: "#DCEAE4", fontSize: 12, marginTop: 5 },
+  userMeta: { color: colors.accentSoft, fontSize: 12, marginTop: 5 },
   assistantBubble: { alignSelf: "stretch", width: "100%", backgroundColor: colors.surface, borderRadius: 18, borderBottomLeftRadius: 5, padding: 15, borderWidth: 1, borderColor: colors.line },
   markdownList: { width: "100%", alignSelf: "stretch" },
   activityRow: { flexDirection: "row", alignItems: "center", gap: 9 },
@@ -1134,19 +1152,20 @@ const styles = StyleSheet.create({
   attachmentStatus: { color: colors.muted, fontSize: 10, marginTop: 2 },
   attachmentFailed: { color: colors.danger },
   remove: { color: colors.muted, fontSize: 18 },
-  connectionBanner: { marginHorizontal: 16, marginBottom: 8, padding: 13, borderRadius: 14, backgroundColor: "#FFF3ED", flexDirection: "row", alignItems: "center", gap: 12 },
+  removeAction: { width: 30, height: 30, alignItems: "center", justifyContent: "center", borderRadius: 9 },
+  connectionBanner: { marginHorizontal: 16, marginBottom: 8, padding: 13, borderRadius: 14, backgroundColor: colors.warningSoft, flexDirection: "row", alignItems: "center", gap: 12 },
   bannerCopy: { flex: 1 },
   connectionTitle: { color: colors.ink, fontWeight: "700" },
   connectionDetail: { color: colors.muted, fontSize: 12, marginTop: 3 },
   bannerButton: { paddingHorizontal: 13, paddingVertical: 8, borderRadius: 11, backgroundColor: colors.surface },
   bannerButtonText: { color: colors.accent, fontWeight: "700" },
   updateBanner: { marginHorizontal: 16, marginBottom: 8, padding: 13, borderRadius: 14, backgroundColor: colors.accentSoft, flexDirection: "row", alignItems: "center", gap: 12 },
-  requiredUpdateBanner: { marginHorizontal: 16, marginBottom: 8, padding: 13, borderRadius: 14, backgroundColor: "#FCE9E7", gap: 4 },
+  requiredUpdateBanner: { marginHorizontal: 16, marginBottom: 8, padding: 13, borderRadius: 14, backgroundColor: colors.dangerSoft, gap: 4 },
   requiredUpdateTitle: { color: colors.danger, fontWeight: "700" },
   updateTitle: { color: colors.ink, fontWeight: "700" },
   updateDetail: { color: colors.muted, fontSize: 12, marginTop: 3 },
   updateLink: { color: colors.accent, fontWeight: "700" },
-  errorBanner: { paddingHorizontal: 16, paddingVertical: 9, backgroundColor: "#FFF3ED", borderTopWidth: 1, borderTopColor: "#F3D7CB" },
+  errorBanner: { paddingHorizontal: 16, paddingVertical: 9, backgroundColor: colors.dangerSoft, borderTopWidth: 1, borderTopColor: colors.line },
   errorText: { color: colors.danger, textAlign: "center", fontSize: 13 },
   composer: { flexDirection: "row", alignItems: "flex-end", gap: 8, padding: 10, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.line },
   roundAction: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: colors.background, borderWidth: 1, borderColor: colors.line },
@@ -1154,13 +1173,13 @@ const styles = StyleSheet.create({
   inputMode: { width: 40, height: 42, alignItems: "center", justifyContent: "center" },
   input: { flex: 1, minHeight: 42, maxHeight: 120, color: colors.ink, paddingRight: 13, paddingVertical: 10, textAlignVertical: "top" },
   primaryAction: { minWidth: 52, height: 42, paddingHorizontal: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.accent, borderRadius: 14 },
-  primaryRecording: { backgroundColor: colors.danger },
+  primaryRecording: { backgroundColor: colors.warning },
+  primaryStopping: { backgroundColor: colors.stop },
   recordingContent: { flexDirection: "row", alignItems: "center", gap: 5 },
   recordingTime: { color: "white", fontSize: 12, fontWeight: "700" },
   sendDisabled: { opacity: 0.45 },
-  sendText: { color: "white", fontWeight: "700" },
   modalRoot: { flex: 1, justifyContent: "flex-end" },
-  backdrop: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "rgba(25, 31, 29, 0.28)" },
+  backdrop: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: colors.overlay },
   actionSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 22, paddingTop: 10, paddingBottom: 34, gap: 18 },
   sheetHandle: { width: 38, height: 4, borderRadius: 2, backgroundColor: colors.line, alignSelf: "center" },
   sheetTitle: { color: colors.ink, fontSize: 17, fontWeight: "700" },

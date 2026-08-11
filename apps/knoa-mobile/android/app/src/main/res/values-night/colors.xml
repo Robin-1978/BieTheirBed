@@ -1,0 +1,24 @@
+<resources>
+  <color name="splashscreen_background">#141A18</color>
+  <color name="iconBackground">#141A18</color>
+  <color name="colorPrimary">#7DBAA8</color>
+  <color name="knoa_background">#141A18</color>
+  <color name="knoa_surface">#1D2522</color>
+  <color name="knoa_surface_elevated">#25302C</color>
+  <color name="knoa_surface_muted">#202A26</color>
+  <color name="knoa_ink">#F2F0E8</color>
+  <color name="knoa_muted">#A6ADA8</color>
+  <color name="knoa_accent">#7DBAA8</color>
+  <color name="knoa_accent_pressed">#96CCBC</color>
+  <color name="knoa_accent_soft">#284038</color>
+  <color name="knoa_accent_faint">#1C3029</color>
+  <color name="knoa_line">#34413C</color>
+  <color name="knoa_line_strong">#485751</color>
+  <color name="knoa_danger">#E59089</color>
+  <color name="knoa_danger_soft">#402825</color>
+  <color name="knoa_warning">#D7A85E</color>
+  <color name="knoa_warning_soft">#3C3323</color>
+  <color name="knoa_stop">#8EAAA1</color>
+  <color name="knoa_stop_soft">#2D3B36</color>
+  <color name="knoa_overlay">#99030705</color>
+</resources>
