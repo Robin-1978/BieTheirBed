@@ -82,6 +82,7 @@ export default function ChatScreen() {
   const params = useLocalSearchParams<{ capturedUri?: string; capturedName?: string }>();
   const list = useRef<FlatList<ChatListItem>>(null);
   const nearBottom = useRef(true);
+  const initialScrollPending = useRef(true);
   const scrollMode = useRef<"none" | "instant" | "animated">("instant");
   const displayedSession = useRef("");
   const draftReady = useRef(false);
@@ -148,11 +149,13 @@ export default function ChatScreen() {
     const sessionHandle = gateway.sessionHandle;
     const previousSession = displayedSession.current;
     displayedSession.current = sessionHandle;
-    const switchedConversation = Boolean(previousSession && previousSession !== sessionHandle);
-    if (!sessionHandle || switchedConversation) {
+    const switchedConversation = previousSession !== sessionHandle;
+    if (switchedConversation) {
       setTurns([]);
       setPendingTurn(null);
       setNextTurnCursor("");
+      initialScrollPending.current = Boolean(sessionHandle);
+      nearBottom.current = true;
       scrollMode.current = "instant";
       turnWatcher.closeAll();
     }
@@ -326,6 +329,7 @@ export default function ChatScreen() {
       error: "",
     };
     scrollMode.current = "animated";
+    nearBottom.current = true;
     setPendingTurn(pending);
     setText("");
     setAttachments([]);
@@ -616,6 +620,13 @@ export default function ChatScreen() {
         keyboardShouldPersistTaps="handled"
         maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
         onContentSizeChange={() => {
+          if (initialScrollPending.current && listItems.length) {
+            initialScrollPending.current = false;
+            nearBottom.current = true;
+            scrollMode.current = "none";
+            requestAnimationFrame(() => list.current?.scrollToEnd({ animated: false }));
+            return;
+          }
           const mode = scrollMode.current;
           if (mode === "none" || !nearBottom.current) return;
           scrollMode.current = "none";
