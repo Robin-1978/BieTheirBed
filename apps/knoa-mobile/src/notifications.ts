@@ -26,11 +26,11 @@ export async function registerPush(client: GatewayClient, requestPermission = fa
   return true;
 }
 
-export async function sendTestNotification(): Promise<void> {
+export async function sendTestNotification(title = "Knoa", body = "Notifications are working on this phone."): Promise<void> {
   await Notifications.scheduleNotificationAsync({
     content: {
-      title: "小诺通知测试",
-      body: "通知已经可以正常送达这台手机。",
+      title,
+      body,
     },
     trigger: null,
   });

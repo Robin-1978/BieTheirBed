@@ -37,12 +37,14 @@ export function ThemeProvider({ children }: PropsWithChildren) {
 
   const setMode = useCallback(async (next: ThemeMode) => {
     setStoredMode(next);
-    // The native preference is applied before React Native starts on the next
-    // launch. Appearance is only changed for an explicit user action so the
-    // current view updates immediately without re-applying the mode during
-    // startup and causing an Activity restart loop.
+    // Android owns Day/Night resources and performs one controlled Activity
+    // recreation. Calling Appearance as well can trigger a second competing
+    // configuration change, so only non-Android platforms use it directly.
+    if (Platform.OS === "android" && nativeTheme) {
+      await nativeTheme.setMode(next);
+      return;
+    }
     Appearance.setColorScheme(next === "system" ? "unspecified" : next);
-    if (Platform.OS === "android" && nativeTheme) await nativeTheme.setMode(next);
   }, []);
 
   const value = useMemo<ThemePreference>(() => ({

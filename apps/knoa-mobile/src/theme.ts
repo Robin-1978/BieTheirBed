@@ -12,7 +12,7 @@ export const colors = {
   surfaceElevated: semanticColor("surface_elevated", "#FFFFFF", "#25302C"),
   surfaceMuted: semanticColor("surface_muted", "#ECE8DF", "#202A26"),
   ink: semanticColor("ink", "#232823", "#F2F0E8"),
-  muted: semanticColor("muted", "#747B73", "#A6ADA8"),
+  muted: semanticColor("muted", "#626A63", "#A6ADA8"),
   accent: semanticColor("accent", "#2F6658", "#7DBAA8"),
   accentPressed: semanticColor("accent_pressed", "#275548", "#96CCBC"),
   accentSoft: semanticColor("accent_soft", "#DCEAE4", "#284038"),

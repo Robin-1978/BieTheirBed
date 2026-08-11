@@ -12,9 +12,11 @@ import {
 } from "react-native";
 
 import { colors } from "@/theme";
+import { useI18n } from "@/i18n";
 
 export default function CaptureScreen() {
   const camera = useRef<CameraView>(null);
+  const { t } = useI18n();
   const [permission, requestPermission] = useCameraPermissions();
   const [working, setWorking] = useState(false);
   const [captured, setCaptured] = useState<{ uri: string; name: string } | null>(null);
@@ -45,14 +47,14 @@ export default function CaptureScreen() {
   if (!permission?.granted) {
     return (
       <View style={styles.permission}>
-        <Text style={styles.permissionText}>需要相机权限才能拍照</Text>
+        <Text style={styles.permissionText}>{t("capture.permission")}</Text>
         {permission && !permission.canAskAgain ? (
           <Pressable style={styles.button} onPress={() => void Linking.openSettings()}>
-            <Text style={styles.buttonText}>打开系统设置</Text>
+            <Text style={styles.buttonText}>{t("pair.openSettings")}</Text>
           </Pressable>
         ) : (
           <Pressable style={styles.button} onPress={() => void requestPermission()}>
-            <Text style={styles.buttonText}>允许相机</Text>
+            <Text style={styles.buttonText}>{t("capture.allow")}</Text>
           </Pressable>
         )}
       </View>
@@ -70,15 +72,15 @@ export default function CaptureScreen() {
         {captured ? (
           <View style={styles.previewActions}>
             <Pressable style={styles.secondaryButton} onPress={() => setCaptured(null)}>
-              <Text style={styles.secondaryText}>重拍</Text>
+              <Text style={styles.secondaryText}>{t("capture.retake")}</Text>
             </Pressable>
             <Pressable style={[styles.button, styles.flexAction]} onPress={usePhoto}>
-              <Text style={styles.buttonText}>使用照片</Text>
+              <Text style={styles.buttonText}>{t("capture.use")}</Text>
             </Pressable>
           </View>
         ) : (
           <Pressable style={styles.button} onPress={() => void capture()} disabled={working}>
-            {working ? <ActivityIndicator color="white" /> : <Text style={styles.buttonText}>拍照</Text>}
+            {working ? <ActivityIndicator color="white" /> : <Text style={styles.buttonText}>{t("capture.take")}</Text>}
           </Pressable>
         )}
       </View>

@@ -21,7 +21,7 @@ export function timelineDisplayEntries(entries: ChatTimelineEntry[]): TimelineDi
         rows.push({
           kind: "tool",
           key,
-          toolName: entry.tool_name || "工具",
+          toolName: entry.tool_name || "Tool",
           state,
         });
       } else {

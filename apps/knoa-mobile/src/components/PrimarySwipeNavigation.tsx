@@ -5,6 +5,7 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   runOnJS,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
   withSpring,
   withTiming,
@@ -28,14 +29,13 @@ function consumeEntryDirection(): -1 | 0 | 1 {
 
 export function PrimarySwipeNavigation({ current, children }: PropsWithChildren<{ current: PrimaryScreen }>) {
   const { width } = useWindowDimensions();
+  const reduceMotion = useReducedMotion();
   const [entryDirection] = useState(consumeEntryDirection);
-  const translateX = useSharedValue(entryDirection * Math.min(width * 0.22, 88));
-  const opacity = useSharedValue(entryDirection ? 0.72 : 1);
+  const translateX = useSharedValue(entryDirection * Math.min(width * 0.14, 52));
 
   useEffect(() => {
-    translateX.value = withTiming(0, { duration: 220 });
-    opacity.value = withTiming(1, { duration: 180 });
-  }, [opacity, translateX]);
+    translateX.value = withTiming(0, { duration: reduceMotion ? 0 : 180 });
+  }, [reduceMotion, translateX]);
 
   const finishNavigation = (target: PrimaryScreen) => navigatePrimary(current, target);
   const gesture = Gesture.Pan()
@@ -45,7 +45,6 @@ export function PrimarySwipeNavigation({ current, children }: PropsWithChildren<
       const allowed = (current === "chat" && event.translationX < 0)
         || (current === "tasks" && event.translationX > 0);
       translateX.value = allowed ? event.translationX : event.translationX * 0.08;
-      opacity.value = allowed ? Math.max(0.82, 1 - Math.abs(event.translationX) / (width * 1.8)) : 1;
     })
     .onEnd((event) => {
       const deliberate = Math.abs(event.translationX) >= 72 || Math.abs(event.velocityX) >= 650;
@@ -55,19 +54,20 @@ export function PrimarySwipeNavigation({ current, children }: PropsWithChildren<
           ? "chat"
           : null;
       if (deliberate && target) {
-        const exit = target === "tasks" ? -width : width;
-        opacity.value = withTiming(0.72, { duration: 170 });
-        translateX.value = withTiming(exit, { duration: 180 }, (finished) => {
+        if (reduceMotion) {
+          runOnJS(finishNavigation)(target);
+          return;
+        }
+        const settle = target === "tasks" ? -Math.min(width * 0.18, 64) : Math.min(width * 0.18, 64);
+        translateX.value = withTiming(settle, { duration: 90 }, (finished) => {
           if (finished) runOnJS(finishNavigation)(target);
         });
         return;
       }
-      opacity.value = withTiming(1, { duration: 120 });
       translateX.value = withSpring(0, { damping: 22, stiffness: 240 });
     });
 
   const animatedStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
     transform: [{ translateX: translateX.value }],
   }));
 

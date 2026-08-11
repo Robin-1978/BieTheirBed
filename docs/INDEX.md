@@ -16,6 +16,7 @@
 - [Knoa Task Product Design](knoa-task-product-design.md)
 - [Knoa Conversation Forward Design](knoa-conversation-design.md)
 - [Knoa Mobile UI Design](knoa-mobile-ui-design.md)
+- [Knoa Mobile Product Polish Plan](knoa-mobile-product-polish-plan.md)
 
 ## Refactoring Planning
 

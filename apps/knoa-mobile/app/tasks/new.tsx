@@ -7,7 +7,6 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   Switch,
   StyleSheet,
@@ -21,9 +20,12 @@ import { colors } from "@/theme";
 import { immediatePolicy, isLaunchPolicyValid, TaskLaunchEditor } from "@/components/TaskLaunchEditor";
 import type { TaskLaunchPolicy } from "@/api/models";
 import { registerPush } from "@/notifications";
+import { useI18n } from "@/i18n";
+import { AppPressable } from "@/components/AppPressable";
 
 export default function NewTaskScreen() {
   const gateway = useGateway();
+  const { t } = useI18n();
   const [title, setTitle] = useState("");
   const [goal, setGoal] = useState("");
   const [saving, setSaving] = useState(false);
@@ -69,12 +71,12 @@ export default function NewTaskScreen() {
         const permission = await Notifications.getPermissionsAsync();
         if (permission.status !== "granted") {
           Alert.alert(
-            "及时知道任务结果",
-            "定时或事件任务会在后台运行。允许通知后，小诺可以在完成、失败或需要确认时提醒你。",
+            t("taskNew.notificationTitle"),
+            t("taskNew.notificationBody"),
             [
-              { text: "稍后", onPress: () => router.replace(`/tasks/${result.task.task_id}`) },
+              { text: t("taskNew.later"), onPress: () => router.replace(`/tasks/${result.task.task_id}`) },
               {
-                text: "启用通知",
+                text: t("taskNew.enableNotifications"),
                 onPress: () => void registerPush(gateway.client!, true)
                   .catch(() => undefined)
                   .finally(() => router.replace(`/tasks/${result.task.task_id}`)),
@@ -86,7 +88,7 @@ export default function NewTaskScreen() {
       }
       router.replace(`/tasks/${result.task.task_id}`);
     } catch {
-      setError("任务创建失败，请检查连接后重试");
+      setError(t("taskNew.createFailed"));
     } finally {
       setSaving(false);
     }
@@ -99,28 +101,28 @@ export default function NewTaskScreen() {
     >
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         {gateway.requiredUpdate ? (
-          <Pressable style={styles.updateRequired} onPress={() => router.replace("/update")}>
-            <Text style={styles.updateRequiredTitle}>需要更新小诺后才能创建任务</Text>
-            <Text style={styles.launchText}>点击前往版本页面下载安装。</Text>
-          </Pressable>
+          <AppPressable style={styles.updateRequired} onPress={() => router.replace("/update")}>
+            <Text style={styles.updateRequiredTitle}>{t("taskNew.updateRequired")}</Text>
+            <Text style={styles.launchText}>{t("taskNew.updateAction")}</Text>
+          </AppPressable>
         ) : null}
         <View style={styles.card}>
-          <Text style={styles.label}>任务名称</Text>
+          <Text style={styles.label}>{t("taskNew.name")}</Text>
           <TextInput
-            accessibilityLabel="任务名称"
+            accessibilityLabel={t("taskNew.name")}
             value={title}
             onChangeText={setTitle}
-            placeholder="可不填，将从目标自动生成"
+            placeholder={t("taskNew.namePlaceholder")}
             placeholderTextColor={colors.muted}
             style={styles.titleInput}
             returnKeyType="next"
           />
-          <Text style={styles.label}>目标</Text>
+          <Text style={styles.label}>{t("taskNew.goal")}</Text>
           <TextInput
-            accessibilityLabel="任务目标"
+            accessibilityLabel={t("taskNew.goal")}
             value={goal}
             onChangeText={setGoal}
-            placeholder="清楚描述小诺需要独立完成什么，以及结果要求"
+            placeholder={t("taskNew.goalPlaceholder")}
             placeholderTextColor={colors.muted}
             multiline
             autoFocus
@@ -129,21 +131,21 @@ export default function NewTaskScreen() {
           />
           <TaskLaunchEditor policy={launchPolicy} onChange={setLaunchPolicy} />
           <View style={styles.notificationCard}>
-            <Text style={styles.launchTitle}>通知我</Text>
-            <Toggle label="任务完成" value={notifyCompleted} onChange={setNotifyCompleted} />
-            <Toggle label="任务失败" value={notifyFailed} onChange={setNotifyFailed} />
-            <Toggle label="需要确认" value={notifyApproval} onChange={setNotifyApproval} />
+            <Text style={styles.launchTitle}>{t("taskNew.notifyMe")}</Text>
+            <Toggle label={t("taskNew.completed")} value={notifyCompleted} onChange={setNotifyCompleted} />
+            <Toggle label={t("taskNew.failed")} value={notifyFailed} onChange={setNotifyFailed} />
+            <Toggle label={t("taskNew.approval")} value={notifyApproval} onChange={setNotifyApproval} />
           </View>
           {error ? <Text style={styles.error}>{error}</Text> : null}
-          <Pressable
+          <AppPressable
             accessibilityRole="button"
-            accessibilityLabel="创建并开始任务"
+            accessibilityLabel={launchPolicy.kind === "immediate" ? t("taskNew.createAndStart") : t("taskNew.create")}
             disabled={!goal.trim() || saving || Boolean(gateway.requiredUpdate) || !isLaunchPolicyValid(launchPolicy)}
             onPress={() => void create()}
             style={[styles.primary, (!goal.trim() || saving || gateway.requiredUpdate || !isLaunchPolicyValid(launchPolicy)) && styles.disabled]}
           >
-            {saving ? <ActivityIndicator color="white" /> : <Text style={styles.primaryText}>{launchPolicy.kind === "immediate" ? "创建并开始" : "创建任务"}</Text>}
-          </Pressable>
+            {saving ? <ActivityIndicator color="white" /> : <Text style={styles.primaryText}>{launchPolicy.kind === "immediate" ? t("taskNew.createAndStart") : t("taskNew.create")}</Text>}
+          </AppPressable>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

@@ -72,12 +72,12 @@ const styles = StyleSheet.create({
     marginRight: 2,
   },
   action: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     justifyContent: "center",
     alignItems: "center",
     borderRadius: 13,
   },
-  tabIcon: { width: 36, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 11 },
+  tabIcon: { width: 38, height: 36, alignItems: "center", justifyContent: "center", borderRadius: 11 },
   selectedTabIcon: { backgroundColor: colors.accentSoft },
 });

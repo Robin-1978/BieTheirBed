@@ -9,19 +9,34 @@ import { Platform } from "react-native";
 
 import type { ResolvedArtifactFile } from "@/api/chatArtifacts";
 
-export async function saveArtifactFile(file: ResolvedArtifactFile): Promise<string> {
+export type SaveArtifactMessages = {
+  saveDialog: string;
+  saveToFile: string;
+  cancelled: string;
+  saved: string;
+};
+
+const DEFAULT_MESSAGES: SaveArtifactMessages = {
+  saveDialog: "保存",
+  saveToFile: "请在系统菜单中选择“存储到文件”",
+  cancelled: "已取消保存",
+  saved: "已保存 {name}",
+};
+
+export async function saveArtifactFile(file: ResolvedArtifactFile, messages: Partial<SaveArtifactMessages> = {}): Promise<string> {
+  const text = { ...DEFAULT_MESSAGES, ...messages };
   if (Platform.OS !== "android") {
     await Sharing.shareAsync(file.uri, {
-      dialogTitle: `保存 ${file.name}`,
+      dialogTitle: `${text.saveDialog} ${file.name}`,
       mimeType: file.mediaType,
     });
-    return "请在系统菜单中选择“存储到文件”";
+    return text.saveToFile;
   }
 
   const permission = await StorageAccessFramework.requestDirectoryPermissionsAsync(
     StorageAccessFramework.getUriForDirectoryInRoot("Download"),
   );
-  if (!permission.granted) return "已取消保存";
+  if (!permission.granted) return text.cancelled;
 
   const targetUri = await StorageAccessFramework.createFileAsync(
     permission.directoryUri,
@@ -30,7 +45,7 @@ export async function saveArtifactFile(file: ResolvedArtifactFile): Promise<stri
   );
   const base64 = await readAsStringAsync(file.uri, { encoding: EncodingType.Base64 });
   await writeAsStringAsync(targetUri, base64, { encoding: EncodingType.Base64 });
-  return `已保存 ${file.name}`;
+  return text.saved.replace("{name}", file.name);
 }
 
 function fileNameWithoutExtension(name: string): string {
