@@ -594,7 +594,7 @@ export default function ChatScreen() {
           >
             {startingTopic
               ? <ActivityIndicator color={colors.accent} size="small" />
-              : <AppIcon name="edit" color={colors.accent} size={20} />}
+              : <AppIcon name="new-topic" color={colors.accent} size={22} />}
           </AppPressable>
           <AppPressable
             accessibilityLabel={t("chat.history")}

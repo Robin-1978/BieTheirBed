@@ -28,9 +28,9 @@ export function HeaderActions({ current }: { current: PrimaryScreen }) {
         accessibilityLabel={t("common.settings")}
         hitSlop={8}
         onPress={() => router.push("/capabilities")}
-        style={styles.action}
+        style={[styles.action, styles.settingsAction]}
       >
-        <AppIcon name="settings" color={colors.ink} size={21} />
+        <AppIcon name="settings" color={colors.accent} size={20} />
       </AppPressable>
     </View>
   );
@@ -78,6 +78,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderRadius: 13,
   },
+  settingsAction: { backgroundColor: colors.accentSoft },
   tabIcon: { width: 36, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 11 },
   selectedTabIcon: { backgroundColor: colors.accentSoft },
 });
