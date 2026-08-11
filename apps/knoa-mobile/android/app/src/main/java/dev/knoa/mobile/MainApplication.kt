@@ -2,6 +2,7 @@ package dev.knoa.mobile
 
 import android.app.Application
 import android.content.res.Configuration
+import androidx.appcompat.app.AppCompatDelegate
 
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
@@ -22,13 +23,14 @@ class MainApplication : Application(), ReactApplication {
       packageList =
         PackageList(this).packages.apply {
           // Packages that cannot be autolinked yet can be added manually here, for example:
-          // add(MyReactNativePackage())
+          add(KnoaThemePackage())
         }
     )
   }
 
   override fun onCreate() {
     super.onCreate()
+    AppCompatDelegate.setDefaultNightMode(appCompatThemeMode(storedThemeMode(this)))
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
       ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())
     } catch (e: IllegalArgumentException) {
