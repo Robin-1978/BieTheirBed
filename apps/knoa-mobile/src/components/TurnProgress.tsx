@@ -1,17 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
-import type { ChatTimelineEntry, ChatTurnSnapshot } from "@/api/models";
+import type { ChatTurnSnapshot } from "@/api/models";
 import { colors } from "@/theme";
+import { timelineDisplayEntries, type TimelineDisplayEntry } from "./turnTimeline";
 
 const TERMINAL_STATES = new Set<ChatTurnSnapshot["state"]>(["completed", "failed", "cancelled"]);
 
 export function TurnProgress({ turn }: { turn: ChatTurnSnapshot }) {
   const active = !TERMINAL_STATES.has(turn.state);
-  const entries = useMemo(
-    () => turn.timeline.filter((entry) => isVisibleEntry(entry)),
-    [turn.timeline],
-  );
+  const entries = useMemo(() => timelineDisplayEntries(turn.timeline), [turn.timeline]);
   const [expanded, setExpanded] = useState(active);
 
   useEffect(() => {
@@ -35,11 +33,8 @@ export function TurnProgress({ turn }: { turn: ChatTurnSnapshot }) {
       </Pressable>
       {expanded && entries.length ? (
         <View style={styles.details}>
-          {entries.map((entry, index) => (
-            <TimelineRow
-              entry={entry}
-              key={`${entry.kind}:${entry.tool_call_id}:${entry.iteration}:${index}`}
-            />
+          {entries.map((entry) => (
+            <TimelineRow entry={entry} key={entry.key} />
           ))}
         </View>
       ) : null}
@@ -47,7 +42,7 @@ export function TurnProgress({ turn }: { turn: ChatTurnSnapshot }) {
   );
 }
 
-function TimelineRow({ entry }: { entry: ChatTimelineEntry }) {
+function TimelineRow({ entry }: { entry: TimelineDisplayEntry }) {
   if (entry.kind === "reasoning") {
     return <Text style={styles.thought}>› {compact(entry.content, 520)}</Text>;
   }
@@ -59,20 +54,15 @@ function TimelineRow({ entry }: { entry: ChatTimelineEntry }) {
       </View>
     );
   }
-  if (entry.kind === "tool_call") {
+  if (entry.kind === "tool") {
     return (
       <View style={styles.toolRow}>
-        <Text style={styles.runningDot}>•</Text>
-        <Text style={styles.toolName}>调用 {entry.tool_name || "工具"}</Text>
-      </View>
-    );
-  }
-  if (entry.kind === "tool_result") {
-    return (
-      <View style={styles.toolRow}>
-        <Text style={entry.blocked ? styles.failed : styles.done}>{entry.blocked ? "!" : "✓"}</Text>
-        <Text style={styles.toolName}>
-          {entry.tool_name || "工具"}{entry.blocked ? " 未完成" : " 已完成"}
+        <Text style={entry.state === "failed" ? styles.failed : entry.state === "completed" ? styles.done : styles.runningDot}>
+          {entry.state === "failed" ? "!" : entry.state === "completed" ? "✓" : "•"}
+        </Text>
+        <Text style={styles.toolName}>{entry.toolName}</Text>
+        <Text style={styles.toolState}>
+          {entry.state === "failed" ? "未完成" : entry.state === "completed" ? "完成" : "进行中"}
         </Text>
       </View>
     );
@@ -80,12 +70,7 @@ function TimelineRow({ entry }: { entry: ChatTimelineEntry }) {
   return <Text style={styles.notice}>{compact(entry.content, 360)}</Text>;
 }
 
-function isVisibleEntry(entry: ChatTimelineEntry): boolean {
-  if (entry.kind === "tool_call" || entry.kind === "tool_result") return true;
-  return Boolean(entry.content.trim());
-}
-
-function progressLabel(turn: ChatTurnSnapshot, entries: ChatTimelineEntry[]): string {
+function progressLabel(turn: ChatTurnSnapshot, entries: TimelineDisplayEntry[]): string {
   if (turn.state === "waiting_approval") return "等待你的确认";
   if (turn.state === "failed") return `执行未完成 · ${entries.length} 步`;
   if (turn.state === "cancelled") return `已停止 · ${entries.length} 步`;
@@ -94,8 +79,11 @@ function progressLabel(turn: ChatTurnSnapshot, entries: ChatTimelineEntry[]): st
   if (!latest) return "正在开始执行";
   if (latest.kind === "reasoning") return "正在分析";
   if (latest.kind === "content") return "正在组织回答";
-  if (latest.kind === "tool_call") return `正在调用 ${latest.tool_name || "工具"}`;
-  if (latest.kind === "tool_result") return `${latest.tool_name || "工具"}已返回，继续处理`;
+  if (latest.kind === "tool") {
+    return latest.state === "running"
+      ? `正在调用 ${latest.toolName}`
+      : `${latest.toolName}${latest.state === "failed" ? "未完成" : "已完成"}，继续处理`;
+  }
   return latest.content.trim() || "正在继续执行";
 }
 
@@ -117,6 +105,7 @@ const styles = StyleSheet.create({
   stepText: { color: colors.ink, fontSize: 13, lineHeight: 19 },
   toolRow: { minHeight: 25, flexDirection: "row", alignItems: "center", gap: 8 },
   toolName: { color: colors.ink, flex: 1, fontSize: 13 },
+  toolState: { color: colors.muted, fontSize: 12 },
   runningDot: { color: colors.accent, fontSize: 20, fontWeight: "900", width: 18, textAlign: "center" },
   done: { color: colors.accent, fontWeight: "800", width: 18, textAlign: "center" },
   failed: { color: colors.danger, fontWeight: "800", width: 18, textAlign: "center" },
