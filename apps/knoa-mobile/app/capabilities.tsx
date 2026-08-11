@@ -53,14 +53,14 @@ export default function CapabilitiesScreen() {
     tools: [],
     audit: [],
   });
-  const [notificationStatus, setNotificationStatus] = useState("检查中");
+  const [notificationStatus, setNotificationStatus] = useState(i18n.t("settings.checking"));
   const [advanced, setAdvanced] = useState(false);
   const [working, setWorking] = useState("");
   const [message, setMessage] = useState("");
 
   const load = useCallback(async () => {
     const permission = await Notifications.getPermissionsAsync();
-    setNotificationStatus(permission.status === "granted" ? "已允许" : "未允许");
+    setNotificationStatus(permission.status === "granted" ? i18n.t("settings.allowed") : i18n.t("settings.notAllowed"));
     if (!gateway.client || !gateway.sessionHandle) return;
     try {
       const [runtime, inventory, deviceAudit] = await gateway.runAuthenticated((client) => Promise.all([
@@ -77,9 +77,9 @@ export default function CapabilitiesScreen() {
         audit: (deviceAudit.events as Array<Record<string, unknown>>) ?? [],
       });
     } catch {
-      setMessage("诊断信息暂时无法读取，连接操作仍可使用");
+      setMessage(i18n.t("settings.diagnosticUnavailable"));
     }
-  }, [gateway.client, gateway.runAuthenticated, gateway.sessionHandle]);
+  }, [gateway.client, gateway.runAuthenticated, gateway.sessionHandle, i18n]);
 
   useEffect(() => {
     void load();
@@ -94,7 +94,7 @@ export default function CapabilitiesScreen() {
       setMessage(success);
       await load();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "操作失败，请稍后重试");
+      setMessage(error instanceof Error ? error.message : i18n.t("settings.operationFailed"));
     } finally {
       setWorking("");
     }
@@ -102,29 +102,29 @@ export default function CapabilitiesScreen() {
 
   function confirmRemoval() {
     Alert.alert(
-      "移除此设备？",
-      "服务端将撤销这台手机的访问权限，并清除本机连接。之后需要重新扫描二维码才能使用。",
+      i18n.t("settings.removeTitle"),
+      i18n.t("settings.removeBody"),
       [
-        { text: "取消", style: "cancel" },
+        { text: i18n.t("settings.cancel"), style: "cancel" },
         {
-          text: "移除设备",
+          text: i18n.t("settings.removeDevice"),
           style: "destructive",
           onPress: () => void runAction("remove", async () => {
             await gateway.removeConnection();
             router.replace("/pair");
-          }, "设备已移除"),
+          }, i18n.t("settings.deviceRemoved")),
         },
       ],
     );
   }
 
   const serviceLabel = gateway.status === "ready"
-    ? "运行正常"
+    ? i18n.t("settings.service.ready")
     : gateway.status === "booting"
-      ? "正在连接"
+      ? i18n.t("settings.service.booting")
       : gateway.status === "error"
-        ? "连接异常"
-        : "尚未配对";
+        ? i18n.t("settings.service.error")
+        : i18n.t("settings.service.unpaired");
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -146,61 +146,61 @@ export default function CapabilitiesScreen() {
         </View>
       </Section>
 
-      <Section title="连接状态">
-        <Metric label="小诺服务" value={serviceLabel} tone={gateway.status === "error" ? "danger" : "normal"} />
-        <Metric label="服务地址" value={gateway.gatewayUrl || "—"} />
-        <Metric label="设备 ID" value={gateway.deviceId || "—"} compact />
-        <Metric label="最近连接" value={formatTime(gateway.lastConnectedAt)} />
+      <Section title={i18n.t("settings.connectionStatus")}>
+        <Metric label={i18n.t("settings.service")} value={serviceLabel} tone={gateway.status === "error" ? "danger" : "normal"} />
+        <Metric label={i18n.t("settings.serviceAddress")} value={gateway.gatewayUrl || "—"} />
+        <Metric label={i18n.t("settings.deviceId")} value={gateway.deviceId || "—"} compact />
+        <Metric label={i18n.t("settings.lastConnected")} value={formatTime(gateway.lastConnectedAt, i18n.locale, i18n.t("settings.never"))} />
         {gateway.error ? <Text style={styles.error}>{gateway.error}</Text> : null}
       </Section>
 
-      <Section title="设备与应用">
-        <Metric label="通知" value={notificationStatus} />
-        <Metric label="应用版本" value={`${Application.nativeApplicationVersion ?? "开发版"} (${Application.nativeBuildVersion ?? "—"})`} />
-        <Metric label="本地身份" value={gateway.deviceId ? "安全存储中" : "无"} />
+      <Section title={i18n.t("settings.deviceAndApp")}>
+        <Metric label={i18n.t("settings.notifications")} value={notificationStatus} />
+        <Metric label={i18n.t("settings.appVersion")} value={`${Application.nativeApplicationVersion ?? i18n.t("settings.development")} (${Application.nativeBuildVersion ?? "—"})`} />
+        <Metric label={i18n.t("settings.localIdentity")} value={gateway.deviceId ? i18n.t("settings.secureStorage") : i18n.t("settings.none")} />
         <Action
-          label="启用或修复通知"
-          detail="先说明用途，再由系统询问权限并注册此设备"
+          label={i18n.t("settings.enableNotifications")}
+          detail={i18n.t("settings.enableNotificationsDetail")}
           busy={working === "notifications"}
           onPress={() => void runAction("notifications", async () => {
-            if (!gateway.client) throw new Error("请先连接小诺");
+            if (!gateway.client) throw new Error(i18n.t("settings.connectFirst"));
             const enabled = await registerPush(gateway.client, true);
             if (!enabled) {
               const permission = await Notifications.getPermissionsAsync();
               if (!permission.canAskAgain) await Linking.openSettings();
-              throw new Error("通知权限尚未允许");
+              throw new Error(i18n.t("settings.notificationsDenied"));
             }
-          }, "通知已启用")}
+          }, i18n.t("settings.notificationsEnabled"))}
         />
         <Action
-          label="发送测试通知"
-          detail="立即在本机显示一条测试消息"
+          label={i18n.t("settings.testNotification")}
+          detail={i18n.t("settings.testNotificationDetail")}
           busy={working === "test-notification"}
-          onPress={() => void runAction("test-notification", sendTestNotification, "测试通知已发送")}
+          onPress={() => void runAction("test-notification", sendTestNotification, i18n.t("settings.testNotificationSent"))}
         />
       </Section>
 
-      <Section title="连接操作">
+      <Section title={i18n.t("settings.connectionActions")}>
         <Action
-          label="重新连接"
-          detail="网络恢复后重新检查服务"
+          label={i18n.t("common.reconnect")}
+          detail={i18n.t("settings.reconnectDetail")}
           busy={working === "reconnect"}
-          onPress={() => void runAction("reconnect", gateway.reconnect, "已重新连接")}
+          onPress={() => void runAction("reconnect", gateway.reconnect, i18n.t("settings.reconnected"))}
         />
         <Action
-          label="重新认证"
-          detail="重新建立安全会话，不改变配对关系"
+          label={i18n.t("settings.reauthenticate")}
+          detail={i18n.t("settings.reauthenticateDetail")}
           busy={working === "reauth"}
-          onPress={() => void runAction("reauth", gateway.reauthenticate, "认证已更新")}
+          onPress={() => void runAction("reauth", gateway.reauthenticate, i18n.t("settings.reauthenticated"))}
         />
         <Action
-          label="重新配对"
-          detail="连接另一台电脑或新的服务"
+          label={i18n.t("settings.repair")}
+          detail={i18n.t("settings.repairDetail")}
           onPress={() => router.push("/pair")}
         />
         <Action
-          label="移除此设备"
-          detail="撤销服务端权限并清除本机连接"
+          label={i18n.t("settings.removeDevice")}
+          detail={i18n.t("settings.removeDeviceDetail")}
           danger
           busy={working === "remove"}
           onPress={confirmRemoval}
@@ -210,45 +210,45 @@ export default function CapabilitiesScreen() {
 
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={advanced ? "收起高级诊断" : "展开高级诊断"}
+        accessibilityLabel={advanced ? i18n.t("settings.collapseAdvanced") : i18n.t("settings.expandAdvanced")}
         style={styles.advancedToggle}
         onPress={() => setAdvanced((value) => !value)}
       >
-        <Text style={styles.advancedTitle}>高级诊断</Text>
-        <Text style={styles.advancedHint}>{advanced ? "收起" : "查看工具、扩展和审计信息"}</Text>
+        <Text style={styles.advancedTitle}>{i18n.t("settings.advanced")}</Text>
+        <Text style={styles.advancedHint}>{advanced ? i18n.t("settings.collapse") : i18n.t("settings.advancedHint")}</Text>
       </Pressable>
 
       {advanced ? (
         <>
-          <Section title="运行统计">
+          <Section title={i18n.t("settings.runtimeStats")}>
             {diagnostic.status ? (
               <>
-                <Metric label="模型调用" value={diagnostic.status.model_calls} />
-                <Metric label="工具调用" value={diagnostic.status.tool_calls} />
+                <Metric label={i18n.t("settings.modelCalls")} value={diagnostic.status.model_calls} />
+                <Metric label={i18n.t("settings.toolCalls")} value={diagnostic.status.tool_calls} />
                 <Metric label="Token" value={diagnostic.status.total_tokens} />
-                <Metric label="缓存 Token" value={diagnostic.status.cached_tokens} />
+                <Metric label={i18n.t("settings.cachedToken")} value={diagnostic.status.cached_tokens} />
               </>
             ) : <ActivityIndicator color={colors.accent} />}
           </Section>
-          <Section title="Skill 与 MCP">
+          <Section title={i18n.t("settings.extensions")}>
             {diagnostic.extensions.length ? diagnostic.extensions.map((extension) => (
               <View key={`${extension.kind}:${extension.extension_id}`} style={styles.item}>
                 <Text style={styles.itemTitle}>{extension.extension_id}</Text>
                 <Text style={styles.meta}>{extension.kind.toUpperCase()} · {extension.state}</Text>
                 {extension.detail ? <Text style={styles.detail}>{extension.detail}</Text> : null}
               </View>
-            )) : <Text style={styles.empty}>没有导入扩展</Text>}
+            )) : <Text style={styles.empty}>{i18n.t("settings.noExtensions")}</Text>}
           </Section>
-          <Section title={`可用工具 · ${diagnostic.tools.length}`}>
+          <Section title={i18n.t("settings.availableTools", { count: diagnostic.tools.length })}>
             {diagnostic.tools.map((tool) => (
               <View key={tool.name} style={styles.item}>
                 <Text style={styles.itemTitle}>{tool.name}</Text>
                 <Text style={styles.meta}>{tool.origin_kind} · {tool.effect} · {tool.risk}</Text>
-                {tool.requires_confirmation ? <Text style={styles.confirm}>执行前需要确认</Text> : null}
+                {tool.requires_confirmation ? <Text style={styles.confirm}>{i18n.t("settings.confirmRequired")}</Text> : null}
               </View>
             ))}
           </Section>
-          <Section title="本设备审计">
+          <Section title={i18n.t("settings.deviceAudit")}>
             {diagnostic.audit.slice(-20).reverse().map((event) => (
               <View key={String(event.event_id)} style={styles.item}>
                 <Text style={styles.itemTitle}>{String(event.event_type)}</Text>
@@ -325,9 +325,9 @@ function Action({ label, detail, onPress, danger = false, busy = false }: { labe
   );
 }
 
-function formatTime(timestamp: number): string {
-  if (!timestamp) return "从未";
-  return new Date(timestamp * 1000).toLocaleString("zh-CN", { hour12: false });
+function formatTime(timestamp: number, locale: string, never: string): string {
+  if (!timestamp) return never;
+  return new Date(timestamp * 1000).toLocaleString(locale, { hour12: false });
 }
 
 const styles = StyleSheet.create({
