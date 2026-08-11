@@ -123,6 +123,66 @@ async def test_schedule_task_infers_one_time_policy() -> None:
 
 
 @pytest.mark.asyncio
+async def test_schedule_task_rejects_six_field_cron_with_actionable_error() -> None:
+    sessions = _Sessions()
+    tasks = _Executions()
+    schedules = _Schedules()
+    tool = ScheduleTaskTool(sessions, tasks, schedules)
+
+    result = await tool.execute_scoped(
+        RuntimeScope(principal_id="personal:owner", session_handle="chat-a"),
+        goal="查询天气后提醒散步",
+        cron="0 30 18 * * *",
+        timezone="Asia/Shanghai",
+    )
+
+    assert result == {
+        "error": (
+            "Invalid cron: expected exactly five fields "
+            "(minute hour day month weekday), with no seconds. "
+            "For 18:30 every day, use '30 18 * * *'."
+        )
+    }
+    assert sessions.calls == []
+    assert schedules.created == []
+    assert tasks.created == []
+
+
+@pytest.mark.asyncio
+async def test_schedule_task_allows_interval_with_first_run_anchor() -> None:
+    sessions = _Sessions()
+    tasks = _Executions()
+    schedules = _Schedules()
+    tool = ScheduleTaskTool(sessions, tasks, schedules)
+
+    result = await tool.execute_scoped(
+        RuntimeScope(principal_id="personal:owner", session_handle="chat-a"),
+        goal="定期整理资料",
+        interval_seconds=3600,
+        run_at=2_000_000_000.0,
+    )
+
+    spec = schedules.created[0][1]["spec"]
+    assert spec.kind is ScheduleKind.INTERVAL
+    assert spec.run_at == 2_000_000_000.0
+    assert spec.interval_seconds == 3600
+    assert result["task_id"] == "task-a"
+
+
+def test_schedule_task_help_documents_five_field_cron() -> None:
+    tool = ScheduleTaskTool(_Sessions(), _Executions(), _Schedules())
+
+    definition = tool.definition()
+
+    assert "exactly five fields" in definition["description"]
+    cron_description = definition["inputSchema"]["properties"]["cron"][
+        "description"
+    ]
+    assert "Do not include seconds" in cron_description
+    assert tool.examples[0]["cron"] == "30 18 * * *"
+
+
+@pytest.mark.asyncio
 async def test_task_tool_lists_public_task_shape() -> None:
     tool = TaskControlTool(_Sessions(), _Executions(), _Schedules(), _Triggers())
 
