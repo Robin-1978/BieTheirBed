@@ -92,19 +92,25 @@ ExecutionAttempt，不向用户暴露。
 Agent 只注入两个紧凑的 Task 工具，内部 Schedule 记录不进入提示词：
 
 - `create_task(title, goal, launch)`：按显式 launch policy 创建 Task；
-- `task(action, task_id)`：统一 list/get/pause/resume/cancel/retry。
+- `task(action, task_id/execution_id)`：统一 list/get/update/pause/resume/archive/
+  restore/delete/execute，以及 Execution 的暂停、恢复、取消、rerun 和删除。
 
 `launch.kind` 支持 `immediate`、`one_time`、`interval` 和 `cron`。所有提供给 Agent
 的工具名、说明、字段描述、示例和错误信息统一使用英语。`schedule_id`、`trigger_id`、
 Occurrence、Launch 和 Attempt 都是 Core 内部实现名，Agent 不应向用户复述。查询和
 控制必须使用公开 `task_id`，不能要求 Agent 先判断底层存储类型。
+Agent 与 App 必须复用同一 Task 生命周期协调层；Task 启停、归档、恢复、修改和删除
+都要同步其内部 Schedule/Trigger。Agent 查询结果返回公开 launch 配置、启动器状态和
+下次执行时间，不返回内部 provider ID。Task 与终态 Execution 删除属于危险操作，
+必须经过用户确认。
 
 ### 3.1 聊天委派
 
 用户明确说“放后台做”“完成后告诉我”时，当前聊天 Agent 创建 Task：
 
-- 一次性工作使用 `immediate`；
-- 周期要求使用 `scheduled`；
+- 立即开始的独立工作使用 `immediate`；
+- 单次未来执行使用 `one_time`；
+- 固定间隔或日历周期分别使用 `interval`、`cron`；
 - 外部条件使用 `event`；
 - 当前对话立即返回任务回执，不等待执行完成。
 

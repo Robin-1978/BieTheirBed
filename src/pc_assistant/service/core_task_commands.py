@@ -6,9 +6,7 @@ from typing import Any
 
 from pc_assistant.agent_runtime.contracts import ArtifactAttachment, RuntimeScope
 from pc_assistant.automation import (
-    ScheduleKind,
     ScheduleService,
-    ScheduleSpec,
     TriggerService,
 )
 from pc_assistant.service.core_api import (
@@ -48,11 +46,8 @@ from pc_assistant.service.core_api import (
     TaskSnapshotMessage,
     UpdateProductTaskRequest,
 )
-from pc_assistant.tasks import (
-    TaskDefinitionState,
-    TaskLaunchKind,
-    TaskService,
-)
+from pc_assistant.service.product_task_lifecycle import ProductTaskLifecycle
+from pc_assistant.tasks import TaskService
 
 Send = Callable[[Any], Awaitable[None]]
 
@@ -65,78 +60,7 @@ class TaskCommandHandler:
         triggers: TriggerService,
     ) -> None:
         self._tasks = tasks
-        self._schedules = schedules
-        self._triggers = triggers
-
-    async def _remove_launch_provider(self, principal: str, task_id: str) -> None:
-        binding = await self._tasks.unbind_launch(principal, task_id)
-        if binding is None:
-            return
-        provider_kind, provider_id = binding
-        if provider_kind == "schedule":
-            await self._schedules.delete(principal, provider_id)
-        elif provider_kind == "event":
-            await self._triggers.delete(principal, provider_id)
-
-    async def _create_launch_provider(
-        self,
-        principal: str,
-        task: Any,
-        client_request_id: str,
-    ) -> None:
-        policy = task.launch_policy
-        if policy.kind is TaskLaunchKind.IMMEDIATE:
-            return
-        scope = RuntimeScope(
-            principal_id=principal,
-            session_handle=task.session_handle,
-        )
-        if policy.kind is TaskLaunchKind.SCHEDULED:
-            if policy.schedule_type is None:
-                raise ValueError("Scheduled Task requires schedule_type")
-            schedule = await self._schedules.create(
-                scope,
-                client_request_id=client_request_id,
-                goal=task.goal,
-                spec=ScheduleSpec(
-                    kind=ScheduleKind(policy.schedule_type),
-                    run_at=policy.run_at,
-                    interval_seconds=policy.interval_seconds,
-                    cron_expression=policy.cron,
-                    timezone=policy.timezone,
-                ),
-                tools_enabled=task.tools_enabled,
-                priority=task.priority,
-            )
-            await self._tasks.bind_launch(
-                principal,
-                task.task_id,
-                provider_kind="schedule",
-                provider_id=schedule.schedule_id,
-            )
-            return
-        trigger = await self._triggers.create(
-            scope,
-            client_request_id=client_request_id,
-            name=task.title,
-            goal=task.goal,
-            tools_enabled=task.tools_enabled,
-            priority=task.priority,
-        )
-        await self._tasks.bind_launch(
-            principal,
-            task.task_id,
-            provider_kind="event",
-            provider_id=trigger.trigger_id,
-        )
-
-    async def _replace_launch_provider(self, principal: str, task: Any) -> None:
-        await self._remove_launch_provider(principal, task.task_id)
-        await self._create_launch_provider(
-            principal,
-            task,
-            f"task-launch:{task.task_id}:r{task.revision}",
-        )
+        self._lifecycle = ProductTaskLifecycle(tasks, schedules, triggers)
 
     async def dispatch(self, principal: str, request: Any, send: Send) -> bool:
         if isinstance(request, CreateTaskRequest):
@@ -188,7 +112,7 @@ class TaskCommandHandler:
                 next_cursor=next_cursor,
             ))
         elif isinstance(request, CreateProductTaskRequest):
-            task, execution = await self._tasks.create_definition(
+            task, execution, _provider = await self._lifecycle.create_definition(
                 RuntimeScope(
                     principal_id=principal,
                     session_handle=request.session_handle,
@@ -207,11 +131,6 @@ class TaskCommandHandler:
                 priority=request.priority,
                 launch_policy=request.launch_policy,
                 notification_policy=request.notification_policy or None,
-            )
-            await self._create_launch_provider(
-                principal,
-                task,
-                f"task-launch:{task.task_id}",
             )
             await send(ProductTaskMessage(
                 request_id=request.request_id,
@@ -257,40 +176,17 @@ class TaskCommandHandler:
                     )
                     for item in request.attachments
                 )
-            task = await self._tasks.update_definition(
+            task = await self._lifecycle.update_definition(
                 principal,
                 request.task_id,
                 **{key: value for key, value in changes.items() if value is not None},
             )
-            if any(value is not None for value in (
-                request.title,
-                request.goal,
-                request.tools_enabled,
-                request.priority,
-                request.launch_policy,
-            )):
-                await self._replace_launch_provider(principal, task)
             await send(ProductTaskMessage(
                 request_id=request.request_id,
                 task=ProductTaskSnapshot.from_record(task),
             ))
         elif isinstance(request, SetProductTaskStateRequest):
-            binding = await self._tasks.launch_binding(principal, request.task_id)
-            if binding is not None:
-                provider_kind, provider_id = binding
-                paused = request.state is not TaskDefinitionState.ACTIVE
-                if provider_kind == "schedule":
-                    if paused:
-                        await self._schedules.pause(principal, provider_id)
-                    else:
-                        await self._schedules.resume(principal, provider_id)
-                elif provider_kind == "event":
-                    await self._triggers.set_paused(
-                        principal,
-                        provider_id,
-                        paused=paused,
-                    )
-            task = await self._tasks.set_definition_state(
+            task = await self._lifecycle.set_definition_state(
                 principal,
                 request.task_id,
                 request.state,
@@ -300,8 +196,7 @@ class TaskCommandHandler:
                 task=ProductTaskSnapshot.from_record(task),
             ))
         elif isinstance(request, DeleteProductTaskRequest):
-            await self._remove_launch_provider(principal, request.task_id)
-            await self._tasks.delete_definition(principal, request.task_id)
+            await self._lifecycle.delete_definition(principal, request.task_id)
             await send(ProductTaskDeletedMessage(
                 request_id=request.request_id,
                 task_id=request.task_id,

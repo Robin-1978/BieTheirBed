@@ -124,6 +124,97 @@ def test_builtin_agent_tool_contracts_are_english_only(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_task_lifecycle_keeps_schedule_and_task_in_sync(
+    tmp_path: Path,
+) -> None:
+    composition = build_core_runtime(
+        _config(tmp_path, service_port=0),
+        provider_factory=_OfflineProvider,
+    )
+    scope = RuntimeScope(
+        principal_id="personal:owner",
+        session_handle="chat-a",
+    )
+    create = composition.registry.get("create_task")
+    task = composition.registry.get("task")
+    assert create is not None
+    assert task is not None
+
+    created = await create.execute_scoped(
+        scope,
+        title="Evening review",
+        goal="Review today's notes.",
+        launch={
+            "kind": "cron",
+            "cron": "30 18 * * *",
+            "timezone": "Asia/Shanghai",
+        },
+    )
+    task_id = created["task_id"]
+    original_binding = await composition.task_service.launch_binding(
+        scope.principal_id,
+        task_id,
+    )
+    assert original_binding is not None
+
+    paused = await task.execute_scoped(
+        scope,
+        action="pause",
+        task_id=task_id,
+    )
+    updated = await task.execute_scoped(
+        scope,
+        action="update",
+        task_id=task_id,
+        launch={
+            "kind": "cron",
+            "cron": "0 19 * * *",
+            "timezone": "Asia/Shanghai",
+        },
+    )
+    replacement_binding = await composition.task_service.launch_binding(
+        scope.principal_id,
+        task_id,
+    )
+
+    assert paused["state"] == "paused"
+    assert paused["launch_state"] == "paused"
+    assert updated["launch"] == {
+        "kind": "cron",
+        "cron": "0 19 * * *",
+        "timezone": "Asia/Shanghai",
+    }
+    assert updated["launch_state"] == "paused"
+    assert replacement_binding is not None
+    assert replacement_binding != original_binding
+    with pytest.raises(LookupError):
+        await composition.schedule_service.get(
+            scope.principal_id,
+            original_binding[1],
+        )
+
+    resumed = await task.execute_scoped(
+        scope,
+        action="resume",
+        task_id=task_id,
+    )
+    deleted = await task.execute_scoped(
+        scope,
+        action="delete",
+        task_id=task_id,
+    )
+
+    assert resumed["state"] == "active"
+    assert resumed["launch_state"] == "active"
+    assert deleted == {"task_id": task_id, "deleted": True}
+    with pytest.raises(LookupError):
+        await composition.schedule_service.get(
+            scope.principal_id,
+            replacement_binding[1],
+        )
+
+
+@pytest.mark.asyncio
 async def test_control_lists_only_principal_profile_tools(tmp_path: Path) -> None:
     composition = build_core_runtime(
         _config(tmp_path, service_port=0),

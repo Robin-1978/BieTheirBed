@@ -108,7 +108,9 @@ task
 
 `create_task(title, goal, launch)` 统一创建 immediate、one_time、interval 和 cron Task，
 不返回 schedule_id。所有 Agent-facing 工具说明、字段描述、示例和错误统一使用英语。
-`task(retry)` 改为对 Execution rerun 或对 Task execute 的明确动作。
+`task` 支持 Task 查询、修改、启停、归档、恢复、删除和立即执行，以及 Execution 的
+控制、rerun 和终态删除。Agent 与 App 复用同一生命周期协调层，确保 Schedule/Trigger
+随 Task 状态和定义同步；删除操作必须确认。
 
 验收：Core client/server、Gateway adapter、OpenAPI 和工具集成测试全部通过。
 

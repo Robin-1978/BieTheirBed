@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Callable
 from typing import Any, Literal, Protocol
 
 from jsonschema import Draft202012Validator
@@ -16,6 +17,8 @@ from pc_assistant.tools.base import (
     ToolPolicy,
 )
 from pc_assistant.tools.registry import ToolRegistry
+
+logger = logging.getLogger(__name__)
 
 
 class ProposedToolCall(ContractModel):
@@ -257,7 +260,7 @@ class ToolStep:
         if self._prepare_execution is not None:
             try:
                 self._prepare_execution(tool_name)
-            except Exception:
+            except Exception:  # noqa: BLE001 - isolate environment preparation failures
                 return self._result(
                     call,
                     "failed",
@@ -288,6 +291,7 @@ class ToolStep:
         except asyncio.CancelledError:
             raise
         except Exception:
+            logger.exception("Tool execution failed: %s", tool_name)
             result = self._result(
                 call,
                 "failed",
