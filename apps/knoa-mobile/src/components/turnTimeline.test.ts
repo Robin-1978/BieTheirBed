@@ -18,6 +18,17 @@ function entry(updates: Partial<ChatTimelineEntry>): ChatTimelineEntry {
 }
 
 describe("timelineDisplayEntries", () => {
+  it("does not repeat the final answer as an execution step", () => {
+    expect(timelineDisplayEntries([
+      entry({ kind: "content", content: "草稿\n最终答案", iteration: 0 }),
+    ], "最终答案")).toEqual([
+      { kind: "content", key: "content:0:0", content: "草稿" },
+    ]);
+    expect(timelineDisplayEntries([
+      entry({ kind: "content", content: "最终答案", iteration: 0 }),
+    ], "最终答案")).toEqual([]);
+  });
+
   it("updates a tool call row in place when its result arrives", () => {
     const rows = timelineDisplayEntries([
       entry({ kind: "reasoning", content: "先分析" }),

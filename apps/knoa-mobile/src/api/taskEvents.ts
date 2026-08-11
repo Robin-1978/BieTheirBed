@@ -60,6 +60,9 @@ export async function subscribeTaskEvents(input: {
   for (const eventType of TASK_EVENT_TYPES) {
     source.addEventListener(eventType, receive);
   }
+  // Some native XHR implementations/proxies omit the custom SSE event field.
+  // The server payload is still valid and the cursor de-duplicates replays.
+  source.addEventListener("message", receive);
   source.addEventListener("error", (event) => {
     input.onError(
       new Error(
