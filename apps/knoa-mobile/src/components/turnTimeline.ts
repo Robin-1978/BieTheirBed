@@ -4,7 +4,7 @@ export type TimelineDisplayEntry =
   | { kind: "reasoning" | "content" | "notice"; key: string; content: string }
   | { kind: "tool"; key: string; toolName: string; state: "running" | "completed" | "failed" };
 
-export function timelineDisplayEntries(entries: ChatTimelineEntry[]): TimelineDisplayEntry[] {
+export function timelineDisplayEntries(entries: ChatTimelineEntry[], finalOutput = ""): TimelineDisplayEntry[] {
   const rows: TimelineDisplayEntry[] = [];
   const toolPositions = new Map<string, number>();
 
@@ -37,7 +37,7 @@ export function timelineDisplayEntries(entries: ChatTimelineEntry[]): TimelineDi
       continue;
     }
 
-    const content = entry.content.trim();
+    const content = withoutFinalDraft(entry.kind, entry.content, finalOutput);
     if (!content) continue;
     rows.push({
       kind: entry.kind === "reasoning" || entry.kind === "content" ? entry.kind : "notice",
@@ -46,4 +46,13 @@ export function timelineDisplayEntries(entries: ChatTimelineEntry[]): TimelineDi
     });
   }
   return rows;
+}
+
+function withoutFinalDraft(kind: string, content: string, finalOutput: string): string {
+  const normalized = content.trim();
+  const final = finalOutput.trim();
+  if (kind !== "content" || !final || !normalized) return normalized;
+  if (normalized === final) return "";
+  if (normalized.endsWith(final)) return normalized.slice(0, -final.length).trim();
+  return normalized;
 }

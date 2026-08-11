@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { ChatTurnSnapshot } from "@/api/models";
@@ -11,12 +11,11 @@ const TERMINAL_STATES = new Set<ChatTurnSnapshot["state"]>(["completed", "failed
 export function TurnProgress({ turn }: { turn: ChatTurnSnapshot }) {
   const { t } = useI18n();
   const active = !TERMINAL_STATES.has(turn.state);
-  const entries = useMemo(() => timelineDisplayEntries(turn.timeline), [turn.timeline]);
-  const [expanded, setExpanded] = useState(active);
-
-  useEffect(() => {
-    if (active) setExpanded(true);
-  }, [active]);
+  const entries = useMemo(
+    () => timelineDisplayEntries(turn.timeline, turn.final_output),
+    [turn.final_output, turn.timeline],
+  );
+  const [expanded, setExpanded] = useState(false);
 
   if (!active && !entries.length) return null;
 

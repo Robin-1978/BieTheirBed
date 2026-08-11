@@ -36,11 +36,12 @@ const ACTIONABLE_EVENTS: Record<string, ActionableEvent | undefined> = {
 const Context = createContext<TaskReminderState | null>(null);
 
 export function TaskReminderProvider({ children }: PropsWithChildren) {
-  const { runAuthenticated, subscribeEvents } = useGateway();
+  const { latestEvent, runAuthenticated, subscribeEvents } = useGateway();
   const [reminders, setReminders] = useState<TaskReminder[]>([]);
   const [activeReminder, setActiveReminder] = useState<TaskReminder | null>(null);
   const processQueueRef = useRef<Promise<void>>(Promise.resolve());
   const appIsActiveRef = useRef(AppState.currentState === "active");
+  const seenEventIdsRef = useRef(new Set<number>());
 
   const replaceAndStore = useCallback((transform: (current: TaskReminder[]) => TaskReminder[]) => {
     setReminders((current) => {
@@ -72,7 +73,7 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
     return () => subscription.remove();
   }, []);
 
-  const processEvent = useCallback(async (feed: PrincipalTaskEvent) => {
+  const processEvent = useCallback(async (feed: PrincipalTaskEvent, attempt = 0): Promise<void> => {
     const actionable = ACTIONABLE_EVENTS[feed.event.event_type];
     if (!actionable) return;
     try {
@@ -99,16 +100,30 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
         Vibration.vibrate(45);
       }
     } catch {
-      // Non-product executions and transient refresh failures do not create reminders.
+      if (attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+        await processEvent(feed, attempt + 1);
+      }
     }
   }, [replaceAndStore, runAuthenticated]);
 
-  useEffect(() => subscribeEvents((feed) => {
+  const enqueueEvent = useCallback((feed: PrincipalTaskEvent) => {
+    if (seenEventIdsRef.current.has(feed.feed_event_id)) return;
+    seenEventIdsRef.current.add(feed.feed_event_id);
+    if (seenEventIdsRef.current.size > 256) {
+      const oldest = seenEventIdsRef.current.values().next().value;
+      if (typeof oldest === "number") seenEventIdsRef.current.delete(oldest);
+    }
     processQueueRef.current = processQueueRef.current.then(
       () => processEvent(feed),
       () => processEvent(feed),
     );
-  }), [processEvent, subscribeEvents]);
+  }, [processEvent]);
+
+  useEffect(() => subscribeEvents(enqueueEvent), [enqueueEvent, subscribeEvents]);
+  useEffect(() => {
+    if (latestEvent) enqueueEvent(latestEvent);
+  }, [enqueueEvent, latestEvent]);
 
   const markRead = useCallback((reminderId: string) => {
     replaceAndStore((current) => markTaskReminderRead(current, reminderId));
