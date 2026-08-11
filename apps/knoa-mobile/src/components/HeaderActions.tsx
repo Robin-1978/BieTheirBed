@@ -1,14 +1,16 @@
 import { router } from "expo-router";
-import { StyleSheet, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { navigatePrimary, type PrimaryScreen } from "@/components/PrimarySwipeNavigation";
 import { useI18n } from "@/i18n";
+import { useTaskReminders } from "@/state/TaskReminderProvider";
 import { colors } from "@/theme";
 
 export function HeaderActions({ current }: { current: PrimaryScreen }) {
   const { t } = useI18n();
+  const { unreadCount } = useTaskReminders();
   return (
     <View style={styles.container}>
       <HeaderTab
@@ -21,6 +23,7 @@ export function HeaderActions({ current }: { current: PrimaryScreen }) {
         icon="tasks"
         label={t("header.tasks")}
         selected={current === "tasks"}
+        badge={unreadCount}
         onPress={() => navigatePrimary(current, "tasks")}
       />
       <AppPressable
@@ -40,11 +43,13 @@ function HeaderTab({
   icon,
   label,
   selected,
+  badge = 0,
   onPress,
 }: {
   icon: "chat" | "tasks";
   label: string;
   selected: boolean;
+  badge?: number;
   onPress(): void;
 }) {
   return (
@@ -59,6 +64,11 @@ function HeaderTab({
     >
       <View style={[styles.tabIcon, selected && styles.selectedTabIcon]}>
         <AppIcon name={icon} color={selected ? colors.accent : colors.muted} size={21} />
+        {badge > 0 ? (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{badge > 9 ? "9+" : badge}</Text>
+          </View>
+        ) : null}
       </View>
     </AppPressable>
   );
@@ -80,4 +90,6 @@ const styles = StyleSheet.create({
   },
   tabIcon: { width: 38, height: 36, alignItems: "center", justifyContent: "center", borderRadius: 11 },
   selectedTabIcon: { backgroundColor: colors.accentSoft },
+  badge: { position: "absolute", right: 1, top: 0, minWidth: 16, height: 16, paddingHorizontal: 3, borderRadius: 8, backgroundColor: colors.danger, alignItems: "center", justifyContent: "center" },
+  badgeText: { color: "white", fontSize: 9, fontWeight: "800" },
 });

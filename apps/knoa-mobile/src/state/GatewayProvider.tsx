@@ -3,10 +3,6 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { GatewayClient, GatewayError } from "@/api/gatewayClient";
 import type { AndroidRelease, PrincipalTaskEvent } from "@/api/models";
 import { subscribeTaskEvents, type TaskEventSubscription } from "@/api/taskEvents";
-import {
-  registerPush,
-  type PushRegistrationResult,
-} from "@/notifications";
 import { authenticateDevice, pairDevice } from "@/security/pairing";
 import {
   clearSession,
@@ -35,9 +31,7 @@ type GatewayState = {
   lastConnectedAt: number;
   requiredUpdate: AndroidRelease | null;
   availableUpdate: AndroidRelease | null;
-  pushRegistration: PushRegistrationResult;
   pair(encoded: string, displayName: string): Promise<void>;
-  publish(event: PrincipalTaskEvent): void;
   reconnect(): Promise<void>;
   reauthenticate(): Promise<void>;
   removeConnection(): Promise<void>;
@@ -47,14 +41,13 @@ type GatewayState = {
   openConversation(sessionHandle: string): Promise<void>;
   connection(): GatewayConnection | null;
   runAuthenticated<T>(operation: (client: GatewayClient) => Promise<T>): Promise<T>;
-  registerNotifications(requestPermission?: boolean): Promise<PushRegistrationResult>;
-  testPush(): Promise<void>;
+  subscribeEvents(listener: (event: PrincipalTaskEvent) => void): () => void;
 };
 
 const Context = createContext<GatewayState | null>(null);
 
 export function GatewayProvider({ children }: React.PropsWithChildren) {
-  type StoredState = Omit<GatewayState, "pair" | "publish" | "reconnect" | "reauthenticate" | "removeConnection" | "newConversation" | "ensureConversation" | "commitConversation" | "openConversation" | "connection" | "runAuthenticated" | "registerNotifications" | "testPush">;
+  type StoredState = Omit<GatewayState, "pair" | "reconnect" | "reauthenticate" | "removeConnection" | "newConversation" | "ensureConversation" | "commitConversation" | "openConversation" | "connection" | "runAuthenticated" | "subscribeEvents">;
   const initialState: StoredState = {
     status: "booting",
     client: null,
@@ -67,13 +60,13 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     lastConnectedAt: 0,
     requiredUpdate: null,
     availableUpdate: null,
-    pushRegistration: { status: "checking", detail: "" },
   };
   const [state, setState] = useState<StoredState>(initialState);
   const stateRef = useRef<StoredState>(initialState);
   const connectionRef = useRef<GatewayConnection | null>(null);
   const authenticationRef = useRef<Promise<GatewayClient> | null>(null);
   const provisionalConversationRef = useRef<Promise<string> | null>(null);
+  const eventListenersRef = useRef(new Set<(event: PrincipalTaskEvent) => void>());
 
   const commit = useCallback((patch: Partial<StoredState>) => {
     const next = { ...stateRef.current, ...patch };
@@ -81,31 +74,9 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     setState(next);
   }, []);
 
-  const registerNotifications = useCallback(async (
-    requestPermission = false,
-  ): Promise<PushRegistrationResult> => {
-    const client = stateRef.current.client;
-    if (!client) {
-      const result: PushRegistrationResult = {
-        status: "server_failed",
-        detail: "Knoa is not connected",
-      };
-      commit({ pushRegistration: result });
-      return result;
-    }
-    commit({ pushRegistration: { status: "checking", detail: "" } });
-    const result = await registerPush(client, requestPermission);
-    commit({ pushRegistration: result });
-    return result;
-  }, [commit]);
-
   const connect = useCallback(async () => {
     provisionalConversationRef.current = null;
-    commit({
-      status: "booting",
-      error: "",
-      pushRegistration: { status: "checking", detail: "" },
-    });
+    commit({ status: "booting", error: "" });
     try {
       const identity = await loadConnectionIdentity();
       if (!identity) {
@@ -149,7 +120,6 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         deviceId: device.deviceId,
         lastConnectedAt: Date.now() / 1000,
       });
-      void registerNotifications();
       void client.latestAndroidRelease()
         .then((release) => commit({
           requiredUpdate: requiresAndroidUpdate(release, installedAndroidVersionCode()) ? release : null,
@@ -162,7 +132,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         error: error instanceof Error ? error.message : "连接失败",
       });
     }
-  }, [commit, registerNotifications]);
+  }, [commit]);
 
   const refreshAuthentication = useCallback(async (): Promise<GatewayClient> => {
     if (authenticationRef.current) return authenticationRef.current;
@@ -183,7 +153,6 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         sessionToken: token,
         error: "",
       });
-      void registerNotifications();
       void client.latestAndroidRelease()
         .then((release) => commit({
           requiredUpdate: requiresAndroidUpdate(release, installedAndroidVersionCode()) ? release : null,
@@ -204,7 +173,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     } finally {
       authenticationRef.current = null;
     }
-  }, [commit, registerNotifications]);
+  }, [commit]);
 
   const runAuthenticated = useCallback(<T,>(
     operation: (client: GatewayClient) => Promise<T>,
@@ -216,9 +185,10 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
 
   const connection = useCallback((): GatewayConnection | null => connectionRef.current, []);
 
-  const testPush = useCallback(async (): Promise<void> => {
-    await runAuthenticated((client) => client.testPush());
-  }, [runAuthenticated]);
+  const subscribeEvents = useCallback((listener: (event: PrincipalTaskEvent) => void) => {
+    eventListenersRef.current.add(listener);
+    return () => eventListenersRef.current.delete(listener);
+  }, []);
 
   useEffect(() => {
     void connect();
@@ -226,21 +196,33 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
 
   useEffect(() => {
     let subscription: TaskEventSubscription | null = null;
+    let cancelled = false;
     if (state.status === "ready") {
       void subscribeTaskEvents({
         gatewayUrl: state.gatewayUrl,
         token: state.sessionToken,
         onEvent: (event) => {
           commit({ latestEvent: event });
+          for (const listener of eventListenersRef.current) {
+            try {
+              listener(event);
+            } catch {
+              // One presentation listener must not interrupt the shared event feed.
+            }
+          }
         },
         onError: () => {
           void runAuthenticated((client) => client.gatewaySession()).catch(() => undefined);
         },
       }).then((active) => {
-        subscription = active;
+        if (cancelled) active.close();
+        else subscription = active;
       });
     }
-    return () => subscription?.close();
+    return () => {
+      cancelled = true;
+      subscription?.close();
+    };
   }, [commit, runAuthenticated, state.gatewayUrl, state.sessionToken, state.status]);
 
   const pair = useCallback(async (encoded: string, displayName: string) => {
@@ -277,7 +259,6 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       lastConnectedAt: 0,
       requiredUpdate: null,
       availableUpdate: null,
-      pushRegistration: { status: "checking", detail: "" },
     });
   }, [commit]);
 
@@ -319,15 +300,10 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     commit({ sessionHandle, latestEvent: null });
   }, [commit, runAuthenticated]);
 
-  const publish = useCallback((event: PrincipalTaskEvent) => {
-    commit({ latestEvent: event });
-  }, [commit]);
-
   const value = useMemo<GatewayState>(
     () => ({
       ...state,
       pair,
-      publish,
       reconnect: connect,
       reauthenticate,
       removeConnection,
@@ -337,10 +313,9 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       openConversation,
       connection,
       runAuthenticated,
-      registerNotifications,
-      testPush,
+      subscribeEvents,
     }),
-    [commitConversation, connect, connection, ensureConversation, newConversation, openConversation, pair, publish, reauthenticate, registerNotifications, removeConnection, runAuthenticated, state, testPush],
+    [commitConversation, connect, connection, ensureConversation, newConversation, openConversation, pair, reauthenticate, removeConnection, runAuthenticated, state, subscribeEvents],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

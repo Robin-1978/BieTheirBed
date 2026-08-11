@@ -1,10 +1,8 @@
 import { router } from "expo-router";
-import * as Notifications from "expo-notifications";
 import * as Crypto from "expo-crypto";
 import { useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -66,27 +64,6 @@ export default function NewTaskScreen() {
         ...input,
         clientRequestId: requestIdentity.current!.requestId,
       }));
-      if (launchPolicy.kind !== "immediate" && gateway.client) {
-        const permission = await Notifications.getPermissionsAsync();
-        if (
-          permission.status !== "granted"
-          || gateway.pushRegistration.status !== "registered"
-        ) {
-          Alert.alert(
-            t("taskNew.notificationTitle"),
-            t("taskNew.notificationBody"),
-            [
-              { text: t("taskNew.later"), onPress: () => router.replace(`/tasks/${result.task.task_id}`) },
-              {
-                text: t("taskNew.enableNotifications"),
-                onPress: () => void gateway.registerNotifications(true)
-                  .finally(() => router.replace(`/tasks/${result.task.task_id}`)),
-              },
-            ],
-          );
-          return;
-        }
-      }
       router.replace(`/tasks/${result.task.task_id}`);
     } catch {
       setError(t("taskNew.createFailed"));

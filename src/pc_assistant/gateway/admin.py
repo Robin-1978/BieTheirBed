@@ -1,14 +1,13 @@
 """Local owner administration for Secure Gateway pairing and devices."""
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import sys
+from datetime import UTC, datetime
 
 from pc_assistant.config import load_config
 from pc_assistant.gateway.audit import GatewayAuditRepository
 from pc_assistant.gateway.identity import GatewayIdentityRepository
 from pc_assistant.gateway.pairing import GatewayPairingPayload
-from pc_assistant.gateway.push import GatewayPushRepository
 from pc_assistant.runtime import RuntimePaths
 
 
@@ -26,7 +25,6 @@ def run_gateway_admin(
     database = RuntimePaths.from_root(config.runtime_root).data / "gateway.db"
     identities = GatewayIdentityRepository(database)
     audit = GatewayAuditRepository(database)
-    push = GatewayPushRepository(database)
 
     try:
         if action == "pair":
@@ -63,7 +61,6 @@ def run_gateway_admin(
 
         if action == "revoke":
             device = identities.revoke_device(principal, device_id)
-            push.unregister(device.principal_id, device.device_id)
             audit.append(
                 "revoked",
                 device_id=device.device_id,

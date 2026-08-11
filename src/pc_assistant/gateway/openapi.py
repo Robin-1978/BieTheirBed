@@ -38,9 +38,6 @@ from pc_assistant.gateway.protocol import (
     ProductTaskExecutionResponse,
     ProductTaskListResponse,
     ProductTaskResponse,
-    PushRegistrationResponse,
-    PushTestResponse,
-    RegisterPushRequest,
     ResolveApprovalRequest,
     ResumeTaskRequest,
     RuntimeStatusResponse,
@@ -82,9 +79,6 @@ _MODELS: tuple[type[BaseModel], ...] = (
     DeviceRevokedResponse,
     CancelTaskRequest,
     PauseTaskRequest,
-    RegisterPushRequest,
-    PushRegistrationResponse,
-    PushTestResponse,
     ResumeTaskRequest,
     TaskEventListResponse,
     ResolveApprovalRequest,
@@ -881,55 +875,6 @@ def gateway_openapi_schema() -> dict[str, Any]:
                         **_errors("401", "404", "429"),
                     },
                 }
-            },
-            "/v1/device/push": {
-                "get": {
-                    "operationId": "getDevicePushRegistration",
-                    "security": bearer,
-                    "responses": {
-                        "200": _json_response(
-                            "Current Push registration",
-                            PushRegistrationResponse,
-                        ),
-                        **_errors("401", "429"),
-                    },
-                },
-                "put": {
-                    "operationId": "registerDevicePush",
-                    "security": bearer,
-                    "requestBody": _json_body(RegisterPushRequest),
-                    "responses": {
-                        "200": _json_response(
-                            "Push registration",
-                            PushRegistrationResponse,
-                        ),
-                        **_errors("400", "401", "415", "429"),
-                    },
-                },
-                "delete": {
-                    "operationId": "unregisterDevicePush",
-                    "security": bearer,
-                    "responses": {
-                        "200": _json_response(
-                            "Push registration removed",
-                            PushRegistrationResponse,
-                        ),
-                        **_errors("401", "429"),
-                    },
-                },
-            },
-            "/v1/device/push/test": {
-                "post": {
-                    "operationId": "testDevicePush",
-                    "security": bearer,
-                    "responses": {
-                        "200": _json_response(
-                            "Push test accepted by provider",
-                            PushTestResponse,
-                        ),
-                        **_errors("401", "409", "429", "502"),
-                    },
-                },
             },
         },
         "components": {

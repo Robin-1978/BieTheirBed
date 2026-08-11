@@ -1,28 +1,27 @@
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect } from "react";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { HeaderActions } from "@/components/HeaderActions";
-import { installNotificationNavigation } from "@/notifications";
+import { TaskReminderBanner } from "@/components/TaskReminderBanner";
 import { I18nProvider, useI18n } from "@/i18n";
 import { GatewayProvider } from "@/state/GatewayProvider";
+import { TaskReminderProvider } from "@/state/TaskReminderProvider";
 import { ThemeProvider, useThemePreference } from "@/state/ThemeProvider";
 import { colors } from "@/theme";
 
 export default function RootLayout() {
-  useEffect(() => {
-    const subscription = installNotificationNavigation();
-    return () => subscription.remove();
-  }, []);
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <KeyboardProvider>
         <I18nProvider>
           <ThemeProvider>
             <GatewayProvider>
-              <AppNavigator />
+              <TaskReminderProvider>
+                <AppNavigator />
+                <TaskReminderBanner />
+              </TaskReminderProvider>
             </GatewayProvider>
           </ThemeProvider>
         </I18nProvider>

@@ -23,12 +23,6 @@ from pc_assistant.gateway.http import GatewayHttp
 from pc_assistant.gateway.identity import (
     GatewayIdentityRepository,
 )
-from pc_assistant.gateway.push import (
-    ExpoPushTransport,
-    GatewayPushDispatcher,
-    GatewayPushRepository,
-    PushTransport,
-)
 from pc_assistant.gateway.releases import AndroidReleaseRepository
 from pc_assistant.gateway.routes import (
     ArtifactRoutes,
@@ -87,8 +81,6 @@ class SecureGatewayAdapter(
         core: GatewayCoreBridge | None = None,
         limiter: _WindowLimiter | None = None,
         audit: GatewayAuditRepository | None = None,
-        push_repository: GatewayPushRepository | None = None,
-        push_transport: PushTransport | None = None,
         release_repository: AndroidReleaseRepository | None = None,
         event_heartbeat_seconds: float = 15.0,
     ) -> None:
@@ -120,13 +112,6 @@ class SecureGatewayAdapter(
         self._authentication = authentication
         self._audit = audit or GatewayAuditRepository(database)
         self._core = core or GatewayCoreBridge(config)
-        self._push_repository = push_repository or GatewayPushRepository(database)
-        self._push_dispatcher = GatewayPushDispatcher(
-            config.owner_principal_id,
-            self._core,
-            self._push_repository,
-            push_transport or ExpoPushTransport(),
-        )
         self._releases = release_repository or AndroidReleaseRepository(
             RuntimePaths.from_root(config.runtime_root).data
             / "mobile-releases"
@@ -285,16 +270,6 @@ class SecureGatewayAdapter(
                 Route("/v1/device/audit", self._device_audit, methods=["GET"]),
                 Route("/v1/device", self._device, methods=["DELETE"]),
                 Route(
-                    "/v1/device/push",
-                    self._device_push,
-                    methods=["GET", "PUT", "DELETE"],
-                ),
-                Route(
-                    "/v1/device/push/test",
-                    self._device_push_test,
-                    methods=["POST"],
-                ),
-                Route(
                     "/v1/approvals/{approval_id:str}/resolve",
                     self._resolve_approval,
                     methods=["POST"],
@@ -339,7 +314,6 @@ class SecureGatewayAdapter(
                         self._config.gateway_host,
                         self.bound_port,
                     )
-                    self._push_dispatcher.start()
                     return
                 if task.done():
                     await task
@@ -351,7 +325,6 @@ class SecureGatewayAdapter(
             raise
 
     async def stop(self) -> None:
-        await self._push_dispatcher.stop()
         server, self._server = self._server, None
         task, self._server_task = self._server_task, None
         if server is not None:

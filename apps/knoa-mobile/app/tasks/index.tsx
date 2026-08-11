@@ -15,12 +15,14 @@ import { AppPressable } from "@/components/AppPressable";
 import { PrimarySwipeNavigation } from "@/components/PrimarySwipeNavigation";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
+import { useTaskReminders } from "@/state/TaskReminderProvider";
 import { colors } from "@/theme";
 
 type Filter = "current" | TaskDefinitionState;
 
 export default function TasksScreen() {
   const gateway = useGateway();
+  const { markAllRead } = useTaskReminders();
   const { t } = useI18n();
   const filters: Array<{ label: string; value: Filter }> = [
     { label: t("tasks.filter.current"), value: "current" },
@@ -53,6 +55,7 @@ export default function TasksScreen() {
   }, [gateway.client, gateway.runAuthenticated, t]);
 
   useEffect(() => { void refresh(); }, [refresh, gateway.latestEvent]);
+  useEffect(() => markAllRead(), [markAllRead]);
 
   const visibleTasks = useMemo(
     () => tasks.filter((task) => filter === "current" ? task.state !== "archived" : task.state === filter),

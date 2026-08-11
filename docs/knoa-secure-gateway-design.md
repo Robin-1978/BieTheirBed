@@ -213,7 +213,7 @@ Gateway device record and are never sent to Core.
 
 ### D4 — mobile delivery
 
-- Push routing;
+- in-App Task reminder routing over the existing SSE feed;
 - configured App/Universal Links;
 - Flutter client generated from the Gateway/Core schemas;
 - task list/detail, approval and Artifact workflows.
@@ -225,17 +225,16 @@ Gateway device record and are never sent to Core.
 > so cold-started clients can reconstruct timelines and pending approvals without
 > relying on transient connection state.
 
-> Gateway-owned Push registration and delivery are now implemented. Devices can
-> register or remove only their own Expo token; the dispatcher consumes the
-> standard principal Task event feed with a persisted cursor and emits only
-> approval and terminal notifications containing opaque Task/approval IDs.
-> Device revocation also removes its Push registration. Provider tokens and
-> delivery logic never enter Core.
+> The mobile workbench now handles Task reminders locally: while the App is open,
+> it consumes the standard principal Task event feed and shows completion,
+> failure and approval banners; the durable SSE cursor replays events missed
+> while the App was closed. No remote provider token, delivery dispatcher or
+> Gateway notification table is needed.
 
 ## 9. Non-goals
 
 - exposing the current loopback Core port to the internet;
-- putting device tables or Push tokens in Core;
+- putting device tables or remote-notification tokens in Core;
 - trusting a six-digit pairing code as the sole secret;
 - bearer credentials without expiration and revocation checks;
 - storing mobile private keys on the service;

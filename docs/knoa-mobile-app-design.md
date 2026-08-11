@@ -100,8 +100,8 @@ compatible fixes rather than forcing an unverified major downgrade or override.
 - Runtime token/tool counts, Skill/MCP state, Tool inventory and current-device
   audit view;
 - `knoa://tasks/<task-id>` route shape through file-based mobile navigation;
-- Expo Push registration, standard approval/terminal notifications and
-  notification-to-Task navigation using opaque IDs only;
+- local in-App reminders for standard approval/terminal events, replay after
+  reconnect, unread Task badge and reminder-to-execution navigation;
 - native audio recording routed through Artifact upload and the configured Core
   transcription capability; camera capture returns immediately to the chat
   composer as a pending attachment and uploads only when the message is sent;
@@ -116,5 +116,6 @@ compatible fixes rather than forcing an unverified major downgrade or override.
 2. Offline Task snapshot cache and explicit reconnect diagnostics.
 3. Owner-signed Android APK build automation and real-device update validation.
 
-Push tokens, provider credentials and delivery audit remain Gateway-owned. Core
-events remain provider-neutral and contain no mobile links.
+Task reminder state remains device-local. The App consumes the existing durable
+SSE feed and requires no Push token, provider credential, delivery worker or
+Gateway notification table. Core events remain provider-neutral.

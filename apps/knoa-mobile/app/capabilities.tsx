@@ -1,6 +1,4 @@
 import * as Application from "expo-application";
-import * as Notifications from "expo-notifications";
-import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -17,10 +15,7 @@ import { AppIcon } from "@/components/AppIcon";
 import { useI18n, type LanguageMode } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { useThemePreference, type ThemeMode } from "@/state/ThemeProvider";
-import type { PushRegistrationStatus } from "@/notifications";
 import { colors } from "@/theme";
-
-type Translate = ReturnType<typeof useI18n>["t"];
 
 type Extension = {
   extension_id: string;
@@ -55,14 +50,11 @@ export default function CapabilitiesScreen() {
     tools: [],
     audit: [],
   });
-  const [notificationStatus, setNotificationStatus] = useState(i18n.t("settings.checking"));
   const [advanced, setAdvanced] = useState(false);
   const [working, setWorking] = useState("");
   const [message, setMessage] = useState("");
 
   const load = useCallback(async () => {
-    const permission = await Notifications.getPermissionsAsync();
-    setNotificationStatus(permission.status === "granted" ? i18n.t("settings.allowed") : i18n.t("settings.notAllowed"));
     if (!gateway.client || !gateway.sessionHandle) return;
     try {
       const [runtime, inventory, deviceAudit] = await gateway.runAuthenticated((client) => Promise.all([
@@ -127,10 +119,6 @@ export default function CapabilitiesScreen() {
       : gateway.status === "error"
         ? i18n.t("settings.service.error")
         : i18n.t("settings.service.unpaired");
-  const pushStatusLabel = pushRegistrationLabel(
-    gateway.pushRegistration.status,
-    i18n.t,
-  );
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -161,40 +149,8 @@ export default function CapabilitiesScreen() {
       </Section>
 
       <Section title={i18n.t("settings.deviceAndApp")}>
-        <Metric label={i18n.t("settings.notificationPermission")} value={notificationStatus} />
-        <Metric
-          label={i18n.t("settings.pushRegistration")}
-          value={pushStatusLabel}
-          tone={gateway.pushRegistration.status === "server_failed" || gateway.pushRegistration.status === "token_failed" ? "danger" : "normal"}
-        />
         <Metric label={i18n.t("settings.appVersion")} value={`${Application.nativeApplicationVersion ?? i18n.t("settings.development")} (${Application.nativeBuildVersion ?? "—"})`} />
         <Metric label={i18n.t("settings.localIdentity")} value={gateway.deviceId ? i18n.t("settings.secureStorage") : i18n.t("settings.none")} />
-        <Action
-          label={i18n.t("settings.enableNotifications")}
-          detail={i18n.t("settings.enableNotificationsDetail")}
-          busy={working === "notifications"}
-          onPress={() => void runAction("notifications", async () => {
-            if (!gateway.client) throw new Error(i18n.t("settings.connectFirst"));
-            const result = await gateway.registerNotifications(true);
-            if (result.status === "permission_denied") {
-              const permission = await Notifications.getPermissionsAsync();
-              if (!permission.canAskAgain) await Linking.openSettings();
-            }
-            if (result.status !== "registered") {
-              throw new Error(pushRegistrationLabel(result.status, i18n.t));
-            }
-          }, i18n.t("settings.notificationsEnabled"))}
-        />
-        <Action
-          label={i18n.t("settings.testNotification")}
-          detail={i18n.t("settings.testNotificationDetail")}
-          busy={working === "test-notification"}
-          onPress={() => void runAction(
-            "test-notification",
-            gateway.testPush,
-            i18n.t("settings.testNotificationSent"),
-          )}
-        />
       </Section>
 
       <Section title={i18n.t("settings.connectionActions")}>
@@ -277,21 +233,6 @@ export default function CapabilitiesScreen() {
       ) : null}
     </ScrollView>
   );
-}
-
-function pushRegistrationLabel(
-  status: PushRegistrationStatus,
-  translate: Translate,
-): string {
-  const keys: Record<PushRegistrationStatus, Parameters<Translate>[0]> = {
-    checking: "settings.push.checking",
-    registered: "settings.push.registered",
-    not_configured: "settings.push.notConfigured",
-    permission_denied: "settings.push.permissionDenied",
-    token_failed: "settings.push.tokenFailed",
-    server_failed: "settings.push.serverFailed",
-  };
-  return translate(keys[status]);
 }
 
 function LanguageChoice({ label, mode, selected, onPress }: { label: string; mode: LanguageMode; selected: boolean; onPress(mode: LanguageMode): Promise<void> }) {
