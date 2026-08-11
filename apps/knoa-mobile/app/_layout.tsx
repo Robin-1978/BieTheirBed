@@ -1,7 +1,6 @@
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
-import { useColorScheme } from "react-native";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
@@ -9,7 +8,7 @@ import { HeaderActions } from "@/components/HeaderActions";
 import { installNotificationNavigation } from "@/notifications";
 import { I18nProvider, useI18n } from "@/i18n";
 import { GatewayProvider } from "@/state/GatewayProvider";
-import { ThemeProvider } from "@/state/ThemeProvider";
+import { ThemeProvider, useThemePreference } from "@/state/ThemeProvider";
 import { colors } from "@/theme";
 
 export default function RootLayout() {
@@ -33,7 +32,7 @@ export default function RootLayout() {
 }
 
 function AppNavigator() {
-  const scheme = useColorScheme();
+  const { resolved: scheme } = useThemePreference();
   const { t } = useI18n();
   return (
     <>
