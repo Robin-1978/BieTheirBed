@@ -5,19 +5,21 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 
-import type { ChatArtifact, TaskApproval, TaskExecution, TaskTraceEntry } from "@/api/models";
+import type { ChatArtifact, TaskApproval, TaskExecution } from "@/api/models";
 import type { ResolvedArtifactFile } from "@/api/chatArtifacts";
 import { saveArtifactFile } from "@/api/saveArtifactFile";
 import { AppPressable } from "@/components/AppPressable";
+import { AppIcon } from "@/components/AppIcon";
 import { AppMarkdown } from "@/components/AppMarkdown";
 import { ArtifactViewer } from "@/components/ArtifactViewer";
+import { mergeTaskTimeline, type TaskTimelineItem } from "@/components/taskTimeline";
+import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
@@ -25,6 +27,7 @@ export default function TaskExecutionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const executionId = String(id ?? "");
   const gateway = useGateway();
+  const { t } = useI18n();
   const [execution, setExecution] = useState<TaskExecution | null>(null);
   const [imagePreview, setImagePreview] = useState<ResolvedArtifactFile | null>(null);
   const [working, setWorking] = useState("");
@@ -32,6 +35,7 @@ export default function TaskExecutionDetailScreen() {
   const [artifactWorking, setArtifactWorking] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [technicalExpanded, setTechnicalExpanded] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!gateway.client || !executionId) return;
@@ -40,9 +44,9 @@ export default function TaskExecutionDetailScreen() {
       const snapshot = await gateway.runAuthenticated((client) => client.getTaskExecution(executionId));
       setExecution(snapshot);
     } catch {
-      setError("执行详情加载失败，请稍后重试");
+      setError(t("execution.loadFailed"));
     }
-  }, [executionId, gateway.client, gateway.runAuthenticated]);
+  }, [executionId, gateway.client, gateway.runAuthenticated, t]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -57,10 +61,10 @@ export default function TaskExecutionDetailScreen() {
     [execution?.approvals],
   );
   const timeline = useMemo(
-    () => (execution?.trace?.entries ?? []).filter(
+    () => mergeTaskTimeline((execution?.trace?.entries ?? []).filter(
       (entry) => entry.entry_type !== "final_output"
         && (entry.entry_type !== "content" || !execution?.final_result),
-    ),
+    )),
     [execution?.final_result, execution?.trace?.entries],
   );
 
@@ -76,7 +80,7 @@ export default function TaskExecutionDetailScreen() {
       }
       await refresh();
     } catch {
-      setError("操作失败，请刷新状态后重试");
+      setError(t("execution.operationFailed"));
     } finally {
       setWorking("");
     }
@@ -98,14 +102,19 @@ export default function TaskExecutionDetailScreen() {
       file.write(downloaded.bytes);
       const resolved = { uri: file.uri, name: downloaded.name, mediaType: downloaded.mediaType };
       if (action === "save") {
-        setMessage(await saveArtifactFile(resolved));
+        setMessage(await saveArtifactFile(resolved, {
+          saveDialog: t("artifact.save"),
+          saveToFile: t("artifact.saveToFile"),
+          cancelled: t("artifact.saveCancelled"),
+          saved: t("artifact.savedFile"),
+        }));
       } else if (downloaded.mediaType.startsWith("image/")) {
         setImagePreview(resolved);
       } else {
         await Sharing.shareAsync(file.uri, { mimeType: downloaded.mediaType });
       }
     } catch {
-      setError(action === "save" ? "附件保存失败，请重试" : "附件暂时无法打开，请重试");
+      setError(action === "save" ? t("execution.saveFailed") : t("execution.openFailed"));
     } finally {
       setArtifactWorking("");
     }
@@ -113,9 +122,9 @@ export default function TaskExecutionDetailScreen() {
 
   function confirmDelete() {
     if (!execution || !isTerminal(execution.state)) return;
-    Alert.alert("删除这次执行记录？", "任务本身和其他执行记录不会受影响。", [
-      { text: "取消", style: "cancel" },
-      { text: "删除", style: "destructive", onPress: () => void deleteExecution() },
+    Alert.alert(t("execution.deleteTitle"), t("execution.deleteBody"), [
+      { text: t("common.cancel"), style: "cancel" },
+      { text: t("common.delete"), style: "destructive", onPress: () => void deleteExecution() },
     ]);
   }
 
@@ -126,7 +135,7 @@ export default function TaskExecutionDetailScreen() {
       await gateway.runAuthenticated((client) => client.deleteTaskExecution(execution.execution_id));
       router.replace(`/tasks/${execution.task_id}`);
     } catch {
-      setError("执行记录删除失败，请重试");
+      setError(t("execution.deleteFailed"));
       setWorking("");
     }
   }
@@ -135,7 +144,7 @@ export default function TaskExecutionDetailScreen() {
   if (!execution) return (
     <View style={styles.loading}>
       <Text style={styles.error}>{error}</Text>
-      <Pressable onPress={() => void refresh()}><Text style={styles.link}>重新加载</Text></Pressable>
+      <AppPressable onPress={() => void refresh()}><Text style={styles.link}>{t("tasks.reload")}</Text></AppPressable>
     </View>
   );
 
@@ -143,12 +152,11 @@ export default function TaskExecutionDetailScreen() {
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.summary}>
         <View style={styles.summaryHeader}>
-          <Text style={styles.reason}>{launchReasonLabel(execution.launch_reason)}</Text>
-          <Text style={styles.state}>{stateLabel(execution.state)}</Text>
+          <Text style={styles.reason}>{launchReasonLabel(execution.launch_reason, t)}</Text>
+          <Text style={styles.state}>{stateLabel(execution.state, t)}</Text>
         </View>
         <Text style={styles.goal}>{execution.goal_snapshot}</Text>
-        {execution.phase ? <Text style={styles.phase}>{execution.phase}</Text> : null}
-        <Text style={styles.snapshot}>基于任务版本 {execution.task_revision} 的不可变快照</Text>
+        <Text style={styles.snapshot}>{formatExecutionTime(execution.created_at, t("execution.started"))}</Text>
       </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -158,23 +166,23 @@ export default function TaskExecutionDetailScreen() {
         <View style={styles.final}><AppMarkdown value={execution.final_result} style={styles.markdown} /></View>
       ) : null}
       {execution.failure_code ? (
-        <View style={styles.failure}><Text style={styles.failureTitle}>本次执行未完成</Text><Text style={styles.failureText}>{execution.failure_code}</Text></View>
+        <View style={styles.failure}><Text style={styles.failureTitle}>{t("execution.incomplete")}</Text><Text style={styles.failureText}>{t("execution.incompleteHelp")}</Text></View>
       ) : null}
 
       {approvals.map((approval, index) => (
         <View key={approval.approval_id} style={styles.approval}>
-          <Text style={styles.approvalTitle}>需要你的确认{approvals.length > 1 ? ` · ${index + 1}/${approvals.length}` : ""}</Text>
+          <Text style={styles.approvalTitle}>{t("execution.approvalTitle")}{approvals.length > 1 ? ` · ${index + 1}/${approvals.length}` : ""}</Text>
           <Text style={styles.tool}>{approval.tool_name}</Text>
-          <ApprovalDetails approval={approval} />
+          <ApprovalDetails approval={approval} showArguments={technicalExpanded} t={t} />
           <View style={styles.row}>
             <Action
-              label="取消"
+              label={t("common.cancel")}
               onPress={() => void resolveApproval(approval, false)}
               disabled={Boolean(working || resolvingApproval)}
               busy={resolvingApproval?.id === approval.approval_id && resolvingApproval.approved === false}
             />
             <Action
-              label="确认"
+              label={t("execution.confirm")}
               primary
               onPress={() => void resolveApproval(approval, true)}
               disabled={Boolean(working || resolvingApproval)}
@@ -186,13 +194,14 @@ export default function TaskExecutionDetailScreen() {
 
       {timeline.length ? (
         <View style={styles.timeline}>
-          <Text style={styles.sectionTitle}>关键步骤</Text>
-          {timeline.map((entry, index) => (
+          <Text style={styles.sectionTitle}>{t("execution.steps")}</Text>
+          {timeline.map((entry) => (
             <TraceEntry
-              key={`${entry.entry_type}:${entry.occurred_at}:${index}`}
+              key={entry.key}
               entry={entry}
               artifactWorking={artifactWorking}
               onArtifact={(artifact, action) => void openArtifact(artifact, action)}
+              t={t}
             />
           ))}
         </View>
@@ -201,22 +210,41 @@ export default function TaskExecutionDetailScreen() {
       <View style={styles.row}>
         {execution.state === "running" || execution.state === "waiting_approval" || execution.state === "queued" ? (
           <>
-            <Action label="暂停" onPress={() => void command("pause")} disabled={Boolean(working)} busy={working === "pause"} />
-            <Action label="停止" danger onPress={() => void command("cancel")} disabled={Boolean(working)} busy={working === "cancel"} />
+            <Action label={t("execution.pause")} onPress={() => void command("pause")} disabled={Boolean(working)} busy={working === "pause"} />
+            <Action label={t("execution.stop")} danger onPress={() => void command("cancel")} disabled={Boolean(working)} busy={working === "cancel"} />
           </>
         ) : null}
-        {execution.state === "paused" ? <Action label="继续" primary onPress={() => void command("resume")} disabled={Boolean(working)} busy={working === "resume"} /> : null}
-        {isTerminal(execution.state) ? <Action label="按本次配置再次执行" primary onPress={() => void command("rerun")} disabled={Boolean(working)} busy={working === "rerun"} /> : null}
+        {execution.state === "paused" ? <Action label={t("execution.resume")} primary onPress={() => void command("resume")} disabled={Boolean(working)} busy={working === "resume"} /> : null}
+        {isTerminal(execution.state) ? <Action label={t("execution.rerun")} primary onPress={() => void command("rerun")} disabled={Boolean(working)} busy={working === "rerun"} /> : null}
       </View>
 
+      <AppPressable onPress={() => setTechnicalExpanded((value) => !value)} style={styles.technicalToggle}>
+        <Text style={styles.technicalToggleText}>{technicalExpanded ? t("execution.hideTechnical") : t("execution.showTechnical")}</Text>
+        <AppIcon name="chevron-right" color={colors.muted} size={17} />
+      </AppPressable>
+      {technicalExpanded ? (
+        <View style={styles.technicalCard}>
+          <Text style={styles.technicalLine}>{t("execution.taskRevision", { revision: execution.task_revision })}</Text>
+          {execution.phase ? <Text selectable style={styles.technicalLine}>{t("execution.phase", { phase: execution.phase })}</Text> : null}
+          {execution.failure_code ? <Text selectable style={styles.technicalLine}>{t("execution.failureCode", { code: execution.failure_code })}</Text> : null}
+        </View>
+      ) : null}
+
       {isTerminal(execution.state) ? (
-        <Pressable disabled={Boolean(working)} onPress={confirmDelete} style={styles.deleteButton}>
+        <AppPressable disabled={Boolean(working)} onPress={confirmDelete} style={styles.deleteButton}>
           {working === "delete"
             ? <ActivityIndicator color={colors.danger} size="small" />
-            : <Text style={styles.deleteText}>删除这次执行记录</Text>}
-        </Pressable>
+            : <Text style={styles.deleteText}>{t("execution.deleteRecord")}</Text>}
+        </AppPressable>
       ) : null}
-      <ArtifactViewer file={imagePreview} onClose={() => setImagePreview(null)} onMessage={setMessage} />
+      <ArtifactViewer
+        file={imagePreview}
+        onClose={() => setImagePreview(null)}
+        onMessage={(value, tone) => {
+          if (tone === "error") setError(value);
+          else setMessage(value);
+        }}
+      />
     </ScrollView>
   );
 
@@ -233,88 +261,100 @@ export default function TaskExecutionDetailScreen() {
       } : current);
       void refresh();
     } catch {
-      setError("确认操作提交失败，请重试");
+      setError(t("execution.approvalFailed"));
     } finally {
       setResolvingApproval(null);
     }
   }
 }
 
-function ApprovalDetails({ approval }: { approval: TaskApproval }) {
+function ApprovalDetails({ approval, showArguments, t }: { approval: TaskApproval; showArguments: boolean; t: ReturnType<typeof useI18n>["t"] }) {
   const [effect, risk] = approval.reason.split(":", 2);
   return (
     <View style={styles.approvalDetails}>
-      <Text style={styles.approvalReason}>影响：{effectLabel(effect ?? "")}</Text>
-      <Text style={styles.approvalReason}>风险：{riskLabel(risk ?? "")}</Text>
-      <Text style={styles.approvalReason}>可撤销性：未保证，请确认目标和参数无误</Text>
-      {Object.keys(approval.arguments).length ? (
+      <Text style={styles.approvalReason}>{t("execution.effect", { value: effectLabel(effect ?? "", t) })}</Text>
+      <Text style={styles.approvalReason}>{t("execution.risk", { value: riskLabel(risk ?? "", t) })}</Text>
+      <Text style={styles.approvalReason}>{t("execution.reversibility")}</Text>
+      {showArguments && Object.keys(approval.arguments).length ? (
         <Text selectable style={styles.arguments}>{JSON.stringify(approval.arguments, null, 2)}</Text>
       ) : null}
     </View>
   );
 }
 
-function effectLabel(value: string): string {
-  return ({ local_write: "会修改本机内容", external_side_effect: "会影响外部系统", desktop_control: "会操作桌面", unknown: "影响范围未知" } as Record<string, string>)[value] ?? "会执行受控操作";
+function effectLabel(value: string, t: ReturnType<typeof useI18n>["t"]): string {
+  return ({ local_write: t("execution.effect.local"), external_side_effect: t("execution.effect.external"), desktop_control: t("execution.effect.desktop"), unknown: t("execution.effect.unknown") } as Record<string, string>)[value] ?? t("execution.effect.controlled");
 }
 
-function riskLabel(value: string): string {
-  return ({ low: "低", medium: "中", high: "高" } as Record<string, string>)[value] ?? "未知";
+function riskLabel(value: string, t: ReturnType<typeof useI18n>["t"]): string {
+  return ({ low: t("execution.risk.low"), medium: t("execution.risk.medium"), high: t("execution.risk.high") } as Record<string, string>)[value] ?? t("execution.risk.unknown");
 }
 
 function isTerminal(state: TaskExecution["state"]): boolean {
   return state === "completed" || state === "failed" || state === "cancelled";
 }
 
-function launchReasonLabel(reason: TaskExecution["launch_reason"]): string {
-  return ({ created: "首次执行", manual: "手动执行", scheduled: "定时执行", event: "事件启动", rerun: "按历史配置再次执行" })[reason];
+function launchReasonLabel(reason: TaskExecution["launch_reason"], t: ReturnType<typeof useI18n>["t"]): string {
+  return ({ created: t("taskDetail.reason.created"), manual: t("taskDetail.reason.manual"), scheduled: t("taskDetail.reason.scheduled"), event: t("taskDetail.reason.event"), rerun: t("taskDetail.reason.rerun") })[reason];
 }
 
-function stateLabel(state: TaskExecution["state"]): string {
-  return ({ queued: "排队中", running: "进行中", waiting_approval: "待确认", paused: "已暂停", completed: "已完成", failed: "失败", cancelled: "已取消" })[state];
+function stateLabel(state: TaskExecution["state"], t: ReturnType<typeof useI18n>["t"]): string {
+  return ({ queued: t("taskState.queued"), running: t("taskState.running"), waiting_approval: t("taskState.waitingApproval"), paused: t("tasks.state.paused"), completed: t("taskState.completed"), failed: t("taskState.failed"), cancelled: t("taskState.cancelled") })[state];
 }
 
 function TraceEntry({
   entry,
   artifactWorking,
   onArtifact,
+  t,
 }: {
-  entry: TaskTraceEntry;
+  entry: TaskTimelineItem;
   artifactWorking: string;
   onArtifact(artifact: ChatArtifact, action: "open" | "save"): void;
+  t: ReturnType<typeof useI18n>["t"];
 }) {
-  if (entry.entry_type === "reasoning") return entry.content ? <Text style={styles.reasoning}>{entry.content}</Text> : null;
-  if (entry.entry_type === "tool_call") return <Text style={styles.toolLine}>⌁ {entry.tool_name || "工具"}</Text>;
-  if (entry.entry_type === "tool_result") return <Text style={styles.toolResult}>✓ {entry.tool_name || "完成"}</Text>;
-  if (entry.entry_type === "warning") return <Text style={styles.warning}>{entry.content}</Text>;
-  if (entry.entry_type === "artifact") {
-    const artifact = entry.artifact;
+  if (entry.kind === "tool") return (
+    <View style={styles.toolRow}>
+      {entry.state === "running" ? <ActivityIndicator color={colors.accent} size="small" /> : <Text style={styles.toolResult}>✓</Text>}
+      <Text style={styles.toolName}>{entry.toolName || t("execution.tool")}</Text>
+      <Text style={styles.toolState}>{entry.state === "running" ? t("execution.running") : t("execution.completed")}</Text>
+    </View>
+  );
+  const source = entry.entry;
+  if (source.entry_type === "reasoning") return source.content ? <Text style={styles.reasoning}>{source.content}</Text> : null;
+  if (source.entry_type === "warning") return <Text style={styles.warning}>{source.content}</Text>;
+  if (source.entry_type === "artifact") {
+    const artifact = source.artifact;
     if (!artifact) return null;
     const opening = artifactWorking === `${artifact.artifact_id}:open`;
     const saving = artifactWorking === `${artifact.artifact_id}:save`;
     return (
       <View style={styles.artifactRow}>
-        <Text style={styles.artifact}>附件</Text>
+        <Text style={styles.artifact}>{t("execution.attachment")}</Text>
         <AppPressable disabled={Boolean(artifactWorking)} onPress={() => onArtifact(artifact, "open")} style={styles.artifactAction}>
-          {opening ? <ActivityIndicator color={colors.accent} size="small" /> : <Text style={styles.artifactActionText}>打开</Text>}
+          {opening ? <ActivityIndicator color={colors.accent} size="small" /> : <Text style={styles.artifactActionText}>{t("execution.open")}</Text>}
         </AppPressable>
         <AppPressable disabled={Boolean(artifactWorking)} onPress={() => onArtifact(artifact, "save")} style={styles.artifactAction}>
-          {saving ? <ActivityIndicator color={colors.accent} size="small" /> : <Text style={styles.artifactActionText}>保存</Text>}
+          {saving ? <ActivityIndicator color={colors.accent} size="small" /> : <Text style={styles.artifactActionText}>{t("execution.save")}</Text>}
         </AppPressable>
       </View>
     );
   }
-  if (entry.entry_type === "content" || entry.entry_type === "plan") return entry.content ? <AppMarkdown value={entry.content} style={styles.markdown} /> : null;
+  if (source.entry_type === "content" || source.entry_type === "plan") return source.content ? <AppMarkdown value={source.content} style={styles.markdown} /> : null;
   return null;
+}
+
+function formatExecutionTime(createdAt: number, label: string): string {
+  return `${label} · ${new Date(createdAt * 1000).toLocaleString()}`;
 }
 
 function Action({ label, primary = false, danger = false, disabled = false, busy = false, onPress }: { label: string; primary?: boolean; danger?: boolean; disabled?: boolean; busy?: boolean; onPress(): void }) {
   return (
-    <Pressable disabled={disabled} style={[styles.action, primary && styles.actionPrimary, danger && styles.actionDanger, disabled && styles.disabled]} onPress={onPress}>
+    <AppPressable disabled={disabled} style={[styles.action, primary && styles.actionPrimary, danger && styles.actionDanger, disabled && styles.disabled]} onPress={onPress}>
       {busy
         ? <ActivityIndicator color={primary ? "white" : colors.accent} size="small" />
         : <Text style={[styles.actionText, primary && styles.actionPrimaryText, danger && styles.actionDangerText]}>{label}</Text>}
-    </Pressable>
+    </AppPressable>
   );
 }
 
@@ -343,8 +383,10 @@ const styles = StyleSheet.create({
   timeline: { backgroundColor: colors.surface, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: colors.line, gap: 10 },
   sectionTitle: { color: colors.ink, fontWeight: "700", fontSize: 17, marginBottom: 4 },
   reasoning: { color: colors.muted, lineHeight: 22 },
-  toolLine: { color: colors.accent, fontFamily: "monospace" },
-  toolResult: { color: colors.muted, fontFamily: "monospace" },
+  toolRow: { minHeight: 30, flexDirection: "row", alignItems: "center", gap: 8 },
+  toolName: { color: colors.ink, flex: 1 },
+  toolState: { color: colors.muted, fontSize: 12 },
+  toolResult: { color: colors.accent, width: 18, textAlign: "center", fontWeight: "800" },
   warning: { color: colors.warning },
   artifact: { color: colors.accent, fontWeight: "600" },
   artifactRow: { minHeight: 42, flexDirection: "row", alignItems: "center", gap: 8 },
@@ -360,6 +402,10 @@ const styles = StyleSheet.create({
   error: { color: colors.danger, lineHeight: 21 },
   message: { color: colors.accent, lineHeight: 21 },
   link: { color: colors.accent, fontWeight: "700" },
+  technicalToggle: { minHeight: 44, paddingHorizontal: 4, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
+  technicalToggleText: { color: colors.muted, fontWeight: "600" },
+  technicalCard: { padding: 14, borderRadius: 14, backgroundColor: colors.surfaceMuted, gap: 6 },
+  technicalLine: { color: colors.muted, fontSize: 12, fontFamily: "monospace" },
   deleteButton: { alignItems: "center", padding: 14, marginTop: 8 },
   deleteText: { color: colors.danger, fontWeight: "600" },
 });

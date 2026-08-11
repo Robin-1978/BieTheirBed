@@ -1,6 +1,6 @@
 import { Redirect } from "expo-router";
-import { useEffect, useRef } from "react";
-import { Animated, Easing, StyleSheet, Text, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { AccessibilityInfo, Animated, Easing, StyleSheet, Text, View } from "react-native";
 
 import { AppPressable } from "@/components/AppPressable";
 import { useI18n } from "@/i18n";
@@ -12,7 +12,20 @@ export default function Index() {
   const { t } = useI18n();
   const rotation = useRef(new Animated.Value(0)).current;
   const breath = useRef(new Animated.Value(0)).current;
+  const [reduceMotion, setReduceMotion] = useState(false);
   useEffect(() => {
+    let active = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
+      if (active) setReduceMotion(enabled);
+    });
+    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
+  useEffect(() => {
+    if (reduceMotion) return;
     const orbitAnimation = Animated.loop(Animated.timing(rotation, {
       toValue: 1,
       duration: 5200,
@@ -39,7 +52,7 @@ export default function Index() {
       orbitAnimation.stop();
       breathAnimation.stop();
     };
-  }, [breath, rotation]);
+  }, [breath, reduceMotion, rotation]);
   if (gateway.status === "unpaired") return <Redirect href="/pair" />;
   if (gateway.status === "ready") return <Redirect href="/chat" />;
   const booting = gateway.status === "booting";
@@ -67,7 +80,7 @@ export default function Index() {
       {booting ? (
         <Text style={styles.status}>{t("splash.restoring")}</Text>
       ) : null}
-      {gateway.error ? <Text style={styles.detail}>{gateway.error}</Text> : null}
+      {gateway.error ? <Text style={styles.detail}>{t("splash.connectionProblem")}</Text> : null}
       {gateway.status === "error" ? (
         <AppPressable style={styles.button} onPress={() => void gateway.reconnect()}>
           <Text style={styles.buttonText}>{t("common.reconnect")}</Text>

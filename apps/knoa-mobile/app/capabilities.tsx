@@ -151,7 +151,7 @@ export default function CapabilitiesScreen() {
         <Metric label={i18n.t("settings.serviceAddress")} value={gateway.gatewayUrl || "—"} />
         <Metric label={i18n.t("settings.deviceId")} value={gateway.deviceId || "—"} compact />
         <Metric label={i18n.t("settings.lastConnected")} value={formatTime(gateway.lastConnectedAt, i18n.locale, i18n.t("settings.never"))} />
-        {gateway.error ? <Text style={styles.error}>{gateway.error}</Text> : null}
+        {gateway.error ? <Text style={styles.error}>{i18n.t("settings.connectionProblem")}</Text> : null}
       </Section>
 
       <Section title={i18n.t("settings.deviceAndApp")}>
@@ -176,7 +176,10 @@ export default function CapabilitiesScreen() {
           label={i18n.t("settings.testNotification")}
           detail={i18n.t("settings.testNotificationDetail")}
           busy={working === "test-notification"}
-          onPress={() => void runAction("test-notification", sendTestNotification, i18n.t("settings.testNotificationSent"))}
+          onPress={() => void runAction("test-notification", () => sendTestNotification(
+            i18n.t("settings.testNotificationTitle"),
+            i18n.t("settings.testNotificationBody"),
+          ), i18n.t("settings.testNotificationSent"))}
         />
       </Section>
 

@@ -9,6 +9,7 @@ import {
 } from "expo-audio";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { File, Paths } from "expo-file-system";
+import * as Linking from "expo-linking";
 import * as Sharing from "expo-sharing";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -73,6 +74,11 @@ type ChatListItem =
   | { kind: "turn"; key: string; turn: ChatTurnSnapshot }
   | { kind: "pending"; key: string; pending: PendingChatTurn };
 
+type Feedback = {
+  text: string;
+  tone: "success" | "error" | "info" | "warning";
+};
+
 const TERMINAL_STATES = new Set<ChatTurnSnapshot["state"]>(["completed", "failed", "cancelled"]);
 
 export default function ChatScreen() {
@@ -87,6 +93,7 @@ export default function ChatScreen() {
   const userDragging = useRef(false);
   const initialScrollPending = useRef(true);
   const scrollIntent = useRef<"none" | "instant" | "smooth">("instant");
+  const smoothScrollUntil = useRef(0);
   const scrollFrame = useRef<number | null>(null);
   const displayedSession = useRef("");
   const draftReady = useRef(false);
@@ -105,7 +112,11 @@ export default function ChatScreen() {
   const [transcribing, setTranscribing] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [imagePreview, setImagePreview] = useState<ResolvedArtifactFile | null>(null);
-  const [message, setMessage] = useState("");
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const showFeedback = useCallback((value: string, tone: Feedback["tone"] = "error") => {
+    setFeedback({ text: value, tone });
+  }, []);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recording = useAudioRecorderState(recorder, 250);
   const [turnWatcher] = useState(() => new ChatTurnWatcher({
@@ -116,8 +127,14 @@ export default function ChatScreen() {
     onSnapshot: (snapshot) => {
       setTurns((current) => mergeConversationTurns(current, [snapshot]));
     },
-    onUnavailable: () => setMessage("暂时无法继续接收回复，请检查网络后重试"),
+    onUnavailable: () => showFeedback(t("chat.streamUnavailable"), "error"),
   }));
+
+  useEffect(() => {
+    if (!feedback || feedback.tone === "error" || feedback.tone === "warning") return;
+    const timeout = setTimeout(() => setFeedback(null), 3200);
+    return () => clearTimeout(timeout);
+  }, [feedback]);
 
   const watchTurn = useCallback((turnId: string) => {
     turnWatcher.watch(turnId);
@@ -144,12 +161,12 @@ export default function ChatScreen() {
     } catch (error) {
       if (error instanceof GatewayError && error.status === 404) {
         await gateway.newConversation();
-        setMessage("原会话已不可用，已切换到新会话");
+        showFeedback(t("chat.sessionReplaced"), "warning");
         return;
       }
-      setMessage("暂时无法同步最新消息，已显示手机中的会话记录");
+      showFeedback(t("chat.syncUnavailable"), "warning");
     }
-  }, [gateway.client, gateway.newConversation, gateway.runAuthenticated, gateway.sessionHandle, watchTurn]);
+  }, [gateway.client, gateway.newConversation, gateway.runAuthenticated, gateway.sessionHandle, showFeedback, t, watchTurn]);
 
   useEffect(() => {
     let active = true;
@@ -164,6 +181,7 @@ export default function ChatScreen() {
       setPreservingOlder(false);
       initialScrollPending.current = Boolean(sessionHandle);
       followLatest.current = true;
+      setShowJumpToLatest(false);
       scrollIntent.current = "instant";
       turnWatcher.closeAll();
     }
@@ -271,12 +289,16 @@ export default function ChatScreen() {
   async function submitPendingTurn(pending: PendingChatTurn) {
     if (!gateway.client) return;
     setPendingTurn({ ...pending, state: "sending", error: "" });
-    setMessage("");
+    setFeedback(null);
     try {
       const wasNewConversation = !gateway.sessionHandle;
       const sessionHandle = await gateway.ensureConversation();
-      const uploadedItems = await Promise.all(pending.attachments.map(async (item) => {
+      const uploadedItems = await Promise.all(pending.attachments.map(async (item, index) => {
         if (item.uploaded) return { ...item, status: "uploaded" as const };
+        setPendingTurn((current) => current?.localId === pending.localId ? {
+          ...current,
+          attachments: current.attachments.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, status: "uploading" } : candidate),
+        } : current);
         try {
           const response = await fetch(item.uri);
           const bytes = await response.arrayBuffer();
@@ -287,9 +309,19 @@ export default function ChatScreen() {
             name: item.name,
             caption: item.name,
           }));
-          return { ...item, status: "uploaded" as const, uploaded };
+          const completed = { ...item, status: "uploaded" as const, uploaded };
+          setPendingTurn((current) => current?.localId === pending.localId ? {
+            ...current,
+            attachments: current.attachments.map((candidate, candidateIndex) => candidateIndex === index ? completed : candidate),
+          } : current);
+          return completed;
         } catch {
-          return { ...item, status: "failed" as const };
+          const failed = { ...item, status: "failed" as const };
+          setPendingTurn((current) => current?.localId === pending.localId ? {
+            ...current,
+            attachments: current.attachments.map((candidate, candidateIndex) => candidateIndex === index ? failed : candidate),
+          } : current);
+          return failed;
         }
       }));
       if (uploadedItems.some((item) => item.status === "failed")) {
@@ -297,7 +329,7 @@ export default function ChatScreen() {
           ...pending,
           attachments: uploadedItems,
           state: "failed",
-          error: "有附件没有上传成功",
+          error: t("chat.attachmentUploadFailed"),
         });
         return;
       }
@@ -313,14 +345,14 @@ export default function ChatScreen() {
       void storeConversationDraft(sessionHandle, "");
       if (wasNewConversation) {
         void gateway.commitConversation(sessionHandle).catch(() => {
-          setMessage("消息已发出，但会话列表暂时没有同步");
+          showFeedback(t("chat.sessionSyncPending"), "warning");
         });
       }
     } catch (error) {
       setPendingTurn({
         ...pending,
         state: "failed",
-        error: error instanceof Error ? error.message : "消息没有发出去",
+        error: t("chat.sendFailed"),
       });
     }
   }
@@ -330,7 +362,7 @@ export default function ChatScreen() {
     const pending: PendingChatTurn = {
       localId: `pending:${Crypto.randomUUID()}`,
       requestId: Crypto.randomUUID(),
-      userInput: text.trim() || "请看一下这些内容",
+      userInput: text.trim() || t("chat.attachmentOnly"),
       attachments: attachments.map((item) => ({ ...item, status: item.uploaded ? "uploaded" : "pending" })),
       state: "sending",
       error: "",
@@ -366,10 +398,10 @@ export default function ChatScreen() {
         caption: item.name,
       }));
       setAttachments((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, status: "uploaded", uploaded } : value));
-      setMessage("附件已上传，可以继续发送");
+      showFeedback(t("chat.attachmentUploaded"), "success");
     } catch {
       setAttachments((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, status: "failed" } : value));
-      setMessage("这个附件仍未上传成功，请检查网络后重试");
+      showFeedback(t("chat.attachmentRetryFailed"), "error");
     }
   }
 
@@ -390,7 +422,7 @@ export default function ChatScreen() {
           bytes,
           mediaType: extension === "webm" ? "audio/webm" : "audio/mp4",
           name: `voice-${Date.now()}.${extension}`,
-          caption: "语音输入",
+          caption: t("chat.voiceCaption"),
         }));
         const transcript = await gateway.runAuthenticated((client) => client.transcribeArtifact(
           sessionHandle,
@@ -404,14 +436,20 @@ export default function ChatScreen() {
       return;
     }
     const permission = await requestRecordingPermissionsAsync();
-    if (!permission.granted) return;
+    if (!permission.granted) {
+      showFeedback(permission.canAskAgain
+        ? t("chat.microphoneRequired")
+        : t("chat.microphoneDisabled"), "warning");
+      if (!permission.canAskAgain) await Linking.openSettings();
+      return;
+    }
     try {
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       await recorder.prepareToRecordAsync();
       recorder.record();
     } catch (error) {
       await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
-      setMessage(error instanceof Error ? error.message : "录音无法开始，请重试");
+      showFeedback(t("chat.recordingFailed"), "error");
     }
   }
 
@@ -449,7 +487,7 @@ export default function ChatScreen() {
         void refresh();
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "确认没有生效，请重试");
+      showFeedback(t("chat.approvalFailed"), "error");
     } finally {
       setResolving("");
       setResolvingApproved(null);
@@ -484,33 +522,42 @@ export default function ChatScreen() {
         await Sharing.shareAsync(resolved.uri, { mimeType: resolved.mediaType });
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "附件暂时无法打开，请重试");
+      showFeedback(t("chat.artifactOpenFailed"), "error");
     }
-  }, [loadArtifact]);
+  }, [loadArtifact, showFeedback, t]);
 
   const saveArtifact = useCallback(async (item: AssistantArtifactItem) => {
     try {
       const resolved = await loadArtifact(item);
-      setMessage(await saveArtifactFile(resolved));
+      showFeedback(await saveArtifactFile(resolved, {
+        saveDialog: t("artifact.save"),
+        saveToFile: t("artifact.saveToFile"),
+        cancelled: t("artifact.saveCancelled"),
+        saved: t("artifact.savedFile"),
+      }), "success");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "文件保存失败，请重试");
+      showFeedback(t("chat.fileSaveFailed"), "error");
     }
-  }, [loadArtifact]);
+  }, [loadArtifact, showFeedback, t]);
 
   async function startNewTopic() {
     if (startingTopic || sending) return;
     setStartingTopic(true);
-    setTurns([]);
-    setPendingTurn(null);
-    setNextTurnCursor("");
-    scrollIntent.current = "instant";
-    turnWatcher.closeAll();
-    setText("");
-    setAttachments([]);
     try {
-      await removeConversationDraft(gateway.sessionHandle);
+      const previousSession = gateway.sessionHandle;
       await gateway.newConversation();
-      await removeConversationDraft("");
+      void removeConversationDraft(previousSession).catch(() => undefined);
+      void removeConversationDraft("").catch(() => undefined);
+      setTurns([]);
+      setPendingTurn(null);
+      setNextTurnCursor("");
+      scrollIntent.current = "instant";
+      turnWatcher.closeAll();
+      setText("");
+      setAttachments([]);
+      setFeedback(null);
+    } catch (error) {
+      showFeedback(t("chat.newTopicFailed"), "error");
     } finally {
       setStartingTopic(false);
     }
@@ -531,7 +578,7 @@ export default function ChatScreen() {
       });
       setNextTurnCursor(page.nextCursor);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "更早的消息暂时无法加载");
+      showFeedback(t("chat.olderFailed"), "error");
     } finally {
       setLoadingOlder(false);
     }
@@ -548,7 +595,7 @@ export default function ChatScreen() {
       setTurns((current) => current.map((item) => item.turn_id === cancelled.turn_id ? cancelled : item));
     } catch {
       setTurns((current) => current.map((item) => item.turn_id === turn.turn_id ? turn : item));
-      setMessage("暂时无法停止这次回复，请重试");
+      showFeedback(t("chat.stopFailed"), "error");
     } finally {
       setCancelling("");
     }
@@ -560,13 +607,13 @@ export default function ChatScreen() {
       setTurns((current) => [...current, accepted]);
       watchTurn(accepted.turn_id);
     } catch {
-      setMessage("这次回复暂时无法重试，你也可以编辑后重新发送");
+      showFeedback(t("chat.retryFailed"), "error");
     }
   }
 
   function editTurn(turn: ChatTurnSnapshot) {
     setText(turn.user_input);
-    setMessage("已放回输入框，修改后可以重新发送");
+    showFeedback(t("chat.editedToComposer"), "info");
   }
 
   const stoppingResponse = Boolean(activeTurn);
@@ -609,7 +656,7 @@ export default function ChatScreen() {
         <View style={styles.connectionBanner}>
           <View style={styles.bannerCopy}>
             <Text style={styles.connectionTitle}>{t("chat.disconnected")}</Text>
-            <Text style={styles.connectionDetail}>{gateway.error || t("chat.reconnecting")}</Text>
+            <Text style={styles.connectionDetail}>{gateway.status === "error" ? t("chat.connectionProblem") : t("chat.reconnecting")}</Text>
           </View>
           <AppPressable onPress={() => void gateway.reconnect()} style={styles.bannerButton}>
             <Text style={styles.bannerButtonText}>{t("chat.retryConnection")}</Text>
@@ -619,18 +666,19 @@ export default function ChatScreen() {
       {gateway.availableUpdate ? (
         <Pressable style={styles.updateBanner} onPress={() => router.push("/update")}>
           <View style={styles.bannerCopy}>
-            <Text style={styles.updateTitle}>小诺 {gateway.availableUpdate.version_name} 可以更新</Text>
-            <Text style={styles.updateDetail}>查看版本说明并下载安装</Text>
+            <Text style={styles.updateTitle}>{t("tasks.updateAvailable", { version: gateway.availableUpdate.version_name })}</Text>
+            <Text style={styles.updateDetail}>{t("chat.updateDetail")}</Text>
           </View>
-          <Text style={styles.updateLink}>更新</Text>
+          <Text style={styles.updateLink}>{t("chat.update")}</Text>
         </Pressable>
       ) : null}
       {gateway.requiredUpdate ? (
         <Pressable style={styles.requiredUpdateBanner} onPress={() => router.push("/update")}>
-          <Text style={styles.requiredUpdateTitle}>需要更新后才能继续新对话</Text>
-          <Text style={styles.updateDetail}>当前版本已不再支持创建消息，点击立即更新</Text>
+          <Text style={styles.requiredUpdateTitle}>{t("chat.requiredUpdate")}</Text>
+          <Text style={styles.updateDetail}>{t("chat.requiredUpdateDetail")}</Text>
         </Pressable>
       ) : null}
+      <View style={styles.listArea}>
       <FlatList
         ref={list}
         style={styles.list}
@@ -659,9 +707,11 @@ export default function ChatScreen() {
           if (!followLatest.current || loadingOlder) return;
           const mode = scrollIntent.current;
           scrollIntent.current = "none";
+          if (mode === "none" && Date.now() < smoothScrollUntil.current) return;
           if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
           scrollFrame.current = requestAnimationFrame(() => {
             scrollFrame.current = null;
+            if (mode === "smooth") smoothScrollUntil.current = Date.now() + 360;
             list.current?.scrollToEnd({ animated: mode === "smooth" });
           });
         }}
@@ -672,12 +722,14 @@ export default function ChatScreen() {
             - nativeEvent.layoutMeasurement.height
             - nativeEvent.contentOffset.y;
           followLatest.current = distance < 80;
+          setShowJumpToLatest(!followLatest.current);
         }}
         onScrollEndDrag={({ nativeEvent }) => {
           const distance = nativeEvent.contentSize.height
             - nativeEvent.layoutMeasurement.height
             - nativeEvent.contentOffset.y;
           followLatest.current = distance < 80;
+          setShowJumpToLatest(!followLatest.current);
           userDragging.current = false;
         }}
         onMomentumScrollEnd={({ nativeEvent }) => {
@@ -685,6 +737,7 @@ export default function ChatScreen() {
             - nativeEvent.layoutMeasurement.height
             - nativeEvent.contentOffset.y;
           followLatest.current = distance < 80;
+          setShowJumpToLatest(!followLatest.current);
         }}
         scrollEventThrottle={32}
         ListHeaderComponent={nextTurnCursor ? (
@@ -719,6 +772,21 @@ export default function ChatScreen() {
           />
         )}
       />
+      {showJumpToLatest ? (
+        <AppPressable
+          accessibilityLabel={t("chat.jumpLatest")}
+          onPress={() => {
+            followLatest.current = true;
+            setShowJumpToLatest(false);
+            list.current?.scrollToEnd({ animated: true });
+          }}
+          style={styles.jumpLatest}
+        >
+          <AppIcon name="arrow-down" color={colors.accent} size={18} />
+          <Text style={styles.jumpLatestText}>{t("chat.jumpLatest")}</Text>
+        </AppPressable>
+      ) : null}
+      </View>
       {attachments.length ? (
         <View style={styles.attachmentStrip}>
           {attachments.map((item, index) => (
@@ -729,18 +797,27 @@ export default function ChatScreen() {
               {item.mediaType.startsWith("image/") ? <Image source={{ uri: item.uri }} style={styles.thumbnail} /> : null}
               <Pressable disabled={item.status !== "failed"} onPress={() => void retryAttachment(index)} style={styles.attachmentCopy}>
                 <Text style={styles.attachmentName} numberOfLines={1}>{item.name}</Text>
-                {item.status ? <Text style={[styles.attachmentStatus, item.status === "failed" && styles.attachmentFailed]}>{attachmentStatusLabel(item.status)}</Text> : null}
+                {item.status ? <Text style={[styles.attachmentStatus, item.status === "failed" && styles.attachmentFailed]}>{attachmentStatusLabel(item.status, t)}</Text> : null}
               </Pressable>
-              <AppPressable accessibilityLabel={`移除 ${item.name}`} onPress={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} style={styles.removeAction}>
+              <AppPressable accessibilityLabel={t("chat.removeAttachment", { name: item.name })} onPress={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} style={styles.removeAction}>
                 <AppIcon name="x" color={colors.muted} size={17} />
               </AppPressable>
             </View>
           ))}
         </View>
       ) : null}
-      {message ? (
-        <Pressable onPress={() => setMessage("")} style={styles.errorBanner}>
-          <Text style={styles.errorText}>{message}</Text>
+      {feedback ? (
+        <Pressable
+          accessibilityRole="alert"
+          onPress={() => setFeedback(null)}
+          style={[
+            styles.feedbackBanner,
+            feedback.tone === "error" && styles.feedbackError,
+            feedback.tone === "warning" && styles.feedbackWarning,
+            feedback.tone === "success" && styles.feedbackSuccess,
+          ]}
+        >
+          <Text style={[styles.feedbackText, feedback.tone === "error" && styles.feedbackErrorText]}>{feedback.text}</Text>
         </Pressable>
       ) : null}
       <View style={styles.composer}>
@@ -808,7 +885,7 @@ export default function ChatScreen() {
       <ArtifactViewer
         file={imagePreview}
         onClose={() => setImagePreview(null)}
-        onMessage={setMessage}
+        onMessage={(value, tone = "info") => showFeedback(value, tone)}
       />
       <Modal
         animationType="fade"
@@ -877,6 +954,7 @@ const ChatTurn = memo(function ChatTurn({
   onRetry(turn: ChatTurnSnapshot): void;
   onEdit(turn: ChatTurnSnapshot): void;
 }) {
+  const { t } = useI18n();
   const terminal = TERMINAL_STATES.has(turn.state);
   const response = terminal ? turn.final_output || turn.content : "";
   const approval = turn.approvals.find((item) => item.state === "pending") ?? null;
@@ -885,7 +963,7 @@ const ChatTurn = memo(function ChatTurn({
     <View style={styles.turn}>
       <View style={styles.userBubble}>
         <Text style={styles.userText}>{turn.user_input}</Text>
-        {turn.attachments.length ? <Text style={styles.userMeta}>附件 {turn.attachments.length}</Text> : null}
+        {turn.attachments.length ? <Text style={styles.userMeta}>{t("chat.attachments", { count: turn.attachments.length })}</Text> : null}
       </View>
       <View style={styles.assistantBubble}>
         <TurnProgress turn={turn} />
@@ -910,12 +988,12 @@ const ChatTurn = memo(function ChatTurn({
               <AppPressable style={styles.deny} disabled={Boolean(resolving)} onPress={() => onResolve(approval, false)}>
                 {resolving === approval.approval_id && resolvingApproved === false
                   ? <ActivityIndicator color={colors.ink} size="small" />
-                  : <Text style={styles.denyText}>取消</Text>}
+                  : <Text style={styles.denyText}>{t("common.cancel")}</Text>}
               </AppPressable>
               <AppPressable style={styles.approve} disabled={Boolean(resolving)} onPress={() => onResolve(approval, true)}>
                 {resolving === approval.approval_id && resolvingApproved === true
                   ? <ActivityIndicator color="white" size="small" />
-                  : <Text style={styles.approveText}>确认</Text>}
+                  : <Text style={styles.approveText}>{t("execution.confirm")}</Text>}
               </AppPressable>
             </View>
           </View>
@@ -923,10 +1001,10 @@ const ChatTurn = memo(function ChatTurn({
         {turn.state === "failed" || turn.state === "cancelled" ? (
           <View style={styles.turnActions}>
             <Pressable accessibilityRole="button" onPress={() => onRetry(turn)} style={styles.turnAction}>
-              <Text style={styles.turnActionText}>重试</Text>
+              <Text style={styles.turnActionText}>{t("chat.retry")}</Text>
             </Pressable>
             <Pressable accessibilityRole="button" onPress={() => onEdit(turn)} style={styles.turnAction}>
-              <Text style={styles.turnActionText}>编辑后重发</Text>
+              <Text style={styles.turnActionText}>{t("chat.editResend")}</Text>
             </Pressable>
           </View>
         ) : null}
@@ -944,28 +1022,40 @@ function PendingTurn({
   onRetry(pending: PendingChatTurn): void;
   onEdit(pending: PendingChatTurn): void;
 }) {
+  const { t } = useI18n();
   return (
     <View style={styles.turn}>
       <View style={styles.userBubble}>
         <Text style={styles.userText}>{pending.userInput}</Text>
         {pending.attachments.length
-          ? <Text style={styles.userMeta}>附件 {pending.attachments.length}</Text>
+          ? <Text style={styles.userMeta}>{t("chat.attachments", { count: pending.attachments.length })}</Text>
           : null}
+        {pending.attachments.length ? (
+          <View style={styles.pendingAttachments}>
+            {pending.attachments.map((item, index) => (
+              <View key={`${item.uri}:${index}`} style={styles.pendingAttachmentRow}>
+                {item.status === "uploading" ? <ActivityIndicator color={colors.accentSoft} size="small" /> : null}
+                <Text numberOfLines={1} style={styles.pendingAttachmentName}>{item.name}</Text>
+                <Text style={[styles.pendingAttachmentState, item.status === "failed" && styles.pendingAttachmentFailed]}>{attachmentStatusLabel(item.status ?? "pending", t)}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
       </View>
       <View style={styles.assistantBubble}>
         <View style={styles.activityRow}>
           {pending.state === "sending" ? <ActivityIndicator color={colors.accent} size="small" /> : null}
           <Text style={pending.state === "failed" ? styles.pendingError : styles.activity}>
-            {pending.state === "sending" ? "正在发送给小诺…" : pending.error || "消息没有发出去"}
+            {pending.state === "sending" ? t("chat.sending") : pending.error || t("chat.sendFailed")}
           </Text>
         </View>
         {pending.state === "failed" ? (
           <View style={styles.turnActions}>
             <AppPressable accessibilityRole="button" onPress={() => onRetry(pending)} style={styles.turnAction}>
-              <Text style={styles.turnActionText}>重试</Text>
+              <Text style={styles.turnActionText}>{t("chat.retry")}</Text>
             </AppPressable>
             <AppPressable accessibilityRole="button" onPress={() => onEdit(pending)} style={styles.turnAction}>
-              <Text style={styles.turnActionText}>编辑</Text>
+              <Text style={styles.turnActionText}>{t("taskDetail.edit")}</Text>
             </AppPressable>
           </View>
         ) : null}
@@ -985,6 +1075,7 @@ function AssistantArtifact({
   onOpen(item: AssistantArtifactItem): Promise<void>;
   onSave(item: AssistantArtifactItem): Promise<void>;
 }) {
+  const { t } = useI18n();
   const [previewUri, setPreviewUri] = useState("");
   const [loading, setLoading] = useState(item.isImage);
   const [failed, setFailed] = useState(false);
@@ -1037,7 +1128,7 @@ function AssistantArtifact({
   if (item.isImage) {
     return (
       <Pressable
-        accessibilityLabel={failed ? `重新加载 ${item.displayName}` : `打开 ${item.displayName}`}
+        accessibilityLabel={failed ? t("chat.reloadArtifact", { name: item.displayName }) : t("chat.openArtifact", { name: item.displayName })}
         disabled={loading || opening}
         onPress={() => void open()}
         style={styles.generatedImageCard}
@@ -1056,7 +1147,7 @@ function AssistantArtifact({
           <View style={styles.generatedImageState}>
             {loading ? <ActivityIndicator color={colors.accent} size="small" /> : null}
             <Text style={failed ? styles.generatedArtifactError : styles.generatedArtifactHint}>
-              {failed ? "加载失败，点击重试" : "正在加载图片…"}
+              {failed ? t("chat.imageRetry") : t("chat.imageLoading")}
             </Text>
           </View>
         )}
@@ -1070,52 +1161,60 @@ function AssistantArtifact({
 
   return (
     <View style={styles.generatedFile}>
-      <View style={styles.generatedFileBadge}><Text style={styles.generatedFileBadgeText}>附件</Text></View>
+      <View style={styles.generatedFileBadge}><Text style={styles.generatedFileBadgeText}>{t("execution.attachment")}</Text></View>
       <Text style={styles.generatedArtifactName} numberOfLines={2}>{item.displayName}</Text>
       <AppPressable
-        accessibilityLabel={`打开或分享 ${item.displayName}`}
+        accessibilityLabel={t("chat.openOrShare", { name: item.displayName })}
         disabled={opening || saving}
         onPress={() => void open()}
         style={styles.fileAction}
       >
-        {opening ? <ActivityIndicator color={colors.accent} size="small" /> : <Text style={styles.fileActionText}>打开</Text>}
+        {opening ? <ActivityIndicator color={colors.accent} size="small" /> : <Text style={styles.fileActionText}>{t("execution.open")}</Text>}
       </AppPressable>
       <AppPressable
-        accessibilityLabel={`保存 ${item.displayName}`}
+        accessibilityLabel={t("chat.saveArtifact", { name: item.displayName })}
         disabled={opening || saving}
         onPress={() => void save()}
         style={styles.fileAction}
       >
-        {saving ? <ActivityIndicator color={colors.accent} size="small" /> : <Text style={styles.fileActionText}>保存</Text>}
+        {saving ? <ActivityIndicator color={colors.accent} size="small" /> : <Text style={styles.fileActionText}>{t("execution.save")}</Text>}
       </AppPressable>
     </View>
   );
 }
 
-function attachmentStatusLabel(status: NonNullable<PendingAttachment["status"]>): string {
+function attachmentStatusLabel(status: NonNullable<PendingAttachment["status"]>, t: ReturnType<typeof useI18n>["t"]): string {
   return ({
-    pending: "等待上传",
-    uploading: "上传中…",
-    uploaded: "已上传",
-    failed: "上传失败 · 点击重试",
+    pending: t("chat.uploadPending"),
+    uploading: t("chat.uploading"),
+    uploaded: t("chat.uploaded"),
+    failed: t("chat.uploadRetry"),
   })[status];
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  listArea: { flex: 1 },
   list: { flex: 1 },
   topbar: { paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   subtitle: { color: colors.muted, fontSize: 13 },
   topActions: { flexDirection: "row", gap: 6 },
-  topAction: { width: 38, height: 36, alignItems: "center", justifyContent: "center", borderRadius: 12 },
+  topAction: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 12 },
   messages: { padding: 16, paddingBottom: 24, gap: 18, flexGrow: 1 },
   empty: { color: colors.muted, textAlign: "center", marginTop: 80, fontSize: 17 },
   loadOlder: { alignSelf: "center", paddingHorizontal: 14, paddingVertical: 8, marginBottom: 4 },
   loadOlderText: { color: colors.accent, fontWeight: "600", fontSize: 13 },
+  jumpLatest: { position: "absolute", right: 16, bottom: 12, minHeight: 40, paddingHorizontal: 13, borderRadius: 20, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.line },
+  jumpLatestText: { color: colors.accent, fontSize: 13, fontWeight: "700" },
   turn: { gap: 8 },
   userBubble: { alignSelf: "flex-end", maxWidth: "84%", backgroundColor: colors.accent, borderRadius: 18, borderBottomRightRadius: 5, paddingHorizontal: 15, paddingVertical: 11 },
   userText: { color: "white", fontSize: 16, lineHeight: 23 },
   userMeta: { color: colors.accentSoft, fontSize: 12, marginTop: 5 },
+  pendingAttachments: { marginTop: 7, gap: 5 },
+  pendingAttachmentRow: { minHeight: 24, flexDirection: "row", alignItems: "center", gap: 6 },
+  pendingAttachmentName: { color: "white", flex: 1, fontSize: 12 },
+  pendingAttachmentState: { color: colors.accentSoft, fontSize: 10 },
+  pendingAttachmentFailed: { color: "#FFD1CC" },
   assistantBubble: { alignSelf: "stretch", width: "100%", backgroundColor: colors.surface, borderRadius: 18, borderBottomLeftRadius: 5, padding: 15, borderWidth: 1, borderColor: colors.line },
   markdownList: { width: "100%", alignSelf: "stretch" },
   activityRow: { flexDirection: "row", alignItems: "center", gap: 9 },
@@ -1152,7 +1251,7 @@ const styles = StyleSheet.create({
   attachmentStatus: { color: colors.muted, fontSize: 10, marginTop: 2 },
   attachmentFailed: { color: colors.danger },
   remove: { color: colors.muted, fontSize: 18 },
-  removeAction: { width: 30, height: 30, alignItems: "center", justifyContent: "center", borderRadius: 9 },
+  removeAction: { width: 40, height: 40, alignItems: "center", justifyContent: "center", borderRadius: 10 },
   connectionBanner: { marginHorizontal: 16, marginBottom: 8, padding: 13, borderRadius: 14, backgroundColor: colors.warningSoft, flexDirection: "row", alignItems: "center", gap: 12 },
   bannerCopy: { flex: 1 },
   connectionTitle: { color: colors.ink, fontWeight: "700" },
@@ -1165,12 +1264,16 @@ const styles = StyleSheet.create({
   updateTitle: { color: colors.ink, fontWeight: "700" },
   updateDetail: { color: colors.muted, fontSize: 12, marginTop: 3 },
   updateLink: { color: colors.accent, fontWeight: "700" },
-  errorBanner: { paddingHorizontal: 16, paddingVertical: 9, backgroundColor: colors.dangerSoft, borderTopWidth: 1, borderTopColor: colors.line },
-  errorText: { color: colors.danger, textAlign: "center", fontSize: 13 },
+  feedbackBanner: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: colors.surfaceMuted, borderTopWidth: 1, borderTopColor: colors.line },
+  feedbackWarning: { backgroundColor: colors.warningSoft },
+  feedbackError: { backgroundColor: colors.dangerSoft },
+  feedbackSuccess: { backgroundColor: colors.accentFaint },
+  feedbackText: { color: colors.ink, textAlign: "center", fontSize: 13 },
+  feedbackErrorText: { color: colors.danger },
   composer: { flexDirection: "row", alignItems: "flex-end", gap: 8, padding: 10, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.line },
   roundAction: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: colors.background, borderWidth: 1, borderColor: colors.line },
   inputShell: { flex: 1, minHeight: 42, maxHeight: 120, flexDirection: "row", alignItems: "flex-end", backgroundColor: colors.background, borderRadius: 16 },
-  inputMode: { width: 40, height: 42, alignItems: "center", justifyContent: "center" },
+  inputMode: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   input: { flex: 1, minHeight: 42, maxHeight: 120, color: colors.ink, paddingRight: 13, paddingVertical: 10, textAlignVertical: "top" },
   primaryAction: { minWidth: 52, height: 42, paddingHorizontal: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.accent, borderRadius: 14 },
   primaryRecording: { backgroundColor: colors.warning },

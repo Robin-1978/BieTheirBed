@@ -20,5 +20,5 @@ export function AppPressable({ style, disabled, android_ripple, ...props }: Prop
   );
 }
 
-const pressedStyle: ViewStyle = { opacity: 0.72, transform: [{ scale: 0.985 }] };
+const pressedStyle: ViewStyle = { opacity: 0.82, transform: [{ scale: 0.99 }] };
 const disabledStyle: ViewStyle = { opacity: 0.52 };

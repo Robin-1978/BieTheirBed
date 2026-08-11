@@ -13,17 +13,22 @@ import {
   View,
 } from "react-native";
 
+import { AppIcon } from "@/components/AppIcon";
+import { AppPressable } from "@/components/AppPressable";
+import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
 export default function PairScreen() {
   const gateway = useGateway();
+  const { t } = useI18n();
   const [permission, requestPermission] = useCameraPermissions();
-  const [displayName, setDisplayName] = useState("我的手机");
+  const [displayName, setDisplayName] = useState(() => t("pair.defaultDevice"));
   const [payload, setPayload] = useState("");
   const [scanning, setScanning] = useState(false);
   const [requestingCamera, setRequestingCamera] = useState(false);
   const [working, setWorking] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
   const [error, setError] = useState("");
 
   async function submit(encoded = payload) {
@@ -34,7 +39,8 @@ export default function PairScreen() {
       await gateway.pair(encoded.trim(), displayName.trim());
       router.replace("/chat");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "配对失败");
+      const detail = caught instanceof Error ? caught.message : "";
+      setError(/expired|consumed|失效|过期/i.test(detail) ? t("pair.expired") : t("pair.failed"));
       setScanning(false);
     } finally {
       setWorking(false);
@@ -54,9 +60,10 @@ export default function PairScreen() {
           }}
         />
         <View style={styles.scanFrame} />
-        <Pressable style={styles.cancel} onPress={() => setScanning(false)}>
-          <Text style={styles.cancelText}>取消扫描</Text>
-        </Pressable>
+        <Text style={styles.scanHint}>{working ? t("pair.verifying") : t("pair.align")}</Text>
+        <AppPressable style={styles.cancel} onPress={() => setScanning(false)}>
+          <Text style={styles.cancelText}>{t("pair.cancelScan")}</Text>
+        </AppPressable>
       </View>
     );
   }
@@ -66,15 +73,20 @@ export default function PairScreen() {
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <Text style={styles.lead}>在电脑上运行 `pca gateway pair`，然后扫描二维码。</Text>
+      <View style={styles.intro}>
+        <View style={styles.introIcon}><AppIcon name="camera" color={colors.accent} size={28} /></View>
+        <Text style={styles.title}>{t("pair.title")}</Text>
+        <Text style={styles.lead}>{t("pair.lead")}</Text>
+        <Text style={styles.expiryHint}>{t("pair.expiryHint")}</Text>
+      </View>
       <TextInput
         style={styles.input}
         value={displayName}
         onChangeText={setDisplayName}
-        placeholder="设备名称"
+        placeholder={t("pair.deviceName")}
         placeholderTextColor={colors.muted}
       />
-      <Pressable
+      <AppPressable
         disabled={requestingCamera || working}
         style={[styles.primary, (requestingCamera || working) && styles.disabled]}
         onPress={async () => {
@@ -84,9 +96,9 @@ export default function PairScreen() {
               const result = await requestPermission();
               if (!result.granted) {
                 if (!result.canAskAgain) {
-                  setError("相机权限已关闭，请在系统设置中允许后再扫描");
+                  setError(t("pair.cameraDisabled"));
                 } else {
-                  setError("需要相机权限才能扫描二维码");
+                  setError(t("pair.cameraRequired"));
                 }
                 return;
               }
@@ -99,35 +111,48 @@ export default function PairScreen() {
       >
         {requestingCamera
           ? <ActivityIndicator color="white" size="small" />
-          : <Text style={styles.primaryText}>扫描配对二维码</Text>}
-      </Pressable>
+          : <Text style={styles.primaryText}>{t("pair.scan")}</Text>}
+      </AppPressable>
       {permission && !permission.granted && !permission.canAskAgain ? (
         <Pressable accessibilityRole="button" onPress={() => void Linking.openSettings()}>
-          <Text style={styles.settingsLink}>打开系统设置</Text>
+          <Text style={styles.settingsLink}>{t("pair.openSettings")}</Text>
         </Pressable>
       ) : null}
-      <Text style={styles.or}>或粘贴 pairing_json</Text>
-      <TextInput
-        style={[styles.input, styles.payload]}
-        value={payload}
-        onChangeText={setPayload}
-        placeholder={'{"version":"v1", ...}'}
-        placeholderTextColor={colors.muted}
-        multiline
-        autoCapitalize="none"
-        autoCorrect={false}
-      />
-      <Pressable style={styles.secondary} onPress={() => void submit()} disabled={working}>
-        {working ? <ActivityIndicator color={colors.accent} /> : <Text style={styles.secondaryText}>安全连接</Text>}
-      </Pressable>
       {error ? <Text style={styles.error}>{error}</Text> : null}
+      <AppPressable onPress={() => setAdvanced((value) => !value)} style={styles.advancedToggle}>
+        <Text style={styles.advancedText}>{advanced ? t("pair.hideAdvanced") : t("pair.showAdvanced")}</Text>
+        <AppIcon name="chevron-right" color={colors.muted} size={17} />
+      </AppPressable>
+      {advanced ? (
+        <View style={styles.advancedCard}>
+          <Text style={styles.command} selectable>pca gateway pair --ttl 300</Text>
+          <Text style={styles.or}>{t("pair.orPaste")}</Text>
+          <TextInput
+            style={[styles.input, styles.payload]}
+            value={payload}
+            onChangeText={setPayload}
+            placeholder={'{"version":"v1", ...}'}
+            placeholderTextColor={colors.muted}
+            multiline
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <AppPressable style={styles.secondary} onPress={() => void submit()} disabled={working || !payload.trim()}>
+            {working ? <ActivityIndicator color={colors.accent} /> : <Text style={styles.secondaryText}>{t("pair.connect")}</Text>}
+          </AppPressable>
+        </View>
+      ) : null}
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 24, gap: 16, justifyContent: "center" },
-  lead: { color: colors.ink, fontSize: 18, lineHeight: 28, marginBottom: 8 },
+  container: { flex: 1, padding: 24, gap: 14, justifyContent: "center" },
+  intro: { alignItems: "center", gap: 8, marginBottom: 8 },
+  introIcon: { width: 58, height: 58, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
+  title: { color: colors.ink, fontSize: 23, fontWeight: "700" },
+  lead: { color: colors.ink, fontSize: 16, lineHeight: 24, textAlign: "center" },
+  expiryHint: { color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center" },
   input: { borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, color: colors.ink, borderRadius: 14, padding: 14 },
   payload: { minHeight: 120, textAlignVertical: "top", fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" },
   primary: { backgroundColor: colors.accent, borderRadius: 14, padding: 15, alignItems: "center" },
@@ -140,6 +165,11 @@ const styles = StyleSheet.create({
   settingsLink: { color: colors.accent, textAlign: "center", fontWeight: "700" },
   scanner: { flex: 1, alignItems: "center", justifyContent: "center" },
   scanFrame: { width: 260, height: 260, borderWidth: 2, borderColor: "white", borderRadius: 24 },
+  scanHint: { position: "absolute", bottom: 116, color: "white", backgroundColor: "rgba(0,0,0,0.58)", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16 },
   cancel: { position: "absolute", bottom: 56, backgroundColor: "rgba(0,0,0,0.65)", paddingHorizontal: 20, paddingVertical: 12, borderRadius: 20 },
   cancelText: { color: "white", fontWeight: "600" },
+  advancedToggle: { minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
+  advancedText: { color: colors.muted, fontWeight: "600" },
+  advancedCard: { gap: 12, padding: 14, borderRadius: 14, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
+  command: { color: colors.ink, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 13, backgroundColor: colors.background, borderRadius: 10, padding: 11 },
 });

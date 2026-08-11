@@ -4,7 +4,6 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   Switch,
   StyleSheet,
@@ -17,11 +16,14 @@ import type { Task, TaskLaunchPolicy } from "@/api/models";
 import { immediatePolicy, isLaunchPolicyValid, TaskLaunchEditor } from "@/components/TaskLaunchEditor";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
+import { useI18n } from "@/i18n";
+import { AppPressable } from "@/components/AppPressable";
 
 export default function EditTaskScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const taskId = String(id ?? "");
   const gateway = useGateway();
+  const { t } = useI18n();
   const [task, setTask] = useState<Task | null>(null);
   const [title, setTitle] = useState("");
   const [goal, setGoal] = useState("");
@@ -44,8 +46,8 @@ export default function EditTaskScreen() {
         setNotifyApproval(loaded.notification_policy.waiting_approval ?? true);
         setLaunchPolicy(loaded.launch_policy);
       })
-      .catch(() => setError("任务加载失败"));
-  }, [gateway.client, gateway.runAuthenticated, taskId]);
+      .catch(() => setError(t("taskEdit.loadFailed")));
+  }, [gateway.client, gateway.runAuthenticated, t, taskId]);
 
   async function save() {
     if (!task || !goal.trim() || saving) return;
@@ -66,7 +68,7 @@ export default function EditTaskScreen() {
       }));
       router.back();
     } catch {
-      setError("保存失败，任务可能已在其他设备修改，请返回刷新后重试");
+      setError(t("taskEdit.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -77,33 +79,33 @@ export default function EditTaskScreen() {
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <Text style={styles.note}>修改只影响以后创建的执行，不会改写已有历史。</Text>
-        <Text style={styles.label}>任务名称</Text>
-        <TextInput value={title} onChangeText={setTitle} style={styles.titleInput} accessibilityLabel="任务名称" />
-        <Text style={styles.label}>目标</Text>
+        <Text style={styles.note}>{t("taskEdit.note")}</Text>
+        <Text style={styles.label}>{t("taskNew.name")}</Text>
+        <TextInput value={title} onChangeText={setTitle} style={styles.titleInput} accessibilityLabel={t("taskNew.name")} />
+        <Text style={styles.label}>{t("taskNew.goal")}</Text>
         <TextInput
           value={goal}
           onChangeText={setGoal}
           multiline
           textAlignVertical="top"
           style={styles.goalInput}
-          accessibilityLabel="任务目标"
+          accessibilityLabel={t("taskNew.goal")}
         />
         <TaskLaunchEditor policy={launchPolicy} onChange={setLaunchPolicy} />
         <View style={styles.notificationCard}>
-          <Text style={styles.label}>通知我</Text>
-          <Toggle label="任务完成" value={notifyCompleted} onChange={setNotifyCompleted} />
-          <Toggle label="任务失败" value={notifyFailed} onChange={setNotifyFailed} />
-          <Toggle label="需要确认" value={notifyApproval} onChange={setNotifyApproval} />
+          <Text style={styles.label}>{t("taskNew.notifyMe")}</Text>
+          <Toggle label={t("taskNew.completed")} value={notifyCompleted} onChange={setNotifyCompleted} />
+          <Toggle label={t("taskNew.failed")} value={notifyFailed} onChange={setNotifyFailed} />
+          <Toggle label={t("taskNew.approval")} value={notifyApproval} onChange={setNotifyApproval} />
         </View>
         {error ? <Text style={styles.error}>{error}</Text> : null}
-        <Pressable
+        <AppPressable
           disabled={!task || !goal.trim() || saving || !isLaunchPolicyValid(launchPolicy)}
           onPress={() => void save()}
           style={[styles.save, (!task || !goal.trim() || saving || !isLaunchPolicyValid(launchPolicy)) && styles.disabled]}
         >
-          {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveText}>保存修改</Text>}
-        </Pressable>
+          {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveText}>{t("taskEdit.save")}</Text>}
+        </AppPressable>
       </ScrollView>
     </KeyboardAvoidingView>
   );

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  ScrollView,
+  FlatList,
   StyleSheet,
   Text,
   TextInput,
@@ -17,9 +17,11 @@ import { removeConversationDraft } from "@/security/conversationDrafts";
 import { useGateway } from "@/state/GatewayProvider";
 import { removeConversationCache } from "@/storage/conversationCache";
 import { colors } from "@/theme";
+import { useI18n } from "@/i18n";
 
 export default function ConversationHistoryScreen() {
   const gateway = useGateway();
+  const { t, locale } = useI18n();
   const [sessions, setSessions] = useState<ConversationSession[]>([]);
   const [nextCursor, setNextCursor] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
@@ -41,11 +43,11 @@ export default function ConversationHistoryScreen() {
       setSessions(result.sessions);
       setNextCursor(result.nextCursor);
     } catch {
-      setError("会话记录暂时无法加载，请检查连接后重试");
+      setError(t("conversations.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [gateway.runAuthenticated, showArchived]);
+  }, [gateway.runAuthenticated, showArchived, t]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -65,7 +67,7 @@ export default function ConversationHistoryScreen() {
       });
       setNextCursor(result.nextCursor);
     } catch {
-      setError("更多会话暂时无法加载，请稍后重试");
+      setError(t("conversations.moreFailed"));
     } finally {
       setLoadingMore(false);
     }
@@ -83,17 +85,17 @@ export default function ConversationHistoryScreen() {
       setEditing("");
       await refresh();
     } catch {
-      setError("会话已发生变化，请刷新后再试");
+      setError(t("conversations.conflict"));
     } finally {
       setWorking("");
     }
   }
 
   function confirmDelete(session: ConversationSession) {
-    Alert.alert("删除会话？", "会话内容和附件关联将被永久删除，无法恢复。", [
-      { text: "取消", style: "cancel" },
+    Alert.alert(t("conversations.deleteTitle"), t("conversations.deleteBody"), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "删除",
+        text: t("common.delete"),
         style: "destructive",
         onPress: () => void (async () => {
           setWorking(session.session_handle);
@@ -104,7 +106,7 @@ export default function ConversationHistoryScreen() {
             if (gateway.sessionHandle === session.session_handle) await gateway.newConversation();
             await refresh();
           } catch {
-            setError("运行中的会话不能删除，请先停止当前回复");
+            setError(t("conversations.deleteActive"));
           } finally {
             setWorking("");
           }
@@ -120,34 +122,38 @@ export default function ConversationHistoryScreen() {
       await gateway.openConversation(session.session_handle);
       router.replace("/chat");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "会话无法打开");
+      setError(t("conversations.openFailed"));
     } finally {
       setWorking("");
     }
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.headerActions}>
-        <AppPressable
-          accessibilityLabel="新建会话"
-          style={styles.primary}
-          onPress={() => void gateway.newConversation().then(() => router.replace("/chat"))}
-        >
-          <AppIcon name="plus" color={colors.white} size={21} />
-        </AppPressable>
-        <AppPressable style={styles.filter} onPress={() => setShowArchived((value) => !value)}>
-          <Text style={styles.filterText}>{showArchived ? "隐藏已归档" : "显示已归档"}</Text>
-        </AppPressable>
-      </View>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {loading ? <ActivityIndicator color={colors.accent} style={styles.loading} /> : null}
-      {!loading && !sessions.length ? <Text style={styles.empty}>还没有会话记录</Text> : null}
-      {sessions.map((session) => {
+    <FlatList
+      data={sessions}
+      keyExtractor={(session) => session.session_handle}
+      keyboardShouldPersistTaps="handled"
+      contentContainerStyle={styles.container}
+      ListHeaderComponent={(
+        <>
+          <View style={styles.headerActions}>
+            <AppPressable accessibilityLabel={t("conversations.new")} style={styles.primary} onPress={() => void gateway.newConversation().then(() => router.replace("/chat"))}>
+              <AppIcon name="new-topic" color={colors.white} size={21} />
+            </AppPressable>
+            <AppPressable style={styles.filter} onPress={() => setShowArchived((value) => !value)}>
+              <Text style={styles.filterText}>{showArchived ? t("conversations.hideArchived") : t("conversations.showArchived")}</Text>
+            </AppPressable>
+          </View>
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {loading ? <ActivityIndicator color={colors.accent} style={styles.loading} /> : null}
+        </>
+      )}
+      ListEmptyComponent={!loading ? <Text style={styles.empty}>{t("conversations.empty")}</Text> : null}
+      renderItem={({ item: session }) => {
         const isEditing = editing === session.session_handle;
         const isCurrent = gateway.sessionHandle === session.session_handle;
         return (
-          <View key={session.session_handle} style={[styles.card, isCurrent && styles.currentCard]}>
+          <View style={[styles.card, isCurrent && styles.currentCard]}>
             {isEditing ? (
               <TextInput
                 autoFocus
@@ -160,40 +166,40 @@ export default function ConversationHistoryScreen() {
               <AppPressable disabled={session.state === "archived"} onPress={() => void open(session)}>
                 <Text style={styles.title}>{session.title}</Text>
                 <Text style={styles.meta}>
-                  {isCurrent ? "当前会话 · " : ""}{session.turn_count} 轮 · {formatTime(session.last_turn_at ?? session.created_at)}
+                  {isCurrent ? `${t("conversations.current")} · ` : ""}{t("conversations.turns", { count: session.turn_count })} · {formatTime(session.last_turn_at ?? session.created_at, locale)}
                 </Text>
               </AppPressable>
             )}
             <View style={styles.actions}>
               {isEditing ? (
                 <>
-                  <IconAction label="取消编辑" icon="x" onPress={() => setEditing("")} />
-                  <IconAction label="保存名称" icon="check" disabled={!title.trim()} onPress={() => void update(session, { title: title.trim() })} />
+                  <IconAction label={t("conversations.cancelEdit")} icon="x" onPress={() => setEditing("")} />
+                  <IconAction label={t("conversations.saveName")} icon="check" disabled={!title.trim()} onPress={() => void update(session, { title: title.trim() })} />
                 </>
               ) : (
                 <>
-                  <IconAction label="重命名" icon="edit" onPress={() => { setEditing(session.session_handle); setTitle(session.title); }} />
+                  <IconAction label={t("conversations.rename")} icon="edit" onPress={() => { setEditing(session.session_handle); setTitle(session.title); }} />
                   <IconAction
-                    label={session.state === "archived" ? "恢复" : "归档"}
+                    label={session.state === "archived" ? t("conversations.restore") : t("conversations.archive")}
                     icon={session.state === "archived" ? "restore" : "archive"}
                     onPress={() => void update(session, { state: session.state === "archived" ? "active" : "archived" })}
                   />
-                  <IconAction label="删除" icon="trash" danger onPress={() => confirmDelete(session)} />
+                  <IconAction label={t("common.delete")} icon="trash" danger onPress={() => confirmDelete(session)} />
                 </>
               )}
               {working === session.session_handle ? <ActivityIndicator color={colors.accent} size="small" /> : null}
             </View>
           </View>
         );
-      })}
-      {nextCursor ? (
+      }}
+      ListFooterComponent={nextCursor ? (
         <AppPressable disabled={loadingMore} onPress={() => void loadMore()} style={styles.loadMore}>
           {loadingMore
             ? <ActivityIndicator color={colors.accent} />
-            : <Text style={styles.loadMoreText}>加载更多会话</Text>}
+            : <Text style={styles.loadMoreText}>{t("conversations.loadMore")}</Text>}
         </AppPressable>
       ) : null}
-    </ScrollView>
+    />
   );
 }
 
@@ -210,8 +216,8 @@ function IconAction({ label, icon, danger = false, disabled = false, onPress }: 
   );
 }
 
-function formatTime(value: number): string {
-  return new Date(value * 1000).toLocaleString("zh-CN", { hour12: false });
+function formatTime(value: number, locale: string): string {
+  return new Date(value * 1000).toLocaleString(locale, { hour12: false });
 }
 
 const styles = StyleSheet.create({
@@ -226,7 +232,7 @@ const styles = StyleSheet.create({
   meta: { color: colors.muted, fontSize: 13 },
   titleInput: { color: colors.ink, borderWidth: 1, borderColor: colors.accent, borderRadius: 10, padding: 10, backgroundColor: colors.background },
   actions: { flexDirection: "row", gap: 18, alignItems: "center" },
-  iconAction: { width: 38, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.background },
+  iconAction: { width: 44, height: 44, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: colors.background },
   loading: { marginTop: 60 },
   empty: { color: colors.muted, textAlign: "center", marginTop: 60 },
   error: { color: colors.danger, lineHeight: 20 },

@@ -15,6 +15,7 @@ import { GatewayError } from "@/api/gatewayClient";
 import type { AndroidRelease } from "@/api/models";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
+import { useI18n } from "@/i18n";
 import {
   AndroidUpdateDownload,
   installAndroidPackage,
@@ -30,6 +31,7 @@ type DownloadState = "idle" | "downloading" | "paused" | "ready" | "error";
 
 export default function UpdateScreen() {
   const gateway = useGateway();
+  const { t } = useI18n();
   const [release, setRelease] = useState<AndroidRelease | null>(null);
   const [checking, setChecking] = useState(true);
   const [state, setState] = useState<DownloadState>("idle");
@@ -48,11 +50,11 @@ export default function UpdateScreen() {
       .then(setRelease)
       .catch((error: unknown) => {
         if (!(error instanceof GatewayError && error.status === 404)) {
-          setMessage(error instanceof Error ? error.message : "检查更新失败");
+          setMessage(t("update.checkFailed"));
         }
       })
       .finally(() => setChecking(false));
-  }, [gateway.client, gateway.runAuthenticated]);
+  }, [gateway.client, gateway.runAuthenticated, t]);
 
   useEffect(() => {
     if (!release || !isAndroidUpdateAvailable(release, currentVersionCode)) return;
@@ -70,12 +72,12 @@ export default function UpdateScreen() {
       if (next === "active" && installAfterSettings.current && packageUri) {
         installAfterSettings.current = false;
         void installAndroidPackage(packageUri).catch((error) => {
-          setMessage(error instanceof Error ? error.message : "无法打开系统安装器");
+          setMessage(t("update.installerFailed"));
         });
       }
     });
     return () => subscription.remove();
-  }, [packageUri, state]);
+  }, [packageUri, state, t]);
 
   useEffect(() => () => {
     if (download.current) void download.current.pause();
@@ -103,7 +105,7 @@ export default function UpdateScreen() {
       download.current = null;
       if (pausing.current) return;
       setState("error");
-      setMessage(error instanceof Error ? error.message : "更新包下载失败");
+      setMessage(t("update.downloadFailed"));
     }
   }
 
@@ -116,7 +118,7 @@ export default function UpdateScreen() {
       setState("paused");
     } catch (error) {
       pausing.current = false;
-      setMessage(error instanceof Error ? error.message : "保存下载断点失败");
+      setMessage(t("update.pauseFailed"));
     }
   }
 
@@ -125,7 +127,7 @@ export default function UpdateScreen() {
     try {
       await installAndroidPackage(packageUri);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "无法打开系统安装器");
+      setMessage(t("update.installerFailed"));
     }
   }
 
@@ -135,7 +137,7 @@ export default function UpdateScreen() {
       await openUnknownSourcesSettings();
     } catch (error) {
       installAfterSettings.current = false;
-      setMessage(error instanceof Error ? error.message : "无法打开安装权限设置");
+      setMessage(t("update.permissionSettingsFailed"));
     }
   }
 
@@ -143,32 +145,32 @@ export default function UpdateScreen() {
   const fraction = progress.total > 0 ? Math.min(1, progress.downloaded / progress.total) : 0;
 
   if (Platform.OS !== "android") {
-    return <View style={styles.center}><Text style={styles.message}>私人自更新目前仅支持 Android</Text></View>;
+    return <View style={styles.center}><Text style={styles.message}>{t("update.androidOnly")}</Text></View>;
   }
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.card}>
-        <Text style={styles.title}>小诺</Text>
+        <Text style={styles.title}>{t("app.name")}</Text>
         <Text style={styles.meta}>
-          当前版本 {Application.nativeApplicationVersion ?? "—"} · build {currentVersionCode}
+          {t("update.currentVersion", { version: Application.nativeApplicationVersion ?? "—", build: currentVersionCode })}
         </Text>
         {checking ? <ActivityIndicator color={colors.accent} /> : null}
         {message && !release ? <Text style={styles.error}>{message}</Text> : null}
-        {!checking && !release ? <Text style={styles.message}>暂时没有发布安装包</Text> : null}
+        {!checking && !release ? <Text style={styles.message}>{t("update.noRelease")}</Text> : null}
         {release ? (
           <>
             <View style={styles.releaseHeader}>
               <Text style={styles.releaseName}>{release.version_name}</Text>
               <Text style={[styles.badge, available && styles.badgeActive]}>
-                {available ? "发现更新" : "已是最新"}
+                {available ? t("update.available") : t("update.latest")}
               </Text>
             </View>
             <Text style={styles.meta}>
               build {release.version_code} · {formatBytes(release.size_bytes)}
             </Text>
             {requiresAndroidUpdate(release, currentVersionCode) ? (
-              <Text style={styles.required}>当前版本过旧，需要更新后继续使用</Text>
+              <Text style={styles.required}>{t("update.required")}</Text>
             ) : null}
             {release.release_notes ? <Text style={styles.notes}>{release.release_notes}</Text> : null}
           </>
@@ -177,7 +179,7 @@ export default function UpdateScreen() {
 
       {release && available ? (
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>下载安装包</Text>
+          <Text style={styles.sectionTitle}>{t("update.downloadPackage")}</Text>
           {(state === "downloading" || state === "paused" || state === "ready") ? (
             <>
               <View style={styles.track}><View style={[styles.bar, { width: `${fraction * 100}%` }]} /></View>
@@ -187,16 +189,16 @@ export default function UpdateScreen() {
           {message ? <Text style={styles.error}>{message}</Text> : null}
           <View style={styles.row}>
             {state === "downloading" ? (
-              <Button label="暂停" secondary onPress={() => void pauseDownload()} />
+              <Button label={t("update.pause")} secondary onPress={() => void pauseDownload()} />
             ) : null}
             {state === "idle" || state === "paused" || state === "error" ? (
-              <Button label={state === "paused" ? "继续下载" : "下载更新"} onPress={() => void startDownload()} />
+              <Button label={state === "paused" ? t("update.resume") : t("update.download")} onPress={() => void startDownload()} />
             ) : null}
-            {state === "ready" ? <Button label="安装更新" onPress={() => void install()} /> : null}
+            {state === "ready" ? <Button label={t("update.install")} onPress={() => void install()} /> : null}
           </View>
-          <Text style={styles.tip}>离开页面或 App 进入后台时会保存断点，下次从断点继续。</Text>
+          <Text style={styles.tip}>{t("update.resumeHint")}</Text>
           <Pressable onPress={() => void allowUnknownSources()}>
-            <Text style={styles.link}>允许小诺安装未知来源应用</Text>
+            <Text style={styles.link}>{t("update.allowUnknown")}</Text>
           </Pressable>
         </View>
       ) : null}

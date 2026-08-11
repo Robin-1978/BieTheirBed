@@ -3,7 +3,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,11 +13,14 @@ import type { Task, TaskExecution, TaskState } from "@/api/models";
 import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
+import { useI18n } from "@/i18n";
+import { AppPressable } from "@/components/AppPressable";
 
 export default function TaskDetailScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const taskId = String(params.id ?? "");
   const gateway = useGateway();
+  const { t } = useI18n();
   const [task, setTask] = useState<Task | null>(null);
   const [executions, setExecutions] = useState<TaskExecution[]>([]);
   const [working, setWorking] = useState("");
@@ -35,9 +37,9 @@ export default function TaskDetailScreen() {
       setTask(nextTask);
       setExecutions(nextExecutions);
     } catch {
-      setError("任务详情加载失败，请稍后重试");
+      setError(t("taskDetail.loadFailed"));
     }
-  }, [gateway.client, gateway.runAuthenticated, taskId]);
+  }, [gateway.client, gateway.runAuthenticated, t, taskId]);
 
   useEffect(() => { void refresh(); }, [refresh, gateway.latestEvent]);
 
@@ -49,7 +51,7 @@ export default function TaskDetailScreen() {
       const execution = await gateway.runAuthenticated((client) => client.executeTask(task.task_id));
       router.push(`/task-executions/${execution.execution_id}`);
     } catch {
-      setError("当前无法开始执行；如果已有执行正在进行，请先查看或停止它");
+      setError(t("taskDetail.executeFailed"));
     } finally {
       setWorking("");
     }
@@ -62,7 +64,7 @@ export default function TaskDetailScreen() {
       const updated = await gateway.runAuthenticated((client) => client.taskDefinitionCommand(task.task_id, command));
       setTask(updated);
     } catch {
-      setError("操作失败，请重试");
+      setError(t("taskDetail.operationFailed"));
     } finally {
       setWorking("");
     }
@@ -72,14 +74,14 @@ export default function TaskDetailScreen() {
     if (!task) return;
     const hasActive = executions.some((item) => !isTerminal(item.state));
     Alert.alert(
-      "删除任务？",
+      t("taskDetail.deleteTitle"),
       hasActive
-        ? "任务仍有执行正在进行，请先停止执行后再删除。"
-        : `将删除“${task.title}”及全部 ${executions.length} 条执行记录，此操作无法撤销。`,
-      hasActive ? [{ text: "知道了" }] : [
-        { text: "取消", style: "cancel" },
+        ? t("taskDetail.deleteActive")
+        : t("taskDetail.deleteBody", { title: task.title, count: executions.length }),
+      hasActive ? [{ text: t("common.gotIt") }] : [
+        { text: t("common.cancel"), style: "cancel" },
         {
-          text: "删除",
+          text: t("common.delete"),
           style: "destructive",
           onPress: () => void deleteTask(),
         },
@@ -94,7 +96,7 @@ export default function TaskDetailScreen() {
       await gateway.runAuthenticated((client) => client.deleteTask(task.task_id));
       router.replace("/tasks");
     } catch {
-      setError("任务删除失败，请确认所有执行都已结束");
+      setError(t("taskDetail.deleteFailed"));
       setWorking("");
     }
   }
@@ -107,7 +109,7 @@ export default function TaskDetailScreen() {
     return (
       <View style={styles.loading}>
         <Text style={styles.error}>{error}</Text>
-        <Pressable onPress={() => void refresh()}><Text style={styles.link}>重新加载</Text></Pressable>
+        <AppPressable onPress={() => void refresh()}><Text style={styles.link}>{t("tasks.reload")}</Text></AppPressable>
       </View>
     );
   }
@@ -116,56 +118,56 @@ export default function TaskDetailScreen() {
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.summary}>
         <View style={styles.summaryHeader}>
-          <Text style={styles.state}>{taskStateLabel(task.state)}</Text>
-          <Text style={styles.revision}>版本 {task.revision}</Text>
+        <Text style={styles.state}>{taskStateLabel(task.state, t)}</Text>
+          <Text style={styles.revision}>{t("taskDetail.revision", { revision: task.revision })}</Text>
         </View>
         <Text style={styles.title}>{task.title}</Text>
         <Text style={styles.goal}>{task.goal}</Text>
-        <Text style={styles.policy}>{launchLabel(task)} · 已执行 {task.execution_count} 次</Text>
+        <Text style={styles.policy}>{launchLabel(task, t)} · {t("tasks.executions", { count: task.execution_count })}</Text>
       </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <View style={styles.actions}>
-        <Action icon="play" label="立即执行" onPress={() => void executeNow()} disabled={Boolean(working)} busy={working === "execute"} primary />
-        <Action icon="edit" label="编辑" onPress={() => router.push(`/tasks/${task.task_id}/edit`)} disabled={Boolean(working)} />
+        <Action icon="play" label={t("taskDetail.executeNow")} onPress={() => void executeNow()} disabled={Boolean(working)} busy={working === "execute"} primary />
+        <Action icon="edit" label={t("taskDetail.edit")} onPress={() => router.push(`/tasks/${task.task_id}/edit`)} disabled={Boolean(working)} />
       </View>
       <View style={styles.actions}>
-        {task.state === "active" ? <Action icon="pause" label="暂停自动启动" onPress={() => void setState("pause")} disabled={Boolean(working)} busy={working === "pause"} /> : null}
-        {task.state === "paused" ? <Action icon="play" label="恢复启用" onPress={() => void setState("resume")} disabled={Boolean(working)} busy={working === "resume"} /> : null}
-        {task.state === "archived" ? <Action icon="restore" label="恢复任务" onPress={() => void setState("restore")} disabled={Boolean(working)} busy={working === "restore"} /> : null}
-        {task.state !== "archived" ? <Action icon="archive" label="归档" onPress={() => void setState("archive")} disabled={Boolean(working)} busy={working === "archive"} /> : null}
+        {task.state === "active" ? <Action icon="pause" label={t("taskDetail.pause")} onPress={() => void setState("pause")} disabled={Boolean(working)} busy={working === "pause"} /> : null}
+        {task.state === "paused" ? <Action icon="play" label={t("taskDetail.resume")} onPress={() => void setState("resume")} disabled={Boolean(working)} busy={working === "resume"} /> : null}
+        {task.state === "archived" ? <Action icon="restore" label={t("taskDetail.restore")} onPress={() => void setState("restore")} disabled={Boolean(working)} busy={working === "restore"} /> : null}
+        {task.state !== "archived" ? <Action icon="archive" label={t("taskDetail.archive")} onPress={() => void setState("archive")} disabled={Boolean(working)} busy={working === "archive"} /> : null}
       </View>
 
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>执行记录</Text>
+        <Text style={styles.sectionTitle}>{t("taskDetail.executions")}</Text>
         <Text style={styles.sectionCount}>{executions.length}</Text>
       </View>
       {executions.length ? executions.map((execution) => (
-        <Pressable
+        <AppPressable
           accessibilityRole="button"
-          accessibilityLabel={`${launchReasonLabel(execution.launch_reason)}，${executionStateLabel(execution.state)}`}
+          accessibilityLabel={`${launchReasonLabel(execution.launch_reason, t)}，${executionStateLabel(execution.state, t)}`}
           key={execution.execution_id}
           style={styles.execution}
           onPress={() => router.push(`/task-executions/${execution.execution_id}`)}
         >
           <View style={styles.executionHeader}>
-            <Text style={styles.executionTitle}>{launchReasonLabel(execution.launch_reason)}</Text>
-            <Text style={styles.executionState}>{executionStateLabel(execution.state)}</Text>
+            <Text style={styles.executionTitle}>{launchReasonLabel(execution.launch_reason, t)}</Text>
+            <Text style={styles.executionState}>{executionStateLabel(execution.state, t)}</Text>
           </View>
           {execution.final_result ? <Text style={styles.result} numberOfLines={2}>{execution.final_result}</Text> : null}
-          {execution.failure_code ? <Text style={styles.failure}>未完成：{execution.failure_code}</Text> : null}
+          {execution.failure_code ? <Text style={styles.failure}>{t("taskDetail.incomplete", { code: execution.failure_code })}</Text> : null}
           <Text style={styles.time}>{new Date(execution.created_at * 1000).toLocaleString()}</Text>
-        </Pressable>
+        </AppPressable>
       )) : (
-        <View style={styles.empty}><Text style={styles.emptyText}>还没有执行记录</Text></View>
+        <View style={styles.empty}><Text style={styles.emptyText}>{t("taskDetail.noExecutions")}</Text></View>
       )}
 
-      <Pressable accessibilityRole="button" disabled={Boolean(working)} onPress={confirmDelete} style={styles.deleteButton}>
+      <AppPressable accessibilityRole="button" disabled={Boolean(working)} onPress={confirmDelete} style={styles.deleteButton}>
         {working === "delete"
           ? <ActivityIndicator color={colors.danger} size="small" />
-          : <View style={styles.deleteContent}><AppIcon name="trash" color={colors.danger} size={18} /><Text style={styles.deleteText}>删除任务和全部记录</Text></View>}
-      </Pressable>
+          : <View style={styles.deleteContent}><AppIcon name="trash" color={colors.danger} size={18} /><Text style={styles.deleteText}>{t("taskDetail.deleteAll")}</Text></View>}
+      </AppPressable>
     </ScrollView>
   );
 }
@@ -174,29 +176,29 @@ function isTerminal(state: TaskState): boolean {
   return state === "completed" || state === "failed" || state === "cancelled";
 }
 
-function taskStateLabel(state: Task["state"]): string {
-  return ({ active: "已启用", paused: "已暂停", archived: "已归档" })[state];
+function taskStateLabel(state: Task["state"], t: ReturnType<typeof useI18n>["t"]): string {
+  return ({ active: t("tasks.state.active"), paused: t("tasks.state.paused"), archived: t("tasks.state.archived") })[state];
 }
 
-function executionStateLabel(state: TaskState): string {
-  return ({ queued: "排队中", running: "进行中", waiting_approval: "待确认", paused: "已暂停", completed: "已完成", failed: "失败", cancelled: "已取消" })[state];
+function executionStateLabel(state: TaskState, t: ReturnType<typeof useI18n>["t"]): string {
+  return ({ queued: t("taskState.queued"), running: t("taskState.running"), waiting_approval: t("taskState.waitingApproval"), paused: t("tasks.state.paused"), completed: t("taskState.completed"), failed: t("taskState.failed"), cancelled: t("taskState.cancelled") })[state];
 }
 
-function launchLabel(task: Task): string {
-  return ({ immediate: "创建时执行，之后手动启动", scheduled: "定时启动", event: "事件启动" })[task.launch_policy.kind];
+function launchLabel(task: Task, t: ReturnType<typeof useI18n>["t"]): string {
+  return ({ immediate: t("taskDetail.launchImmediate"), scheduled: t("tasks.launch.scheduled"), event: t("tasks.launch.event") })[task.launch_policy.kind];
 }
 
-function launchReasonLabel(reason: TaskExecution["launch_reason"]): string {
-  return ({ created: "首次执行", manual: "手动执行", scheduled: "定时执行", event: "事件启动", rerun: "按历史配置再次执行" })[reason];
+function launchReasonLabel(reason: TaskExecution["launch_reason"], t: ReturnType<typeof useI18n>["t"]): string {
+  return ({ created: t("taskDetail.reason.created"), manual: t("taskDetail.reason.manual"), scheduled: t("taskDetail.reason.scheduled"), event: t("taskDetail.reason.event"), rerun: t("taskDetail.reason.rerun") })[reason];
 }
 
 function Action({ icon, label, primary = false, disabled = false, busy = false, onPress }: { icon: AppIconName; label: string; primary?: boolean; disabled?: boolean; busy?: boolean; onPress(): void }) {
   return (
-    <Pressable disabled={disabled} style={[styles.action, primary && styles.actionPrimary, disabled && styles.disabled]} onPress={onPress}>
+    <AppPressable disabled={disabled} style={[styles.action, primary && styles.actionPrimary, disabled && styles.disabled]} onPress={onPress}>
       {busy
         ? <ActivityIndicator color={primary ? "white" : colors.accent} size="small" />
         : <><AppIcon name={icon} color={primary ? colors.white : colors.accent} size={18} /><Text style={[styles.actionText, primary && styles.actionPrimaryText]}>{label}</Text></>}
-    </Pressable>
+    </AppPressable>
   );
 }
 

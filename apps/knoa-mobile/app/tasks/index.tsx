@@ -45,12 +45,12 @@ export default function TasksScreen() {
       }));
       setTasks(result.tasks);
     } catch {
-      setError("任务暂时加载失败，请检查连接后重试");
+      setError(t("tasks.loadFailed"));
     } finally {
       setRefreshing(false);
       setLoading(false);
     }
-  }, [gateway.client, gateway.runAuthenticated]);
+  }, [gateway.client, gateway.runAuthenticated, t]);
 
   useEffect(() => { void refresh(); }, [refresh, gateway.latestEvent]);
 
@@ -81,10 +81,10 @@ export default function TasksScreen() {
       {gateway.availableUpdate ? (
         <AppPressable style={styles.updateBanner} onPress={() => router.push("/update") }>
           <View>
-            <Text style={styles.updateTitle}>小诺 {gateway.availableUpdate.version_name} 可以更新</Text>
-            <Text style={styles.updateDetail}>支持断点续传</Text>
+            <Text style={styles.updateTitle}>{t("tasks.updateAvailable", { version: gateway.availableUpdate.version_name })}</Text>
+            <Text style={styles.updateDetail}>{t("tasks.updateResume")}</Text>
           </View>
-          <Text style={styles.updateLink}>查看</Text>
+          <Text style={styles.updateLink}>{t("tasks.view")}</Text>
         </AppPressable>
       ) : null}
       <View style={styles.filters}>
@@ -121,18 +121,18 @@ export default function TasksScreen() {
         renderItem={({ item }) => (
           <AppPressable
             accessibilityRole="button"
-            accessibilityLabel={`${item.title}，${stateLabel(item.state)}，已执行 ${item.execution_count} 次`}
+            accessibilityLabel={`${item.title}，${stateLabel(item.state, t)}，${t("tasks.executions", { count: item.execution_count })}`}
             style={styles.task}
             onPress={() => router.push(`/tasks/${item.task_id}`)}
           >
             <View style={styles.taskHeader}>
               <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
-              <Text style={[styles.state, item.state === "paused" && styles.paused]}>{stateLabel(item.state)}</Text>
+              <Text style={[styles.state, item.state === "paused" && styles.paused]}>{stateLabel(item.state, t)}</Text>
             </View>
             <Text style={styles.goal} numberOfLines={3}>{item.goal}</Text>
             <View style={styles.metaRow}>
               <View style={styles.metaCopy}>
-                <Text style={styles.meta}>{launchLabel(item)}</Text>
+                <Text style={styles.meta}>{launchLabel(item, t)}</Text>
                 <Text style={styles.meta}>{t("tasks.executions", { count: item.execution_count })}</Text>
               </View>
               <AppIcon name="chevron-right" color={colors.muted} size={18} />
@@ -145,14 +145,14 @@ export default function TasksScreen() {
   );
 }
 
-function stateLabel(state: TaskDefinitionState): string {
-  return ({ active: "已启用", paused: "已暂停", archived: "已归档" })[state];
+function stateLabel(state: TaskDefinitionState, t: ReturnType<typeof useI18n>["t"]): string {
+  return ({ active: t("tasks.state.active"), paused: t("tasks.state.paused"), archived: t("tasks.state.archived") })[state];
 }
 
-function launchLabel(task: Task): string {
-  if (task.launch_policy.kind === "scheduled") return "定时启动";
-  if (task.launch_policy.kind === "event") return "事件启动";
-  return "手动启动";
+function launchLabel(task: Task, t: ReturnType<typeof useI18n>["t"]): string {
+  if (task.launch_policy.kind === "scheduled") return t("tasks.launch.scheduled");
+  if (task.launch_policy.kind === "event") return t("tasks.launch.event");
+  return t("tasks.launch.manual");
 }
 
 const styles = StyleSheet.create({

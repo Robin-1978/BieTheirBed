@@ -8,6 +8,7 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-na
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { ResolvedArtifactFile } from "@/api/chatArtifacts";
+import { useI18n } from "@/i18n";
 import { colors } from "@/theme";
 
 export function ArtifactViewer({
@@ -17,8 +18,9 @@ export function ArtifactViewer({
 }: {
   file: ResolvedArtifactFile | null;
   onClose(): void;
-  onMessage(message: string): void;
+  onMessage(message: string, tone?: "success" | "error" | "info"): void;
 }) {
+  const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const [working, setWorking] = useState<"save" | "share" | "">("");
   const scale = useSharedValue(1);
@@ -77,15 +79,15 @@ export function ArtifactViewer({
       const permission = await MediaLibrary.requestPermissionsAsync(true, ["photo"]);
       if (!permission.granted) {
         onMessage(permission.canAskAgain
-          ? "需要照片权限才能保存到相册"
-          : "照片权限已关闭，请在系统设置中允许后再保存");
+          ? t("artifact.photoPermission")
+          : t("artifact.photoPermissionDisabled"), "error");
         if (!permission.canAskAgain) await Linking.openSettings();
         return;
       }
       await MediaLibrary.createAssetAsync(file.uri);
-      onMessage("图片已保存到手机相册");
+      onMessage(t("artifact.savedToPhotos"), "success");
     } catch (error) {
-      onMessage(error instanceof Error ? error.message : "图片保存失败，请重试");
+      onMessage(error instanceof Error ? error.message : t("artifact.saveImageFailed"), "error");
     } finally {
       setWorking("");
     }
@@ -97,7 +99,7 @@ export function ArtifactViewer({
     try {
       await Sharing.shareAsync(file.uri, { mimeType: file.mediaType });
     } catch (error) {
-      onMessage(error instanceof Error ? error.message : "图片分享失败，请重试");
+      onMessage(error instanceof Error ? error.message : t("artifact.shareFailed"), "error");
     } finally {
       setWorking("");
     }
@@ -108,16 +110,16 @@ export function ArtifactViewer({
       {file ? (
         <GestureHandlerRootView style={styles.root}>
           <View style={[styles.toolbar, { paddingTop: insets.top + 6 }]}>
-            <Pressable accessibilityLabel="关闭图片预览" onPress={onClose} style={styles.button}>
-              <Text style={styles.buttonText}>关闭</Text>
+            <Pressable accessibilityLabel={t("artifact.closePreview")} onPress={onClose} style={styles.button}>
+              <Text style={styles.buttonText}>{t("artifact.close")}</Text>
             </Pressable>
             <Text numberOfLines={1} style={styles.name}>{file.name}</Text>
             <View style={styles.actions}>
-              <Pressable accessibilityLabel="保存图片到相册" disabled={Boolean(working)} onPress={() => void save()} style={styles.button}>
-                {working === "save" ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.buttonText}>保存</Text>}
+              <Pressable accessibilityLabel={t("artifact.saveToPhotos")} disabled={Boolean(working)} onPress={() => void save()} style={styles.button}>
+                {working === "save" ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.buttonText}>{t("artifact.save")}</Text>}
               </Pressable>
-              <Pressable accessibilityLabel="分享图片" disabled={Boolean(working)} onPress={() => void share()} style={styles.button}>
-                {working === "share" ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.buttonText}>分享</Text>}
+              <Pressable accessibilityLabel={t("artifact.shareImage")} disabled={Boolean(working)} onPress={() => void share()} style={styles.button}>
+                {working === "share" ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.buttonText}>{t("artifact.share")}</Text>}
               </Pressable>
             </View>
           </View>
@@ -126,7 +128,7 @@ export function ArtifactViewer({
               <Animated.Image resizeMode="contain" source={{ uri: file.uri }} style={[styles.image, imageStyle]} />
             </Animated.View>
           </GestureDetector>
-          <Text style={[styles.hint, { bottom: insets.bottom + 16 }]}>双击或双指缩放，放大后可拖动</Text>
+          <Text style={[styles.hint, { bottom: insets.bottom + 16 }]}>{t("artifact.zoomHint")}</Text>
         </GestureHandlerRootView>
       ) : null}
     </Modal>
