@@ -163,7 +163,7 @@ class GatewayHttp:
         if not header:
             return query_after_id
         if not header.isascii() or not header.isdecimal():
-            raise ValueError("invalid event cursor")
+            return query_after_id
         header_id = int(header)
         if header_id > 9_223_372_036_854_775_807:
             raise ValueError("invalid event cursor")

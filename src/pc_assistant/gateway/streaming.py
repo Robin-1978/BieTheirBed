@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from typing import Any
 
 from pydantic import ValidationError
@@ -47,19 +46,12 @@ class GatewayStreaming:
             iterator = self._core.chat_turn_updates(principal_id, turn_id).__aiter__()
             pending: asyncio.Task[Any] | None = None
             replacement = asyncio.create_task(replaced.wait())
-            deadline = time.monotonic() + self._event_stream_max_seconds
             try:
                 pending = asyncio.create_task(anext(iterator))
                 while True:
-                    remaining_lifetime = deadline - time.monotonic()
-                    if remaining_lifetime <= 0:
-                        return
                     done, _pending = await asyncio.wait(
                         {pending, replacement},
-                        timeout=min(
-                            self._event_heartbeat_seconds,
-                            remaining_lifetime,
-                        ),
+                        timeout=self._event_heartbeat_seconds,
                     )
                     if replacement in done:
                         return
@@ -164,19 +156,12 @@ class GatewayStreaming:
             ).__aiter__()
             pending: asyncio.Task[Any] | None = None
             replacement = asyncio.create_task(replaced.wait())
-            deadline = time.monotonic() + self._event_stream_max_seconds
             try:
                 pending = asyncio.create_task(anext(iterator))
                 while True:
-                    remaining_lifetime = deadline - time.monotonic()
-                    if remaining_lifetime <= 0:
-                        return
                     done, _pending = await asyncio.wait(
                         {pending, replacement},
-                        timeout=min(
-                            self._event_heartbeat_seconds,
-                            remaining_lifetime,
-                        ),
+                        timeout=self._event_heartbeat_seconds,
                     )
                     if replacement in done:
                         return
