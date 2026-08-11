@@ -793,14 +793,14 @@ async def test_gateway_adapter_streams_resumable_standard_task_events(tmp_path) 
         "Last-Event-ID": "40",
     }
     async with httpx.AsyncClient(transport=transport, base_url="http://gateway.local") as http:
-        response = await http.get("/v1/events", headers=headers)
+        response = await http.get("/v1/events?after_id=40", headers={**headers, "Last-Event-ID": "41"})
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
-    assert "id: 41\n" in response.text
+    assert "id: 42\n" in response.text
     assert "event: content_delta\n" in response.text
     assert '"content":"你好"' in response.text
-    assert core.calls == [("principal_task_events", "personal:owner", 40)]
+    assert core.calls == [("principal_task_events", "personal:owner", 41)]
 
 
 @pytest.mark.asyncio
