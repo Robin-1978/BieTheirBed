@@ -167,9 +167,10 @@ class GatewayHttp:
         header_id = int(header)
         if header_id > 9_223_372_036_854_775_807:
             raise ValueError("invalid event cursor")
-        if query_after_id and query_after_id != header_id:
-            raise ValueError("conflicting event cursors")
-        return header_id
+        # EventSource reconnects with Last-Event-ID while keeping the original
+        # URL query string.  The header is the newer cursor when it advances;
+        # never move a reconnect backwards if the URL still has a later value.
+        return max(query_after_id, header_id)
 
     @staticmethod
     def _sse(event: str, payload: dict[str, Any], *, event_id: int | None = None) -> bytes:
