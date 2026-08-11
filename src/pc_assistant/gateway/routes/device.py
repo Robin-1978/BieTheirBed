@@ -252,6 +252,18 @@ class DeviceRoutes:
         if isinstance(authenticated, JSONResponse):
             return authenticated
         device = authenticated.device
+        if request.method == "GET":
+            registration = await asyncio.to_thread(
+                self._push_repository.get_for_device,
+                device.principal_id,
+                device.device_id,
+            )
+            return JSONResponse(
+                {
+                    "registered": registration is not None,
+                    "provider": "" if registration is None else registration.provider,
+                }
+            )
         if request.method == "DELETE":
             await asyncio.to_thread(
                 self._push_repository.unregister,
@@ -288,6 +300,39 @@ class DeviceRoutes:
         return JSONResponse(
             {"registered": True, "provider": registration.provider}
         )
+
+    async def _device_push_test(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=10)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        device = authenticated.device
+        try:
+            sent = await self._push_dispatcher.send_test(
+                device.principal_id,
+                device.device_id,
+            )
+        except Exception:
+            logger.warning(
+                "Gateway Push test delivery failed device=%s",
+                device.device_id,
+                exc_info=True,
+            )
+            self._record_audit(
+                "push_test_failed",
+                request=request,
+                device_id=device.device_id,
+                principal_id=device.principal_id,
+            )
+            return JSONResponse({"error": "push_delivery_failed"}, status_code=502)
+        if not sent:
+            return JSONResponse({"error": "push_not_registered"}, status_code=409)
+        self._record_audit(
+            "push_test_sent",
+            request=request,
+            device_id=device.device_id,
+            principal_id=device.principal_id,
+        )
+        return JSONResponse({"sent": True})
 
     async def _device(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=10)

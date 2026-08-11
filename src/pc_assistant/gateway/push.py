@@ -206,6 +206,19 @@ class GatewayPushRepository:
             ).fetchall()
         return tuple(self._registration(row) for row in rows)
 
+    def get_for_device(
+        self,
+        principal_id: str,
+        device_id: str,
+    ) -> GatewayPushRegistration | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM gateway_push_registrations "
+                "WHERE principal_id = ? AND device_id = ?",
+                (self._text(principal_id, 256), self._text(device_id, 128)),
+            ).fetchone()
+        return None if row is None else self._registration(row)
+
     def cursor(self, principal_id: str) -> int:
         with self._connect() as connection:
             row = connection.execute(
@@ -359,6 +372,27 @@ class GatewayPushDispatcher:
                     registration.device_id,
                     message.category,
                 )
+
+    async def send_test(self, principal_id: str, device_id: str) -> bool:
+        registration = await asyncio.to_thread(
+            self._repository.get_for_device,
+            principal_id,
+            device_id,
+        )
+        if registration is None:
+            return False
+        await self._transport.send(
+            registration,
+            GatewayPushMessage(
+                category="test",
+                task_id="",
+                execution_id="",
+                approval_id="",
+                title="小诺通知测试",
+                body="服务器推送已经可以正常送达这台手机。",
+            ),
+        )
+        return True
 
     @staticmethod
     def message_for(feed: PrincipalTaskEvent) -> GatewayPushMessage | None:

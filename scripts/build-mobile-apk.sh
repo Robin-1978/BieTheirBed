@@ -10,6 +10,8 @@ ENV_SH="$DISK_DEV/env.sh"
 ASSISTANT_HOME="${PC_ASSISTANT_HOME:-$HOME/.pc-assistant}"
 SECRETS_DIR="${KNOA_MOBILE_SECRETS_DIR:-$ASSISTANT_HOME/secrets/android}"
 KEY_PROPERTIES="$SECRETS_DIR/key.properties"
+EXPO_PROJECT_ID_FILE="$SECRETS_DIR/expo-project-id"
+GOOGLE_SERVICES_FILE="${KNOA_MOBILE_GOOGLE_SERVICES_JSON:-$SECRETS_DIR/google-services.json}"
 
 if [[ ! -f "$ENV_SH" ]]; then
   echo "Missing Android environment: $ENV_SH" >&2
@@ -25,6 +27,17 @@ source "$ENV_SH"
 if [[ ! -f "$KEY_PROPERTIES" ]]; then
   echo "Missing release signing configuration: $KEY_PROPERTIES" >&2
   exit 1
+fi
+if [[ -z "${KNOA_EXPO_PROJECT_ID:-}" && -f "$EXPO_PROJECT_ID_FILE" ]]; then
+  KNOA_EXPO_PROJECT_ID="$(tr -d '[:space:]' < "$EXPO_PROJECT_ID_FILE")"
+fi
+if [[ -z "${KNOA_EXPO_PROJECT_ID:-}" ]]; then
+  echo "WARNING: Push is not configured; set KNOA_EXPO_PROJECT_ID or create $EXPO_PROJECT_ID_FILE" >&2
+else
+  export KNOA_EXPO_PROJECT_ID
+fi
+if [[ ! -f "$GOOGLE_SERVICES_FILE" ]]; then
+  echo "WARNING: Firebase Android Push configuration is missing: $GOOGLE_SERVICES_FILE" >&2
 fi
 
 export KNOA_MOBILE_BUILD_DIR="${KNOA_MOBILE_BUILD_DIR:-$DISK_DEV/knoa-mobile-out}"
@@ -63,9 +76,12 @@ rsync -a --delete --no-owner --no-group --no-perms \
   "$REPO/assets/branding/" "$KNOA_MOBILE_SOURCE_ROOT/assets/branding/"
 
 cp "$KEY_PROPERTIES" "$ANDROID/key.properties"
+if [[ -f "$GOOGLE_SERVICES_FILE" ]]; then
+  cp "$GOOGLE_SERVICES_FILE" "$ANDROID/app/google-services.json"
+fi
 
 cleanup() {
-  rm -f "$ANDROID/key.properties"
+  rm -f "$ANDROID/key.properties" "$ANDROID/app/google-services.json"
 }
 trap cleanup EXIT
 

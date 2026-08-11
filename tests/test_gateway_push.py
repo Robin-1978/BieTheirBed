@@ -70,6 +70,8 @@ def test_gateway_push_repository_replaces_only_current_device_registration(
     assert len(registrations) == 1
     assert registrations[0].token == "ExponentPushToken[second-token]"
     assert second.created_at == first.created_at
+    assert repository.get_for_device("personal:owner", "dev-a") == second
+    assert repository.get_for_device("personal:other", "dev-a") is None
     assert repository.unregister("personal:other", "dev-a") is False
     assert repository.unregister("personal:owner", "dev-a") is True
 
@@ -120,6 +122,23 @@ async def test_gateway_push_dispatcher_honors_task_notification_policy(tmp_path)
     await dispatcher._deliver(_feed("failed"))
 
     assert [message.category for _registration, message in transport.sent] == ["task_failed"]
+
+
+async def test_gateway_push_dispatcher_sends_test_to_current_device(tmp_path) -> None:
+    repository = GatewayPushRepository(tmp_path / "data" / "gateway.db")
+    repository.register("dev-a", "personal:owner", "expo", "ExponentPushToken[token-a]")
+    transport = _Transport()
+    dispatcher = GatewayPushDispatcher(
+        "personal:owner",
+        _Core(),
+        repository,
+        transport,
+    )
+
+    assert await dispatcher.send_test("personal:owner", "dev-a") is True
+    assert await dispatcher.send_test("personal:owner", "dev-b") is False
+    assert len(transport.sent) == 1
+    assert transport.sent[0][1].category == "test"
 
 
 def test_gateway_push_cursor_is_monotonic(tmp_path) -> None:

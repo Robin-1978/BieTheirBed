@@ -287,7 +287,12 @@ class SecureGatewayAdapter(
                 Route(
                     "/v1/device/push",
                     self._device_push,
-                    methods=["PUT", "DELETE"],
+                    methods=["GET", "PUT", "DELETE"],
+                ),
+                Route(
+                    "/v1/device/push/test",
+                    self._device_push_test,
+                    methods=["POST"],
                 ),
                 Route(
                     "/v1/approvals/{approval_id:str}/resolve",

@@ -30,6 +30,8 @@ export class GatewayError extends Error {
 function userMessage(status: number, code: string): string {
   if (status === 401) return "连接认证已失效，正在尝试重新认证";
   if (status === 404) return "内容不存在或已经被删除";
+  if (code === "push_not_registered") return "这台手机尚未注册服务器推送，请先启用通知";
+  if (code === "push_delivery_failed") return "服务器推送发送失败，请稍后重试";
   if (status === 413 || code === "payload_too_large") return "内容过大，请减少附件后重试";
   if (status === 422 || code === "rejected") return "当前状态不允许这个操作，请刷新后重试";
   if (status === 429) return "操作太频繁，请稍后再试";
@@ -416,6 +418,14 @@ export class GatewayClient {
       method: "PUT",
       body: { provider: "expo", token },
     });
+  }
+
+  async pushRegistration(): Promise<{ registered: boolean; provider: string }> {
+    return this.json("/v1/device/push");
+  }
+
+  async testPush(): Promise<void> {
+    await this.json("/v1/device/push/test", { method: "POST" });
   }
 
   async unregisterPush(): Promise<void> {
