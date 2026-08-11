@@ -120,6 +120,11 @@ class SecureGatewayAdapter(
         self._limiter = limiter or _WindowLimiter()
         self._event_heartbeat_seconds = max(0.01, event_heartbeat_seconds)
         self._active_event_streams: dict[str, int] = defaultdict(int)
+        self._stream_replacements: dict[tuple[str, str], asyncio.Event] = {}
+        self._event_stream_max_seconds = max(
+            30.0,
+            self._event_heartbeat_seconds * 8,
+        )
         self._server: _EmbeddedUvicornServer | None = None
         self._server_task: asyncio.Task[None] | None = None
         self.app = Starlette(

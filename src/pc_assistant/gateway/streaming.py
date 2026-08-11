@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from pydantic import ValidationError
@@ -32,8 +33,12 @@ class GatewayStreaming:
         if turn_id is None:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         device_id = authenticated.device.device_id
-        if self._active_event_streams[device_id] >= 3:
-            return JSONResponse({"error": "too_many_streams"}, status_code=429)
+        stream_key = (device_id, f"chat:{turn_id}")
+        previous = self._stream_replacements.get(stream_key)
+        if previous is not None:
+            previous.set()
+        replaced = asyncio.Event()
+        self._stream_replacements[stream_key] = replaced
         self._active_event_streams[device_id] += 1
         token = self._bearer_token(request)
         principal_id = authenticated.device.principal_id
@@ -41,13 +46,23 @@ class GatewayStreaming:
         async def stream():
             iterator = self._core.chat_turn_updates(principal_id, turn_id).__aiter__()
             pending: asyncio.Task[Any] | None = None
+            replacement = asyncio.create_task(replaced.wait())
+            deadline = time.monotonic() + self._event_stream_max_seconds
             try:
                 pending = asyncio.create_task(anext(iterator))
                 while True:
+                    remaining_lifetime = deadline - time.monotonic()
+                    if remaining_lifetime <= 0:
+                        return
                     done, _pending = await asyncio.wait(
-                        {pending},
-                        timeout=self._event_heartbeat_seconds,
+                        {pending, replacement},
+                        timeout=min(
+                            self._event_heartbeat_seconds,
+                            remaining_lifetime,
+                        ),
                     )
+                    if replacement in done:
+                        return
                     if not done:
                         if self._authenticate_token(token) is None:
                             return
@@ -71,9 +86,14 @@ class GatewayStreaming:
                 if pending is not None and not pending.done():
                     pending.cancel()
                     await asyncio.gather(pending, return_exceptions=True)
+                if not replacement.done():
+                    replacement.cancel()
+                await asyncio.gather(replacement, return_exceptions=True)
                 close = getattr(iterator, "aclose", None)
                 if close is not None:
                     await close()
+                if self._stream_replacements.get(stream_key) is replaced:
+                    self._stream_replacements.pop(stream_key, None)
                 remaining = self._active_event_streams.get(device_id, 1) - 1
                 if remaining > 0:
                     self._active_event_streams[device_id] = remaining
@@ -121,8 +141,12 @@ class GatewayStreaming:
         except (ValidationError, ValueError):
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         device_id = authenticated.device.device_id
-        if self._active_event_streams[device_id] >= 3:
-            return JSONResponse({"error": "too_many_streams"}, status_code=429)
+        stream_key = (device_id, "principal-events")
+        previous = self._stream_replacements.get(stream_key)
+        if previous is not None:
+            previous.set()
+        replaced = asyncio.Event()
+        self._stream_replacements[stream_key] = replaced
         self._active_event_streams[device_id] += 1
         self._record_audit(
             "stream_opened",
@@ -139,13 +163,23 @@ class GatewayStreaming:
                 after_id=after_id,
             ).__aiter__()
             pending: asyncio.Task[Any] | None = None
+            replacement = asyncio.create_task(replaced.wait())
+            deadline = time.monotonic() + self._event_stream_max_seconds
             try:
                 pending = asyncio.create_task(anext(iterator))
                 while True:
+                    remaining_lifetime = deadline - time.monotonic()
+                    if remaining_lifetime <= 0:
+                        return
                     done, _pending = await asyncio.wait(
-                        {pending},
-                        timeout=self._event_heartbeat_seconds,
+                        {pending, replacement},
+                        timeout=min(
+                            self._event_heartbeat_seconds,
+                            remaining_lifetime,
+                        ),
                     )
+                    if replacement in done:
+                        return
                     if not done:
                         if self._authenticate_token(token) is None:
                             return
@@ -177,9 +211,14 @@ class GatewayStreaming:
                 if pending is not None and not pending.done():
                     pending.cancel()
                     await asyncio.gather(pending, return_exceptions=True)
+                if not replacement.done():
+                    replacement.cancel()
+                await asyncio.gather(replacement, return_exceptions=True)
                 close = getattr(iterator, "aclose", None)
                 if close is not None:
                     await close()
+                if self._stream_replacements.get(stream_key) is replaced:
+                    self._stream_replacements.pop(stream_key, None)
                 remaining = self._active_event_streams.get(device_id, 1) - 1
                 if remaining > 0:
                     self._active_event_streams[device_id] = remaining
