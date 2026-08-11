@@ -848,9 +848,9 @@ const ChatTurn = memo(function ChatTurn({
   onRetry(turn: ChatTurnSnapshot): void;
   onEdit(turn: ChatTurnSnapshot): void;
 }) {
-  const response = turn.final_output || turn.content;
+  const terminal = TERMINAL_STATES.has(turn.state);
+  const response = terminal ? turn.final_output || turn.content : "";
   const approval = turn.approvals.find((item) => item.state === "pending") ?? null;
-  const activity = activityText(turn);
   const artifactItems = useMemo(() => assistantArtifactItems(turn.artifacts), [turn.artifacts]);
   return (
     <View style={styles.turn}>
@@ -859,15 +859,8 @@ const ChatTurn = memo(function ChatTurn({
         {turn.attachments.length ? <Text style={styles.userMeta}>附件 {turn.attachments.length}</Text> : null}
       </View>
       <View style={styles.assistantBubble}>
-        {response ? (
-          <AppMarkdown value={response} style={styles.markdownList} />
-        ) : (
-          <View style={styles.activityRow}>
-            {!TERMINAL_STATES.has(turn.state) ? <ActivityIndicator color={colors.accent} size="small" /> : null}
-            <Text style={styles.activity}>{activity}</Text>
-          </View>
-        )}
         <TurnProgress turn={turn} />
+        {response ? <AppMarkdown value={response} style={styles.markdownList} /> : null}
         {artifactItems.length ? (
           <View style={styles.generatedArtifacts}>
             {artifactItems.map((item) => (
@@ -1068,15 +1061,6 @@ function AssistantArtifact({
       </AppPressable>
     </View>
   );
-}
-
-function activityText(turn: ChatTurnSnapshot): string {
-  if (turn.state === "failed") return "这次没有完成";
-  if (turn.state === "cancelled") return "已停止";
-  if (turn.state === "waiting_approval") return "等你确认";
-  const tool = [...turn.timeline].reverse().find((entry) => entry.kind === "tool_call");
-  if (tool) return `正在使用 ${tool.tool_name || "工具"}`;
-  return "正在思考…";
 }
 
 function attachmentStatusLabel(status: NonNullable<PendingAttachment["status"]>): string {

@@ -109,6 +109,7 @@ class ConversationRepository:
                     updated_at REAL NOT NULL,
                     finished_at REAL,
                     revision INTEGER NOT NULL,
+                    timeline_json TEXT NOT NULL DEFAULT '[]',
                     UNIQUE(principal_id, client_request_id)
                 );
                 CREATE TABLE IF NOT EXISTS conversation_tool_steps (
@@ -147,6 +148,14 @@ class ConversationRepository:
                     ON conversation_approvals(turn_id, state, created_at);
                 """
             )
+            turn_columns = {
+                str(row[1]) for row in db.execute("PRAGMA table_info(conversation_turns)")
+            }
+            if "timeline_json" not in turn_columns:
+                db.execute(
+                    "ALTER TABLE conversation_turns "
+                    "ADD COLUMN timeline_json TEXT NOT NULL DEFAULT '[]'"
+                )
             require_exact_table(
                 db,
                 "conversation_sessions",
@@ -189,6 +198,7 @@ class ConversationRepository:
                     ("updated_at", "REAL", True, None, 0),
                     ("finished_at", "REAL", False, None, 0),
                     ("revision", "INTEGER", True, None, 0),
+                    ("timeline_json", "TEXT", True, "'[]'", 0),
                 ),
                 label="Conversation Turn",
             )
@@ -474,27 +484,10 @@ class ConversationRepository:
                 (turn_id,),
             )
         )
-        timeline: list[ChatTimelineEntry] = []
-        for step in steps:
-            timeline.append(
-                ChatTimelineEntry(
-                    kind="tool_call",
-                    tool_call_id=step.tool_call_id,
-                    tool_name=step.tool_name,
-                    tool_args=step.arguments,
-                    blocked=False,
-                )
-            )
-            if step.state != "running":
-                timeline.append(
-                    ChatTimelineEntry(
-                        kind="tool_result",
-                        tool_call_id=step.tool_call_id,
-                        tool_name=step.tool_name,
-                        tool_result=step.result,
-                        blocked=step.state != "completed",
-                    )
-                )
+        timeline = [
+            ChatTimelineEntry.model_validate(item)
+            for item in json.loads(str(row["timeline_json"]))
+        ]
         return ChatTurn(
             turn_id=turn_id,
             principal_id=str(row["principal_id"]),
@@ -590,10 +583,11 @@ class ConversationRepository:
                 """INSERT INTO conversation_turns(
                        turn_id, principal_id, session_handle, client_request_id,
                        user_input, attachments_json, tools_enabled, state,
-                       reasoning, content, final_output, artifacts_json, failure_code,
+                       reasoning, content, final_output, timeline_json,
+                       artifacts_json, failure_code,
                        cancel_requested, created_at, updated_at, finished_at,
                        revision
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', '', '[]', '', 0, ?, ?, NULL, 1)""",
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', '', '[]', '[]', '', 0, ?, ?, NULL, 1)""",
                 (
                     turn_id,
                     scope.principal_id,
@@ -718,9 +712,11 @@ class ConversationRepository:
         reasoning: str | None = None,
         content: str | None = None,
         final_output: str | None = None,
+        timeline: tuple[ChatTimelineEntry, ...] | None = None,
         artifacts: tuple[ArtifactRef, ...] | None = None,
         failure_code: str | None = None,
         cancel_requested: bool | None = None,
+        revision: int | None = None,
         finished: bool = False,
     ) -> ChatTurn:
         now = self._clock()
@@ -741,6 +737,15 @@ class ConversationRepository:
                 "final_output": (
                     final_output if final_output is not None else str(row["final_output"])
                 ),
+                "timeline_json": (
+                    json.dumps(
+                        [entry.model_dump(mode="json") for entry in timeline],
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    if timeline is not None
+                    else str(row["timeline_json"])
+                ),
                 "artifacts_json": (
                     json.dumps(
                         [artifact.model_dump(mode="json") for artifact in artifacts],
@@ -758,23 +763,27 @@ class ConversationRepository:
                     if cancel_requested is not None
                     else int(row["cancel_requested"])
                 ),
+                "revision": max(int(row["revision"]) + 1, revision or 0),
             }
             db.execute(
                 """UPDATE conversation_turns SET
-                       state=?, reasoning=?, content=?, final_output=?, artifacts_json=?,
+                       state=?, reasoning=?, content=?, final_output=?, timeline_json=?,
+                       artifacts_json=?,
                        failure_code=?, cancel_requested=?, updated_at=?,
-                       finished_at=?, revision=revision+1
+                       finished_at=?, revision=?
                    WHERE turn_id=? AND principal_id=?""",
                 (
                     values["state"],
                     values["reasoning"],
                     values["content"],
                     values["final_output"],
+                    values["timeline_json"],
                     values["artifacts_json"],
                     values["failure_code"],
                     values["cancel_requested"],
                     now,
                     now if finished else row["finished_at"],
+                    values["revision"],
                     turn_id,
                     principal_id,
                 ),
@@ -831,7 +840,7 @@ class ConversationRepository:
                     WHERE state IN ({placeholders})
                       AND finished_at IS NOT NULL
                       AND finished_at<=?
-                      AND (reasoning<>'' OR content<>'')""",
+                      AND (reasoning<>'' OR content<>'' OR timeline_json<>'[]')""",
                 (*terminal_states, cutoff),
             ).fetchall()
             turn_ids = tuple(str(row["turn_id"]) for row in rows)
@@ -840,7 +849,7 @@ class ConversationRepository:
             ids = ",".join("?" for _ in turn_ids)
             db.execute(
                 f"""UPDATE conversation_turns SET
-                       reasoning='', content='', revision=revision+1
+                       reasoning='', content='', timeline_json='[]', revision=revision+1
                     WHERE turn_id IN ({ids})""",
                 turn_ids,
             )

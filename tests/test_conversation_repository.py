@@ -9,6 +9,7 @@ from pc_assistant.agent_runtime.contracts import ArtifactAttachment
 from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
 from pc_assistant.agent_runtime.tool_step import ProposedToolCall, ToolStepResult
 from pc_assistant.conversation import (
+    ChatTimelineEntry,
     ChatTurnConflictError,
     ChatTurnState,
     ConversationRepository,
@@ -123,6 +124,23 @@ def test_turn_persists_only_merged_snapshots_and_durable_side_effects(
         reasoning="checked",
         content="answer",
         final_output="answer",
+        timeline=(
+            ChatTimelineEntry(kind="reasoning", content="checked", iteration=1),
+            ChatTimelineEntry(
+                kind="tool_call",
+                tool_call_id="call-a",
+                tool_name="read_file",
+                iteration=1,
+            ),
+            ChatTimelineEntry(
+                kind="tool_result",
+                tool_call_id="call-a",
+                tool_name="read_file",
+                tool_result={"output": {"content": "ok"}},
+                iteration=1,
+            ),
+            ChatTimelineEntry(kind="content", content="answer", iteration=2),
+        ),
         finished=True,
     )
     assert completed.state is ChatTurnState.COMPLETED
@@ -131,10 +149,12 @@ def test_turn_persists_only_merged_snapshots_and_durable_side_effects(
     assert len(completed.tool_steps) == 1
     assert len(completed.approvals) == 1
     assert [entry.kind for entry in completed.timeline] == [
+        "reasoning",
         "tool_call",
         "tool_result",
+        "content",
     ]
-    assert completed.timeline[-1].tool_result["output"] == {"content": "ok"}
+    assert completed.timeline[2].tool_result["output"] == {"content": "ok"}
 
     with sqlite3.connect(database) as db:
         names = {

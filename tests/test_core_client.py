@@ -310,7 +310,8 @@ async def test_client_chat_turn_round_trip_is_not_a_task(tmp_path: Path) -> None
         stored = await connected.client.get_chat_turn(accepted.turn_id)
         assert stored.turn_id == snapshots[-1].turn_id
         assert stored.final_output == snapshots[-1].final_output
-        assert stored.timeline == ()
+        assert [entry.kind for entry in stored.timeline] == ["content"]
+        assert stored.timeline[0].content == "hello"
         listed, turn_cursor = await connected.client.list_chat_turns(session_handle)
         assert [turn.turn_id for turn in listed] == [accepted.turn_id]
         assert turn_cursor == ""
