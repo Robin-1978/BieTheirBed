@@ -402,9 +402,9 @@ Task 至少记录：
 > 列表与详情、任务控制、确认、文件上传下载、Markdown、SSE 游标续传、单 Task 事件
 > 回放、Skill/MCP/Tool 状态和本设备审计。当前机器没有 Flutter/Dart，因此优先交付
 > 可立即 typecheck/test/doctor 的双端工程；客户端边界仍完全由 Gateway 协议决定。
-> Gateway-owned Expo Push 注册和投递也已接入：只消费标准 Task 事件并持久保存独立
-> cursor，通知只携带类别及不透明 Task/approval ID；App 点击后进入对应任务详情。
-> 设备撤销会同步移除 Push 注册，provider token 与投递逻辑不会进入 Core。
+> 移动端任务提醒直接消费已有的标准 SSE Task 事件：App 运行时展示完成、失败和待确认
+> 横幅，重连后按持久化游标补齐错过事件，并在本机保存未读状态；点击后进入执行详情。
+> 当前范围不需要 Expo/Firebase Push、provider token、Gateway 投递线程或服务端提醒表。
 > App 多模态入口也已补齐第一批：原生录音先上传 Artifact，再调用 Core 配置的标准
 > 转写能力并回填可编辑任务文本；拍照直接生成受同一 Task/Artifact/权限边界管理的
 > 图片任务，移动端没有内嵌语音厂商或视觉执行逻辑。

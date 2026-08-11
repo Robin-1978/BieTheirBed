@@ -45,15 +45,6 @@ def test_gateway_openapi_matches_the_allow_listed_http_surface(tmp_path) -> None
     assert schema["paths"]["/v1/task-executions/{execution_id}/events"]["get"][
         "operationId"
     ] == "listTaskExecutionEvents"
-    assert schema["paths"]["/v1/device/push"]["put"]["operationId"] == (
-        "registerDevicePush"
-    )
-    assert schema["paths"]["/v1/device/push"]["get"]["operationId"] == (
-        "getDevicePushRegistration"
-    )
-    assert schema["paths"]["/v1/device/push/test"]["post"]["operationId"] == (
-        "testDevicePush"
-    )
     assert schema["paths"]["/v1/device"]["delete"]["operationId"] == (
         "revokeCurrentDevice"
     )

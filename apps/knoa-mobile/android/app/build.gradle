@@ -5,10 +5,6 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
-if (file("google-services.json").exists()) {
-    apply plugin: "com.google.gms.google-services"
-}
-
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 def expoConfig = new JsonSlurper().parse(rootProject.file("../app.json")).expo
 def keystorePropertiesFile = rootProject.file("key.properties")

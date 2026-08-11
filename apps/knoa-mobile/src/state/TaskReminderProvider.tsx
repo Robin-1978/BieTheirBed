@@ -1,0 +1,139 @@
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type PropsWithChildren } from "react";
+import { AppState, Vibration } from "react-native";
+
+import type { PrincipalTaskEvent } from "@/api/models";
+import {
+  loadTaskReminders,
+  markAllTaskRemindersRead,
+  markTaskReminderRead,
+  mergeTaskReminder,
+  storeTaskReminders,
+  type TaskReminder,
+  type TaskReminderCategory,
+} from "@/reminders/taskReminders";
+import { useGateway } from "@/state/GatewayProvider";
+
+type TaskReminderState = {
+  reminders: TaskReminder[];
+  activeReminder: TaskReminder | null;
+  unreadCount: number;
+  dismissActive(): void;
+  markRead(reminderId: string): void;
+  markAllRead(): void;
+};
+
+type ActionableEvent = {
+  category: TaskReminderCategory;
+  policyKey: "completed" | "failed" | "waiting_approval";
+};
+
+const ACTIONABLE_EVENTS: Record<string, ActionableEvent | undefined> = {
+  completed: { category: "completed", policyKey: "completed" },
+  failed: { category: "failed", policyKey: "failed" },
+  approval_requested: { category: "approval", policyKey: "waiting_approval" },
+};
+
+const Context = createContext<TaskReminderState | null>(null);
+
+export function TaskReminderProvider({ children }: PropsWithChildren) {
+  const { runAuthenticated, subscribeEvents } = useGateway();
+  const [reminders, setReminders] = useState<TaskReminder[]>([]);
+  const [activeReminder, setActiveReminder] = useState<TaskReminder | null>(null);
+  const processQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const appIsActiveRef = useRef(AppState.currentState === "active");
+
+  const replaceAndStore = useCallback((transform: (current: TaskReminder[]) => TaskReminder[]) => {
+    setReminders((current) => {
+      const next = transform(current);
+      if (next !== current) void storeTaskReminders(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    void loadTaskReminders().then((stored) => {
+      setReminders((current) => stored.reduce(mergeTaskReminder, current));
+      const latestUnread = [...stored].reverse().find((reminder) => !reminder.read) ?? null;
+      if (latestUnread) setActiveReminder((current) => current ?? latestUnread);
+    });
+  }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      appIsActiveRef.current = state === "active";
+      if (state === "active") {
+        setReminders((current) => {
+          const latestUnread = [...current].reverse().find((reminder) => !reminder.read) ?? null;
+          if (latestUnread) setActiveReminder(latestUnread);
+          return current;
+        });
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
+  const processEvent = useCallback(async (feed: PrincipalTaskEvent) => {
+    const actionable = ACTIONABLE_EVENTS[feed.event.event_type];
+    if (!actionable) return;
+    try {
+      const execution = await runAuthenticated(
+        (client) => client.getTaskExecution(feed.event.task_id),
+      );
+      const task = await runAuthenticated(
+        (client) => client.getTask(execution.task_id),
+      );
+      if (!(task.notification_policy[actionable.policyKey] ?? true)) return;
+      const reminder: TaskReminder = {
+        reminderId: `feed:${feed.feed_event_id}`,
+        feedEventId: feed.feed_event_id,
+        category: actionable.category,
+        taskId: task.task_id,
+        executionId: execution.execution_id,
+        taskTitle: task.title || task.goal,
+        occurredAt: feed.event.occurred_at,
+        read: false,
+      };
+      replaceAndStore((current) => mergeTaskReminder(current, reminder));
+      if (appIsActiveRef.current) {
+        setActiveReminder(reminder);
+        Vibration.vibrate(45);
+      }
+    } catch {
+      // Non-product executions and transient refresh failures do not create reminders.
+    }
+  }, [replaceAndStore, runAuthenticated]);
+
+  useEffect(() => subscribeEvents((feed) => {
+    processQueueRef.current = processQueueRef.current.then(
+      () => processEvent(feed),
+      () => processEvent(feed),
+    );
+  }), [processEvent, subscribeEvents]);
+
+  const markRead = useCallback((reminderId: string) => {
+    replaceAndStore((current) => markTaskReminderRead(current, reminderId));
+  }, [replaceAndStore]);
+
+  const markAllRead = useCallback(() => {
+    replaceAndStore(markAllTaskRemindersRead);
+  }, [replaceAndStore]);
+
+  const dismissActive = useCallback(() => setActiveReminder(null), []);
+
+  const value = useMemo<TaskReminderState>(() => ({
+    reminders,
+    activeReminder,
+    unreadCount: reminders.filter((reminder) => !reminder.read).length,
+    dismissActive,
+    markRead,
+    markAllRead,
+  }), [activeReminder, dismissActive, markAllRead, markRead, reminders]);
+
+  return <Context.Provider value={value}>{children}</Context.Provider>;
+}
+
+export function useTaskReminders(): TaskReminderState {
+  const value = useContext(Context);
+  if (!value) throw new Error("TaskReminderProvider is missing");
+  return value;
+}

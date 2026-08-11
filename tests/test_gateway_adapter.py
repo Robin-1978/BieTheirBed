@@ -29,7 +29,6 @@ from pc_assistant.conversation import ChatTurnState
 from pc_assistant.gateway.adapter import SecureGatewayAdapter
 from pc_assistant.gateway.auth import GatewayAuthenticationRejectedError
 from pc_assistant.gateway.identity import PairingGrantRejectedError
-from pc_assistant.gateway.push import GatewayPushRepository
 from pc_assistant.service.core_api import (
     ChatApprovalSnapshot,
     ChatTurnSnapshot,
@@ -749,75 +748,11 @@ async def test_gateway_adapter_exposes_current_device_audit_without_secrets(
 
 
 @pytest.mark.asyncio
-async def test_gateway_adapter_registers_and_removes_current_device_push(tmp_path) -> None:
-    repository = GatewayPushRepository(tmp_path / "data" / "gateway.db")
+async def test_gateway_adapter_revokes_current_device(tmp_path) -> None:
     adapter = SecureGatewayAdapter(
         _config(tmp_path),
         authentication=_Authentication(),
         core=_Core(),
-        push_repository=repository,
-    )
-    transport = httpx.ASGITransport(app=adapter.app)
-    headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
-    async with httpx.AsyncClient(
-        transport=transport,
-        base_url="http://gateway.local",
-    ) as http:
-        missing = await http.get("/v1/device/push", headers=headers)
-        registered = await http.put(
-            "/v1/device/push",
-            headers=headers,
-            json={"provider": "expo", "token": "ExponentPushToken[token-a]"},
-        )
-        current = await http.get("/v1/device/push", headers=headers)
-        removed = await http.delete("/v1/device/push", headers=headers)
-
-    assert missing.json() == {"registered": False, "provider": ""}
-    assert registered.json() == {"registered": True, "provider": "expo"}
-    assert current.json() == {"registered": True, "provider": "expo"}
-    assert removed.json() == {"registered": False, "provider": ""}
-    assert repository.list_for_principal("personal:owner") == ()
-
-
-@pytest.mark.asyncio
-async def test_gateway_adapter_sends_current_device_push_test(tmp_path) -> None:
-    repository = GatewayPushRepository(tmp_path / "data" / "gateway.db")
-    repository.register("dev-a", "personal:owner", "expo", "ExponentPushToken[token-a]")
-
-    class PushTransport:
-        def __init__(self) -> None:
-            self.sent = []
-
-        async def send(self, registration, message) -> None:
-            self.sent.append((registration, message))
-
-    push_transport = PushTransport()
-    adapter = SecureGatewayAdapter(
-        _config(tmp_path),
-        authentication=_Authentication(),
-        core=_Core(),
-        push_repository=repository,
-        push_transport=push_transport,
-    )
-    transport = httpx.ASGITransport(app=adapter.app)
-    headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
-    async with httpx.AsyncClient(transport=transport, base_url="http://gateway.local") as http:
-        response = await http.post("/v1/device/push/test", headers=headers)
-
-    assert response.json() == {"sent": True}
-    assert len(push_transport.sent) == 1
-    assert push_transport.sent[0][1].category == "test"
-
-
-@pytest.mark.asyncio
-async def test_gateway_adapter_revokes_current_device_and_removes_push(tmp_path) -> None:
-    repository = GatewayPushRepository(tmp_path / "data" / "gateway.db")
-    repository.register("dev-a", "personal:owner", "expo", "ExponentPushToken[token-a]")
-    adapter = SecureGatewayAdapter(
-        _config(tmp_path),
-        authentication=_Authentication(),
-        core=_Core(),
-        push_repository=repository,
     )
     transport = httpx.ASGITransport(app=adapter.app)
     headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
@@ -826,7 +761,6 @@ async def test_gateway_adapter_revokes_current_device_and_removes_push(tmp_path)
 
     assert response.status_code == 200
     assert response.json() == {"revoked": True}
-    assert repository.list_for_principal("personal:owner") == ()
 
 
 @pytest.mark.asyncio

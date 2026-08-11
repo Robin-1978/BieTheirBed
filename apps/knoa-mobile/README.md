@@ -22,9 +22,10 @@ pca gateway pair --ttl 300
 The mobile private key and short-lived session token are stored through the
 platform secure store. The App never stores the Core local service token.
 
-Expo Push registration becomes active in an EAS development/production build
-with a real project ID. Notifications contain only a category plus opaque Task
-and approval IDs, and open the corresponding `/tasks/<task-id>` route.
+Task completion, failure and approval events are shown as in-App reminders while
+the App is open. The standard SSE cursor replays events missed while the App was
+closed; reminder state and unread status stay local to the device. Knoa does not
+require Expo, Firebase or another remote Push provider.
 
 The task composer accepts documents, native voice recording and camera capture.
 Voice bytes are uploaded as an Artifact and sent through the Gateway's standard
@@ -62,18 +63,3 @@ Android always shows a system installation confirmation unless the device is
 managed or rooted. The first installation must also allow this App to install
 unknown-source packages. Expo Go cannot exercise this flow; use an installable
 native APK signed by the same private key.
-
-## Android Push configuration
-
-Release builds require both files below in the private Android secrets
-directory (by default `~/.pc-assistant/secrets/android`):
-
-- `expo-project-id`: the Expo/EAS project UUID used to obtain an Expo Push token.
-- `google-services.json`: the Firebase Android app configuration for
-  `dev.knoa.mobile`.
-
-The Expo project must also have the matching FCM v1 service-account credential
-configured for Android Push delivery. The build script embeds the project ID,
-copies `google-services.json` only into the temporary build mirror, and prints
-prominent warnings when either configuration is missing. In that case the App
-shows that server Push is not configured instead of silently claiming success.
