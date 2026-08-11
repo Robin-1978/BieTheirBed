@@ -204,7 +204,7 @@ Task 只表示独立工作：
 
 - 用户明确要求后台完成；
 - App 任务页创建；
-- Agent 调用 `create_task` 或 `schedule_task`；
+- Agent 调用带显式 `launch` policy 的 `create_task`；
 - 定时或外部事件启动。
 
 TaskExecution 使用独立 Session，拥有暂停、恢复、取消、重试和主动通知能力。

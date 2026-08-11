@@ -51,9 +51,9 @@ from pc_assistant.automation import (
 )
 from pc_assistant.config import AppConfig
 from pc_assistant.context.memory_db import (
-    SQLiteMemoryRepository,
     ScopedEpisodicMemory,
     ScopedUserMemory,
+    SQLiteMemoryRepository,
 )
 from pc_assistant.context.prompt import build_session_context, build_system_prompt
 from pc_assistant.context.session_context import (
@@ -74,44 +74,19 @@ from pc_assistant.extensions.skill import (
     builtin_skill_root,
 )
 from pc_assistant.observability.trace import LLMTraceRecorder, TurnRecorder
-from pc_assistant.runtime import RuntimePaths
 from pc_assistant.principal import converge_owner_principals, discover_owner_aliases
-from pc_assistant.service.core_host import (
-    CoreServiceHost,
-    TcpCoreEndpoint,
-)
+from pc_assistant.runtime import RuntimePaths
 from pc_assistant.service.core_auth import (
     CompositeAuthenticator,
     SignedPrincipalAuthenticator,
     StaticTokenAuthenticator,
 )
+from pc_assistant.service.core_host import (
+    CoreServiceHost,
+    TcpCoreEndpoint,
+)
 from pc_assistant.service.core_server import CoreServer
 from pc_assistant.service.credentials import resolve_local_service_token
-from pc_assistant.tools.artifact_prepare import ArtifactPrepareTool
-from pc_assistant.tools.base import ToolCapability
-from pc_assistant.tools.clipboard import ClipboardTool
-from pc_assistant.tools.create_task import CreateTaskTool
-from pc_assistant.tools.describe_tool import DescribeTool
-from pc_assistant.tools.exchange import ExchangeTool
-from pc_assistant.tools.hotkey import HotkeyTool
-from pc_assistant.tools.memory_tool import MemoryTool
-from pc_assistant.tools.mcp_import import MCPImportTool
-from pc_assistant.tools.mouse import MouseTool
-from pc_assistant.tools.notification import NotificationTool
-from pc_assistant.tools.press_key import PressKeyTool
-from pc_assistant.tools.read_artifact import ReadArtifactTool
-from pc_assistant.tools.read_file import ReadFileTool
-from pc_assistant.tools.registry import ToolRegistry
-from pc_assistant.tools.screenshot import ScreenshotTool
-from pc_assistant.tools.schedule_task import ScheduleTaskTool
-from pc_assistant.tools.shell import ShellTool
-from pc_assistant.tools.type_text import TypeTextTool
-from pc_assistant.tools.task_control import TaskControlTool
-from pc_assistant.tools.weather import WeatherTool
-from pc_assistant.tools.web_fetch import WebFetchTool
-from pc_assistant.tools.web_search import WebSearchTool
-from pc_assistant.tools.window import WindowTool
-from pc_assistant.tools.write_file import WriteFileTool
 from pc_assistant.tasks import (
     DurableApprovalService,
     DurableToolCommitService,
@@ -120,7 +95,30 @@ from pc_assistant.tasks import (
     TaskRepository,
     TaskService,
 )
-
+from pc_assistant.tools.artifact_prepare import ArtifactPrepareTool
+from pc_assistant.tools.base import ToolCapability
+from pc_assistant.tools.clipboard import ClipboardTool
+from pc_assistant.tools.create_task import CreateTaskTool
+from pc_assistant.tools.describe_tool import DescribeTool
+from pc_assistant.tools.exchange import ExchangeTool
+from pc_assistant.tools.hotkey import HotkeyTool
+from pc_assistant.tools.mcp_import import MCPImportTool
+from pc_assistant.tools.memory_tool import MemoryTool
+from pc_assistant.tools.mouse import MouseTool
+from pc_assistant.tools.notification import NotificationTool
+from pc_assistant.tools.press_key import PressKeyTool
+from pc_assistant.tools.read_artifact import ReadArtifactTool
+from pc_assistant.tools.read_file import ReadFileTool
+from pc_assistant.tools.registry import ToolRegistry
+from pc_assistant.tools.screenshot import ScreenshotTool
+from pc_assistant.tools.shell import ShellTool
+from pc_assistant.tools.task_control import TaskControlTool
+from pc_assistant.tools.type_text import TypeTextTool
+from pc_assistant.tools.weather import WeatherTool
+from pc_assistant.tools.web_fetch import WebFetchTool
+from pc_assistant.tools.web_search import WebSearchTool
+from pc_assistant.tools.window import WindowTool
+from pc_assistant.tools.write_file import WriteFileTool
 
 PERSONAL_LOCAL_CAPABILITIES = frozenset(ToolCapability)
 REMOTE_SCOPED_CAPABILITIES = frozenset({ToolCapability.NETWORK})
@@ -462,8 +460,7 @@ def build_core_runtime(
     schedule_service = ScheduleService(schedules, schedule_dispatcher)
     trigger_dispatcher = TriggerDispatcher(triggers, task_service)
     trigger_service = TriggerService(triggers, trigger_dispatcher)
-    registry.register(CreateTaskTool(sessions, task_service))
-    registry.register(ScheduleTaskTool(sessions, task_service, schedule_service))
+    registry.register(CreateTaskTool(sessions, task_service, schedule_service))
     registry.register(
         TaskControlTool(
             sessions,
