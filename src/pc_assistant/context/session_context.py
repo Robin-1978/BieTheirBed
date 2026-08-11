@@ -10,9 +10,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from pc_assistant.agent_runtime.contracts import RuntimeScope
 from pc_assistant.context.compact import summarize_tool_turn
-from pc_assistant.context.tags import format_compacted_history, normalize_message_content
+from pc_assistant.context.tags import (
+    format_compacted_history,
+    normalize_message_content,
+)
 from pc_assistant.context.token_estimate import TokenEstimator
 from pc_assistant.exceptions import SessionNotFoundError
+from pc_assistant.sqlite_connection import connect_sqlite, initialize_wal
 from pc_assistant.sqlite_schema import require_exact_table, require_foreign_keys
 
 
@@ -30,14 +34,11 @@ class SessionContextRepository:
 
     def __init__(self, db_path: str | Path) -> None:
         self._path = Path(db_path).expanduser().resolve()
+        initialize_wal(self._path)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._path, timeout=5.0)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA journal_mode=WAL")
-        return connection
+        return connect_sqlite(self._path, foreign_keys=True)
 
     def _initialize(self) -> None:
         with self._connect() as db:

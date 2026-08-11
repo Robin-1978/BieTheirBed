@@ -14,9 +14,9 @@ import httpx
 from pc_assistant.gateway.core import GatewayCoreBridge
 from pc_assistant.gateway.storage import prepare_owner_only_database
 from pc_assistant.service.core_client import CoreRequestError
+from pc_assistant.sqlite_connection import connect_sqlite
 from pc_assistant.sqlite_schema import require_exact_table, require_index_columns
 from pc_assistant.tasks import PrincipalTaskEvent
-
 
 logger = logging.getLogger(__name__)
 
@@ -97,10 +97,7 @@ class GatewayPushRepository:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._db_path, timeout=5.0)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA busy_timeout = 5000")
-        return connection
+        return connect_sqlite(self._db_path, busy_timeout_ms=5000)
 
     def _initialize(self) -> None:
         with self._connect() as connection:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -36,6 +37,18 @@ class _Tasks:
         return SimpleNamespace(execution_id="execution-a")
 
 
+class _IdleRepository:
+    def __init__(self) -> None:
+        self.claim_calls = 0
+
+    def claim_due(self, worker_id, *, lease_seconds):
+        self.claim_calls += 1
+        return None
+
+    def seconds_until_next_dispatch(self):
+        return None
+
+
 def _components(tmp_path: Path, clock: _Clock, tasks: _Tasks):
     database = tmp_path / "assistant.db"
     sessions = RuntimeSessionRepository(
@@ -51,6 +64,38 @@ def _components(tmp_path: Path, clock: _Clock, tasks: _Tasks):
     )
     dispatcher = ScheduleDispatcher(repository, tasks)
     return repository, dispatcher, scope
+
+
+def test_repository_reports_next_schedule_deadline(tmp_path: Path) -> None:
+    clock = _Clock(100.0)
+    repository, _dispatcher, scope = _components(tmp_path, clock, _Tasks())
+
+    assert repository.seconds_until_next_dispatch() is None
+    repository.create(
+        scope,
+        client_request_id="request-a",
+        goal="prepare report",
+        spec=ScheduleSpec(kind=ScheduleKind.ONE_TIME, run_at=112.0),
+    )
+
+    assert repository.seconds_until_next_dispatch() == 12.0
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_sleeps_until_woken_when_no_deadline_exists() -> None:
+    repository = _IdleRepository()
+    dispatcher = ScheduleDispatcher(repository, _Tasks())
+
+    await dispatcher.start()
+    try:
+        await asyncio.sleep(0.05)
+        assert repository.claim_calls == 1
+
+        dispatcher.wake()
+        await asyncio.sleep(0.05)
+        assert repository.claim_calls == 2
+    finally:
+        await dispatcher.stop()
 
 
 @pytest.mark.asyncio
@@ -106,3 +151,4 @@ async def test_dispatcher_persists_retry_instead_of_losing_occurrence(
     assert failed.state is OccurrenceState.RETRY_WAIT
     assert failed.failure_code == "RuntimeError"
     assert failed.next_attempt_at == 111.0
+    assert repository.seconds_until_next_dispatch() == 10.0

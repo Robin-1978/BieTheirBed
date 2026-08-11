@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from pc_assistant.artifacts.models import ArtifactRef
+from pc_assistant.sqlite_connection import connect_sqlite
 from pc_assistant.sqlite_schema import require_exact_table
 
 Direction = Literal["inbound", "outbound"]
@@ -110,7 +111,7 @@ class ArtifactStore:
     def _connect(self) -> sqlite3.Connection:
         self._db_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._db_path.parent.chmod(0o700)
-        connection = sqlite3.connect(self._db_path)
+        connection = connect_sqlite(self._db_path, row_factory=False)
         self._db_path.chmod(0o600)
         return connection
 
@@ -289,6 +290,7 @@ class ArtifactStore:
         }
         try:
             import io
+
             from PIL import Image
 
             with Image.open(io.BytesIO(data)) as image:

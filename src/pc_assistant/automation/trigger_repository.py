@@ -18,12 +18,12 @@ from pc_assistant.automation.models import (
     TriggerState,
 )
 from pc_assistant.exceptions import SessionNotFoundError
+from pc_assistant.sqlite_connection import connect_sqlite, initialize_wal
 from pc_assistant.sqlite_schema import (
     require_exact_table,
     require_foreign_keys,
     require_index_columns,
 )
-
 
 _MAX_TRIGGER_PAYLOAD_BYTES = 128 * 1024
 
@@ -65,14 +65,12 @@ class TriggerRepository:
         self._clock = clock
         self._max_delivery_attempts = max_delivery_attempts
         self._retry_base_seconds = retry_base_seconds
+        initialize_wal(self._path)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._path, timeout=5.0)
+        connection = connect_sqlite(self._path, foreign_keys=True)
         self._path.chmod(0o600)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA journal_mode=WAL")
         return connection
 
     def _initialize(self) -> None:
@@ -588,6 +586,37 @@ class TriggerRepository:
             ).fetchone()
             assert claimed is not None
             return self._event(claimed)
+
+    def seconds_until_next_dispatch(self) -> float | None:
+        """Return the delay until an active trigger event needs delivery."""
+
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT MIN(
+                       CASE event.state
+                           WHEN ? THEN ?
+                           WHEN ? THEN event.next_attempt_at
+                           WHEN ? THEN event.lease_expires_at
+                       END
+                   )
+                   FROM runtime_trigger_events AS event
+                   JOIN runtime_triggers AS trigger
+                     ON trigger.trigger_id=event.trigger_id
+                   WHERE trigger.state=? AND event.state IN (?, ?, ?)""",
+                (
+                    TriggerEventState.RECEIVED.value,
+                    float(self._clock()),
+                    TriggerEventState.RETRY_WAIT.value,
+                    TriggerEventState.CLAIMED.value,
+                    TriggerState.ACTIVE.value,
+                    TriggerEventState.RECEIVED.value,
+                    TriggerEventState.RETRY_WAIT.value,
+                    TriggerEventState.CLAIMED.value,
+                ),
+            ).fetchone()
+        if row is None or row[0] is None:
+            return None
+        return max(0.0, float(row[0]) - float(self._clock()))
 
     def mark_task_created(
         self,

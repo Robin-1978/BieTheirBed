@@ -10,7 +10,6 @@ from pc_assistant.automation.models import ScheduleRecord, ScheduleSpec, Schedul
 from pc_assistant.automation.repository import ScheduleRepository
 from pc_assistant.tasks.models import TaskExecutionRecord, TaskLaunchReason
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -37,15 +36,17 @@ class ScheduleDispatcher:
         *,
         worker_id: str = "schedule-worker",
         lease_seconds: float = 60.0,
-        poll_interval: float = 1.0,
+        reconciliation_interval: float = 15.0,
     ) -> None:
-        if not 0.1 <= poll_interval <= 60.0:
-            raise ValueError("Schedule poll interval must be between 0.1 and 60 seconds")
+        if not 1.0 <= reconciliation_interval <= 300.0:
+            raise ValueError(
+                "Schedule reconciliation interval must be between 1 and 300 seconds"
+            )
         self._repository = repository
         self._tasks = tasks
         self._worker_id = worker_id
         self._lease_seconds = lease_seconds
-        self._poll_interval = poll_interval
+        self._reconciliation_interval = reconciliation_interval
         self._wake = asyncio.Event()
         self._worker: asyncio.Task[None] | None = None
 
@@ -125,10 +126,21 @@ class ScheduleDispatcher:
                 raise
             except Exception:
                 logger.exception("Schedule dispatcher iteration failed")
+            delay = self._reconciliation_interval
+            try:
+                next_due = await asyncio.to_thread(
+                    self._repository.seconds_until_next_dispatch
+                )
+                if next_due is not None:
+                    delay = min(delay, next_due)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Schedule dispatcher deadline lookup failed")
             try:
                 await asyncio.wait_for(
                     self._wake.wait(),
-                    timeout=self._poll_interval,
+                    timeout=delay,
                 )
             except TimeoutError:
                 pass

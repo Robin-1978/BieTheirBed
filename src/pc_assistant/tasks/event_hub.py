@@ -42,6 +42,8 @@ class TaskEventHub:
         self._capacity = subscriber_capacity
         self._subscribers: dict[str, set[TaskEventSubscription]] = {}
         self._lock = asyncio.Lock()
+        self._feed_changed = asyncio.Condition(self._lock)
+        self._feed_version = 0
 
     async def subscribe(self, task_id: str) -> TaskEventSubscription:
         normalized = task_id.strip()
@@ -86,3 +88,29 @@ class TaskEventHub:
                 subscription.queue.put_nowait(
                     TaskSubscriptionOverflowError(event.event_seq - 1)
                 )
+            self._feed_version += 1
+            self._feed_changed.notify_all()
+
+    async def feed_version(self) -> int:
+        async with self._lock:
+            return self._feed_version
+
+    async def wait_for_feed_change(
+        self,
+        version: int,
+        *,
+        timeout: float,
+    ) -> int:
+        """Wait for a committed Task event, with timeout for reconciliation."""
+
+        async with self._feed_changed:
+            try:
+                await asyncio.wait_for(
+                    self._feed_changed.wait_for(
+                        lambda: self._feed_version != version
+                    ),
+                    timeout=timeout,
+                )
+            except TimeoutError:
+                pass
+            return self._feed_version

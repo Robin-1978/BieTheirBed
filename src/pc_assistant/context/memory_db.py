@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from pc_assistant.context.scope import current_memory_scope
+from pc_assistant.sqlite_connection import connect_sqlite, initialize_wal
 from pc_assistant.sqlite_schema import require_exact_table, require_index_columns
-
 
 AMBIGUOUS_MEMORY_KEYS = frozenset({
     "name", "language", "style", "preference", "location", "browser",
@@ -81,14 +81,12 @@ class SQLiteMemoryRepository:
         self.path = Path(path).expanduser().resolve()
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.path.parent.chmod(0o700)
+        initialize_wal(self.path)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=5.0)
+        connection = connect_sqlite(self.path, foreign_keys=True)
         self.path.chmod(0o600)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA foreign_keys=ON")
         return connection
 
     def _initialize(self) -> None:

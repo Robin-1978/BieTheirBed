@@ -10,6 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from pc_assistant.agent_runtime.contracts import ArtifactAttachment, RuntimeScope
+from pc_assistant.sqlite_connection import connect_sqlite, initialize_wal
 from pc_assistant.tasks.definition_repository import TaskDefinitionRepositoryMixin
 from pc_assistant.tasks.errors import (
     TaskNotFoundError,
@@ -120,14 +121,12 @@ class TaskRepository(
         self._max_active_tasks = max_active_tasks
         self._max_active_tasks_per_principal = max_active_tasks_per_principal
         self._trace_retention_seconds = float(trace_retention_seconds)
+        initialize_wal(self._path)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._path, timeout=5.0)
+        connection = connect_sqlite(self._path, foreign_keys=True)
         self._path.chmod(0o600)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA journal_mode=WAL")
         return connection
 
 

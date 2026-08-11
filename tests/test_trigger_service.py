@@ -130,6 +130,7 @@ def test_external_event_id_deduplicates_same_payload(tmp_path: Path) -> None:
     assert created is True
     assert repeated_created is False
     assert repeated == first
+    assert repository.seconds_until_next_dispatch() == 0.0
     assert repository.get(scope.principal_id, trigger.trigger_id).event_count == 1
     with pytest.raises(TriggerNotFoundError):
         repository.receive(
@@ -273,6 +274,7 @@ async def test_trigger_delivery_failure_is_retried_with_backoff(
     retry = repository.get_event(event.trigger_event_id)
     assert retry.state is TriggerEventState.RETRY_WAIT
     assert retry.next_attempt_at == 110.0
+    assert repository.seconds_until_next_dispatch() == 10.0
     clock.value = 110.0
     assert await dispatcher.dispatch_once() is True
     dead = repository.get_event(event.trigger_event_id)

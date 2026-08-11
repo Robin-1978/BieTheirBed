@@ -15,6 +15,7 @@ from pc_assistant.agent_runtime.contracts import ArtifactAttachment, RuntimeScop
 from pc_assistant.agent_runtime.tool_step import ProposedToolCall, ToolStepResult
 from pc_assistant.artifacts import ArtifactRef
 from pc_assistant.conversation.models import (
+    TERMINAL_CHAT_TURN_STATES,
     ChatApproval,
     ChatTimelineEntry,
     ChatToolStep,
@@ -22,9 +23,9 @@ from pc_assistant.conversation.models import (
     ChatTurnState,
     ConversationSession,
     ConversationSessionState,
-    TERMINAL_CHAT_TURN_STATES,
 )
 from pc_assistant.exceptions import SessionNotFoundError
+from pc_assistant.sqlite_connection import connect_sqlite, initialize_wal
 from pc_assistant.sqlite_schema import require_exact_table, require_foreign_keys
 from pc_assistant.tools.base import ToolPolicy
 
@@ -66,14 +67,11 @@ class ConversationRepository:
         )
         self._clock = clock
         self._detail_retention_seconds = float(detail_retention_seconds)
+        initialize_wal(self._path)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._path, timeout=5.0)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA journal_mode=WAL")
-        return connection
+        return connect_sqlite(self._path, foreign_keys=True)
 
     def _initialize(self) -> None:
         with self._connect() as db:
