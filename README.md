@@ -154,6 +154,14 @@ authority: unconfigured tools remain hidden and all enabled tools still pass
 schema validation, capability checks, confirmation and cancellation through
 the standard `ToolStep` boundary.
 
+MCP Servers that expose standard Resources can also be configured as explicit
+Resource Task Sources. Core performs bounded `resources/list`/`read`, negotiates
+optional subscriptions and creates one principal-owned Durable Task per
+immutable Resource URI. Notifications are wake-up hints only; no MCP Resource
+creates work unless its URI scope, principal and owned Session are configured
+locally. See the runnable [Jira MCP reference server](examples/jira_mcp_server/README.md)
+for a real automatic issue-analysis example.
+
 This process boundary isolates crashes and dependency conflicts. Strong
 resource or host-access containment is a separate OS-level sandbox policy and
 is not implied by stdio process isolation.
@@ -166,6 +174,15 @@ and activates the MCP provider without restarting Core. Newly registered tools
 are visible to the next model iteration in the same Task attempt. Network download and
 marketplace trust remain separate future concerns; this tool imports local
 packages only.
+
+For an already running remote or stdio MCP Server, the Agent first uses
+read-only `mcp_inspect`, then proposes a confirmation-gated `mcp_connect` call
+containing the exact Tool names to enable. Only user-confirmed Tools that also
+declare `readOnlyHint=true` are persisted and activated. Write, ambiguous or
+unselected Tools remain withheld. Resource-to-Task automation still requires
+an explicit Resource URI; `mcp_configure_resource_task` binds it to the current
+owned Session and activates the route without a restart. `mcp_disable` provides
+a confirmation-gated rollback that stops the Provider and persists it disabled.
 
 Enable the independently mounted Feishu channel in
 `~/.pc-assistant/config/local.yaml`:

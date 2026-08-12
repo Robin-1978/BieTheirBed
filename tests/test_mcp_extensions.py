@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -18,10 +18,14 @@ from pc_assistant.agent_runtime.tool_step import (
 from pc_assistant.config import AppConfig
 from pc_assistant.extensions import ExtensionManager, ExtensionState
 from pc_assistant.extensions.mcp import (
+    MCPResourceCapabilities,
+    MCPResourceDefinition,
+    MCPResourceSnapshot,
     MCPServerProvider,
     MCPToolDefinition,
     StdioMCPClient,
     StreamableHTTPMCPClient,
+    _negotiate_session,
 )
 from pc_assistant.extensions.models import MCPServerConfig
 from pc_assistant.tools.base import ToolCapability, ToolOriginKind
@@ -43,6 +47,10 @@ class _FakeMCPClient:
         self.calls: list[tuple[str, dict]] = []
         self.started = False
         self.closed = False
+        self.notification_handler = None
+
+    def set_notification_handler(self, handler) -> None:
+        self.notification_handler = handler
 
     async def start(self) -> None:
         self.started = True
@@ -53,6 +61,22 @@ class _FakeMCPClient:
     async def call_tool(self, name: str, arguments: dict):
         self.calls.append((name, arguments))
         return self.result
+
+    def resource_capabilities(self) -> MCPResourceCapabilities:
+        return MCPResourceCapabilities()
+
+    async def list_resources(self) -> tuple[MCPResourceDefinition, ...]:
+        return ()
+
+    async def read_resource(self, uri: str) -> MCPResourceSnapshot:
+        del uri
+        return MCPResourceSnapshot(contents=())
+
+    async def subscribe_resource(self, uri: str) -> None:
+        del uri
+
+    async def unsubscribe_resource(self, uri: str) -> None:
+        del uri
 
     async def close(self) -> None:
         self.closed = True
@@ -110,6 +134,44 @@ def _provider(config: MCPServerConfig, client: _FakeMCPClient) -> MCPServerProvi
         config,
         client_factory=lambda _config: client,
     )
+
+
+@pytest.mark.asyncio
+async def test_mcp_negotiation_prefers_discover_and_falls_back_only_for_legacy() -> None:
+    from mcp import types
+    from mcp.shared.exceptions import MCPError
+
+    modern_result = SimpleNamespace(capabilities=SimpleNamespace(resources=None))
+
+    class _ModernSession:
+        async def discover(self):
+            return modern_result
+
+        async def initialize(self):
+            raise AssertionError("legacy handshake must not run")
+
+    assert await _negotiate_session(_ModernSession(), 1) == (modern_result, True)
+
+    legacy_result = SimpleNamespace(capabilities=SimpleNamespace(resources=None))
+
+    class _LegacySession:
+        async def discover(self):
+            raise MCPError(types.METHOD_NOT_FOUND, "not found")
+
+        async def initialize(self):
+            return legacy_result
+
+    assert await _negotiate_session(_LegacySession(), 1) == (legacy_result, False)
+
+    class _BrokenModernSession:
+        async def discover(self):
+            raise MCPError(types.INTERNAL_ERROR, "broken")
+
+        async def initialize(self):
+            raise AssertionError("non-legacy discover failures must not downgrade")
+
+    with pytest.raises(MCPError):
+        await _negotiate_session(_BrokenModernSession(), 1)
 
 
 @pytest.mark.asyncio
@@ -341,6 +403,20 @@ def test_mcp_config_rejects_unsafe_urls_names_and_unknown_policy() -> None:
                 },
             }
         )
+    with pytest.raises(ValidationError, match="unsafe path"):
+        MCPServerConfig.model_validate(
+            {
+                "enabled": True,
+                "url": "https://example.test/mcp",
+                "resource_tasks": {
+                    "assigned": {
+                        "uri": "jira://assigned-to-me/events/%2Fsecret",
+                        "principal_id": "personal:owner",
+                        "session_handle": "session-a",
+                    }
+                },
+            }
+        )
     with pytest.raises(ValidationError):
         MCPServerConfig.model_validate(
             {
@@ -398,6 +474,38 @@ def test_mcp_config_enforces_transport_specific_fields() -> None:
         )
 
 
+def test_mcp_resource_task_config_is_explicit_and_strict() -> None:
+    config = MCPServerConfig.model_validate(
+        {
+            "enabled": True,
+            "url": "https://example.test/mcp",
+            "resource_tasks": {
+                "assigned": {
+                    "uri": "jira://assigned-to-me",
+                    "principal_id": "personal:owner",
+                    "session_handle": "session-a",
+                    "priority": 4,
+                }
+            },
+        }
+    )
+    assert config.resource_tasks["assigned"].uri == "jira://assigned-to-me"
+    with pytest.raises(ValidationError, match="must not contain credentials"):
+        MCPServerConfig.model_validate(
+            {
+                "enabled": True,
+                "url": "https://example.test/mcp",
+                "resource_tasks": {
+                    "assigned": {
+                        "uri": "jira://user:secret@assigned-to-me",
+                        "principal_id": "personal:owner",
+                        "session_handle": "session-a",
+                    }
+                },
+            }
+        )
+
+
 def test_stdio_environment_is_explicit_and_missing_values_fail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -424,19 +532,20 @@ def test_stdio_environment_is_explicit_and_missing_values_fail(
 
 @pytest.mark.asyncio
 async def test_stdio_client_with_live_official_mcp_server(tmp_path: Path) -> None:
-    pytest.importorskip("mcp.server.fastmcp")
+    pytest.importorskip("mcp.server")
     server_script = tmp_path / "server.py"
     server_script.write_text(
         """
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
-app = FastMCP("stdio-test")
+app = MCPServer("stdio-test")
 
 @app.tool(name="monitor.echo")
 def echo(message: str) -> str:
     return f"echo:{message}"
 
-app.run(transport="stdio")
+import asyncio
+asyncio.run(app.run_stdio_async())
 """.strip(),
         encoding="utf-8",
     )
@@ -459,20 +568,16 @@ app.run(transport="stdio")
         await client.close()
 
     assert [tool.name for tool in tools] == ["monitor.echo"]
-    assert result.structuredContent == {"result": "echo:hello"}
+    assert result.structured_content == {"result": "echo:hello"}
 
 
 @pytest.mark.asyncio
 async def test_streamable_http_client_with_live_local_mcp_server() -> None:
     uvicorn = pytest.importorskip("uvicorn")
-    fastmcp = pytest.importorskip("mcp.server.fastmcp")
-    FastMCP = fastmcp.FastMCP
+    mcp_server = pytest.importorskip("mcp.server")
+    MCPServer = mcp_server.MCPServer
 
-    server_mcp = FastMCP(
-        "knoa-test",
-        stateless_http=True,
-        json_response=True,
-    )
+    server_mcp = MCPServer("knoa-test")
 
     @server_mcp.tool()
     def echo(message: str) -> str:
@@ -480,7 +585,10 @@ async def test_streamable_http_client_with_live_local_mcp_server() -> None:
 
     server = uvicorn.Server(
         uvicorn.Config(
-            server_mcp.streamable_http_app(),
+            server_mcp.streamable_http_app(
+                stateless_http=True,
+                json_response=True,
+            ),
             host="127.0.0.1",
             port=0,
             log_level="error",
@@ -507,4 +615,4 @@ async def test_streamable_http_client_with_live_local_mcp_server() -> None:
         await server_task
 
     assert [tool.name for tool in tools] == ["echo"]
-    assert result.structuredContent == {"result": "echo:hello"}
+    assert result.structured_content == {"result": "echo:hello"}

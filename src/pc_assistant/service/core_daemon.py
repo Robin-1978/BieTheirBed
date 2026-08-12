@@ -1,4 +1,5 @@
 """Process lifecycle for the forward-only Core service."""
+
 from __future__ import annotations
 
 import argparse
@@ -9,15 +10,13 @@ import signal
 import sys
 from pathlib import Path
 
-from pc_assistant.branding import ASSISTANT_NAME
-
 from pc_assistant.agent_runtime.composition import (
     CoreRuntimeComposition,
     build_core_runtime,
 )
+from pc_assistant.branding import ASSISTANT_NAME
 from pc_assistant.config import AppConfig, load_config
 from pc_assistant.runtime import RuntimePaths
-
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +42,7 @@ class CoreDaemon:
             await composition.extensions.start()
             await composition.conversation_service.start()
             await composition.task_service.start()
+            await composition.mcp_resource_tasks.start()
             await composition.schedule_dispatcher.start()
             await composition.trigger_dispatcher.start()
             await composition.host.start()
@@ -51,6 +51,7 @@ class CoreDaemon:
             await composition.host.stop()
             await composition.trigger_dispatcher.stop()
             await composition.schedule_dispatcher.stop()
+            await composition.mcp_resource_tasks.stop()
             await composition.task_service.stop()
             await composition.conversation_service.stop()
             await composition.extensions.stop()
@@ -70,6 +71,7 @@ class CoreDaemon:
         await composition.host.stop()
         await composition.trigger_dispatcher.stop()
         await composition.schedule_dispatcher.stop()
+        await composition.mcp_resource_tasks.stop()
         await composition.task_service.stop()
         await composition.conversation_service.stop()
         await composition.extensions.stop()

@@ -25,6 +25,10 @@ class _Extensions(_Host):
     pass
 
 
+class _MCPResourceTasks(_Host):
+    pass
+
+
 class _TaskService(_Host):
     async def compact_expired_traces(self) -> int:
         return 0
@@ -50,6 +54,7 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
 ) -> None:
     host = _Host()
     extensions = _Extensions()
+    mcp_resource_tasks = _MCPResourceTasks()
     task_service = _TaskService()
     conversation_service = _ConversationService()
     schedule_dispatcher = _ScheduleDispatcher()
@@ -58,6 +63,7 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     composition = SimpleNamespace(
         host=host,
         extensions=extensions,
+        mcp_resource_tasks=mcp_resource_tasks,
         task_service=task_service,
         conversation_service=conversation_service,
         schedule_dispatcher=schedule_dispatcher,
@@ -78,6 +84,7 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
 
     assert host.started
     assert extensions.started
+    assert mcp_resource_tasks.started
     assert task_service.started
     assert conversation_service.started
     assert schedule_dispatcher.started
@@ -90,6 +97,7 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
 
     assert host.stopped
     assert extensions.stopped
+    assert mcp_resource_tasks.stopped
     assert task_service.stopped
     assert conversation_service.stopped
     assert schedule_dispatcher.stopped

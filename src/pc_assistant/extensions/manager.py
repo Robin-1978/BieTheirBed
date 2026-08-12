@@ -10,7 +10,6 @@ from typing import Protocol
 from pc_assistant.tools.base import ToolBase, ToolOrigin, ToolOriginKind
 from pc_assistant.tools.registry import ToolRegistry
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -115,6 +114,48 @@ class ExtensionManager:
                 await self._start_provider(provider)
             return self._statuses[descriptor]
 
+    async def remove_provider(self, provider: ExtensionProvider) -> None:
+        """Stop and remove one dynamically added extension."""
+
+        async with self._lifecycle_lock:
+            descriptor = provider.descriptor
+            if provider not in self._providers:
+                return
+            origin = descriptor.tool_origin if self._registered.get(descriptor) else None
+            for name in reversed(self._registered.pop(descriptor, ())):
+                assert origin is not None
+                self._registry.unregister(name, origin=origin)
+            if provider in self._started:
+                self._started.remove(provider)
+                try:
+                    await provider.stop()
+                except Exception:
+                    logger.exception("Extension stop failed: %s", descriptor.extension_id)
+            self._providers.remove(provider)
+            self._statuses.pop(descriptor, None)
+
+    async def stop_provider(self, provider: ExtensionProvider) -> None:
+        """Disable one dynamic provider while retaining its configured identity."""
+
+        async with self._lifecycle_lock:
+            descriptor = provider.descriptor
+            if provider not in self._providers:
+                return
+            origin = descriptor.tool_origin if self._registered.get(descriptor) else None
+            for name in reversed(self._registered.pop(descriptor, ())):
+                assert origin is not None
+                self._registry.unregister(name, origin=origin)
+            if provider in self._started:
+                self._started.remove(provider)
+                try:
+                    await provider.stop()
+                except Exception:
+                    logger.exception("Extension stop failed: %s", descriptor.extension_id)
+            self._statuses[descriptor] = ExtensionStatus(
+                descriptor,
+                ExtensionState.STOPPED,
+            )
+
     async def _start_provider(self, provider: ExtensionProvider) -> None:
         descriptor = provider.descriptor
         registered: list[str] = []
@@ -130,7 +171,7 @@ class ExtensionManager:
                 assert origin is not None
                 self._registry.register(tool, origin=origin)
                 registered.append(tool.name)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - extension failure isolation boundary
             for name in reversed(registered):
                 assert origin is not None
                 self._registry.unregister(name, origin=origin)
