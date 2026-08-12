@@ -1,0 +1,184 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+import yaml
+
+from pc_assistant.agent_runtime.config_control import PersistentConfigController
+from pc_assistant.config import AppConfig
+from pc_assistant.extensions.manager import ExtensionManager
+from pc_assistant.extensions.mcp import (
+    MCPPromptDefinition,
+    MCPResourceCapabilities,
+    MCPResourceDefinition,
+    MCPResourceSnapshot,
+    MCPToolDefinition,
+)
+from pc_assistant.extensions.mcp_onboarding import MCPOnboardingService
+from pc_assistant.extensions.mcp_resource_tasks import MCPResourceTaskBridge
+from pc_assistant.extensions.models import MCPResourceTaskConfig, MCPServerConfig
+from pc_assistant.tools.registry import ToolRegistry
+
+
+class _DiscoveryClient:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def set_notification_handler(self, _handler) -> None:
+        pass
+
+    async def start(self) -> None:
+        pass
+
+    async def list_tools(self):
+        return (
+            MCPToolDefinition(
+                name="jira.get_issue",
+                description="Read Jira",
+                input_schema={"type": "object", "properties": {}},
+                read_only_hint=True,
+                open_world_hint=True,
+            ),
+            MCPToolDefinition(
+                name="jira.add_comment",
+                description="Write Jira",
+                input_schema={"type": "object", "properties": {}},
+                read_only_hint=False,
+                open_world_hint=True,
+            ),
+            MCPToolDefinition(
+                name="jira.ambiguous",
+                description="Missing annotations",
+                input_schema={"type": "object", "properties": {}},
+            ),
+        )
+
+    async def list_prompts(self):
+        return (MCPPromptDefinition("jira.analyze_issue", "Analyze Jira"),)
+
+    def resource_capabilities(self):
+        return MCPResourceCapabilities(available=True, subscribe=True)
+
+    async def list_resources(self):
+        return (
+            MCPResourceDefinition(
+                uri="jira://assigned-to-me",
+                name="Assignments",
+                description="",
+                mime_type="application/json",
+            ),
+        )
+
+    async def call_tool(self, _name, _arguments):
+        raise AssertionError
+
+    async def read_resource(self, _uri):
+        return MCPResourceSnapshot(contents=())
+
+    async def subscribe_resource(self, _uri):
+        pass
+
+    async def unsubscribe_resource(self, _uri):
+        pass
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class _ProviderClient(_DiscoveryClient):
+    async def list_tools(self):
+        return (await super().list_tools())[:1]
+
+
+@pytest.mark.asyncio
+async def test_onboarding_discovers_and_enables_only_annotated_read_tools(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pc_assistant.extensions.mcp as mcp_module
+    import pc_assistant.extensions.mcp_onboarding as onboarding_module
+
+    discovery = _DiscoveryClient()
+    provider_client = _ProviderClient()
+    clients = iter((discovery, provider_client))
+    monkeypatch.setattr(onboarding_module, "create_mcp_client", lambda _config: next(clients))
+    monkeypatch.setattr(mcp_module, "create_mcp_client", lambda _config: next(clients))
+    registry = ToolRegistry()
+    manager = ExtensionManager(registry)
+    await manager.start()
+    path = tmp_path / "local.yaml"
+    service = MCPOnboardingService(
+        manager,
+        PersistentConfigController(AppConfig(), path),
+        MCPResourceTaskBridge((), object(), object()),
+    )
+
+    result = await service.connect(
+        "jira",
+        MCPServerConfig.model_validate(
+            {"enabled": True, "url": "https://jira-mcp.example.test/mcp"}
+        ),
+        frozenset({"jira.get_issue"}),
+    )
+
+    assert result.enabled_tools == ("jira.get_issue",)
+    assert result.withheld_tools == ("jira.add_comment", "jira.ambiguous")
+    assert result.prompts[0].name == "jira.analyze_issue"
+    assert discovery.closed
+    assert registry.list_tools() == ["mcp__jira__jira_get_issue"]
+    saved = yaml.safe_load(path.read_text())
+    assert set(saved["mcp_servers"]["jira"]["tools"]) == {"jira.get_issue"}
+    assert "resource_tasks" not in saved["mcp_servers"]["jira"]
+    await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_onboarding_adds_resource_task_route_without_restart(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "local.yaml"
+    initial = AppConfig(
+        mcp_servers={
+            "jira": {
+                "enabled": True,
+                "url": "https://jira-mcp.example.test/mcp",
+            }
+        }
+    )
+    controller = PersistentConfigController(initial, path)
+
+    class _Bridge:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def validate_route(self, _route) -> None:
+            pass
+
+        def add_route(self, provider, route_id, route) -> None:
+            self.calls.append((provider, route_id, route))
+
+    bridge = _Bridge()
+    manager = ExtensionManager(ToolRegistry())
+    provider = object()
+    service = MCPOnboardingService(
+        manager,
+        controller,
+        bridge,  # type: ignore[arg-type]
+    )
+    service._providers["jira"] = provider  # type: ignore[assignment]
+    route = MCPResourceTaskConfig.model_validate(
+        {
+            "uri": "jira://assigned-to-me",
+            "principal_id": "personal:owner",
+            "session_handle": "session-a",
+        }
+    )
+
+    await service.configure_resource_task("jira", "assigned", route)
+
+    assert bridge.calls == [(provider, "assigned", route)]
+    saved = yaml.safe_load(path.read_text())
+    assert saved["mcp_servers"]["jira"]["resource_tasks"]["assigned"]["uri"] == (
+        "jira://assigned-to-me"
+    )

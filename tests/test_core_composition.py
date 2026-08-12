@@ -73,7 +73,9 @@ def _config(tmp_path: Path, **updates) -> AppConfig:
     return AppConfig(**values)
 
 
-def test_core_composition_builds_forward_only_registry_and_profiles(tmp_path: Path) -> None:
+def test_core_composition_builds_forward_only_registry_and_profiles(
+    tmp_path: Path,
+) -> None:
     composition = build_core_runtime(
         _config(tmp_path, service_port=0),
         provider_factory=_OfflineProvider,
@@ -89,17 +91,24 @@ def test_core_composition_builds_forward_only_registry_and_profiles(tmp_path: Pa
         "screenshot",
         "mouse",
         "mcp_import",
+        "mcp_connect",
+        "mcp_inspect",
+        "mcp_disable",
+        "mcp_configure_resource_task",
         "tool_help",
     } <= local
     assert {"web_search", "web_fetch", "weather", "currency"} <= remote
-    assert not {
-        "attach",
-        "read_file",
-        "write_file",
-        "run_command",
-        "mouse",
-        "tool_help",
-    } & remote
+    assert (
+        not {
+            "attach",
+            "read_file",
+            "write_file",
+            "run_command",
+            "mouse",
+            "tool_help",
+        }
+        & remote
+    )
     assert not {"screen", "ui", "schedule", "inspect_image"} & local
     assert "create_task" in local
     assert "schedule_task" not in local
@@ -119,10 +128,13 @@ def test_builtin_agent_tool_contracts_are_english_only(tmp_path: Path) -> None:
         ensure_ascii=False,
     )
 
-    assert re.search(
-        r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]",
-        rendered,
-    ) is None
+    assert (
+        re.search(
+            r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]",
+            rendered,
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio
@@ -337,7 +349,9 @@ def test_tcp_endpoint_uses_managed_token_when_not_configured(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
-async def test_tcp_endpoint_separates_local_and_remote_credentials(tmp_path: Path) -> None:
+async def test_tcp_endpoint_separates_local_and_remote_credentials(
+    tmp_path: Path,
+) -> None:
     config = _config(
         tmp_path,
         service_host="127.0.0.1",
@@ -478,10 +492,7 @@ async def test_composition_records_correlated_model_and_turn_traces(
     turn_trace = composition.turn_traces.recent(1)[0]
     assert model_trace["run_hash"] == turn_trace["run_hash"]
     assert model_trace["session_hash"] == turn_trace["session_hash"]
-    assert (
-        model_trace["client_request_hash"]
-        == turn_trace["client_request_hash"]
-    )
+    assert model_trace["client_request_hash"] == turn_trace["client_request_hash"]
     assert "run_id" not in model_trace
     assert "client_request_id" not in model_trace
     assert model_trace["cached_tokens"] == 3

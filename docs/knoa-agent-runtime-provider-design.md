@@ -61,7 +61,7 @@ Capability Registry
 6. 移动端继续使用现有 Secure Gateway HTTP/SSE，不直接连接 Codex App Server。
 7. 第一阶段不把 AgentRuntime 拆成独立网络微服务；先建立稳定模块边界。
 8. Codex App Server 作为独立子进程运行，由 `CodexAppServerProvider` 通过 stdio 管理。
-9. Codex 不直接连接带有 Knoa 外部副作用的 MCP；MVP 通过 App Server `dynamicTools` 将调用回送 Knoa，长期通过 scoped Capability MCP Gateway 统一转发。
+9. Codex 不直接连接任何绕过 Knoa policy boundary 的外部 MCP；MVP 通过 App Server `dynamicTools` 将 Tool 调用回送 Knoa，长期仅在单一审批权威可证明时通过 scoped Capability MCP Gateway 统一转发。
 10. 所有 Provider 控制命令、事件和主动请求都必须具备可持久化的 correlation、幂等和恢复语义。
 
 ## 3. 术语
@@ -428,6 +428,8 @@ CoreServer
             -> codex app-server
 ```
 
+连接状态机为 `SPAWNED -> INITIALIZING -> READY`。只有 `initialize` 成功响应且 schema/capability 校验通过后才能发送 `initialized` 并进入 READY。stdout 只接受有界 JSONL；stderr 独立采集；畸形、超长或未知主动请求 fail closed。
+
 主要调用映射：
 
 ```text
@@ -464,6 +466,8 @@ codex app-server generate-json-schema --out <managed-schema-dir>
 ```
 
 生成结果属于运行时兼容资料，不直接成为 Knoa 的公共协议。
+
+Codex App Server 的账户认证只解决上游 Codex 凭据，不提供 Knoa principal 隔离。所有主动请求必须通过持久 Thread binding 反查 principal、Session 和 workspace；App Server 进程、配置和凭据至少不得跨不可信 principal 共享。
 
 ## 11. Session 和 Turn 生命周期
 
@@ -544,6 +548,8 @@ Codex server request
 3. Core 的本地 policy 决定是否允许、是否需要确认及授权范围；
 4. App Server 连接在审批期间断开时，审批标记为 provider_lost，不假设操作已执行；
 5. 对结果不确定的外部副作用必须进入 outcome_unknown 或失败状态，不自动重放。
+6. MVP 只允许单次最小范围的 `accept`、`decline` 或 `cancel`；拒绝 `acceptForSession`、execpolicy amendment、session-scoped permission 和超出请求子集的授权。
+7. dynamic tool/server request 在执行前持久化 `threadId/turnId/itemId/callId/JSON-RPC id/tool idempotency key`；断线不能靠 `thread/resume` 恢复旧请求。
 
 ## 13. MCP 和 Monitor 的位置
 
@@ -568,7 +574,7 @@ Native Provider 继续通过 Knoa `ExtensionManager` 和 `Capability Registry` �
 
 ### 13.2 Codex Provider
 
-Codex App Server 有两种接入 Knoa MCP 能力的方式。直接在 Codex 配置中注册 Monitor MCP 最简单，但会绕过 Knoa 的 Capability Registry、ToolStep、统一审批和 principal 审计，因此生产模式不得用于带副作用的工具。
+Codex App Server 有两种接入 Knoa MCP 能力的候选方式。生产 Provider 必须使用隔离、生成式 Codex 配置目录，禁用非 Gateway 的 MCP、apps 和 plugins；直接在 Codex 配置中注册 Monitor/Jira/PC Assistant MCP 会绕过 Knoa Capability Registry、ToolStep、统一审批和 principal 审计，因此无论当前工具是否只读都不允许。启动后必须通过 `mcpServerStatus/list` 核验 inventory，发现额外外部能力即 fail closed。
 
 #### MVP：dynamicTools 回送 Knoa
 
@@ -586,6 +592,8 @@ Codex Agent
 
 该路径的工具授权绑定到 `principal_id + session_handle + binding_epoch`，Codex 不接触 Monitor 凭据。MVP 阶段仅允许声明式、大小受限的工具 schema；未注册或高风险未审批工具必须失败关闭。
 
+`dynamicTools` 只导出 Capability Registry 的 Tool descriptors/calls；MCP Resources、Prompts、Notifications 和 subscriptions 仍由 Knoa Standard MCP Host 处理，不得复制进 Provider。
+
 #### 长期：Knoa Capability MCP Gateway
 
 为了让其他 Agent Runtime 也能复用同一能力集合，增加 principal/session-scoped 的 `Knoa Capability MCP Gateway`。Codex 配置连接 Gateway，而不是直接连接 Monitor：
@@ -602,7 +610,7 @@ Codex App Server
 
 Gateway 使用短期、Session-scoped 凭据将每次调用绑定到 Knoa Session，并将 MCP 调用重新送回 Capability Registry。统一执行策略、审批、幂等和审计。
 
-直接配置 Monitor MCP 仅作为本地开发和只读诊断方案；`gitlab.retry_pipeline`、`gitlab.retry_job` 等外部副作用工具在没有 Knoa 中介时不得向 Codex 暴露。
+Knoa 必须是 Gateway 外部 Tool 的唯一审批权威。若无法可靠关闭或自动拒绝 App Server 对同一 MCP action 的内建 approval，则不得实现该 Gateway 路径。一个外部 action idempotency key 最多产生一次用户审批。
 
 该 Gateway 是能力代理，不是 Agent 控制协议，也不替代 `AgentRuntimePort`。
 
@@ -679,6 +687,8 @@ Worker 主动连接 Core，避免暴露用户电脑入站端口。Worker 只接�
 - Provider 原始描述和 annotations 不是本地授权依据；
 - 外部副作用仍通过 Knoa 统一确认、幂等和审计边界；
 - Codex 登录凭据保留在运行 Codex 的机器上，不发送给 App。
+- Codex 使用隔离配置目录；非 Gateway MCP、apps 和 plugins 默认禁用；
+- Session grant、execpolicy amendment 和扩大 workspace/network scope 默认拒绝。
 
 ### 15.3 传输
 
@@ -792,9 +802,10 @@ GET /agent-runtime/providers
 - 转换消息、工具、文件和 terminal 事件；
 - 复用 ChatTurn snapshot 与现有 SSE；
 - 增加 Provider 版本和 schema 检查；
+- 增加完整 initialize 状态机、有界 JSONL parser 和隔离 Codex 配置；
 - 仅支持本机已登记 workspace；
 - 只通过 `dynamicTools` 暴露当前 Session 已批准的能力；
-- Codex 不得直接使用带外部副作用的 Monitor MCP；
+- Codex 不得直接使用任何绕过 Knoa policy boundary 的外部 MCP；
 - 以 supervisor、bounded queues 和低并发配额运行。
 
 ### Phase 3：交互完整性
@@ -805,6 +816,7 @@ GET /agent-runtime/providers
 - 增加 Provider 断线、重启和 Session 恢复；
 - 增加 Native/Codex 能力差异 UI；
 - 增加 steer/interrupt command 状态机、deadline 和 outcome_unknown；
+- 增加 dynamic tool/server request 持久桥接状态与 provider_lost/expired；
 - 增加重复、乱序、崩溃和审批断线测试。
 
 ### Phase 4：统一 Capability Gateway
@@ -813,6 +825,7 @@ GET /agent-runtime/providers
 - Codex 通过 Gateway 使用 Knoa Capability Registry；
 - 统一 Monitor 等 MCP Tool 的策略、审批和审计；
 - 禁止未登记工具和凭据越界；
+- 证明 Knoa 是外部 Tool 唯一审批权威，否则不启用 Gateway；
 - 通过 Native 与 Codex 的同一工具调用验收证明策略、审批、幂等和审计一致。
 
 ### Phase 5：可选 Agent Worker

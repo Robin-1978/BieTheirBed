@@ -68,8 +68,10 @@ audio_transcription:
   max_bytes: 20971520
 supports_vision: null
 
-# Dynamic MCP tools are disabled unless a private local config explicitly
-# enables a server and assigns local effect/capability/risk policy per tool.
+# Dynamic MCP capabilities are disabled unless a private local config explicitly
+# enables a server. Tools require local effect/capability/risk policy. Optional
+# Resource Task Sources additionally require an explicit URI, principal and owned
+# Session; MCP notifications alone never create work.
 mcp_servers: {}
 
 # Additional roots containing Skill package directories. Knoa also loads its

@@ -1,4 +1,5 @@
 """Concrete composition root for the forward-only Core runtime."""
+
 from __future__ import annotations
 
 import asyncio
@@ -64,10 +65,12 @@ from pc_assistant.conversation import ConversationRepository, ConversationServic
 from pc_assistant.desktop_session import ensure_desktop_session
 from pc_assistant.extensions import ExtensionManager
 from pc_assistant.extensions.mcp import build_mcp_providers
+from pc_assistant.extensions.mcp_onboarding import MCPOnboardingService
 from pc_assistant.extensions.mcp_package import (
     MCPPackageService,
     build_mcp_package_providers,
 )
+from pc_assistant.extensions.mcp_resource_tasks import MCPResourceTaskBridge
 from pc_assistant.extensions.skill import (
     SkillCatalog,
     build_skill_providers,
@@ -102,6 +105,12 @@ from pc_assistant.tools.create_task import CreateTaskTool
 from pc_assistant.tools.describe_tool import DescribeTool
 from pc_assistant.tools.exchange import ExchangeTool
 from pc_assistant.tools.hotkey import HotkeyTool
+from pc_assistant.tools.mcp_connect import (
+    MCPConfigureResourceTaskTool,
+    MCPConnectTool,
+    MCPDisableTool,
+    MCPInspectTool,
+)
 from pc_assistant.tools.mcp_import import MCPImportTool
 from pc_assistant.tools.memory_tool import MemoryTool
 from pc_assistant.tools.mouse import MouseTool
@@ -151,6 +160,7 @@ class CoreRuntimeComposition:
     llm_traces: LLMTraceRecorder
     turn_traces: TurnRecorder
     extensions: ExtensionManager
+    mcp_resource_tasks: MCPResourceTaskBridge
     mcp_packages: MCPPackageService
     skills: SkillCatalog
     host: CoreServiceHost
@@ -279,11 +289,12 @@ def build_core_runtime(
         paths.skills,
         *(paths.resolve(directory) for directory in config.skill_directories),
     )
+    mcp_providers = build_mcp_providers(config.mcp_servers)
     extensions = ExtensionManager(
         registry,
         (
             *build_skill_providers(skill_roots, skills),
-            *build_mcp_providers(config.mcp_servers),
+            *mcp_providers,
             *build_mcp_package_providers(
                 paths.mcp,
                 excluded_ids=frozenset(config.mcp_servers),
@@ -379,6 +390,7 @@ def build_core_runtime(
             schema_tokens=result.schema_tokens_estimated,
             failover_used=result.failover_used,
         )
+
     tool_step = ToolStep(
         registry,
         ToolArgumentPolicy(config.working_directory),
@@ -413,6 +425,7 @@ def build_core_runtime(
             tool_calls=outcome.tool_calls,
             elapsed_ms=elapsed_ms,
         )
+
     runtime = AgentRuntime(
         react_loop,
         registry,
@@ -460,6 +473,11 @@ def build_core_runtime(
     schedule_service = ScheduleService(schedules, schedule_dispatcher)
     trigger_dispatcher = TriggerDispatcher(triggers, task_service)
     trigger_service = TriggerService(triggers, trigger_dispatcher)
+    mcp_resource_tasks = MCPResourceTaskBridge(
+        mcp_providers,
+        task_service,
+        sessions,
+    )
     registry.register(CreateTaskTool(sessions, task_service, schedule_service))
     registry.register(
         TaskControlTool(
@@ -475,6 +493,16 @@ def build_core_runtime(
         else paths.config / "local.yaml"
     )
     config_controller = PersistentConfigController(config, config_path)
+    mcp_onboarding = MCPOnboardingService(
+        extensions,
+        config_controller,
+        mcp_resource_tasks,
+        mcp_providers,
+    )
+    registry.register(MCPInspectTool(mcp_onboarding))
+    registry.register(MCPConnectTool(mcp_onboarding))
+    registry.register(MCPConfigureResourceTaskTool(mcp_onboarding))
+    registry.register(MCPDisableTool(mcp_onboarding))
 
     def status_details(scope: RuntimeScope) -> dict[str, object]:
         configured_model = config.resolve_model()
@@ -506,13 +534,14 @@ def build_core_runtime(
                 effect=descriptor.policy.effect.value,
                 risk=descriptor.policy.risk.value,
                 capabilities=tuple(
-                    sorted(capability.value for capability in descriptor.policy.capabilities)
+                    sorted(
+                        capability.value
+                        for capability in descriptor.policy.capabilities
+                    )
                 ),
                 requires_confirmation=descriptor.requires_confirmation,
             )
-            for descriptor in registry.descriptors_for(
-                capabilities_for_scope(scope)
-            )
+            for descriptor in registry.descriptors_for(capabilities_for_scope(scope))
         ),
         config_controller=config_controller,
         status_details=status_details,
@@ -584,6 +613,7 @@ def build_core_runtime(
         llm_traces=llm_traces,
         turn_traces=turn_traces,
         extensions=extensions,
+        mcp_resource_tasks=mcp_resource_tasks,
         mcp_packages=mcp_packages,
         skills=skills,
         host=host,

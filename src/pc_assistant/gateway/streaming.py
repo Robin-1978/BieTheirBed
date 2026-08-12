@@ -52,6 +52,7 @@ class GatewayStreaming:
                     done, _pending = await asyncio.wait(
                         {pending, replacement},
                         timeout=self._event_heartbeat_seconds,
+                        return_when=asyncio.FIRST_COMPLETED,
                     )
                     if replacement in done:
                         return
@@ -162,6 +163,7 @@ class GatewayStreaming:
                     done, _pending = await asyncio.wait(
                         {pending, replacement},
                         timeout=self._event_heartbeat_seconds,
+                        return_when=asyncio.FIRST_COMPLETED,
                     )
                     if replacement in done:
                         return
