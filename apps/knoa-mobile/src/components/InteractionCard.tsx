@@ -15,14 +15,18 @@ export function InteractionCard({
   onSubmit(value: Record<string, unknown>): void;
 }) {
   const fields = interaction.display.fields ?? [];
-  const properties = interaction.resolution_schema.properties ?? {};
+  const elicitationContent = interaction.resolution_schema.properties?.content;
+  const formSchema = interaction.kind === "mcp_elicitation" && elicitationContent?.type === "object"
+    ? elicitationContent
+    : interaction.resolution_schema;
+  const properties = formSchema.properties ?? {};
   const required = useMemo(
-    () => new Set(interaction.resolution_schema.required ?? []),
-    [interaction.resolution_schema.required],
+    () => new Set(formSchema.required ?? []),
+    [formSchema.required],
   );
   const [values, setValues] = useState<Record<string, string | boolean>>({});
-  const supported = interaction.resolution_schema.type === "object"
-    && interaction.resolution_schema.additionalProperties === false
+  const supported = formSchema.type === "object"
+    && formSchema.additionalProperties === false
     && fields.every((field) => {
       const schema = properties[field.id];
       return schema?.type === "string" || schema?.type === "boolean";
@@ -35,7 +39,7 @@ export function InteractionCard({
 
   return (
     <View style={styles.card}>
-      <Text style={styles.eyebrow}>需要你的输入 · 这不是写入授权</Text>
+      <Text style={styles.eyebrow}>{interaction.kind === "mcp_elicitation" ? "MCP Server 请求输入 · 这不是写入授权" : "需要你的输入 · 这不是写入授权"}</Text>
       <Text style={styles.title}>{interaction.display.title || "补充信息"}</Text>
       {interaction.display.description ? <Text style={styles.description}>{interaction.display.description}</Text> : null}
       {!supported ? <Text style={styles.unsupported}>当前版本暂不支持这个表单，请在其他客户端处理。</Text> : fields.map((field) => {
@@ -72,9 +76,20 @@ export function InteractionCard({
         );
       })}
       {supported ? (
-        <AppPressable disabled={!complete || submitting} onPress={() => onSubmit(values)} style={[styles.submit, (!complete || submitting) && styles.disabled]}>
-          {submitting ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.submitText}>提交选择</Text>}
-        </AppPressable>
+        <View style={styles.actions}>
+          {interaction.kind === "mcp_elicitation" ? (
+            <AppPressable disabled={submitting} onPress={() => onSubmit({ action: "decline" })} style={[styles.secondary, submitting && styles.disabled]}>
+              <Text style={styles.secondaryText}>拒绝提供</Text>
+            </AppPressable>
+          ) : null}
+          <AppPressable
+            disabled={!complete || submitting}
+            onPress={() => onSubmit(interaction.kind === "mcp_elicitation" ? { action: "accept", content: values } : values)}
+            style={[styles.submit, (!complete || submitting) && styles.disabled]}
+          >
+            {submitting ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.submitText}>提交选择</Text>}
+          </AppPressable>
+        </View>
       ) : null}
     </View>
   );
@@ -104,6 +119,9 @@ const styles = StyleSheet.create({
   optionLabelSelected: { color: colors.accent, fontWeight: "700" },
   input: { minHeight: 44, padding: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.line, color: colors.ink, textAlignVertical: "top" },
   submit: { minHeight: 44, borderRadius: 12, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
+  actions: { gap: 8 },
+  secondary: { minHeight: 44, borderRadius: 12, borderWidth: 1, borderColor: colors.line, alignItems: "center", justifyContent: "center" },
+  secondaryText: { color: colors.muted, fontWeight: "700" },
   disabled: { opacity: 0.45 },
   submitText: { color: "white", fontWeight: "700" },
 });

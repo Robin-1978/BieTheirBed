@@ -127,6 +127,7 @@ class AgentExecutionService:
                 cancellation=request.cancellation,
                 confirmation=request.confirmation,
                 tool_commit=request.tool_commit,
+                interaction=request.interaction,
                 artifact_ids=frozenset(
                     attachment.artifact_id for attachment in request.attachments
                 ),

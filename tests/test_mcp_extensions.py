@@ -4,9 +4,11 @@ import asyncio
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Annotated
 
 import pytest
-from pydantic import ValidationError
+from mcp.server.mcpserver.resolve import Elicit, Resolve
+from pydantic import BaseModel, ValidationError
 
 from knoa_platform.agent_runtime.contracts import RuntimeScope
 from knoa_platform.agent_runtime.tool_step import (
@@ -30,6 +32,14 @@ from knoa_platform.extensions.mcp import (
 from knoa_platform.extensions.models import MCPServerConfig
 from knoa_platform.tools.base import ToolCapability, ToolOriginKind
 from knoa_platform.tools.registry import ToolRegistry
+
+
+class _ElicitationChoice(BaseModel):
+    transition_id: str
+
+
+async def _request_transition() -> Elicit[_ElicitationChoice]:
+    return Elicit("Choose the Jira transition", _ElicitationChoice)
 
 
 class _FakeMCPClient:
@@ -58,7 +68,13 @@ class _FakeMCPClient:
     async def list_tools(self) -> tuple[MCPToolDefinition, ...]:
         return self.definitions
 
-    async def call_tool(self, name: str, arguments: dict):
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict,
+        elicitation_handler=None,
+    ):
+        del elicitation_handler
         self.calls.append((name, arguments))
         return self.result
 
@@ -93,9 +109,26 @@ class _Confirmation:
         return self.approved
 
 
+class _InteractionPort:
+    def __init__(self, resolution) -> None:
+        self.resolution = resolution
+        self.calls = []
+
+    async def begin(self, scope, run_id, event):
+        self.calls.append((scope, run_id, event))
+
+        class Handle:
+            async def wait(inner_self):
+                del inner_self
+                return self.resolution
+
+        return Handle()
+
+
 def _context(
     capabilities: frozenset[ToolCapability],
     confirmation: _Confirmation | None = None,
+    interaction=None,
 ) -> ToolStepContext:
     return ToolStepContext(
         scope=RuntimeScope(principal_id="local", session_handle="session-a"),
@@ -104,6 +137,7 @@ def _context(
         capabilities=capabilities,
         cancellation=asyncio.Event(),
         confirmation=confirmation,
+        interaction=interaction,
     )
 
 
@@ -318,6 +352,75 @@ async def test_mcp_side_effect_uses_standard_confirmation_boundary(
     assert missing.code == "confirmation_required"
     assert completed.status == "completed"
     assert confirmation.calls == 1
+    await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_mcp_elicitation_uses_current_tool_step_interaction_owner(
+    tmp_path: Path,
+) -> None:
+    class Client(_FakeMCPClient):
+        async def call_tool(self, name, arguments, elicitation_handler=None):
+            assert elicitation_handler is not None
+            response = await elicitation_handler(
+                {
+                    "title": "Choose",
+                    "description": "Select one",
+                    "fields": [{"id": "choice", "title": "Choice"}],
+                    "source": "mcp_server",
+                },
+                {
+                    "type": "object",
+                    "properties": {"choice": {"type": "string"}},
+                    "required": ["choice"],
+                    "additionalProperties": False,
+                },
+            )
+            return SimpleNamespace(
+                content=[],
+                structuredContent=response,
+                isError=False,
+            )
+
+    client = Client(
+        (
+            MCPToolDefinition(
+                name="ping",
+                description="Ping",
+                input_schema={
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
+            ),
+        )
+    )
+    registry = ToolRegistry()
+    manager = ExtensionManager(registry, (_provider(_config(), client),))
+    await manager.start()
+    interaction = _InteractionPort(
+        {"action": "accept", "content": {"choice": "a"}}
+    )
+
+    result = await ToolStep(registry, ToolArgumentPolicy(tmp_path)).execute(
+        _context(
+            frozenset({ToolCapability.NETWORK, ToolCapability.MCP}),
+            interaction=interaction,
+        ),
+        ProposedToolCall(call_id="call-a", name="mcp__docs__ping"),
+    )
+
+    assert result.status == "completed"
+    assert result.output["structured_content"]["content"] == {"choice": "a"}
+    scope, run_id, event = interaction.calls[0]
+    assert scope.session_handle == "session-a"
+    assert run_id == "run-a"
+    assert event.kind == "mcp_elicitation"
+    assert event.resolution_schema["properties"]["action"]["enum"] == [
+        "accept",
+        "decline",
+        "cancel",
+    ]
     await manager.stop()
 
 
@@ -678,3 +781,161 @@ async def test_streamable_http_client_with_live_local_mcp_server() -> None:
 
     assert [tool.name for tool in tools] == ["echo"]
     assert result.structured_content == {"result": "echo:hello"}
+
+
+@pytest.mark.asyncio
+async def test_streamable_http_client_handles_standard_form_elicitation() -> None:
+    uvicorn = pytest.importorskip("uvicorn")
+    mcp_server = pytest.importorskip("mcp.server")
+
+    MCPServer = mcp_server.MCPServer
+    server_mcp = MCPServer("knoa-elicitation-test")
+
+    @server_mcp.tool()
+    async def choose_transition(
+        choice: Annotated[_ElicitationChoice, Resolve(_request_transition)],
+    ) -> str:
+        return choice.transition_id
+
+    server = uvicorn.Server(
+        uvicorn.Config(
+            server_mcp.streamable_http_app(
+                stateless_http=False,
+                json_response=True,
+            ),
+            host="127.0.0.1",
+            port=0,
+            log_level="error",
+        )
+    )
+    server_task = asyncio.create_task(server.serve())
+    for _ in range(500):
+        if server.started or server_task.done():
+            break
+        await asyncio.sleep(0.01)
+    assert server.started
+    port = server.servers[0].sockets[0].getsockname()[1]
+    client = StreamableHTTPMCPClient(
+        f"http://127.0.0.1:{port}/mcp",
+        timeout_seconds=5,
+    )
+    seen: list[tuple[dict, dict]] = []
+
+    async def elicit(display, schema):
+        seen.append((display, schema))
+        return {"action": "accept", "content": {"transition_id": "101"}}
+
+    try:
+        await client.start()
+        await client.list_tools()
+        result = await client.call_tool(
+            "choose_transition",
+            {},
+            elicitation_handler=elicit,
+        )
+    finally:
+        await client.close()
+        server.should_exit = True
+        await server_task
+
+    assert seen[0][0]["source"] == "mcp_server"
+    assert seen[0][1]["properties"]["transition_id"]["type"] == "string"
+    assert result.structured_content == {"result": "101"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["decline", "cancel"])
+async def test_mcp_elicitation_preserves_non_accept_actions(action: str) -> None:
+    from mcp import types
+
+    client = StreamableHTTPMCPClient("https://example.test/mcp", timeout_seconds=1)
+    client._elicitation_handler = lambda _display, _schema: asyncio.sleep(
+        0, result={"action": action}
+    )
+
+    result = await client._elicit(
+        None,
+        types.ElicitRequestFormParams(
+            message="Choose",
+            requested_schema={
+                "type": "object",
+                "properties": {"choice": {"type": "string"}},
+                "required": ["choice"],
+                "additionalProperties": False,
+            },
+        ),
+    )
+
+    assert result.action == action
+    assert result.content is None
+
+
+@pytest.mark.asyncio
+async def test_mcp_url_elicitation_is_declined_without_navigation() -> None:
+    client = StreamableHTTPMCPClient("https://example.test/mcp", timeout_seconds=1)
+    called = False
+
+    async def handler(_display, _schema):
+        nonlocal called
+        called = True
+        return {"action": "accept"}
+
+    client._elicitation_handler = handler
+    result = await client._elicit(
+        None,
+        SimpleNamespace(
+            mode="url",
+            message="Authenticate",
+            url="https://auth.example.test",
+        ),
+    )
+
+    assert result.action == "decline"
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_concurrent_mcp_calls_keep_elicitation_handlers_bound() -> None:
+    from mcp import types
+
+    client = StreamableHTTPMCPClient("https://example.test/mcp", timeout_seconds=2)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class Session:
+        async def call_tool(self, name, arguments, **_kwargs):
+            del arguments
+            if name == "first":
+                started.set()
+                await release.wait()
+            result = await client._elicit(
+                None,
+                types.ElicitRequestFormParams(
+                    message=name,
+                    requested_schema={
+                        "type": "object",
+                        "properties": {"owner": {"type": "string"}},
+                        "required": ["owner"],
+                        "additionalProperties": False,
+                    },
+                ),
+            )
+            return SimpleNamespace(name=name, owner=result.content["owner"])
+
+    client._session = Session()
+
+    async def first_handler(_display, _schema):
+        return {"action": "accept", "content": {"owner": "first"}}
+
+    async def second_handler(_display, _schema):
+        return {"action": "accept", "content": {"owner": "second"}}
+
+    first = asyncio.create_task(client.call_tool("first", {}, first_handler))
+    await started.wait()
+    second = asyncio.create_task(client.call_tool("second", {}, second_handler))
+    await asyncio.sleep(0)
+    release.set()
+
+    first_result, second_result = await asyncio.gather(first, second)
+    assert (first_result.name, first_result.owner) == ("first", "first")
+    assert (second_result.name, second_result.owner) == ("second", "second")

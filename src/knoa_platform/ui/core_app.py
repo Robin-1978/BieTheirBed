@@ -49,6 +49,12 @@ _HELP = """\
 | Command | Description |
 |---------|-------------|
 | `/new` | Start a new conversation |
+| `/agents`, `/agent <id>` | List or select an Agent for new conversations |
+| `/tasks`, `/task <id>` | List or inspect durable Tasks |
+| `/executions <task-id>`, `/execution <id>` | List or inspect Executions |
+| `/approve <id>`, `/deny <id>` | Resolve a Task approval |
+| `/resolve <id> <json>` | Resolve a HumanInteraction or MCP Elicitation |
+| `/follow-up <task-id> <text>` | Continue a Task with a new Execution |
 | `/memory` | Show remembered user preferences |
 | `/memory clear` | Clear memories |
 | `/history` | Show conversation history |
@@ -72,6 +78,7 @@ class _TurnRenderState:
     tool_panels: dict[str, ToolCallPanel] = field(default_factory=dict)
     terminal_recorded: bool = False
     resolved_approval_ids: set[str] = field(default_factory=set)
+    shown_interaction_ids: set[str] = field(default_factory=set)
 
 
 class CoreChatApp(App):
@@ -88,12 +95,14 @@ class CoreChatApp(App):
         config: AppConfig,
         client: CoreClient,
         session_handle: str,
+        agent_id: str | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._config = config
         self._client = client
         self._session_handle = session_handle
+        self._agent_id = agent_id or config.default_agent
         self._state = UIState()
         self._processing = False
         self._last_input = ""
@@ -242,6 +251,26 @@ class CoreChatApp(App):
                     f"\n\n*Artifact: `{artifact.name}` saved to `{target}`*\n"
                 )
 
+        for interaction in snapshot.interactions:
+            if (
+                interaction.state != "pending"
+                or interaction.interaction_id in state.shown_interaction_ids
+            ):
+                continue
+            state.shown_interaction_ids.add(interaction.interaction_id)
+            kind = (
+                "MCP server input request (not write authorization)"
+                if interaction.kind == "mcp_elicitation"
+                else "Input request"
+            )
+            await stream.write(
+                f"\n\n**{kind}:** `{interaction.interaction_id}`\n\n"
+                f"{interaction.display.get('description', '')}\n\n"
+                f"Schema: `{json.dumps(interaction.resolution_schema, ensure_ascii=False)}`\n\n"
+                f"Use `/resolve {interaction.interaction_id} <json>`.\n"
+            )
+            self._set_status("input required")
+
         if snapshot.state is ChatTurnState.WAITING_APPROVAL:
             self._set_status("confirmation required")
         elif snapshot.state is ChatTurnState.CANCELLED:
@@ -367,7 +396,11 @@ class CoreChatApp(App):
         elif cmd == "/help":
             await log.mount(CommandOutput(_HELP))
         elif cmd == "/new":
-            self._session_handle = await self._client.create_session()
+            self._session_handle = (
+                await self._client.create_session()
+                if self._agent_id == self._config.default_agent
+                else await self._client.create_session(agent_id=self._agent_id)
+            )
             self._state.clear_messages()
             await log.remove_children()
             await log.mount(CommandOutput("*Started a new conversation.*"))
@@ -375,6 +408,44 @@ class CoreChatApp(App):
             tools = (await self._client.list_tools(self._session_handle)).tools
             rows = "\n".join(f"| `{name}` |" for name in tools)
             await log.mount(CommandOutput(f"| Tool |\n|------|\n{rows}"))
+        elif cmd == "/agents":
+            rows = "\n".join(
+                f"| `{agent_id}` | {'selected' if agent_id == self._agent_id else ''} |"
+                for agent_id, agent in self._config.agents.items()
+                if agent.enabled
+            )
+            await log.mount(CommandOutput(f"| Agent | State |\n|---|---|\n{rows}"))
+        elif cmd.startswith("/agent "):
+            agent_id = command.split(None, 1)[1].strip()
+            agent = self._config.agents.get(agent_id)
+            if agent is None or not agent.enabled:
+                await log.mount(CommandOutput(f"{ICON_WARN} Agent is not enabled: `{agent_id}`"))
+            else:
+                self._agent_id = agent_id
+                self._session_handle = await self._client.create_session(agent_id=agent_id)
+                await log.mount(CommandOutput(f"Selected Agent `{agent_id}` and started a new conversation."))
+        elif cmd == "/tasks":
+            tasks = await self._client.list_product_tasks(limit=50)
+            rows = "\n".join(
+                f"| `{task.task_id}` | {task.state} | `{task.agent_id}` | {task.title} |"
+                for task in tasks
+            )
+            await log.mount(CommandOutput(f"| Task | State | Agent | Title |\n|---|---|---|---|\n{rows}"))
+        elif cmd.startswith("/task "):
+            task = await self._client.get_product_task(command.split(None, 1)[1].strip())
+            await log.mount(CommandOutput(self._product_task_markdown(task)))
+        elif cmd.startswith("/executions "):
+            task_id = command.split(None, 1)[1].strip()
+            executions = await self._client.list_product_task_executions(task_id)
+            rows = "\n".join(
+                f"| `{item.execution_id}` | {item.state} | {item.launch_reason} |"
+                for item in executions
+            )
+            await log.mount(CommandOutput(f"| Execution | State | Reason |\n|---|---|---|\n{rows}"))
+        elif cmd.startswith("/execution "):
+            execution_id = command.split(None, 1)[1].strip()
+            execution = await self._client.get_product_task_execution(execution_id)
+            await log.mount(CommandOutput(self._execution_markdown(execution)))
         elif cmd == "/history":
             messages = (await self._client.history(self._session_handle)).messages
             await log.mount(CommandOutput(self._history_table(messages)))
@@ -424,6 +495,33 @@ class CoreChatApp(App):
                 self.refresh_css()
             else:
                 await log.mount(CommandOutput(", ".join(AVAILABLE_THEMES)))
+        elif cmd.startswith("/approve "):
+            approval_id = command.split(None, 1)[1].strip()
+            await self._client.resolve_approval(approval_id, approved=True)
+            await log.mount(CommandOutput(f"Approved `{approval_id}`."))
+        elif cmd.startswith("/deny "):
+            approval_id = command.split(None, 1)[1].strip()
+            await self._client.resolve_approval(approval_id, approved=False)
+            await log.mount(CommandOutput(f"Denied `{approval_id}`."))
+        elif cmd.startswith("/resolve "):
+            parts = command.split(None, 2)
+            if len(parts) != 3:
+                await log.mount(CommandOutput(f"{ICON_WARN} Usage: `/resolve <id> <json>`"))
+            else:
+                value = json.loads(parts[2])
+                await self._client.resolve_interaction(parts[1], value)
+                await log.mount(CommandOutput(f"Resolved `{parts[1]}`."))
+        elif cmd.startswith("/follow-up "):
+            parts = command.split(None, 2)
+            if len(parts) != 3:
+                await log.mount(CommandOutput(f"{ICON_WARN} Usage: `/follow-up <task-id> <text>`"))
+            else:
+                execution = await self._client.continue_product_task(
+                    parts[1],
+                    input=parts[2],
+                    client_request_id=str(uuid.uuid4()),
+                )
+                await log.mount(CommandOutput(f"Started Execution `{execution.execution_id}`."))
         elif cmd == "/confirm":
             self._resolve_confirmation(True, log)
         elif cmd == "/deny":
@@ -432,6 +530,38 @@ class CoreChatApp(App):
             await log.mount(CommandOutput(f"{ICON_WARN} Unknown command: `{command}`"))
         self._scroll_end()
         return True
+
+    @staticmethod
+    def _product_task_markdown(task: Any) -> str:
+        return (
+            f"# {task.title}\n\n"
+            f"- Task: `{task.task_id}`\n"
+            f"- Agent: `{task.agent_id}`\n"
+            f"- State: `{task.state}`\n"
+            f"- Executions: `{task.execution_count}`\n\n"
+            f"{task.goal}"
+        )
+
+    @staticmethod
+    def _execution_markdown(execution: Any) -> str:
+        approvals = "\n".join(
+            f"- `{item.approval_id}` · {item.state} · `{item.tool_name}`"
+            for item in execution.approvals
+        ) or "- None"
+        interactions = "\n".join(
+            f"- `{item.interaction_id}` · {item.state} · `{item.kind}`"
+            for item in execution.interactions
+        ) or "- None"
+        result = execution.final_result or execution.failure_code or execution.phase
+        return (
+            f"# Execution `{execution.execution_id}`\n\n"
+            f"- Task: `{execution.task_id}`\n"
+            f"- Agent: `{execution.agent_id_snapshot}`\n"
+            f"- State: `{execution.state}`\n\n"
+            f"## Approvals\n\n{approvals}\n\n"
+            f"## Interactions\n\n{interactions}\n\n"
+            f"## Result\n\n{result}"
+        )
 
     def _resolve_confirmation(self, approved: bool, log: VerticalScroll) -> None:
         future = self._confirm_pending

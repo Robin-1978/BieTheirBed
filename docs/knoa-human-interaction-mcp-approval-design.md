@@ -10,11 +10,11 @@
 
 Knoa 是通用 Agent Platform。App、CLI、飞书和 Core 不理解 Jira 的“经办人”“状态流转”等业务概念；这些能力由标准 MCP Server 通过 Tools 暴露。
 
-当前只实现以下闭环：
+当前实现以下闭环：
 
 ```text
-只读 MCP Tool 查询候选
-  -> HumanInteraction(user_input) 让用户选择或补充参数
+MCP Server / Agent 请求结构化输入
+  -> HumanInteraction(user_input | mcp_elicitation)
   -> Agent 形成参数完整的写 Tool proposal
   -> Knoa 使用现有 Approval 确认精确 Tool + 参数
   -> 现有 ToolStep commit 边界执行标准 MCP tools/call
@@ -22,10 +22,12 @@ Knoa 是通用 Agent Platform。App、CLI、飞书和 Core 不理解 Jira 的“
 
 其中：
 
-- `HumanInteraction(user_input)` 负责收集人的结构化输入；
+- `HumanInteraction(user_input)` 负责 Agent 主动收集人的结构化输入；
+- 标准 MCP Elicitation 由 Knoa MCP Client 接收，并持久化适配为
+  `HumanInteraction(mcp_elicitation)`；
 - 现有 `Approval` 负责授权一个参数已经完全确定的副作用 Tool；
 - MCP `tools/call` 负责执行外部业务能力；
-- MCP Elicitation 不进入本期范围。
+- MCP Elicitation 只负责输入，不构成写入授权。
 
 “选择转给谁”不等于“批准执行转交”。UI 可以连续呈现，但 Core 必须先完成选择，再创建最终写入审批。
 
@@ -41,12 +43,15 @@ Knoa 是通用 Agent Platform。App、CLI、飞书和 Core 不理解 Jira 的“
 6. 外部写 Tool 继续进入现有 Tool Policy、Approval 和 ToolStep commit 边界。
 7. Approval 保存并展示最终规范化后的 `tool_name + arguments`。
 8. 执行使用被批准的精确参数，参数变化必须重新审批。
-9. Jira 通过“两阶段 Tools”完成经办人、流转和评论写回示例。
+9. 标准 MCP form Elicitation 通过同一 HumanInteraction 服务跨 Channel 解决。
+10. CLI 与 Textual TUI 可以选择 Agent、查看 Task/Execution、解决 Approval 和
+    Interaction，并在同一 Product Task 下创建 follow-up Execution。
+11. Jira 通过“两阶段 Tools”完成经办人、流转和评论写回示例。
 
 ### 2.2 本期明确不做
 
-- MCP Elicitation；
 - MCP Elicitation 跨连接或跨重启恢复；
+- URL Elicitation 导航与完成通知；
 - App 内置 Jira/GitHub 等业务快捷页面；
 - 无模型 ActionDescriptor 或通用工作流 DSL；
 - 并行的多个阻塞 Interaction；
@@ -70,6 +75,7 @@ Knoa 是通用 Agent Platform。App、CLI、飞书和 Core 不理解 Jira 的“
 | 参数定义 | `inputSchema` |
 | 结构化结果 | `outputSchema`，如果 Server 提供 |
 | Tool 风险提示 | Tool annotations，仅作为提示 |
+| Server 请求结构化输入 | Elicitation（`elicitation/create` / `InputRequiredResult`） |
 
 最终 Jira 指派仍是标准调用：
 
@@ -98,9 +104,35 @@ Knoa 负责：
 
 MCP annotations 不能自行授予权限。Tool 未配置、effect 未知或不在当前 capability scope 时必须拒绝。
 
-### 3.3 App 边界
+### 3.3 Elicitation 传输适配
 
-App 只连接 Knoa Product API，不直连 MCP Server。App 只理解：
+Elicitation 是标准 MCP 能力；`HumanInteraction` 是 Knoa 内部的持久化和多 Channel
+适配，不是私有 MCP 方法。
+
+```text
+MCP Server
+  -> standard Elicitation
+  -> Knoa MCP Client callback / InputRequired driver
+  -> HumanInteraction(kind=mcp_elicitation)
+  -> App / CLI / TUI 提交 accept | decline | cancel
+  -> MCP Tool call 继续
+  -> 如 Tool 有外部副作用，再进入 Knoa Approval
+```
+
+传输差异：
+
+- 2026-07-28 及以后协议，在无反向通道的 Streamable HTTP 上使用
+  `InputRequiredResult + inputResponses + requestState` 多轮重试；
+- 旧协议或具备反向通道的连接可使用独立 server-to-client
+  `elicitation/create`；
+- Knoa Client 同时保留两条兼容路径，但对产品层暴露同一个
+  `HumanInteraction(mcp_elicitation)`；
+- URL Elicitation 涉及凭据、OAuth 或支付等带外操作，MVP 默认 `decline`，不会自动
+  打开 URL，也不会把敏感输入带回 Agent。
+
+### 3.4 Client 边界
+
+App、CLI 和 Textual TUI 只连接 Knoa Product API，不直连 MCP Server。它们只理解：
 
 - Interaction 标题和说明；
 - 受限表单 schema；
@@ -113,7 +145,8 @@ App 不判断 `assignee_id`、`transition_id` 或 Jira 字段的业务含义。
 
 ### 4.1 定位
 
-MVP 的 `HumanInteraction` 只解决 Agent/产品需要用户补充结构化输入的问题。它不是新的 MCP 方法，也不是授权机制。
+`HumanInteraction` 解决 Agent/产品和 MCP Server 需要用户补充结构化输入的问题。
+它不是新的 MCP 方法，也不是授权机制。
 
 现有 Runtime 契约已经有：
 
@@ -127,7 +160,8 @@ InteractionRequested
 └── expires_at?
 ```
 
-本期只闭合 `kind=user_input`。`tool_approval` 继续使用现有 Core Approval，不强行把两套持久模型一次性合并。
+本期闭合 `kind=user_input | mcp_elicitation`。`tool_approval` 继续使用现有 Core
+Approval，不强行把两套持久模型一次性合并。
 
 ### 4.2 持久记录
 
@@ -141,7 +175,7 @@ HumanInteraction
 ├── runtime_turn_ref
 ├── runtime_interaction_id
 ├── interaction_epoch
-├── kind: user_input
+├── kind: user_input | mcp_elicitation
 ├── state: pending | resolved | cancelled | expired | runtime_lost
 ├── display
 ├── resolution_schema
@@ -419,7 +453,15 @@ POST /v1/interactions/{interaction_id}/resolve
 - Tool 配置变化使未执行 Approval stale；
 - 保留现有 ToolStep 单次提交和 `outcome_unknown` 语义。
 
-### Phase 3：Jira 纵向闭环
+### Phase 3：标准 MCP Elicitation 与 Client Channel
+
+- MCP Client 接入 form Elicitation callback 和现代 InputRequired 多轮 driver；
+- 将请求持久化为 `HumanInteraction(mcp_elicitation)`；
+- App、CLI 和 Textual TUI 支持 accept、decline、cancel；
+- CLI/TUI 支持 Agent、Task、Execution、Approval、Interaction 和 follow-up；
+- URL Elicitation 默认拒绝，不自动导航。
+
+### Phase 4：Jira 纵向闭环
 
 - 经办人查询、选择、指派；
 - transition 查询、字段选择、流转；
@@ -446,8 +488,8 @@ POST /v1/interactions/{interaction_id}/resolve
 
 | 延后能力 | 何时重新设计 |
 |---|---|
-| MCP Elicitation | 有真实 MCP Server 必须在 Tool 调用中主动请求输入 |
 | 多个并行 Interaction | Runtime 开始并行等待两个独立用户决定 |
+| MCP Elicitation 跨重启恢复 | 有真实长时 Tool call 必须跨连接或进程恢复 |
 | 独立 Grant/Snapshot | 现有 Approval + ToolStep 无法证明单次精确执行 |
 | Tool/schema 版本摘要 | MCP Provider 支持调用期间热更新且出现真实竞态 |
 | worker fencing | 同一 ToolStep 允许被多个 worker 恢复或接管 |
@@ -465,7 +507,7 @@ POST /v1/interactions/{interaction_id}/resolve
 | 展示可能与参数不一致 | 接受；展示和执行都读取 Approval 保存的规范化参数，不新增 Snapshot |
 | policy/Tool 变化 | 接受最小闭环；commit 前重查，变化即 stale，不设计版本偏序 |
 | Runtime 旁路或重复审批 | 接受为现有架构不变量；Gateway 是唯一外部 Tool 路径 |
-| MCP Elicitation 恢复 | 延后；MVP 不支持 Elicitation |
+| MCP Elicitation 恢复 | form Elicitation 已支持；仅跨连接/重启恢复延后 |
 | 不可信 schema/Secret | 部分接受；限制 schema、标记来源、禁止 Secret |
 | fencing/reconciliation | 延后；当前复用单执行器，结果不明只停止且不重试 |
 | 无模型业务按钮会泄漏 Jira | 接受范围收缩；MVP 只通过 Conversation/Agent 编排 |

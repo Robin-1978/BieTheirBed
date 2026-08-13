@@ -110,6 +110,9 @@ class TaskEventPayload(TaskModel):
     reason: Annotated[str, StringConstraints(max_length=2000)] = ""
     approval_id: Annotated[str, StringConstraints(max_length=128)] = ""
     interaction_id: Annotated[str, StringConstraints(max_length=128)] = ""
+    interaction_kind: Annotated[str, StringConstraints(max_length=64)] = ""
+    interaction_display: dict[str, Any] = Field(default_factory=dict)
+    interaction_schema: dict[str, Any] = Field(default_factory=dict)
     tool_step_id: Annotated[str, StringConstraints(max_length=128)] = ""
     tool_call_id: Annotated[str, StringConstraints(max_length=256)] = ""
     tool_name: Annotated[str, StringConstraints(max_length=256)] = ""

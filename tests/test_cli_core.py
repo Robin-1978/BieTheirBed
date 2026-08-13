@@ -115,6 +115,48 @@ class _Client:
         self.disconnected = True
 
 
+class _InteractionClient(_Client):
+    def __init__(self) -> None:
+        super().__init__()
+        self.resolution = None
+
+    def execute_task(self, session_handle, user_input, attachments=(), *, tools_enabled=True):
+        del session_handle, user_input, attachments, tools_enabled
+
+        async def stream():
+            yield TaskEvent(
+                task_id="task-a",
+                event_seq=1,
+                occurred_at=1.0,
+                event_type="interaction_requested",
+                payload=TaskEventPayload(
+                    interaction_id="interaction-a",
+                    interaction_kind="mcp_elicitation",
+                    interaction_display={"description": "Choose a transition"},
+                    interaction_schema={
+                        "type": "object",
+                        "properties": {
+                            "action": {"type": "string"},
+                            "content": {"type": "object"},
+                        },
+                    },
+                ),
+            )
+            yield TaskEvent(
+                task_id="task-a",
+                event_seq=2,
+                occurred_at=2.0,
+                event_type="completed",
+                payload=TaskEventPayload(content="done", state=TaskState.COMPLETED),
+            )
+
+        return stream()
+
+    async def resolve_interaction(self, interaction_id, value):
+        assert interaction_id == "interaction-a"
+        self.resolution = value
+
+
 @pytest.mark.asyncio
 async def test_core_ask_uses_strict_client_and_request_scoped_no_tools(
     tmp_path,
@@ -176,3 +218,26 @@ async def test_core_ask_keeps_streaming_when_artifact_download_fails(
     assert '"answer": "done"' in output
     assert "Artifact download failed: disk unavailable" in output
     assert client.disconnected
+
+
+@pytest.mark.asyncio
+async def test_core_ask_resolves_structured_mcp_elicitation(monkeypatch) -> None:
+    client = _InteractionClient()
+
+    async def connect(config, **kwargs):
+        del config, kwargs
+        return client
+
+    monkeypatch.setattr("knoa_platform.cli_core.get_core_client", connect)
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda _prompt: '{"action":"accept","content":{"transition_id":"101"}}',
+    )
+
+    result = await run_core_ask(AppConfig(fallback_enabled=False), "hello")
+
+    assert result == 0
+    assert client.resolution == {
+        "action": "accept",
+        "content": {"transition_id": "101"},
+    }

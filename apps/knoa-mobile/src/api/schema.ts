@@ -1298,9 +1298,9 @@ export interface components {
             /**
              * Kind
              * @default user_input
-             * @constant
+             * @enum {string}
              */
-            kind: "user_input";
+            kind: "user_input" | "mcp_elicitation";
             /**
              * State
              * @enum {string}
@@ -1636,6 +1636,19 @@ export interface components {
              * @default
              */
             interaction_id: string;
+            /**
+             * Interaction Kind
+             * @default
+             */
+            interaction_kind: string;
+            /** Interaction Display */
+            interaction_display?: {
+                [key: string]: unknown;
+            };
+            /** Interaction Schema */
+            interaction_schema?: {
+                [key: string]: unknown;
+            };
             /**
              * Tool Step Id
              * @default

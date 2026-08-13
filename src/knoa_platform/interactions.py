@@ -34,7 +34,7 @@ class HumanInteraction(BaseModel):
     runtime_turn_ref: str = Field(min_length=1, max_length=256)
     runtime_interaction_id: str = Field(min_length=1, max_length=128)
     interaction_epoch: int = Field(ge=1)
-    kind: Literal["user_input"] = "user_input"
+    kind: Literal["user_input", "mcp_elicitation"] = "user_input"
     state: InteractionState
     display: dict[str, Any] = Field(default_factory=dict)
     resolution_schema: dict[str, Any] = Field(default_factory=dict)
@@ -112,7 +112,7 @@ class HumanInteractionRepository:
             runtime_turn_ref=str(row["runtime_turn_ref"]),
             runtime_interaction_id=str(row["runtime_interaction_id"]),
             interaction_epoch=int(row["interaction_epoch"]),
-            kind="user_input",
+            kind=str(row["kind"]),
             state=str(row["state"]),
             display=json.loads(str(row["display_json"])),
             resolution_schema=json.loads(str(row["resolution_schema_json"])),
@@ -138,8 +138,8 @@ class HumanInteractionRepository:
         owner_id: str,
         event: InteractionRequested,
     ) -> tuple[HumanInteraction, bool]:
-        if event.kind != "user_input":
-            raise ValueError("Only user_input interactions are supported")
+        if event.kind not in {"user_input", "mcp_elicitation"}:
+            raise ValueError("Unsupported HumanInteraction kind")
         Draft202012Validator.check_schema(event.resolution_schema)
         if event.resolution_schema.get("type") != "object":
             raise ValueError("HumanInteraction requires an object resolution schema")
@@ -176,7 +176,7 @@ class HumanInteractionRepository:
                        runtime_interaction_id, interaction_epoch, kind, state,
                        display_json, resolution_schema_json, resolution_json,
                        created_at, resolved_at, expires_at, resolved_by
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'user_input', 'pending',
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending',
                              ?, ?, NULL, ?, NULL, ?, '')""",
                 (
                     interaction_id,
@@ -187,6 +187,7 @@ class HumanInteractionRepository:
                     event.runtime_turn_ref,
                     event.interaction_id,
                     event.interaction_epoch,
+                    event.kind,
                     self._json(event.display),
                     self._json(event.resolution_schema),
                     now,

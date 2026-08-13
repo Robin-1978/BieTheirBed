@@ -191,7 +191,7 @@ class HumanInteractionSnapshot(CoreModel):
     interaction_id: NonEmpty
     owner_kind: Literal["conversation_turn", "task_execution"]
     owner_id: NonEmpty
-    kind: Literal["user_input"] = "user_input"
+    kind: Literal["user_input", "mcp_elicitation"] = "user_input"
     state: Literal["pending", "resolved", "cancelled", "expired", "runtime_lost"]
     display: dict[str, Any] = Field(default_factory=dict)
     resolution_schema: dict[str, Any] = Field(default_factory=dict)

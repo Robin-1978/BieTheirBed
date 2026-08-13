@@ -5495,8 +5495,11 @@
             "type": "string"
           },
           "kind": {
-            "const": "user_input",
             "default": "user_input",
+            "enum": [
+              "user_input",
+              "mcp_elicitation"
+            ],
             "title": "Kind",
             "type": "string"
           },
@@ -6316,6 +6319,22 @@
             "maxLength": 128,
             "title": "Interaction Id",
             "type": "string"
+          },
+          "interaction_kind": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Interaction Kind",
+            "type": "string"
+          },
+          "interaction_display": {
+            "additionalProperties": true,
+            "title": "Interaction Display",
+            "type": "object"
+          },
+          "interaction_schema": {
+            "additionalProperties": true,
+            "title": "Interaction Schema",
+            "type": "object"
           },
           "tool_step_id": {
             "default": "",
