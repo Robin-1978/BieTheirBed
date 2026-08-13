@@ -8,16 +8,16 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from pc_assistant.agent_runtime.contracts import RuntimeScope
-from pc_assistant.agent_runtime.tool_step import (
+from knoa_platform.agent_runtime.contracts import RuntimeScope
+from knoa_platform.agent_runtime.tool_step import (
     ProposedToolCall,
     ToolArgumentPolicy,
     ToolStep,
     ToolStepContext,
 )
-from pc_assistant.config import AppConfig
-from pc_assistant.extensions import ExtensionManager, ExtensionState
-from pc_assistant.extensions.mcp import (
+from knoa_platform.config import AppConfig
+from knoa_platform.extensions import ExtensionManager, ExtensionState
+from knoa_platform.extensions.mcp import (
     MCPResourceCapabilities,
     MCPResourceDefinition,
     MCPResourceSnapshot,
@@ -27,9 +27,9 @@ from pc_assistant.extensions.mcp import (
     StreamableHTTPMCPClient,
     _negotiate_session,
 )
-from pc_assistant.extensions.models import MCPServerConfig
-from pc_assistant.tools.base import ToolCapability, ToolOriginKind
-from pc_assistant.tools.registry import ToolRegistry
+from knoa_platform.extensions.models import MCPServerConfig
+from knoa_platform.tools.base import ToolCapability, ToolOriginKind
+from knoa_platform.tools.registry import ToolRegistry
 
 
 class _FakeMCPClient:
@@ -569,6 +569,45 @@ asyncio.run(app.run_stdio_async())
 
     assert [tool.name for tool in tools] == ["monitor.echo"]
     assert result.structured_content == {"result": "echo:hello"}
+
+
+@pytest.mark.asyncio
+async def test_stdio_client_can_close_from_a_different_task(tmp_path: Path) -> None:
+    pytest.importorskip("mcp.server")
+    server_script = tmp_path / "cross_task_server.py"
+    server_script.write_text(
+        """
+from mcp.server import MCPServer
+
+app = MCPServer("stdio-cross-task")
+
+@app.tool(name="monitor.echo")
+def echo(message: str) -> str:
+    return message
+
+import asyncio
+asyncio.run(app.run_stdio_async())
+""".strip(),
+        encoding="utf-8",
+    )
+    client = StdioMCPClient(
+        MCPServerConfig.model_validate(
+            {
+                "enabled": True,
+                "transport": "stdio",
+                "command": sys.executable,
+                "args": [str(server_script)],
+                "working_directory": str(tmp_path),
+                "timeout_seconds": 5,
+            }
+        )
+    )
+    await client.start()
+
+    await asyncio.create_task(client.close())
+
+    with pytest.raises(RuntimeError, match="not started"):
+        await client.list_tools()
 
 
 @pytest.mark.asyncio

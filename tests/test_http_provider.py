@@ -5,12 +5,12 @@ import json
 
 import pytest
 
-from pc_assistant.agent_runtime.http_provider import (
+from knoa_platform.agent_runtime.http_provider import (
     FailoverModelProvider,
     HttpModelProvider,
 )
-from pc_assistant.agent_runtime.model_step import ProviderCallRequest, ProviderChunk
-from pc_assistant.config import ResolvedModelConfig
+from knoa_platform.agent_runtime.model_step import ProviderCallRequest, ProviderChunk
+from knoa_platform.config import ResolvedModelConfig
 
 
 class FakeResponse:

@@ -4,12 +4,12 @@ import sqlite3
 
 import pytest
 
-from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
-from pc_assistant.context.memory_db import SQLiteMemoryRepository
-from pc_assistant.gateway.auth import GatewayAuthRepository
-from pc_assistant.gateway.identity import GatewayIdentityRepository
-from pc_assistant.principal import converge_owner_principals
-from pc_assistant.runtime import RuntimePaths
+from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
+from knoa_platform.context.memory_db import SQLiteMemoryRepository
+from knoa_platform.gateway.auth import GatewayAuthRepository
+from knoa_platform.gateway.identity import GatewayIdentityRepository
+from knoa_platform.principal import converge_owner_principals
+from knoa_platform.runtime import RuntimePaths
 
 
 def _memory(

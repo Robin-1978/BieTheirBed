@@ -4,7 +4,7 @@ import stat
 
 import pytest
 
-from pc_assistant.artifacts import ArtifactStore
+from knoa_platform.artifacts import ArtifactStore
 
 
 DATA_URL = (

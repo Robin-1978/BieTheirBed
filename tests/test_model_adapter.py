@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 
-from pc_assistant.model_adapter.parsers.anthropic import (
+from knoa_platform.model_adapter.parsers.anthropic import (
     AnthropicStreamAccumulator,
     build_anthropic_payload,
     convert_tools_to_anthropic,
 )
-from pc_assistant.model_adapter.parsers.openai import (
+from knoa_platform.model_adapter.parsers.openai import (
     OpenAIStreamAccumulator,
     build_chat_payload,
 )
-from pc_assistant.model_adapter.profiles import resolve_profile
+from knoa_platform.model_adapter.profiles import resolve_profile
 
 
 class TestResolveProfile:

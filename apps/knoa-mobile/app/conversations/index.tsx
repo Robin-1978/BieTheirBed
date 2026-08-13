@@ -10,7 +10,7 @@ import {
   View,
 } from "react-native";
 
-import type { ConversationSession } from "@/api/models";
+import type { AgentSummary, ConversationSession } from "@/api/models";
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { removeConversationDraft } from "@/security/conversationDrafts";
@@ -166,7 +166,7 @@ export default function ConversationHistoryScreen() {
               <AppPressable disabled={session.state === "archived"} onPress={() => void open(session)}>
                 <Text style={styles.title}>{session.title}</Text>
                 <Text style={styles.meta}>
-                  {isCurrent ? `${t("conversations.current")} · ` : ""}{t("conversations.turns", { count: session.turn_count })} · {formatTime(session.last_turn_at ?? session.created_at, locale)}
+                  {agentName(session.agent_id, gateway.agents)} · {isCurrent ? `${t("conversations.current")} · ` : ""}{t("conversations.turns", { count: session.turn_count })} · {formatTime(session.last_turn_at ?? session.created_at, locale)}
                 </Text>
               </AppPressable>
             )}
@@ -218,6 +218,10 @@ function IconAction({ label, icon, danger = false, disabled = false, onPress }: 
 
 function formatTime(value: number, locale: string): string {
   return new Date(value * 1000).toLocaleString(locale, { hour12: false });
+}
+
+function agentName(agentId: string, agents: AgentSummary[]): string {
+  return agents.find((agent) => agent.agent_id === agentId)?.display_name ?? agentId;
 }
 
 const styles = StyleSheet.create({

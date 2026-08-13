@@ -38,21 +38,32 @@ A personal computer agent with ReAct reasoning, multi-LLM support, tool calling,
 pip install -e .
 
 # Run with local llama.cpp server (default)
-pca
+knoa
+
+# Development checkout: run current source without installing a wheel
+PYTHONPATH=src python -m knoa_platform
+
+# Or install a PATH symlink to the source-backed development launcher
+ln -s "$PWD/scripts/knoa" ~/.local/bin/knoa
+knoa --restart
+
+# Start/restart the background service from the current checkout
+scripts/service-start.sh
+scripts/service-restart.sh
 
 # Run with OpenAI-compatible API
-PC_LLM_PROVIDER=openai_compatible PC_LLM_API_BASE=http://localhost:11434/v1 PC_LLM_MODEL_NAME=qwen3 pca
+KNOA_LLM_PROVIDER=openai_compatible KNOA_LLM_API_BASE=http://localhost:11434/v1 KNOA_LLM_MODEL_NAME=qwen3 knoa
 
 # Run with Anthropic
-PC_LLM_PROVIDER=anthropic PC_LLM_API_KEY=sk-ant-... pca
+KNOA_LLM_PROVIDER=anthropic KNOA_LLM_API_KEY=sk-ant-... knoa
 
 # Run with OpenAI
-PC_LLM_PROVIDER=openai PC_LLM_API_KEY=sk-... PC_LLM_MODEL_NAME=gpt-4o pca
+KNOA_LLM_PROVIDER=openai KNOA_LLM_API_KEY=sk-... KNOA_LLM_MODEL_NAME=gpt-4o knoa
 ```
 
 ## Configuration
 
-### Multiple providers and models (`~/.pc-assistant/config/local.yaml`)
+### Multiple providers and models (`~/.knoa/config/local.yaml`)
 
 The private per-user config lives outside the source tree. A provider entry
 represents one API account, while a model entry references that account. This
@@ -113,7 +124,7 @@ tool calls. Set `fallback_enabled: false` to disable this behavior.
 
 Use `api_key_env` when the service receives its environment from a process
 manager. For a standalone local installation, `api_key` may instead be stored
-directly in `~/.pc-assistant/config/local.yaml`; protect that file with
+directly in `~/.knoa/config/local.yaml`; protect that file with
 `chmod 600`.
 
 If no `providers`/`models` catalog is configured, the original single-model
@@ -122,7 +133,7 @@ fields in `config/default.yaml` remain the fallback.
 The Core API uses one token-authenticated WebSocket listener on
 `127.0.0.1:9527` by default. Local CLI/TUI clients use an automatically managed
 credential stored with mode `0600` at
-`~/.pc-assistant/config/service.token`. Setting `service_token` adds a separate
+`~/.knoa/config/service.token`. Setting `service_token` adds a separate
 credential for scoped clients; it is not required for local operation.
 
 ### MCP extensions
@@ -144,7 +155,7 @@ mcp_servers:
 ```
 
 Manually imported local MCP packages live under
-`~/.pc-assistant/mcp/<server-id>/`. Each package contains a bounded `mcp.yaml`
+`~/.knoa/mcp/<server-id>/`. Each package contains a bounded `mcp.yaml`
 manifest and its local server files. Local packages use the official MCP stdio
 transport in an independent child process. The manifest declaratively defines
 the command, arguments, package-confined working directory and timeout; Core
@@ -167,7 +178,7 @@ resource or host-access containment is a separate OS-level sandbox policy and
 is not implied by stdio process isolation.
 
 When explicitly requested, the Agent can call the confirmation-gated
-`mcp_import` Built-in Tool with an existing local package directory. Knoa
+`mcp_deploy` Built-in Tool with an existing local package directory. Knoa
 validates and snapshots the package, omits hidden metadata and symlinks,
 rejects size-limit violations, installs it atomically,
 and activates the MCP provider without restarting Core. Newly registered tools
@@ -185,7 +196,7 @@ owned Session and activates the route without a restart. `mcp_disable` provides
 a confirmation-gated rollback that stops the Provider and persists it disabled.
 
 Enable the independently mounted Feishu channel in
-`~/.pc-assistant/config/local.yaml`:
+`~/.knoa/config/local.yaml`:
 
 ```yaml
 feishu_enabled: true
@@ -268,12 +279,12 @@ Create the short-lived, single-use pairing grant locally; never expose an
 administrative grant-creation endpoint:
 
 ```bash
-pca gateway pair --ttl 300
-pca gateway devices
-pca gateway revoke <device-id>
+knoa gateway pair --ttl 300
+knoa gateway devices
+knoa gateway revoke <device-id>
 ```
 
-When `gateway_public_url` is configured, `pca gateway pair` also prints one
+When `gateway_public_url` is configured, `knoa gateway pair` also prints one
 canonical `pairing_json` payload and a terminal QR code for the mobile App. The
 payload contains the short-lived grant secret and must be treated as sensitive
 until it expires or is consumed. Paired devices can read only their own
@@ -290,13 +301,34 @@ code, then publish it locally:
 ```bash
 scripts/build-mobile-apk.sh
 KNOA_MOBILE_RELEASE_NOTES="Personal release" scripts/publish-mobile-apk.sh
-pca gateway release latest
+knoa gateway release latest
 ```
 
 The build uses the Android/JDK environment in `/disk/dev/env.sh`, keeps Gradle
 caches and APK output under `/disk/dev`, and reads the fixed owner signing key
-from `~/.pc-assistant/secrets/android`. Publication reads and verifies
+from `~/.knoa/secrets/android`. Publication reads and verifies
 `versionName` and `versionCode` directly from the compiled APK manifest.
+
+### Version management
+
+Knoa Platform and Knoa Mobile have independent semantic versions. Agent Runtime
+protocol `1.0` and Core/Gateway API `v1` are protocol versions and are changed
+only with their respective protocol contracts.
+
+```bash
+# Validate all product version sources
+scripts/bump-version.sh check
+
+# Platform only: 0.2.0 -> 0.2.1
+scripts/bump-version.sh bump platform patch
+
+# Mobile only: versionName patch + Android versionCode increment
+scripts/bump-version.sh bump mobile patch
+```
+
+Platform release tags use `knoa-vX.Y.Z`; Mobile release tags use
+`knoa-mobile-vX.Y.Z`. Creating tags remains an explicit release action and is
+not performed by the bump command.
 
 The authenticated Gateway serves an immutable release manifest and APK byte
 ranges. The App can pause and resume the download, verifies its size and SHA-256
@@ -305,49 +337,42 @@ endpoint is exposed remotely, and release storage never enters Core.
 
 ### Environment variables
 
-All config fields can be overridden with `PC_` prefix:
+Supported environment overrides use the `KNOA_` prefix:
 
 | Variable | Field |
 |----------|-------|
-| `PC_LLM_PROVIDER` | llm_provider |
-| `PC_DEFAULT_MODEL` | default_model |
-| `PC_VISION_MODEL` | vision_model |
-| `PC_LLM_SERVER_URL` | llm_server_url |
-| `PC_LLM_MODEL_NAME` | llm_model_name |
-| `PC_LLM_API_KEY` | llm_api_key |
-| `PC_LLM_API_BASE` | llm_api_base |
-| `PC_LLM_TEMPERATURE` | llm_temperature |
-| `PC_LLM_TIMEOUT` | llm_timeout |
-| `PC_VISION_ENABLED` | vision_enabled |
-| `PC_VISION_PROVIDER` | vision_provider |
-| `PC_VISION_SERVER_URL` | vision_server_url |
-| `PC_VISION_MODEL_NAME` | vision_model_name |
-| `PC_VISION_API_KEY` | vision_api_key |
-| `PC_VISION_API_BASE` | vision_api_base |
-| `PC_VISION_TIMEOUT` | vision_timeout |
-| `PC_VISION_MAX_TOKENS` | vision_max_tokens |
-| `PC_MAX_ITERATIONS` | max_iterations |
-| `PC_SHELL_TIMEOUT` | shell_timeout |
-| `PC_CONTEXT_WINDOW_BUDGET` | context_window_budget |
-| `PC_TOKEN_FAMILY` | token_family |
-| `PC_LLM_COMPACT_ENABLED` | llm_compact_enabled |
-| `PC_MAX_SESSIONS` | max_sessions |
-| `PC_TRACE_ENABLED` | trace_enabled |
-| `PC_LLM_TRACE_LOG` | llm_trace_log |
-| `PC_TURN_TRACE_LOG` | turn_trace_log |
-| `PC_EVIDENCE_POLICY_ENABLED` | evidence_policy_enabled |
-| `PC_ASSISTANT_HOME` | runtime_root (friendly alias) |
-| `PC_RUNTIME_ROOT` | runtime_root |
-| `PC_WEBHOOK_ENABLED` | webhook_enabled |
-| `PC_WEBHOOK_HOST` | webhook_host |
-| `PC_WEBHOOK_PORT` | webhook_port |
-| `PC_GATEWAY_ENABLED` | gateway_enabled |
-| `PC_GATEWAY_HOST` | gateway_host |
-| `PC_GATEWAY_PORT` | gateway_port |
-| `PC_GATEWAY_REMOTE_ENABLED` | gateway_remote_enabled |
-| `PC_GATEWAY_PUBLIC_URL` | gateway_public_url |
-| `PC_GATEWAY_TLS_CERT_FILE` | gateway_tls_cert_file |
-| `PC_GATEWAY_TLS_KEY_FILE` | gateway_tls_key_file |
+| `KNOA_LLM_PROVIDER` | llm_provider |
+| `KNOA_DEFAULT_MODEL` | default_model |
+| `KNOA_FALLBACK_ENABLED` | fallback_enabled |
+| `KNOA_FALLBACK_MODEL` | fallback_model |
+| `KNOA_LLM_SERVER_URL` | llm_server_url |
+| `KNOA_LLM_MODEL_NAME` | llm_model_name |
+| `KNOA_LLM_API_KEY` | llm_api_key |
+| `KNOA_LLM_API_BASE` | llm_api_base |
+| `KNOA_LLM_TEMPERATURE` | llm_temperature |
+| `KNOA_LLM_TIMEOUT` | llm_timeout |
+| `KNOA_MAX_ITERATIONS` | max_iterations |
+| `KNOA_MAX_TOTAL_TOOL_CALLS` | max_total_tool_calls |
+| `KNOA_SHELL_TIMEOUT` | shell_timeout |
+| `KNOA_CONTEXT_WINDOW_BUDGET` | context_window_budget |
+| `KNOA_TRACE_ENABLED` | trace_enabled |
+| `KNOA_LLM_TRACE_LOG` | llm_trace_log |
+| `KNOA_TURN_TRACE_LOG` | turn_trace_log |
+| `KNOA_LOG_FILE` | log_file |
+| `KNOA_HOME` | runtime_root (friendly alias) |
+| `KNOA_RUNTIME_ROOT` | runtime_root |
+| `KNOA_WORKING_DIRECTORY` | working_directory |
+| `KNOA_OWNER_PRINCIPAL_ID` | owner_principal_id |
+| `KNOA_WEBHOOK_ENABLED` | webhook_enabled |
+| `KNOA_WEBHOOK_HOST` | webhook_host |
+| `KNOA_WEBHOOK_PORT` | webhook_port |
+| `KNOA_GATEWAY_ENABLED` | gateway_enabled |
+| `KNOA_GATEWAY_HOST` | gateway_host |
+| `KNOA_GATEWAY_PORT` | gateway_port |
+| `KNOA_GATEWAY_REMOTE_ENABLED` | gateway_remote_enabled |
+| `KNOA_GATEWAY_PUBLIC_URL` | gateway_public_url |
+| `KNOA_GATEWAY_TLS_CERT_FILE` | gateway_tls_cert_file |
+| `KNOA_GATEWAY_TLS_KEY_FILE` | gateway_tls_key_file |
 
 ### Runtime config
 
@@ -356,10 +381,10 @@ Use `/config set key=value` in the chat to change settings at runtime.
 ### Runtime data
 
 By default, mutable application state is kept outside the source tree under
-`~/.pc-assistant/`:
+`~/.knoa/`:
 
 ```text
-~/.pc-assistant/
+~/.knoa/
 ├── logs/          # application, service, audit, and trace logs
 ├── attachments/   # temporary inbound and generated artifacts
 ├── artifacts/     # persistent user-requested generated files
@@ -369,7 +394,7 @@ By default, mutable application state is kept outside the source tree under
 └── mcp/           # manually imported local stdio MCP packages
 ```
 
-Set `PC_ASSISTANT_HOME` (or `PC_RUNTIME_ROOT`) to override this root. Service
+Set `KNOA_HOME` (or `KNOA_RUNTIME_ROOT`) to override this root. Service
 socket and PID files use the operating system runtime directory.
 
 ## Slash Commands
@@ -409,7 +434,7 @@ socket and PID files use the operating system runtime directory.
 | `image_inspect` | describe, ocr, locate, compare | Observe visible image content by `image_id`; diagnosis and solutions remain with the main model |
 | `screenshot` | — | Capture a full-desktop PNG for delivery to the current conversation |
 | `artifact_prepare` | path | Borrow an existing file for client delivery without copying or deleting it; protected paths are blocked and out-of-workspace paths require confirmation |
-| `mcp_import` | path, server_id | Validate, atomically install, and activate a local MCP package after explicit confirmation |
+| `mcp_deploy` | path, server_id, resource_uri? | Validate, atomically install or update, activate, and optionally route a local MCP package Resource into the current Session after explicit confirmation |
 | `describe_tool` | tool_name | Meta-tool: query the full JSON schema of any registered tool |
 
 ## Development
@@ -422,13 +447,13 @@ pip install -e ".[dev]"
 pytest
 
 # Run with coverage
-pytest --cov=pc_assistant --cov-report=term-missing
+pytest --cov=knoa_platform --cov-report=term-missing
 ```
 
 ## Architecture
 
 ```
-src/pc_assistant/
+src/knoa_platform/
 ├── agent.py             # ReAct agent loop with SDB, planning, reflection
 ├── eventbus.py          # Pub/sub event bus for decoupled subscribers
 ├── planner.py           # Plan-Execute layer for complex tasks

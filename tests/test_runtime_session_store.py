@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import RuntimeScope
-from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository, SessionSnapshot
-from pc_assistant.exceptions import SessionNotFoundError
+from knoa_platform.agent_runtime.contracts import RuntimeScope
+from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository, SessionSnapshot
+from knoa_platform.exceptions import SessionNotFoundError
 
 
 def test_session_handle_is_core_created_and_opaque(tmp_path: Path) -> None:
@@ -25,6 +25,44 @@ def test_session_handle_is_core_created_and_opaque(tmp_path: Path) -> None:
     )
     assert "principal-a" not in scope.session_handle
     assert repo.active("principal-a") == scope
+
+
+def test_session_persists_selected_agent_identity(tmp_path: Path) -> None:
+    repo = RuntimeSessionRepository(
+        tmp_path / "assistant.db",
+        handle_factory=lambda: "codex-session",
+    )
+
+    scope = repo.create("principal-a", agent_id="codex")
+
+    assert repo.agent_id(scope) == "codex"
+    restarted = RuntimeSessionRepository(tmp_path / "assistant.db")
+    assert restarted.agent_id(scope) == "codex"
+
+
+def test_external_task_scope_is_stable_isolated_and_inherits_agent(tmp_path: Path) -> None:
+    repo = RuntimeSessionRepository(
+        tmp_path / "assistant.db",
+        handle_factory=lambda: "source-session",
+    )
+    source = repo.create("principal-a", agent_id="codex")
+
+    first = repo.isolated_task_scope(source, "mcp-resource:event-a")
+    repeated = repo.isolated_task_scope(source, "mcp-resource:event-a")
+    other = repo.isolated_task_scope(source, "mcp-resource:event-b")
+
+    assert first == repeated
+    assert first != source
+    assert first != other
+    assert repo.agent_id(first) == "codex"
+    with pytest.raises(SessionNotFoundError):
+        repo.isolated_task_scope(
+            RuntimeScope(
+                principal_id="principal-b",
+                session_handle=source.session_handle,
+            ),
+            "mcp-resource:event-a",
+        )
 
 
 def test_foreign_and_unknown_sessions_are_indistinguishable(tmp_path: Path) -> None:
@@ -179,7 +217,7 @@ def test_orphan_session_data_fails_foreign_key_check_on_startup(tmp_path: Path) 
 
 def test_transcript_size_is_bounded_before_save(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
-        "pc_assistant.agent_runtime.session_store._MAX_TRANSCRIPT_BYTES",
+        "knoa_platform.agent_runtime.session_store._MAX_TRANSCRIPT_BYTES",
         32,
     )
     repo = RuntimeSessionRepository(
@@ -211,7 +249,7 @@ def test_oversized_stored_transcript_is_rejected_before_json_parse(
             ("x" * 100, scope.session_handle),
         )
     monkeypatch.setattr(
-        "pc_assistant.agent_runtime.session_store._MAX_TRANSCRIPT_BYTES",
+        "knoa_platform.agent_runtime.session_store._MAX_TRANSCRIPT_BYTES",
         32,
     )
 

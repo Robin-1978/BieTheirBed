@@ -10,7 +10,7 @@ status: "DRAFT"
 
 ## 1. 业务功能概述 (Business Overview)
 
-为 PC Assistant agent 增加两类能力:
+为 Knoa agent 增加两类能力:
 
 1. **多模态输入**:agent 能阅读并分析图片(用户发送的图片、工具返回的截图)。
 2. **屏幕理解与精准控制**:agent 能"看懂"屏幕,使 `mouse`/`keyboard` 工具的执行更准确。
@@ -193,33 +193,33 @@ ui_backend: auto               # auto | pywinauto | ax | atspi
 
 **第一层(多模态管道,必做):**
 
-- `src/pc_assistant/model_adapter/content.py` (新增)
-- `src/pc_assistant/model_adapter/types.py`
-- `src/pc_assistant/model_adapter/profiles.py`
-- `src/pc_assistant/model_adapter/parsers/openai.py`
-- `src/pc_assistant/model_adapter/parsers/anthropic.py`
-- `src/pc_assistant/context/conversation.py`
-- `src/pc_assistant/context/assembly.py`
-- `src/pc_assistant/context/token_estimate.py`
-- `src/pc_assistant/vision/preprocess.py` (新增)
-- `src/pc_assistant/tools/system.py`
-- `src/pc_assistant/agent.py`
-- `src/pc_assistant/config.py`
+- `src/knoa_platform/model_adapter/content.py` (新增)
+- `src/knoa_platform/model_adapter/types.py`
+- `src/knoa_platform/model_adapter/profiles.py`
+- `src/knoa_platform/model_adapter/parsers/openai.py`
+- `src/knoa_platform/model_adapter/parsers/anthropic.py`
+- `src/knoa_platform/context/conversation.py`
+- `src/knoa_platform/context/assembly.py`
+- `src/knoa_platform/context/token_estimate.py`
+- `src/knoa_platform/vision/preprocess.py` (新增)
+- `src/knoa_platform/tools/system.py`
+- `src/knoa_platform/agent.py`
+- `src/knoa_platform/config.py`
 - `config/default.yaml`
 
 **第二层(屏幕理解,核心):**
 
-- `src/pc_assistant/tools/ui.py` (新增,无障碍树)
-- `src/pc_assistant/tools/screen.py` (新增,截图+网格+验证)
-- `src/pc_assistant/vision/grid.py` (新增,网格覆盖层)
-- `src/pc_assistant/vision/a11y.py` (新增,跨平台无障碍后端)
-- `src/pc_assistant/tools/registry.py` (注册新工具)
-- `src/pc_assistant/harness/verifier.py` (事后验证策略)
+- `src/knoa_platform/tools/ui.py` (新增,无障碍树)
+- `src/knoa_platform/tools/screen.py` (新增,截图+网格+验证)
+- `src/knoa_platform/vision/grid.py` (新增,网格覆盖层)
+- `src/knoa_platform/vision/a11y.py` (新增,跨平台无障碍后端)
+- `src/knoa_platform/tools/registry.py` (注册新工具)
+- `src/knoa_platform/harness/verifier.py` (事后验证策略)
 
 **第三层(grounding,可选):**
 
-- `src/pc_assistant/vision/grounding.py` (新增,HTTP client)
-- `src/pc_assistant/tools/screen.py` (`understand` action)
+- `src/knoa_platform/vision/grounding.py` (新增,HTTP client)
+- `src/knoa_platform/tools/screen.py` (`understand` action)
 
 ## 5. 变更历史日志 (Commit History Logs)
 

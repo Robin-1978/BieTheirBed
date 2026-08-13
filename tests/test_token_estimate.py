@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pc_assistant.context.token_estimate import (
+from knoa_platform.context.token_estimate import (
     TokenEstimator,
     count_cjk,
     estimate_messages_tokens,

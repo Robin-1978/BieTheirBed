@@ -1,4 +1,4 @@
-# PC Assistant Architecture
+# Knoa Architecture
 
 > Status: current-code architecture review and defect-hardening anchor
 > Last updated: 2026-08-05
@@ -7,7 +7,7 @@
 ## 1. Purpose and authority
 
 This document defines the system-level module boundaries and architectural
-invariants for PC Assistant. It deliberately separates:
+invariants for Knoa. It deliberately separates:
 
 - **Current architecture (As-Is):** behavior verified in the current workspace.
 - **Defect-hardening direction (To-Be):** minimal boundary fixes to the current
@@ -46,18 +46,27 @@ and channel ports.
 
 ### 1.2 Tool-schema injection and discovery
 
-The registry injects every registered tool on each model request using only a
-small, stable `core_schema` (name, short description, and commonly needed
-parameters). With the current tool count this keeps the action surface complete,
-avoids a selector/embedding failure mode, and makes the static prefix
-deterministic for prompt-cache reuse. It is not a security boundary: calls
-still pass schema validation, safety, confirmation, idempotency, and the
-verified executor.
+The Platform registry and Capability Gateway expose complete standard MCP Tool
+definitions through `tools/list`. This inventory is the authorized execution
+upper bound; it is not copied directly into every model request.
 
-`describe_tool(tool_name)` is a meta-tool for progressive detail. It is used
-only when a task needs parameters omitted from the compact schema; its response
-is request-scoped and is not persisted into the stable cache prefix. MCP tools
-follow the same compact-core/full-schema contract.
+Knoa Agent owns a separate model projection. Necessary conversation built-ins
+are injected as a small, deterministically ordered static signature set. The
+signature keeps names, parameter shapes, basic types, `required`, and enums, but
+does not duplicate full descriptions or validation-only constraints. This stable
+prefix avoids the earlier selector/embedding miss for ordinary abilities such as
+weather and improves prompt-cache reuse.
+
+Platform MCP management tools and proxied upstream MCP tools remain discoverable
+in the complete inventory but are not part of the ordinary static model prefix.
+The always-visible `tool_help` meta-tool supports query discovery and exact-name
+full-schema lookup. After an exact lookup, Knoa Agent activates that MCP tool for
+the Runtime Session and includes its compact signature from the next model step.
+
+The model projection is not a security or validation boundary. Every call still
+passes the Gateway's complete JSON Schema validation, policy, approval,
+idempotency, binding-epoch, and verified-execution checks. Standard MCP
+`tools/list` and `tools/call` remain unchanged; no private MCP method is added.
 
 ### 1.3 Context capacity, compaction, and live configuration
 
@@ -83,7 +92,7 @@ restart-required instead of being replaced implicitly.
 
 ## 2. System context
 
-PC Assistant is a Python 3.10+ desktop agent that accepts requests from local
+Knoa is a Python 3.10+ desktop agent that accepts requests from local
 interactive clients and external channels, runs a ReAct-style orchestration
 loop, calls one of several LLM providers, verifies proposed tool actions, and
 executes local or MCP-provided tools.
@@ -127,7 +136,7 @@ authority merely by entering the context window.
 
 ### 3.1 Entry and interaction
 
-**Paths:** `src/pc_assistant/__init__.py`, `ui/`, `channels/`
+**Paths:** `src/knoa_platform/__init__.py`, `ui/`, `channels/`
 
 **Responsibilities:**
 
@@ -155,7 +164,7 @@ lossless continuation cards; none of those concepts enter Core.
 
 ### 3.2 Service and transport
 
-**Paths:** `src/pc_assistant/service/`
+**Paths:** `src/knoa_platform/service/`
 
 **Responsibilities:**
 
@@ -198,7 +207,7 @@ the main loop.
 
 ### 3.4 Context and memory
 
-**Paths:** `src/pc_assistant/context/`
+**Paths:** `src/knoa_platform/context/`
 
 **Responsibilities:**
 
@@ -238,7 +247,7 @@ diagnosable error; image content is never silently dropped.
 
 ### 3.6 Tools, desktop automation, and vision
 
-**Paths:** `src/pc_assistant/tools/`, `src/pc_assistant/vision/`
+**Paths:** `src/knoa_platform/tools/`, `src/knoa_platform/vision/`
 
 **Responsibilities:**
 
@@ -271,7 +280,7 @@ coordinates cannot be described as guaranteed-precision execution.
 
 ### 3.7 Harness safety boundary
 
-**Paths:** `src/pc_assistant/harness/`
+**Paths:** `src/knoa_platform/harness/`
 
 **Responsibilities:**
 
@@ -323,7 +332,7 @@ use the configured application runtime root.
 
 ### 3.9 Benchmark and tests
 
-**Paths:** `src/pc_assistant/benchmark/`, `tests/`
+**Paths:** `src/knoa_platform/benchmark/`, `tests/`
 
 **Responsibilities:**
 
@@ -675,7 +684,7 @@ ambiguous keys are rejected, and ordinary chat text is not auto-persisted.
 
 Scheduler tasks previously used `data/scheduled_tasks.json`, relative to the
 process working directory. They now use a dedicated `scheduled_tasks` table in
-`~/.pc-assistant/data/assistant.db`. SQLite is the shared transactional store
+`~/.knoa/data/assistant.db`. SQLite is the shared transactional store
 for durable domain state and Artifact registry metadata. Logs remain
 append-only files, Artifact bytes remain files, configuration remains
 YAML/environment input, and caches remain rebuildable files; binary content

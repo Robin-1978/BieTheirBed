@@ -4,14 +4,14 @@ import base64
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import (
+from knoa_platform.agent_runtime.contracts import (
     ArtifactDownloadResult,
     HealthStatus,
 )
-from pc_assistant.artifacts import ArtifactRef
-from pc_assistant.cli_core import run_core_ask
-from pc_assistant.config import AppConfig
-from pc_assistant.tasks import TaskEvent, TaskEventPayload, TaskState
+from knoa_platform.artifacts import ArtifactRef
+from knoa_platform.cli_core import run_core_ask
+from knoa_platform.config import AppConfig
+from knoa_platform.tasks import TaskEvent, TaskEventPayload, TaskState
 
 
 PNG = base64.b64decode(
@@ -129,7 +129,7 @@ async def test_core_ask_uses_strict_client_and_request_scoped_no_tools(
         del config, kwargs
         return client
 
-    monkeypatch.setattr("pc_assistant.cli_core.get_core_client", connect)
+    monkeypatch.setattr("knoa_platform.cli_core.get_core_client", connect)
     config = AppConfig(fallback_enabled=False, runtime_root=str(tmp_path))
 
     result = await run_core_ask(
@@ -166,7 +166,7 @@ async def test_core_ask_keeps_streaming_when_artifact_download_fails(
         del config, kwargs
         return client
 
-    monkeypatch.setattr("pc_assistant.cli_core.get_core_client", connect)
+    monkeypatch.setattr("knoa_platform.cli_core.get_core_client", connect)
     config = AppConfig(fallback_enabled=False, runtime_root=str(tmp_path))
 
     result = await run_core_ask(config, "hello", json_output=True)

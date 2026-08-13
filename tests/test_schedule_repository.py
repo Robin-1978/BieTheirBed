@@ -5,15 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
-from pc_assistant.automation import (
+from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
+from knoa_platform.automation import (
     OccurrenceState,
     ScheduleKind,
     ScheduleRepository,
     ScheduleSpec,
     ScheduleState,
 )
-from pc_assistant.automation.repository import (
+from knoa_platform.automation.repository import (
     ScheduleIdempotencyConflictError,
     ScheduleNotFoundError,
 )

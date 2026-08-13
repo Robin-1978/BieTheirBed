@@ -3,9 +3,9 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from pc_assistant.config import AppConfig
-from pc_assistant.gateway.adapter import SecureGatewayAdapter
-from pc_assistant.gateway.openapi import gateway_openapi_schema
+from knoa_platform.config import AppConfig
+from knoa_platform.gateway.adapter import SecureGatewayAdapter
+from knoa_platform.gateway.openapi import gateway_openapi_schema
 
 
 def _adapter(tmp_path) -> SecureGatewayAdapter:
@@ -54,6 +54,7 @@ def test_gateway_openapi_matches_the_allow_listed_http_surface(tmp_path) -> None
     assert schema["paths"]["/v1/conversations/turns/{turn_id}/retry"]["post"]["operationId"] == (
         "retryChatTurn"
     )
+    assert schema["paths"]["/v1/agents"]["get"]["operationId"] == "listAgents"
 
 
 @pytest.mark.asyncio

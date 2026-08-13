@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from pc_assistant.branding import ASSISTANT_IDENTITY
-from pc_assistant.context.assembly import assemble_llm_messages, truncate_messages
-from pc_assistant.context.prompt import (
+from knoa_platform.branding import ASSISTANT_IDENTITY
+from knoa_platform.context.assembly import assemble_llm_messages, truncate_messages
+from knoa_platform.context.prompt import (
     build_session_context,
     build_system_prompt,
 )

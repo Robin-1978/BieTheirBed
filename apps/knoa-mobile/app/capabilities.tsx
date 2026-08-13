@@ -149,7 +149,11 @@ export default function CapabilitiesScreen() {
       </Section>
 
       <Section title={i18n.t("settings.deviceAndApp")}>
-        <Metric label={i18n.t("settings.appVersion")} value={`${Application.nativeApplicationVersion ?? i18n.t("settings.development")} (${Application.nativeBuildVersion ?? "—"})`} />
+        <Metric
+          label={i18n.t("settings.appVersion")}
+          value={`${Application.nativeApplicationVersion ?? i18n.t("settings.development")} (${Application.nativeBuildVersion ?? "—"})`}
+          onPress={() => router.push("/update")}
+        />
         <Metric label={i18n.t("settings.localIdentity")} value={gateway.deviceId ? i18n.t("settings.secureStorage") : i18n.t("settings.none")} />
       </Section>
 
@@ -271,13 +275,41 @@ function Section({ title, children }: React.PropsWithChildren<{ title: string }>
   return <View style={styles.section}><Text style={styles.sectionTitle}>{title}</Text>{children}</View>;
 }
 
-function Metric({ label, value, compact = false, tone = "normal" }: { label: string; value: unknown; compact?: boolean; tone?: "normal" | "danger" }) {
-  return (
-    <View style={styles.metric}>
+function Metric({
+  label,
+  value,
+  compact = false,
+  tone = "normal",
+  onPress,
+}: {
+  label: string;
+  value: unknown;
+  compact?: boolean;
+  tone?: "normal" | "danger";
+  onPress?: () => void;
+}) {
+  const content = (
+    <>
       <Text style={styles.meta}>{label}</Text>
-      <Text numberOfLines={compact ? 1 : 2} style={[styles.metricValue, compact && styles.compact, tone === "danger" && styles.error]}>{String(value ?? "—")}</Text>
-    </View>
+      <View style={styles.metricTrailing}>
+        <Text numberOfLines={compact ? 1 : 2} style={[styles.metricValue, compact && styles.compact, tone === "danger" && styles.error]}>{String(value ?? "—")}</Text>
+        {onPress ? <AppIcon name="chevron-right" color={colors.accent} size={18} /> : null}
+      </View>
+    </>
   );
+  if (onPress) {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        onPress={onPress}
+        style={({ pressed }) => [styles.metric, pressed && styles.pressed]}
+      >
+        {content}
+      </Pressable>
+    );
+  }
+  return <View style={styles.metric}>{content}</View>;
 }
 
 function Action({ label, detail, onPress, danger = false, busy = false }: { label: string; detail: string; onPress(): void; danger?: boolean; busy?: boolean }) {
@@ -317,6 +349,7 @@ const styles = StyleSheet.create({
   radioSelected: { borderColor: colors.accent },
   radioDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.accent },
   metric: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 16 },
+  metricTrailing: { flex: 1, flexDirection: "row", justifyContent: "flex-end", alignItems: "center", gap: 6 },
   metricValue: { color: colors.ink, fontWeight: "700", textAlign: "right", flexShrink: 1 },
   compact: { fontSize: 12 },
   action: { borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 12, flexDirection: "row", alignItems: "center", gap: 12 },

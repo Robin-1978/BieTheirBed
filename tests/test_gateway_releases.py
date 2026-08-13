@@ -7,9 +7,9 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from pc_assistant.config import AppConfig
-from pc_assistant.gateway.adapter import SecureGatewayAdapter
-from pc_assistant.gateway.releases import AndroidReleaseRepository
+from knoa_platform.config import AppConfig
+from knoa_platform.gateway.adapter import SecureGatewayAdapter
+from knoa_platform.gateway.releases import AndroidReleaseRepository
 
 
 def _apk(path, payload: bytes = b"classes") -> bytes:
@@ -67,7 +67,7 @@ def test_android_release_repository_rejects_symlink_and_invalid_minimum(
 class _Authentication:
     def authenticate_session(self, token: str):
         if token != "valid-session":
-            from pc_assistant.gateway.auth import GatewayAuthenticationRejectedError
+            from knoa_platform.gateway.auth import GatewayAuthenticationRejectedError
 
             raise GatewayAuthenticationRejectedError("invalid")
         return SimpleNamespace(

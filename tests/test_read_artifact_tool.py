@@ -4,9 +4,9 @@ import base64
 
 import pytest
 
-from pc_assistant.artifacts import ArtifactStore
-from pc_assistant.context.scope import MemoryScope, reset_memory_scope, set_memory_scope
-from pc_assistant.tools.read_artifact import ReadArtifactTool
+from knoa_platform.artifacts import ArtifactStore
+from knoa_platform.context.scope import MemoryScope, reset_memory_scope, set_memory_scope
+from knoa_platform.tools.read_artifact import ReadArtifactTool
 
 
 @pytest.mark.asyncio

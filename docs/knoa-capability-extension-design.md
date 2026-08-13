@@ -144,7 +144,7 @@ metadata.
 Local packages are manually copied/imported below the runtime root:
 
 ```text
-~/.pc-assistant/mcp/monitor/
+~/.knoa/mcp/monitor/
 ├── mcp.yaml
 └── server package files
 ```
@@ -203,7 +203,7 @@ Core never imports downloaded package modules into its own interpreter.
 Skill packages remain data-only:
 
 ```text
-~/.pc-assistant/skills/research/
+~/.knoa/skills/research/
 ├── skill.yaml
 ├── instructions.md
 └── references/*.md
@@ -217,7 +217,7 @@ make an unavailable MCP Server available.
 
 ## 7. Agent-assisted local import
 
-`mcp_import` lets the Agent prepare an installation while preserving user
+`mcp_deploy` lets the Agent prepare an installation or atomic update while preserving user
 authority. It accepts only an existing local directory and a safe target server
 ID. Because installing an MCP package introduces executable code, the tool is
 `local_write/high` and always crosses the standard confirmation boundary.
@@ -230,7 +230,7 @@ After approval Knoa:
 4. omits hidden metadata without recognizing any external tool or project layout;
 5. copies into an isolated staging directory;
 6. validates the staged package using its final server ID;
-7. atomically moves it into `~/.pc-assistant/mcp/<server-id>`;
+7. atomically moves it into `~/.knoa/mcp/<server-id>`;
 8. adds and starts one provider through `ExtensionManager`;
 9. refreshes model-visible definitions before the next ReAct iteration.
 

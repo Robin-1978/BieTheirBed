@@ -8,9 +8,9 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from pc_assistant.adapters.webhook import WebhookAdapter
-from pc_assistant.automation import TriggerEventState
-from pc_assistant.config import AppConfig
+from knoa_platform.adapters.webhook import WebhookAdapter
+from knoa_platform.automation import TriggerEventState
+from knoa_platform.config import AppConfig
 
 
 _SECRET = "0123456789abcdef0123456789abcdef"

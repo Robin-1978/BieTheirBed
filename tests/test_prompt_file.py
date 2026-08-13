@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pc_assistant.branding import ASSISTANT_IDENTITY
-from pc_assistant.context.prompt import (
+from knoa_platform.branding import ASSISTANT_IDENTITY
+from knoa_platform.context.prompt import (
     _DEFAULT_SYSTEM_TEMPLATE,
     _SYSTEM_TEMPLATE_PATH,
     build_system_prompt,

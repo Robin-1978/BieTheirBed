@@ -1,0 +1,19 @@
+[Unit]
+Description=Knoa Service Daemon
+Documentation=https://github.com/user/BieTheirBed
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/ws/BieTheirBed
+Environment=PYTHONPATH=%h/ws/BieTheirBed/src
+Environment=KNOA_HOME=%h/.knoa
+Environment=CRYPTOGRAPHY_OPENSSL_NO_LEGACY=1
+ExecStart=/disk/miniconda3/bin/python -m knoa_platform --serve
+ExecStop=/disk/miniconda3/bin/python -m knoa_platform --stop
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

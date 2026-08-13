@@ -1,31 +1,26 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import (
-    CancelRequest,
-    CancelResult,
-    HealthStatus,
-    RunRequest,
-    RuntimeEvent,
-    RuntimeEventPayload,
-    RuntimeRunContext,
+from knoa_agent_contracts import (
+    AssistantDelta,
+    RuntimeHealth,
+    TurnFinished,
 )
-from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
-from pc_assistant.agent_runtime.tool_step import (
-    ProposedToolCall,
-    ToolOutcomeUnknownError,
-)
-from pc_assistant.tasks import (
+from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
+from knoa_platform.agent_runtime.tool_step import ProposedToolCall
+from knoa_platform.tasks import (
     DurableApprovalService,
     DurableToolCommitService,
     TaskEventHub,
     TaskExecutor,
     TaskLaunchKind,
     TaskLaunchPolicy,
+    TaskLaunchReason,
     TaskRepository,
     TaskService,
     TaskState,
@@ -43,19 +38,19 @@ class _Runtime:
         self.hold = hold
         self.request_confirmation = request_confirmation
         self.unknown_outcome = unknown_outcome
-        self.cancellations: list[CancelRequest] = []
-
-    def run(self, context: RuntimeRunContext, request: RunRequest):
-        return self._run(context, request)
-
-    async def _run(self, context: RuntimeRunContext, request: RunRequest):
-        yield RuntimeEvent(
-            event_type="content_delta",
-            payload=RuntimeEventPayload(content=f"working:{request.input}"),
+    async def execute_turn(self, request):
+        base = {
+            "runtime_session_ref": "agent-session-a",
+            "runtime_turn_ref": request.turn_id,
+            "occurred_at": 1.0,
+        }
+        yield AssistantDelta(
+            **base,
+            content=f"working:{request.input}",
         )
         if self.hold is not None:
             hold_task = asyncio.create_task(self.hold.wait())
-            cancel_task = asyncio.create_task(context.cancellation.wait())
+            cancel_task = asyncio.create_task(request.cancellation.wait())
             done, pending = await asyncio.wait(
                 {hold_task, cancel_task},
                 return_when=asyncio.FIRST_COMPLETED,
@@ -63,14 +58,19 @@ class _Runtime:
             for task in pending:
                 task.cancel()
             await asyncio.gather(*pending, return_exceptions=True)
-            if cancel_task in done and context.cancellation.is_set():
+            if cancel_task in done and request.cancellation.is_set():
+                yield TurnFinished(
+                    **base,
+                    status="interrupted",
+                    error_code="cancelled",
+                )
                 return
         approved = True
         if self.request_confirmation:
-            assert context.confirmation is not None
-            approved = await context.confirmation.confirm(
-                context.scope,
-                context.run_id,
+            assert request.confirmation is not None
+            approved = await request.confirmation.confirm(
+                request.scope,
+                request.turn_id,
                 ProposedToolCall(
                     call_id="call-a",
                     name="publish",
@@ -78,31 +78,35 @@ class _Runtime:
                 ),
                 "external_side_effect:high",
             )
-        if context.cancellation.is_set():
+        if request.cancellation.is_set():
+            yield TurnFinished(
+                **base,
+                status="interrupted",
+                error_code="cancelled",
+            )
             return
         if self.unknown_outcome:
-            raise ToolOutcomeUnknownError("checkpoint failed")
-        yield RuntimeEvent(
-            event_type="final_output",
-            payload=RuntimeEventPayload(
-                content="approved" if approved else "denied"
-            ),
+            yield TurnFinished(
+                **base,
+                status="outcome_unknown",
+                error_code="tool_outcome_unknown",
+            )
+            return
+        yield TurnFinished(
+            **base,
+            status="completed",
+            final_output="approved" if approved else "denied",
         )
 
-    async def cancel(self, scope, request: CancelRequest) -> CancelResult:
-        del scope
-        self.cancellations.append(request)
-        return CancelResult(accepted=True, status="cancelling")
-
-    async def health_check(self) -> HealthStatus:
-        return HealthStatus(healthy=True)
+    async def health(self):
+        return RuntimeHealth(healthy=True, state="ready")
 
 
 def _components(
     tmp_path: Path,
     runtime: _Runtime,
     *,
-    task_id: str = "task-a",
+    task_id: str | Callable[[], str] = "task-a",
 ) -> tuple[TaskService, TaskRepository, object]:
     database = tmp_path / "assistant.db"
     sessions = RuntimeSessionRepository(
@@ -112,7 +116,7 @@ def _components(
     scope = sessions.active("principal-a") or sessions.create("principal-a")
     repository = TaskRepository(
         database,
-        task_id_factory=lambda: task_id,
+        task_id_factory=task_id if callable(task_id) else lambda: task_id,
         approval_id_factory=lambda: "approval-a",
     )
     hub = TaskEventHub(subscriber_capacity=32)
@@ -186,6 +190,45 @@ async def test_immediate_definition_creates_one_execution_and_retries_idempotent
         )) == 1
     finally:
         release.set()
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_completed_definition_accepts_human_follow_up_as_new_execution(
+    tmp_path: Path,
+) -> None:
+    task_ids = iter(("execution-initial", "execution-follow-up"))
+    service, _repository, scope = _components(
+        tmp_path,
+        _Runtime(),
+        task_id=lambda: next(task_ids),
+    )
+    await service.start()
+    try:
+        definition, first = await service.create_definition(
+            scope,
+            client_request_id="definition-follow-up",
+            title="Analyze incident",
+            goal="Analyze the initial evidence",
+        )
+        assert first is not None
+        async for event in service.events(scope.principal_id, first.execution_id):
+            if event.event_type in {"completed", "failed", "cancelled"}:
+                break
+
+        follow_up = await service.continue_definition(
+            scope.principal_id,
+            definition.task_id,
+            client_request_id="follow-up-a",
+            input="Please also inspect the logs around 10:32.",
+        )
+
+        assert follow_up.task_id == definition.task_id
+        assert follow_up.execution_id != first.execution_id
+        assert follow_up.launch_reason is TaskLaunchReason.FOLLOW_UP
+        assert follow_up.goal_snapshot == "Please also inspect the logs around 10:32."
+        assert follow_up.agent_id_snapshot == definition.agent_id
+    finally:
         await service.stop()
 
 

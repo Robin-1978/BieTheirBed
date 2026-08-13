@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from pc_assistant import desktop_session
+from knoa_platform import desktop_session
 
 
 _DESKTOP_ENV_KEYS = (

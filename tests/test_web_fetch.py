@@ -4,7 +4,7 @@ import socket
 
 import pytest
 
-from pc_assistant.tools.web_fetch import WebFetchTool, _is_safe_url
+from knoa_platform.tools.web_fetch import WebFetchTool, _is_safe_url
 
 
 def test_safe_url_fails_closed_when_dns_resolution_fails(monkeypatch) -> None:
@@ -75,7 +75,7 @@ async def test_redirect_target_is_revalidated_before_second_request(
         return True, ""
 
     monkeypatch.setattr("httpx.AsyncClient", Client)
-    monkeypatch.setattr("pc_assistant.tools.web_fetch._is_safe_url", validate)
+    monkeypatch.setattr("knoa_platform.tools.web_fetch._is_safe_url", validate)
 
     result = await WebFetchTool().execute(url="https://example.com/start")
 
@@ -127,10 +127,10 @@ async def test_response_body_is_rejected_when_declared_size_exceeds_limit(
 
     monkeypatch.setattr("httpx.AsyncClient", Client)
     monkeypatch.setattr(
-        "pc_assistant.tools.web_fetch._is_safe_url",
+        "knoa_platform.tools.web_fetch._is_safe_url",
         lambda _url: (True, ""),
     )
-    monkeypatch.setattr("pc_assistant.tools.web_fetch._MAX_RESPONSE_BYTES", 5)
+    monkeypatch.setattr("knoa_platform.tools.web_fetch._MAX_RESPONSE_BYTES", 5)
 
     result = await WebFetchTool().execute(url="https://example.com/report")
 
@@ -176,10 +176,10 @@ async def test_chunked_response_body_is_stopped_at_hard_limit(monkeypatch) -> No
 
     monkeypatch.setattr("httpx.AsyncClient", Client)
     monkeypatch.setattr(
-        "pc_assistant.tools.web_fetch._is_safe_url",
+        "knoa_platform.tools.web_fetch._is_safe_url",
         lambda _url: (True, ""),
     )
-    monkeypatch.setattr("pc_assistant.tools.web_fetch._MAX_RESPONSE_BYTES", 5)
+    monkeypatch.setattr("knoa_platform.tools.web_fetch._MAX_RESPONSE_BYTES", 5)
 
     result = await WebFetchTool().execute(url="https://example.com/report")
 

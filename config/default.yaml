@@ -1,5 +1,5 @@
 # Named API accounts/endpoints. Cloud accounts and their keys belong in the
-# per-user ~/.pc-assistant/config/local.yaml file, outside the source tree.
+# per-user ~/.knoa/config/local.yaml file, outside the source tree.
 providers:
   local_llama:
     driver: "llamacpp"
@@ -34,8 +34,8 @@ context_window_budget: 8192
 trace_enabled: true
 llm_trace_log: "logs/llm_trace.jsonl"
 turn_trace_log: "logs/turn_trace.jsonl"
-log_file: "logs/pc_assistant.json"
-runtime_root: "~/.pc-assistant"
+log_file: "logs/knoa_platform.json"
+runtime_root: "~/.knoa"
 working_directory: "."
 service_host: "127.0.0.1"
 service_port: 9527
@@ -75,5 +75,31 @@ supports_vision: null
 mcp_servers: {}
 
 # Additional roots containing Skill package directories. Knoa also loads its
-# packaged built-in Skills and ~/.pc-assistant/skills.
+# packaged built-in Skills and ~/.knoa/skills.
 skill_directories: []
+# Stable Agent selected for newly bound Sessions.
+default_agent: knoa
+agents:
+  knoa:
+    enabled: true
+    max_concurrency: 4
+  codex:
+    enabled: false
+    max_concurrency: 1
+    command: ["codex", "app-server"]
+    # Empty means: let Codex use its normal ~/.codex configuration and
+    # authentication. Set this only when an isolated Codex identity is wanted.
+    home: ""
+    model: ""
+    # Empty uses a private neutral workspace under
+    # ~/.knoa/agents/codex/workspace, never the Knoa service source directory.
+    cwd: ""
+    approval_policy: "never"
+    sandbox: "read-only"
+    request_timeout_seconds: 120
+    max_line_bytes: 4194304
+    max_event_queue: 1024
+
+# Loopback-only standard MCP endpoint used by out-of-process Agents.
+capability_mcp_host: "127.0.0.1"
+capability_mcp_port: 9530

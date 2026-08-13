@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import stat
 
-from pc_assistant.tools.artifacts import ArtifactPaths
+from knoa_platform.tools.artifacts import ArtifactPaths
 
 
 def test_generated_screenshot_path_is_unique_and_below_root(tmp_path):

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from pc_assistant.config import AppConfig
-from pc_assistant.service.application_daemon import ApplicationDaemon
+from knoa_platform.config import AppConfig
+from knoa_platform.service.application_daemon import ApplicationDaemon
 
 
 class _Lifecycle:
@@ -28,11 +28,11 @@ async def test_application_daemon_composes_core_and_channels_above_both_layers(
     core = _Lifecycle("core", events)
     channels = _Lifecycle("channels", events)
     monkeypatch.setattr(
-        "pc_assistant.service.application_daemon.CoreDaemon",
+        "knoa_platform.service.application_daemon.CoreDaemon",
         lambda config, log_path: core,
     )
     monkeypatch.setattr(
-        "pc_assistant.service.application_daemon.ChannelRuntime.from_config",
+        "knoa_platform.service.application_daemon.ChannelRuntime.from_config",
         lambda config: channels,
     )
     daemon = ApplicationDaemon(
@@ -61,15 +61,15 @@ async def test_application_daemon_mounts_webhook_outside_core(
     channels = _Lifecycle("channels", events)
     webhooks = _Lifecycle("webhook", events)
     monkeypatch.setattr(
-        "pc_assistant.service.application_daemon.CoreDaemon",
+        "knoa_platform.service.application_daemon.CoreDaemon",
         lambda config, log_path: core,
     )
     monkeypatch.setattr(
-        "pc_assistant.service.application_daemon.ChannelRuntime.from_config",
+        "knoa_platform.service.application_daemon.ChannelRuntime.from_config",
         lambda config: channels,
     )
     monkeypatch.setattr(
-        "pc_assistant.adapters.WebhookAdapter",
+        "knoa_platform.adapters.WebhookAdapter",
         lambda config: webhooks,
     )
     daemon = ApplicationDaemon(
@@ -110,15 +110,15 @@ async def test_application_daemon_mounts_gateway_outside_core(
     channels = _Lifecycle("channels", events)
     gateway = _Lifecycle("gateway", events)
     monkeypatch.setattr(
-        "pc_assistant.service.application_daemon.CoreDaemon",
+        "knoa_platform.service.application_daemon.CoreDaemon",
         lambda config, log_path: core,
     )
     monkeypatch.setattr(
-        "pc_assistant.service.application_daemon.ChannelRuntime.from_config",
+        "knoa_platform.service.application_daemon.ChannelRuntime.from_config",
         lambda config: channels,
     )
     monkeypatch.setattr(
-        "pc_assistant.gateway.SecureGatewayAdapter",
+        "knoa_platform.gateway.SecureGatewayAdapter",
         lambda config: gateway,
     )
     daemon = ApplicationDaemon(

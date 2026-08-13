@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/disk/dev/bin/cloudflared tunnel run --token-file /home/robin/.pc-assistant/config/cloudflare.token
+ExecStart=/disk/dev/bin/cloudflared tunnel run --token-file /home/robin/.knoa/config/cloudflare.token
 Restart=always
 RestartSec=5
 

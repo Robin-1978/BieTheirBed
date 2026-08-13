@@ -62,7 +62,7 @@ private local service token. It cannot import Core repositories or receive an
 in-process Agent object.
 
 Gateway identity state lives in a separate owner-only SQLite database below
-`~/.pc-assistant/data/`. Core's task and memory database remains authoritative
+`~/.knoa/data/`. Core's task and memory database remains authoritative
 for Agent state; the Gateway database is authoritative only for devices,
 pairing grants, transport sessions and Push routing.
 

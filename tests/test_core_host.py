@@ -1,35 +1,29 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from pc_assistant.agent_runtime.artifact_service import ArtifactService
-from pc_assistant.agent_runtime.contracts import (
-    CancelRequest,
-    CancelResult,
+from knoa_platform.agent_runtime.artifact_service import ArtifactService
+from knoa_agent_contracts import RuntimeHealth, TurnFinished
+from knoa_platform.agent_runtime.contracts import (
     ConfigSetRequest,
     ConfigSetResult,
-    HealthStatus,
-    RunRequest,
-    RuntimeEvent,
-    RuntimeRunContext,
     RuntimeScope,
 )
-from pc_assistant.agent_runtime.control import ControlService
-from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
-from pc_assistant.artifacts import ArtifactStore
-from pc_assistant.context.memory_db import SQLiteMemoryRepository
-from pc_assistant.service.core_client import CoreClient
-from pc_assistant.service.core_host import (
+from knoa_platform.agent_runtime.control import ControlService
+from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
+from knoa_platform.artifacts import ArtifactStore
+from knoa_platform.context.memory_db import SQLiteMemoryRepository
+from knoa_platform.service.core_client import CoreClient
+from knoa_platform.service.core_host import (
     CoreServiceHost,
     TcpCoreEndpoint,
 )
-from pc_assistant.service.core_auth import StaticTokenAuthenticator
-from pc_assistant.service.core_server import CoreServer
-from pc_assistant.tasks import (
+from knoa_platform.service.core_auth import StaticTokenAuthenticator
+from knoa_platform.service.core_server import CoreServer
+from knoa_platform.tasks import (
     DurableApprovalService,
     DurableToolCommitService,
     TaskEventHub,
@@ -40,22 +34,19 @@ from pc_assistant.tasks import (
 
 
 class EmptyRuntime:
-    def run(
-        self,
-        context: RuntimeRunContext,
-        request: RunRequest,
-    ) -> AsyncIterator[RuntimeEvent]:
-        async def stream() -> AsyncIterator[RuntimeEvent]:
-            if False:
-                yield RuntimeEvent(event_type="warning")
+    def execute_turn(self, request):
+        async def stream():
+            yield TurnFinished(
+                runtime_session_ref="agent-session-a",
+                runtime_turn_ref=request.turn_id,
+                occurred_at=1.0,
+                status="completed",
+            )
 
         return stream()
 
-    async def cancel(self, scope: RuntimeScope, request: CancelRequest) -> CancelResult:
-        return CancelResult(accepted=False, status="not_found")
-
-    async def health_check(self) -> HealthStatus:
-        return HealthStatus(healthy=True)
+    async def health(self):
+        return RuntimeHealth(healthy=True, state="ready")
 
 
 class FakeConfig:

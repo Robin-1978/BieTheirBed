@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import stat
 
-from pc_assistant.observability.trace import (
+from knoa_platform.observability.trace import (
     JsonlRecorder,
     LLMTraceRecorder,
     TurnRecorder,

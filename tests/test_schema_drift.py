@@ -3,22 +3,22 @@ from __future__ import annotations
 
 import pytest
 
-from pc_assistant.tools.clipboard import ClipboardTool
-from pc_assistant.tools.exchange import ExchangeTool
-from pc_assistant.tools.hotkey import HotkeyTool
-from pc_assistant.tools.memory_tool import MemoryTool
-from pc_assistant.tools.mouse import MouseTool
-from pc_assistant.tools.notification import NotificationTool
-from pc_assistant.tools.press_key import PressKeyTool
-from pc_assistant.tools.read_file import ReadFileTool
-from pc_assistant.tools.shell import ShellTool
-from pc_assistant.tools.type_text import TypeTextTool
-from pc_assistant.tools.weather import WeatherTool
-from pc_assistant.tools.web_fetch import WebFetchTool
-from pc_assistant.tools.web_search import WebSearchTool
-from pc_assistant.tools.window import WindowTool
-from pc_assistant.tools.write_file import WriteFileTool
-from pc_assistant.tools.registry import ToolRegistry
+from knoa_platform.tools.clipboard import ClipboardTool
+from knoa_platform.tools.exchange import ExchangeTool
+from knoa_platform.tools.hotkey import HotkeyTool
+from knoa_platform.tools.memory_tool import MemoryTool
+from knoa_platform.tools.mouse import MouseTool
+from knoa_platform.tools.notification import NotificationTool
+from knoa_platform.tools.press_key import PressKeyTool
+from knoa_platform.tools.read_file import ReadFileTool
+from knoa_platform.tools.shell import ShellTool
+from knoa_platform.tools.type_text import TypeTextTool
+from knoa_platform.tools.weather import WeatherTool
+from knoa_platform.tools.web_fetch import WebFetchTool
+from knoa_platform.tools.web_search import WebSearchTool
+from knoa_platform.tools.window import WindowTool
+from knoa_platform.tools.write_file import WriteFileTool
+from knoa_platform.tools.registry import ToolRegistry
 
 
 def _extract_action_enums(schema: dict) -> set[str]:

@@ -6,21 +6,26 @@ from typing import Any
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import RuntimeScope
-from pc_assistant.agent_runtime.tool_step import (
+from knoa_platform.agent_runtime.contracts import RuntimeScope
+from knoa_platform.agent_runtime.tool_step import (
     ProposedToolCall,
     ToolArgumentPolicy,
     ToolStep,
     ToolStepContext,
 )
-from pc_assistant.tools.base import (
+from knoa_platform.context.memory_db import SQLiteMemoryRepository, ScopedUserMemory
+from knoa_platform.context.scope import current_memory_scope
+from knoa_platform.tools.describe_tool import DescribeTool
+from knoa_platform.tools.web_search import WebSearchTool
+from knoa_platform.tools.base import (
     ToolBase,
     ToolCapability,
     ToolEffect,
     ToolPolicy,
     ToolRisk,
 )
-from pc_assistant.tools.registry import ToolRegistry
+from knoa_platform.tools.registry import ToolRegistry
+from knoa_platform.tools.memory_tool import MemoryTool
 
 
 class RecordingTool(ToolBase):
@@ -319,3 +324,38 @@ async def test_call_specific_write_policy_still_requires_confirmation(
     assert result.status == "rejected"
     assert result.code == "confirmation_required"
     assert tool.calls == []
+
+
+@pytest.mark.asyncio
+async def test_tool_commit_binds_principal_and_session_for_scoped_memory(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteMemoryRepository(tmp_path / "assistant.db")
+    tool = MemoryTool(memory=ScopedUserMemory(repository))
+    step = _step(tmp_path, tool)
+    context = _context(
+        confirmation=Confirmation(True),
+        capabilities=frozenset(
+            {ToolCapability.MEMORY_READ, ToolCapability.MEMORY_WRITE}
+        ),
+    )
+
+    result = await step.execute(
+        context,
+        ProposedToolCall(
+            call_id="call-memory",
+            name="memory",
+            arguments={
+                "action": "store",
+                "key": "user_name",
+                "value": "Robin",
+                "category": "identity",
+                "importance": "core",
+            },
+        ),
+    )
+
+    assert result.status == "completed"
+    assert repository.get_memory("local", "user_name")["value"] == "Robin"
+    with pytest.raises(RuntimeError, match="not bound"):
+        current_memory_scope()

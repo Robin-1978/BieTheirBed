@@ -5,9 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from pc_assistant.artifacts import ArtifactStore
-from pc_assistant.context.scope import MemoryScope, reset_memory_scope, set_memory_scope
-from pc_assistant.tools.screenshot import ScreenshotTool
+from knoa_platform.artifacts import ArtifactStore
+from knoa_platform.context.scope import MemoryScope, reset_memory_scope, set_memory_scope
+from knoa_platform.tools.screenshot import ScreenshotTool
 
 
 class _FakeMss:

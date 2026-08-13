@@ -12,7 +12,7 @@
 
 ## 1. Executive decision
 
-PC Assistant will implement a principal-scoped production runtime directly from
+Knoa will implement a principal-scoped production runtime directly from
 the target domain model. The old concrete `Agent`, free-form service protocol,
 caller-owned session identifiers, global active-session behavior, and concrete
 member reach-through are not compatibility constraints.
@@ -604,8 +604,8 @@ Restart-bound configuration changes are atomically written to the configuration
 source that the next process start will load. With an explicit configuration
 path, that file is updated; otherwise overrides live at
 `runtime_root/config/local.yaml`. A write-only sidecar filename that startup
-does not read is forbidden. Both `PC_ASSISTANT_HOME` and the higher-priority
-`PC_RUNTIME_ROOT` select that canonical runtime root.
+does not read is forbidden. Both `KNOA_HOME` and the higher-priority
+`KNOA_RUNTIME_ROOT` select that canonical runtime root.
 
 ## 9. Tool effect and capability model
 

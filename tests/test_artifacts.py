@@ -4,8 +4,8 @@ import sqlite3
 
 import pytest
 
-from pc_assistant.artifacts import ArtifactStore
-from pc_assistant.tools.screenshot import ScreenshotTool
+from knoa_platform.artifacts import ArtifactStore
+from knoa_platform.tools.screenshot import ScreenshotTool
 
 
 def test_artifact_store_borrows_existing_file_and_never_deletes_source(tmp_path):

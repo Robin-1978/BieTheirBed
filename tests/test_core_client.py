@@ -6,23 +6,22 @@ from pathlib import Path
 
 import pytest
 
-from pc_assistant.agent_runtime.artifact_service import ArtifactService
-from pc_assistant.agent_runtime.contracts import (
-    CancelRequest,
-    CancelResult,
+from knoa_platform.agent_runtime.artifact_service import ArtifactService
+from knoa_agent_contracts import (
+    AssistantDelta,
+    RuntimeHealth,
+    TurnFinished,
+)
+from knoa_platform.agent_runtime.contracts import (
     ConfigSetRequest,
     ConfigSetResult,
     HealthStatus,
-    RunRequest,
-    RuntimeEvent,
-    RuntimeEventPayload,
-    RuntimeRunContext,
     RuntimeScope,
 )
-from pc_assistant.agent_runtime.control import ControlService
-from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
-from pc_assistant.agent_runtime.tool_step import ProposedToolCall
-from pc_assistant.automation import (
+from knoa_platform.agent_runtime.control import ControlService
+from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
+from knoa_platform.agent_runtime.tool_step import ProposedToolCall
+from knoa_platform.automation import (
     ScheduleDispatcher,
     ScheduleKind,
     ScheduleRepository,
@@ -32,16 +31,16 @@ from pc_assistant.automation import (
     TriggerRepository,
     TriggerService,
 )
-from pc_assistant.artifacts import ArtifactStore
-from pc_assistant.context.memory_db import SQLiteMemoryRepository
-from pc_assistant.conversation import ConversationRepository, ConversationService
-from pc_assistant.service.core_client import (
+from knoa_platform.artifacts import ArtifactStore
+from knoa_platform.context.memory_db import SQLiteMemoryRepository
+from knoa_platform.conversation import ConversationRepository, ConversationService
+from knoa_platform.service.core_client import (
     CoreClient,
     CoreConnectionLostError,
 )
-from pc_assistant.service.core_auth import StaticTokenAuthenticator
-from pc_assistant.service.core_server import CoreServer
-from pc_assistant.tasks import (
+from knoa_platform.service.core_auth import StaticTokenAuthenticator
+from knoa_platform.service.core_server import CoreServer
+from knoa_platform.tasks import (
     DurableApprovalService,
     DurableToolCommitService,
     TaskEvent,
@@ -106,22 +105,20 @@ class FakeRuntime:
         self.confirm = False
         self.confirmed: bool | None = None
 
-    def run(
-        self,
-        context: RuntimeRunContext,
-        request: RunRequest,
-    ) -> AsyncIterator[RuntimeEvent]:
-        async def stream() -> AsyncIterator[RuntimeEvent]:
+    def execute_turn(self, request):
+        async def stream():
+            base = {
+                "runtime_session_ref": "agent-session-a",
+                "runtime_turn_ref": request.turn_id,
+                "occurred_at": 1.0,
+            }
             self.started.set()
-            yield RuntimeEvent(
-                event_type="content_delta",
-                payload=RuntimeEventPayload(content=request.input),
-            )
+            yield AssistantDelta(**base, content=request.input)
             if self.confirm:
-                assert context.confirmation is not None
-                self.confirmed = await context.confirmation.confirm(
-                    context.scope,
-                    context.run_id,
+                assert request.confirmation is not None
+                self.confirmed = await request.confirmation.confirm(
+                    request.scope,
+                    request.turn_id,
                     ProposedToolCall(
                         call_id="call-a",
                         name="publish",
@@ -131,7 +128,7 @@ class FakeRuntime:
                 )
             if self.hold:
                 release = asyncio.create_task(self.release.wait())
-                cancelled = asyncio.create_task(context.cancellation.wait())
+                cancelled = asyncio.create_task(request.cancellation.wait())
                 _done, pending = await asyncio.wait(
                     {release, cancelled},
                     return_when=asyncio.FIRST_COMPLETED,
@@ -139,21 +136,23 @@ class FakeRuntime:
                 for pending_task in pending:
                     pending_task.cancel()
                 await asyncio.gather(*pending, return_exceptions=True)
-            if context.cancellation.is_set():
+            if request.cancellation.is_set():
+                yield TurnFinished(
+                    **base,
+                    status="interrupted",
+                    error_code="cancelled",
+                )
                 return
-            yield RuntimeEvent(
-                event_type="final_output",
-                payload=RuntimeEventPayload(content="done"),
+            yield TurnFinished(
+                **base,
+                status="completed",
+                final_output="done",
             )
 
         return stream()
 
-    async def cancel(self, scope: RuntimeScope, request: CancelRequest) -> CancelResult:
-        del scope, request
-        return CancelResult(accepted=True, status="cancelling")
-
-    async def health_check(self) -> HealthStatus:
-        return HealthStatus(healthy=True)
+    async def health(self):
+        return RuntimeHealth(healthy=True, state="ready")
 
 
 class FakeConfig:
@@ -376,6 +375,22 @@ async def test_client_replays_and_tails_principal_task_event_feed(
         assert {item.principal_id for item in events} == {"local"}
     finally:
         await stream.aclose()
+        await connected.close()
+
+
+@pytest.mark.asyncio
+async def test_client_can_repeatedly_close_principal_feed_without_leaking_slots(
+    tmp_path: Path,
+) -> None:
+    connected = await _connected(tmp_path)
+    try:
+        session_handle = await connected.client.create_session()
+        await connected.client.create_task(session_handle, "background task")
+        for _ in range(12):
+            stream = connected.client.principal_task_events(after_id=0)
+            await asyncio.wait_for(anext(stream), timeout=2.0)
+            await stream.aclose()
+    finally:
         await connected.close()
 
 

@@ -6,16 +6,23 @@ from pathlib import Path
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import (
-    CancelResult,
-    HealthStatus,
-    RunRequest,
-    RuntimeEvent,
-    RuntimeEventPayload,
-    RuntimeRunContext,
+from knoa_agent_contracts import (
+    AssistantDelta,
+    ReasoningSummaryDelta,
+    ToolCallFinished,
+    ToolCallStarted,
+    TurnFinished,
 )
-from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
-from pc_assistant.conversation import ChatTurnState, ConversationRepository, ConversationService
+from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
+from knoa_platform.conversation import ChatTurnState, ConversationRepository, ConversationService
+
+
+def _base(request):
+    return {
+        "runtime_session_ref": "agent-session-a",
+        "runtime_turn_ref": request.turn_id,
+        "occurred_at": 1.0,
+    }
 
 
 class ChunkRuntime:
@@ -24,32 +31,24 @@ class ChunkRuntime:
         self.block = block
         self.started = asyncio.Event()
 
-    async def run(self, context: RuntimeRunContext, request: RunRequest):
-        del request
+    async def execute_turn(self, request):
         self.started.set()
         if self.block:
-            await context.cancellation.wait()
+            await request.cancellation.wait()
+            yield TurnFinished(
+                **_base(request),
+                status="interrupted",
+                error_code="cancelled",
+            )
             return
         for _ in range(self.chunks):
-            yield RuntimeEvent(
-                event_type="reasoning_delta",
-                payload=RuntimeEventPayload(content="r"),
-            )
-            yield RuntimeEvent(
-                event_type="content_delta",
-                payload=RuntimeEventPayload(content="x"),
-            )
-        yield RuntimeEvent(
-            event_type="final_output",
-            payload=RuntimeEventPayload(content="done"),
+            yield ReasoningSummaryDelta(**_base(request), content="r")
+            yield AssistantDelta(**_base(request), content="x")
+        yield TurnFinished(
+            **_base(request),
+            status="completed",
+            final_output="done",
         )
-
-    async def cancel(self, scope, request):
-        del scope, request
-        return CancelResult(accepted=False, status="not_found")
-
-    async def health_check(self):
-        return HealthStatus(healthy=True)
 
 
 class SerialRuntime(ChunkRuntime):
@@ -59,16 +58,16 @@ class SerialRuntime(ChunkRuntime):
         self.active = 0
         self.max_active = 0
 
-    async def run(self, context: RuntimeRunContext, request: RunRequest):
-        del context, request
+    async def execute_turn(self, request):
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         self.started.set()
         try:
             await self.release.wait()
-            yield RuntimeEvent(
-                event_type="final_output",
-                payload=RuntimeEventPayload(content="done"),
+            yield TurnFinished(
+                **_base(request),
+                status="completed",
+                final_output="done",
             )
         finally:
             self.active -= 1
@@ -78,40 +77,29 @@ class ProgressRuntime(ChunkRuntime):
     def __init__(self) -> None:
         super().__init__(chunks=0)
 
-    async def run(self, context: RuntimeRunContext, request: RunRequest):
-        del context, request
+    async def execute_turn(self, request):
         self.started.set()
-        yield RuntimeEvent(
-            event_type="reasoning_delta",
-            payload=RuntimeEventPayload(content="先检查状态", iteration=1),
+        yield ReasoningSummaryDelta(**_base(request), content="先检查状态")
+        await asyncio.sleep(0.08)
+        yield ToolCallStarted(
+            **_base(request),
+            tool_call_id="call-a",
+            tool_name="status",
         )
         await asyncio.sleep(0.08)
-        yield RuntimeEvent(
-            event_type="tool_call",
-            payload=RuntimeEventPayload(
-                tool_call_id="call-a",
-                tool_name="status",
-                iteration=1,
-            ),
+        yield ToolCallFinished(
+            **_base(request),
+            tool_call_id="call-a",
+            tool_name="status",
+            status="completed",
+            output={"ok": True},
         )
         await asyncio.sleep(0.08)
-        yield RuntimeEvent(
-            event_type="tool_result",
-            payload=RuntimeEventPayload(
-                tool_call_id="call-a",
-                tool_name="status",
-                tool_result={"ok": True},
-                iteration=1,
-            ),
-        )
-        await asyncio.sleep(0.08)
-        yield RuntimeEvent(
-            event_type="content_delta",
-            payload=RuntimeEventPayload(content="检查完成", iteration=2),
-        )
-        yield RuntimeEvent(
-            event_type="final_output",
-            payload=RuntimeEventPayload(content="检查完成", iteration=2),
+        yield AssistantDelta(**_base(request), content="检查完成")
+        yield TurnFinished(
+            **_base(request),
+            status="completed",
+            final_output="检查完成",
         )
 
 

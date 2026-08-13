@@ -25,22 +25,22 @@
 The current `Agent` is both the application entrypoint and the owner of concrete
 construction, session persistence, prompt assembly, streaming protocol handling,
 verified tool execution, artifact mediation, runtime configuration, and status
-reporting. Its constructor spans 168 lines (`src/pc_assistant/agent.py:142`), and
-the main `_run_loop` spans 693 lines (`src/pc_assistant/agent.py:1101`).
+reporting. Its constructor spans 168 lines (`src/knoa_platform/agent.py:142`), and
+the main `_run_loop` spans 693 lines (`src/knoa_platform/agent.py:1101`).
 
 The concentration is visible outside the file as well:
 
-- legacy `AgentLike.cancel()` is async (`src/pc_assistant/service/agent_like.py:28`),
+- legacy `AgentLike.cancel()` is async (`src/knoa_platform/service/agent_like.py:28`),
   while the concrete `Agent.cancel()` is synchronous
-  (`src/pc_assistant/agent.py:403`). The common contract is therefore not exact.
+  (`src/knoa_platform/agent.py:403`). The common contract is therefore not exact.
 - The service directly reaches into `registry`, `memory`, and `config`
-  (`src/pc_assistant/service/server.py:469`, `src/pc_assistant/service/server.py:478`,
-  `src/pc_assistant/service/server.py:489`).
+  (`src/knoa_platform/service/server.py:469`, `src/knoa_platform/service/server.py:478`,
+  `src/knoa_platform/service/server.py:489`).
 - The TUI branches on the concrete class name and then uses different command
-  paths (`src/pc_assistant/ui/chat.py:328`).
+  paths (`src/knoa_platform/ui/chat.py:328`).
 - `SchedulerTool` stores an untyped complete Agent reference
-  (`src/pc_assistant/tools/scheduler.py:226`) although it only needs to invoke a
-  scheduled turn (`src/pc_assistant/tools/scheduler.py:609`).
+  (`src/knoa_platform/tools/scheduler.py:226`) although it only needs to invoke a
+  scheduled turn (`src/knoa_platform/tools/scheduler.py:609`).
 - Tests frequently replace private `_llm`, `_executor`, `_limiter`, and
   `_conversation` members (`tests/test_agent.py:160`, `tests/test_agent.py:380`,
   `tests/test_agent.py:526`, `tests/test_agent.py:597`).
@@ -84,8 +84,8 @@ UI / Channel / Service / Benchmark / Scheduler
 
 The side-effect commit invariant is already correctly centralized in
 `VerifiedToolExecutor`: authorization creates an opaque capability and commit
-consumes it once (`src/pc_assistant/harness/executor.py:44`,
-`src/pc_assistant/harness/executor.py:60`, `src/pc_assistant/harness/executor.py:77`).
+consumes it once (`src/knoa_platform/harness/executor.py:44`,
+`src/knoa_platform/harness/executor.py:60`, `src/knoa_platform/harness/executor.py:77`).
 The refactor preserves that boundary rather than recreating it.
 
 ### 2.2 To-Be
@@ -130,7 +130,7 @@ same Core API boundary; only CoreServer code calls `AgentRuntimePort`.
 `service/server.py` is the current Core Server host and becomes `CoreServer`.
 `service/client.py` is the current client transport and becomes the thin
 `CoreClient` adapter. The current lifecycle fallback that constructs an in-process Agent
-(`src/pc_assistant/service/lifecycle.py:24`, `src/pc_assistant/service/lifecycle.py:106`)
+(`src/knoa_platform/service/lifecycle.py:24`, `src/knoa_platform/service/lifecycle.py:106`)
 is removed from the production path: if the daemon cannot be started or reached,
 the client reports a Core availability error rather than taking ownership of
 execution locally. Tests may instantiate `AgentRuntime` directly as a Core test
@@ -139,13 +139,13 @@ fixture; that is not a client deployment mode.
 Feishu's ingress/delivery code remains a channel adapter. It may download or
 upload transport payloads, but artifact ownership, session authorization,
 ReAct, tool execution, and postcondition evidence remain Core operations
-(`src/pc_assistant/channels/feishu.py:657`,
-`src/pc_assistant/channels/feishu.py:1451`).
+(`src/knoa_platform/channels/feishu.py:657`,
+`src/knoa_platform/channels/feishu.py:1451`).
 
 Target source layout:
 
 ```text
-src/pc_assistant/agent_runtime/
+src/knoa_platform/agent_runtime/
 ├── contracts.py       # RuntimeEvent, requests/results, AgentRuntimePort, TurnInvoker
 ├── factory.py         # concrete dependency construction and model reconfiguration
 ├── runtime.py         # session ingress, cancellation, status, artifacts, control delegation
@@ -156,7 +156,7 @@ src/pc_assistant/agent_runtime/
 ```
 
 The non-colliding `agent_runtime` package is used throughout C1-C4 while the
-legacy module is reduced in place. The old `src/pc_assistant/agent.py` is deleted
+legacy module is reduced in place. The old `src/knoa_platform/agent.py` is deleted
 during the final cutover. Callers import target modules explicitly;
 `Agent = AgentRuntime`, re-export aliases, and private attribute mirrors are not
 permitted. This avoids the Python import collision that would occur if
@@ -190,20 +190,20 @@ evidence references identifying code that is being deleted.
 1. Every side effect still passes through `VerifiedToolExecutor`; no new direct
    registry execution path is introduced. Owner: `ToolStep` plus existing
    verifier/executor (`docs/architecture.md:509`,
-   `src/pc_assistant/harness/executor.py:44`).
+   `src/knoa_platform/harness/executor.py:44`).
 2. A complete turn remains serialized by one stable session lease/lock, while
    distinct sessions may run concurrently. An active state cannot be evicted,
    dropped, replaced, or cleaned up until its lease is released. Owner:
    `AgentRuntime` and `SessionManager`
-   (`src/pc_assistant/session.py:27`, `src/pc_assistant/agent.py:1009`).
+   (`src/knoa_platform/session.py:27`, `src/knoa_platform/agent.py:1009`).
 3. Conversation and context-summary rollback on cancellation/error/generator
    close and transcript persistence on allowed completion remain one
    session-runtime transaction responsibility
-   (`src/pc_assistant/agent.py:1072`, `src/pc_assistant/agent.py:1080`).
+   (`src/knoa_platform/agent.py:1072`, `src/knoa_platform/agent.py:1080`).
 4. Provider-native image bytes remain request-local and never enter durable
    history/events/idempotency. Owner: `ModelStep` and `ToolStep`
-   (`docs/architecture.md:512`, `src/pc_assistant/agent.py:616`,
-   `src/pc_assistant/agent.py:1795`).
+   (`docs/architecture.md:512`, `src/knoa_platform/agent.py:616`,
+   `src/knoa_platform/agent.py:1795`).
 5. The Core API v1 wire contract is a versioned task/run contract. `RunEvent`
    is an ordered public event with `run_id`, `event_seq`, `event_type`, and a
    typed payload; it is not the internal runtime event model.
@@ -242,7 +242,7 @@ CoreServer maps versioned Core API requests to its uniformly async operations:
 session handle. Ownership is validated before run, history/export, cancellation,
 memory, and artifact operations; identity is never copied into model messages.
 Attachments are represented by the existing `ImageAttachment` type
-(`src/pc_assistant/model_adapter/types.py:1`).
+(`src/knoa_platform/model_adapter/types.py:1`).
 
 `RuntimeEvent` is the Core-only ordered execution event returned by
 `AgentRuntimePort`. `RunEvent` is the public Core API event envelope. CoreServer
@@ -251,12 +251,12 @@ the versioned typed payload; the two are never the same DTO.
 
 `TurnInvoker` is the narrow scheduled-execution dependency: a callable accepting
 input and session identity and returning the ordered `RuntimeEvent` stream. It replaces
-`SchedulerTool.set_agent(Any)` (`src/pc_assistant/tools/scheduler.py:231`).
+`SchedulerTool.set_agent(Any)` (`src/knoa_platform/tools/scheduler.py:231`).
 
 `ControlService` owns command semantics currently duplicated or branched across
 the service and UI: session creation, tools, history/export, memory, and config
-mutation (`src/pc_assistant/service/server.py:449`,
-`src/pc_assistant/ui/chat.py:321`). This is a current multi-consumer boundary,
+mutation (`src/knoa_platform/service/server.py:449`,
+`src/knoa_platform/ui/chat.py:321`). This is a current multi-consumer boundary,
 not a speculative extension point.
 
 ### 4.2 ModelStep
@@ -269,14 +269,14 @@ and error state. Consumer backpressure is preserved because the orchestrator
 awaits each yielded signal. It owns:
 
 - context/memory assembly and automatic compaction currently beginning at
-  `src/pc_assistant/agent.py:1123`;
+  `src/knoa_platform/agent.py:1123`;
 - schema/completion/input budget allocation currently at
-  `src/pc_assistant/agent.py:1216`;
+  `src/knoa_platform/agent.py:1216`;
 - request-local image hydrate/manifest behavior currently at
-  `src/pc_assistant/agent.py:1795`;
+  `src/knoa_platform/agent.py:1795`;
 - stream accumulation and provider-neutral tool-call normalization currently at
-  `src/pc_assistant/agent.py:1290`;
-- LLM-call trace/usage recording currently at `src/pc_assistant/agent.py:1377`.
+  `src/knoa_platform/agent.py:1290`;
+- LLM-call trace/usage recording currently at `src/knoa_platform/agent.py:1377`.
 
 It does not authorize tools, mutate idempotency state, commit side effects,
 persist compaction, or decide whether another iteration is required.
@@ -291,13 +291,13 @@ commit do not occur before the corresponding earlier signals have been consumed.
 It owns:
 
 - semantic call normalization and loop detection
-  (`src/pc_assistant/agent.py:1468`, `src/pc_assistant/agent.py:1470`);
+  (`src/knoa_platform/agent.py:1468`, `src/knoa_platform/agent.py:1470`);
 - deterministic authorization and prepared capability handling
-  (`src/pc_assistant/agent.py:1495`);
-- side-effect idempotency (`src/pc_assistant/agent.py:1533`);
-- commit/cancellation handling (`src/pc_assistant/agent.py:1610`);
+  (`src/knoa_platform/agent.py:1495`);
+- side-effect idempotency (`src/knoa_platform/agent.py:1533`);
+- commit/cancellation handling (`src/knoa_platform/agent.py:1610`);
 - safe result projection, artifact events, evidence accounting, and tool-result
-  conversation insertion (`src/pc_assistant/agent.py:1630`).
+  conversation insertion (`src/knoa_platform/agent.py:1630`).
 
 It calls the existing `VerifiedToolExecutor`; it does not reproduce verifier or
 registry internals.
@@ -317,7 +317,7 @@ prepare turn
 ```
 
 Counters and mutable flags become a per-run `TurnContext` rather than local
-variables spread through `_run_loop` (`src/pc_assistant/agent.py:1183`). Internal
+variables spread through `_run_loop` (`src/knoa_platform/agent.py:1183`). Internal
 `RuntimeEvent` ordering is explicit and CoreServer preserves it when assigning
 Core API `RunEvent.event_seq`:
 
@@ -346,7 +346,7 @@ Runtime acquisition creates an active-state lease before exposing
 `SessionState`. LRU eviction and explicit drop skip leased states and defer
 artifact cleanup until release. This closes the current possibility that
 `SessionManager._evict_locked()` removes a long-running state while its
-`run_lock` is held (`src/pc_assistant/session.py:83`).
+`run_lock` is held (`src/knoa_platform/session.py:83`).
 
 Compaction is computed by ModelStep for the current prompt but returned as a
 proposed transaction update. AgentRuntime applies it only on an allowed terminal
@@ -411,7 +411,7 @@ Estimated file slots are explicit:
 - C4 (33): `agent_runtime/runtime.py`, `agent_runtime/control.py`,
   `agent_runtime/react_loop.py`, `agent.py` deletion, `session.py`,
   `service/agent_like.py` deletion, `service/client.py`, `service/lifecycle.py`,
-  `service/protocol.py`, `service/server.py`, `pc_assistant/__init__.py`,
+  `service/protocol.py`, `service/server.py`, `knoa_platform/__init__.py`,
   `ui/app.py`, `ui/chat.py`, `channels/feishu.py`, `benchmark/runner.py`,
   `benchmark/scorer.py`, `tools/scheduler.py`, `tests/test_agent.py`,
   `tests/test_agent_sessions.py`, `tests/test_artifacts.py`,
@@ -431,8 +431,8 @@ rollback boundary.
 
 | Plan | Changes | Critical path | Lifecycle amplification | Shared-path overlap | Outcome-less | Outcome/quality/closure preserved? |
 |---|---:|---:|---:|---:|---:|---|
-| Candidate | 4 | 3 | 1.33 | 1 (`src/pc_assistant/agent.py`) | 0 | yes, with explicit C4 granularity override |
-| Smallest cohesive alternative | 3 | 3 | 1.0 | 1 (`src/pc_assistant/agent.py`) | 0 | no: combining ModelStep and ToolStep exceeds ~800 changed lines and merges stochastic parsing with the deterministic security boundary |
+| Candidate | 4 | 3 | 1.33 | 1 (`src/knoa_platform/agent.py`) | 0 | yes, with explicit C4 granularity override |
+| Smallest cohesive alternative | 3 | 3 | 1.0 | 1 (`src/knoa_platform/agent.py`) | 0 | no: combining ModelStep and ToolStep exceeds ~800 changed lines and merges stochastic parsing with the deterministic security boundary |
 
 The four-Change candidate is retained because C2 and C3 have different current
 owners, failure modes, verification suites, and rollback surfaces. Combining
@@ -637,16 +637,16 @@ adapter remains after C4.
 ## 7. Security and lifecycle preservation
 
 - The authorization/commit capability remains opaque and single-use
-  (`src/pc_assistant/harness/executor.py:39`,
-  `src/pc_assistant/harness/executor.py:77`).
+  (`src/knoa_platform/harness/executor.py:39`,
+  `src/knoa_platform/harness/executor.py:77`).
 - Tool results continue to be converted to structured actionable errors by the
-  verified execution boundary (`src/pc_assistant/harness/executor.py:12`).
+  verified execution boundary (`src/knoa_platform/harness/executor.py:12`).
 - Same-session locking remains around the entire serialized run
-  (`src/pc_assistant/agent.py:1009`).
+  (`src/knoa_platform/agent.py:1009`).
 - Image encodings continue to be removed from events and persistence payloads
-  (`src/pc_assistant/agent.py:616`).
+  (`src/knoa_platform/agent.py:616`).
 - Scheduler session context remains bound only around scheduled tool execution
-  (`src/pc_assistant/agent.py:1606`).
+  (`src/knoa_platform/agent.py:1606`).
 
 ## 8. Simplicity budget
 
@@ -685,7 +685,7 @@ and scheduler's `Any` Agent dependency.
 
 ## 10. Campaign verification criteria
 
-1. `src/pc_assistant/agent.py` and `src/pc_assistant/service/agent_like.py` no
+1. `src/knoa_platform/agent.py` and `src/knoa_platform/service/agent_like.py` no
    longer exist.
 2. No source or test imports an old Agent compatibility alias or accesses
    `_llm`, `_executor`, `_conversation`, `_registry`, `_memory`, or `_config`
@@ -740,13 +740,13 @@ and scheduler's `Any` Agent dependency.
 The Campaign introduces no additional provider call, tool call, persistence
 round-trip, or image hydration. Event delivery remains streaming. Regression
 tests compare call counts and event order; existing token/latency trace recording
-remains in the model operation (`src/pc_assistant/agent.py:914`).
+remains in the model operation (`src/knoa_platform/agent.py:914`).
 
 ## 14. Cross-module adaptation
 
 | Consumer | Current coupling | Target |
 |---|---|---|
-| CLI entry | constructs concrete `Agent` (`src/pc_assistant/__init__.py:97`) | AgentFactory |
+| CLI entry | constructs concrete `Agent` (`src/knoa_platform/__init__.py:97`) | AgentFactory |
 | Service server | concrete Agent plus direct admin internals (`service/server.py:24`, `service/server.py:469`) | Core Server owns AgentRuntime + ControlService |
 | Core client | imports event from legacy concrete Agent (`service/client.py:17`) | thin wire adapter using Core API v1 `RunEvent`; no runtime-port implementation |
 | Textual/Rich UI | concrete type and class-name branches (`ui/app.py:14`, `ui/chat.py:328`) | thin client using `CoreClient.command/run` |

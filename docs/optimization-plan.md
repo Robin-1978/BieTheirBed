@@ -1,4 +1,4 @@
-# PC Assistant 优化计划
+# Knoa 优化计划
 
 基于与 `~/ws/per-staging/agent` 的架构对比，识别出的差距与优化方案。
 目标：在不破坏现有工具链与安全护栏的前提下，补齐 Agent 基础设施短板。
@@ -21,10 +21,10 @@
 
 ### P0-1 模型适配层 (ModelAdapter)
 
-**现状**：`src/pc_assistant/llm_provider.py` 一个类内置 openai / anthropic / openai_compatible / llamacpp 四个分支，流式与整响应解析各自实现；thinking 依赖 `_strip_think_tags` 正则（`agent.py:49`）。
+**现状**：`src/knoa_platform/llm_provider.py` 一个类内置 openai / anthropic / openai_compatible / llamacpp 四个分支，流式与整响应解析各自实现；thinking 依赖 `_strip_think_tags` 正则（`agent.py:49`）。
 
 **方案**：
-1. 新增 `src/pc_assistant/model_adapter/`，定义统一 IR：
+1. 新增 `src/knoa_platform/model_adapter/`，定义统一 IR：
    - `ParsedResponse`：`content / reasoning / tool_calls / finish_reason / usage / error`
 2. Backend 抽象（复用现有 HTTP 逻辑迁移）：
    - `backends/openai.py`、`backends/anthropic.py`、`backends/llamacpp.py`（含 `openai_compatible`）
@@ -32,7 +32,7 @@
 4. `profile.py`：按 provider+model 声明能力（支持 streaming / thinking / tool_choice / max_tokens 上限），缺失能力时静默降级（如不支持 thinking 则不再发思考请求）。
 5. `bridge.py`：唯一入口 `chat()/chat_stream()`，agent 循环不再感知厂商差异。
 
-**涉及文件**：新增 `src/pc_assistant/model_adapter/**`；`llm_provider.py` 降级为后端注册表；`agent.py` 改调 bridge。
+**涉及文件**：新增 `src/knoa_platform/model_adapter/**`；`llm_provider.py` 降级为后端注册表；`agent.py` 改调 bridge。
 
 **验收**：现有 pytest 全绿；同一循环代码可跑通 llamacpp、OpenAI、Anthropic；加入新的本地 XML 模型无需改动 agent 循环。
 
@@ -115,7 +115,7 @@
 
 **现状**：`context/system_prompt.py` 内联构建。
 
-**方案**：迁移到 `src/pc_assistant/prompts/*.md`，运行时加载；可版本化、可单测、可被 `/config` 覆盖。
+**方案**：迁移到 `src/knoa_platform/prompts/*.md`，运行时加载；可版本化、可单测、可被 `/config` 覆盖。
 
 ## 3. 建议实施顺序
 

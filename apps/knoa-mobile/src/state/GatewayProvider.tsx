@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { GatewayClient, GatewayError } from "@/api/gatewayClient";
-import type { AndroidRelease, PrincipalTaskEvent } from "@/api/models";
+import type { AgentSummary, AndroidRelease, PrincipalTaskEvent } from "@/api/models";
 import { subscribeTaskEvents, type TaskEventSubscription } from "@/api/taskEvents";
 import { authenticateDevice, pairDevice } from "@/security/pairing";
 import {
@@ -31,6 +31,11 @@ type GatewayState = {
   lastConnectedAt: number;
   requiredUpdate: AndroidRelease | null;
   availableUpdate: AndroidRelease | null;
+  agents: AgentSummary[];
+  defaultAgentId: string;
+  selectedAgentId: string;
+  activeAgentId: string;
+  selectAgent(agentId: string): void;
   pair(encoded: string, displayName: string): Promise<void>;
   reconnect(): Promise<void>;
   reauthenticate(): Promise<void>;
@@ -47,7 +52,7 @@ type GatewayState = {
 const Context = createContext<GatewayState | null>(null);
 
 export function GatewayProvider({ children }: React.PropsWithChildren) {
-  type StoredState = Omit<GatewayState, "pair" | "reconnect" | "reauthenticate" | "removeConnection" | "newConversation" | "ensureConversation" | "commitConversation" | "openConversation" | "connection" | "runAuthenticated" | "subscribeEvents">;
+  type StoredState = Omit<GatewayState, "pair" | "reconnect" | "reauthenticate" | "removeConnection" | "newConversation" | "ensureConversation" | "commitConversation" | "openConversation" | "connection" | "runAuthenticated" | "subscribeEvents" | "selectAgent">;
   const initialState: StoredState = {
     status: "booting",
     client: null,
@@ -60,6 +65,10 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     lastConnectedAt: 0,
     requiredUpdate: null,
     availableUpdate: null,
+    agents: [],
+    defaultAgentId: "knoa",
+    selectedAgentId: "knoa",
+    activeAgentId: "",
   };
   const [state, setState] = useState<StoredState>(initialState);
   const stateRef = useRef<StoredState>(initialState);
@@ -81,7 +90,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       const identity = await loadConnectionIdentity();
       if (!identity) {
         connectionRef.current = null;
-        commit({ status: "unpaired", client: null, gatewayUrl: "", sessionToken: "", sessionHandle: "", deviceId: "", lastConnectedAt: 0, requiredUpdate: null, availableUpdate: null });
+        commit({ status: "unpaired", client: null, gatewayUrl: "", sessionToken: "", sessionHandle: "", deviceId: "", lastConnectedAt: 0, requiredUpdate: null, availableUpdate: null, agents: [], activeAgentId: "", selectedAgentId: "knoa" });
         return;
       }
       const device = { deviceId: identity.deviceId, gatewayUrl: identity.gatewayUrl };
@@ -110,6 +119,14 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       }
       if (!token) throw new Error("未能建立安全会话");
       const sessionHandle = (await loadCoreSession()) ?? "";
+      let activeAgentId = "";
+      if (sessionHandle) {
+        try {
+          activeAgentId = (await client.getConversationSession(sessionHandle)).agent_id;
+        } catch {
+          activeAgentId = "";
+        }
+      }
       connectionRef.current = { gatewayUrl: device.gatewayUrl, token };
       commit({
         status: "ready",
@@ -119,7 +136,19 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         sessionToken: token,
         deviceId: device.deviceId,
         lastConnectedAt: Date.now() / 1000,
+        activeAgentId,
+        selectedAgentId: activeAgentId || stateRef.current.selectedAgentId,
       });
+      void client.listAgents().then(({ defaultAgentId, agents }) => {
+        const active = stateRef.current.activeAgentId;
+        commit({
+          agents,
+          defaultAgentId,
+          selectedAgentId: active || (agents.some((item) => item.agent_id === stateRef.current.selectedAgentId)
+            ? stateRef.current.selectedAgentId
+            : defaultAgentId),
+        });
+      }).catch(() => undefined);
       void client.latestAndroidRelease()
         .then((release) => commit({
           requiredUpdate: requiresAndroidUpdate(release, installedAndroidVersionCode()) ? release : null,
@@ -153,6 +182,11 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         sessionToken: token,
         error: "",
       });
+      void client.listAgents().then(({ defaultAgentId, agents }) => commit({
+        agents,
+        defaultAgentId,
+        selectedAgentId: stateRef.current.activeAgentId || stateRef.current.selectedAgentId || defaultAgentId,
+      })).catch(() => undefined);
       void client.latestAndroidRelease()
         .then((release) => commit({
           requiredUpdate: requiresAndroidUpdate(release, installedAndroidVersionCode()) ? release : null,
@@ -259,6 +293,9 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       lastConnectedAt: 0,
       requiredUpdate: null,
       availableUpdate: null,
+      agents: [],
+      activeAgentId: "",
+      selectedAgentId: "knoa",
     });
   }, [commit]);
 
@@ -268,6 +305,8 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     commit({
       sessionHandle: "",
       latestEvent: null,
+      activeAgentId: "",
+      selectedAgentId: stateRef.current.defaultAgentId,
     });
   }, [commit]);
 
@@ -276,14 +315,17 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     if (current) return current;
     if (!provisionalConversationRef.current) {
       provisionalConversationRef.current = runAuthenticated(
-        (client) => client.createSession(),
-      ).catch((error) => {
+        (client) => client.createSession(stateRef.current.selectedAgentId),
+      ).then((sessionHandle) => {
+        commit({ activeAgentId: stateRef.current.selectedAgentId });
+        return sessionHandle;
+      }).catch((error) => {
         provisionalConversationRef.current = null;
         throw error;
       });
     }
     return provisionalConversationRef.current;
-  }, [runAuthenticated]);
+  }, [commit, runAuthenticated]);
 
   const commitConversation = useCallback(async (sessionHandle: string) => {
     if (!sessionHandle) throw new Error("会话尚未创建");
@@ -297,8 +339,14 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     const session = await runAuthenticated((client) => client.getConversationSession(sessionHandle));
     if (session.state === "archived") throw new Error("请先恢复已归档的会话");
     await storeCoreSession(sessionHandle);
-    commit({ sessionHandle, latestEvent: null });
+    commit({ sessionHandle, latestEvent: null, activeAgentId: session.agent_id, selectedAgentId: session.agent_id });
   }, [commit, runAuthenticated]);
+
+  const selectAgent = useCallback((agentId: string) => {
+    if (stateRef.current.activeAgentId || stateRef.current.sessionHandle) return;
+    if (!stateRef.current.agents.some((agent) => agent.agent_id === agentId)) return;
+    commit({ selectedAgentId: agentId });
+  }, [commit]);
 
   const value = useMemo<GatewayState>(
     () => ({
@@ -314,8 +362,9 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       connection,
       runAuthenticated,
       subscribeEvents,
+      selectAgent,
     }),
-    [commitConversation, connect, connection, ensureConversation, newConversation, openConversation, pair, reauthenticate, removeConnection, runAuthenticated, state, subscribeEvents],
+    [commitConversation, connect, connection, ensureConversation, newConversation, openConversation, pair, reauthenticate, removeConnection, runAuthenticated, selectAgent, state, subscribeEvents],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

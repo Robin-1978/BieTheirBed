@@ -4,7 +4,7 @@
 
 ## Architecture
 
-- [PC Assistant Architecture](architecture.md)
+- [Knoa Architecture](architecture.md)
 - [Knoa Product Forward Blueprint](knoa-product-forward-blueprint.md)
 - [Knoa Product Forward Implementation Plan](knoa-product-forward-implementation-plan.md)
 - [Knoa User Experience Audit](knoa-user-experience-audit.md)
@@ -13,7 +13,7 @@
 - [Knoa Mobile App Forward Design](knoa-mobile-app-design.md)
 - [Knoa Capability Extension Design](knoa-capability-extension-design.md)
 - [Knoa Standard MCP Host Design](knoa-standard-mcp-host-design.md)
-- [Knoa Unified Agent Runtime Provider Design](knoa-agent-runtime-provider-design.md)
+- [Knoa Unified Agent Runtime Design](knoa-agent-runtime-design.md)
 - [Knoa Durable Task Design](knoa-durable-task-design.md)
 - [Knoa Task Product Design](knoa-task-product-design.md)
 - [Knoa Conversation Forward Design](knoa-conversation-design.md)

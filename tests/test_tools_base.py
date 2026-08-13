@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from pc_assistant.tools.base import (
+from knoa_platform.tools.base import (
     BUILTIN_TOOL_ORIGIN,
     ToolBase,
     ToolEffect,
@@ -9,7 +9,7 @@ from pc_assistant.tools.base import (
     ToolOriginKind,
     ToolRisk,
 )
-from pc_assistant.tools.registry import ToolRegistry
+from knoa_platform.tools.registry import ToolRegistry
 
 
 class DummyTool(ToolBase):
@@ -108,6 +108,17 @@ def test_registry_describes_visible_tool_policy_and_origin():
     assert descriptor.origin == BUILTIN_TOOL_ORIGIN
     assert descriptor.policy.effect is ToolEffect.READ_ONLY
     assert descriptor.requires_confirmation is False
+
+
+def test_registry_returns_complete_standard_mcp_definition() -> None:
+    registry = ToolRegistry()
+    registry.register(DummyTool())
+
+    definition = registry.definitions_for(frozenset())[0]
+
+    assert definition["name"] == "dummy"
+    assert definition["description"] == "A dummy tool for testing"
+    assert definition["inputSchema"]["type"] == "object"
 
 
 def test_registry_empty_name():

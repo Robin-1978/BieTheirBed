@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from pc_assistant.config import AppConfig, load_config
+from knoa_platform.config import AppConfig, load_config
 
 
 class TestAppConfig:
@@ -17,6 +17,27 @@ class TestAppConfig:
         assert cfg.owner_principal_id == "personal:owner"
         assert cfg.owner_principal_aliases == ("local",)
         assert cfg.gateway_artifact_max_bytes == 32 * 1024 * 1024
+        assert cfg.default_agent == "knoa"
+        assert cfg.agents["knoa"].enabled is True
+        assert cfg.agents["codex"].enabled is False
+
+    def test_codex_can_be_selected_as_dynamic_default(self):
+        cfg = AppConfig(
+            default_agent="codex",
+            agents={
+                "knoa": {"enabled": True, "max_concurrency": 4},
+                "codex": {
+                    "enabled": True,
+                    "command": ["codex", "app-server"],
+                },
+            },
+        )
+
+        assert cfg.default_agent == "codex"
+
+    def test_agent_configuration_is_a_small_trusted_set(self):
+        with pytest.raises(ValueError, match="trusted knoa and codex"):
+            AppConfig(agents={"knoa": {}, "arbitrary_plugin": {}})
 
     def test_audio_transcription_requires_public_mcp_tool(self):
         with pytest.raises(ValueError, match="requires an MCP tool"):
@@ -256,22 +277,22 @@ class TestAppConfig:
         assert cfg.resolve_fallback_model() is None
 
     def test_loads_user_config_outside_working_directory(self, monkeypatch, tmp_path):
-        app_home = tmp_path / ".pc-assistant"
+        app_home = tmp_path / ".knoa"
         user_config = app_home / "config" / "local.yaml"
         user_config.parent.mkdir(parents=True)
         user_config.write_text("max_iterations: 19\n", encoding="utf-8")
-        monkeypatch.setenv("PC_ASSISTANT_HOME", str(app_home))
+        monkeypatch.setenv("KNOA_HOME", str(app_home))
         monkeypatch.chdir(tmp_path)
         assert load_config().max_iterations == 19
 
     def test_explicit_config_overrides_user_config(self, monkeypatch, tmp_path):
-        app_home = tmp_path / ".pc-assistant"
+        app_home = tmp_path / ".knoa"
         user_config = app_home / "config" / "local.yaml"
         user_config.parent.mkdir(parents=True)
         user_config.write_text("max_iterations: 19\n", encoding="utf-8")
         explicit = tmp_path / "selected.yaml"
         explicit.write_text("max_iterations: 23\n", encoding="utf-8")
-        monkeypatch.setenv("PC_ASSISTANT_HOME", str(app_home))
+        monkeypatch.setenv("KNOA_HOME", str(app_home))
         cfg = load_config(explicit)
         assert cfg.max_iterations == 23
         assert cfg.source_config_path == str(explicit.resolve())

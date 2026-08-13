@@ -125,7 +125,7 @@ export default function PairScreen() {
       </AppPressable>
       {advanced ? (
         <View style={styles.advancedCard}>
-          <Text style={styles.command} selectable>pca gateway pair --ttl 300</Text>
+          <Text style={styles.command} selectable>knoa gateway pair --ttl 300</Text>
           <Text style={styles.or}>{t("pair.orPaste")}</Text>
           <TextInput
             style={[styles.input, styles.payload]}

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from pc_assistant.tools.exchange import ExchangeTool
-from pc_assistant.tools.weather import WeatherTool
-from pc_assistant.tools.web_fetch import WebFetchTool
-from pc_assistant.tools.web_search import WebSearchTool
+from knoa_platform.tools.exchange import ExchangeTool
+from knoa_platform.tools.weather import WeatherTool
+from knoa_platform.tools.web_fetch import WebFetchTool
+from knoa_platform.tools.web_search import WebSearchTool
 
 
 @pytest.mark.asyncio

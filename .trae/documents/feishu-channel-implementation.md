@@ -2,7 +2,7 @@
 
 ## 概述
 
-参考 `/home/robin/ws/per/notifier/lark.py` 的飞书通道实现，为 BieTheirBed 的 PC Assistant Agent 添加飞书 Channel 支持，使用户可以通过飞书与 Agent 交互。
+参考 `/home/robin/ws/per/notifier/lark.py` 的飞书通道实现，为 BieTheirBed 的 Knoa Agent 添加飞书 Channel 支持，使用户可以通过飞书与 Agent 交互。
 
 ## 架构设计
 

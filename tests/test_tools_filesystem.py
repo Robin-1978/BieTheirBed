@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from pc_assistant.tools.read_file import ReadFileTool
-from pc_assistant.tools.write_file import WriteFileTool
+from knoa_platform.tools.read_file import ReadFileTool
+from knoa_platform.tools.write_file import WriteFileTool
 
 
 class TestReadFileToolName:

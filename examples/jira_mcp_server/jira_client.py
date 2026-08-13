@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import sqlite3
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,6 +29,17 @@ _TEXT_MIME_TYPES = frozenset(
         "application/x-yaml",
     }
 )
+_RASTER_IMAGE_MIME_TYPES = frozenset(
+    {"image/gif", "image/jpeg", "image/png", "image/webp"}
+)
+_IMAGE_FORMAT_FOR_MIME = {
+    "image/gif": "GIF",
+    "image/jpeg": "JPEG",
+    "image/png": "PNG",
+    "image/webp": "WEBP",
+}
+_MAX_ANALYSIS_PROMPT_BYTES = 64 * 1024
+logger = logging.getLogger("jira-mcp-example.client")
 
 
 def _required_env(name: str) -> str:
@@ -47,6 +60,16 @@ def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
     return value
 
 
+def _optional_path(name: str) -> Path | None:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    path = Path(raw).expanduser().resolve()
+    if path == Path(path.anchor):
+        raise ValueError(f"{name} must not be a filesystem root")
+    return path
+
+
 @dataclass(frozen=True)
 class JiraSettings:
     base_url: str
@@ -59,6 +82,11 @@ class JiraSettings:
     retention_days: int
     max_issues: int
     state_path: Path
+    attachment_root: Path
+    code_root: Path | None
+    log_root: Path | None
+    analysis_prompt_path: Path | None
+    max_attachment_bytes: int
     write_enabled: bool
 
     @classmethod
@@ -72,6 +100,12 @@ class JiraSettings:
         auth_mode = os.environ.get("JIRA_AUTH_MODE", "basic").strip().lower()
         if auth_mode not in {"basic", "bearer"}:
             raise ValueError("JIRA_AUTH_MODE must be basic or bearer")
+        username = os.environ.get("JIRA_USERNAME", "").strip()
+        if auth_mode == "basic" and not username:
+            raise ValueError(
+                "Required environment variable is not set for basic auth: "
+                "JIRA_USERNAME"
+            )
         api_version = os.environ.get("JIRA_API_VERSION", "2").strip()
         if api_version not in {"2", "3"}:
             raise ValueError("JIRA_API_VERSION must be 2 or 3")
@@ -79,15 +113,27 @@ class JiraSettings:
             Path(
                 os.environ.get(
                     "JIRA_MCP_STATE_PATH",
-                    "~/.pc-assistant/data/jira-mcp-example.db",
+                    "~/.knoa/data/jira-mcp-example.db",
                 )
             )
             .expanduser()
             .resolve()
         )
+        attachment_root = (
+            Path(
+                os.environ.get(
+                    "JIRA_ATTACHMENT_ROOT",
+                    "~/.knoa/jira-evidence",
+                )
+            )
+            .expanduser()
+            .resolve()
+        )
+        if attachment_root == Path(attachment_root.anchor):
+            raise ValueError("JIRA_ATTACHMENT_ROOT must not be a filesystem root")
         return cls(
             base_url=base_url,
-            username=_required_env("JIRA_USERNAME"),
+            username=username,
             api_token=_required_env("JIRA_API_TOKEN"),
             auth_mode=auth_mode,
             api_version=api_version,
@@ -102,9 +148,43 @@ class JiraSettings:
             retention_days=_bounded_int("JIRA_EVENT_RETENTION_DAYS", 7, 1, 365),
             max_issues=_bounded_int("JIRA_MAX_ISSUES", 100, 1, 500),
             state_path=state_path,
+            attachment_root=attachment_root,
+            code_root=_optional_path("JIRA_CODE_ROOT"),
+            log_root=_optional_path("JIRA_LOG_ROOT"),
+            analysis_prompt_path=_optional_path("JIRA_ANALYSIS_PROMPT_PATH"),
+            max_attachment_bytes=_bounded_int(
+                "JIRA_MAX_ATTACHMENT_BYTES",
+                100 * 1024 * 1024,
+                1024,
+                2 * 1024 * 1024 * 1024,
+            ),
             write_enabled=os.environ.get("JIRA_WRITE_ENABLED", "false").strip().lower()
             in {"1", "true", "yes", "on"},
         )
+
+    def analysis_instructions(self) -> str:
+        path = self.analysis_prompt_path
+        if path is None:
+            return (
+                "Correlate Jira evidence, logs and source code. Produce a problem "
+                "summary, evidence, likely root cause, affected code, verification "
+                "plan, remediation proposal and Jira comment draft. Do not write a "
+                "Jira comment or modify source code without explicit user approval."
+            )
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("JIRA_ANALYSIS_PROMPT_PATH must be a regular file")
+        data = path.read_bytes()
+        if len(data) > _MAX_ANALYSIS_PROMPT_BYTES:
+            raise ValueError(
+                f"JIRA analysis prompt exceeds {_MAX_ANALYSIS_PROMPT_BYTES} bytes"
+            )
+        try:
+            prompt = data.decode("utf-8").strip()
+        except UnicodeDecodeError as exc:
+            raise ValueError("Jira analysis prompt must be UTF-8 text") from exc
+        if not prompt:
+            raise ValueError("Jira analysis prompt must not be empty")
+        return prompt
 
 
 def validate_issue_key(issue_key: str) -> str:
@@ -289,6 +369,7 @@ class JiraClient:
         )
         self._current_user_ids: set[str] = set()
         self._comment_locks: dict[str, asyncio.Lock] = {}
+        self._materialize_locks: dict[str, asyncio.Lock] = {}
 
     @property
     def api_root(self) -> str:
@@ -361,12 +442,28 @@ class JiraClient:
                     f"initial:{issue.get('id', issue_key)}:{fields.get('created', '')}"
                 )
             event_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
+            if self.store.get_assignment_event(event_id) is not None:
+                continue
+            try:
+                evidence = await self.materialize_issue(issue_key)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Jira evidence materialization failed for %s", issue_key)
+                continue
             if self.store.add_assignment_event(
                 event_id,
                 issue_key,
                 retention_seconds=retention,
             ):
-                created.append({"event_id": event_id, "issue_key": issue_key})
+                created.append(
+                    {
+                        "event_id": event_id,
+                        "issue_key": issue_key,
+                        "evidence_directory": str(evidence["evidence_directory"]),
+                        "manifest": str(evidence["manifest"]),
+                    }
+                )
         return tuple(created)
 
     async def get_issue(
@@ -435,13 +532,7 @@ class JiraClient:
 
     async def list_attachments(self, issue_key: str) -> tuple[dict[str, Any], ...]:
         key = validate_issue_key(issue_key)
-        issue = await self._request(
-            "GET",
-            f"{self.api_root}/issue/{key}",
-            params={"fields": "attachment"},
-        )
-        fields = issue.get("fields", {}) if isinstance(issue, dict) else {}
-        attachments = fields.get("attachment", []) if isinstance(fields, dict) else []
+        attachments = await self._attachment_records(key)
         return tuple(
             {
                 "id": str(item.get("id", "")),
@@ -454,6 +545,242 @@ class JiraClient:
             if isinstance(item, dict)
         )
 
+    async def _attachment_records(self, issue_key: str) -> tuple[dict[str, Any], ...]:
+        key = validate_issue_key(issue_key)
+        issue = await self._request(
+            "GET",
+            f"{self.api_root}/issue/{key}",
+            params={"fields": "attachment"},
+        )
+        fields = issue.get("fields", {}) if isinstance(issue, dict) else {}
+        attachments = fields.get("attachment", []) if isinstance(fields, dict) else []
+        return tuple(item for item in attachments[:100] if isinstance(item, dict))
+
+    def _attachment(self, attachments: tuple[dict[str, Any], ...], attachment_id: str) -> dict[str, Any]:
+        normalized_id = attachment_id.strip()
+        if not _ATTACHMENT_ID.fullmatch(normalized_id):
+            raise ValueError("Invalid Jira attachment ID")
+        match = next(
+            (item for item in attachments if str(item.get("id", "")) == normalized_id),
+            None,
+        )
+        if match is None:
+            raise LookupError("Jira attachment does not belong to the issue")
+        return match
+
+    def _attachment_url(self, attachment: dict[str, Any]) -> str:
+        content_url = str(attachment.get("content", ""))
+        target = urlsplit(urljoin(f"{self.settings.base_url}/", content_url))
+        base = urlsplit(self.settings.base_url)
+        if (
+            target.username
+            or target.password
+            or target.scheme != base.scheme
+            or target.hostname != base.hostname
+            or target.port != base.port
+            or target.fragment
+        ):
+            raise ValueError("Jira attachment URL is outside the configured Jira origin")
+        return target.geturl()
+
+    @staticmethod
+    def _safe_filename(attachment_id: str, filename: str) -> str:
+        basename = Path(filename.replace("\\", "/")).name.strip()
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", basename).strip("._")
+        if not safe:
+            safe = "attachment.bin"
+        safe = safe[:180]
+        return f"{attachment_id}-{safe}"
+
+    @staticmethod
+    def _write_json(path: Path, value: Any) -> None:
+        if path.is_symlink():
+            raise ValueError("Jira evidence file must not be a symbolic link")
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporary.write_text(
+                json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2, default=str)
+                + "\n",
+                encoding="utf-8",
+            )
+            temporary.chmod(0o600)
+            os.replace(temporary, path)
+            path.chmod(0o600)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    @staticmethod
+    def _private_directory(path: Path) -> None:
+        if path.is_symlink():
+            raise ValueError("Jira evidence directory must not be a symbolic link")
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if path.is_symlink() or not path.is_dir():
+            raise ValueError("Jira evidence directory is invalid")
+        path.chmod(0o700)
+
+    async def download_attachment(
+        self,
+        issue_key: str,
+        attachment_id: str,
+        *,
+        attachments: tuple[dict[str, Any], ...] | None = None,
+    ) -> dict[str, Any]:
+        key = validate_issue_key(issue_key)
+        records = attachments if attachments is not None else await self._attachment_records(key)
+        attachment = self._attachment(records, attachment_id)
+        normalized_id = str(attachment.get("id", "")).strip()
+        declared_size = max(0, int(attachment.get("size", 0) or 0))
+        if declared_size > self.settings.max_attachment_bytes:
+            raise ValueError("Jira attachment exceeds JIRA_MAX_ATTACHMENT_BYTES")
+        issue_root = self.settings.attachment_root / key
+        attachment_root = issue_root / "attachments"
+        self._private_directory(self.settings.attachment_root)
+        self._private_directory(issue_root)
+        self._private_directory(attachment_root)
+        target = attachment_root / self._safe_filename(
+            normalized_id,
+            str(attachment.get("filename", "")),
+        )
+        if target.is_symlink():
+            raise ValueError("Jira evidence file must not be a symbolic link")
+        if target.exists():
+            size = target.stat().st_size
+            if size > self.settings.max_attachment_bytes:
+                raise ValueError("Existing Jira attachment exceeds the configured limit")
+            if declared_size and size != declared_size:
+                raise ValueError("Existing Jira attachment size does not match Jira metadata")
+            return self._download_result(attachment, target, reused=True)
+
+        temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+        digest = hashlib.sha256()
+        written = 0
+        try:
+            async with self._client.stream(
+                "GET",
+                self._attachment_url(attachment),
+            ) as response:
+                response.raise_for_status()
+                content_length = response.headers.get("content-length")
+                if content_length:
+                    try:
+                        response_size = int(content_length)
+                    except ValueError as exc:
+                        raise ValueError("Jira attachment Content-Length is invalid") from exc
+                    if response_size > self.settings.max_attachment_bytes:
+                        raise ValueError("Jira attachment exceeds JIRA_MAX_ATTACHMENT_BYTES")
+                with temporary.open("xb") as output:
+                    temporary.chmod(0o600)
+                    async for chunk in response.aiter_bytes():
+                        written += len(chunk)
+                        if written > self.settings.max_attachment_bytes:
+                            raise ValueError("Jira attachment exceeds JIRA_MAX_ATTACHMENT_BYTES")
+                        output.write(chunk)
+                        digest.update(chunk)
+                    output.flush()
+                    os.fsync(output.fileno())
+            if declared_size and written != declared_size:
+                raise ValueError("Downloaded Jira attachment size does not match Jira metadata")
+            self._validate_downloaded_attachment(attachment, temporary)
+            os.replace(temporary, target)
+            target.chmod(0o600)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return self._download_result(
+            attachment,
+            target,
+            reused=False,
+            sha256=digest.hexdigest(),
+        )
+
+    @staticmethod
+    def _validate_downloaded_attachment(
+        attachment: dict[str, Any],
+        path: Path,
+    ) -> None:
+        mime_type = str(attachment.get("mimeType", "")).lower()
+        if mime_type not in _RASTER_IMAGE_MIME_TYPES:
+            return
+        try:
+            from PIL import Image, UnidentifiedImageError
+
+            with Image.open(path) as image:
+                if image.format != _IMAGE_FORMAT_FOR_MIME[mime_type]:
+                    raise ValueError(
+                        "Jira image attachment format does not match its MIME type"
+                    )
+                image.verify()
+        except (OSError, UnidentifiedImageError) as exc:
+            raise ValueError("Jira image attachment content is invalid") from exc
+
+    @staticmethod
+    def _download_result(
+        attachment: dict[str, Any],
+        path: Path,
+        *,
+        reused: bool,
+        sha256: str = "",
+    ) -> dict[str, Any]:
+        if not sha256:
+            digest = hashlib.sha256()
+            with path.open("rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            sha256 = digest.hexdigest()
+        return {
+            "attachment_id": str(attachment.get("id", "")),
+            "filename": str(attachment.get("filename", ""))[:1000],
+            "mime_type": str(
+                attachment.get("mimeType", "application/octet-stream")
+            )[:256],
+            "size": path.stat().st_size,
+            "sha256": sha256,
+            "path": str(path),
+            "reused": reused,
+        }
+
+    async def materialize_issue(self, issue_key: str) -> dict[str, Any]:
+        key = validate_issue_key(issue_key)
+        lock = self._materialize_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            issue_root = self.settings.attachment_root / key
+            self._private_directory(self.settings.attachment_root)
+            self._private_directory(issue_root)
+            issue = await self.get_issue(key, changelog=True)
+            comments = await self.get_comments(key, limit=100)
+            attachments = await self._attachment_records(key)
+            downloaded: list[dict[str, Any]] = []
+            for attachment in attachments:
+                attachment_id = str(attachment.get("id", ""))
+                downloaded.append(
+                    await self.download_attachment(
+                        key,
+                        attachment_id,
+                        attachments=attachments,
+                    )
+                )
+            issue_path = issue_root / "issue.json"
+            comments_path = issue_root / "comments.json"
+            manifest_path = issue_root / "manifest.json"
+            self._write_json(issue_path, issue)
+            self._write_json(comments_path, {"comments": comments})
+            manifest = {
+                "format": "knoa-jira-evidence-v1",
+                "issue_key": key,
+                "materialized_at": time.time(),
+                "evidence_directory": str(issue_root),
+                "issue": str(issue_path),
+                "comments": str(comments_path),
+                "attachments": downloaded,
+            }
+            self._write_json(manifest_path, manifest)
+            return {
+                "issue_key": key,
+                "evidence_directory": str(issue_root),
+                "manifest": str(manifest_path),
+                "attachment_count": len(downloaded),
+                "attachments": downloaded,
+            }
+
     async def get_attachment_excerpt(
         self,
         issue_key: str,
@@ -463,46 +790,16 @@ class JiraClient:
     ) -> dict[str, Any]:
         key = validate_issue_key(issue_key)
         normalized_id = attachment_id.strip()
-        if not _ATTACHMENT_ID.fullmatch(normalized_id):
-            raise ValueError("Invalid Jira attachment ID")
         bounded_max = max(1024, min(max_bytes, 262_144))
-        issue = await self._request(
-            "GET",
-            f"{self.api_root}/issue/{key}",
-            params={"fields": "attachment"},
-        )
-        fields = issue.get("fields", {}) if isinstance(issue, dict) else {}
-        attachments = fields.get("attachment", []) if isinstance(fields, dict) else []
-        match = next(
-            (
-                item
-                for item in attachments
-                if isinstance(item, dict) and str(item.get("id", "")) == normalized_id
-            ),
-            None,
-        )
-        if match is None:
-            raise LookupError("Jira attachment does not belong to the issue")
+        attachments = await self._attachment_records(key)
+        match = self._attachment(attachments, normalized_id)
         mime_type = str(match.get("mimeType", "application/octet-stream")).lower()
         if (
             not mime_type.startswith(_TEXT_MIME_PREFIXES)
             and mime_type not in _TEXT_MIME_TYPES
         ):
             raise ValueError("Jira attachment is not a supported text type")
-        content_url = str(match.get("content", ""))
-        target = urlsplit(urljoin(f"{self.settings.base_url}/", content_url))
-        base = urlsplit(self.settings.base_url)
-        if (
-            target.username
-            or target.password
-            or target.scheme != base.scheme
-            or target.hostname != base.hostname
-            or target.port != base.port
-        ):
-            raise ValueError(
-                "Jira attachment URL is outside the configured Jira origin"
-            )
-        async with self._client.stream("GET", target.geturl()) as response:
+        async with self._client.stream("GET", self._attachment_url(match)) as response:
             response.raise_for_status()
             chunks = bytearray()
             async for chunk in response.aiter_bytes():

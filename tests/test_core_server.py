@@ -5,13 +5,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import (
+from knoa_platform.agent_runtime.contracts import (
     ArtifactTranscriptionResult,
     HealthStatus,
     RuntimeScope,
 )
-from pc_assistant.conversation.models import ChatApproval
-from pc_assistant.service.core_api import (
+from knoa_platform.conversation.models import ChatApproval
+from knoa_platform.service.core_api import (
     AuthenticateRequest,
     CancelTaskRequest,
     CreateSessionRequest,
@@ -24,11 +24,12 @@ from pc_assistant.service.core_api import (
     SubscribePrincipalTaskEventsRequest,
     SubscribeTaskRequest,
     TranscribeArtifactRequest,
+    UnsubscribeRequest,
     parse_core_server_message_json,
 )
-from pc_assistant.service.core_auth import StaticTokenAuthenticator
-from pc_assistant.service.core_server import CoreServer
-from pc_assistant.tasks import (
+from knoa_platform.service.core_auth import StaticTokenAuthenticator
+from knoa_platform.service.core_server import CoreServer
+from knoa_platform.tasks import (
     PrincipalTaskEvent,
     TaskCapacityError,
     TaskCancelResult,
@@ -175,7 +176,7 @@ class FakeTasks:
 
 
 class FakeControl:
-    async def create_session(self, principal_id: str) -> RuntimeScope:
+    async def create_session(self, principal_id: str, **_kwargs) -> RuntimeScope:
         return RuntimeScope(principal_id=principal_id, session_handle="session-a")
 
 
@@ -219,6 +220,7 @@ def _task_record(task_id: str):
     return SimpleNamespace(
         task_id=task_id,
         session_handle="session-a",
+        agent_id="knoa",
         client_request_id="request-a",
         parent_task_id="",
         goal="hello",
@@ -416,6 +418,35 @@ async def test_disconnect_closes_subscription_without_cancelling_task() -> None:
         "task_subscribed",
         "task_event",
     ]
+
+
+@pytest.mark.asyncio
+async def test_unsubscribe_releases_slot_without_cancelling_task() -> None:
+    tasks = FakeTasks()
+    websocket = FakeWebSocket()
+    server_task = asyncio.create_task(_server(tasks).handle(websocket))
+
+    await websocket.push(AuthenticateRequest(request_id="auth", credential="token-a"))
+    await websocket.push(
+        SubscribeTaskRequest(request_id="subscribe", task_id="task-a")
+    )
+    await websocket.wait_sent(3)
+    await websocket.push(
+        UnsubscribeRequest(
+            request_id="unsubscribe",
+            subscription_request_id="subscribe",
+        )
+    )
+    await websocket.wait_sent(4)
+    await asyncio.wait_for(tasks.subscription_closed.wait(), timeout=2.0)
+    await websocket.close_input()
+    await server_task
+
+    assert tasks.cancelled == []
+    message = websocket.messages()[-1]
+    assert message.message_type == "unsubscribed"
+    assert message.subscription_request_id == "subscribe"
+    assert message.released is True
 
 
 @pytest.mark.asyncio

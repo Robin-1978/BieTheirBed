@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from pc_assistant.branding import ASSISTANT_IDENTITY
-from pc_assistant.context.assembly import truncate_messages
-from pc_assistant.context.prompt import build_system_prompt
-from pc_assistant.context.tags import (
+from knoa_platform.branding import ASSISTANT_IDENTITY
+from knoa_platform.context.assembly import truncate_messages
+from knoa_platform.context.prompt import build_system_prompt
+from knoa_platform.context.tags import (
     parse_tool_result_payload,
     tool_result_status,
     wrap_tool_result,

@@ -1,4 +1,4 @@
-# PC Assistant 知识库方案
+# Knoa 知识库方案
 
 ## 现状分析
 

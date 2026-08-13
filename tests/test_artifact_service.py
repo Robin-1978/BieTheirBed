@@ -4,20 +4,20 @@ from pathlib import Path
 
 import pytest
 
-from pc_assistant.agent_runtime.artifact_service import (
+from knoa_platform.agent_runtime.artifact_service import (
     ArtifactDownloadTooLargeError,
     ArtifactNotFoundError,
     ArtifactService,
     InvalidArtifactError,
 )
-from pc_assistant.agent_runtime.contracts import (
+from knoa_platform.agent_runtime.contracts import (
     ArtifactDownloadRequest,
     ArtifactUploadRequest,
     RuntimeScope,
 )
-from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
-from pc_assistant.artifacts import ArtifactStore
-from pc_assistant.exceptions import SessionNotFoundError
+from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
+from knoa_platform.artifacts import ArtifactStore
+from knoa_platform.exceptions import SessionNotFoundError
 
 
 DATA_URL = (
@@ -158,7 +158,7 @@ async def test_download_rejects_artifact_above_wire_limit(
     scope = sessions.create("principal-a")
     uploaded = await service.upload(scope, ArtifactUploadRequest(data_url=DATA_URL))
     monkeypatch.setattr(
-        "pc_assistant.agent_runtime.artifact_service.MAX_ARTIFACT_DOWNLOAD_BYTES",
+        "knoa_platform.agent_runtime.artifact_service.MAX_ARTIFACT_DOWNLOAD_BYTES",
         1,
     )
 

@@ -5,10 +5,10 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from pc_assistant.artifacts import ArtifactRef
-from pc_assistant.agent_runtime.contracts import ArtifactTranscriptionResult
-from pc_assistant.automation import ScheduleKind, ScheduleSpec
-from pc_assistant.service.core_api import (
+from knoa_platform.artifacts import ArtifactRef
+from knoa_platform.agent_runtime.contracts import ArtifactTranscriptionResult
+from knoa_platform.automation import ScheduleKind, ScheduleSpec
+from knoa_platform.service.core_api import (
     CreateSessionRequest,
     CreateScheduleRequest,
     CreateTriggerRequest,
@@ -24,6 +24,7 @@ from pc_assistant.service.core_api import (
     ResumeScheduleRequest,
     SubscribePrincipalTaskEventsRequest,
     SubscribeTaskRequest,
+    UnsubscribeRequest,
     PrincipalTaskEventMessage,
     TaskEventMessage,
     TranscribeArtifactRequest,
@@ -32,7 +33,7 @@ from pc_assistant.service.core_api import (
     parse_core_request_json,
     parse_core_server_message_json,
 )
-from pc_assistant.tasks import (
+from knoa_platform.tasks import (
     PrincipalTaskEvent,
     TaskEvent,
     TaskEventPayload,
@@ -92,6 +93,18 @@ def test_task_commands_are_versioned_and_method_specific() -> None:
                 }
             )
         )
+
+
+def test_unsubscribe_targets_an_existing_subscription_request() -> None:
+    request = parse_core_request_json(
+        UnsubscribeRequest(
+            request_id="unsubscribe-1",
+            subscription_request_id="principal-feed-1",
+        ).model_dump_json()
+    )
+
+    assert isinstance(request, UnsubscribeRequest)
+    assert request.subscription_request_id == "principal-feed-1"
 
 
 def test_principal_task_event_feed_is_strict_and_versioned() -> None:

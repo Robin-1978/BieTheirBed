@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import pytest
 
-from pc_assistant.extensions import (
+from knoa_platform.extensions import (
     ExtensionDescriptor,
     ExtensionKind,
     ExtensionManager,
     ExtensionState,
 )
-from pc_assistant.tools.base import (
+from knoa_platform.tools.base import (
     ToolBase,
     ToolEffect,
     ToolRisk,
 )
-from pc_assistant.tools.registry import ToolRegistry
+from knoa_platform.tools.registry import ToolRegistry
 
 
 class _Tool(ToolBase):

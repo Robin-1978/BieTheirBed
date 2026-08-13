@@ -4,10 +4,10 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import patch
 
-from pc_assistant.ui.clipboard import available_tool, copy_or_save, copy_to_clipboard
-from pc_assistant.config import AppConfig
-from pc_assistant.ui.core_app import CoreChatApp
-from pc_assistant.ui.widgets import CommandOutput, UserMessage
+from knoa_platform.ui.clipboard import available_tool, copy_or_save, copy_to_clipboard
+from knoa_platform.config import AppConfig
+from knoa_platform.ui.core_app import CoreChatApp
+from knoa_platform.ui.widgets import CommandOutput, UserMessage
 
 
 def _run(coro):
@@ -33,22 +33,22 @@ class TestClipboardHelpers:
     def _xclip_only(tool: str) -> str:
         return "/usr/bin/xclip" if tool == "xclip" else ""
 
-    @patch("pc_assistant.ui.clipboard.shutil.which", side_effect=_xclip_only)
+    @patch("knoa_platform.ui.clipboard.shutil.which", side_effect=_xclip_only)
     def test_posix_popen_path(self, mock_which):
-        with patch("pc_assistant.ui.clipboard.subprocess.Popen", return_value=self.FakeProc()) as popen:
+        with patch("knoa_platform.ui.clipboard.subprocess.Popen", return_value=self.FakeProc()) as popen:
             ok, detail = _run(copy_to_clipboard("hello clipboard"))
         assert ok is True
         assert "xclip" in detail
         popen.assert_called_once()
         assert popen.call_args.kwargs.get("start_new_session") is True
 
-    @patch("pc_assistant.ui.clipboard.subprocess.Popen", side_effect=RuntimeError("boom"))
-    @patch("pc_assistant.ui.clipboard.shutil.which", side_effect=_xclip_only)
+    @patch("knoa_platform.ui.clipboard.subprocess.Popen", side_effect=RuntimeError("boom"))
+    @patch("knoa_platform.ui.clipboard.shutil.which", side_effect=_xclip_only)
     def test_proc_exception_returns_false(self, mock_which, mock_popen):
         ok, detail = _run(copy_to_clipboard("hi"))
         assert ok is False
 
-    @patch("pc_assistant.ui.clipboard.shutil.which", return_value="")
+    @patch("knoa_platform.ui.clipboard.shutil.which", return_value="")
     def test_fallback_writes_file(self, mock_which, tmp_path):
         fallback = str(tmp_path / "clip.txt")
         ok, detail = _run(copy_or_save("saved content", fallback_path=fallback))
@@ -70,7 +70,7 @@ class TestWidgetCopyText:
     def test_assistant_message_copy(self):
         from types import SimpleNamespace
 
-        from pc_assistant.ui.widgets import AssistantMessage, ToolCallPanel
+        from knoa_platform.ui.widgets import AssistantMessage, ToolCallPanel
 
         msg = AssistantMessage()
         panel = ToolCallPanel("shell", {"command": "ls"})

@@ -109,7 +109,7 @@ preconditions consume stable target and transform contracts.
 | C5 | `vision/a11y.py`, `vision/grid.py`, `tools/ui.py`, `tools/screen.py`, window integration, tests | 5 files, ~190 lines | Target and image coordinates map to a fresh desktop target | Duplicate/stale/hidden targets fail closed; negative origin, DPI, rotation, and crop transforms tested | `pytest tests/test_layer2_gui.py tests/test_window.py` |
 | C6 | `harness/verifier.py`, verified executor boundary, `agent.py`, audit/idempotency integration, tests | 5 files, ~180 lines | Authorization precedes exactly one execution and postcondition follows it | Registry cannot be used as public bypass; visual prompt injection cannot expand authority; failure stops/reobserves | `pytest tests/test_harness.py tests/test_layer2_gui.py tests/test_agent.py` |
 
-Campaign gate: `pytest --cov=pc_assistant --cov-report=term-missing --cov-fail-under=80`.
+Campaign gate: `pytest --cov=knoa_platform --cov-report=term-missing --cov-fail-under=80`.
 
 Comparison:
 

@@ -28,17 +28,17 @@ runtime consumer.
 
 ## Investigation
 
-- `src/pc_assistant/agent.py:142-309` constructs the main/fallback model,
+- `src/knoa_platform/agent.py:142-309` constructs the main/fallback model,
   repositories, verifier/executor, session manager, recorders, artifact store,
   vision broker, tools, and cache plan inside `Agent.__init__`.
-- `src/pc_assistant/agent.py:685-779` reconstructs model dependencies during
+- `src/knoa_platform/agent.py:685-779` reconstructs model dependencies during
   configuration changes, creating a second construction site.
-- `src/pc_assistant/agent.py:111` defines the current internal event beside the
-  concrete runtime, while `src/pc_assistant/service/protocol.py` wraps that event
+- `src/knoa_platform/agent.py:111` defines the current internal event beside the
+  concrete runtime, while `src/knoa_platform/service/protocol.py` wraps that event
   in an unversioned service envelope.
-- `src/pc_assistant/service/agent_like.py` defines an inexact shared protocol:
+- `src/knoa_platform/service/agent_like.py` defines an inexact shared protocol:
   its asynchronous `cancel` does not match concrete `Agent.cancel`.
-- `src/pc_assistant/service/lifecycle.py` still falls back to an in-process
+- `src/knoa_platform/service/lifecycle.py` still falls back to an in-process
   `Agent`; its removal belongs to C4, not this Change.
 - Existing tests inject concrete dependencies by replacing private `Agent`
   members. C1 introduces constructor-level dependency seams; C2-C4 migrate the
@@ -48,7 +48,7 @@ runtime consumer.
 
 ### In scope
 
-- Add the non-colliding `pc_assistant.agent_runtime` package.
+- Add the non-colliding `knoa_platform.agent_runtime` package.
 - Define `RuntimeScope`, `RuntimeEvent`, Core API v1 `RunEvent`, exact async
   `AgentRuntimePort`, `TurnInvoker`, and operation-specific request-result types;
   every session-scoped signature takes `RuntimeScope`, while health is explicitly

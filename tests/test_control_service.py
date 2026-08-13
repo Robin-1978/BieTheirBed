@@ -4,16 +4,16 @@ from pathlib import Path
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import (
+from knoa_platform.agent_runtime.contracts import (
     ConfigSetRequest,
     ConfigSetResult,
     ExtensionStatusRecord,
     RuntimeScope,
 )
-from pc_assistant.agent_runtime.control import ControlService
-from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository, SessionSnapshot
-from pc_assistant.context.memory_db import SQLiteMemoryRepository
-from pc_assistant.exceptions import SessionNotFoundError
+from knoa_platform.agent_runtime.control import ControlService
+from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository, SessionSnapshot
+from knoa_platform.context.memory_db import SQLiteMemoryRepository
+from knoa_platform.exceptions import SessionNotFoundError
 
 
 class FakeConfigController:
@@ -63,6 +63,26 @@ async def test_control_service_creates_core_owned_session(tmp_path: Path) -> Non
 
     assert scope == RuntimeScope(principal_id="principal-a", session_handle="session-a")
     assert sessions.active("principal-a") == scope
+
+
+@pytest.mark.asyncio
+async def test_control_service_uses_dynamic_default_agent(tmp_path: Path) -> None:
+    handle_iter = iter(("session-a",))
+    sessions = RuntimeSessionRepository(
+        tmp_path / "assistant.db",
+        handle_factory=lambda: next(handle_iter),
+    )
+    service = ControlService(
+        sessions,
+        SQLiteMemoryRepository(tmp_path / "assistant.db"),
+        tool_names=lambda _scope: (),
+        config_controller=FakeConfigController(),
+        agent_selector=lambda requested: requested or "codex",
+    )
+
+    scope = await service.create_session("principal-a")
+
+    assert sessions.agent_id(scope) == "codex"
 
 
 @pytest.mark.asyncio

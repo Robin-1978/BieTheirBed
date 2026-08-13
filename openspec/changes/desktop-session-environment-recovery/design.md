@@ -41,7 +41,7 @@ post-action screen verification occurs.
 
 ## Boundaries and Interfaces
 
-`src/pc_assistant/desktop_session.py` owns:
+`src/knoa_platform/desktop_session.py` owns:
 
 - `DESKTOP_TOOL_NAMES`: the exact first-party tool names requiring a graphical
   session.
@@ -54,7 +54,7 @@ Only an allowlist may cross from session/process inspection into `os.environ`:
 `DISPLAY`, `XAUTHORITY`, `WAYLAND_DISPLAY`, `XDG_SESSION_TYPE`,
 `XDG_RUNTIME_DIR`, and `DBUS_SESSION_BUS_ADDRESS`.
 
-`src/pc_assistant/harness/executor.py` calls the function after consuming the
+`src/knoa_platform/harness/executor.py` calls the function after consuming the
 authorized capability and before `_registry._commit`. Resolver exceptions are
 converted through the existing structured tool-error path.
 

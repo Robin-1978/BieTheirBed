@@ -25,9 +25,9 @@ local connector. Device authentication remains enforced by the Gateway.
 Store the remotely managed Tunnel token outside the repository:
 
 ```bash
-install -d -m 700 ~/.pc-assistant/config
+install -d -m 700 ~/.knoa/config
 install -m 600 deploy/cloudflared/cloudflare.token.example \
-  ~/.pc-assistant/config/cloudflare.token
+  ~/.knoa/config/cloudflare.token
 ```
 
 Replace the example content in `cloudflare.token` with only the remotely

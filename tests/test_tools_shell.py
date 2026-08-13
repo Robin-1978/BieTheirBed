@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from pc_assistant.tools.shell import ShellTool
+from knoa_platform.tools.shell import ShellTool
 
 
 class TestShellToolName:

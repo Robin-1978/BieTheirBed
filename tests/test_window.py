@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from pc_assistant.tools.window import WindowTool
+from knoa_platform.tools.window import WindowTool
 
 
 class FakeWin:
@@ -143,7 +143,7 @@ class TestWindowFocus:
         with (
             patch("pywinctl.getAllWindows", return_value=[window]),
             patch("pywinctl.getActiveWindow", return_value=None),
-            patch("pc_assistant.tools.window.get_platform", return_value="windows"),
+            patch("knoa_platform.tools.window.get_platform", return_value="windows"),
         ):
             res = _run(tool.execute(action="focus", window_id="Chat"))
 

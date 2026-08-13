@@ -7,17 +7,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import RuntimeScope
-from pc_assistant.automation import ScheduleKind, ScheduleState
-from pc_assistant.tasks import (
+from knoa_platform.agent_runtime.contracts import RuntimeScope
+from knoa_platform.automation import ScheduleKind, ScheduleState
+from knoa_platform.tasks import (
     TaskDefinitionState,
     TaskLaunchKind,
     TaskLaunchPolicy,
     TaskState,
 )
-from pc_assistant.tools.base import ToolRisk
-from pc_assistant.tools.create_task import CreateTaskTool
-from pc_assistant.tools.task_control import TaskControlTool
+from knoa_platform.tools.base import ToolRisk
+from knoa_platform.tools.create_task import CreateTaskTool
+from knoa_platform.tools.task_control import TaskControlTool
 
 
 class _Sessions:

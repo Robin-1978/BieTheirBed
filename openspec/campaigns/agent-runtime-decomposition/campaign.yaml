@@ -31,6 +31,6 @@ knowledge_base:
   blueprint: docs/agent-runtime-decomposition-phases.md
   coverage_matrix: docs/agent-runtime-decomposition-coverage-matrix.yaml
   path_decision: .gs-harness/plans/agent-runtime-decomposition.yaml
-  baseline_spec: openspec/specs/pc-assistant-system/spec.md
+  baseline_spec: openspec/specs/knoa-system/spec.md
   modules: modules.yaml
   architecture: docs/architecture.md

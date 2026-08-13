@@ -55,6 +55,14 @@ function TimelineRow({ entry, t }: { entry: TimelineDisplayEntry; t: ReturnType<
       </View>
     );
   }
+  if (entry.kind === "completion") {
+    return (
+      <View style={styles.toolRow}>
+        <Text style={styles.done}>✓</Text>
+        <Text style={styles.toolName}>{t("turn.answerCompleted")}</Text>
+      </View>
+    );
+  }
   if (entry.kind === "tool") {
     return (
       <View style={styles.toolRow}>
@@ -80,6 +88,7 @@ function progressLabel(turn: ChatTurnSnapshot, entries: TimelineDisplayEntry[], 
   if (!latest) return t("turn.starting");
   if (latest.kind === "reasoning") return t("turn.analyzing");
   if (latest.kind === "content") return t("turn.composing");
+  if (latest.kind === "completion") return t("turn.answerCompleted");
   if (latest.kind === "tool") {
     return latest.state === "running"
       ? t("turn.callingTool", { tool: latest.toolName })

@@ -4,7 +4,7 @@ import base64
 
 import pytest
 
-from pc_assistant.gateway import (
+from knoa_platform.gateway import (
     GatewayAuthenticationRejectedError,
     GatewayAuthenticationService,
     GatewayAuthRepository,

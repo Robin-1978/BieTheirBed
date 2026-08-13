@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import RuntimeScope
-from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
-from pc_assistant.tasks import (
+from knoa_platform.agent_runtime.contracts import RuntimeScope
+from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
+from knoa_platform.tasks import (
     TaskCapacityError,
     TaskEventPayload,
     TaskIdempotencyConflictError,
@@ -561,7 +561,7 @@ def test_repository_migrates_legacy_stream_events_into_execution_trace(
     )] == ["task_created"]
 
 
-def test_repository_migrates_legacy_task_table_with_origin_at_end(
+def test_repository_rejects_legacy_task_schema(
     tmp_path: Path,
 ) -> None:
     database = tmp_path / "assistant.db"
@@ -601,13 +601,8 @@ def test_repository_migrates_legacy_task_table_with_origin_at_end(
             """
         )
 
-    TaskRepository(database)
-
-    with sqlite3.connect(database) as connection:
-        columns = connection.execute(
-            "PRAGMA table_info(runtime_tasks)"
-        ).fetchall()
-    assert columns[-1][1:5] == ("origin", "TEXT", 1, "'chat'")
+    with pytest.raises(RuntimeError, match="schema is incompatible"):
+        TaskRepository(database)
 
 
 def test_paused_task_requires_explicit_resume(tmp_path: Path) -> None:

@@ -1,4 +1,5 @@
 import type {
+  AgentSummary,
   AndroidRelease,
   ArtifactInput,
   ChatApproval,
@@ -79,11 +80,17 @@ export class GatewayClient {
     });
   }
 
-  async createSession(): Promise<string> {
+  async createSession(agentId?: string): Promise<string> {
     const response = await this.json<{ session_handle: string }>("/v1/sessions", {
       method: "POST",
+      body: agentId ? { agent_id: agentId } : undefined,
     });
     return response.session_handle;
+  }
+
+  async listAgents(): Promise<{ defaultAgentId: string; agents: AgentSummary[] }> {
+    const response = await this.json<{ default_agent: string; agents: AgentSummary[] }>("/v1/agents");
+    return { defaultAgentId: response.default_agent, agents: response.agents };
   }
 
   async listConversationSessions(input: {
@@ -189,6 +196,7 @@ export class GatewayClient {
     text?: string;
     attachments?: ArtifactInput[];
     toolsEnabled?: boolean;
+    agentId?: string;
   }): Promise<ChatTurnSnapshot> {
     const response = await this.json<{ turn: ChatTurnSnapshot }>(
       `/v1/conversations/sessions/${encodeURIComponent(input.sessionHandle)}/turns`,
@@ -199,6 +207,7 @@ export class GatewayClient {
           input: input.text ?? "",
           attachments: input.attachments ?? [],
           tools_enabled: input.toolsEnabled ?? true,
+          agent_id: input.agentId,
         },
       },
     );
@@ -239,6 +248,7 @@ export class GatewayClient {
     toolsEnabled?: boolean;
     launchPolicy?: TaskLaunchPolicy;
     notificationPolicy?: Record<string, boolean>;
+    agentId?: string;
   }): Promise<{ task: Task; execution: TaskExecution | null }> {
     return this.json("/v1/tasks", {
       method: "POST",
@@ -250,6 +260,7 @@ export class GatewayClient {
         tools_enabled: input.toolsEnabled ?? true,
         launch_policy: input.launchPolicy,
         notification_policy: input.notificationPolicy ?? {},
+        agent_id: input.agentId,
       },
     });
   }
@@ -301,6 +312,26 @@ export class GatewayClient {
     const response = await this.json<{ execution: TaskExecution }>(
       `/v1/tasks/${encodeURIComponent(taskId)}/execute`,
       { method: "POST" },
+    );
+    return response.execution;
+  }
+
+  async continueTask(input: {
+    clientRequestId: string;
+    taskId: string;
+    text?: string;
+    attachments?: ArtifactInput[];
+  }): Promise<TaskExecution> {
+    const response = await this.json<{ execution: TaskExecution }>(
+      `/v1/tasks/${encodeURIComponent(input.taskId)}/continue`,
+      {
+        method: "POST",
+        body: {
+          client_request_id: input.clientRequestId,
+          input: input.text ?? "",
+          attachments: input.attachments ?? [],
+        },
+      },
     );
     return response.execution;
   }
