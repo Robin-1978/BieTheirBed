@@ -4,27 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import hashlib
 import json
 import secrets
 import time
-import contextlib
-from contextlib import AsyncExitStack
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 
+import uvicorn
 from mcp import ClientSession, types
 from mcp.client._memory import InMemoryTransport
-from mcp.server.lowlevel.server import Server, ServerRequestContext
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
-from knoa_agent_contracts import McpEndpointGrant
-import uvicorn
+from mcp.server.lowlevel.server import Server, ServerRequestContext
 
+from knoa_agent_contracts import McpEndpointGrant
 from knoa_platform.agent_runtime.contracts import RuntimeScope
-from knoa_platform.artifacts import ArtifactStore
 from knoa_platform.agent_runtime.tool_step import (
     ConfirmationPort,
     ProposedToolCall,
@@ -33,6 +31,7 @@ from knoa_platform.agent_runtime.tool_step import (
     ToolStepContext,
     ToolStepResult,
 )
+from knoa_platform.artifacts import ArtifactStore
 from knoa_platform.tools.base import ToolCapability
 from knoa_platform.tools.registry import ToolRegistry
 
@@ -65,6 +64,7 @@ class CapabilityGrant:
     expires_at: float
     scope_digest: str
     artifact_ids: frozenset[str]
+    allow_tools: bool
 
 
 class CapabilityGrantRegistry:
@@ -89,6 +89,7 @@ class CapabilityGrantRegistry:
         artifact_ids: frozenset[str] = frozenset(),
         binding_epoch: int = 1,
         ttl_seconds: float = 300.0,
+        allow_tools: bool = True,
     ) -> CapabilityGrant:
         if ttl_seconds <= 0:
             raise ValueError("Capability grant TTL must be positive")
@@ -100,6 +101,7 @@ class CapabilityGrantRegistry:
                 "binding_epoch": binding_epoch,
                 "capabilities": sorted(item.value for item in capabilities),
                 "artifact_ids": sorted(artifact_ids),
+                "allow_tools": allow_tools,
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -118,6 +120,7 @@ class CapabilityGrantRegistry:
             expires_at=self._clock() + ttl_seconds,
             scope_digest=hashlib.sha256(canonical_scope.encode()).hexdigest(),
             artifact_ids=artifact_ids,
+            allow_tools=allow_tools,
         )
         async with self._guard:
             self._purge_expired_locked()
@@ -204,6 +207,8 @@ class CapabilityGateway:
         _params: types.PaginatedRequestParams | None,
     ) -> types.ListToolsResult:
         grant = await self._grant(context)
+        if not grant.allow_tools:
+            return types.ListToolsResult(tools=[])
         tools = []
         for definition in self._registry.definitions_for(grant.capabilities):
             tools.append(
@@ -226,6 +231,8 @@ class CapabilityGateway:
         params: types.CallToolRequestParams,
     ) -> types.CallToolResult:
         grant = await self._grant(context)
+        if not grant.allow_tools:
+            raise PermissionError("This capability grant does not allow Tools")
         call_id = self._call_id(context, params)
         result = await self._tool_step.execute(
             ToolStepContext(

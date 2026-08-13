@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import base64
 
-import pytest
 import httpx
+import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
@@ -15,14 +15,14 @@ from knoa_platform.agent_runtime.tool_step import (
     ToolArgumentPolicy,
     ToolStep,
 )
+from knoa_platform.artifacts import ArtifactStore
 from knoa_platform.capabilities import (
     CapabilityGateway,
     CapabilityMCPHost,
     GatewayMCPClient,
 )
-from knoa_platform.artifacts import ArtifactStore
-from knoa_platform.tasks.tool_commit import DurableToolCommitService
 from knoa_platform.tasks.repository import TaskRepository
+from knoa_platform.tasks.tool_commit import DurableToolCommitService
 from knoa_platform.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRisk
 from knoa_platform.tools.registry import ToolRegistry
 
@@ -58,6 +58,29 @@ class EchoTool(ToolBase):
 class InternalWriteTool(EchoTool):
     name = "internal_write"
     effect = ToolEffect.INTERNAL_WRITE
+
+
+@pytest.mark.asyncio
+async def test_gateway_can_issue_a_toolless_system_agent_grant(tmp_path) -> None:
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+    gateway = CapabilityGateway(
+        registry,
+        ToolStep(registry, ToolArgumentPolicy(tmp_path)),
+    )
+    grant = await gateway.grants.issue(
+        scope=RuntimeScope(principal_id="principal-a", session_handle="review-a"),
+        run_id="review-a",
+        client_request_id="review-a",
+        capabilities=frozenset({ToolCapability.NETWORK}),
+        cancellation=asyncio.Event(),
+        confirmation=None,
+        tool_commit=None,
+        allow_tools=False,
+    )
+
+    async with GatewayMCPClient(gateway).bind(grant) as client:
+        assert await client.list_tools() == ()
 
 
 @pytest.mark.asyncio
@@ -290,10 +313,9 @@ async def test_gateway_exposes_grant_as_authenticated_standard_http_mcp(tmp_path
         async with streamable_http_client(
             host.endpoint,
             http_client=http_client,
-        ) as streams:
-            async with ClientSession(streams[0], streams[1]) as session:
-                await session.initialize()
-                result = await session.list_tools()
+        ) as streams, ClientSession(streams[0], streams[1]) as session:
+            await session.initialize()
+            result = await session.list_tools()
         assert [tool.name for tool in result.tools] == ["echo"]
     finally:
         await host.stop()

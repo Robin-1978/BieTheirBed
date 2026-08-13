@@ -47,7 +47,7 @@ class DeviceRoutes:
                     "display_name": display_names.get(agent_id, agent_id),
                 }
                 for agent_id, config in self._config.agents.items()
-                if config.enabled
+                if config.enabled and agent_id != "reviewer_agent"
             ],
         })
 

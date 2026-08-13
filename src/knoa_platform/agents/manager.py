@@ -36,12 +36,14 @@ class AgentManager:
         default_agent: str = "knoa",
         enabled: Mapping[str, bool] | None = None,
         max_concurrency: Mapping[str, int] | None = None,
+        system_agents: frozenset[str] = frozenset(),
     ) -> None:
         if not runtimes:
             raise ValueError("At least one trusted Agent Runtime is required")
         enabled = enabled or {}
         max_concurrency = max_concurrency or {}
         self._agents: dict[str, _ManagedAgent] = {}
+        self._system_agents = system_agents
         for agent_id, runtime in runtimes.items():
             if runtime.descriptor.agent_id != agent_id:
                 raise ValueError("Agent Runtime descriptor does not match registration ID")
@@ -67,6 +69,17 @@ class AgentManager:
 
     def resolve_agent_id(self, requested: str | None = None) -> str:
         agent_id = (requested or self._default_agent).strip()
+        if agent_id in self._system_agents:
+            raise AgentNotFoundError(f"Agent '{agent_id}' is not user-selectable")
+        return self._resolve_enabled(agent_id)
+
+    def resolve_system_agent_id(self, requested: str) -> str:
+        agent_id = requested.strip()
+        if agent_id not in self._system_agents:
+            raise AgentNotFoundError(f"Agent '{agent_id}' is not a system Agent")
+        return self._resolve_enabled(agent_id)
+
+    def _resolve_enabled(self, agent_id: str) -> str:
         managed = self._agents.get(agent_id)
         if managed is None:
             raise AgentNotFoundError(f"Unknown Agent '{agent_id}'")
@@ -93,6 +106,17 @@ class AgentManager:
     @asynccontextmanager
     async def lease(self, agent_id: str) -> AsyncIterator[AgentRuntime]:
         resolved = self.resolve_agent_id(agent_id)
+        async with self._lease_resolved(resolved) as runtime:
+            yield runtime
+
+    @asynccontextmanager
+    async def lease_system(self, agent_id: str) -> AsyncIterator[AgentRuntime]:
+        resolved = self.resolve_system_agent_id(agent_id)
+        async with self._lease_resolved(resolved) as runtime:
+            yield runtime
+
+    @asynccontextmanager
+    async def _lease_resolved(self, resolved: str) -> AsyncIterator[AgentRuntime]:
         managed = self._agents[resolved]
         await managed.capacity.acquire()
         managed.active_leases += 1

@@ -114,6 +114,8 @@ class KnoaAgentRuntime(AgentRuntime):
         ]
         | None = None,
         tool_inventory: ToolInventory | None = None,
+        agent_id: str = "knoa",
+        display_name: str = "Knoa",
     ) -> None:
         if max_iterations <= 0 or max_tool_calls <= 0:
             raise ValueError("Knoa Agent limits must be positive")
@@ -131,6 +133,8 @@ class KnoaAgentRuntime(AgentRuntime):
         self._turn_id_factory = turn_id_factory or (lambda: uuid.uuid4().hex)
         self._prompt_context = prompt_context
         self._tool_inventory = tool_inventory or ToolInventory()
+        self._agent_id = agent_id
+        self._display_name = display_name
         self._active: dict[str, tuple[RuntimeSession, asyncio.Event]] = {}
         self._operations: dict[str, str] = {}
         self._guard = asyncio.Lock()
@@ -139,8 +143,8 @@ class KnoaAgentRuntime(AgentRuntime):
     @property
     def descriptor(self) -> AgentDescriptor:
         return AgentDescriptor(
-            agent_id="knoa",
-            display_name="Knoa",
+            agent_id=self._agent_id,
+            display_name=self._display_name,
             implementation_version="1.0.0",
             capabilities=frozenset(
                 {
@@ -164,14 +168,14 @@ class KnoaAgentRuntime(AgentRuntime):
             state_version=self._STATE_VERSION,
         )
         return RuntimeSession(
-            agent_id="knoa",
+            agent_id=self._agent_id,
             runtime_session_ref=session.runtime_session_ref,
             runtime_protocol_version="1.0",
             binding_epoch=request.binding_epoch,
         )
 
     async def resume_session(self, request: ResumeRuntimeSession) -> RuntimeSession:
-        if request.session.agent_id != "knoa":
+        if request.session.agent_id != self._agent_id:
             raise ValueError("Runtime Session belongs to another Agent")
         session = await asyncio.to_thread(
             self._contexts.get_session,

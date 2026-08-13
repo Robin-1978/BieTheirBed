@@ -117,6 +117,36 @@ fallback_model: "local_vision"
 vision_enabled: true
 ```
 
+### Approval reviewer Agent
+
+Knoa can route approvals that already passed deterministic Tool Policy checks
+to a restricted system Agent. The reviewer uses the same Agent Runtime and
+model-provider stack as other Agents, but it is not selectable for a Session,
+receives no Tools, and cannot resolve an Approval directly.
+
+```yaml
+agents:
+  reviewer_agent:
+    enabled: true
+    max_concurrency: 1
+    model: "local_qwen_reviewer"
+
+approval_review:
+  mode: "suggest" # off | suggest | auto
+  agent: "reviewer_agent"
+  model: "local_qwen_reviewer"
+  timeout_seconds: 15
+  max_output_tokens: 256
+  auto_max_risk: "medium"
+```
+
+`suggest` records the reviewer's `approve`, `deny`, or `escalate` recommendation
+on the existing Approval and still waits for a person. `auto` may resolve only
+low/medium-risk Approvals within the configured ceiling; high-risk operations
+always remain human-gated. Invalid output, timeout, or missing context always
+falls back to human review. Tool Policy, scope checks, stale-Approval checks,
+and the single ToolStep commit boundary remain authoritative.
+
 When the primary model request fails before producing any output, the agent
 automatically retries the request with the configured local `llamacpp` fallback.
 A partially streamed response is never replayed to avoid duplicated text or

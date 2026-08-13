@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, get_args, get_origin, Literal, Union
+from typing import Any, Literal, Union, get_args, get_origin
 from urllib.parse import urlsplit
 
 import yaml
@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field, SecretStr, field_validator, model_validat
 from knoa_platform.extensions.models import MCP_SERVER_ID_PATTERN, MCPServerConfig
 from knoa_platform.network_tls import is_loopback_host
 from knoa_platform.runtime import default_runtime_root
-
 
 _MAX_CONFIG_BYTES = 1024 * 1024
 
@@ -175,6 +174,17 @@ class AgentConfig(BaseModel):
         return normalized
 
 
+class ApprovalReviewConfig(BaseModel):
+    """Platform policy for the restricted system reviewer Agent."""
+
+    mode: Literal["off", "suggest", "auto"] = "off"
+    agent: str = "reviewer_agent"
+    model: str = ""
+    timeout_seconds: float = Field(default=15.0, gt=0.0, le=120.0)
+    max_output_tokens: int = Field(default=256, ge=64, le=1024)
+    auto_max_risk: Literal["low", "medium"] = "medium"
+
+
 class AppConfig(BaseModel):
     default_agent: str = "knoa"
     agents: dict[str, AgentConfig] = Field(
@@ -184,7 +194,14 @@ class AppConfig(BaseModel):
                 enabled=False,
                 command=("codex", "app-server"),
             ),
+            "reviewer_agent": AgentConfig(
+                enabled=False,
+                max_concurrency=1,
+            ),
         }
+    )
+    approval_review: ApprovalReviewConfig = Field(
+        default_factory=ApprovalReviewConfig
     )
     # Multi-provider model catalog. Provider keys identify API accounts;
     # model keys are stable aliases used by the application.
@@ -255,11 +272,13 @@ class AppConfig(BaseModel):
     source_config_path: str = ""
 
     @model_validator(mode="after")
-    def _validate_provider(self) -> "AppConfig":
+    def _validate_provider(self) -> AppConfig:
         if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", self.default_agent):
             raise ValueError("default_agent must be a stable safe Agent ID")
-        if set(self.agents) - {"knoa", "codex"}:
-            raise ValueError("Only the trusted knoa and codex Agent IDs are supported")
+        if set(self.agents) - {"knoa", "codex", "reviewer_agent"}:
+            raise ValueError(
+                "Only the trusted knoa, codex and reviewer_agent IDs are supported"
+            )
         if "knoa" not in self.agents:
             raise ValueError("agents must configure the built-in knoa Agent")
         selected_agent = self.agents.get(self.default_agent)
@@ -268,6 +287,23 @@ class AppConfig(BaseModel):
         codex = self.agents.get("codex")
         if codex is not None and codex.enabled and not codex.command:
             raise ValueError("Enabled codex Agent requires a command")
+        reviewer = self.agents.get("reviewer_agent")
+        if reviewer is not None and reviewer.enabled and not (
+            self.approval_review.model or reviewer.model
+        ):
+            raise ValueError("Enabled reviewer_agent requires a model")
+        if self.approval_review.mode != "off":
+            if self.approval_review.agent != "reviewer_agent":
+                raise ValueError("approval_review agent must be reviewer_agent")
+            if reviewer is None or not reviewer.enabled:
+                raise ValueError(
+                    "Enabled approval review requires enabled reviewer_agent"
+                )
+            model_alias = self.approval_review.model or reviewer.model
+            if not model_alias:
+                raise ValueError("Enabled approval review requires a reviewer model")
+            if self.models and model_alias not in self.models:
+                raise ValueError(f"Unknown reviewer model '{model_alias}'")
         if not 0 <= self.service_port <= 65535:
             raise ValueError("Core WebSocket service port must be between 0 and 65535")
         owner = self.owner_principal_id.strip()

@@ -62,6 +62,70 @@ _TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
 
 class TaskToolRepositoryMixin:
 
+    def annotate_approval_review(
+        self,
+        principal_id: str,
+        approval_id: str,
+        *,
+        reason: str,
+    ) -> tuple[TaskApprovalRecord, TaskEvent]:
+        principal = self._normalize_identifier(
+            principal_id, label="principal_id", limit=256
+        )
+        normalized_approval_id = self._normalize_identifier(
+            approval_id, label="approval_id", limit=128
+        )
+        normalized_reason = reason.strip()[:2000]
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = self._owned_approval(db, principal, normalized_approval_id)
+            approval = self._approval_record(row)
+            if approval.state is not ApprovalState.PENDING:
+                event_row = db.execute(
+                    """SELECT * FROM runtime_task_events
+                       WHERE task_id=? AND event_seq=?""",
+                    (approval.task_id, approval.request_event_seq),
+                ).fetchone()
+                assert event_row is not None
+                return approval, TaskEvent(
+                    task_id=approval.task_id,
+                    event_seq=approval.request_event_seq,
+                    event_type="approval_requested",
+                    payload=TaskEventPayload.model_validate_json(
+                        event_row["payload_json"]
+                    ),
+                    occurred_at=float(event_row["occurred_at"]),
+                )
+            db.execute(
+                "UPDATE runtime_task_approvals SET reason=? WHERE approval_id=?",
+                (normalized_reason, normalized_approval_id),
+            )
+            event_row = db.execute(
+                """SELECT * FROM runtime_task_events
+                   WHERE task_id=? AND event_seq=?""",
+                (approval.task_id, approval.request_event_seq),
+            ).fetchone()
+            assert event_row is not None
+            payload = TaskEventPayload.model_validate_json(event_row["payload_json"])
+            payload = payload.model_copy(update={"reason": normalized_reason})
+            db.execute(
+                """UPDATE runtime_task_events SET payload_json=?
+                   WHERE task_id=? AND event_seq=?""",
+                (
+                    self._event_json(payload),
+                    approval.task_id,
+                    approval.request_event_seq,
+                ),
+            )
+            updated = self._owned_approval(db, principal, normalized_approval_id)
+            return self._approval_record(updated), TaskEvent(
+                task_id=approval.task_id,
+                event_seq=approval.request_event_seq,
+                event_type="approval_requested",
+                payload=payload,
+                occurred_at=float(event_row["occurred_at"]),
+            )
+
     def begin_tool_step(
         self,
         principal_id: str,
