@@ -31,8 +31,14 @@ gitlab://failed-pipelines/events/{event_id}
 Bind the collection Resource to a principal-owned Session through `mcp_deploy`
 or `mcp_configure_resource_task` to create one durable diagnostic Task per
 event. The Task tells the Agent to inspect bounded CI evidence, inspect a bound
-workspace when available, and return `retry`, `stop`, or `needs_human`. Retry
-remains an ordinary approval-gated MCP Tool call.
+set of Pipeline Jobs and their traces, report compile/build totals, compare
+failed jobs with successful jobs, and return `retry`, `stop`, or `needs_human`.
+The diagnostic Task explicitly forbids local workspace, filesystem and shell
+access. Immediately before a Job retry, both the Agent and Provider re-read the
+Job and its Pipeline Job list. The Provider permits only `failed` or `canceled`
+and rejects the retry when a newer Job with the same name is already `created`,
+`pending`, `preparing`, `running` or otherwise active. Retry remains an
+ordinary approval-gated MCP Tool call.
 
 Store private configuration in `~/.knoa/secrets/mcp/gitlab.env` with mode 0600:
 

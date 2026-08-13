@@ -16,6 +16,18 @@ from urllib.parse import quote, urlsplit
 import httpx
 
 _NUMERIC_ID = re.compile(r"^[1-9][0-9]*$")
+_ACTIVE_JOB_STATUSES = frozenset(
+    {
+        "created",
+        "pending",
+        "preparing",
+        "running",
+        "waiting_for_resource",
+        "scheduled",
+        "canceling",
+    }
+)
+_RETRYABLE_JOB_STATUSES = frozenset({"failed", "canceled"})
 
 
 def _required_env(name: str) -> str:
@@ -450,6 +462,62 @@ class GitLabClient:
                 return result
             if state in {"failed", "outcome_unknown", "pending"}:
                 raise RuntimeError(result.get("error", f"retry action is {state}"))
+            if kind == "job":
+                job = await self.get_job(project, target_id)
+                status = str(job.get("status", "")).strip().lower()
+                if status in _ACTIVE_JOB_STATUSES:
+                    failure = {
+                        "error": (
+                            f"GitLab job is already active ({status}); retry is blocked"
+                        )
+                    }
+                    self.store.complete_retry(idempotency_key, "failed", failure)
+                    raise RuntimeError(failure["error"])
+                if status not in _RETRYABLE_JOB_STATUSES:
+                    failure = {
+                        "error": (
+                            "GitLab job is not retryable from status "
+                            f"{status or 'unknown'}"
+                        )
+                    }
+                    self.store.complete_retry(idempotency_key, "failed", failure)
+                    raise RuntimeError(failure["error"])
+                pipeline = job.get("pipeline")
+                pipeline_id = (
+                    str(pipeline.get("id", ""))
+                    if isinstance(pipeline, dict)
+                    else ""
+                )
+                job_name = str(job.get("name", "")).strip()
+                if not _NUMERIC_ID.fullmatch(pipeline_id) or not job_name:
+                    failure = {
+                        "error": (
+                            "GitLab job lacks pipeline identity; active retry check "
+                            "cannot be completed"
+                        )
+                    }
+                    self.store.complete_retry(idempotency_key, "failed", failure)
+                    raise RuntimeError(failure["error"])
+                pipeline_jobs = await self.list_pipeline_jobs(project, pipeline_id)
+                active_matches = [
+                    candidate
+                    for candidate in pipeline_jobs
+                    if str(candidate.get("id", "")) != target_id
+                    and str(candidate.get("name", "")).strip() == job_name
+                    and str(candidate.get("status", "")).strip().lower()
+                    in _ACTIVE_JOB_STATUSES
+                ]
+                if active_matches:
+                    active = active_matches[0]
+                    failure = {
+                        "error": (
+                            "A retry of this GitLab job is already active "
+                            f"(job {active.get('id')}, status {active.get('status')}); "
+                            "retry is blocked"
+                        )
+                    }
+                    self.store.complete_retry(idempotency_key, "failed", failure)
+                    raise RuntimeError(failure["error"])
             path = (
                 f"/api/v4/projects/{encoded_project}/pipelines/{target_id}/retry"
                 if kind == "pipeline"

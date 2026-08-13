@@ -128,14 +128,25 @@ class GitLabMCPApplication:
                 raise LookupError("GitLab failure event was not found")
             payload = event["payload"]
             text = (
-                "Diagnose this failed GitLab CI state. Use the read-only GitLab MCP "
-                "Tools to inspect the pipeline, failed jobs and bounded job traces. "
-                "If an authorized workspace contains the matching repository, inspect "
-                "the referenced branch and commit there. Classify the result as retry, "
-                "stop or needs_human. Prefer retrying one job. Do not propose another "
-                "retry for the same deterministic failure fingerprint; after two failed "
-                "attempts, diagnose before proposing any retry. Every retry remains a "
-                "high-risk host-approved MCP Tool call.\n\n"
+                "Diagnose this failed GitLab CI state using only the read-only GitLab "
+                "MCP Tools. Inspect the pipeline, list all jobs, and read bounded traces "
+                "for every failed compile/build job. Do not access a local workspace, "
+                "do not call shell or filesystem Tools, and do not search the host. "
+                "Report the relevant compile/build job totals as: total, succeeded, "
+                "failed and skipped; list each failed job and its deterministic failure "
+                "fingerprint. Compare failed jobs with successful jobs from the same "
+                "pipeline. If failed jobs contain 'gcc: internal compiler error: Killed "
+                "(program cc1plus)' while other compile jobs succeeded, classify the "
+                "cause as likely Runner memory pressure/OOM rather than a general code "
+                "compile failure. Finish with exactly one decision: retry, stop or "
+                "needs_human, plus a short reason. A retry proposal must name one exact "
+                "failed job. Immediately before proposing or calling retry_job, read "
+                "that exact job again with gitlab.get_job, list its Pipeline Jobs again, "
+                "and confirm the target is failed or canceled and no newer Job with the "
+                "same name is active. Never retry when that logical Job already has a "
+                "created, pending, preparing, running, waiting_for_resource, scheduled "
+                "or canceling instance. Retry remains a high-risk host-approved MCP Tool "
+                "call. Do not retry the same failure fingerprint blindly.\n\n"
                 + json.dumps(payload, ensure_ascii=False, indent=2)
             )
         else:
