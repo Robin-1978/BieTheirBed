@@ -297,10 +297,14 @@ def build_core_runtime(
         paths.skills,
         *(paths.resolve(directory) for directory in config.skill_directories),
     )
-    mcp_providers = build_mcp_providers(config.mcp_servers)
+    mcp_providers = build_mcp_providers(
+        config.mcp_servers,
+        secret_root=paths.mcp_secrets,
+    )
     mcp_package_providers = build_mcp_package_providers(
         paths.mcp,
         excluded_ids=frozenset(config.mcp_servers),
+        secret_root=paths.mcp_secrets,
     )
     extensions = ExtensionManager(
         registry,
@@ -515,6 +519,7 @@ def build_core_runtime(
         mcp_resource_tasks,
         mcp_package_providers,
         reserved_ids=frozenset(config.mcp_servers),
+        secret_root=paths.mcp_secrets,
     )
     registry.register(MCPDeployTool(mcp_packages))
     registry.register(CreateTaskTool(sessions, task_service, schedule_service))

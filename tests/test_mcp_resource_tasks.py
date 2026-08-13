@@ -182,6 +182,23 @@ async def test_completed_inventory_unsubscribes_removed_resources() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reconciliation_tolerates_provider_removed_during_inventory() -> None:
+    root = "jira://assigned-to-me"
+    provider = _Provider((_resource(root),))
+    bridge = MCPResourceTaskBridge((provider,), _Tasks(), _Sessions())
+
+    async def list_and_remove():
+        await bridge.remove_provider(provider)
+        return provider.resources
+
+    provider.list_resources = list_and_remove  # type: ignore[method-assign]
+
+    await bridge.reconcile_once()
+
+    assert "jira" not in bridge._providers
+
+
+@pytest.mark.asyncio
 async def test_unsafe_or_lookalike_resource_uri_is_not_authorized() -> None:
     valid = "jira://assigned-to-me/events/assignment-1"
     lookalike = "jira://assigned-to-me.evil/events/assignment-2"

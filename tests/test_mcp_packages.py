@@ -15,6 +15,7 @@ from knoa_platform.extensions.mcp_package import (
     build_mcp_package_providers,
     load_mcp_package,
 )
+from knoa_platform.extensions.mcp_secrets import load_mcp_private_environment
 from knoa_platform.extensions.models import MCPResourceTaskConfig
 from knoa_platform.tools.registry import ToolRegistry
 
@@ -64,6 +65,23 @@ def test_local_mcp_package_loads_and_resolves_cwd(tmp_path: Path) -> None:
     assert config.transport == "stdio"
     assert config.working_directory == str(package.resolve())
     assert "monitor.list_observations" in config.tools
+
+
+def test_private_mcp_environment_is_server_scoped_and_requires_0600(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "secrets" / "mcp" / "jira.env"
+    path.parent.mkdir(parents=True)
+    path.write_text('JIRA_API_TOKEN="safe-$value"\n', encoding="utf-8")
+    path.chmod(0o600)
+
+    assert load_mcp_private_environment(path) == {
+        "JIRA_API_TOKEN": "safe-$value"
+    }
+
+    path.chmod(0o644)
+    with pytest.raises(PermissionError, match="0600"):
+        load_mcp_private_environment(path)
 
 
 def test_local_mcp_package_confines_manifest_and_working_directory(

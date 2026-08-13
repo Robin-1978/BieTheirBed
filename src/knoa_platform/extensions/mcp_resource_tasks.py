@@ -334,6 +334,8 @@ class MCPResourceTaskBridge:
         server_id: str,
         provider: MCPServerProvider,
     ) -> None:
+        if self._providers.get(server_id) is not provider:
+            return
         capabilities = provider.resource_capabilities()
         if not capabilities.available:
             logger.warning("MCP server does not expose Resources: %s", server_id)
@@ -349,7 +351,10 @@ class MCPResourceTaskBridge:
             canonical_resources[canonical.text] = resource
 
         desired_subscriptions: set[str] = set()
-        for route_id, state in tuple(self._routes[server_id].items()):
+        routes = self._routes.get(server_id)
+        if routes is None or self._providers.get(server_id) is not provider:
+            return
+        for route_id, state in tuple(routes.items()):
             try:
                 scope = await asyncio.to_thread(
                     self._sessions.resolve,
@@ -382,13 +387,15 @@ class MCPResourceTaskBridge:
                     canonical_uri,
                     canonical_resources[canonical_uri],
                 )
-        if capabilities.subscribe:
+        if capabilities.subscribe and self._providers.get(server_id) is provider:
             await self._sync_subscriptions(
                 provider,
                 server_id,
                 desired_subscriptions,
             )
-        self._pending_updates[server_id].clear()
+        pending = self._pending_updates.get(server_id)
+        if pending is not None and self._providers.get(server_id) is provider:
+            pending.clear()
 
     async def _sync_subscriptions(
         self,
@@ -396,7 +403,11 @@ class MCPResourceTaskBridge:
         server_id: str,
         uris: set[str],
     ) -> None:
-        subscribed = self._subscribed[server_id]
+        if self._providers.get(server_id) is not provider:
+            return
+        subscribed = self._subscribed.get(server_id)
+        if subscribed is None:
+            return
         for uri in sorted(uris - subscribed):
             try:
                 await provider.subscribe_resource(uri)

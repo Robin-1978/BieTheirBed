@@ -530,6 +530,29 @@ def test_stdio_environment_is_explicit_and_missing_values_fail(
         StdioMCPClient(config)._environment()
 
 
+def test_stdio_private_environment_overrides_process_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MONITOR_TOKEN", "global-value")
+    monkeypatch.setenv("UNRELATED_SECRET", "must-not-pass")
+    config = MCPServerConfig.model_validate(
+        {
+            "enabled": True,
+            "transport": "stdio",
+            "command": "python",
+            "inherit_env": ["MONITOR_TOKEN"],
+        }
+    )
+
+    environment = StdioMCPClient(
+        config,
+        private_environment={"MONITOR_TOKEN": "server-specific"},
+    )._environment()
+
+    assert environment["MONITOR_TOKEN"] == "server-specific"
+    assert "UNRELATED_SECRET" not in environment
+
+
 @pytest.mark.asyncio
 async def test_stdio_client_with_live_official_mcp_server(tmp_path: Path) -> None:
     pytest.importorskip("mcp.server")

@@ -231,7 +231,11 @@ export default function TaskExecutionDetailScreen() {
         <View key={approval.approval_id} style={styles.approval}>
           <Text style={styles.approvalTitle}>{t("execution.approvalTitle")}{approvals.length > 1 ? ` · ${index + 1}/${approvals.length}` : ""}</Text>
           <Text style={styles.tool}>{approval.tool_name}</Text>
-          <ApprovalDetails approval={approval} showArguments={technicalExpanded} t={t} />
+          <ApprovalDetails
+            approval={approval}
+            showArguments={technicalExpanded || approval.reason.startsWith("external_side_effect:")}
+            t={t}
+          />
           <View style={styles.row}>
             <Action
               label={t("common.cancel")}
@@ -362,7 +366,10 @@ function ApprovalDetails({ approval, showArguments, t }: { approval: TaskApprova
       <Text style={styles.approvalReason}>{t("execution.risk", { value: riskLabel(risk ?? "", t) })}</Text>
       <Text style={styles.approvalReason}>{t("execution.reversibility")}</Text>
       {showArguments && Object.keys(approval.arguments).length ? (
-        <Text selectable style={styles.arguments}>{JSON.stringify(approval.arguments, null, 2)}</Text>
+        <>
+          <Text style={styles.approvalReason}>{t("execution.arguments")}</Text>
+          <Text selectable style={styles.arguments}>{JSON.stringify(approval.arguments, null, 2)}</Text>
+        </>
       ) : null}
     </View>
   );

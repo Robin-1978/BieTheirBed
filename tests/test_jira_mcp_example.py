@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+import yaml
 
 from examples.jira_mcp_server.jira_client import (
     JiraClient,
@@ -66,6 +67,23 @@ def _stream_response(body: bytes, *, content_type: str = "application/octet-stre
         content=body,
         request=httpx.Request("GET", "https://jira.example.test/attachment/1"),
     )
+
+
+def test_jira_write_tools_are_host_confirmation_gated() -> None:
+    manifest = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / "examples/jira_mcp_server/mcp.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    tools = manifest["tools"]
+    for name in ("jira.add_comment", "jira.assign_issue", "jira.transition_issue"):
+        assert tools[name] == {
+            "effect": "external_side_effect",
+            "capabilities": ["mcp", "network"],
+            "risk": "high",
+        }
+    assert tools["jira.find_assignable_users"]["effect"] == "read_only"
+    assert tools["jira.list_transitions"]["effect"] == "read_only"
 
 
 def test_bearer_settings_do_not_require_username(
@@ -223,6 +241,158 @@ async def test_comment_idempotency_replays_success_without_second_write(
         "replayed": True,
     }
     assert posts == 1
+
+
+@pytest.mark.asyncio
+async def test_find_assignable_users_uses_exact_ids_for_later_assignment(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    client = JiraClient(settings, JiraStateStore(settings.state_path))
+
+    async def request(method: str, path: str, **kwargs):
+        assert method == "GET"
+        assert path.endswith("/user/assignable/search")
+        assert kwargs["params"] == {
+            "issueKey": "PROJECT-123",
+            "username": "Zhang San",
+            "maxResults": 20,
+        }
+        return [
+            {
+                "name": "zhangsan",
+                "displayName": "张三",
+                "emailAddress": "zhangsan@example.test",
+            }
+        ]
+
+    client._request = request  # type: ignore[method-assign]
+    try:
+        users = await client.find_assignable_users("PROJECT-123", "Zhang San")
+    finally:
+        await client.close()
+
+    assert users == (
+        {
+            "id": "zhangsan",
+            "display_name": "张三",
+            "email": "zhangsan@example.test",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_assign_issue_requires_write_switch_and_uses_jira_identity_field(
+    tmp_path: Path,
+) -> None:
+    disabled = JiraClient(_settings(tmp_path), JiraStateStore(tmp_path / "disabled.db"))
+    try:
+        with pytest.raises(PermissionError, match="disabled"):
+            await disabled.assign_issue("PROJECT-123", "zhangsan")
+    finally:
+        await disabled.close()
+
+    settings = _settings(tmp_path, write_enabled=True)
+    client = JiraClient(settings, JiraStateStore(settings.state_path))
+
+    async def request(method: str, path: str, **kwargs):
+        assert method == "PUT"
+        assert path.endswith("/issue/PROJECT-123/assignee")
+        assert kwargs["json"] == {"name": "zhangsan"}
+        return None
+
+    client._request = request  # type: ignore[method-assign]
+    try:
+        result = await client.assign_issue("PROJECT-123", "zhangsan")
+    finally:
+        await client.close()
+
+    assert result["status"] == "succeeded"
+    assert result["assignee_id"] == "zhangsan"
+
+
+@pytest.mark.asyncio
+async def test_list_and_apply_transition_use_fields_discovered_from_jira(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path, write_enabled=True)
+    client = JiraClient(settings, JiraStateStore(settings.state_path))
+    calls: list[tuple[str, str, dict]] = []
+
+    async def request(method: str, path: str, **kwargs):
+        calls.append((method, path, kwargs))
+        if method == "GET":
+            return {
+                "transitions": [
+                    {
+                        "id": "71",
+                        "name": "提交验证",
+                        "to": {"name": "待验证"},
+                        "fields": {
+                            "customfield_1": {
+                                "name": "责任部门",
+                                "required": False,
+                                "schema": {"type": "option"},
+                                "allowedValues": [{"id": "2", "value": "研发"}],
+                            }
+                        },
+                    }
+                ]
+            }
+        return None
+
+    client._request = request  # type: ignore[method-assign]
+    try:
+        transitions = await client.list_transitions("PROJECT-123")
+        result = await client.transition_issue(
+            "PROJECT-123",
+            "71",
+            fields={"customfield_1": {"id": "2"}},
+        )
+    finally:
+        await client.close()
+
+    assert transitions[0]["target_status"] == "待验证"
+    assert transitions[0]["fields"]["customfield_1"]["allowed_values"] == (
+        {"id": "2", "name": "研发"},
+    )
+    assert calls[0][2]["params"] == {"expand": "transitions.fields"}
+    assert calls[1][0] == "GET"
+    assert calls[2][2]["json"] == {
+        "transition": {"id": "71"},
+        "fields": {"customfield_1": {"id": "2"}},
+    }
+    assert result["status"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_transition_rejects_unknown_fields_before_write(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, write_enabled=True)
+    client = JiraClient(settings, JiraStateStore(settings.state_path))
+    posts = 0
+
+    async def request(method: str, _path: str, **_kwargs):
+        nonlocal posts
+        if method == "POST":
+            posts += 1
+        return {
+            "transitions": [
+                {"id": "71", "name": "提交验证", "fields": {}}
+            ]
+        }
+
+    client._request = request  # type: ignore[method-assign]
+    try:
+        with pytest.raises(ValueError, match="not currently available"):
+            await client.transition_issue(
+                "PROJECT-123",
+                "71",
+                fields={"customfield_unknown": "value"},
+            )
+    finally:
+        await client.close()
+
+    assert posts == 0
 
 
 @pytest.mark.asyncio
@@ -634,7 +804,11 @@ async def test_reference_server_runs_over_real_stdio_mcp(
         "jira.download_attachment",
         "jira.materialize_issue",
         "jira.get_comments",
+        "jira.find_assignable_users",
         "jira.list_attachments",
         "jira.get_attachment_excerpt",
         "jira.add_comment",
+        "jira.assign_issue",
+        "jira.list_transitions",
+        "jira.transition_issue",
     ]

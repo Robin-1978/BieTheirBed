@@ -20,6 +20,7 @@ import httpx
 
 _ISSUE_KEY = re.compile(r"^[A-Za-z][A-Za-z0-9_]*-[1-9][0-9]*$")
 _ATTACHMENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+_TRANSITION_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _TEXT_MIME_PREFIXES = ("text/",)
 _TEXT_MIME_TYPES = frozenset(
     {
@@ -530,6 +531,174 @@ class JiraClient:
             )
         return tuple(rendered)
 
+    async def find_assignable_users(
+        self,
+        issue_key: str,
+        query: str,
+        *,
+        limit: int = 20,
+    ) -> tuple[dict[str, str], ...]:
+        key = validate_issue_key(issue_key)
+        normalized_query = query.strip()
+        if not normalized_query or len(normalized_query) > 256:
+            raise ValueError("Jira user query must contain 1-256 characters")
+        bounded_limit = max(1, min(limit, 50))
+        query_name = "query" if self.settings.api_version == "3" else "username"
+        payload = await self._request(
+            "GET",
+            f"{self.api_root}/user/assignable/search",
+            params={
+                "issueKey": key,
+                query_name: normalized_query,
+                "maxResults": bounded_limit,
+            },
+        )
+        users = payload if isinstance(payload, list) else []
+        return tuple(
+            {
+                "id": str(
+                    user.get("accountId")
+                    or user.get("name")
+                    or user.get("key")
+                    or ""
+                ),
+                "display_name": str(user.get("displayName", ""))[:1000],
+                "email": str(user.get("emailAddress", ""))[:1000],
+            }
+            for user in users[:bounded_limit]
+            if isinstance(user, dict)
+        )
+
+    async def assign_issue(self, issue_key: str, assignee_id: str) -> dict[str, Any]:
+        if not self.settings.write_enabled:
+            raise PermissionError("Jira writes are disabled")
+        key = validate_issue_key(issue_key)
+        normalized_assignee = assignee_id.strip()
+        if not normalized_assignee or len(normalized_assignee) > 256:
+            raise ValueError("Jira assignee ID must contain 1-256 characters")
+        identity_field = "accountId" if self.settings.api_version == "3" else "name"
+        await self._request(
+            "PUT",
+            f"{self.api_root}/issue/{key}/assignee",
+            json={identity_field: normalized_assignee},
+        )
+        return {
+            "status": "succeeded",
+            "issue_key": key,
+            "assignee_id": normalized_assignee,
+        }
+
+    async def list_transitions(self, issue_key: str) -> tuple[dict[str, Any], ...]:
+        key = validate_issue_key(issue_key)
+        payload = await self._request(
+            "GET",
+            f"{self.api_root}/issue/{key}/transitions",
+            params={"expand": "transitions.fields"},
+        )
+        transitions = payload.get("transitions", []) if isinstance(payload, dict) else []
+        rendered: list[dict[str, Any]] = []
+        for transition in transitions[:100]:
+            if not isinstance(transition, dict):
+                continue
+            fields = transition.get("fields", {})
+            rendered_fields: dict[str, Any] = {}
+            if isinstance(fields, dict):
+                for field_id, field in list(fields.items())[:100]:
+                    if not isinstance(field, dict):
+                        continue
+                    schema = field.get("schema", {})
+                    allowed = field.get("allowedValues", [])
+                    rendered_fields[str(field_id)] = {
+                        "name": str(field.get("name", field_id))[:1000],
+                        "required": bool(field.get("required", False)),
+                        "type": str(schema.get("type", ""))
+                        if isinstance(schema, dict)
+                        else "",
+                        "allowed_values": tuple(
+                            _transition_allowed_value(value)
+                            for value in allowed[:100]
+                        )
+                        if isinstance(allowed, list)
+                        else (),
+                    }
+            rendered.append(
+                {
+                    "id": str(transition.get("id", "")),
+                    "name": str(transition.get("name", ""))[:1000],
+                    "target_status": _named(transition.get("to")),
+                    "fields": rendered_fields,
+                }
+            )
+        return tuple(rendered)
+
+    async def transition_issue(
+        self,
+        issue_key: str,
+        transition_id: str,
+        *,
+        fields: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not self.settings.write_enabled:
+            raise PermissionError("Jira writes are disabled")
+        key = validate_issue_key(issue_key)
+        normalized_transition = transition_id.strip()
+        if not _TRANSITION_ID.fullmatch(normalized_transition):
+            raise ValueError("Invalid Jira transition ID")
+        normalized_fields = dict(fields or {})
+        transitions = await self.list_transitions(key)
+        selected = next(
+            (
+                transition
+                for transition in transitions
+                if transition.get("id") == normalized_transition
+            ),
+            None,
+        )
+        if selected is None:
+            raise LookupError("Jira transition is not currently available")
+        declared_fields = selected.get("fields", {})
+        if not isinstance(declared_fields, dict):
+            declared_fields = {}
+        unknown_fields = sorted(set(normalized_fields) - set(declared_fields))
+        if unknown_fields:
+            raise ValueError(
+                f"Jira transition fields are not currently available: {unknown_fields[0]}"
+            )
+        missing_required = sorted(
+            field_id
+            for field_id, definition in declared_fields.items()
+            if isinstance(definition, dict)
+            and definition.get("required")
+            and field_id not in normalized_fields
+        )
+        if missing_required:
+            raise ValueError(
+                f"Jira transition requires field: {missing_required[0]}"
+            )
+        encoded_fields = json.dumps(
+            normalized_fields,
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        ).encode("utf-8")
+        if len(encoded_fields) > 64 * 1024:
+            raise ValueError("Jira transition fields exceed 65536 bytes")
+        payload: dict[str, Any] = {
+            "transition": {"id": normalized_transition},
+        }
+        if normalized_fields:
+            payload["fields"] = normalized_fields
+        await self._request(
+            "POST",
+            f"{self.api_root}/issue/{key}/transitions",
+            json=payload,
+        )
+        return {
+            "status": "succeeded",
+            "issue_key": key,
+            "transition_id": normalized_transition,
+        }
+
     async def list_attachments(self, issue_key: str) -> tuple[dict[str, Any], ...]:
         key = validate_issue_key(issue_key)
         attachments = await self._attachment_records(key)
@@ -930,6 +1099,26 @@ def _display_user(value: Any) -> str:
         or value.get("accountId")
         or ""
     )
+
+
+def _transition_allowed_value(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {"id": "", "name": str(value)[:1000]}
+    return {
+        "id": str(
+            value.get("id")
+            or value.get("accountId")
+            or value.get("name")
+            or value.get("value")
+            or ""
+        ),
+        "name": str(
+            value.get("name")
+            or value.get("displayName")
+            or value.get("value")
+            or ""
+        )[:1000],
+    }
 
 
 def json_text(value: Any) -> str:
