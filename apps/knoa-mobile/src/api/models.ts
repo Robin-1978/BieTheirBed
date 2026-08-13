@@ -90,7 +90,7 @@ export type HumanInteraction = {
   interaction_id: string;
   owner_kind: "conversation_turn" | "task_execution";
   owner_id: string;
-  kind: "user_input";
+  kind: "user_input" | "mcp_elicitation";
   state: "pending" | "resolved" | "cancelled" | "expired" | "runtime_lost";
   display: {
     title?: string;
@@ -111,6 +111,15 @@ export type HumanInteraction = {
       enum?: string[];
       minLength?: number;
       maxLength?: number;
+      properties?: Record<string, {
+        type?: string;
+        title?: string;
+        enum?: string[];
+        minLength?: number;
+        maxLength?: number;
+      }>;
+      required?: string[];
+      additionalProperties?: boolean;
     }>;
     required?: string[];
     additionalProperties?: boolean;

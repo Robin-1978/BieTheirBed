@@ -8,7 +8,7 @@ from knoa_platform.branding import (
     ASSISTANT_NAME_EN,
 )
 
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 
 
 def _gateway_ttl(value: str) -> int:
@@ -64,6 +64,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Image file path(s) to attach to the ask/turn (multimodal).",
     )
     parser.add_argument(
+        "--agent", type=str, default=None,
+        help="Agent ID for a new ask or TUI conversation.",
+    )
+    parser.add_argument(
         "-b", "--benchmark", type=str, default=None,
         help="Run a benchmark dataset (JSONL file or directory)",
     )
@@ -105,6 +109,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show whether the service daemon is running",
     )
     commands = parser.add_subparsers(dest="command")
+    commands.add_parser("agents", help="List enabled Agents")
+    tasks = commands.add_parser("tasks", help="List durable product Tasks")
+    tasks.add_argument("--limit", type=int, default=50)
+    task = commands.add_parser("task", help="Show one durable product Task")
+    task.add_argument("task_id")
+    executions = commands.add_parser("executions", help="List a Task's Executions")
+    executions.add_argument("task_id")
+    execution = commands.add_parser("execution", help="Show one Task Execution")
+    execution.add_argument("execution_id")
+    approve = commands.add_parser("approve", help="Approve a pending tool call")
+    approve.add_argument("approval_id")
+    deny = commands.add_parser("deny", help="Deny a pending tool call")
+    deny.add_argument("approval_id")
+    resolve = commands.add_parser("resolve", help="Resolve a pending HumanInteraction")
+    resolve.add_argument("interaction_id")
+    resolve.add_argument("value", help="Resolution JSON")
+    follow_up = commands.add_parser("follow-up", help="Continue a durable Task")
+    follow_up.add_argument("task_id")
+    follow_up.add_argument("input")
     gateway = commands.add_parser(
         "gateway",
         help="Manage Secure Gateway pairing and devices locally",
@@ -155,6 +178,7 @@ async def async_main(
     json_output: bool = False,
     no_tools: bool = False,
     attach: list[str] | None = None,
+    agent_id: str | None = None,
 ) -> int:
     import logging
 
@@ -205,6 +229,7 @@ async def async_main(
             json_output=json_output,
             no_tools=no_tools,
             attachments=attach,
+            agent_id=agent_id,
         )
 
     from knoa_platform.service.core_lifecycle import get_core_client
@@ -217,12 +242,20 @@ async def async_main(
             print(f"ERROR: {health.detail or 'No configured model is available'}")
             await client.disconnect()
             return 1
-        session_handle = await client.create_session()
+        session_handle = (
+            await client.create_session(agent_id=agent_id)
+            if agent_id
+            else await client.create_session()
+        )
     except Exception as exc:
         print(f"ERROR: Could not connect to Core service: {exc}")
         return 1
 
-    chat_ui = CoreChatApp(cfg, client, session_handle)
+    chat_ui = (
+        CoreChatApp(cfg, client, session_handle, agent_id=agent_id)
+        if agent_id
+        else CoreChatApp(cfg, client, session_handle)
+    )
 
     try:
         await chat_ui.run_async()
@@ -355,6 +388,23 @@ def main(argv: list[str] | None = None) -> int:
             device_id=getattr(args, "device_id", ""),
         )
 
+    if args.command in {
+        "agents", "tasks", "task", "executions", "execution",
+        "approve", "deny", "resolve", "follow-up",
+    }:
+        from knoa_platform.cli_management import run_client_command
+        from knoa_platform.config import load_config
+
+        command_values = vars(args).copy()
+        command_values.pop("command", None)
+        return asyncio.run(
+            run_client_command(
+                load_config(config_path),
+                args.command,
+                **command_values,
+            )
+        )
+
     if args.status:
         return _service_status()
 
@@ -393,6 +443,7 @@ def main(argv: list[str] | None = None) -> int:
             config_path, args.verbose,
             ask=args.ask, json_output=args.json, no_tools=args.no_tools,
             attach=args.attach,
+            agent_id=args.agent,
         ))
     except KeyboardInterrupt:
         return 130

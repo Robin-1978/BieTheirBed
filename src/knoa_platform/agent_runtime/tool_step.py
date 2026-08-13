@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+from contextvars import ContextVar, Token
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -80,6 +81,17 @@ class ToolStepContext:
     cancellation: asyncio.Event
     confirmation: ConfirmationPort | None = None
     commit: ToolCommitPort | None = None
+    interaction: Any = None
+
+
+_CURRENT_TOOL_STEP_CONTEXT: ContextVar[ToolStepContext | None] = ContextVar(
+    "knoa_current_tool_step_context",
+    default=None,
+)
+
+
+def current_tool_step_context() -> ToolStepContext | None:
+    return _CURRENT_TOOL_STEP_CONTEXT.get()
 
 
 class ToolPolicyDeniedError(PermissionError):
@@ -368,6 +380,9 @@ class ToolStep:
                 session_id=context.scope.session_handle,
             )
         )
+        tool_context_token: Token[ToolStepContext | None] = (
+            _CURRENT_TOOL_STEP_CONTEXT.set(context)
+        )
         try:
             output = await self._registry._commit(
                 tool_name,
@@ -403,6 +418,7 @@ class ToolStep:
                     output=output,
                 )
         finally:
+            _CURRENT_TOOL_STEP_CONTEXT.reset(tool_context_token)
             reset_memory_scope(scope_token)
         if context.commit is not None:
             try:

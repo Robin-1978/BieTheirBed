@@ -8,6 +8,7 @@ import mimetypes
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from knoa_platform.config import AppConfig
 from knoa_platform.artifacts.delivery import save_download
@@ -23,6 +24,7 @@ async def run_core_ask(
     json_output: bool = False,
     no_tools: bool = False,
     attachments: list[str] | None = None,
+    agent_id: str | None = None,
 ) -> int:
     if question == "-":
         question = sys.stdin.read().strip()
@@ -47,7 +49,11 @@ async def run_core_ask(
         if not health.healthy:
             error = health.detail or "No configured model is available"
         else:
-            session_handle = await client.create_session()
+            session_handle = (
+                await client.create_session(agent_id=agent_id)
+                if agent_id
+                else await client.create_session()
+            )
             refs: list[ArtifactInputRef] = []
             for path in attachments or []:
                 refs.append(
@@ -67,6 +73,8 @@ async def run_core_ask(
                     final_answer = event.payload.content
                 elif event.event_type == "tool_call":
                     tool_calls += 1
+                elif event.event_type == "interaction_requested":
+                    await _resolve_interaction_in_terminal(client, event)
                 elif event.event_type == "artifact" and event.payload.artifact:
                     try:
                         downloaded = await client.download_artifact(
@@ -173,3 +181,26 @@ async def _confirm_in_terminal(event: TaskEvent) -> bool:
     except (EOFError, KeyboardInterrupt):
         return False
     return answer.strip().lower() in {"y", "yes"}
+
+
+async def _resolve_interaction_in_terminal(client: Any, event: TaskEvent) -> None:
+    payload = event.payload
+    display = payload.interaction_display
+    title = str(display.get("title") or "Input required")
+    description = str(display.get("description") or "")
+    schema = payload.interaction_schema
+    print(f"\n{title}", file=sys.stderr)
+    if description:
+        print(description, file=sys.stderr)
+    print(json.dumps(schema, ensure_ascii=False, indent=2), file=sys.stderr)
+    prompt = "Response JSON"
+    if payload.interaction_kind == "mcp_elicitation":
+        prompt += ' (for example {"action":"accept","content":{...}})'
+    try:
+        raw = await asyncio.to_thread(input, f"{prompt}: ")
+        value = json.loads(raw)
+    except (EOFError, KeyboardInterrupt):
+        value = {"action": "cancel"} if payload.interaction_kind == "mcp_elicitation" else {}
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid interaction JSON: {exc.msg}") from exc
+    await client.resolve_interaction(payload.interaction_id, value)

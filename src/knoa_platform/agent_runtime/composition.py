@@ -495,7 +495,12 @@ def build_core_runtime(
                 if interaction.state == "pending"
                 else "interaction_resolved"
             ),
-            TaskEventPayload(interaction_id=interaction.interaction_id),
+            TaskEventPayload(
+                interaction_id=interaction.interaction_id,
+                interaction_kind=interaction.kind,
+                interaction_display=interaction.display,
+                interaction_schema=interaction.resolution_schema,
+            ),
         )
         await task_events.publish(event)
 

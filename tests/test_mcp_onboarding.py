@@ -70,7 +70,8 @@ class _DiscoveryClient:
             ),
         )
 
-    async def call_tool(self, _name, _arguments):
+    async def call_tool(self, _name, _arguments, elicitation_handler=None):
+        del elicitation_handler
         raise AssertionError
 
     async def read_resource(self, _uri):

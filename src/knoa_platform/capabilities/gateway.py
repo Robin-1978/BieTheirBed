@@ -60,6 +60,7 @@ class CapabilityGrant:
     cancellation: asyncio.Event
     confirmation: ConfirmationPort | None
     tool_commit: ToolCommitPort | None
+    interaction: Any
     binding_epoch: int
     expires_at: float
     scope_digest: str
@@ -84,6 +85,7 @@ class CapabilityGrantRegistry:
         cancellation: asyncio.Event,
         confirmation: ConfirmationPort | None,
         tool_commit: ToolCommitPort | None,
+        interaction: Any = None,
         artifact_ids: frozenset[str] = frozenset(),
         binding_epoch: int = 1,
         ttl_seconds: float = 300.0,
@@ -111,6 +113,7 @@ class CapabilityGrantRegistry:
             cancellation=cancellation,
             confirmation=confirmation,
             tool_commit=tool_commit,
+            interaction=interaction,
             binding_epoch=binding_epoch,
             expires_at=self._clock() + ttl_seconds,
             scope_digest=hashlib.sha256(canonical_scope.encode()).hexdigest(),
@@ -233,6 +236,7 @@ class CapabilityGateway:
                 cancellation=grant.cancellation,
                 confirmation=grant.confirmation,
                 commit=grant.tool_commit,
+                interaction=grant.interaction,
             ),
             ProposedToolCall(
                 call_id=call_id,

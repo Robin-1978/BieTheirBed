@@ -16,7 +16,8 @@ class _Client:
     def __init__(self) -> None:
         self.sessions = 0
 
-    async def create_session(self) -> str:
+    async def create_session(self, *, agent_id=None) -> str:
+        del agent_id
         self.sessions += 1
         return f"session-{self.sessions}"
 
@@ -116,6 +117,34 @@ async def test_chat_snapshot_renders_reasoning_tools_and_authoritative_answer() 
     assert app._last_answer == "Hello from Xiao Nuo."
     assert app._state.messages[-1].content == "Hello from Xiao Nuo."
     assert any(message.type.value == "tool_call" for message in app._state.messages)
+
+
+@pytest.mark.asyncio
+async def test_tui_can_select_agent_and_resolve_interaction() -> None:
+    class Client(_Client):
+        def __init__(self):
+            super().__init__()
+            self.resolved = None
+
+        async def resolve_interaction(self, interaction_id, value):
+            self.resolved = (interaction_id, value)
+
+    config = AppConfig(
+        default_agent="codex",
+        agents={
+            "knoa": {"enabled": True},
+            "codex": {"enabled": True, "command": ["codex", "app-server"]},
+        },
+    )
+    client = Client()
+    app = CoreChatApp(config, client, "session-a")
+
+    async with app.run_test():
+        await app._handle_command("/agent knoa")
+        await app._handle_command('/resolve interaction-a {"action":"decline"}')
+
+    assert app._agent_id == "knoa"
+    assert client.resolved == ("interaction-a", {"action": "decline"})
 
 
 def _snapshot(**updates) -> ChatTurnSnapshot:

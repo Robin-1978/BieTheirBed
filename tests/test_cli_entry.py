@@ -60,6 +60,14 @@ def test_version_uses_product_name_and_platform_version(capsys) -> None:
     assert capsys.readouterr().out == f"Knoa {__version__}\n"
 
 
+def test_parser_exposes_generic_task_and_interaction_commands() -> None:
+    parser = knoa_platform.build_parser()
+    assert parser.parse_args(["tasks", "--limit", "5"]).command == "tasks"
+    resolved = parser.parse_args(["resolve", "interaction-a", '{"action":"decline"}'])
+    assert resolved.interaction_id == "interaction-a"
+    assert parser.parse_args(["follow-up", "task-a", "continue"]).command == "follow-up"
+
+
 def test_start_uses_authoritative_service_lifecycle(monkeypatch) -> None:
     calls: list[tuple[str | None, str | None]] = []
 

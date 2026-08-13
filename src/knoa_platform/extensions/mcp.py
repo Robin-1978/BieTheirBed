@@ -7,6 +7,8 @@ import json
 import logging
 import os
 import re
+import secrets
+import time
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
@@ -45,6 +47,30 @@ _STDIO_BASE_ENV = frozenset(
 
 
 logger = logging.getLogger(__name__)
+
+
+def _schema_fields(schema: dict[str, Any]) -> list[dict[str, Any]]:
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return []
+    fields: list[dict[str, Any]] = []
+    for field_id, value in properties.items():
+        if not isinstance(field_id, str) or not isinstance(value, dict):
+            continue
+        field: dict[str, Any] = {
+            "id": field_id,
+            "title": str(value.get("title") or field_id),
+            "description": str(value.get("description") or ""),
+        }
+        enum = value.get("enum")
+        if isinstance(enum, list):
+            field["options"] = [
+                {"value": item, "label": str(item)}
+                for item in enum
+                if isinstance(item, (str, int, float, bool))
+            ]
+        fields.append(field)
+    return fields
 
 
 @dataclass(frozen=True)
@@ -99,6 +125,7 @@ class MCPResourceNotification:
 
 
 MCPNotificationHandler = Callable[[MCPResourceNotification], Awaitable[None]]
+MCPElicitationHandler = Callable[[dict[str, Any], dict[str, Any]], Awaitable[Any]]
 
 
 class MCPClientPort(Protocol):
@@ -113,7 +140,12 @@ class MCPClientPort(Protocol):
 
     async def list_prompts(self) -> tuple[MCPPromptDefinition, ...]: ...
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any: ...
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        elicitation_handler: MCPElicitationHandler | None = None,
+    ) -> Any: ...
 
     def resource_capabilities(self) -> MCPResourceCapabilities: ...
 
@@ -267,6 +299,39 @@ class _SessionClientMixin:
     _modern: bool
     _resource_subscriptions: set[str]
     _listen_task: asyncio.Task[None] | None
+    _elicitation_handler: MCPElicitationHandler | None
+    _tool_call_lock: asyncio.Lock
+
+    async def _elicit(self, _context: Any, params: Any) -> Any:
+        from mcp import types
+
+        if getattr(params, "mode", "form") != "form":
+            return types.ElicitResult(action="decline")
+        handler = self._elicitation_handler
+        if handler is None:
+            return types.ElicitResult(action="decline")
+        try:
+            result = await handler(
+                {
+                    "title": "MCP server requests input",
+                    "description": str(params.message),
+                    "fields": _schema_fields(dict(params.requested_schema)),
+                    "source": "mcp_server",
+                },
+                dict(params.requested_schema),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("MCP Elicitation handler failed")
+            return types.ElicitResult(action="decline")
+        if not isinstance(result, dict):
+            return types.ElicitResult(action="decline")
+        action = str(result.get("action") or "decline")
+        if action not in {"accept", "decline", "cancel"}:
+            action = "decline"
+        content = result.get("content") if action == "accept" else None
+        return types.ElicitResult(action=action, content=content)
 
     async def _start_owned(self) -> None:
         raise NotImplementedError
@@ -450,11 +515,55 @@ class _SessionClientMixin:
                 return tuple(definitions)
         raise ValueError("MCP prompt discovery pagination limit exceeded")
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
-        return await asyncio.wait_for(
-            self._require_session().call_tool(name, arguments),
-            timeout=self._timeout,
-        )
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        elicitation_handler: MCPElicitationHandler | None = None,
+    ) -> Any:
+        async with self._tool_call_lock:
+            self._elicitation_handler = elicitation_handler
+            try:
+                from mcp import types
+                from mcp.client.client import run_input_required_driver
+                from mcp.client.session import ClientRequestContext
+
+                session = self._require_session()
+
+                async def retry(input_responses, request_state):
+                    return await asyncio.wait_for(
+                        session.call_tool(
+                            name,
+                            arguments,
+                            input_responses=input_responses,
+                            request_state=request_state,
+                            allow_input_required=True,
+                        ),
+                        timeout=self._timeout,
+                    )
+
+                first = await retry(None, None)
+                if not isinstance(first, types.InputRequiredResult):
+                    return first
+
+                async def dispatch(key, request):
+                    return await session.dispatch_input_request(
+                        ClientRequestContext(
+                            session=session,
+                            request_id=key,
+                            meta=request.params.meta if request.params else None,
+                        ),
+                        request,
+                    )
+
+                return await run_input_required_driver(
+                    first,
+                    dispatch=dispatch,
+                    retry=retry,
+                    max_rounds=8,
+                )
+            finally:
+                self._elicitation_handler = None
 
     def resource_capabilities(self) -> MCPResourceCapabilities:
         return self._resource_capabilities
@@ -529,6 +638,8 @@ class StreamableHTTPMCPClient(_SessionClientMixin):
         self._stack: AsyncExitStack | None = None
         self._session: Any = None
         self._notification_handler: MCPNotificationHandler | None = None
+        self._elicitation_handler: MCPElicitationHandler | None = None
+        self._tool_call_lock = asyncio.Lock()
         self._resource_capabilities = MCPResourceCapabilities()
         self._modern = False
         self._resource_subscriptions: set[str] = set()
@@ -563,6 +674,7 @@ class StreamableHTTPMCPClient(_SessionClientMixin):
                     write_stream,
                     read_timeout_seconds=self._timeout,
                     message_handler=self._handle_message,
+                    elicitation_callback=self._elicit,
                 )
             )
             await self._finish_start(session)
@@ -604,6 +716,8 @@ class StdioMCPClient(_SessionClientMixin):
         self._stack: AsyncExitStack | None = None
         self._session: Any = None
         self._notification_handler: MCPNotificationHandler | None = None
+        self._elicitation_handler: MCPElicitationHandler | None = None
+        self._tool_call_lock = asyncio.Lock()
         self._resource_capabilities = MCPResourceCapabilities()
         self._modern = False
         self._resource_subscriptions: set[str] = set()
@@ -662,6 +776,7 @@ class StdioMCPClient(_SessionClientMixin):
                     write_stream,
                     read_timeout_seconds=self._timeout,
                     message_handler=self._handle_message,
+                    elicitation_callback=self._elicit,
                 )
             )
             await self._finish_start(session)
@@ -778,8 +893,55 @@ class MCPTool(ToolBase):
         self._client = client
 
     async def execute(self, **kwargs: Any) -> Any:
+        return await self.execute_scoped(None, **kwargs)
+
+    async def execute_scoped(self, scope: Any, **kwargs: Any) -> Any:
+        del scope
+        from knoa_agent_contracts import InteractionRequested
+        from knoa_platform.agent_runtime.tool_step import current_tool_step_context
+
+        context = current_tool_step_context()
+
+        async def elicit(
+            display: dict[str, Any],
+            resolution_schema: dict[str, Any],
+        ) -> Any:
+            if context is None or context.interaction is None:
+                return {"action": "decline"}
+            interaction_id = f"mcp-{context.run_id}-{secrets.token_hex(8)}"
+            handle = await context.interaction.begin(
+                context.scope,
+                context.run_id,
+                InteractionRequested(
+                    runtime_session_ref=context.scope.session_handle,
+                    runtime_turn_ref=context.run_id,
+                    occurred_at=time.time(),
+                    interaction_id=interaction_id[:128],
+                    interaction_epoch=1,
+                    kind="mcp_elicitation",
+                    display=display,
+                    resolution_schema={
+                        "type": "object",
+                        "properties": {
+                            "action": {
+                                "type": "string",
+                                "enum": ["accept", "decline", "cancel"],
+                            },
+                            "content": resolution_schema,
+                        },
+                        "required": ["action"],
+                        "additionalProperties": False,
+                    },
+                ),
+            )
+            return await handle.wait()
+
         try:
-            result = await self._client.call_tool(self._remote_name, kwargs)
+            result = await self._client.call_tool(
+                self._remote_name,
+                kwargs,
+                elicitation_handler=elicit,
+            )
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - remote provider failures become tool results
