@@ -120,11 +120,31 @@ class McpEndpointGrant(ContractModel):
         )
 
 
+class RuntimeTurnContext(ContractModel):
+    """Authorized, non-conversational material supplied by the host.
+
+    The host decides what the Agent may see. The Agent remains responsible for
+    rendering, ordering, budgeting, and compacting this material for its model.
+    """
+
+    core_memory: tuple[Annotated[str, StringConstraints(max_length=2000)], ...] = Field(
+        default=(), max_length=12
+    )
+    relevant_memory: tuple[
+        Annotated[str, StringConstraints(max_length=2000)], ...
+    ] = Field(default=(), max_length=5)
+    episodic_memory: tuple[
+        Annotated[str, StringConstraints(max_length=4000)], ...
+    ] = Field(default=(), max_length=3)
+    skill_instructions: Annotated[str, StringConstraints(max_length=200_000)] = ""
+
+
 class RuntimeTurnRequest(ContractModel):
     session: RuntimeSession
     operation_id: Identifier
     input: tuple[TurnInputPart, ...] = Field(min_length=1, max_length=16)
     mcp: McpEndpointGrant
+    context: RuntimeTurnContext = Field(default_factory=RuntimeTurnContext)
     deadline: float | None = Field(default=None, gt=0.0)
     options: dict[str, bool | int | float | str] = Field(default_factory=dict)
 

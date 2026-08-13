@@ -12,6 +12,7 @@ from knoa_agent_contracts import (
     AssistantDelta,
     McpEndpointGrant,
     RuntimeSession,
+    RuntimeTurnContext,
     RuntimeTurnEvent,
     RuntimeTurnRequest,
     TextPart,
@@ -55,12 +56,14 @@ def test_runtime_request_is_wire_safe_and_epoch_fenced() -> None:
         operation_id="operation-a",
         input=(TextPart(text="hello"),),
         mcp=grant,
+        context=RuntimeTurnContext(core_memory=("preferred_language: zh",)),
     )
 
     encoded = request.model_dump_json()
     assert "callback" not in encoded
     assert "repository" not in encoded
     assert "path" not in encoded
+    assert "preferred_language: zh" in encoded
     assert "secret-token" not in repr(grant)
 
     with pytest.raises(ValidationError, match="binding epochs differ"):

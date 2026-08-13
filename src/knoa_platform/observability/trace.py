@@ -111,6 +111,9 @@ class LLMTraceRecorder(JsonlRecorder):
         message_budget: int = 0,
         schema_tokens: int = 0,
         failover_used: bool = False,
+        prompt_tokens_estimated: int = 0,
+        prompt_tokens_source: str = "provider",
+        completion_tokens_source: str = "provider",
     ) -> None:
         self.record({
             "kind": "llm_call",
@@ -123,6 +126,9 @@ class LLMTraceRecorder(JsonlRecorder):
             "iteration": iteration,
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
+            "prompt_tokens_estimated": prompt_tokens_estimated,
+            "prompt_tokens_source": prompt_tokens_source,
+            "completion_tokens_source": completion_tokens_source,
             "cached_tokens": cached_tokens,
             "total_tokens": prompt_tokens + completion_tokens,
             "cache_hit_ratio": (cached_tokens / prompt_tokens) if prompt_tokens else 0.0,
@@ -145,8 +151,11 @@ class LLMTraceRecorder(JsonlRecorder):
         prompt_tokens = 0
         completion_tokens = 0
         cached_tokens = 0
+        prompt_tokens_estimated = 0
         model_calls = 0
         model = ""
+        provider_prompt_calls = 0
+        provider_completion_calls = 0
         for entry in self._session_records(principal_id, session_id):
             prompt_tokens += max(0, int(entry.get("prompt_tokens") or 0))
             completion_tokens += max(
@@ -154,6 +163,14 @@ class LLMTraceRecorder(JsonlRecorder):
                 int(entry.get("completion_tokens") or 0),
             )
             cached_tokens += max(0, int(entry.get("cached_tokens") or 0))
+            prompt_tokens_estimated += max(
+                0,
+                int(entry.get("prompt_tokens_estimated") or 0),
+            )
+            if entry.get("prompt_tokens_source") == "provider":
+                provider_prompt_calls += 1
+            if entry.get("completion_tokens_source") == "provider":
+                provider_completion_calls += 1
             model_calls += 1
             if entry.get("model"):
                 model = str(entry["model"])
@@ -161,8 +178,18 @@ class LLMTraceRecorder(JsonlRecorder):
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "cached_tokens": cached_tokens,
+            "prompt_tokens_estimated": prompt_tokens_estimated,
             "total_tokens": prompt_tokens + completion_tokens,
             "model_calls": model_calls,
+            "usage_source": (
+                "provider"
+                if model_calls
+                and provider_prompt_calls == model_calls
+                and provider_completion_calls == model_calls
+                else "partial"
+                if provider_prompt_calls or provider_completion_calls
+                else "unavailable"
+            ),
             "model": model,
         }
 

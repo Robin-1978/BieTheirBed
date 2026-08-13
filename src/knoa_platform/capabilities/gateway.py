@@ -262,6 +262,11 @@ class CapabilityGateway:
             isError=result.status != "completed",
         )
 
+    def authorized_tool_names(self, grant: CapabilityGrant) -> tuple[str, ...]:
+        if not grant.allow_tools:
+            return ()
+        return tuple(self._registry.list_for(grant.capabilities))
+
     async def _list_resources(
         self,
         context: ServerRequestContext[Any, Any],

@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
 
+from knoa_agent_contracts import (
+    AgentDescriptor,
+    AssistantDelta,
+    RuntimeLimits,
+    RuntimeSession,
+    RuntimeTurn,
+    TurnFinished,
+)
 from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
 from knoa_platform.agent_runtime.tool_step import ProposedToolCall
 from knoa_platform.approvals import (
@@ -13,6 +22,7 @@ from knoa_platform.approvals import (
     ApprovalReviewResult,
     KnoaReviewerAgent,
 )
+from knoa_platform.capabilities import CapabilityGrantRegistry
 from knoa_platform.tasks import TaskEventHub, TaskRepository
 from knoa_platform.tasks.approval import DurableApprovalService
 
@@ -32,6 +42,66 @@ class Reviewer:
         )
 
 
+class CapturingRuntime:
+    def __init__(self) -> None:
+        self.requests = []
+        self._descriptor = AgentDescriptor(
+            agent_id="reviewer_agent",
+            display_name="Reviewer",
+            implementation_version="1",
+            limits=RuntimeLimits(max_concurrent_turns=1),
+        )
+
+    @property
+    def descriptor(self):
+        return self._descriptor
+
+    async def create_session(self, request):
+        return RuntimeSession(
+            agent_id="reviewer_agent",
+            runtime_session_ref="review-session",
+            runtime_protocol_version="1.0",
+            binding_epoch=request.binding_epoch,
+        )
+
+    async def start_turn(self, request):
+        self.requests.append(request)
+
+        async def events():
+            yield AssistantDelta(
+                runtime_session_ref=request.session.runtime_session_ref,
+                runtime_turn_ref="review-turn",
+                occurred_at=1.0,
+                content='{"decision":"escalate","reason":"human required","rule_ids":[]}',
+            )
+            yield TurnFinished(
+                runtime_session_ref=request.session.runtime_session_ref,
+                runtime_turn_ref="review-turn",
+                occurred_at=2.0,
+                status="completed",
+            )
+
+        return RuntimeTurn(runtime_turn_ref="review-turn", events=events())
+
+    async def delete_session(self, session):
+        del session
+
+
+class ReviewerGateway:
+    def __init__(self) -> None:
+        self.grants = CapabilityGrantRegistry()
+
+
+class ReviewerManager:
+    def __init__(self, runtime) -> None:
+        self.runtime = runtime
+
+    @asynccontextmanager
+    async def lease_system(self, agent_id):
+        assert agent_id == "reviewer_agent"
+        yield self.runtime
+
+
 def test_reviewer_json_contract_accepts_plain_and_fenced_json():
     plain = KnoaReviewerAgent._parse_json(
         '{"decision":"approve","reason":"ok","rule_ids":[]}'
@@ -47,6 +117,37 @@ def test_reviewer_json_contract_accepts_plain_and_fenced_json():
 def test_reviewer_json_contract_rejects_non_object():
     with pytest.raises(TypeError, match="must be an object"):
         KnoaReviewerAgent._parse_json("[]")
+
+
+@pytest.mark.asyncio
+async def test_reviewer_agent_never_receives_user_memory_context() -> None:
+    runtime = CapturingRuntime()
+    reviewer = KnoaReviewerAgent(
+        ReviewerManager(runtime),
+        ReviewerGateway(),
+    )
+
+    result = await reviewer.review(
+        type(
+            "Request",
+            (),
+            {
+                "principal_id": "principal-a",
+                "run_id": "run-a",
+                "model_dump": lambda self, **_kwargs: {
+                    "principal_id": "principal-a",
+                    "run_id": "run-a",
+                    "tool_name": "write_file",
+                },
+            },
+        )()
+    )
+
+    assert result.decision is ApprovalReviewDecision.ESCALATE
+    assert runtime.requests[0].context.core_memory == ()
+    assert runtime.requests[0].context.relevant_memory == ()
+    assert runtime.requests[0].context.episodic_memory == ()
+    assert runtime.requests[0].context.skill_instructions == ""
 
 
 def _running_task(tmp_path: Path):
