@@ -55,6 +55,7 @@ class CoreDaemon:
             await composition.mcp_resource_tasks.stop()
             await composition.task_service.stop()
             await composition.conversation_service.stop()
+            await composition.interactions.close()
             await composition.capability_mcp_host.stop()
             await composition.extensions.stop()
             raise
@@ -76,6 +77,9 @@ class CoreDaemon:
         await composition.mcp_resource_tasks.stop()
         await composition.task_service.stop()
         await composition.conversation_service.stop()
+        interactions = getattr(composition, "interactions", None)
+        if interactions is not None:
+            await interactions.close()
         await composition.capability_mcp_host.stop()
         await composition.extensions.stop()
         composition.paths.pid.unlink(missing_ok=True)

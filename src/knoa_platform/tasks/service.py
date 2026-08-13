@@ -33,6 +33,7 @@ from knoa_platform.tasks.models import (
     TaskState,
 )
 from knoa_platform.tasks.repository import TaskRepository
+from knoa_platform.interactions import HumanInteractionService
 
 
 class TaskService:
@@ -44,11 +45,13 @@ class TaskService:
         executor: TaskExecutor,
         approvals: DurableApprovalService,
         events: TaskEventHub,
+        interactions: HumanInteractionService | None = None,
     ) -> None:
         self._repository = repository
         self._executor = executor
         self._approvals = approvals
         self._events = events
+        self._interactions = interactions
 
     async def start(self) -> None:
         await self._executor.start()
@@ -347,7 +350,18 @@ class TaskService:
             principal_id,
             execution.execution_id,
         )
-        return execution.model_copy(update={"approvals": approvals})
+        interactions = (
+            ()
+            if self._interactions is None
+            else await self._interactions.list_owner(
+                principal_id,
+                "task_execution",
+                execution.execution_id,
+            )
+        )
+        return execution.model_copy(
+            update={"approvals": approvals, "interactions": interactions}
+        )
 
     async def list_executions(
         self,
@@ -369,7 +383,20 @@ class TaskService:
                 principal_id,
                 execution.execution_id,
             )
-            hydrated.append(execution.model_copy(update={"approvals": approvals}))
+            interactions = (
+                ()
+                if self._interactions is None
+                else await self._interactions.list_owner(
+                    principal_id,
+                    "task_execution",
+                    execution.execution_id,
+                )
+            )
+            hydrated.append(
+                execution.model_copy(
+                    update={"approvals": approvals, "interactions": interactions}
+                )
+            )
         return tuple(hydrated)
 
     async def rerun_execution(

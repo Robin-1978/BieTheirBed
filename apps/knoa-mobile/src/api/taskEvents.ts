@@ -14,6 +14,8 @@ const TASK_EVENT_TYPES = [
   "tool_result",
   "approval_requested",
   "approval_resolved",
+  "interaction_requested",
+  "interaction_resolved",
   "artifact",
   "context_compacted",
   "warning",

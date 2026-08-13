@@ -1371,6 +1371,110 @@
         }
       }
     },
+    "/v1/interactions/{interaction_id}/resolve": {
+      "post": {
+        "operationId": "resolveInteraction",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "interaction_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveHumanInteractionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Human interaction resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanInteractionResolvedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tasks": {
       "post": {
         "operationId": "createTask",
@@ -4896,6 +5000,14 @@
             "title": "Approvals",
             "type": "array"
           },
+          "interactions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HumanInteractionSnapshot"
+            },
+            "title": "Interactions",
+            "type": "array"
+          },
           "timeline": {
             "default": [],
             "items": {
@@ -5344,6 +5456,117 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "HumanInteractionResolvedResponse": {
+        "properties": {
+          "interaction": {
+            "$ref": "#/components/schemas/HumanInteractionSnapshot"
+          },
+          "resolved": {
+            "title": "Resolved",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "interaction",
+          "resolved"
+        ],
+        "title": "HumanInteractionResolvedResponse",
+        "type": "object"
+      },
+      "HumanInteractionSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "interaction_id": {
+            "minLength": 1,
+            "title": "Interaction Id",
+            "type": "string"
+          },
+          "owner_kind": {
+            "enum": [
+              "conversation_turn",
+              "task_execution"
+            ],
+            "title": "Owner Kind",
+            "type": "string"
+          },
+          "owner_id": {
+            "minLength": 1,
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "user_input",
+            "default": "user_input",
+            "title": "Kind",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "resolved",
+              "cancelled",
+              "expired",
+              "runtime_lost"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "display": {
+            "additionalProperties": true,
+            "title": "Display",
+            "type": "object"
+          },
+          "resolution_schema": {
+            "additionalProperties": true,
+            "title": "Resolution Schema",
+            "type": "object"
+          },
+          "resolution": {
+            "default": null,
+            "title": "Resolution"
+          },
+          "created_at": {
+            "minimum": 0.0,
+            "title": "Created At",
+            "type": "number"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resolved At"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expires At"
+          }
+        },
+        "required": [
+          "interaction_id",
+          "owner_kind",
+          "owner_id",
+          "state",
+          "created_at"
+        ],
+        "title": "HumanInteractionSnapshot",
+        "type": "object"
+      },
       "PairChallengeRequest": {
         "additionalProperties": false,
         "properties": {
@@ -5601,6 +5824,14 @@
             },
             "title": "Approvals",
             "type": "array"
+          },
+          "interactions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HumanInteractionSnapshot"
+            },
+            "title": "Interactions",
+            "type": "array"
           }
         },
         "required": [
@@ -5778,6 +6009,19 @@
           "approved"
         ],
         "title": "ResolveApprovalRequest",
+        "type": "object"
+      },
+      "ResolveHumanInteractionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "ResolveHumanInteractionRequest",
         "type": "object"
       },
       "ResumeTaskRequest": {
@@ -5972,6 +6216,8 @@
               "tool_result",
               "approval_requested",
               "approval_resolved",
+              "interaction_requested",
+              "interaction_resolved",
               "artifact",
               "context_compacted",
               "warning",
@@ -6063,6 +6309,12 @@
             "default": "",
             "maxLength": 128,
             "title": "Approval Id",
+            "type": "string"
+          },
+          "interaction_id": {
+            "default": "",
+            "maxLength": 128,
+            "title": "Interaction Id",
             "type": "string"
           },
           "tool_step_id": {

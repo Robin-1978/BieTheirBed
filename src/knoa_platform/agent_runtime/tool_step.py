@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -184,7 +185,8 @@ class ToolStep:
                 code="capability_denied",
                 message="Tool policy is not configured",
             )
-        validator = Draft202012Validator(tool.validation_schema())
+        approved_schema = copy.deepcopy(tool.validation_schema())
+        validator = Draft202012Validator(approved_schema)
         errors = sorted(
             validator.iter_errors(call.arguments),
             key=lambda error: repr(tuple(error.path)),
@@ -252,6 +254,79 @@ class ToolStep:
                     tool_name=tool_name,
                     code="confirmation_denied",
                     message="Tool execution was denied",
+                )
+            current_tool = self._registry.get(tool_name)
+            if current_tool is not tool:
+                return self._result(
+                    call,
+                    "rejected",
+                    tool_name=tool_name,
+                    code="approval_stale",
+                    message="Tool definition changed after confirmation",
+                )
+            try:
+                current_schema = current_tool.validation_schema()
+            except Exception:  # noqa: BLE001 - changed Tool definitions fail closed
+                return self._result(
+                    call,
+                    "rejected",
+                    tool_name=tool_name,
+                    code="approval_stale",
+                    message="Tool schema changed after confirmation",
+                )
+            if current_schema != approved_schema:
+                return self._result(
+                    call,
+                    "rejected",
+                    tool_name=tool_name,
+                    code="approval_stale",
+                    message="Tool schema changed after confirmation",
+                )
+            current_errors = sorted(
+                Draft202012Validator(current_schema).iter_errors(call.arguments),
+                key=lambda error: repr(tuple(error.path)),
+            )
+            if current_errors:
+                return self._result(
+                    call,
+                    "rejected",
+                    tool_name=tool_name,
+                    code="approval_stale",
+                    message="Tool arguments are no longer valid after confirmation",
+                )
+            current_policy = current_tool.policy_for(call.arguments)
+            if (
+                current_policy != policy
+                or not current_policy.configured
+                or not current_policy.capabilities <= context.capabilities
+            ):
+                return self._result(
+                    call,
+                    "rejected",
+                    tool_name=tool_name,
+                    code="approval_stale",
+                    message="Tool policy changed after confirmation",
+                )
+            try:
+                current_arguments = self._argument_policy.normalize(
+                    current_policy.capabilities,
+                    call.arguments,
+                )
+            except ToolPolicyDeniedError:
+                return self._result(
+                    call,
+                    "rejected",
+                    tool_name=tool_name,
+                    code="approval_stale",
+                    message="Tool arguments changed after confirmation",
+                )
+            if current_arguments != arguments:
+                return self._result(
+                    call,
+                    "rejected",
+                    tool_name=tool_name,
+                    code="approval_stale",
+                    message="Tool arguments changed after confirmation",
                 )
         if context.cancellation.is_set():
             return self._result(

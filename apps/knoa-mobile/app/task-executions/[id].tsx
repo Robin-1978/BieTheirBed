@@ -14,13 +14,14 @@ import {
   View,
 } from "react-native";
 
-import type { AgentSummary, ArtifactInput, ChatArtifact, Task, TaskApproval, TaskExecution } from "@/api/models";
+import type { AgentSummary, ArtifactInput, ChatArtifact, HumanInteraction, Task, TaskApproval, TaskExecution } from "@/api/models";
 import type { ResolvedArtifactFile } from "@/api/chatArtifacts";
 import { saveArtifactFile } from "@/api/saveArtifactFile";
 import { AppPressable } from "@/components/AppPressable";
 import { AppIcon } from "@/components/AppIcon";
 import { AppMarkdown } from "@/components/AppMarkdown";
 import { ArtifactViewer } from "@/components/ArtifactViewer";
+import { InteractionCard } from "@/components/InteractionCard";
 import { mergeTaskTimeline, type TaskTimelineItem } from "@/components/taskTimeline";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
@@ -36,6 +37,7 @@ export default function TaskExecutionDetailScreen() {
   const [imagePreview, setImagePreview] = useState<ResolvedArtifactFile | null>(null);
   const [working, setWorking] = useState("");
   const [resolvingApproval, setResolvingApproval] = useState<{ id: string; approved: boolean } | null>(null);
+  const [resolvingInteraction, setResolvingInteraction] = useState("");
   const [artifactWorking, setArtifactWorking] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -67,6 +69,10 @@ export default function TaskExecutionDetailScreen() {
   const approvals = useMemo(
     () => execution?.approvals.filter((item) => item.state === "pending") ?? [],
     [execution?.approvals],
+  );
+  const interactions = useMemo(
+    () => execution?.interactions?.filter((item) => item.state === "pending") ?? [],
+    [execution?.interactions],
   );
   const timeline = useMemo(
     () => mergeTaskTimeline((execution?.trace?.entries ?? []).filter(
@@ -254,6 +260,15 @@ export default function TaskExecutionDetailScreen() {
         </View>
       ))}
 
+      {interactions.map((interaction) => (
+        <InteractionCard
+          key={interaction.interaction_id}
+          interaction={interaction}
+          submitting={resolvingInteraction === interaction.interaction_id}
+          onSubmit={(value) => void resolveInteraction(interaction, value)}
+        />
+      ))}
+
       {timeline.length ? (
         <View style={styles.timeline}>
           <Text style={styles.sectionTitle}>{t("execution.steps")}</Text>
@@ -354,6 +369,25 @@ export default function TaskExecutionDetailScreen() {
       setError(t("execution.approvalFailed"));
     } finally {
       setResolvingApproval(null);
+    }
+  }
+
+  async function resolveInteraction(interaction: HumanInteraction, value: Record<string, unknown>) {
+    if (working || resolvingInteraction) return;
+    setResolvingInteraction(interaction.interaction_id);
+    try {
+      const result = await gateway.runAuthenticated(
+        (client) => client.resolveInteraction(interaction.interaction_id, value),
+      );
+      setExecution((current) => current ? {
+        ...current,
+        interactions: (current.interactions ?? []).map((item) => item.interaction_id === interaction.interaction_id ? result.interaction : item),
+      } : current);
+      void refresh();
+    } catch {
+      setError("输入未能提交，请刷新后重试");
+    } finally {
+      setResolvingInteraction("");
     }
   }
 }

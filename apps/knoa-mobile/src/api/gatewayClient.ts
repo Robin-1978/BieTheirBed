@@ -6,6 +6,7 @@ import type {
   ChatTurnSnapshot,
   ConversationSession,
   GatewaySession,
+  HumanInteraction,
   PairingPayload,
   Task,
   TaskDefinitionState,
@@ -238,6 +239,16 @@ export class GatewayClient {
       `/v1/conversations/approvals/${encodeURIComponent(approvalId)}/resolve`,
       { method: "POST", body: { approved } },
     );
+  }
+
+  async resolveInteraction(
+    interactionId: string,
+    value: Record<string, unknown>,
+  ): Promise<{ interaction: HumanInteraction; resolved: boolean }> {
+    return this.json(`/v1/interactions/${encodeURIComponent(interactionId)}/resolve`, {
+      method: "POST",
+      body: { value },
+    });
   }
 
   async createTask(input: {

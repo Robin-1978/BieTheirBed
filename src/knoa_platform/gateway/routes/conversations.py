@@ -14,6 +14,7 @@ from knoa_platform.gateway.protocol import (
     CreateChatTurnRequest,
     CreateSessionRequest,
     ResolveApprovalRequest,
+    ResolveHumanInteractionRequest,
     UpdateConversationSessionRequest,
 )
 
@@ -23,6 +24,31 @@ _MAX_BODY_BYTES = 16 * 1024
 
 
 class ConversationRoutes:
+
+    async def _resolve_interaction(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=30)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        interaction_id = self._path_identifier(request, "interaction_id")
+        if interaction_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        parsed = await self._parse_body(request, ResolveHumanInteractionRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            result = await self._core.resolve_interaction(
+                authenticated.device.principal_id,
+                interaction_id,
+                parsed.value,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse(
+            {
+                "interaction": result.interaction.model_dump(mode="json"),
+                "resolved": result.resolved,
+            }
+        )
 
     async def _create_session(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=30)

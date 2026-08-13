@@ -71,6 +71,7 @@ from knoa_platform.service.core_auth import (
 )
 from knoa_platform.service.core_automation_commands import AutomationCommandHandler
 from knoa_platform.service.core_conversation_commands import ConversationCommandHandler
+from knoa_platform.service.core_interaction_commands import HumanInteractionCommandHandler
 from knoa_platform.service.core_task_commands import TaskCommandHandler
 from knoa_platform.tasks import (
     TaskCapacityError,
@@ -79,6 +80,7 @@ from knoa_platform.tasks import (
     TaskService,
     TaskTransitionError,
 )
+from knoa_platform.interactions import HumanInteractionService
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +105,7 @@ class CoreServer:
         *,
         conversations: ConversationService | None = None,
         transcription: ArtifactTranscriptionServicePort | None = None,
+        interactions: HumanInteractionService | None = None,
         authentication_timeout_seconds: float = 10.0,
         max_subscriptions_per_connection: int = 8,
     ) -> None:
@@ -119,6 +122,7 @@ class CoreServer:
         self._authentication_timeout = max(0.01, authentication_timeout_seconds)
         self._max_subscriptions = max_subscriptions_per_connection
         self._command_handlers = (
+            HumanInteractionCommandHandler(interactions),
             ConversationCommandHandler(control, conversations),
             TaskCommandHandler(tasks, schedules, triggers),
             AutomationCommandHandler(schedules, triggers),

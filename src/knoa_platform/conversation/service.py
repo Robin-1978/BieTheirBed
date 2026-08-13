@@ -46,6 +46,7 @@ from knoa_platform.conversation.repository import (
     ConversationRepository,
 )
 from knoa_platform.context.session_context import SessionContextService
+from knoa_platform.interactions import HumanInteractionService, ScopedInteractionPort
 from knoa_platform.tasks.identity import task_tool_step_id
 from knoa_platform.tools.base import ToolPolicy
 
@@ -239,6 +240,7 @@ class ConversationService:
         *,
         hub: ConversationHub | None = None,
         session_context: SessionContextService | None = None,
+        interactions: HumanInteractionService | None = None,
     ) -> None:
         self._sessions = sessions
         self._repository = repository
@@ -249,6 +251,10 @@ class ConversationService:
         self._executions: dict[str, asyncio.Task[None]] = {}
         self._approvals = ConversationApprovalService(repository, self._notify)
         self._tool_commits = ConversationToolCommitService(repository)
+        self._interactions = interactions
+        self._interaction_port: ScopedInteractionPort | None = (
+            None if interactions is None else interactions.for_owner("conversation_turn")
+        )
         self._session_leases: dict[str, _SessionLease] = {}
         self._session_leases_guard = asyncio.Lock()
 
@@ -380,6 +386,16 @@ class ConversationService:
 
     async def get_turn(self, principal_id: str, turn_id: str) -> ChatTurn:
         stored = await asyncio.to_thread(self._repository.get, principal_id, turn_id)
+        if self._interactions is not None:
+            stored = stored.model_copy(
+                update={
+                    "interactions": await self._interactions.list_owner(
+                        principal_id,
+                        "conversation_turn",
+                        turn_id,
+                    )
+                }
+            )
         live = self._live.get(turn_id)
         if live is None or stored.state in TERMINAL_CHAT_TURN_STATES:
             return stored
@@ -521,6 +537,7 @@ class ConversationService:
                     ),
                     confirmation=self._approvals,
                     tool_commit=self._tool_commits,
+                    interaction=self._interaction_port,
                 ),
             ):
                 await self._apply_event(turn, live, event)

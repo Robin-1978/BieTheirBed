@@ -86,6 +86,41 @@ export type ChatApproval = {
   resolved_by: string;
 };
 
+export type HumanInteraction = {
+  interaction_id: string;
+  owner_kind: "conversation_turn" | "task_execution";
+  owner_id: string;
+  kind: "user_input";
+  state: "pending" | "resolved" | "cancelled" | "expired" | "runtime_lost";
+  display: {
+    title?: string;
+    description?: string;
+    fields?: Array<{
+      id: string;
+      title?: string;
+      description?: string;
+      options?: Array<{ value: string; label: string; description?: string }>;
+      allow_other?: boolean;
+    }>;
+  };
+  resolution_schema: {
+    type?: string;
+    properties?: Record<string, {
+      type?: string;
+      title?: string;
+      enum?: string[];
+      minLength?: number;
+      maxLength?: number;
+    }>;
+    required?: string[];
+    additionalProperties?: boolean;
+  };
+  resolution: unknown;
+  created_at: number;
+  resolved_at: number | null;
+  expires_at: number | null;
+};
+
 export type ChatArtifact = {
   artifact_id: string;
   name: string;
@@ -109,6 +144,7 @@ export type ChatTurnSnapshot = {
   cancel_requested: boolean;
   tool_steps: Array<Record<string, unknown>>;
   approvals: ChatApproval[];
+  interactions?: HumanInteraction[];
   timeline: ChatTimelineEntry[];
   created_at: number;
   updated_at: number;
@@ -155,6 +191,7 @@ export type TaskExecution = {
   finished_at: number | null;
   trace: TaskExecutionTrace | null;
   approvals: TaskApproval[];
+  interactions?: HumanInteraction[];
 };
 
 export type TaskApproval = {

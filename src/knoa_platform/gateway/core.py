@@ -29,6 +29,7 @@ from knoa_platform.service.core_api import (
     TaskPauseResultMessage,
     TaskResumedMessage,
     TaskSnapshot,
+    HumanInteractionResolvedMessage,
 )
 from knoa_platform.service.core_client import CoreClient
 from knoa_platform.service.credentials import (
@@ -113,6 +114,12 @@ class GatewayCoreClient(Protocol):
         *,
         approved: bool,
     ) -> ChatApprovalResolvedMessage: ...
+
+    async def resolve_interaction(
+        self,
+        interaction_id: str,
+        value: object,
+    ) -> HumanInteractionResolvedMessage: ...
 
     async def get_task(self, task_id: str) -> TaskSnapshot: ...
 
@@ -407,6 +414,17 @@ class GatewayCoreBridge:
         return await (await self._client_for(principal_id)).resolve_chat_approval(
             approval_id,
             approved=approved,
+        )
+
+    async def resolve_interaction(
+        self,
+        principal_id: str,
+        interaction_id: str,
+        value: object,
+    ) -> HumanInteractionResolvedMessage:
+        return await (await self._client_for(principal_id)).resolve_interaction(
+            interaction_id,
+            value,
         )
 
     async def get_task(self, principal_id: str, task_id: str) -> TaskSnapshot:

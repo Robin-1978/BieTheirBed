@@ -7,14 +7,17 @@ import hashlib
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
+from typing import Any, Protocol
 
 from knoa_agent_contracts import (
     ArtifactPart,
     ArtifactReference,
     CreateRuntimeSession,
+    InteractionRequested,
     McpEndpointGrant,
     ResumeRuntimeSession,
     RuntimeInterruptCommand,
+    RuntimeInteractionResolution,
     RuntimeTurnEvent,
     RuntimeTurnRequest,
     TextPart,
@@ -34,6 +37,19 @@ from knoa_platform.capabilities import CapabilityGateway
 from knoa_platform.tools.base import ToolCapability
 
 
+class InteractionHandle(Protocol):
+    async def wait(self) -> Any: ...
+
+
+class InteractionPort(Protocol):
+    async def begin(
+        self,
+        scope: RuntimeScope,
+        run_id: str,
+        event: InteractionRequested,
+    ) -> InteractionHandle: ...
+
+
 @dataclass(frozen=True)
 class ExecuteAgentTurn:
     scope: RuntimeScope
@@ -46,6 +62,7 @@ class ExecuteAgentTurn:
     agent_id: str | None = None
     confirmation: ConfirmationPort | None = None
     tool_commit: ToolCommitPort | None = None
+    interaction: InteractionPort | None = None
 
 
 class AgentExecutionService:
@@ -162,7 +179,37 @@ class AgentExecutionService:
                             terminal = event
                         if terminal_count > 1:
                             raise RuntimeError("Agent Runtime emitted multiple terminals")
+                        interaction_handle: InteractionHandle | None = None
+                        if isinstance(event, InteractionRequested):
+                            if event.kind != "user_input" or request.interaction is None:
+                                raise RuntimeError(
+                                    "Agent Runtime requested an unsupported interaction"
+                                )
+                            interaction_handle = await request.interaction.begin(
+                                request.scope,
+                                request.turn_id,
+                                event,
+                            )
                         yield event
+                        if interaction_handle is not None:
+                            value = await interaction_handle.wait()
+                            result = await runtime.resolve_interaction(
+                                RuntimeInteractionResolution(
+                                    session=session,
+                                    runtime_turn_ref=turn.runtime_turn_ref,
+                                    interaction_id=event.interaction_id,
+                                    interaction_epoch=event.interaction_epoch,
+                                    command_id=(
+                                        f"interaction:{request.turn_id}:"
+                                        f"{event.interaction_id}:{event.interaction_epoch}"
+                                    ),
+                                    value=value,
+                                )
+                            )
+                            if result.status != "accepted":
+                                raise RuntimeError(
+                                    "Agent Runtime rejected the interaction resolution"
+                                )
                 finally:
                     interrupt.cancel()
                     await asyncio.gather(interrupt, return_exceptions=True)

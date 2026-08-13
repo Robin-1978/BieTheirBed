@@ -32,6 +32,7 @@ from knoa_platform.gateway.protocol import (
     DeviceRevokedResponse,
     ErrorResponse,
     HealthResponse,
+    HumanInteractionResolvedResponse,
     PairChallengeRequest,
     PairCompleteRequest,
     PairCompleteResponse,
@@ -41,6 +42,7 @@ from knoa_platform.gateway.protocol import (
     ProductTaskListResponse,
     ProductTaskResponse,
     ResolveApprovalRequest,
+    ResolveHumanInteractionRequest,
     ResumeTaskRequest,
     RuntimeStatusResponse,
     SessionCreatedResponse,
@@ -75,6 +77,7 @@ _MODELS: tuple[type[BaseModel], ...] = (
     ChatTurnResponse,
     ChatTurnListResponse,
     ChatApprovalResolvedResponse,
+    HumanInteractionResolvedResponse,
     ProductTaskResponse,
     ProductTaskListResponse,
     ProductTaskExecutionResponse,
@@ -86,6 +89,7 @@ _MODELS: tuple[type[BaseModel], ...] = (
     ResumeTaskRequest,
     TaskEventListResponse,
     ResolveApprovalRequest,
+    ResolveHumanInteractionRequest,
     ApprovalResolvedResponse,
     AuditEventResponse,
     AuditListResponse,
@@ -403,6 +407,26 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     "responses": {
                         "200": _json_response("Chat approval resolved", ChatApprovalResolvedResponse),
                         **_errors("400", "401", "404", "429", "503"),
+                    },
+                }
+            },
+            "/v1/interactions/{interaction_id}/resolve": {
+                "post": {
+                    "operationId": "resolveInteraction",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "interaction_id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                    }],
+                    "requestBody": _json_body(ResolveHumanInteractionRequest),
+                    "responses": {
+                        "200": _json_response(
+                            "Human interaction resolved",
+                            HumanInteractionResolvedResponse,
+                        ),
+                        **_errors("400", "401", "404", "422", "429", "503"),
                     },
                 }
             },

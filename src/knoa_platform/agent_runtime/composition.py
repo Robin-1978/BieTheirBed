@@ -79,6 +79,10 @@ from knoa_platform.extensions.skill import (
     build_skill_providers,
     builtin_skill_root,
 )
+from knoa_platform.interactions import (
+    HumanInteractionRepository,
+    HumanInteractionService,
+)
 from knoa_platform.observability.trace import LLMTraceRecorder, TurnRecorder
 from knoa_platform.principal import converge_owner_principals, discover_owner_aliases
 from knoa_platform.runtime import RuntimePaths
@@ -97,6 +101,7 @@ from knoa_platform.tasks import (
     DurableApprovalService,
     DurableToolCommitService,
     TaskEventHub,
+    TaskEventPayload,
     TaskExecutor,
     TaskRepository,
     TaskService,
@@ -147,6 +152,7 @@ class CoreRuntimeComposition:
     task_service: TaskService
     conversations: ConversationRepository
     conversation_service: ConversationService
+    interactions: HumanInteractionService
     schedules: ScheduleRepository
     schedule_dispatcher: ScheduleDispatcher
     schedule_service: ScheduleService
@@ -474,6 +480,29 @@ def build_core_runtime(
         turn_observer=observe_turn,
     )
     task_events = TaskEventHub()
+    interaction_repository = HumanInteractionRepository(database)
+
+    async def interaction_changed(interaction) -> None:
+        if interaction.owner_kind == "conversation_turn":
+            await conversation_service._notify(interaction.owner_id)
+            return
+        event = await asyncio.to_thread(
+            tasks.append_event,
+            interaction.principal_id,
+            interaction.owner_id,
+            (
+                "interaction_requested"
+                if interaction.state == "pending"
+                else "interaction_resolved"
+            ),
+            TaskEventPayload(interaction_id=interaction.interaction_id),
+        )
+        await task_events.publish(event)
+
+    interactions = HumanInteractionService(
+        interaction_repository,
+        changed=interaction_changed,
+    )
     task_approvals = DurableApprovalService(tasks, task_events)
     task_tool_commits = DurableToolCommitService(tasks)
     task_executor = TaskExecutor(
@@ -484,12 +513,14 @@ def build_core_runtime(
         task_tool_commits,
         task_events,
         session_context=session_context,
+        interactions=interactions.for_owner("task_execution"),
     )
     task_service = TaskService(
         tasks,
         task_executor,
         task_approvals,
         task_events,
+        interactions=interactions,
     )
     conversations = ConversationRepository(
         database,
@@ -502,6 +533,7 @@ def build_core_runtime(
         conversations,
         agent_execution,
         session_context=session_context,
+        interactions=interactions,
     )
     schedule_dispatcher = ScheduleDispatcher(schedules, task_service)
     schedule_service = ScheduleService(schedules, schedule_dispatcher)
@@ -626,6 +658,7 @@ def build_core_runtime(
         ),
         conversations=conversation_service,
         transcription=transcription_service,
+        interactions=interactions,
     )
     host = CoreServiceHost(
         tcp=TcpCoreEndpoint(
@@ -642,6 +675,7 @@ def build_core_runtime(
         task_service=task_service,
         conversations=conversations,
         conversation_service=conversation_service,
+        interactions=interactions,
         schedules=schedules,
         schedule_dispatcher=schedule_dispatcher,
         schedule_service=schedule_service,

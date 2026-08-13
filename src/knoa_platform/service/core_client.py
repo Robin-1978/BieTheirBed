@@ -60,6 +60,7 @@ from knoa_platform.service.core_api import (
     HealthMessage,
     HealthRequest,
     HistoryMessage,
+    HumanInteractionResolvedMessage,
     ListChatTurnsRequest,
     ListConversationSessionsRequest,
     ListMemoryRequest,
@@ -82,6 +83,7 @@ from knoa_platform.service.core_api import (
     RerunProductTaskExecutionRequest,
     ResolveApprovalRequest,
     ResolveChatApprovalRequest,
+    ResolveHumanInteractionRequest,
     ResumeTaskRequest,
     RetryChatTurnRequest,
     SessionCreatedMessage,
@@ -671,6 +673,22 @@ class CoreClient(CoreArtifactClientMixin, CoreAutomationClientMixin):
         )
         if not isinstance(response, ChatApprovalResolvedMessage):
             raise RuntimeError("CoreServer returned an invalid Chat approval response")
+        return response
+
+    async def resolve_interaction(
+        self,
+        interaction_id: str,
+        value: Any,
+    ) -> HumanInteractionResolvedMessage:
+        response = await self._request(
+            ResolveHumanInteractionRequest(
+                request_id=self._request_id(),
+                interaction_id=interaction_id,
+                value=value,
+            )
+        )
+        if not isinstance(response, HumanInteractionResolvedMessage):
+            raise RuntimeError("CoreServer returned an invalid interaction response")
         return response
 
     async def task_events(

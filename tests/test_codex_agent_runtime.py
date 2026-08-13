@@ -275,6 +275,90 @@ async def test_codex_runtime_rejects_session_wide_approval(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_codex_runtime_exposes_user_input_as_generic_schema(tmp_path: Path) -> None:
+    factory = ClientFactory()
+    runtime = CodexAgentRuntime(
+        CodexSessionRepository(tmp_path / "sessions.db"),
+        home=tmp_path / "codex-home",
+        cwd=tmp_path,
+        client_factory=factory,
+    )
+    session = await runtime.create_session(
+        CreateRuntimeSession(operation_id="bind-a", binding_epoch=1)
+    )
+    turn = await runtime.start_turn(
+        RuntimeTurnRequest(
+            session=session,
+            operation_id="operation-a",
+            input=(TextPart(text="hello"),),
+            mcp=grant(),
+        )
+    )
+    client = factory.clients[-1]
+    consume = asyncio.create_task(anext(turn.events))
+    await client.emit(
+        {
+            "id": 99,
+            "method": "item/tool/requestUserInput",
+            "params": {
+                "threadId": "thread-a",
+                "turnId": "turn-a",
+                "itemId": "item-a",
+                "questions": [
+                    {
+                        "id": "target",
+                        "header": "Target",
+                        "question": "Choose a target",
+                        "isOther": False,
+                        "isSecret": False,
+                        "options": [
+                            {"label": "alpha", "description": "First"},
+                            {"label": "beta", "description": "Second"},
+                        ],
+                    }
+                ],
+                "isBlocking": True,
+                "autoResolutionMs": None,
+            },
+        }
+    )
+    interaction = await consume
+
+    assert interaction.kind == "user_input"
+    assert interaction.resolution_schema == {
+        "type": "object",
+        "properties": {
+            "target": {
+                "type": "string",
+                "title": "Target",
+                "minLength": 1,
+                "maxLength": 4000,
+                "enum": ["alpha", "beta"],
+            }
+        },
+        "required": ["target"],
+        "additionalProperties": False,
+    }
+    assert interaction.display["fields"][0]["options"][0]["value"] == "alpha"
+
+    result = await runtime.resolve_interaction(
+        RuntimeInteractionResolution(
+            session=session,
+            runtime_turn_ref="turn-a",
+            interaction_id=interaction.interaction_id,
+            interaction_epoch=interaction.interaction_epoch,
+            command_id="resolve-a",
+            value={"target": "beta"},
+        )
+    )
+
+    assert result.status == "accepted"
+    assert client.responses == [
+        (99, {"answers": {"target": {"answers": ["beta"]}}}, None)
+    ]
+
+
+@pytest.mark.asyncio
 async def test_codex_runtime_rejects_extra_mcp_server_inventory(tmp_path: Path) -> None:
     factory = ClientFactory()
     runtime = CodexAgentRuntime(
