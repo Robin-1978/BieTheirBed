@@ -1,4 +1,4 @@
-# PC Assistant 架构优化执行计划
+# Knoa 架构优化执行计划
 
 基于 `full-architecture-review.md` 评审结果，按 Phase 1→2→3 顺序执行。
 

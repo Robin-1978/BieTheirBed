@@ -1,0 +1,155 @@
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+import pytest
+
+from knoa_agent import ContextCheckpointRepository, KnoaAgentRuntime
+from knoa_platform.agent_runtime.contracts import ArtifactAttachment, RuntimeScope
+from knoa_platform.agent_runtime.model_step import ProviderChunk
+from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
+from knoa_platform.agent_runtime.tool_step import ToolArgumentPolicy, ToolStep
+from knoa_platform.agents import (
+    AgentExecutionService,
+    AgentManager,
+    AgentSessionBindingRepository,
+    ExecuteAgentTurn,
+)
+from knoa_platform.artifacts import ArtifactStore
+from knoa_platform.capabilities import CapabilityGateway, GatewayMCPConnector
+from knoa_platform.tools.registry import ToolRegistry
+
+
+class Provider:
+    def __init__(self) -> None:
+        self.requests = []
+
+    def stream(self, request, cancellation):
+        del cancellation
+
+        async def iterate():
+            self.requests.append(request)
+            yield ProviderChunk(content_delta="done")
+            yield ProviderChunk(finish_reason="stop", terminal=True)
+
+        return iterate()
+
+
+async def healthy():
+    return type("Health", (), {"healthy": True, "detail": "ok"})()
+
+
+@pytest.mark.asyncio
+async def test_execution_service_persists_binding_and_passes_artifact_by_mcp(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "platform.db"
+    sessions = RuntimeSessionRepository(database, handle_factory=lambda: "session-a")
+    scope = sessions.create("principal-a")
+    artifacts = ArtifactStore(tmp_path / "attachments", db_path=database)
+    artifact = artifacts.put_data_url(
+        scope.session_handle,
+        "data:text/plain;base64,aGVsbG8=",
+        name="issue.log",
+    )
+    registry = ToolRegistry()
+    gateway = CapabilityGateway(
+        registry,
+        ToolStep(registry, ToolArgumentPolicy(tmp_path)),
+        artifacts,
+    )
+    provider = Provider()
+    runtime = KnoaAgentRuntime(
+        provider,
+        ContextCheckpointRepository(
+            tmp_path / "agent" / "context.db",
+            session_id_factory=lambda: "agent-session-a",
+        ),
+        GatewayMCPConnector(gateway),
+        system_prompt="system",
+        health_probe=healthy,
+        turn_id_factory=lambda: "runtime-turn-a",
+    )
+    bindings = AgentSessionBindingRepository(database)
+    execution = AgentExecutionService(
+        AgentManager({"knoa": runtime}),
+        bindings,
+        gateway,
+        artifacts,
+        capabilities_for=lambda _scope: frozenset(),
+    )
+
+    events = [
+        event
+        async for event in execution.execute_turn(
+            ExecuteAgentTurn(
+                scope=scope,
+                turn_id="turn-a",
+                client_request_id="request-a",
+                input="inspect",
+                attachments=(
+                    ArtifactAttachment(artifact_id=artifact["artifact_id"]),
+                ),
+                tools_enabled=True,
+                cancellation=asyncio.Event(),
+            )
+        )
+    ]
+
+    binding = bindings.get(scope)
+    assert binding is not None
+    assert binding.agent_id == "knoa"
+    assert binding.runtime_session_ref == "agent-session-a"
+    assert [event.event_type for event in events] == [
+        "assistant_delta",
+        "usage_reported",
+        "turn_finished",
+    ]
+    assert "hello" in str(provider.requests[0].messages)
+    assert "knoa-artifact://" not in str(provider.requests[0].messages)
+
+
+@pytest.mark.asyncio
+async def test_execution_service_rejects_agent_switch_after_session_binding(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "platform.db"
+    sessions = RuntimeSessionRepository(database, handle_factory=lambda: "session-a")
+    scope = sessions.create("principal-a", agent_id="knoa")
+    artifacts = ArtifactStore(tmp_path / "attachments", db_path=database)
+    registry = ToolRegistry()
+    gateway = CapabilityGateway(
+        registry,
+        ToolStep(registry, ToolArgumentPolicy(tmp_path)),
+        artifacts,
+    )
+    runtime = KnoaAgentRuntime(
+        Provider(),
+        ContextCheckpointRepository(tmp_path / "agent" / "context.db"),
+        GatewayMCPConnector(gateway),
+        system_prompt="system",
+        health_probe=healthy,
+    )
+    execution = AgentExecutionService(
+        AgentManager({"knoa": runtime}),
+        AgentSessionBindingRepository(database),
+        gateway,
+        artifacts,
+        capabilities_for=lambda _scope: frozenset(),
+    )
+
+    with pytest.raises(Exception):
+        async for _event in execution.execute_turn(
+            ExecuteAgentTurn(
+                scope=scope,
+                turn_id="turn-a",
+                client_request_id="request-a",
+                input="hello",
+                attachments=(),
+                tools_enabled=False,
+                cancellation=asyncio.Event(),
+                agent_id="codex",
+            )
+        ):
+            pass

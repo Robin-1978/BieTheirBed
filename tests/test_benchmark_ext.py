@@ -5,13 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from pc_assistant.agent_runtime.model_step import ProviderChunk
-from pc_assistant.benchmark.dataset import load_dataset
-from pc_assistant.benchmark.evaluator import LLMJudge
-from pc_assistant.benchmark.reporter import Reporter
-from pc_assistant.benchmark.scorer import Scorer
-from pc_assistant.benchmark.types import BenchmarkQuestion, BenchmarkResult
-from pc_assistant.tasks import TaskEvent, TaskEventPayload
+from knoa_platform.agent_runtime.model_step import ProviderChunk
+from knoa_platform.benchmark.dataset import load_dataset
+from knoa_platform.benchmark.evaluator import LLMJudge
+from knoa_platform.benchmark.reporter import Reporter
+from knoa_platform.benchmark.scorer import Scorer
+from knoa_platform.benchmark.types import BenchmarkQuestion, BenchmarkResult
+from knoa_platform.tasks import TaskEvent, TaskEventPayload
 
 
 def _event(

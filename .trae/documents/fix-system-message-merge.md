@@ -6,7 +6,7 @@ Qwen 模型的 Jinja chat template 只允许 **一个** system message 在消息
 当前 `get_messages_for_llm()` 生成了 **两个** system message：
 ```python
 [
-    {"role": "system", "content": "You are PC Assistant..."},  # 第1个
+    {"role": "system", "content": "You are Knoa..."},  # 第1个
     {"role": "system", "content": "Current date: 2026-05-12..."},  # 第2个 ← 问题！
     {"role": "user", "content": "几点了？"},
 ]
@@ -39,7 +39,7 @@ def get_messages_for_llm(self) -> list[dict[str, Any]]:
 这样发送给 llama.cpp 的消息就是：
 ```python
 [
-    {"role": "system", "content": "You are PC Assistant...\n\nCurrent date: 2026-05-12..."},  # 单个！
+    {"role": "system", "content": "You are Knoa...\n\nCurrent date: 2026-05-12..."},  # 单个！
     {"role": "user", "content": "几点了？"},
 ]
 ```

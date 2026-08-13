@@ -5,19 +5,19 @@ from pathlib import Path
 import pytest
 import yaml
 
-from pc_assistant.agent_runtime.composition import build_core_runtime
-from pc_assistant.agent_runtime.contracts import HealthStatus
-from pc_assistant.agent_runtime.model_step import ProviderChunk
-from pc_assistant.config import AppConfig
-from pc_assistant.extensions import ExtensionManager, ExtensionState
-from pc_assistant.extensions.skill import (
+from knoa_platform.agent_runtime.composition import build_core_runtime
+from knoa_platform.agent_runtime.contracts import HealthStatus
+from knoa_platform.agent_runtime.model_step import ProviderChunk
+from knoa_platform.config import AppConfig
+from knoa_platform.extensions import ExtensionManager, ExtensionState
+from knoa_platform.extensions.skill import (
     SkillCatalog,
     SkillPackageProvider,
     builtin_skill_root,
     load_skill_package,
 )
-from pc_assistant.tools.base import ToolCapability
-from pc_assistant.tools.registry import ToolRegistry
+from knoa_platform.tools.base import ToolCapability
+from knoa_platform.tools.registry import ToolRegistry
 
 
 def _write_skill(

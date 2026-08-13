@@ -1,13 +1,13 @@
 """Multimodal content, provider serialization, and image budgeting tests."""
 from __future__ import annotations
 
-from pc_assistant.model_adapter.content import (
+from knoa_platform.model_adapter.content import (
     build_image_block,
     text_block,
     to_anthropic_content,
     to_openai_content,
 )
-from pc_assistant.vision.preprocess import estimate_image_tokens
+from knoa_platform.vision.preprocess import estimate_image_tokens
 
 DATA_URL = "data:image/jpeg;base64,AAAA"
 VALID_IMAGE_DATA_URL = (
@@ -69,7 +69,7 @@ class TestVisionPreprocess:
 
 class TestTokenEstimateImages:
     def test_messages_tokens_counts_images(self):
-        from pc_assistant.context.token_estimate import TokenEstimator
+        from knoa_platform.context.token_estimate import TokenEstimator
 
         est = TokenEstimator("default")
         text_tokens = est.messages_tokens([{"role": "user", "content": "hello"}])
@@ -84,7 +84,7 @@ class TestTokenEstimateImages:
 
 class TestProfilesVision:
     def test_default_llamacpp_vision(self):
-        from pc_assistant.model_adapter.profiles import resolve_profile
+        from knoa_platform.model_adapter.profiles import resolve_profile
 
         # OpenAI-compatible/local endpoints do not advertise capabilities
         # reliably; unknown vision support fails closed and must be explicit.
@@ -92,18 +92,18 @@ class TestProfilesVision:
         assert resolve_profile("llamacpp", supports_vision=True).supports_vision is True
 
     def test_openai_compatible_unknown_vision_fails_closed(self):
-        from pc_assistant.model_adapter.profiles import resolve_profile
+        from knoa_platform.model_adapter.profiles import resolve_profile
 
         assert resolve_profile("openai_compatible").supports_vision is False
         assert resolve_profile("openai_compatible", supports_vision=True).supports_vision is True
 
     def test_override_disable_vision(self):
-        from pc_assistant.model_adapter.profiles import resolve_profile
+        from knoa_platform.model_adapter.profiles import resolve_profile
 
         assert resolve_profile("openai", supports_vision=False).supports_vision is False
 
     def test_capability_rejects_unsupported_mime(self):
-        from pc_assistant.model_adapter.profiles import resolve_profile
+        from knoa_platform.model_adapter.profiles import resolve_profile
 
         capability = resolve_profile("openai").vision
         error = capability.validate([{
@@ -113,7 +113,7 @@ class TestProfilesVision:
         assert "MIME" in error
 
     def test_capability_exposes_limits(self):
-        from pc_assistant.model_adapter.profiles import resolve_profile
+        from knoa_platform.model_adapter.profiles import resolve_profile
 
         capability = resolve_profile("anthropic").vision
         assert capability.enabled
@@ -123,7 +123,7 @@ class TestProfilesVision:
 
 class TestProviderRoleAwareImages:
     def test_openai_tool_image_becomes_tool_result_plus_user_observation(self):
-        from pc_assistant.model_adapter.parsers.openai import build_chat_payload
+        from knoa_platform.model_adapter.parsers.openai import build_chat_payload
 
         payload = build_chat_payload("m", [{
             "role": "tool",
@@ -135,7 +135,7 @@ class TestProviderRoleAwareImages:
         assert payload["messages"][1]["content"][-1]["type"] == "image_url"
 
     def test_anthropic_tool_image_uses_tool_result_block(self):
-        from pc_assistant.model_adapter.parsers.anthropic import build_anthropic_payload
+        from knoa_platform.model_adapter.parsers.anthropic import build_anthropic_payload
 
         payload = build_anthropic_payload("m", [{
             "role": "tool",

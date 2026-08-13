@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
-from pc_assistant.context.session_context import (
+from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
+from knoa_platform.context.session_context import (
     SessionContextRepository,
     SessionContextService,
 )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from pc_assistant.service.channel_runtime import ChannelRuntime
+from knoa_platform.service.channel_runtime import ChannelRuntime
 
 
 class _Channel:

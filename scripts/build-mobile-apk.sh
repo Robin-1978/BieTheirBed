@@ -7,9 +7,11 @@ REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 SOURCE_MOBILE="$REPO/apps/knoa-mobile"
 DISK_DEV="${DISK_DEV:-/disk/dev}"
 ENV_SH="$DISK_DEV/env.sh"
-ASSISTANT_HOME="${PC_ASSISTANT_HOME:-$HOME/.pc-assistant}"
+ASSISTANT_HOME="${KNOA_HOME:-$HOME/.knoa}"
 SECRETS_DIR="${KNOA_MOBILE_SECRETS_DIR:-$ASSISTANT_HOME/secrets/android}"
 KEY_PROPERTIES="$SECRETS_DIR/key.properties"
+
+"$SCRIPT_DIR/bump-version.sh" check >/dev/null
 
 if [[ ! -f "$ENV_SH" ]]; then
   echo "Missing Android environment: $ENV_SH" >&2

@@ -1,0 +1,48 @@
+enabled: true
+transport: stdio
+command: python3
+args:
+  - server.py
+working_directory: .
+inherit_env:
+  - JIRA_BASE_URL
+  - JIRA_API_TOKEN
+  - JIRA_AUTH_MODE
+  - JIRA_JQL
+  - JIRA_POLL_INTERVAL_SECONDS
+  - JIRA_EVENT_RETENTION_DAYS
+  - JIRA_MAX_ISSUES
+  - JIRA_MCP_STATE_PATH
+  - JIRA_ATTACHMENT_ROOT
+  - JIRA_CODE_ROOT
+  - JIRA_LOG_ROOT
+  - JIRA_ANALYSIS_PROMPT_PATH
+  - JIRA_MAX_ATTACHMENT_BYTES
+  - JIRA_WRITE_ENABLED
+  - PYTHONDONTWRITEBYTECODE
+timeout_seconds: 300
+tools:
+  jira.get_issue:
+    effect: read_only
+    capabilities: [mcp, network]
+    risk: low
+  jira.get_comments:
+    effect: read_only
+    capabilities: [mcp, network]
+    risk: low
+  jira.list_attachments:
+    effect: read_only
+    capabilities: [mcp, network]
+    risk: low
+  jira.get_attachment_excerpt:
+    effect: read_only
+    capabilities: [mcp, network]
+    risk: low
+  jira.download_attachment:
+    effect: local_write
+    capabilities: [mcp, network, host_write]
+    risk: medium
+  jira.materialize_issue:
+    effect: local_write
+    capabilities: [mcp, network, host_write]
+    risk: medium

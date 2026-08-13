@@ -4,9 +4,9 @@ import stat
 
 import pytest
 
-from pc_assistant.runtime import RuntimePaths
-from pc_assistant.service.credentials import resolve_local_service_token
-from pc_assistant.service.credentials import (
+from knoa_platform.runtime import RuntimePaths
+from knoa_platform.service.credentials import resolve_local_service_token
+from knoa_platform.service.credentials import (
     issue_principal_credential,
     verify_principal_credential,
 )

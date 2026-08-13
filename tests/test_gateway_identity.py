@@ -5,7 +5,7 @@ import stat
 
 import pytest
 
-from pc_assistant.gateway import (
+from knoa_platform.gateway import (
     DeviceNotFoundError,
     GatewayIdentityRepository,
     PairingGrantRejectedError,

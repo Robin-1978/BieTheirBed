@@ -5,13 +5,30 @@ from pathlib import Path
 import pytest
 import yaml
 
-from pc_assistant.extensions import ExtensionManager, ExtensionState
-from pc_assistant.extensions.mcp_package import (
+from knoa_platform.extensions import (
+    ExtensionManager,
+    ExtensionState,
+    ExtensionStatus,
+)
+from knoa_platform.extensions.mcp_package import (
     MCPPackageService,
     build_mcp_package_providers,
     load_mcp_package,
 )
-from pc_assistant.tools.registry import ToolRegistry
+from knoa_platform.extensions.models import MCPResourceTaskConfig
+from knoa_platform.tools.registry import ToolRegistry
+
+
+class _ResourceTasks:
+    def __init__(self) -> None:
+        self.added = []
+        self.removed = []
+
+    def add_provider(self, provider) -> None:
+        self.added.append(provider)
+
+    async def remove_provider(self, provider) -> None:
+        self.removed.append(provider)
 
 
 def _write_package(root: Path, server_id: str, **updates) -> Path:
@@ -110,6 +127,8 @@ async def test_agent_import_copies_safe_snapshot_and_activates_provider(
     (source / ".env").write_text("SECRET=must-not-copy\n", encoding="utf-8")
     (source / ".git").mkdir()
     (source / ".git" / "config").write_text("private", encoding="utf-8")
+    (source / "__pycache__").mkdir()
+    (source / "__pycache__" / "module.pyc").write_bytes(b"cache")
     (source / "empty").mkdir()
     registry = ToolRegistry()
     manager = ExtensionManager(registry)
@@ -118,16 +137,14 @@ async def test_agent_import_copies_safe_snapshot_and_activates_provider(
         tmp_path / "runtime" / "mcp",
         tmp_path / "runtime" / "cache" / "mcp-imports",
         manager,
+        _ResourceTasks(),
     )
 
-    status = await service.import_local(source, "monitor")
+    with pytest.raises(ValueError, match="could not be activated|FileNotFoundError"):
+        await service.deploy_local(source, "monitor")
 
     installed = tmp_path / "runtime" / "mcp" / "monitor"
-    assert status.state is ExtensionState.FAILED
-    assert (installed / "mcp.yaml").is_file()
-    assert (installed / "empty").is_dir()
-    assert not (installed / ".env").exists()
-    assert not (installed / ".git").exists()
+    assert not installed.exists()
     await manager.stop()
 
 
@@ -145,15 +162,133 @@ async def test_agent_import_omits_symlinks_and_rejects_reserved_ids(
         tmp_path / "runtime" / "mcp",
         tmp_path / "runtime" / "cache" / "mcp-imports",
         manager,
+        _ResourceTasks(),
         reserved_ids=frozenset({"configured"}),
     )
 
-    status = await service.import_local(source, "linked")
+    with pytest.raises(ValueError, match="could not be activated|Connection closed"):
+        await service.deploy_local(source, "linked")
     with pytest.raises(ValueError, match="reserved"):
-        await service.import_local(source, "configured")
+        await service.deploy_local(source, "configured")
 
     installed = tmp_path / "runtime" / "mcp" / "linked"
-    assert status.state is ExtensionState.FAILED
-    assert installed.is_dir()
-    assert not (installed / "linked.txt").exists()
+    assert not installed.exists()
     await manager.stop()
+
+
+def test_installed_package_loads_private_resource_task_deployment(
+    tmp_path: Path,
+) -> None:
+    package = _write_package(tmp_path, "jira")
+    deployment = package / ".knoa-deployment.yaml"
+    deployment.write_text(
+        yaml.safe_dump(
+            {
+                "resource_tasks": {
+                    "assigned": {
+                        "uri": "jira://assigned-to-me",
+                        "principal_id": "personal:owner",
+                        "session_handle": "session-a",
+                        "priority": 4,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_mcp_package(package)
+
+    assert config.resource_tasks["assigned"].session_handle == "session-a"
+
+
+@pytest.mark.asyncio
+async def test_deploy_update_preserves_resource_task_and_replaces_package(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _write_package(tmp_path / "sources", "jira-source")
+    (source / "version.txt").write_text("one", encoding="utf-8")
+    manager = ExtensionManager(ToolRegistry())
+    manager._running = True
+    resource_tasks = _ResourceTasks()
+    service = MCPPackageService(
+        tmp_path / "runtime" / "mcp",
+        tmp_path / "runtime" / "cache" / "mcp-imports",
+        manager,
+        resource_tasks,  # type: ignore[arg-type]
+    )
+
+    async def running(provider):
+        manager._providers.append(provider)
+        manager._statuses[provider.descriptor] = ExtensionStatus(
+            provider.descriptor,
+            ExtensionState.RUNNING,
+        )
+        return manager._statuses[provider.descriptor]
+
+    monkeypatch.setattr(manager, "add_provider", running)
+    route = MCPResourceTaskConfig.model_validate(
+        {
+            "uri": "jira://assigned-to-me",
+            "principal_id": "personal:owner",
+            "session_handle": "session-a",
+        }
+    )
+    installed, _ = await service.deploy_local(
+        source,
+        "jira",
+        route=("assigned", route),
+    )
+    (source / "version.txt").write_text("two", encoding="utf-8")
+    updated, _ = await service.deploy_local(source, "jira")
+
+    target = tmp_path / "runtime" / "mcp" / "jira"
+    config = load_mcp_package(target)
+    assert installed == "installed"
+    assert updated == "updated"
+    assert (target / "version.txt").read_text(encoding="utf-8") == "two"
+    assert config.resource_tasks["assigned"] == route
+
+
+@pytest.mark.asyncio
+async def test_failed_update_restores_previous_running_package(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _write_package(tmp_path / "sources", "jira-source")
+    (source / "version.txt").write_text("stable", encoding="utf-8")
+    manager = ExtensionManager(ToolRegistry())
+    manager._running = True
+    resource_tasks = _ResourceTasks()
+    service = MCPPackageService(
+        tmp_path / "runtime" / "mcp",
+        tmp_path / "runtime" / "cache" / "mcp-imports",
+        manager,
+        resource_tasks,  # type: ignore[arg-type]
+    )
+    starts = 0
+
+    async def add_provider(provider):
+        nonlocal starts
+        starts += 1
+        manager._providers.append(provider)
+        state = ExtensionState.FAILED if starts == 2 else ExtensionState.RUNNING
+        status = ExtensionStatus(
+            provider.descriptor,
+            state,
+            detail="new package failed" if state is ExtensionState.FAILED else "",
+        )
+        manager._statuses[provider.descriptor] = status
+        return status
+
+    monkeypatch.setattr(manager, "add_provider", add_provider)
+    await service.deploy_local(source, "jira")
+    (source / "version.txt").write_text("broken", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="new package failed"):
+        await service.deploy_local(source, "jira")
+
+    target = tmp_path / "runtime" / "mcp" / "jira"
+    assert (target / "version.txt").read_text(encoding="utf-8") == "stable"
+    assert service._providers["jira"] is resource_tasks.added[-1]

@@ -6,8 +6,8 @@ import zipfile
 
 import pytest
 
-from pc_assistant import main
-from pc_assistant.gateway.identity import (
+from knoa_platform import main
+from knoa_platform.gateway.identity import (
     DeviceNotFoundError,
     GatewayIdentityRepository,
 )
@@ -18,8 +18,8 @@ def test_gateway_admin_pairs_lists_and_revokes_device(
     capsys,
     monkeypatch,
 ) -> None:
-    monkeypatch.delenv("PC_RUNTIME_ROOT", raising=False)
-    monkeypatch.delenv("PC_ASSISTANT_HOME", raising=False)
+    monkeypatch.delenv("KNOA_RUNTIME_ROOT", raising=False)
+    monkeypatch.delenv("KNOA_HOME", raising=False)
     runtime_root = tmp_path / "runtime"
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -66,7 +66,7 @@ def test_gateway_admin_emits_canonical_pairing_payload_when_url_is_configured(
     capsys,
     monkeypatch,
 ) -> None:
-    monkeypatch.delenv("PC_RUNTIME_ROOT", raising=False)
+    monkeypatch.delenv("KNOA_RUNTIME_ROOT", raising=False)
     runtime_root = tmp_path / "runtime"
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -99,12 +99,12 @@ def test_gateway_admin_publishes_and_inspects_private_android_release(
     capsys,
     monkeypatch,
 ) -> None:
-    monkeypatch.delenv("PC_RUNTIME_ROOT", raising=False)
+    monkeypatch.delenv("KNOA_RUNTIME_ROOT", raising=False)
     runtime_root = tmp_path / "runtime"
     config_path = tmp_path / "config.yaml"
     config_path.write_text(f"runtime_root: {runtime_root}\n", encoding="utf-8")
     monkeypatch.setattr(
-        "pc_assistant.gateway.release_admin.read_apk_version",
+        "knoa_platform.gateway.release_admin.read_apk_version",
         lambda _apk: ("0.2.0", 2),
     )
     apk = tmp_path / "knoa.apk"

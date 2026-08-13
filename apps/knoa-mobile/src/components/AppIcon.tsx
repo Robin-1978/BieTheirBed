@@ -3,6 +3,7 @@ import type { ColorValue, OpaqueColorValue } from "react-native";
 import { View } from "react-native";
 
 export type AppIconName =
+  | "agent"
   | "archive"
   | "arrow-down"
   | "camera"
@@ -31,6 +32,7 @@ export type AppIconName =
   | "x";
 
 const glyphs: Record<AppIconName, React.ComponentProps<typeof Ionicons>["name"]> = {
+  agent: "sparkles-outline",
   archive: "archive-outline",
   "arrow-down": "arrow-down",
   camera: "camera-outline",

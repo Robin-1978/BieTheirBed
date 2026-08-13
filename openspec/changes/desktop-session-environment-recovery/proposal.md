@@ -15,20 +15,20 @@ when manually prefixed with `DISPLAY=:N`.
 
 ## Investigation
 
-- `src/pc_assistant/service/server.py:628-685` daemonizes by forking and retains
+- `src/knoa_platform/service/server.py:628-685` daemonizes by forking and retains
   only the environment supplied by its launcher; it does not discover a later
   graphical login.
-- `contrib/pc-assistant.service:4-16` starts from the user manager's
+- `contrib/knoa.service:4-16` starts from the user manager's
   `default.target` and sets only `PYTHONUNBUFFERED`, so graphical variables are
   not part of the unit contract.
-- `src/pc_assistant/tools/screenshot.py:22-50` initializes `mss` directly from
+- `src/knoa_platform/tools/screenshot.py:22-50` initializes `mss` directly from
   process environment.
-- `src/pc_assistant/tools/mouse.py:115-154` imports and calls `pyautogui`
+- `src/knoa_platform/tools/mouse.py:115-154` imports and calls `pyautogui`
   directly; a missing `DISPLAY` is not an `ImportError` and escapes as a backend
   exception.
-- `src/pc_assistant/harness/executor.py:77-94` is the single verified commit
+- `src/knoa_platform/harness/executor.py:77-94` is the single verified commit
   boundary for every model-proposed built-in tool.
-- `src/pc_assistant/security/totp.py:126-149` already establishes the project
+- `src/knoa_platform/security/totp.py:126-149` already establishes the project
   pattern for enumerating the current user's local graphical sessions through
   `loginctl`.
 - Current runtime diagnostics found one active local X11 session for the current

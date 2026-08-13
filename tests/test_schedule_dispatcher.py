@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
-from pc_assistant.automation import (
+from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
+from knoa_platform.automation import (
     OccurrenceState,
     ScheduleDispatcher,
     ScheduleKind,

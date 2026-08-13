@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pc_assistant.gateway.openapi import gateway_openapi_schema
+from knoa_platform.gateway.openapi import gateway_openapi_schema
 
 
 def main() -> None:

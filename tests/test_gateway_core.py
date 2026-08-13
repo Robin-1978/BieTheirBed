@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from pc_assistant.config import AppConfig
-from pc_assistant.gateway.core import GatewayCoreBridge
-from pc_assistant.service.core_api import ArtifactInputRef, TaskSnapshot
-from pc_assistant.tasks import TaskOrigin, TaskState
+from knoa_platform.config import AppConfig
+from knoa_platform.gateway.core import GatewayCoreBridge
+from knoa_platform.service.core_api import ArtifactInputRef, TaskSnapshot
+from knoa_platform.tasks import TaskOrigin, TaskState
 
 
 class _Client:
@@ -27,6 +27,7 @@ class _Client:
         return TaskSnapshot(
             task_id=task_id,
             session_handle="session-a",
+            agent_id="knoa",
             client_request_id="request-a",
             goal="original goal",
             attachments=(ArtifactInputRef(artifact_id="artifact-a"),),

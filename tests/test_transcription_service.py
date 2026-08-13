@@ -5,19 +5,19 @@ from typing import Any
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import (
+from knoa_platform.agent_runtime.contracts import (
     ArtifactTranscriptionRequest,
     RuntimeScope,
 )
-from pc_assistant.agent_runtime.tool_step import ToolArgumentPolicy, ToolStep
-from pc_assistant.agent_runtime.transcription_service import (
+from knoa_platform.agent_runtime.tool_step import ToolArgumentPolicy, ToolStep
+from knoa_platform.agent_runtime.transcription_service import (
     ArtifactTranscriptionService,
     InvalidAudioArtifactError,
     TranscriptionUnavailableError,
 )
-from pc_assistant.artifacts import ArtifactStore
-from pc_assistant.config import AudioTranscriptionConfig
-from pc_assistant.tools.base import (
+from knoa_platform.artifacts import ArtifactStore
+from knoa_platform.config import AudioTranscriptionConfig
+from knoa_platform.tools.base import (
     ToolBase,
     ToolCapability,
     ToolEffect,
@@ -25,7 +25,7 @@ from pc_assistant.tools.base import (
     ToolOriginKind,
     ToolRisk,
 )
-from pc_assistant.tools.registry import ToolRegistry
+from knoa_platform.tools.registry import ToolRegistry
 
 
 _TOOL_NAME = "mcp__speech__transcribe"

@@ -40,6 +40,7 @@ import type { ArtifactInput, ChatApproval, ChatTurnSnapshot } from "@/api/models
 import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { AppMarkdown } from "@/components/AppMarkdown";
 import { AppPressable } from "@/components/AppPressable";
+import { AgentSelector } from "@/components/AgentSelector";
 import { ArtifactViewer } from "@/components/ArtifactViewer";
 import { PrimarySwipeNavigation } from "@/components/PrimarySwipeNavigation";
 import { TurnProgress } from "@/components/TurnProgress";
@@ -111,6 +112,7 @@ export default function ChatScreen() {
   const [cancelling, setCancelling] = useState("");
   const [transcribing, setTranscribing] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const [imagePreview, setImagePreview] = useState<ResolvedArtifactFile | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
@@ -622,6 +624,8 @@ export default function ChatScreen() {
     : inputMode === "text"
       ? !canSend
       : sending || transcribing || (!gateway.client && !recording.isRecording);
+  const selectedAgentId = gateway.activeAgentId || gateway.selectedAgentId;
+  const agentLocked = Boolean(gateway.activeAgentId || gateway.sessionHandle);
 
   return (
     <PrimarySwipeNavigation current="chat">
@@ -650,6 +654,27 @@ export default function ChatScreen() {
           >
             <AppIcon name="history" color={colors.accent} size={21} />
           </AppPressable>
+          {gateway.agents.length > 1 ? (
+            <AppPressable
+              accessibilityRole="button"
+              accessibilityLabel={agentLocked
+                ? t("agent.lockedConversation")
+                : t("agent.selectConversation")}
+              accessibilityState={{ disabled: agentLocked }}
+              disabled={agentLocked}
+              onPress={() => setAgentPickerOpen(true)}
+              style={[
+                styles.topAction,
+                !agentLocked && selectedAgentId !== gateway.defaultAgentId && styles.selectedAgentAction,
+              ]}
+            >
+              <AppIcon
+                name="agent"
+                color={!agentLocked && selectedAgentId !== gateway.defaultAgentId ? colors.accent : colors.muted}
+                size={21}
+              />
+            </AppPressable>
+          ) : null}
         </View>
       </View>
       {gateway.status !== "ready" ? (
@@ -887,6 +912,29 @@ export default function ChatScreen() {
         onClose={() => setImagePreview(null)}
         onMessage={(value, tone = "info") => showFeedback(value, tone)}
       />
+      <Modal
+        animationType="fade"
+        onRequestClose={() => setAgentPickerOpen(false)}
+        transparent
+        visible={agentPickerOpen}
+      >
+        <View style={styles.modalRoot}>
+          <Pressable style={styles.backdrop} onPress={() => setAgentPickerOpen(false)} />
+          <View style={styles.actionSheet}>
+            <View style={styles.sheetHandle} />
+            <AgentSelector
+              agents={gateway.agents}
+              selectedAgentId={selectedAgentId}
+              label={t("agent.selectConversation")}
+              lockedLabel={t("agent.lockedConversation")}
+              onChange={(agentId) => {
+                gateway.selectAgent(agentId);
+                setAgentPickerOpen(false);
+              }}
+            />
+          </View>
+        </View>
+      </Modal>
       <Modal
         animationType="fade"
         onRequestClose={() => setActionsOpen(false)}
@@ -1200,6 +1248,7 @@ const styles = StyleSheet.create({
   subtitle: { color: colors.muted, fontSize: 13 },
   topActions: { flexDirection: "row", gap: 6 },
   topAction: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 12 },
+  selectedAgentAction: { backgroundColor: colors.accentSoft },
   messages: { padding: 16, paddingBottom: 24, gap: 18, flexGrow: 1 },
   empty: { color: colors.muted, textAlign: "center", marginTop: 80, fontSize: 17 },
   loadOlder: { alignSelf: "center", paddingHorizontal: 14, paddingVertical: 8, marginBottom: 4 },

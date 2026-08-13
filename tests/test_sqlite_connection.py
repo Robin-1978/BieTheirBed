@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from pc_assistant.sqlite_connection import connect_sqlite, initialize_wal
+from knoa_platform.sqlite_connection import connect_sqlite, initialize_wal
 
 
 def test_context_managed_connection_is_closed(tmp_path) -> None:

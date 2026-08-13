@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import ArtifactAttachment
-from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
-from pc_assistant.agent_runtime.tool_step import ProposedToolCall, ToolStepResult
-from pc_assistant.conversation import (
+from knoa_platform.agent_runtime.contracts import ArtifactAttachment
+from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
+from knoa_platform.agent_runtime.tool_step import ProposedToolCall, ToolStepResult
+from knoa_platform.conversation import (
     ChatTimelineEntry,
     ChatTurnConflictError,
     ChatTurnState,
@@ -16,7 +16,7 @@ from pc_assistant.conversation import (
     ConversationSessionConflictError,
     ConversationSessionState,
 )
-from pc_assistant.tools.base import ToolEffect, ToolPolicy, ToolRisk
+from knoa_platform.tools.base import ToolEffect, ToolPolicy, ToolRisk
 
 
 def _repository(tmp_path: Path):

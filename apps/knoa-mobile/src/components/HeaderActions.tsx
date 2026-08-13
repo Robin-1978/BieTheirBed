@@ -12,30 +12,30 @@ export function HeaderActions({ current }: { current: PrimaryScreen }) {
   const { t } = useI18n();
   const { unreadCount } = useTaskReminders();
   return (
-    <View style={styles.container}>
-      <HeaderTab
-        icon="chat"
-        label={t("header.chat")}
-        selected={current === "chat"}
-        onPress={() => navigatePrimary(current, "chat")}
-      />
-      <HeaderTab
-        icon="tasks"
-        label={t("header.tasks")}
-        selected={current === "tasks"}
-        badge={unreadCount}
-        onPress={() => navigatePrimary(current, "tasks")}
-      />
-      <AppPressable
-        accessibilityRole="button"
-        accessibilityLabel={t("common.settings")}
-        hitSlop={8}
-        onPress={() => router.push("/capabilities")}
-        style={styles.action}
-      >
-        <AppIcon name="settings" color={colors.muted} size={20} />
-      </AppPressable>
-    </View>
+      <View style={styles.container}>
+        <HeaderTab
+          icon="chat"
+          label={t("header.chat")}
+          selected={current === "chat"}
+          onPress={() => navigatePrimary(current, "chat")}
+        />
+        <HeaderTab
+          icon="tasks"
+          label={t("header.tasks")}
+          selected={current === "tasks"}
+          badge={unreadCount}
+          onPress={() => navigatePrimary(current, "tasks")}
+        />
+        <AppPressable
+          accessibilityRole="button"
+          accessibilityLabel={t("common.settings")}
+          hitSlop={8}
+          onPress={() => router.push("/capabilities")}
+          style={styles.action}
+        >
+          <AppIcon name="settings" color={colors.muted} size={20} />
+        </AppPressable>
+      </View>
   );
 }
 

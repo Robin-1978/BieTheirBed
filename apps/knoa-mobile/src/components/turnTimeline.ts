@@ -2,6 +2,7 @@ import type { ChatTimelineEntry } from "@/api/models";
 
 export type TimelineDisplayEntry =
   | { kind: "reasoning" | "content" | "notice"; key: string; content: string }
+  | { kind: "completion"; key: string }
   | { kind: "tool"; key: string; toolName: string; state: "running" | "completed" | "failed" };
 
 export function timelineDisplayEntries(entries: ChatTimelineEntry[], finalOutput = ""): TimelineDisplayEntry[] {
@@ -44,6 +45,9 @@ export function timelineDisplayEntries(entries: ChatTimelineEntry[], finalOutput
       key: `${entry.kind}:${entry.iteration}:${index}`,
       content,
     });
+  }
+  if (finalOutput.trim()) {
+    rows.push({ kind: "completion", key: "answer-completed" });
   }
   return rows;
 }

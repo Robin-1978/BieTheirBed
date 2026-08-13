@@ -6,15 +6,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
-from pc_assistant.automation import (
+from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
+from knoa_platform.automation import (
     TriggerDispatcher,
     TriggerEventState,
     TriggerRepository,
     TriggerService,
     TriggerState,
 )
-from pc_assistant.automation.trigger_repository import (
+from knoa_platform.automation.trigger_repository import (
     TriggerIdempotencyConflictError,
     TriggerNotFoundError,
     TriggerTransitionError,
@@ -118,13 +118,13 @@ def test_external_event_id_deduplicates_same_payload(tmp_path: Path) -> None:
         scope.principal_id,
         trigger.trigger_id,
         external_event_id="jira-event-1",
-        payload={"issue": "PCA-1"},
+        payload={"issue": "KNOA-1"},
     )
     repeated, repeated_created = repository.receive(
         scope.principal_id,
         trigger.trigger_id,
         external_event_id="jira-event-1",
-        payload={"issue": "PCA-1"},
+        payload={"issue": "KNOA-1"},
     )
 
     assert created is True
@@ -144,7 +144,7 @@ def test_external_event_id_deduplicates_same_payload(tmp_path: Path) -> None:
             scope.principal_id,
             trigger.trigger_id,
             external_event_id="jira-event-1",
-            payload={"issue": "PCA-2"},
+            payload={"issue": "KNOA-2"},
         )
 
 

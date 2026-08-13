@@ -390,7 +390,7 @@ SHA-256: 7f676a8e6601cd97aff487fccbc788c97be63a627ace375154913d59e208560c
 ### 发布验证
 
 ```text
-pca --restart
+knoa --restart
 Service started (pid 3129513); Core 9527 and Gateway 9529 ready
 
 GET http://127.0.0.1:9529/health

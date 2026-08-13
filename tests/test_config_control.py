@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from pc_assistant.agent_runtime.config_control import PersistentConfigController
-from pc_assistant.agent_runtime.contracts import ConfigSetRequest
-from pc_assistant.config import AppConfig, load_config
+from knoa_platform.agent_runtime.config_control import PersistentConfigController
+from knoa_platform.agent_runtime.contracts import ConfigSetRequest
+from knoa_platform.config import AppConfig, load_config
 
 
 @pytest.mark.asyncio
@@ -70,8 +70,8 @@ async def test_persisted_override_is_loaded_after_restart(
     monkeypatch,
 ) -> None:
     runtime_root = tmp_path / "runtime"
-    monkeypatch.setenv("PC_ASSISTANT_HOME", str(runtime_root))
-    monkeypatch.delenv("PC_RUNTIME_ROOT", raising=False)
+    monkeypatch.setenv("KNOA_HOME", str(runtime_root))
+    monkeypatch.delenv("KNOA_RUNTIME_ROOT", raising=False)
     initial = load_config()
     controller = PersistentConfigController(
         initial,

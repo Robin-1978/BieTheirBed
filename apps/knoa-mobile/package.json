@@ -1,6 +1,6 @@
 {
   "name": "knoa-mobile",
-  "version": "0.2.16",
+  "version": "0.2.22",
   "private": true,
   "main": "expo-router/entry",
   "scripts": {

@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from pc_assistant.config import AppConfig
-from pc_assistant.service.core_daemon import CoreDaemon
+from knoa_platform.config import AppConfig
+from knoa_platform.service.core_daemon import CoreDaemon
 
 
 class _Host:
@@ -59,6 +59,7 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     conversation_service = _ConversationService()
     schedule_dispatcher = _ScheduleDispatcher()
     trigger_dispatcher = _TriggerDispatcher()
+    capability_mcp_host = _Host()
     pid = tmp_path / "service.pid"
     composition = SimpleNamespace(
         host=host,
@@ -68,11 +69,12 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
         conversation_service=conversation_service,
         schedule_dispatcher=schedule_dispatcher,
         trigger_dispatcher=trigger_dispatcher,
+        capability_mcp_host=capability_mcp_host,
         paths=SimpleNamespace(pid=pid),
         artifacts=SimpleNamespace(cleanup_expired=lambda: None),
     )
     monkeypatch.setattr(
-        "pc_assistant.service.core_daemon.build_core_runtime",
+        "knoa_platform.service.core_daemon.build_core_runtime",
         lambda config: composition,
     )
     daemon = CoreDaemon(
@@ -89,6 +91,7 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     assert conversation_service.started
     assert schedule_dispatcher.started
     assert trigger_dispatcher.started
+    assert capability_mcp_host.started
     assert pid.exists()
     assert str(tmp_path / "service.log") in pid.read_text(encoding="utf-8")
     assert stat.S_IMODE(pid.stat().st_mode) == 0o600
@@ -102,4 +105,5 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     assert conversation_service.stopped
     assert schedule_dispatcher.stopped
     assert trigger_dispatcher.stopped
+    assert capability_mcp_host.stopped
     assert not pid.exists()

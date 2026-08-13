@@ -1,0 +1,83 @@
+"""Core-owned persistent Task aggregate and event journal."""
+
+from knoa_platform.tasks.approval import DurableApprovalService
+from knoa_platform.tasks.errors import (
+    TaskCapacityError,
+    TaskIdempotencyConflictError,
+    TaskNotFoundError,
+    TaskTransitionError,
+)
+from knoa_platform.tasks.event_hub import (
+    TaskEventHub,
+    TaskEventSubscription,
+    TaskSubscriptionOverflowError,
+)
+from knoa_platform.tasks.executor import TaskExecutor
+from knoa_platform.tasks.models import (
+    TERMINAL_TASK_STATES,
+    ApprovalState,
+    PrincipalTaskEvent,
+    TaskApprovalRecord,
+    TaskAttemptRecord,
+    TaskAttemptState,
+    TaskCancelResult,
+    TaskDefinitionRecord,
+    TaskDefinitionState,
+    TaskEvent,
+    TaskEventPayload,
+    TaskEventType,
+    TaskExecutionRecord,
+    TaskExecutionTrace,
+    TaskLaunchKind,
+    TaskLaunchPolicy,
+    TaskLaunchReason,
+    TaskOrigin,
+    TaskPauseResult,
+    TaskRecord,
+    TaskState,
+    TaskToolStepRecord,
+    TaskToolStepState,
+    TaskTraceEntry,
+)
+from knoa_platform.tasks.repository import TaskRepository
+from knoa_platform.tasks.service import TaskService
+from knoa_platform.tasks.tool_commit import DurableToolCommitService
+
+__all__ = [
+    "TERMINAL_TASK_STATES",
+    "ApprovalState",
+    "PrincipalTaskEvent",
+    "DurableApprovalService",
+    "DurableToolCommitService",
+    "TaskApprovalRecord",
+    "TaskAttemptRecord",
+    "TaskAttemptState",
+    "TaskCapacityError",
+    "TaskCancelResult",
+    "TaskEvent",
+    "TaskEventHub",
+    "TaskEventPayload",
+    "TaskEventSubscription",
+    "TaskExecutor",
+    "TaskEventType",
+    "TaskExecutionTrace",
+    "TaskExecutionRecord",
+    "TaskDefinitionRecord",
+    "TaskDefinitionState",
+    "TaskLaunchKind",
+    "TaskLaunchPolicy",
+    "TaskLaunchReason",
+    "TaskIdempotencyConflictError",
+    "TaskNotFoundError",
+    "TaskPauseResult",
+    "TaskOrigin",
+    "TaskRecord",
+    "TaskRepository",
+    "TaskState",
+    "TaskTraceEntry",
+    "TaskToolStepRecord",
+    "TaskToolStepState",
+    "TaskService",
+    "TaskTransitionError",
+    "TaskSubscriptionOverflowError",
+]

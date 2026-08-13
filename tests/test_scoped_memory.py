@@ -4,13 +4,13 @@ import sqlite3
 
 import pytest
 
-from pc_assistant.context.memory_db import (
+from knoa_platform.context.memory_db import (
     SQLiteMemoryRepository,
     ScopedEpisodicMemory,
     ScopedUserMemory,
     validate_memory_key,
 )
-from pc_assistant.context.scope import (
+from knoa_platform.context.scope import (
     MemoryScope,
     current_memory_scope,
     reset_memory_scope,
@@ -49,10 +49,10 @@ def test_explicit_identity_keys_remain_distinct(stores):
     memory, _ = stores
     with scoped_as("local", "tui:one"):
         memory.store("user_name", "Robin", category="identity", importance="core")
-        memory.store("assistant_name", "PCA", category="identity", importance="core")
+        memory.store("assistant_name", "Knoa", category="identity", importance="core")
 
         assert memory.retrieve("user_name").value == "Robin"
-        assert memory.retrieve("assistant_name").value == "PCA"
+        assert memory.retrieve("assistant_name").value == "Knoa"
 
 
 def test_ambiguous_name_key_is_rejected():

@@ -5,20 +5,20 @@ from pathlib import Path
 import pytest
 import yaml
 
-from pc_assistant.agent_runtime.config_control import PersistentConfigController
-from pc_assistant.config import AppConfig
-from pc_assistant.extensions.manager import ExtensionManager
-from pc_assistant.extensions.mcp import (
+from knoa_platform.agent_runtime.config_control import PersistentConfigController
+from knoa_platform.config import AppConfig
+from knoa_platform.extensions.manager import ExtensionManager
+from knoa_platform.extensions.mcp import (
     MCPPromptDefinition,
     MCPResourceCapabilities,
     MCPResourceDefinition,
     MCPResourceSnapshot,
     MCPToolDefinition,
 )
-from pc_assistant.extensions.mcp_onboarding import MCPOnboardingService
-from pc_assistant.extensions.mcp_resource_tasks import MCPResourceTaskBridge
-from pc_assistant.extensions.models import MCPResourceTaskConfig, MCPServerConfig
-from pc_assistant.tools.registry import ToolRegistry
+from knoa_platform.extensions.mcp_onboarding import MCPOnboardingService
+from knoa_platform.extensions.mcp_resource_tasks import MCPResourceTaskBridge
+from knoa_platform.extensions.models import MCPResourceTaskConfig, MCPServerConfig
+from knoa_platform.tools.registry import ToolRegistry
 
 
 class _DiscoveryClient:
@@ -96,8 +96,8 @@ async def test_onboarding_discovers_and_enables_only_annotated_read_tools(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import pc_assistant.extensions.mcp as mcp_module
-    import pc_assistant.extensions.mcp_onboarding as onboarding_module
+    import knoa_platform.extensions.mcp as mcp_module
+    import knoa_platform.extensions.mcp_onboarding as onboarding_module
 
     discovery = _DiscoveryClient()
     provider_client = _ProviderClient()

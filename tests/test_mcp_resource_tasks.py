@@ -4,16 +4,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import RuntimeScope
-from pc_assistant.extensions.mcp import (
+from knoa_platform.agent_runtime.contracts import RuntimeScope
+from knoa_platform.extensions.mcp import (
     MCPResourceCapabilities,
     MCPResourceContent,
     MCPResourceDefinition,
     MCPResourceSnapshot,
 )
-from pc_assistant.extensions.mcp_resource_tasks import MCPResourceTaskBridge
-from pc_assistant.extensions.models import MCPServerConfig
-from pc_assistant.tasks import TaskOrigin
+from knoa_platform.extensions.mcp_resource_tasks import MCPResourceTaskBridge
+from knoa_platform.extensions.models import MCPServerConfig
+from knoa_platform.tasks import TaskLaunchKind, TaskLaunchReason
 
 
 class _Provider:
@@ -71,14 +71,30 @@ class _Sessions:
         assert session_handle == "session-a"
         return RuntimeScope(principal_id=principal_id, session_handle=session_handle)
 
+    def isolated_task_scope(
+        self,
+        source: RuntimeScope,
+        task_key: str,
+    ) -> RuntimeScope:
+        assert source.session_handle == "session-a"
+        assert task_key.startswith("mcp-resource:")
+        return RuntimeScope(
+            principal_id=source.principal_id,
+            session_handle="isolated-task-session",
+        )
+
 
 class _Tasks:
     def __init__(self) -> None:
         self.calls = []
 
-    async def create(self, scope: RuntimeScope, **kwargs):
-        self.calls.append((scope, kwargs))
-        return SimpleNamespace(task_id="task-a")
+    async def create_definition(self, scope: RuntimeScope, **kwargs):
+        self.calls.append(("define", scope, kwargs))
+        return SimpleNamespace(task_id="task-a"), None
+
+    async def execute_definition(self, principal_id: str, task_id: str, **kwargs):
+        self.calls.append(("execute", principal_id, task_id, kwargs))
+        return SimpleNamespace(execution_id="execution-a")
 
 
 def _resource(uri: str) -> MCPResourceDefinition:
@@ -115,12 +131,19 @@ async def test_resource_inventory_creates_one_owned_event_task() -> None:
     await bridge.reconcile_once()
     await bridge.reconcile_once()
 
-    assert len(tasks.calls) == 1
-    scope, request = tasks.calls[0]
-    assert scope == RuntimeScope(principal_id="principal-a", session_handle="session-a")
-    assert request["origin"] is TaskOrigin.EVENT
+    assert len(tasks.calls) == 2
+    _kind, scope, request = tasks.calls[0]
+    assert scope == RuntimeScope(
+        principal_id="principal-a",
+        session_handle="isolated-task-session",
+    )
+    assert request["title"] == "assignment-1"
     assert request["priority"] == 4
+    assert request["launch_policy"].kind is TaskLaunchKind.EVENT
+    assert request["launch_policy"].event_source == "mcp:jira"
+    assert request["launch_policy"].source_config == {"resource_uri": event}
     assert "Analyze Jira issue PROJECT-1" in request["goal"]
+    assert tasks.calls[1][3]["launch_reason"] is TaskLaunchReason.EVENT
     assert outside not in provider.subscribed
     assert set(provider.subscribed) == {root, event}
 
@@ -139,7 +162,7 @@ async def test_invalid_session_is_retried_without_consuming_resource() -> None:
     sessions.available = True
     await bridge.reconcile_once()
 
-    assert len(tasks.calls) == 1
+    assert len(tasks.calls) == 2
 
 
 @pytest.mark.asyncio
@@ -170,5 +193,5 @@ async def test_unsafe_or_lookalike_resource_uri_is_not_authorized() -> None:
 
     await bridge.reconcile_once()
 
-    assert len(tasks.calls) == 1
+    assert len(tasks.calls) == 2
     assert provider.subscribed == [valid]

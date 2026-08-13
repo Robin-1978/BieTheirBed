@@ -10,7 +10,7 @@
 ## 1. Runtime Contracts
 
 - [x] 1.1 Implement the non-colliding runtime package and exact Core-owned contract models without service or Agent aliases
-  - owned_paths: [src/pc_assistant/agent_runtime/__init__.py, src/pc_assistant/agent_runtime/contracts.py, tests/test_agent_contracts.py]
+  - owned_paths: [src/knoa_platform/agent_runtime/__init__.py, src/knoa_platform/agent_runtime/contracts.py, tests/test_agent_contracts.py]
   - verification: pytest -q tests/test_agent_contracts.py
   ← REQ-001 ← REQ-002 ← REQ-005
 
@@ -24,13 +24,13 @@
 ## 3. Production Composition Cutover
 
 - [x] 3.1 Implement AgentFactory typed `AgentDependencies`/`ExecutionDependencies` construction and retained overrides; stage config, model, vision, registry/schema, verifier/executor, and cache candidates; then route Agent construction, factory-controlled tool changes, turn-ingress generation capture, and single-reference execution publication through the live composition owner
-  - owned_paths: [src/pc_assistant/agent_runtime/factory.py, src/pc_assistant/agent.py, tests/test_agent_factory.py]
+  - owned_paths: [src/knoa_platform/agent_runtime/factory.py, src/knoa_platform/agent.py, tests/test_agent_factory.py]
   - verification: pytest -q tests/test_agent_factory.py
   ← REQ-003 ← REQ-004
 
 ## 4. C1 Convergence
 
 - [x] 4.1 Verify the exact contracts and factory-driven production construction together
-  - owned_paths: [src/pc_assistant/agent_runtime/__init__.py, src/pc_assistant/agent_runtime/contracts.py, src/pc_assistant/agent_runtime/factory.py, src/pc_assistant/agent.py, tests/test_agent_contracts.py, tests/test_agent_factory.py]
+  - owned_paths: [src/knoa_platform/agent_runtime/__init__.py, src/knoa_platform/agent_runtime/contracts.py, src/knoa_platform/agent_runtime/factory.py, src/knoa_platform/agent.py, tests/test_agent_contracts.py, tests/test_agent_factory.py]
   - verification: pytest -q tests/test_agent_contracts.py tests/test_agent_factory.py
   ← REQ-001 ← REQ-002 ← REQ-003 ← REQ-004 ← REQ-005

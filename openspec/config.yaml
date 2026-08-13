@@ -1,7 +1,7 @@
 schema: spec-driven
 
 context: |
-  PC Assistant is a Python 3.10+ desktop AI system with CLI/TUI and Feishu
+  Knoa is a Python 3.10+ desktop AI system with CLI/TUI and Feishu
   clients, a service transport, session-isolated ReAct execution,
   provider-neutral model adapters, deterministic tool verification, desktop and
   MCP tools, structured context/memory, and pytest-based verification.

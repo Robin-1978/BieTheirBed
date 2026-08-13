@@ -16,6 +16,7 @@ import {
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 import { immediatePolicy, isLaunchPolicyValid, TaskLaunchEditor } from "@/components/TaskLaunchEditor";
+import { AgentSelector } from "@/components/AgentSelector";
 import type { TaskLaunchPolicy } from "@/api/models";
 import { useI18n } from "@/i18n";
 import { AppPressable } from "@/components/AppPressable";
@@ -31,6 +32,7 @@ export default function NewTaskScreen() {
   const [notifyFailed, setNotifyFailed] = useState(true);
   const [notifyApproval, setNotifyApproval] = useState(true);
   const [launchPolicy, setLaunchPolicy] = useState<TaskLaunchPolicy>(immediatePolicy);
+  const [agentId, setAgentId] = useState(gateway.defaultAgentId || "knoa");
   const requestIdentity = useRef<{ fingerprint: string; requestId: string } | null>(null);
 
   async function create() {
@@ -52,6 +54,7 @@ export default function NewTaskScreen() {
           waiting_approval: notifyApproval,
         },
         launchPolicy,
+        agentId,
       };
       const fingerprint = JSON.stringify(input);
       if (requestIdentity.current?.fingerprint !== fingerprint) {
@@ -106,6 +109,14 @@ export default function NewTaskScreen() {
             autoFocus
             style={styles.goalInput}
             textAlignVertical="top"
+          />
+          <AgentSelector
+            agents={gateway.agents}
+            selectedAgentId={agentId}
+            disabled={saving}
+            label={t("agent.selectTask")}
+            lockedLabel={t("agent.lockedTask")}
+            onChange={setAgentId}
           />
           <TaskLaunchEditor policy={launchPolicy} onChange={setLaunchPolicy} />
           <View style={styles.notificationCard}>

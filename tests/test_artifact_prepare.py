@@ -5,20 +5,20 @@ from pathlib import Path
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import RuntimeScope
-from pc_assistant.agent_runtime.tool_step import (
+from knoa_platform.agent_runtime.contracts import RuntimeScope
+from knoa_platform.agent_runtime.tool_step import (
     ProposedToolCall,
     ToolArgumentPolicy,
     ToolStep,
     ToolStepContext,
 )
-from pc_assistant.artifacts import ArtifactStore
-from pc_assistant.context.scope import MemoryScope, reset_memory_scope, set_memory_scope
-from pc_assistant.tools.artifact_prepare import ArtifactPrepareTool
-from pc_assistant.tools.base import ToolCapability
-from pc_assistant.tools.read_file import ReadFileTool
-from pc_assistant.tools.registry import ToolRegistry
-from pc_assistant.tools.write_file import WriteFileTool
+from knoa_platform.artifacts import ArtifactStore
+from knoa_platform.context.scope import MemoryScope, reset_memory_scope, set_memory_scope
+from knoa_platform.tools.artifact_prepare import ArtifactPrepareTool
+from knoa_platform.tools.base import ToolCapability
+from knoa_platform.tools.read_file import ReadFileTool
+from knoa_platform.tools.registry import ToolRegistry
+from knoa_platform.tools.write_file import WriteFileTool
 
 
 class _Confirmation:

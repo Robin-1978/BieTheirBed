@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from pc_assistant.automation import ScheduleKind, ScheduleSpec, next_fire_at
+from knoa_platform.automation import ScheduleKind, ScheduleSpec, next_fire_at
 
 
 def _timestamp(value: str) -> float:

@@ -5,9 +5,9 @@ import stat
 
 import pytest
 
-from pc_assistant.agent_runtime.contracts import ArtifactDownloadResult
-from pc_assistant.artifacts import ArtifactRef
-from pc_assistant.artifacts.delivery import save_download
+from knoa_platform.agent_runtime.contracts import ArtifactDownloadResult
+from knoa_platform.artifacts import ArtifactRef
+from knoa_platform.artifacts.delivery import save_download
 
 
 def _result(data: bytes, *, name: str = "capture.png") -> ArtifactDownloadResult:

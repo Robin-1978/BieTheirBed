@@ -6,28 +6,28 @@ from typing import Any
 
 import pytest
 
-from pc_assistant.agent_runtime.session_store import RuntimeSessionRepository
-from pc_assistant.agent_runtime.tool_step import (
+from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
+from knoa_platform.agent_runtime.tool_step import (
     ProposedToolCall,
     ToolArgumentPolicy,
     ToolStep,
     ToolStepContext,
 )
-from pc_assistant.tasks import (
+from knoa_platform.tasks import (
     DurableToolCommitService,
     TaskRepository,
     TaskState,
     TaskToolStepState,
     TaskTransitionError,
 )
-from pc_assistant.tools.base import (
+from knoa_platform.tools.base import (
     ToolBase,
     ToolCapability,
     ToolEffect,
     ToolPolicy,
     ToolRisk,
 )
-from pc_assistant.tools.registry import ToolRegistry
+from knoa_platform.tools.registry import ToolRegistry
 
 
 class _WriteTool(ToolBase):

@@ -1,3 +1,5 @@
+import * as DocumentPicker from "expo-document-picker";
+import * as Crypto from "expo-crypto";
 import { router, useLocalSearchParams } from "expo-router";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
@@ -8,10 +10,11 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
-import type { ChatArtifact, TaskApproval, TaskExecution } from "@/api/models";
+import type { AgentSummary, ArtifactInput, ChatArtifact, Task, TaskApproval, TaskExecution } from "@/api/models";
 import type { ResolvedArtifactFile } from "@/api/chatArtifacts";
 import { saveArtifactFile } from "@/api/saveArtifactFile";
 import { AppPressable } from "@/components/AppPressable";
@@ -29,6 +32,7 @@ export default function TaskExecutionDetailScreen() {
   const gateway = useGateway();
   const { t } = useI18n();
   const [execution, setExecution] = useState<TaskExecution | null>(null);
+  const [task, setTask] = useState<Task | null>(null);
   const [imagePreview, setImagePreview] = useState<ResolvedArtifactFile | null>(null);
   const [working, setWorking] = useState("");
   const [resolvingApproval, setResolvingApproval] = useState<{ id: string; approved: boolean } | null>(null);
@@ -36,13 +40,17 @@ export default function TaskExecutionDetailScreen() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [technicalExpanded, setTechnicalExpanded] = useState(false);
+  const [followUp, setFollowUp] = useState("");
+  const [followUpFiles, setFollowUpFiles] = useState<PendingFollowUpFile[]>([]);
 
   const refresh = useCallback(async () => {
     if (!gateway.client || !executionId) return;
     setError("");
     try {
       const snapshot = await gateway.runAuthenticated((client) => client.getTaskExecution(executionId));
+      const definition = await gateway.runAuthenticated((client) => client.getTask(snapshot.task_id));
       setExecution(snapshot);
+      setTask(definition);
     } catch {
       setError(t("execution.loadFailed"));
     }
@@ -81,6 +89,56 @@ export default function TaskExecutionDetailScreen() {
       await refresh();
     } catch {
       setError(t("execution.operationFailed"));
+    } finally {
+      setWorking("");
+    }
+  }
+
+  async function chooseFollowUpFiles() {
+    const picked = await DocumentPicker.getDocumentAsync({
+      multiple: true,
+      copyToCacheDirectory: true,
+    });
+    if (picked.canceled) return;
+    setFollowUpFiles((current) => [
+      ...current,
+      ...picked.assets.slice(0, 8 - current.length).map((asset) => ({
+        uri: asset.uri,
+        name: asset.name,
+        mediaType: asset.mimeType ?? "application/octet-stream",
+      })),
+    ].slice(0, 8));
+  }
+
+  async function submitFollowUp() {
+    if (!execution || !task || working || (!followUp.trim() && !followUpFiles.length)) return;
+    setWorking("follow-up");
+    setError("");
+    try {
+      const attachments: ArtifactInput[] = [];
+      for (const item of followUpFiles) {
+        const response = await fetch(item.uri);
+        const bytes = await response.arrayBuffer();
+        const uploaded = await gateway.runAuthenticated((client) => client.uploadArtifact({
+          sessionHandle: task.session_handle,
+          bytes,
+          mediaType: item.mediaType,
+          name: item.name,
+          caption: item.name,
+        }));
+        attachments.push(uploaded);
+      }
+      const next = await gateway.runAuthenticated((client) => client.continueTask({
+        clientRequestId: Crypto.randomUUID(),
+        taskId: execution.task_id,
+        text: followUp.trim(),
+        attachments,
+      }));
+      setFollowUp("");
+      setFollowUpFiles([]);
+      router.push(`/task-executions/${next.execution_id}`);
+    } catch {
+      setError(t("execution.followUpFailed"));
     } finally {
       setWorking("");
     }
@@ -218,12 +276,40 @@ export default function TaskExecutionDetailScreen() {
         {isTerminal(execution.state) ? <Action label={t("execution.rerun")} primary onPress={() => void command("rerun")} disabled={Boolean(working)} busy={working === "rerun"} /> : null}
       </View>
 
+      {isTerminal(execution.state) ? (
+        <View style={styles.followUpCard}>
+          <Text style={styles.sectionTitle}>{t("execution.followUpTitle")}</Text>
+          <Text style={styles.followUpHint}>{t("execution.followUpHint")}</Text>
+          <TextInput
+            multiline
+            value={followUp}
+            onChangeText={setFollowUp}
+            placeholder={t("execution.followUpPlaceholder")}
+            placeholderTextColor={colors.muted}
+            style={styles.followUpInput}
+          />
+          {followUpFiles.map((file, index) => (
+            <View key={`${file.uri}:${index}`} style={styles.followUpFile}>
+              <Text numberOfLines={1} style={styles.followUpFileName}>{file.name}</Text>
+              <AppPressable onPress={() => setFollowUpFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
+                <Text style={styles.followUpRemove}>{t("common.delete")}</Text>
+              </AppPressable>
+            </View>
+          ))}
+          <View style={styles.row}>
+            <Action label={t("execution.addEvidence")} onPress={() => void chooseFollowUpFiles()} disabled={Boolean(working) || followUpFiles.length >= 8} />
+            <Action label={t("execution.continueAnalysis")} primary onPress={() => void submitFollowUp()} disabled={Boolean(working) || (!followUp.trim() && !followUpFiles.length)} busy={working === "follow-up"} />
+          </View>
+        </View>
+      ) : null}
+
       <AppPressable onPress={() => setTechnicalExpanded((value) => !value)} style={styles.technicalToggle}>
         <Text style={styles.technicalToggleText}>{technicalExpanded ? t("execution.hideTechnical") : t("execution.showTechnical")}</Text>
         <AppIcon name="chevron-right" color={colors.muted} size={17} />
       </AppPressable>
       {technicalExpanded ? (
         <View style={styles.technicalCard}>
+          <Text style={styles.technicalLine}>{t("agent.executionSnapshot", { agent: agentName(execution.agent_id_snapshot, gateway.agents) })}</Text>
           <Text style={styles.technicalLine}>{t("execution.taskRevision", { revision: execution.task_revision })}</Text>
           {execution.phase ? <Text selectable style={styles.technicalLine}>{t("execution.phase", { phase: execution.phase })}</Text> : null}
           {execution.failure_code ? <Text selectable style={styles.technicalLine}>{t("execution.failureCode", { code: execution.failure_code })}</Text> : null}
@@ -295,7 +381,7 @@ function isTerminal(state: TaskExecution["state"]): boolean {
 }
 
 function launchReasonLabel(reason: TaskExecution["launch_reason"], t: ReturnType<typeof useI18n>["t"]): string {
-  return ({ created: t("taskDetail.reason.created"), manual: t("taskDetail.reason.manual"), scheduled: t("taskDetail.reason.scheduled"), event: t("taskDetail.reason.event"), rerun: t("taskDetail.reason.rerun") })[reason];
+  return ({ created: t("taskDetail.reason.created"), manual: t("taskDetail.reason.manual"), scheduled: t("taskDetail.reason.scheduled"), event: t("taskDetail.reason.event"), rerun: t("taskDetail.reason.rerun"), follow_up: t("taskDetail.reason.followUp") })[reason];
 }
 
 function stateLabel(state: TaskExecution["state"], t: ReturnType<typeof useI18n>["t"]): string {
@@ -348,6 +434,16 @@ function formatExecutionTime(createdAt: number, label: string): string {
   return `${label} · ${new Date(createdAt * 1000).toLocaleString()}`;
 }
 
+function agentName(agentId: string, agents: AgentSummary[]): string {
+  return agents.find((agent) => agent.agent_id === agentId)?.display_name ?? agentId;
+}
+
+type PendingFollowUpFile = {
+  uri: string;
+  name: string;
+  mediaType: string;
+};
+
 function Action({ label, primary = false, danger = false, disabled = false, busy = false, onPress }: { label: string; primary?: boolean; danger?: boolean; disabled?: boolean; busy?: boolean; onPress(): void }) {
   return (
     <AppPressable disabled={disabled} style={[styles.action, primary && styles.actionPrimary, danger && styles.actionDanger, disabled && styles.disabled]} onPress={onPress}>
@@ -381,6 +477,12 @@ const styles = StyleSheet.create({
   arguments: { color: colors.ink, fontFamily: "monospace", fontSize: 12, backgroundColor: colors.surface, borderRadius: 10, padding: 10 },
   row: { flexDirection: "row", gap: 10 },
   timeline: { backgroundColor: colors.surface, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: colors.line, gap: 10 },
+  followUpCard: { backgroundColor: colors.surface, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: colors.line, gap: 10 },
+  followUpHint: { color: colors.muted, lineHeight: 20 },
+  followUpInput: { minHeight: 96, borderWidth: 1, borderColor: colors.line, borderRadius: 13, padding: 12, color: colors.ink, textAlignVertical: "top", backgroundColor: colors.surfaceMuted },
+  followUpFile: { minHeight: 34, flexDirection: "row", alignItems: "center", gap: 8 },
+  followUpFileName: { color: colors.ink, flex: 1, fontSize: 13 },
+  followUpRemove: { color: colors.danger, fontSize: 12, fontWeight: "600" },
   sectionTitle: { color: colors.ink, fontWeight: "700", fontSize: 17, marginBottom: 4 },
   reasoning: { color: colors.muted, lineHeight: 22 },
   toolRow: { minHeight: 30, flexDirection: "row", alignItems: "center", gap: 8 },

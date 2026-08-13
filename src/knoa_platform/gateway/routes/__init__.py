@@ -1,0 +1,8 @@
+"""HTTP route groups for the Secure Gateway."""
+
+from knoa_platform.gateway.routes.artifacts import ArtifactRoutes
+from knoa_platform.gateway.routes.conversations import ConversationRoutes
+from knoa_platform.gateway.routes.device import DeviceRoutes
+from knoa_platform.gateway.routes.tasks import TaskRoutes
+
+__all__ = ["ArtifactRoutes", "ConversationRoutes", "DeviceRoutes", "TaskRoutes"]

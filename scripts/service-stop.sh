@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stop the PC Assistant service.
+# Stop the Knoa service.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=service-lib.sh

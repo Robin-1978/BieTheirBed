@@ -4,7 +4,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from pc_assistant.tools.clipboard import ClipboardTool
+from knoa_platform.tools.clipboard import ClipboardTool
 
 
 class TestClipboardToolName:

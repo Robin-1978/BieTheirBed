@@ -15,7 +15,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
-from pc_assistant.agent_runtime.contracts import (
+from knoa_platform.agent_runtime.contracts import (
     ArtifactDownloadResult,
     ArtifactTranscriptionResult,
     ExtensionStatusRecord,
@@ -23,20 +23,20 @@ from pc_assistant.agent_runtime.contracts import (
     ToolDescriptorRecord,
     ToolListResult,
 )
-from pc_assistant.artifacts import ArtifactRef
-from pc_assistant.config import AppConfig
-from pc_assistant.conversation import ChatTurnState
-from pc_assistant.gateway.adapter import SecureGatewayAdapter
-from pc_assistant.gateway.auth import GatewayAuthenticationRejectedError
-from pc_assistant.gateway.identity import PairingGrantRejectedError
-from pc_assistant.service.core_api import (
+from knoa_platform.artifacts import ArtifactRef
+from knoa_platform.config import AppConfig
+from knoa_platform.conversation import ChatTurnState
+from knoa_platform.gateway.adapter import SecureGatewayAdapter
+from knoa_platform.gateway.auth import GatewayAuthenticationRejectedError
+from knoa_platform.gateway.identity import PairingGrantRejectedError
+from knoa_platform.service.core_api import (
     ChatApprovalSnapshot,
     ChatTurnSnapshot,
     ProductTaskExecutionSnapshot,
     ProductTaskSnapshot,
     TaskSnapshot,
 )
-from pc_assistant.tasks import (
+from knoa_platform.tasks import (
     ApprovalState,
     PrincipalTaskEvent,
     TaskCancelResult,
@@ -143,6 +143,7 @@ def _task_snapshot() -> TaskSnapshot:
     return TaskSnapshot(
         task_id="task-a",
         session_handle="session-a",
+        agent_id="knoa",
         client_request_id="request-a",
         goal="hello",
         tools_enabled=True,
@@ -162,6 +163,8 @@ def _product_task_snapshot(
 ) -> ProductTaskSnapshot:
     return ProductTaskSnapshot(
         task_id="task-a",
+        session_handle="session-a",
+        agent_id="knoa",
         title="hello",
         goal="hello",
         tools_enabled=True,
@@ -183,6 +186,7 @@ def _product_execution_snapshot(
     return ProductTaskExecutionSnapshot(
         execution_id="execution-a",
         task_id="task-a",
+        agent_id_snapshot="knoa",
         task_revision=1,
         launch_reason=TaskLaunchReason.CREATED,
         goal_snapshot="hello",
@@ -233,11 +237,12 @@ class _Core:
     async def create_product_task(
         self, principal_id, session_handle, goal, *, title, attachments,
         client_request_id, tools_enabled, priority, launch_policy, notification_policy,
+        agent_id=None,
     ):
         self.calls.append((
             "create_product_task", principal_id, session_handle, goal, title,
             client_request_id, attachments, tools_enabled, priority, launch_policy,
-            notification_policy,
+            notification_policy, agent_id,
         ))
         return SimpleNamespace(
             task=_product_task_snapshot(),
@@ -514,6 +519,37 @@ async def test_gateway_adapter_exposes_bounded_authentication_flow(tmp_path) -> 
 
 
 @pytest.mark.asyncio
+async def test_gateway_adapter_lists_only_enabled_agents(tmp_path) -> None:
+    base = _config(tmp_path)
+    config = AppConfig(**{
+        **base.model_dump(),
+        "agents": {
+            "knoa": {"enabled": True, "max_concurrency": 4},
+            "codex": {
+                "enabled": True,
+                "max_concurrency": 1,
+                "command": ["codex", "app-server"],
+            },
+        },
+    })
+    adapter = SecureGatewayAdapter(config, authentication=_Authentication())
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://gateway.local") as http:
+        response = await http.get("/v1/agents", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "default_agent": "knoa",
+        "agents": [
+            {"agent_id": "knoa", "display_name": "Knoa"},
+            {"agent_id": "codex", "display_name": "Codex"},
+        ],
+    }
+
+
+@pytest.mark.asyncio
 async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_path) -> None:
     core = _Core()
     adapter = SecureGatewayAdapter(
@@ -670,7 +706,7 @@ async def test_gateway_creates_background_task_in_detached_session(tmp_path) -> 
     assert core.calls[0] == (
         "create_session",
         "personal:owner",
-        {"activate": False},
+        {"activate": False, "agent_id": None},
     )
     create = core.calls[1]
     assert create[0:4] == (
@@ -680,6 +716,39 @@ async def test_gateway_creates_background_task_in_detached_session(tmp_path) -> 
         "整理资料",
     )
     assert create[5] == "task-request-a"
+
+
+@pytest.mark.asyncio
+async def test_gateway_selects_explicit_agent_for_background_task(tmp_path) -> None:
+    core = _Core()
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=_Authentication(),
+        core=core,
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://gateway.local",
+    ) as http:
+        response = await http.post(
+            "/v1/tasks",
+            headers=headers,
+            json={
+                "client_request_id": "task-request-codex",
+                "goal": "分析问题",
+                "agent_id": "codex",
+            },
+        )
+
+    assert response.status_code == 201
+    assert core.calls[0] == (
+        "create_session",
+        "personal:owner",
+        {"activate": False, "agent_id": "codex"},
+    )
+    assert core.calls[1][-1] == "codex"
 
 
 @pytest.mark.asyncio

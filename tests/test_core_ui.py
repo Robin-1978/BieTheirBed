@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from pc_assistant.config import AppConfig
-from pc_assistant.conversation import ChatTurnState
-from pc_assistant.service.core_api import (
+from knoa_platform.config import AppConfig
+from knoa_platform.conversation import ChatTurnState
+from knoa_platform.service.core_api import (
     ChatTimelineEntrySnapshot,
     ChatTurnSnapshot,
 )
-from pc_assistant.ui.core_app import CoreChatApp, _TurnRenderState
-from pc_assistant.ui.widgets import AssistantMessage
+from knoa_platform.ui.core_app import CoreChatApp, _TurnRenderState
+from knoa_platform.ui.widgets import AssistantMessage
 
 
 class _Client:

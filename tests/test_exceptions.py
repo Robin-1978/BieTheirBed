@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pc_assistant.exceptions import (
+from knoa_platform.exceptions import (
     PCAssistantError,
     SessionNotFoundError,
     ToolNotFoundError,

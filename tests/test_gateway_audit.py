@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pc_assistant.gateway.audit import GatewayAuditRepository
+from knoa_platform.gateway.audit import GatewayAuditRepository
 
 
 def test_gateway_audit_is_device_scoped_ordered_and_secret_free(tmp_path) -> None:

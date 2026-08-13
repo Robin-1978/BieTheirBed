@@ -5,14 +5,14 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from pc_assistant.agent_runtime.model_step import (
+from knoa_platform.agent_runtime.model_step import (
     ModelStep,
     ModelStepRequest,
     ProviderCallRequest,
     ProviderChunk,
 )
-from pc_assistant.agent_runtime.contracts import RuntimeScope
-from pc_assistant.agent_runtime.tool_step import ProposedToolCall
+from knoa_platform.agent_runtime.contracts import RuntimeScope
+from knoa_platform.agent_runtime.tool_step import ProposedToolCall
 
 
 _SCOPE = RuntimeScope(principal_id="local", session_handle="session-a")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from pc_assistant import platform_
+from knoa_platform import platform_
 
 
 class TestGetPlatform:

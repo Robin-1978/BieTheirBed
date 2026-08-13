@@ -333,6 +333,48 @@
         }
       }
     },
+    "/v1/agents": {
+      "get": {
+        "operationId": "listAgents",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enabled Agents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/sessions": {
       "post": {
         "operationId": "createCoreSession",
@@ -1811,6 +1853,119 @@
         "responses": {
           "202": {
             "description": "Execution accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductTaskExecutionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tasks/{task_id}/continue": {
+      "post": {
+        "operationId": "continueTask",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContinueProductTaskRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Follow-up execution accepted",
             "content": {
               "application/json": {
                 "schema": {
@@ -3951,6 +4106,45 @@
       }
     },
     "schemas": {
+      "AgentListResponse": {
+        "properties": {
+          "default_agent": {
+            "title": "Default Agent",
+            "type": "string"
+          },
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/AgentSummary"
+            },
+            "title": "Agents",
+            "type": "array"
+          }
+        },
+        "required": [
+          "default_agent",
+          "agents"
+        ],
+        "title": "AgentListResponse",
+        "type": "object"
+      },
+      "AgentSummary": {
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "display_name"
+        ],
+        "title": "AgentSummary",
+        "type": "object"
+      },
       "AndroidReleaseResponse": {
         "properties": {
           "platform": {
@@ -4764,6 +4958,37 @@
         "title": "ChatTurnState",
         "type": "string"
       },
+      "ContinueProductTaskRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "client_request_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Client Request Id",
+            "type": "string"
+          },
+          "input": {
+            "default": "",
+            "maxLength": 200000,
+            "title": "Input",
+            "type": "string"
+          },
+          "attachments": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ArtifactInputRef"
+            },
+            "maxItems": 8,
+            "title": "Attachments",
+            "type": "array"
+          }
+        },
+        "required": [
+          "client_request_id"
+        ],
+        "title": "ContinueProductTaskRequest",
+        "type": "object"
+      },
       "ConversationSessionListResponse": {
         "properties": {
           "sessions": {
@@ -4804,6 +5029,12 @@
             "maxLength": 256,
             "minLength": 1,
             "title": "Session Handle",
+            "type": "string"
+          },
+          "agent_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Agent Id",
             "type": "string"
           },
           "title": {
@@ -4851,6 +5082,7 @@
         },
         "required": [
           "session_handle",
+          "agent_id",
           "title",
           "state",
           "turn_count",
@@ -4897,6 +5129,19 @@
             "default": true,
             "title": "Tools Enabled",
             "type": "boolean"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Agent Id"
           }
         },
         "required": [
@@ -4956,6 +5201,19 @@
             },
             "title": "Notification Policy",
             "type": "object"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Agent Id"
           }
         },
         "required": [
@@ -5234,6 +5492,12 @@
             "title": "Task Id",
             "type": "string"
           },
+          "agent_id_snapshot": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Agent Id Snapshot",
+            "type": "string"
+          },
           "task_revision": {
             "minimum": 1,
             "title": "Task Revision",
@@ -5342,6 +5606,7 @@
         "required": [
           "execution_id",
           "task_id",
+          "agent_id_snapshot",
           "task_revision",
           "launch_reason",
           "goal_snapshot",
@@ -5399,6 +5664,18 @@
             "maxLength": 128,
             "minLength": 1,
             "title": "Task Id",
+            "type": "string"
+          },
+          "session_handle": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Session Handle",
+            "type": "string"
+          },
+          "agent_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Agent Id",
             "type": "string"
           },
           "title": {
@@ -5473,6 +5750,8 @@
         },
         "required": [
           "task_id",
+          "session_handle",
+          "agent_id",
           "title",
           "goal",
           "tools_enabled",
@@ -6004,7 +6283,8 @@
           "manual",
           "scheduled",
           "event",
-          "rerun"
+          "rerun",
+          "follow_up"
         ],
         "title": "TaskLaunchReason",
         "type": "string"

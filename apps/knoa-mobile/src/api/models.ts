@@ -12,6 +12,11 @@ export type GatewaySession = {
   device_id: string;
 };
 
+export type AgentSummary = {
+  agent_id: string;
+  display_name: string;
+};
+
 export type TaskState =
   | "queued"
   | "running"
@@ -36,7 +41,7 @@ export type TaskLaunchPolicy = {
   source_config: Record<string, unknown>;
 };
 
-export type TaskLaunchReason = "created" | "manual" | "scheduled" | "event" | "rerun";
+export type TaskLaunchReason = "created" | "manual" | "scheduled" | "event" | "rerun" | "follow_up";
 
 export type ArtifactInput = {
   artifact_id: string;
@@ -47,6 +52,7 @@ export type ChatTurnState = "running" | "waiting_approval" | "completed" | "fail
 
 export type ConversationSession = {
   session_handle: string;
+  agent_id: string;
   title: string;
   state: "active" | "archived";
   turn_count: number;
@@ -112,6 +118,8 @@ export type ChatTurnSnapshot = {
 
 export type Task = {
   task_id: string;
+  session_handle: string;
+  agent_id: string;
   title: string;
   goal: string;
   attachments: ArtifactInput[];
@@ -130,6 +138,7 @@ export type Task = {
 export type TaskExecution = {
   execution_id: string;
   task_id: string;
+  agent_id_snapshot: string;
   task_revision: number;
   launch_reason: TaskLaunchReason;
   goal_snapshot: string;

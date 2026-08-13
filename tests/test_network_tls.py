@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from pc_assistant import network_tls
+from knoa_platform import network_tls
 
 
 def test_ca_bundle_respects_explicit_configuration(monkeypatch) -> None:

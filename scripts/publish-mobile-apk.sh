@@ -19,10 +19,21 @@ if [[ ! -f "$APK" ]]; then
   exit 1
 fi
 
-PCA_BIN="${PCA_BIN:-$REPO/.venv/bin/pca}"
-if [[ ! -x "$PCA_BIN" ]]; then
-  PCA_BIN="$(command -v pca)"
+if [[ -n "${KNOA_PYTHON:-}" ]]; then
+  KNOA_RELEASE_PYTHON="$KNOA_PYTHON"
+elif [[ -x "$REPO/.venv/bin/python" ]]; then
+  KNOA_RELEASE_PYTHON="$REPO/.venv/bin/python"
+elif [[ -x "/disk/miniconda3/bin/python" ]]; then
+  KNOA_RELEASE_PYTHON="/disk/miniconda3/bin/python"
+else
+  KNOA_RELEASE_PYTHON="$(command -v python3 2>/dev/null || true)"
 fi
-exec "$PCA_BIN" gateway release publish "$APK" \
+if [[ -z "$KNOA_RELEASE_PYTHON" || ! -x "$KNOA_RELEASE_PYTHON" ]]; then
+  echo "No usable Python interpreter found." >&2
+  exit 1
+fi
+
+export PYTHONPATH="$REPO/src${PYTHONPATH:+:$PYTHONPATH}"
+exec "$KNOA_RELEASE_PYTHON" -m knoa_platform gateway release publish "$APK" \
   --min-version-code "$MIN_VERSION_CODE" \
   --notes "$NOTES"

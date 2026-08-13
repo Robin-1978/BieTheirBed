@@ -9,7 +9,7 @@ import {
   View,
 } from "react-native";
 
-import type { Task, TaskExecution, TaskState } from "@/api/models";
+import type { AgentSummary, Task, TaskExecution, TaskState } from "@/api/models";
 import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
@@ -123,7 +123,7 @@ export default function TaskDetailScreen() {
         </View>
         <Text style={styles.title}>{task.title}</Text>
         <Text style={styles.goal}>{task.goal}</Text>
-        <Text style={styles.policy}>{launchLabel(task, t)} · {t("tasks.executions", { count: task.execution_count })}</Text>
+        <Text style={styles.policy}>{agentName(task.agent_id, gateway.agents)} · {launchLabel(task, t)} · {t("tasks.executions", { count: task.execution_count })}</Text>
       </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -176,6 +176,10 @@ function isTerminal(state: TaskState): boolean {
   return state === "completed" || state === "failed" || state === "cancelled";
 }
 
+function agentName(agentId: string, agents: AgentSummary[]): string {
+  return agents.find((agent) => agent.agent_id === agentId)?.display_name ?? agentId;
+}
+
 function taskStateLabel(state: Task["state"], t: ReturnType<typeof useI18n>["t"]): string {
   return ({ active: t("tasks.state.active"), paused: t("tasks.state.paused"), archived: t("tasks.state.archived") })[state];
 }
@@ -189,7 +193,7 @@ function launchLabel(task: Task, t: ReturnType<typeof useI18n>["t"]): string {
 }
 
 function launchReasonLabel(reason: TaskExecution["launch_reason"], t: ReturnType<typeof useI18n>["t"]): string {
-  return ({ created: t("taskDetail.reason.created"), manual: t("taskDetail.reason.manual"), scheduled: t("taskDetail.reason.scheduled"), event: t("taskDetail.reason.event"), rerun: t("taskDetail.reason.rerun") })[reason];
+  return ({ created: t("taskDetail.reason.created"), manual: t("taskDetail.reason.manual"), scheduled: t("taskDetail.reason.scheduled"), event: t("taskDetail.reason.event"), rerun: t("taskDetail.reason.rerun"), follow_up: t("taskDetail.reason.followUp") })[reason];
 }
 
 function Action({ icon, label, primary = false, disabled = false, busy = false, onPress }: { icon: AppIconName; label: string; primary?: boolean; disabled?: boolean; busy?: boolean; onPress(): void }) {

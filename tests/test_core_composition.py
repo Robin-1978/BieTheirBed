@@ -6,25 +6,25 @@ from pathlib import Path
 
 import pytest
 
-from pc_assistant.agent_runtime.composition import (
+from knoa_platform.agent_runtime.composition import (
     PERSONAL_LOCAL_CAPABILITIES,
     REMOTE_SCOPED_CAPABILITIES,
     build_core_runtime,
 )
-from pc_assistant.agent_runtime.contracts import (
+from knoa_platform.agent_runtime.contracts import (
     HealthStatus,
     RuntimeScope,
 )
-from pc_assistant.agent_runtime.model_step import ProviderChunk
-from pc_assistant.config import AppConfig
-from pc_assistant.runtime import RuntimePaths
-from pc_assistant.service.core_client import CoreClient
-from pc_assistant.service.credentials import (
+from knoa_platform.agent_runtime.model_step import ProviderChunk
+from knoa_platform.config import AppConfig
+from knoa_platform.runtime import RuntimePaths
+from knoa_platform.service.core_client import CoreClient
+from knoa_platform.service.credentials import (
     issue_principal_credential,
     resolve_local_service_token,
 )
-from pc_assistant.service.product_task_lifecycle import ProductTaskLifecycle
-from pc_assistant.tasks import TaskDefinitionState, TaskLaunchKind, TaskLaunchPolicy
+from knoa_platform.service.product_task_lifecycle import ProductTaskLifecycle
+from knoa_platform.tasks import TaskDefinitionState, TaskLaunchKind, TaskLaunchPolicy
 
 
 class _OfflineProvider:
@@ -90,7 +90,7 @@ def test_core_composition_builds_forward_only_registry_and_profiles(
         "write_file",
         "screenshot",
         "mouse",
-        "mcp_import",
+        "mcp_deploy",
         "mcp_connect",
         "mcp_inspect",
         "mcp_disable",
@@ -135,6 +135,33 @@ def test_builtin_agent_tool_contracts_are_english_only(tmp_path: Path) -> None:
         )
         is None
     )
+
+
+def test_codex_uses_private_neutral_workspace_when_cwd_is_empty(
+    tmp_path: Path,
+) -> None:
+    composition = build_core_runtime(
+        _config(
+            tmp_path,
+            service_port=0,
+            agents={
+                "knoa": {"enabled": True},
+                "codex": {
+                    "enabled": True,
+                    "command": ["codex", "app-server"],
+                    "cwd": "",
+                },
+            },
+        ),
+        provider_factory=_OfflineProvider,
+    )
+
+    codex = composition.agent_manager.runtime("codex")
+    assert codex._cwd == str(
+        (tmp_path / "runtime" / "agents" / "codex" / "workspace").resolve()
+    )
+    assert Path(codex._cwd).is_dir()
+    assert Path(codex._cwd) != (tmp_path / "workspace").resolve()
 
 
 @pytest.mark.asyncio

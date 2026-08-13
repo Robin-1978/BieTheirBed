@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from pc_assistant.tools.http_limits import (
+from knoa_platform.tools.http_limits import (
     HttpResponseTooLargeError,
     iter_limited_lines,
     read_limited_bytes,

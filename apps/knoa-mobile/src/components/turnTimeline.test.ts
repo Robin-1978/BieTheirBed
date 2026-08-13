@@ -23,10 +23,13 @@ describe("timelineDisplayEntries", () => {
       entry({ kind: "content", content: "草稿\n最终答案", iteration: 0 }),
     ], "最终答案")).toEqual([
       { kind: "content", key: "content:0:0", content: "草稿" },
+      { kind: "completion", key: "answer-completed" },
     ]);
     expect(timelineDisplayEntries([
       entry({ kind: "content", content: "最终答案", iteration: 0 }),
-    ], "最终答案")).toEqual([]);
+    ], "最终答案")).toEqual([
+      { kind: "completion", key: "answer-completed" },
+    ]);
   });
 
   it("updates a tool call row in place when its result arrives", () => {

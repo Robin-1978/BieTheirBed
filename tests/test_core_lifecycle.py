@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from pc_assistant.config import AppConfig
-from pc_assistant.service.core_lifecycle import get_core_client
+from knoa_platform.config import AppConfig
+from knoa_platform.service.core_lifecycle import get_core_client
 
 
 @pytest.mark.asyncio
@@ -20,15 +20,15 @@ async def test_lifecycle_connects_to_authenticated_loopback_websocket(
         return expected
 
     monkeypatch.setattr(
-        "pc_assistant.service.core_lifecycle.CoreClient.connect",
+        "knoa_platform.service.core_lifecycle.CoreClient.connect",
         classmethod(connect),
     )
     monkeypatch.setattr(
-        "pc_assistant.service.core_lifecycle.resolve_local_service_token",
+        "knoa_platform.service.core_lifecycle.resolve_local_service_token",
         lambda paths: "local-secret",
     )
     monkeypatch.setattr(
-        "pc_assistant.service.core_lifecycle._start_core_daemon",
+        "knoa_platform.service.core_lifecycle._start_core_daemon",
         lambda config: pytest.fail("daemon should not be started"),
     )
 

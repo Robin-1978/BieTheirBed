@@ -16,7 +16,7 @@ Generate a short-lived QR payload on the service machine after configuring a
 real `gateway_public_url`:
 
 ```bash
-pca gateway pair --ttl 300
+knoa gateway pair --ttl 300
 ```
 
 The mobile private key and short-lived session token are stored through the
@@ -44,12 +44,12 @@ APK locally on the service machine:
 ```bash
 scripts/build-mobile-apk.sh
 KNOA_MOBILE_RELEASE_NOTES="新增私人自更新" scripts/publish-mobile-apk.sh
-pca gateway release latest
+knoa gateway release latest
 ```
 
 The scripts load `/disk/dev/env.sh`, write build output to
 `/disk/dev/knoa-mobile-out`, and use the private signing configuration in
-`~/.pc-assistant/secrets/android`. The publishing command reads the version
+`~/.knoa/secrets/android`. The publishing command reads the version
 directly from the APK manifest; no version arguments need to be repeated
 manually.
 

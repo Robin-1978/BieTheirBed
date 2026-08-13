@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from pc_assistant import async_main
+import knoa_platform
+from knoa_platform import __version__, _is_knoa_service_pid, async_main, main
 
 
 @pytest.mark.asyncio
@@ -43,12 +44,48 @@ async def test_async_main_uses_textual_async_runner(monkeypatch) -> None:
     async def get_client(_config):
         return Client()
 
-    monkeypatch.setattr("pc_assistant.config.load_config", lambda _path: Config())
+    monkeypatch.setattr("knoa_platform.config.load_config", lambda _path: Config())
     monkeypatch.setattr(
-        "pc_assistant.service.core_lifecycle.get_core_client",
+        "knoa_platform.service.core_lifecycle.get_core_client",
         get_client,
     )
-    monkeypatch.setattr("pc_assistant.ui.core_app.CoreChatApp", ChatApp)
+    monkeypatch.setattr("knoa_platform.ui.core_app.CoreChatApp", ChatApp)
 
     assert await async_main(None, False) == 0
     assert calls == ["run_async", "disconnect"]
+
+
+def test_version_uses_product_name_and_platform_version(capsys) -> None:
+    assert main(["--version"]) == 0
+    assert capsys.readouterr().out == f"Knoa {__version__}\n"
+
+
+def test_start_uses_authoritative_service_lifecycle(monkeypatch) -> None:
+    calls: list[tuple[str | None, str | None]] = []
+
+    def start(config_path: str | None, log_dir: str | None) -> int:
+        calls.append((config_path, log_dir))
+        return 0
+
+    monkeypatch.setattr(knoa_platform, "_start_service", start)
+
+    assert main(["--start", "--log-dir", "/tmp/knoa-test-logs"]) == 0
+    assert calls == [(None, "/tmp/knoa-test-logs")]
+
+
+@pytest.mark.parametrize(
+    ("cmdline", "expected"),
+    [
+        (b"python\0-m\0knoa_platform\0--serve\0--daemon\0", True),
+        (b"python\0-m\0knoa_platform.service\0--daemon\0", True),
+        (b"python\0-m\0unrelated_server\0--serve\0", False),
+        (b"python\0server.py\09527\0", False),
+    ],
+)
+def test_service_pid_identity_requires_knoa_module(
+    monkeypatch,
+    cmdline: bytes,
+    expected: bool,
+) -> None:
+    monkeypatch.setattr("pathlib.Path.read_bytes", lambda _self: cmdline)
+    assert _is_knoa_service_pid(1234) is expected

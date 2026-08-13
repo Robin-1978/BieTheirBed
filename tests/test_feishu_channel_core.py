@@ -8,9 +8,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from pc_assistant.artifacts import ArtifactRef
-from pc_assistant.agent_runtime.contracts import RuntimeStatus
-from pc_assistant.channels.feishu import (
+from knoa_platform import __version__
+from knoa_platform.artifacts import ArtifactRef
+from knoa_platform.agent_runtime.contracts import RuntimeStatus
+from knoa_platform.channels.feishu import (
     FeishuChannel,
     _ActiveTaskPresentation,
     _StreamingCardState,
@@ -21,17 +22,17 @@ from pc_assistant.channels.feishu import (
     _service_notice,
     _split_text,
 )
-from pc_assistant.config import AppConfig
-from pc_assistant.conversation import ChatTurnState
-from pc_assistant.service.core_api import (
+from knoa_platform.config import AppConfig
+from knoa_platform.conversation import ChatTurnState
+from knoa_platform.service.core_api import (
     ChatApprovalSnapshot,
     ChatTimelineEntrySnapshot,
     ChatTurnSnapshot,
     TaskCancelResultMessage,
 )
-from pc_assistant.service.core_client import CoreRequestError
-from pc_assistant.service import credentials
-from pc_assistant.tasks import (
+from knoa_platform.service.core_client import CoreRequestError
+from knoa_platform.service import credentials
+from knoa_platform.tasks import (
     PrincipalTaskEvent,
     TaskCancelResult,
     TaskEvent,
@@ -216,11 +217,11 @@ async def test_feishu_core_client_uses_canonical_owner_principal(
         return _CoreClient()
 
     monkeypatch.setattr(
-        "pc_assistant.channels.feishu_transport.resolve_local_service_token",
+        "knoa_platform.channels.feishu_transport.resolve_local_service_token",
         lambda _paths: "local-signing-key",
     )
     monkeypatch.setattr(
-        "pc_assistant.channels.feishu_transport.CoreClient.connect",
+        "knoa_platform.channels.feishu_transport.CoreClient.connect",
         connect,
     )
 
@@ -309,7 +310,7 @@ async def test_feishu_start_and_stop_notifications_include_version(
         ("ou-user", _service_notice("已启动")),
         ("ou-user", _service_notice("已停止")),
     ]
-    assert "v0.1.1" in sent[0][1]
+    assert f"v{__version__}" in sent[0][1]
 
 
 @pytest.mark.asyncio
@@ -514,7 +515,7 @@ async def test_feishu_audio_keeps_artifact_when_transcription_is_unavailable(
     class UnavailableClient(_CoreClient):
         async def transcribe_artifact(self, session, artifact_id):
             del session, artifact_id
-            from pc_assistant.service.core_api import CoreError
+            from knoa_platform.service.core_api import CoreError
 
             raise CoreRequestError(
                 CoreError(
@@ -687,7 +688,7 @@ async def test_feishu_confirmation_updates_the_single_streaming_card(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
-        "pc_assistant.channels.feishu_conversation._STREAM_PATCH_INTERVAL_SECONDS",
+        "knoa_platform.channels.feishu_conversation._STREAM_PATCH_INTERVAL_SECONDS",
         0,
     )
     channel = FeishuChannel(_config(tmp_path))
