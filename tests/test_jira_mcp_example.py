@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -158,8 +159,7 @@ async def test_assignment_transition_becomes_one_immutable_resource_event(
     async def current_user_ids():
         return {"owner", "owner@example.test"}
 
-    async def search_assigned_issues():
-        return (
+    issues = [
             {
                 "id": "10001",
                 "key": "PROJECT-123",
@@ -178,8 +178,11 @@ async def test_assignment_transition_becomes_one_immutable_resource_event(
                         }
                     ]
                 },
-            },
-        )
+            }
+    ]
+
+    async def search_assigned_issues():
+        return tuple(issues)
 
     async def materialize(issue_key: str):
         evidence = settings.attachment_root / issue_key
@@ -192,13 +195,38 @@ async def test_assignment_transition_becomes_one_immutable_resource_event(
     client.search_assigned_issues = search_assigned_issues  # type: ignore[method-assign]
     client.materialize_issue = materialize  # type: ignore[method-assign]
     try:
+        baseline = await client.poll_assignment_events()
+        repeated_baseline = await client.poll_assignment_events()
+        issues.append(
+            {
+                "id": "10002",
+                "key": "PROJECT-124",
+                "fields": {"created": "2026-08-13T00:00:00.000+0000"},
+                "changelog": {
+                    "histories": [
+                        {
+                            "id": "9002",
+                            "items": [
+                                {
+                                    "field": "assignee",
+                                    "to": "owner",
+                                    "toString": "Owner",
+                                }
+                            ],
+                        }
+                    ]
+                },
+            }
+        )
         first = await client.poll_assignment_events()
         repeated = await client.poll_assignment_events()
     finally:
         await client.close()
 
+    assert baseline == ()
+    assert repeated_baseline == ()
     assert len(first) == 1
-    assert first[0]["issue_key"] == "PROJECT-123"
+    assert first[0]["issue_key"] == "PROJECT-124"
     assert repeated == ()
     assert store.list_assignment_events()[0]["event_id"] == first[0]["event_id"]
 
@@ -299,7 +327,6 @@ async def test_assign_issue_requires_write_switch_and_uses_jira_identity_field(
         assert method == "PUT"
         assert path.endswith("/issue/PROJECT-123/assignee")
         assert kwargs["json"] == {"name": "zhangsan"}
-        return None
 
     client._request = request  # type: ignore[method-assign]
     try:
@@ -652,15 +679,19 @@ async def test_assignment_event_is_published_only_after_materialization(
     async def current_user_ids():
         return {"owner"}
 
+    issues: list[dict[str, Any]] = []
+
     async def search_assigned_issues():
-        return (
+        return tuple(issues)
+
+    assigned_issue = (
             {
                 "id": "10001",
                 "key": "PROJECT-123",
                 "fields": {"created": "2026-08-12"},
                 "changelog": {"histories": []},
-            },
-        )
+            }
+    )
 
     async def materialize(_issue_key: str):
         nonlocal attempts
@@ -677,6 +708,8 @@ async def test_assignment_event_is_published_only_after_materialization(
     client.search_assigned_issues = search_assigned_issues  # type: ignore[method-assign]
     client.materialize_issue = materialize  # type: ignore[method-assign]
     try:
+        assert await client.poll_assignment_events() == ()
+        issues.append(assigned_issue)
         assert await client.poll_assignment_events() == ()
         assert store.list_assignment_events() == ()
         created = await client.poll_assignment_events()
