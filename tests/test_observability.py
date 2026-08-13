@@ -41,6 +41,9 @@ class TestLLMTraceRecorder:
             latency_ms=100.0, ttft_ms=20.0,
             finish_reason="stop", tool_calls=1,
             failover_used=True,
+            prompt_tokens_estimated=12,
+            prompt_tokens_source="provider",
+            completion_tokens_source="provider",
         )
         entry = rec.recent(1)[0]
         assert entry["kind"] == "llm_call"
@@ -53,6 +56,9 @@ class TestLLMTraceRecorder:
         assert "client_request_id" not in entry
         assert entry["principal_hash"] != "user-a"
         assert entry["failover_used"] is True
+        assert entry["prompt_tokens_estimated"] == 12
+        assert entry["prompt_tokens_source"] == "provider"
+        assert entry["completion_tokens_source"] == "provider"
 
     def test_session_totals_include_persisted_calls(self, tmp_path):
         path = str(tmp_path / "llm.jsonl")
@@ -68,6 +74,9 @@ class TestLLMTraceRecorder:
                 prompt_tokens=prompt,
                 completion_tokens=completion,
                 cached_tokens=cached,
+                prompt_tokens_estimated=prompt + 1,
+                prompt_tokens_source="provider",
+                completion_tokens_source="provider",
             )
         rec.record_call(
             principal_id="user-a",
@@ -88,8 +97,10 @@ class TestLLMTraceRecorder:
             "prompt_tokens": 30,
             "completion_tokens": 12,
             "cached_tokens": 5,
+            "prompt_tokens_estimated": 32,
             "total_tokens": 42,
             "model_calls": 2,
+            "usage_source": "provider",
             "model": "model-a",
         }
 

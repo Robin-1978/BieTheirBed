@@ -14,6 +14,7 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from knoa_agent.context import ContextBudgetExceeded, ContextEngine
 from knoa_agent.context_store import ContextCheckpoint, ContextCheckpointRepository
 from knoa_agent.tool_inventory import ToolInventory
 from knoa_agent_contracts import (
@@ -24,7 +25,6 @@ from knoa_agent_contracts import (
     ContextCompacted,
     CreateRuntimeSession,
     McpEndpointGrant,
-    PlanChanged,
     ReasoningSummaryDelta,
     ReconcileRuntime,
     ResourceLinkPart,
@@ -40,7 +40,6 @@ from knoa_agent_contracts import (
     RuntimeTurn,
     RuntimeTurnEvent,
     RuntimeTurnRequest,
-    RuntimeWarning,
     TextPart,
     ToolCallFinished,
     ToolCallStarted,
@@ -106,13 +105,9 @@ class KnoaAgentRuntime(AgentRuntime):
         max_tool_calls: int = 50,
         max_output_tokens: int = 1024,
         temperature: float = 0.2,
-        history_char_budget: int = 120_000,
+        context_window: int = 8192,
         clock: Callable[[], float] = time.time,
         turn_id_factory: Callable[[], str] | None = None,
-        prompt_context: Callable[
-            [str, frozenset[str]], Awaitable[str]
-        ]
-        | None = None,
         tool_inventory: ToolInventory | None = None,
         agent_id: str = "knoa",
         display_name: str = "Knoa",
@@ -128,10 +123,12 @@ class KnoaAgentRuntime(AgentRuntime):
         self._max_tool_calls = max_tool_calls
         self._max_output_tokens = max_output_tokens
         self._temperature = temperature
-        self._history_char_budget = history_char_budget
+        self._context = ContextEngine(
+            context_window=context_window,
+            completion_reserve=max_output_tokens,
+        )
         self._clock = clock
         self._turn_id_factory = turn_id_factory or (lambda: uuid.uuid4().hex)
-        self._prompt_context = prompt_context
         self._tool_inventory = tool_inventory or ToolInventory()
         self._agent_id = agent_id
         self._display_name = display_name
@@ -220,19 +217,12 @@ class KnoaAgentRuntime(AgentRuntime):
                 request.session.runtime_session_ref,
             )
             durable_history = self._checkpoint_messages(checkpoint)
+            summary, covered_messages = self._checkpoint_summary(checkpoint)
             async with self._mcp.connect(request.mcp) as client:
                 inventory = await self._tool_inventory.load(
                     request.session.runtime_session_ref,
                     request.mcp.scope_digest,
                     client,
-                )
-                prompt_context = (
-                    await self._prompt_context(
-                        self._input_text(request),
-                        frozenset(str(tool["name"]) for tool in inventory.tools),
-                    )
-                    if self._prompt_context is not None
-                    else ""
                 )
                 tools = self._tool_inventory.project(
                     request.session.runtime_session_ref,
@@ -242,40 +232,48 @@ class KnoaAgentRuntime(AgentRuntime):
                 model_user = await self._model_user_message(request, client)
                 model_messages = [*durable_history, model_user]
                 durable_messages = [*durable_history, durable_user]
-                compacted = self._compact(model_messages, durable_messages)
-                if compacted:
-                    yield ContextCompacted(
-                        **self._event_base(request, runtime_turn_ref),
-                        source_cursor=compacted,
-                        state_version=self._STATE_VERSION,
-                        tokens_before=0,
-                        tokens_after=0,
-                    )
                 tool_calls = 0
                 final_output = ""
                 usage: dict[str, int | float | str] = {}
                 for _iteration in range(1, self._max_iterations + 1):
                     if cancellation.is_set():
                         break
+                    try:
+                        prepared = self._context.prepare(
+                            system_prompt=self._system_prompt,
+                            model_history=model_messages,
+                            durable_history=durable_messages,
+                            tools=tools,
+                            context=request.context,
+                            summary=summary,
+                            covered_messages=covered_messages,
+                        )
+                    except ContextBudgetExceeded:
+                        yield TurnFinished(
+                            **self._event_base(request, runtime_turn_ref),
+                            status="failed",
+                            error_code="context_budget_exceeded",
+                        )
+                        terminal_emitted = True
+                        return
+                    model_messages = list(prepared.model_history)
+                    durable_messages = list(prepared.durable_history)
+                    summary = prepared.summary
+                    covered_messages = prepared.covered_messages
+                    if prepared.compacted:
+                        yield ContextCompacted(
+                            **self._event_base(request, runtime_turn_ref),
+                            source_cursor=covered_messages,
+                            state_version=self._STATE_VERSION,
+                            tokens_before=prepared.tokens_before,
+                            tokens_after=prepared.tokens_after,
+                        )
                     terminal_chunk = None
                     content_parts: list[str] = []
                     calls: tuple[Any, ...] = ()
                     model_request = AgentModelRequest(
                         call_id=uuid.uuid4().hex,
-                        messages=tuple(
-                            [
-                                {
-                                    "role": "system",
-                                    "content": self._system_prompt,
-                                },
-                                *(
-                                    [{"role": "user", "content": prompt_context}]
-                                    if prompt_context
-                                    else []
-                                ),
-                                *model_messages,
-                            ]
-                        ),
+                        messages=prepared.messages,
                         tools=tools,
                         temperature=self._temperature,
                         max_output_tokens=self._max_output_tokens,
@@ -334,16 +332,21 @@ class KnoaAgentRuntime(AgentRuntime):
                             **usage,
                             "cached_tokens": self._cached_tokens(raw_usage),
                             "iteration": _iteration,
-                            "schema_tokens_estimated": max(
-                                0,
-                                len(
-                                    json.dumps(
-                                        tools,
-                                        ensure_ascii=False,
-                                        sort_keys=True,
-                                    )
+                            "prompt_tokens_estimated": prepared.tokens_after,
+                            "schema_tokens_estimated": prepared.schema_tokens,
+                            "prompt_tokens_source": (
+                                "provider"
+                                if self._has_usage(
+                                    usage, "prompt_tokens", "input_tokens"
                                 )
-                                // 4,
+                                else "estimated"
+                            ),
+                            "completion_tokens_source": (
+                                "provider"
+                                if self._has_usage(
+                                    usage, "completion_tokens", "output_tokens"
+                                )
+                                else "unavailable"
                             ),
                             "available_tools": len(tools),
                             "inventory_tools": len(inventory.tools),
@@ -367,6 +370,8 @@ class KnoaAgentRuntime(AgentRuntime):
                             request,
                             checkpoint,
                             durable_messages,
+                            summary=summary,
+                            covered_messages=covered_messages,
                         )
                         yield TurnFinished(
                             **self._event_base(request, runtime_turn_ref),
@@ -623,34 +628,29 @@ class KnoaAgentRuntime(AgentRuntime):
                     )
         return {"role": "user", "content": blocks}
 
-    def _compact(
-        self,
-        model_messages: list[dict[str, Any]],
-        durable_messages: list[dict[str, Any]],
-    ) -> int:
-        removed = 0
-        while len(json.dumps(model_messages, ensure_ascii=False, default=str)) > self._history_char_budget and len(model_messages) > 2:
-            model_messages.pop(0)
-            durable_messages.pop(0)
-            removed += 1
-        return removed
-
     async def _save_checkpoint(
         self,
         request: RuntimeTurnRequest,
         previous: ContextCheckpoint | None,
         messages: list[dict[str, Any]],
+        *,
+        summary: str,
+        covered_messages: int,
     ) -> None:
         serialized = json.dumps(messages, ensure_ascii=False, sort_keys=True, default=str)
         checkpoint = ContextCheckpoint(
             runtime_session_ref=request.session.runtime_session_ref,
             state_version=self._STATE_VERSION,
-            source_cursor=len(messages),
+            source_cursor=covered_messages + len(messages),
             agent_config_digest=hashlib.sha256(
                 self._system_prompt.encode("utf-8")
             ).hexdigest(),
             model_context_digest=hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
-            payload={"messages": messages},
+            payload={
+                "messages": messages,
+                "summary": summary,
+                "covered_messages": covered_messages,
+            },
             revision=previous.revision if previous is not None else 1,
             created_at=previous.created_at if previous is not None else 0.0,
             updated_at=0.0,
@@ -660,6 +660,22 @@ class KnoaAgentRuntime(AgentRuntime):
             checkpoint,
             expected_revision=(previous.revision if previous is not None else None),
         )
+
+    @staticmethod
+    def _checkpoint_summary(
+        checkpoint: ContextCheckpoint | None,
+    ) -> tuple[str, int]:
+        if checkpoint is None:
+            return "", 0
+        summary = checkpoint.payload.get("summary", "")
+        covered = checkpoint.payload.get("covered_messages", 0)
+        if not isinstance(summary, str) or not isinstance(covered, int) or covered < 0:
+            raise RuntimeError("Knoa Agent checkpoint summary is invalid")
+        return summary, covered
+
+    @staticmethod
+    def _has_usage(usage: dict[str, Any], *names: str) -> bool:
+        return any(isinstance(usage.get(name), (int, float)) for name in names)
 
     @staticmethod
     def _assistant_tool_message(content: str, calls: tuple[Any, ...]) -> dict[str, Any]:

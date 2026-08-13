@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any
 
 from knoa_agent_contracts import (
     ArtifactProduced,
@@ -26,7 +25,6 @@ from knoa_platform.agent_runtime.contracts import (
 from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
 from knoa_platform.agent_runtime.tool_step import ToolOutcomeUnknownError
 from knoa_platform.agents import AgentExecutionService, ExecuteAgentTurn
-from knoa_platform.context.session_context import SessionContextService
 from knoa_platform.interactions import ScopedInteractionPort
 from knoa_platform.tasks.approval import DurableApprovalService
 from knoa_platform.tasks.event_hub import TaskEventHub
@@ -58,7 +56,6 @@ class TaskExecutor:
         worker_id: str = "core-worker",
         lease_seconds: float = 60.0,
         max_concurrency: int = 4,
-        session_context: SessionContextService | None = None,
         interactions: ScopedInteractionPort | None = None,
     ) -> None:
         if not 1 <= max_concurrency <= 32:
@@ -72,7 +69,6 @@ class TaskExecutor:
         self._worker_id = worker_id
         self._lease_seconds = lease_seconds
         self._max_concurrency = max_concurrency
-        self._session_context = session_context
         self._interactions = interactions
         self._wake = asyncio.Event()
         self._worker: asyncio.Task[None] | None = None

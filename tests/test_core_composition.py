@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -16,6 +18,7 @@ from knoa_platform.agent_runtime.contracts import (
     RuntimeScope,
 )
 from knoa_platform.agent_runtime.model_step import ProviderChunk
+from knoa_platform.agents import ExecuteAgentTurn
 from knoa_platform.config import AppConfig
 from knoa_platform.runtime import RuntimePaths
 from knoa_platform.service.core_client import CoreClient
@@ -63,6 +66,29 @@ class _AnswerProvider(_OfflineProvider):
         return answer_stream()
 
 
+class _CaptureProvider(_OfflineProvider):
+    instances: ClassVar[list[_CaptureProvider]] = []
+
+    def __init__(self, model) -> None:
+        super().__init__(model)
+        self.requests = []
+        type(self).instances.append(self)
+
+    def stream(self, request, cancellation):
+        del cancellation
+
+        async def answer_stream():
+            self.requests.append(request)
+            yield ProviderChunk(content_delta="done")
+            yield ProviderChunk(
+                finish_reason="stop",
+                usage={"prompt_tokens": 321, "completion_tokens": 17},
+                terminal=True,
+            )
+
+        return answer_stream()
+
+
 def _config(tmp_path: Path, **updates) -> AppConfig:
     values = {
         "runtime_root": str(tmp_path / "runtime"),
@@ -71,6 +97,81 @@ def _config(tmp_path: Path, **updates) -> AppConfig:
     }
     values.update(updates)
     return AppConfig(**values)
+
+
+@pytest.mark.asyncio
+async def test_knoa_provider_request_receives_scoped_memory_in_tail_context(
+    tmp_path: Path,
+) -> None:
+    _CaptureProvider.instances = []
+    composition = build_core_runtime(
+        _config(tmp_path, service_port=0),
+        provider_factory=_CaptureProvider,
+    )
+    scope_a = await composition.control.create_session("principal-a")
+    scope_b = await composition.control.create_session("principal-b")
+    composition.memory.store_memory(
+        "principal-a",
+        "preferred_language",
+        "zh",
+        category="communication",
+        importance="core",
+        confidence=1.0,
+        source="explicit",
+    )
+    composition.memory.store_memory(
+        "principal-a",
+        "preferred_editor",
+        "vim",
+        category="preference",
+        importance="relevant",
+        confidence=1.0,
+        source="explicit",
+    )
+    composition.memory.store_memory(
+        "principal-a",
+        "unrelated_workflow",
+        "never injected",
+        category="workflow",
+        importance="relevant",
+        confidence=1.0,
+        source="explicit",
+    )
+
+    async def run(scope, turn_id, text):
+        return [
+            event
+            async for event in composition.agent_execution.execute_turn(
+                ExecuteAgentTurn(
+                    scope=scope,
+                    turn_id=turn_id,
+                    client_request_id=f"request-{turn_id}",
+                    input=text,
+                    attachments=(),
+                    tools_enabled=False,
+                    cancellation=asyncio.Event(),
+                )
+            )
+        ]
+
+    await run(scope_a, "turn-a", "Use my editor preference")
+    await run(scope_b, "turn-b", "Use my editor preference")
+
+    provider = _CaptureProvider.instances[0]
+    first = provider.requests[0].messages
+    assert first[-1]["content"][0]["text"] == "Use my editor preference"
+    runtime_context = first[-2]["content"]
+    assert "preferred_language: zh" in runtime_context
+    assert "preferred_editor: vim" in runtime_context
+    assert "unrelated_workflow" not in runtime_context
+    assert "preferred_language: zh" not in str(provider.requests[1].messages)
+
+    model_trace = composition.llm_traces.recent(2)[0]
+    assert model_trace["prompt_tokens"] == 321
+    assert model_trace["completion_tokens"] == 17
+    assert model_trace["prompt_tokens_source"] == "provider"
+    assert model_trace["completion_tokens_source"] == "provider"
+    assert model_trace["prompt_tokens_estimated"] > 0
 
 
 def test_core_composition_builds_forward_only_registry_and_profiles(

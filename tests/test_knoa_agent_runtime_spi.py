@@ -10,6 +10,7 @@ from knoa_agent_contracts import (
     CreateRuntimeSession,
     McpEndpointGrant,
     RuntimeInterruptCommand,
+    RuntimeTurnContext,
     RuntimeTurnRequest,
     TextPart,
 )
@@ -256,12 +257,127 @@ async def test_knoa_runtime_owns_session_checkpoint_and_one_terminal_event(
     ]
     assert events[-1].status == "completed"
     assert events[-1].final_output == "hello"
+    usage = next(event.usage for event in events if event.event_type == "usage_reported")
+    assert "completion_tokens" not in usage
+    assert usage["completion_tokens_source"] == "unavailable"
+    assert usage["prompt_tokens_source"] == "estimated"
+    assert usage["prompt_tokens_estimated"] > 0
     checkpoint = store.load_checkpoint(session.runtime_session_ref)
     assert checkpoint is not None
     assert checkpoint.payload["messages"][-1] == {
         "role": "assistant",
         "content": "hello",
     }
+
+
+@pytest.mark.asyncio
+async def test_knoa_runtime_restores_compacted_summary_from_checkpoint(
+    tmp_path: Path,
+) -> None:
+    provider = Provider()
+    store = ContextCheckpointRepository(tmp_path / "context.db")
+    runtime = KnoaAgentRuntime(
+        provider,
+        store,
+        Connector(),
+        system_prompt="system",
+        health_probe=healthy,
+        context_window=700,
+        max_output_tokens=350,
+    )
+    session = await runtime.create_session(
+        CreateRuntimeSession(operation_id="create-summary", binding_epoch=1)
+    )
+    checkpoint = store.load_checkpoint(session.runtime_session_ref)
+    assert checkpoint is None
+    from knoa_agent.context_store import ContextCheckpoint
+
+    stored = ContextCheckpoint(
+        runtime_session_ref=session.runtime_session_ref,
+        state_version="1",
+        source_cursor=8,
+        agent_config_digest="agent",
+        model_context_digest="model",
+        payload={
+            "messages": [
+                {"role": "user", "content": "recent question"},
+                {"role": "assistant", "content": "recent answer"},
+            ],
+            "summary": "User: earlier important request",
+            "covered_messages": 6,
+        },
+        revision=1,
+        created_at=0.0,
+        updated_at=0.0,
+    )
+    store.save_checkpoint(stored, expected_revision=None)
+
+    turn = await runtime.start_turn(
+        RuntimeTurnRequest(
+            session=session,
+            operation_id="operation-summary",
+            input=(TextPart(text="follow up"),),
+            mcp=grant(),
+            context=RuntimeTurnContext(core_memory=("preferred_language: zh",)),
+        )
+    )
+    events = [event async for event in turn.events]
+
+    assert events[-1].status == "completed"
+    messages = provider.requests[0].messages
+    assert "earlier important request" in messages[1]["content"]
+    assert "preferred_language: zh" in messages[-2]["content"]
+    restored = store.load_checkpoint(session.runtime_session_ref)
+    assert restored is not None
+    assert restored.payload["summary"] == "User: earlier important request"
+    assert restored.payload["covered_messages"] == 6
+
+
+@pytest.mark.asyncio
+async def test_provider_usage_is_authoritative_and_missing_output_is_marked(
+    tmp_path: Path,
+) -> None:
+    class UsageProvider(Provider):
+        def stream(self, request, cancellation):
+            del cancellation
+
+            async def iterate():
+                self.requests.append(request)
+                yield ProviderChunk(content_delta="hello")
+                yield ProviderChunk(
+                    finish_reason="stop",
+                    usage={"prompt_tokens": 77, "completion_tokens": 9},
+                    terminal=True,
+                )
+
+            return iterate()
+
+    runtime = KnoaAgentRuntime(
+        UsageProvider(),
+        ContextCheckpointRepository(tmp_path / "context.db"),
+        Connector(),
+        system_prompt="system",
+        health_probe=healthy,
+    )
+    session = await runtime.create_session(
+        CreateRuntimeSession(operation_id="create-usage", binding_epoch=1)
+    )
+    turn = await runtime.start_turn(
+        RuntimeTurnRequest(
+            session=session,
+            operation_id="operation-usage",
+            input=(TextPart(text="hi"),),
+            mcp=grant(),
+        )
+    )
+    events = [event async for event in turn.events]
+    usage = next(event.usage for event in events if event.event_type == "usage_reported")
+
+    assert usage["prompt_tokens"] == 77
+    assert usage["completion_tokens"] == 9
+    assert usage["prompt_tokens_source"] == "provider"
+    assert usage["completion_tokens_source"] == "provider"
+    assert usage["prompt_tokens_estimated"] > 0
 
 
 @pytest.mark.asyncio

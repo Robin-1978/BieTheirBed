@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from knoa_agent import ContextCheckpointRepository, KnoaAgentRuntime
-from knoa_agent_contracts import TurnFinished, UsageReported
+from knoa_agent_contracts import RuntimeTurnContext, TurnFinished, UsageReported
 from knoa_codex_agent import CodexAgentRuntime, CodexSessionRepository
 from knoa_platform.agent_runtime.artifact_service import ArtifactService
 from knoa_platform.agent_runtime.config_control import PersistentConfigController
@@ -60,10 +60,6 @@ from knoa_platform.context.memory_db import (
     SQLiteMemoryRepository,
 )
 from knoa_platform.context.prompt import build_system_prompt
-from knoa_platform.context.session_context import (
-    SessionContextRepository,
-    SessionContextService,
-)
 from knoa_platform.conversation import ConversationRepository, ConversationService
 from knoa_platform.desktop_session import ensure_desktop_session
 from knoa_platform.extensions import ExtensionManager
@@ -147,7 +143,6 @@ class CoreRuntimeComposition:
 
     paths: RuntimePaths
     sessions: RuntimeSessionRepository
-    session_context: SessionContextService
     tasks: TaskRepository
     task_service: TaskService
     conversations: ConversationRepository
@@ -274,12 +269,8 @@ def build_core_runtime(
     database = paths.data / "assistant.db"
     sessions = RuntimeSessionRepository(database)
     prompt_budget = max(
-        257,
+        256,
         config.effective_context_window_budget() - config.max_tokens,
-    )
-    session_context = SessionContextService(
-        SessionContextRepository(database),
-        soft_token_limit=max(256, int(prompt_budget * 0.65)),
     )
     tasks = TaskRepository(
         database,
@@ -372,6 +363,16 @@ def build_core_runtime(
                 0,
                 int(usage.get("schema_tokens_estimated") or 0),
             ),
+            prompt_tokens_estimated=max(
+                0,
+                int(usage.get("prompt_tokens_estimated") or 0),
+            ),
+            prompt_tokens_source=str(
+                usage.get("prompt_tokens_source") or "unavailable"
+            ),
+            completion_tokens_source=str(
+                usage.get("completion_tokens_source") or "unavailable"
+            ),
         )
 
     async def observe_turn(
@@ -395,10 +396,11 @@ def build_core_runtime(
 
     capability_gateway = CapabilityGateway(registry, tool_step, artifacts)
 
-    async def agent_prompt_context(
+    async def platform_turn_context(
+        scope: RuntimeScope,
         query: str,
         available_tools: frozenset[str],
-    ) -> str:
+    ) -> RuntimeTurnContext:
         effective_capabilities = frozenset(
             capability
             for tool_name in available_tools
@@ -406,10 +408,43 @@ def build_core_runtime(
             if policy is not None
             for capability in policy.capabilities
         )
-        return skills.active_context(
-            query,
-            available_tools=available_tools,
-            capabilities=effective_capabilities,
+        core, relevant, episodes = await asyncio.gather(
+            asyncio.to_thread(
+                memory_repository.list_memories,
+                scope.principal_id,
+                importance="core",
+                limit=12,
+            ),
+            asyncio.to_thread(
+                memory_repository.search_memories,
+                scope.principal_id,
+                query,
+                limit=5,
+            ),
+            asyncio.to_thread(
+                memory_repository.recall_episodes,
+                scope.principal_id,
+                scope.session_handle,
+                query,
+                limit=3,
+            ),
+        )
+        core_keys = {str(item["key"]) for item in core}
+        return RuntimeTurnContext(
+            core_memory=tuple(
+                f"{item['key']}: {item['value']}" for item in core
+            ),
+            relevant_memory=tuple(
+                f"{item['key']}: {item['value']}"
+                for item in relevant
+                if str(item["key"]) not in core_keys
+            ),
+            episodic_memory=tuple(str(item["summary"]) for item in episodes),
+            skill_instructions=skills.active_context(
+                query,
+                available_tools=available_tools,
+                capabilities=effective_capabilities,
+            ),
         )
 
     runtime = KnoaAgentRuntime(
@@ -422,7 +457,7 @@ def build_core_runtime(
         max_tool_calls=config.max_total_tool_calls,
         max_output_tokens=config.max_tokens,
         temperature=config.llm_temperature,
-        prompt_context=agent_prompt_context,
+        context_window=config.effective_context_window_budget(),
     )
     capability_mcp_host = CapabilityMCPHost(
         capability_gateway,
@@ -464,6 +499,11 @@ def build_core_runtime(
             max_tool_calls=1,
             max_output_tokens=config.approval_review.max_output_tokens,
             temperature=0.0,
+            context_window=max(
+                512,
+                config.resolve_model(reviewer_model_alias).context_window
+                or config.context_window_budget,
+            ),
             agent_id="reviewer_agent",
             display_name="Knoa Reviewer",
         )
@@ -527,6 +567,7 @@ def build_core_runtime(
         external_mcp_endpoint=lambda: capability_mcp_host.endpoint,
         usage_observer=observe_usage,
         turn_observer=observe_turn,
+        context_provider=platform_turn_context,
     )
     task_events = TaskEventHub()
     interaction_repository = HumanInteractionRepository(database)
@@ -572,7 +613,6 @@ def build_core_runtime(
         task_approvals,
         task_tool_commits,
         task_events,
-        session_context=session_context,
         interactions=interactions.for_owner("task_execution"),
     )
     task_service = TaskService(
@@ -592,7 +632,6 @@ def build_core_runtime(
         sessions,
         conversations,
         agent_execution,
-        session_context=session_context,
         interactions=interactions,
         approval_reviewer=approval_reviewer,
         approval_review_mode=ApprovalReviewMode(config.approval_review.mode),
@@ -733,7 +772,6 @@ def build_core_runtime(
     return CoreRuntimeComposition(
         paths=paths,
         sessions=sessions,
-        session_context=session_context,
         tasks=tasks,
         task_service=task_service,
         conversations=conversations,

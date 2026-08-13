@@ -35,7 +35,6 @@ from knoa_platform.approvals import (
     ApprovalReviewRequest,
 )
 from knoa_platform.artifacts import ArtifactRef
-from knoa_platform.context.session_context import SessionContextService
 from knoa_platform.conversation.models import (
     TERMINAL_CHAT_TURN_STATES,
     ChatApproval,
@@ -313,7 +312,6 @@ class ConversationService:
         agents: AgentExecutionService,
         *,
         hub: ConversationHub | None = None,
-        session_context: SessionContextService | None = None,
         interactions: HumanInteractionService | None = None,
         approval_reviewer: ApprovalReviewer | None = None,
         approval_review_mode: ApprovalReviewMode = ApprovalReviewMode.OFF,
@@ -322,7 +320,6 @@ class ConversationService:
         self._sessions = sessions
         self._repository = repository
         self._agents = agents
-        self._session_context = session_context
         self._hub = hub or ConversationHub()
         self._live: dict[str, _LiveTurn] = {}
         self._executions: dict[str, asyncio.Task[None]] = {}

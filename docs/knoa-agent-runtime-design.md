@@ -210,6 +210,26 @@ A2A 主要解决跨组织或跨服务 Agent 之间的发现、消息、Task、Ar
 
 Platform 向 Runtime 提供当前 Turn 的用户输入、附件引用和授权能力，而不是完整历史或提前压缩好的模型 Prompt。Runtime 通过自己的 `runtime_session_ref` 恢复 Agent 私有历史。Runtime 可以产生 `ContextCompacted` 和 token usage 等观察事件，但不能覆盖、删除或改写 Platform 保存的产品会话记录。
 
+Platform 还可以通过 `RuntimeTurnContext` 提供本次 Turn 已获授权的、非会话型结构化材料：`core_memory`、按当前 query 命中的 `relevant_memory`、当前 Session 的 episodic memory，以及已激活 Skill 的 instructions。该契约只表达“允许 Agent 看见什么”，不包含模型 role、消息排列、token 预算或压缩结果。
+
+`KnoaAgentRuntime` 内部的 Context Engine 是以下能力的唯一生产权威：
+
+- 将动态 memory/Skill context 固定在当前 user Turn 之前，保留稳定的 system + 已完成历史前缀以提高 prompt cache 命中；
+- 按模型 context window、completion reserve 和当前 tool schema 共同计算输入预算；
+- 每次 ReAct model step 重新预算，避免 tool result 在循环中无界膨胀；
+- 只按完整 dialogue Turn 淘汰历史，tool call 与对应 tool result 不得被拆开；
+- 将淘汰 Turn 转成明确标记为 lossy 的滚动摘要，并把摘要与 `covered_messages` 保存到 Agent 私有 checkpoint；
+- 恢复 Session 时同时恢复近期完整历史和滚动摘要。
+
+Platform 不再在 Conversation/Task 主路径中维护另一份模型滚动摘要。旧的 Platform context helper 只作为尚未清理的非生产代码或 benchmark 辅助存在，不能被视为运行时事实。
+
+Token 有两种口径，必须分离：
+
+- Provider 返回的 `prompt_tokens` / `input_tokens`、`completion_tokens` / `output_tokens` 是统计和计费权威；
+- Knoa Agent 的 `prompt_tokens_estimated` 只用于调用前预算与诊断。Provider 缺失 usage 时，实际 token 不得用估算冒充，source 标记为 `unavailable` 或 `partial`。
+
+系统级 `reviewer_agent` 不接收用户 memory、episodic memory 或普通 Skill context，只接收审批请求本身所需的结构化证据。
+
 因此，同一个 Platform Session 若绑定 `knoa`，历史上下文和压缩由 `KnoaAgentRuntime` 完成；若绑定 `codex`，则由 Codex App Server 管理其 Thread 和 compaction。Platform 只保存产品可见消息、必要的观察元数据和恢复 binding，不尝试用一套历史或压缩算法统一两个 Agent。
 
 ## 5. 组件职责

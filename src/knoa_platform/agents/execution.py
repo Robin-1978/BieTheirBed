@@ -16,8 +16,9 @@ from knoa_agent_contracts import (
     InteractionRequested,
     McpEndpointGrant,
     ResumeRuntimeSession,
-    RuntimeInterruptCommand,
     RuntimeInteractionResolution,
+    RuntimeInterruptCommand,
+    RuntimeTurnContext,
     RuntimeTurnEvent,
     RuntimeTurnRequest,
     TextPart,
@@ -86,6 +87,10 @@ class AgentExecutionService:
             [ExecuteAgentTurn, TurnFinished, int, float], Awaitable[None]
         ]
         | None = None,
+        context_provider: Callable[
+            [RuntimeScope, str, frozenset[str]], Awaitable[RuntimeTurnContext]
+        ]
+        | None = None,
     ) -> None:
         self._manager = manager
         self._bindings = bindings
@@ -98,6 +103,7 @@ class AgentExecutionService:
         )
         self._usage_observer = usage_observer
         self._turn_observer = turn_observer
+        self._context_provider = context_provider
         self._binding_locks: dict[str, asyncio.Lock] = {}
         self._binding_locks_guard = asyncio.Lock()
 
@@ -150,12 +156,23 @@ class AgentExecutionService:
                 binding_epoch=grant.binding_epoch,
             )
             try:
+                turn_context = (
+                    await self._context_provider(
+                        request.scope,
+                        request.input,
+                        frozenset(self._gateway.authorized_tool_names(grant)),
+                    )
+                    if self._context_provider is not None
+                    and binding.agent_id == "knoa"
+                    else RuntimeTurnContext()
+                )
                 turn = await runtime.start_turn(
                     RuntimeTurnRequest(
                         session=session,
                         operation_id=request.turn_id,
                         input=self._input_parts(request),
                         mcp=endpoint,
+                        context=turn_context,
                     )
                 )
                 interrupt = asyncio.create_task(

@@ -214,7 +214,10 @@ the main loop.
 - Store role-ordered conversation history.
 - Assemble cache-friendly request messages.
 - Preserve tool-call/result grouping during truncation.
-- Estimate tokens, compact old turns, and inject session/memory context.
+- Knoa Agent estimates the full provider request, compacts complete old Turns,
+  persists its rolling summary, and places authorized Platform memory/Skill
+  material immediately before the current user Turn. Provider-reported usage
+  remains authoritative; local estimates are budget diagnostics only.
 - Maintain principal-scoped core/relevant memory, session-scoped episodes, and
   procedural rules.
 
