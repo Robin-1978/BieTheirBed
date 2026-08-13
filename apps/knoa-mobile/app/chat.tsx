@@ -1032,6 +1032,9 @@ const ChatTurn = memo(function ChatTurn({
         {approval ? (
           <View style={styles.approval}>
             <Text style={styles.approvalReason}>{approval.reason || approval.tool_name}</Text>
+            {Object.keys(approval.arguments).length ? (
+              <Text selectable style={styles.approvalArguments}>{JSON.stringify(approval.arguments, null, 2)}</Text>
+            ) : null}
             <View style={styles.approvalActions}>
               <AppPressable style={styles.deny} disabled={Boolean(resolving)} onPress={() => onResolve(approval, false)}>
                 {resolving === approval.approval_id && resolvingApproved === false
@@ -1271,6 +1274,7 @@ const styles = StyleSheet.create({
   pendingError: { color: colors.danger, flex: 1 },
   approval: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 12, gap: 10 },
   approvalReason: { color: colors.ink, lineHeight: 21 },
+  approvalArguments: { color: colors.muted, fontFamily: "monospace", fontSize: 12, lineHeight: 18 },
   approvalActions: { flexDirection: "row", gap: 10 },
   turnActions: { flexDirection: "row", gap: 10, marginTop: 12 },
   turnAction: { alignSelf: "flex-start", marginTop: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.line, paddingHorizontal: 12, paddingVertical: 8 },

@@ -17,6 +17,7 @@ from knoa_platform.extensions.manager import (
     ExtensionStatus,
 )
 from knoa_platform.extensions.mcp import MCPServerProvider
+from knoa_platform.extensions.mcp_secrets import mcp_private_environment_loader
 from knoa_platform.extensions.mcp_resource_tasks import MCPResourceTaskBridge
 from knoa_platform.extensions.models import (
     MCP_SERVER_ID_PATTERN,
@@ -162,10 +163,16 @@ def build_mcp_package_providers(
     root: str | Path,
     *,
     excluded_ids: frozenset[str] = frozenset(),
+    secret_root: str | Path | None = None,
 ) -> tuple[MCPServerProvider, ...]:
     """Discover safe package directories; each manifest loads in its own lifecycle."""
 
     resolved = Path(root).expanduser().resolve()
+    resolved_secret_root = (
+        Path(secret_root).expanduser().resolve()
+        if secret_root is not None
+        else None
+    )
     if not resolved.is_dir():
         return ()
     providers: list[MCPServerProvider] = []
@@ -185,6 +192,10 @@ def build_mcp_package_providers(
                 server_id,
                 config_loader=lambda package_root=package_root: load_mcp_package(
                     package_root
+                ),
+                private_environment_loader=mcp_private_environment_loader(
+                    resolved_secret_root,
+                    server_id,
                 ),
             )
         )
@@ -249,6 +260,7 @@ class MCPPackageService:
         providers: tuple[MCPServerProvider, ...] = (),
         *,
         reserved_ids: frozenset[str] = frozenset(),
+        secret_root: str | Path | None = None,
     ) -> None:
         self._package_root = Path(package_root).expanduser().resolve()
         self._staging_root = Path(staging_root).expanduser().resolve()
@@ -256,6 +268,11 @@ class MCPPackageService:
         self._resource_tasks = resource_tasks
         self._providers = {provider.server_id: provider for provider in providers}
         self._reserved_ids = reserved_ids
+        self._secret_root = (
+            Path(secret_root).expanduser().resolve()
+            if secret_root is not None
+            else None
+        )
         self._import_lock = asyncio.Lock()
 
     async def deploy_local(
@@ -359,6 +376,10 @@ class MCPPackageService:
         provider = MCPServerProvider(
             server_id,
             config_loader=lambda: load_mcp_package(target),
+            private_environment_loader=mcp_private_environment_loader(
+                self._secret_root,
+                server_id,
+            ),
         )
         try:
             status = await self._manager.add_provider(provider)
@@ -374,6 +395,10 @@ class MCPPackageService:
                 restored = MCPServerProvider(
                     server_id,
                     config_loader=lambda: load_mcp_package(target),
+                    private_environment_loader=mcp_private_environment_loader(
+                        self._secret_root,
+                        server_id,
+                    ),
                 )
                 restored_status = await self._manager.add_provider(restored)
                 if restored_status.state is ExtensionState.RUNNING:

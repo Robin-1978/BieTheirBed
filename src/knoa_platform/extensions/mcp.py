@@ -10,6 +10,7 @@ import re
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from knoa_platform.extensions.manager import (
@@ -591,8 +592,14 @@ class StreamableHTTPMCPClient(_SessionClientMixin):
 class StdioMCPClient(_SessionClientMixin):
     """Own one locally supervised MCP child process over stdin/stdout."""
 
-    def __init__(self, config: MCPServerConfig) -> None:
+    def __init__(
+        self,
+        config: MCPServerConfig,
+        *,
+        private_environment: dict[str, str] | None = None,
+    ) -> None:
         self._config = config
+        self._private_environment = dict(private_environment or {})
         self._timeout = config.timeout_seconds
         self._stack: AsyncExitStack | None = None
         self._session: Any = None
@@ -620,7 +627,9 @@ class StdioMCPClient(_SessionClientMixin):
             if (value := os.environ.get(name)) is not None
         }
         for name in self._config.inherit_env:
-            value = os.environ.get(name)
+            value = self._private_environment.get(name)
+            if value is None:
+                value = os.environ.get(name)
             if value is None:
                 raise ValueError(
                     f"Required MCP environment variable is not set: {name}"
@@ -793,6 +802,7 @@ class MCPServerProvider(ExtensionProvider):
         *,
         config_loader: Callable[[], MCPServerConfig] | None = None,
         client_factory: Callable[[MCPServerConfig], MCPClientPort] | None = None,
+        private_environment_loader: Callable[[], dict[str, str]] | None = None,
     ) -> None:
         if (config is None) == (config_loader is None):
             raise ValueError("MCP provider requires exactly one configuration source")
@@ -801,6 +811,7 @@ class MCPServerProvider(ExtensionProvider):
         self._active_config: MCPServerConfig | None = config
         self._config_loader = config_loader
         self._client_factory = client_factory
+        self._private_environment_loader = private_environment_loader
         self._descriptor = ExtensionDescriptor(
             extension_id=f"mcp:{server_id}",
             kind=ExtensionKind.MCP,
@@ -864,11 +875,22 @@ class MCPServerProvider(ExtensionProvider):
         self._active_config = config
         if not config.enabled:
             raise ValueError("MCP server is disabled")
-        client = (
-            self._client_factory(config)
-            if self._client_factory is not None
-            else create_mcp_client(config)
-        )
+        if self._client_factory is not None:
+            client = self._client_factory(config)
+        else:
+            private_environment = (
+                self._private_environment_loader()
+                if self._private_environment_loader is not None
+                else None
+            )
+            client = (
+                create_mcp_client(
+                    config,
+                    private_environment=private_environment,
+                )
+                if private_environment is not None
+                else create_mcp_client(config)
+            )
         self._client = client
         client.set_notification_handler(self._dispatch_notification)
         await client.start()
@@ -900,17 +922,35 @@ class MCPServerProvider(ExtensionProvider):
 
 def build_mcp_providers(
     configs: dict[str, MCPServerConfig],
+    *,
+    secret_root: str | Path | None = None,
 ) -> tuple[MCPServerProvider, ...]:
+    from knoa_platform.extensions.mcp_secrets import mcp_private_environment_loader
+
     return tuple(
-        MCPServerProvider(server_id, config)
+        MCPServerProvider(
+            server_id,
+            config,
+            private_environment_loader=mcp_private_environment_loader(
+                secret_root,
+                server_id,
+            ),
+        )
         for server_id, config in configs.items()
         if config.enabled
     )
 
 
-def create_mcp_client(config: MCPServerConfig) -> MCPClientPort:
+def create_mcp_client(
+    config: MCPServerConfig,
+    *,
+    private_environment: dict[str, str] | None = None,
+) -> MCPClientPort:
     if config.transport == "stdio":
-        return StdioMCPClient(config)
+        return StdioMCPClient(
+            config,
+            private_environment=private_environment,
+        )
     return StreamableHTTPMCPClient(
         config.url,
         timeout_seconds=config.timeout_seconds,

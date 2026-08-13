@@ -19,7 +19,6 @@ inherit_env:
   - JIRA_ANALYSIS_PROMPT_PATH
   - JIRA_MAX_ATTACHMENT_BYTES
   - JIRA_WRITE_ENABLED
-  - PYTHONDONTWRITEBYTECODE
 timeout_seconds: 300
 tools:
   jira.get_issue:
@@ -27,6 +26,10 @@ tools:
     capabilities: [mcp, network]
     risk: low
   jira.get_comments:
+    effect: read_only
+    capabilities: [mcp, network]
+    risk: low
+  jira.find_assignable_users:
     effect: read_only
     capabilities: [mcp, network]
     risk: low
@@ -46,3 +49,19 @@ tools:
     effect: local_write
     capabilities: [mcp, network, host_write]
     risk: medium
+  jira.add_comment:
+    effect: external_side_effect
+    capabilities: [mcp, network]
+    risk: high
+  jira.assign_issue:
+    effect: external_side_effect
+    capabilities: [mcp, network]
+    risk: high
+  jira.list_transitions:
+    effect: read_only
+    capabilities: [mcp, network]
+    risk: low
+  jira.transition_issue:
+    effect: external_side_effect
+    capabilities: [mcp, network]
+    risk: high
