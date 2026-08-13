@@ -175,6 +175,11 @@ class SecureGatewayAdapter(
                     self._resolve_chat_approval,
                     methods=["POST"],
                 ),
+                Route(
+                    "/v1/interactions/{interaction_id:str}/resolve",
+                    self._resolve_interaction,
+                    methods=["POST"],
+                ),
                 Route("/v1/tasks", self._create_task, methods=["POST"]),
                 Route("/v1/tasks", self._list_tasks, methods=["GET"]),
                 Route("/v1/events", self._events, methods=["GET"]),

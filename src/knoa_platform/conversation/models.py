@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from knoa_platform.agent_runtime.contracts import ArtifactAttachment
 from knoa_platform.artifacts import ArtifactRef
+from knoa_platform.interactions import HumanInteraction
 
 
 NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -100,6 +101,7 @@ class ChatTurn(ConversationModel):
     cancel_requested: bool = False
     tool_steps: tuple[ChatToolStep, ...] = ()
     approvals: tuple[ChatApproval, ...] = ()
+    interactions: tuple[HumanInteraction, ...] = ()
     timeline: tuple[ChatTimelineEntry, ...] = ()
     created_at: float = Field(ge=0.0)
     updated_at: float = Field(ge=0.0)

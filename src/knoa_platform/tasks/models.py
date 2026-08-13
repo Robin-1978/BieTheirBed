@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 
 from knoa_platform.agent_runtime.contracts import ArtifactAttachment
 from knoa_platform.artifacts import ArtifactRef
+from knoa_platform.interactions import HumanInteraction
 
 NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 Identifier = Annotated[NonEmpty, StringConstraints(max_length=128)]
@@ -76,6 +77,8 @@ TaskEventType = Literal[
     "tool_result",
     "approval_requested",
     "approval_resolved",
+    "interaction_requested",
+    "interaction_resolved",
     "artifact",
     "context_compacted",
     "warning",
@@ -106,6 +109,7 @@ class TaskEventPayload(TaskModel):
     phase: Annotated[str, StringConstraints(max_length=256)] = ""
     reason: Annotated[str, StringConstraints(max_length=2000)] = ""
     approval_id: Annotated[str, StringConstraints(max_length=128)] = ""
+    interaction_id: Annotated[str, StringConstraints(max_length=128)] = ""
     tool_step_id: Annotated[str, StringConstraints(max_length=128)] = ""
     tool_call_id: Annotated[str, StringConstraints(max_length=256)] = ""
     tool_name: Annotated[str, StringConstraints(max_length=256)] = ""
@@ -336,3 +340,4 @@ class TaskExecutionRecord(TaskModel):
     finished_at: float | None = Field(default=None, ge=0.0)
     trace: TaskExecutionTrace | None = None
     approvals: tuple[TaskApprovalRecord, ...] = ()
+    interactions: tuple[HumanInteraction, ...] = ()

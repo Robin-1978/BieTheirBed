@@ -28,6 +28,7 @@ from knoa_platform.agent_runtime.contracts import (
     ToolListResult,
 )
 from knoa_platform.artifacts import ArtifactRef
+from knoa_platform.interactions import HumanInteraction
 from knoa_platform.automation import (
     ScheduleRecord,
     ScheduleSpec,
@@ -186,6 +187,35 @@ class ProductTaskSnapshot(CoreModel):
         )
 
 
+class HumanInteractionSnapshot(CoreModel):
+    interaction_id: NonEmpty
+    owner_kind: Literal["conversation_turn", "task_execution"]
+    owner_id: NonEmpty
+    kind: Literal["user_input"] = "user_input"
+    state: Literal["pending", "resolved", "cancelled", "expired", "runtime_lost"]
+    display: dict[str, Any] = Field(default_factory=dict)
+    resolution_schema: dict[str, Any] = Field(default_factory=dict)
+    resolution: Any = None
+    created_at: float = Field(ge=0.0)
+    resolved_at: float | None = Field(default=None, ge=0.0)
+    expires_at: float | None = Field(default=None, gt=0.0)
+
+    @classmethod
+    def from_record(cls, interaction: HumanInteraction) -> HumanInteractionSnapshot:
+        return cls.model_validate(
+            interaction.model_dump(
+                exclude={
+                    "principal_id",
+                    "runtime_session_ref",
+                    "runtime_turn_ref",
+                    "runtime_interaction_id",
+                    "interaction_epoch",
+                    "resolved_by",
+                }
+            )
+        )
+
+
 class ProductTaskExecutionSnapshot(CoreModel):
     execution_id: TaskId
     task_id: TaskId
@@ -206,6 +236,7 @@ class ProductTaskExecutionSnapshot(CoreModel):
     finished_at: float | None = Field(default=None, ge=0.0)
     trace: TaskExecutionTrace | None = None
     approvals: tuple[TaskApprovalSnapshot, ...] = ()
+    interactions: tuple[HumanInteractionSnapshot, ...] = ()
 
     @classmethod
     def from_record(
@@ -248,6 +279,10 @@ class ProductTaskExecutionSnapshot(CoreModel):
                     resolved_at=approval.resolved_at,
                 )
                 for approval in execution.approvals
+            ),
+            interactions=tuple(
+                HumanInteractionSnapshot.from_record(interaction)
+                for interaction in execution.interactions
             ),
         )
 
@@ -313,6 +348,7 @@ class ChatTurnSnapshot(CoreModel):
     cancel_requested: bool
     tool_steps: tuple[ChatToolStepSnapshot, ...] = ()
     approvals: tuple[ChatApprovalSnapshot, ...] = ()
+    interactions: tuple[HumanInteractionSnapshot, ...] = ()
     timeline: tuple[ChatTimelineEntrySnapshot, ...] = ()
     created_at: float = Field(ge=0.0)
     updated_at: float = Field(ge=0.0)
@@ -348,6 +384,10 @@ class ChatTurnSnapshot(CoreModel):
             approvals=tuple(
                 ChatApprovalSnapshot.model_validate(approval.model_dump())
                 for approval in turn.approvals
+            ),
+            interactions=tuple(
+                HumanInteractionSnapshot.from_record(interaction)
+                for interaction in turn.interactions
             ),
             timeline=tuple(
                 ChatTimelineEntrySnapshot.model_validate(entry.model_dump())
@@ -603,6 +643,14 @@ class ResolveChatApprovalRequest(CoreModel):
     method: Literal["resolve_chat_approval"] = "resolve_chat_approval"
     approval_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
     approved: bool
+
+
+class ResolveHumanInteractionRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["interaction_resolve"] = "interaction_resolve"
+    interaction_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+    value: Any
 
 
 class SubscribeTaskRequest(CoreModel):
@@ -952,6 +1000,7 @@ CoreRequest: TypeAlias = Annotated[
     | CancelChatTurnRequest
     | RetryChatTurnRequest
     | ResolveChatApprovalRequest
+    | ResolveHumanInteractionRequest
     | SubscribeTaskRequest
     | SubscribePrincipalTaskEventsRequest
     | UnsubscribeRequest
@@ -1118,6 +1167,14 @@ class ChatApprovalResolvedMessage(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
     approval: ChatApprovalSnapshot
+    resolved: bool
+
+
+class HumanInteractionResolvedMessage(CoreModel):
+    message_type: Literal["interaction_resolved"] = "interaction_resolved"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    interaction: HumanInteractionSnapshot
     resolved: bool
 
 
@@ -1376,6 +1433,7 @@ CoreServerMessage: TypeAlias = Annotated[
     | ChatTurnListMessage
     | ChatTurnSignalMessage
     | ChatApprovalResolvedMessage
+    | HumanInteractionResolvedMessage
     | TaskSubscribedMessage
     | PrincipalTaskEventsSubscribedMessage
     | UnsubscribedMessage

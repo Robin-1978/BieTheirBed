@@ -781,13 +781,92 @@ class CodexAgentRuntime(AgentRuntime):
             method,
             active.interaction_epoch,
         )
+        display = {"method": method, "params": params}
+        resolution_schema: dict[str, Any] = {}
+        if method == "item/tool/requestUserInput":
+            display, resolution_schema = self._user_input_contract(params)
         return InteractionRequested(
             **base,
             interaction_id=interaction_id,
             interaction_epoch=active.interaction_epoch,
             kind=kind,
-            display={"method": method, "params": params},
-            resolution_schema={},
+            display=display,
+            resolution_schema=resolution_schema,
+        )
+
+    @staticmethod
+    def _user_input_contract(
+        params: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        raw_questions = params.get("questions")
+        if not isinstance(raw_questions, list) or not 1 <= len(raw_questions) <= 3:
+            raise ValueError("Codex user-input request must contain 1-3 questions")
+        questions: list[dict[str, Any]] = []
+        properties: dict[str, Any] = {}
+        required: list[str] = []
+        seen: set[str] = set()
+        for raw in raw_questions:
+            if not isinstance(raw, dict):
+                raise ValueError("Codex user-input question is invalid")
+            question_id = str(raw.get("id") or "").strip()
+            header = str(raw.get("header") or "").strip()
+            prompt = str(raw.get("question") or "").strip()
+            if (
+                not question_id
+                or len(question_id) > 128
+                or question_id in seen
+                or not prompt
+                or bool(raw.get("isSecret"))
+            ):
+                raise ValueError("Codex user-input question is unsupported")
+            seen.add(question_id)
+            options_raw = raw.get("options")
+            options: list[dict[str, str]] = []
+            labels: list[str] = []
+            if options_raw is not None:
+                if not isinstance(options_raw, list) or not 1 <= len(options_raw) <= 50:
+                    raise ValueError("Codex user-input options are invalid")
+                for option in options_raw:
+                    if not isinstance(option, dict):
+                        raise ValueError("Codex user-input option is invalid")
+                    label = str(option.get("label") or "").strip()
+                    description = str(option.get("description") or "").strip()
+                    if not label or len(label) > 256 or label in labels:
+                        raise ValueError("Codex user-input option is invalid")
+                    labels.append(label)
+                    options.append({"value": label, "label": label, "description": description})
+            allow_other = bool(raw.get("isOther"))
+            field_schema: dict[str, Any] = {
+                "type": "string",
+                "title": header or prompt[:80],
+                "minLength": 1,
+                "maxLength": 4000,
+            }
+            if labels and not allow_other:
+                field_schema["enum"] = labels
+            properties[question_id] = field_schema
+            required.append(question_id)
+            questions.append(
+                {
+                    "id": question_id,
+                    "title": header,
+                    "description": prompt,
+                    "options": options,
+                    "allow_other": allow_other,
+                }
+            )
+        return (
+            {
+                "title": "Input required",
+                "description": "The agent needs information to continue.",
+                "fields": questions,
+            },
+            {
+                "type": "object",
+                "properties": properties,
+                "required": required,
+                "additionalProperties": False,
+            },
         )
 
     @staticmethod
@@ -802,9 +881,24 @@ class CodexAgentRuntime(AgentRuntime):
                 raise ValueError("Codex approval only permits a one-shot decision")
             return {"decision": normalized}
         if method == "item/tool/requestUserInput":
-            if not isinstance(value, dict) or set(value) != {"answers"}:
+            if not isinstance(value, dict):
                 raise ValueError("Codex user-input resolution is invalid")
-            return value
+            answers: dict[str, dict[str, list[str]]] = {}
+            for question_id, answer in value.items():
+                if not isinstance(question_id, str) or not question_id:
+                    raise ValueError("Codex user-input resolution is invalid")
+                if isinstance(answer, str):
+                    normalized = [answer]
+                elif (
+                    isinstance(answer, list)
+                    and answer
+                    and all(isinstance(item, str) for item in answer)
+                ):
+                    normalized = list(answer)
+                else:
+                    raise ValueError("Codex user-input resolution is invalid")
+                answers[question_id] = {"answers": normalized}
+            return {"answers": answers}
         if method == "mcpServer/elicitation/request":
             if not isinstance(value, dict):
                 raise ValueError("Codex MCP elicitation resolution is invalid")

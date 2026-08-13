@@ -26,6 +26,8 @@ _PRINCIPAL_FEED_EVENT_TYPES = frozenset(
         "state_changed",
         "approval_requested",
         "approval_resolved",
+        "interaction_requested",
+        "interaction_resolved",
         "completed",
         "failed",
         "cancelled",

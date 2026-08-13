@@ -107,13 +107,16 @@ class MixedPolicyTool(ToolBase):
 
 
 class Confirmation:
-    def __init__(self, approved: bool) -> None:
+    def __init__(self, approved: bool, on_confirm=None) -> None:
         self.approved = approved
+        self.on_confirm = on_confirm
         self.calls = 0
 
     async def confirm(self, scope, run_id, call, reason: str) -> bool:
         assert run_id == "run-a"
         self.calls += 1
+        if self.on_confirm is not None:
+            self.on_confirm()
         return self.approved
 
 
@@ -213,6 +216,61 @@ async def test_confirmation_precedes_single_commit(tmp_path: Path) -> None:
     assert tool.calls == [
         {"path": str((tmp_path / "out.txt").resolve()), "options": {"enabled": True}}
     ]
+
+
+@pytest.mark.asyncio
+async def test_tool_replacement_after_confirmation_makes_approval_stale(
+    tmp_path: Path,
+) -> None:
+    tool = RecordingTool()
+    replacement = RecordingTool()
+    registry = ToolRegistry()
+    registry.register(tool)
+    step = ToolStep(registry, ToolArgumentPolicy(tmp_path))
+
+    def replace_tool() -> None:
+        origin = registry.origin("record")
+        assert origin is not None
+        registry.unregister("record", origin=origin)
+        registry.register(replacement)
+
+    result = await step.execute(
+        _context(confirmation=Confirmation(True, replace_tool)),
+        ProposedToolCall(
+            call_id="call-a",
+            name="record",
+            arguments={"path": "out.txt", "options": {"enabled": True}},
+        ),
+    )
+
+    assert result.status == "rejected"
+    assert result.code == "approval_stale"
+    assert tool.calls == []
+    assert replacement.calls == []
+
+
+@pytest.mark.asyncio
+async def test_call_policy_change_after_confirmation_makes_approval_stale(
+    tmp_path: Path,
+) -> None:
+    tool = RecordingTool()
+    step = _step(tmp_path, tool)
+
+    def change_policy() -> None:
+        tool.risk = ToolRisk.HIGH
+
+    result = await step.execute(
+        _context(confirmation=Confirmation(True, change_policy)),
+        ProposedToolCall(
+            call_id="call-a",
+            name="record",
+            arguments={"path": "out.txt", "options": {"enabled": True}},
+        ),
+    )
+
+    assert result.status == "rejected"
+    assert result.code == "approval_stale"
+    assert tool.calls == []
 
 
 @pytest.mark.asyncio

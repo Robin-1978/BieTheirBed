@@ -1,7 +1,7 @@
 """Public, versioned Secure Gateway HTTP protocol models."""
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -16,6 +16,7 @@ from knoa_platform.service.core_api import (
     ChatApprovalSnapshot,
     ChatTurnSnapshot,
     ConversationSessionSnapshot,
+    HumanInteractionSnapshot,
     ProductTaskExecutionSnapshot,
     ProductTaskSnapshot,
     TaskSnapshot,
@@ -142,6 +143,10 @@ class RetryTaskRequest(PauseTaskRequest):
 
 class ResolveApprovalRequest(GatewayRequest):
     approved: bool
+
+
+class ResolveHumanInteractionRequest(GatewayRequest):
+    value: Any
 
 
 class GatewayQuery(BaseModel):
@@ -278,6 +283,11 @@ class ChatTurnListResponse(BaseModel):
 
 class ChatApprovalResolvedResponse(BaseModel):
     approval: ChatApprovalSnapshot
+    resolved: bool
+
+
+class HumanInteractionResolvedResponse(BaseModel):
+    interaction: HumanInteractionSnapshot
     resolved: bool
 
 

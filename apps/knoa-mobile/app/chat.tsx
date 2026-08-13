@@ -36,12 +36,13 @@ import {
   type ResolvedArtifactFile,
 } from "@/api/chatArtifacts";
 import { GatewayError } from "@/api/gatewayClient";
-import type { ArtifactInput, ChatApproval, ChatTurnSnapshot } from "@/api/models";
+import type { ArtifactInput, ChatApproval, ChatTurnSnapshot, HumanInteraction } from "@/api/models";
 import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { AppMarkdown } from "@/components/AppMarkdown";
 import { AppPressable } from "@/components/AppPressable";
 import { AgentSelector } from "@/components/AgentSelector";
 import { ArtifactViewer } from "@/components/ArtifactViewer";
+import { InteractionCard } from "@/components/InteractionCard";
 import { PrimarySwipeNavigation } from "@/components/PrimarySwipeNavigation";
 import { TurnProgress } from "@/components/TurnProgress";
 import { useI18n } from "@/i18n";
@@ -109,6 +110,7 @@ export default function ChatScreen() {
   const [startingTopic, setStartingTopic] = useState(false);
   const [resolving, setResolving] = useState("");
   const [resolvingApproved, setResolvingApproved] = useState<boolean | null>(null);
+  const [resolvingInteraction, setResolvingInteraction] = useState("");
   const [cancelling, setCancelling] = useState("");
   const [transcribing, setTranscribing] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -496,6 +498,28 @@ export default function ChatScreen() {
     }
   }
 
+  async function resolveInteraction(interaction: HumanInteraction, value: Record<string, unknown>) {
+    if (!gateway.client || resolvingInteraction) return;
+    setResolvingInteraction(interaction.interaction_id);
+    try {
+      const result = await gateway.runAuthenticated(
+        (client) => client.resolveInteraction(interaction.interaction_id, value),
+      );
+      setTurns((current) => current.map((turn) => turn.turn_id !== interaction.owner_id ? turn : {
+        ...turn,
+        interactions: (turn.interactions ?? []).map((candidate) => candidate.interaction_id === interaction.interaction_id ? result.interaction : candidate),
+      }));
+      watchTurn(interaction.owner_id);
+      void gateway.runAuthenticated((client) => client.getChatTurn(interaction.owner_id)).then((fresh) => {
+        setTurns((current) => mergeConversationTurns(current, [fresh]));
+      }).catch(() => undefined);
+    } catch {
+      showFeedback("输入未能提交，请刷新后重试", "error");
+    } finally {
+      setResolvingInteraction("");
+    }
+  }
+
   const loadArtifact = useCallback(async (
     item: AssistantArtifactItem,
   ): Promise<ResolvedArtifactFile> => resolveAssistantArtifactFile(item, {
@@ -788,7 +812,9 @@ export default function ChatScreen() {
             turn={item.turn}
             resolving={resolving}
             resolvingApproved={resolvingApproved}
+            resolvingInteraction={resolvingInteraction}
             onResolve={resolve}
+            onResolveInteraction={resolveInteraction}
             onLoadArtifact={loadArtifact}
             onOpenArtifact={openArtifact}
             onSaveArtifact={saveArtifact}
@@ -985,7 +1011,9 @@ const ChatTurn = memo(function ChatTurn({
   turn,
   resolving,
   resolvingApproved,
+  resolvingInteraction,
   onResolve,
+  onResolveInteraction,
   onLoadArtifact,
   onOpenArtifact,
   onSaveArtifact,
@@ -995,7 +1023,9 @@ const ChatTurn = memo(function ChatTurn({
   turn: ChatTurnSnapshot;
   resolving: string;
   resolvingApproved: boolean | null;
+  resolvingInteraction: string;
   onResolve(approval: ChatApproval, approved: boolean): void;
+  onResolveInteraction(interaction: HumanInteraction, value: Record<string, unknown>): void;
   onLoadArtifact(item: AssistantArtifactItem): Promise<ResolvedArtifactFile>;
   onOpenArtifact(item: AssistantArtifactItem): Promise<void>;
   onSaveArtifact(item: AssistantArtifactItem): Promise<void>;
@@ -1006,6 +1036,7 @@ const ChatTurn = memo(function ChatTurn({
   const terminal = TERMINAL_STATES.has(turn.state);
   const response = terminal ? turn.final_output || turn.content : "";
   const approval = turn.approvals.find((item) => item.state === "pending") ?? null;
+  const interaction = turn.interactions?.find((item) => item.state === "pending") ?? null;
   const artifactItems = useMemo(() => assistantArtifactItems(turn.artifacts), [turn.artifacts]);
   return (
     <View style={styles.turn}>
@@ -1028,6 +1059,13 @@ const ChatTurn = memo(function ChatTurn({
               />
             ))}
           </View>
+        ) : null}
+        {interaction ? (
+          <InteractionCard
+            interaction={interaction}
+            submitting={resolvingInteraction === interaction.interaction_id}
+            onSubmit={(value) => onResolveInteraction(interaction, value)}
+          />
         ) : null}
         {approval ? (
           <View style={styles.approval}>

@@ -260,6 +260,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/interactions/{interaction_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["resolveInteraction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/tasks": {
         parameters: {
             query?: never;
@@ -1052,6 +1068,11 @@ export interface components {
              */
             approvals: components["schemas"]["ChatApprovalSnapshot"][];
             /**
+             * Interactions
+             * @default []
+             */
+            interactions: components["schemas"]["HumanInteractionSnapshot"][];
+            /**
              * Timeline
              * @default []
              */
@@ -1257,6 +1278,60 @@ export interface components {
             /** Scope */
             scope: string;
         };
+        /** HumanInteractionResolvedResponse */
+        HumanInteractionResolvedResponse: {
+            interaction: components["schemas"]["HumanInteractionSnapshot"];
+            /** Resolved */
+            resolved: boolean;
+        };
+        /** HumanInteractionSnapshot */
+        HumanInteractionSnapshot: {
+            /** Interaction Id */
+            interaction_id: string;
+            /**
+             * Owner Kind
+             * @enum {string}
+             */
+            owner_kind: "conversation_turn" | "task_execution";
+            /** Owner Id */
+            owner_id: string;
+            /**
+             * Kind
+             * @default user_input
+             * @constant
+             */
+            kind: "user_input";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "pending" | "resolved" | "cancelled" | "expired" | "runtime_lost";
+            /** Display */
+            display?: {
+                [key: string]: unknown;
+            };
+            /** Resolution Schema */
+            resolution_schema?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Resolution
+             * @default null
+             */
+            resolution: unknown;
+            /** Created At */
+            created_at: number;
+            /**
+             * Resolved At
+             * @default null
+             */
+            resolved_at: number | null;
+            /**
+             * Expires At
+             * @default null
+             */
+            expires_at: number | null;
+        };
         /** PairChallengeRequest */
         PairChallengeRequest: {
             /** Grant Id */
@@ -1364,6 +1439,11 @@ export interface components {
              * @default []
              */
             approvals: components["schemas"]["TaskApprovalSnapshot"][];
+            /**
+             * Interactions
+             * @default []
+             */
+            interactions: components["schemas"]["HumanInteractionSnapshot"][];
         };
         /** ProductTaskListResponse */
         ProductTaskListResponse: {
@@ -1421,6 +1501,11 @@ export interface components {
         ResolveApprovalRequest: {
             /** Approved */
             approved: boolean;
+        };
+        /** ResolveHumanInteractionRequest */
+        ResolveHumanInteractionRequest: {
+            /** Value */
+            value: unknown;
         };
         /** ResumeTaskRequest */
         ResumeTaskRequest: {
@@ -1510,7 +1595,7 @@ export interface components {
              * Event Type
              * @enum {string}
              */
-            event_type: "task_created" | "state_changed" | "reasoning_delta" | "content_delta" | "plan" | "tool_call" | "tool_result" | "approval_requested" | "approval_resolved" | "artifact" | "context_compacted" | "warning" | "final_output" | "completed" | "failed" | "cancelled";
+            event_type: "task_created" | "state_changed" | "reasoning_delta" | "content_delta" | "plan" | "tool_call" | "tool_result" | "approval_requested" | "approval_resolved" | "interaction_requested" | "interaction_resolved" | "artifact" | "context_compacted" | "warning" | "final_output" | "completed" | "failed" | "cancelled";
             payload?: components["schemas"]["TaskEventPayload"];
             /** Occurred At */
             occurred_at: number;
@@ -1546,6 +1631,11 @@ export interface components {
              * @default
              */
             approval_id: string;
+            /**
+             * Interaction Id
+             * @default
+             */
+            interaction_id: string;
             /**
              * Tool Step Id
              * @default
@@ -2905,6 +2995,86 @@ export interface operations {
             };
             /** @description Request rejected */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    resolveInteraction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                interaction_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveHumanInteractionRequest"];
+            };
+        };
+        responses: {
+            /** @description Human interaction resolved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumanInteractionResolvedResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
