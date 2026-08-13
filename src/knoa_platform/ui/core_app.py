@@ -545,7 +545,12 @@ class CoreChatApp(App):
     @staticmethod
     def _execution_markdown(execution: Any) -> str:
         approvals = "\n".join(
-            f"- `{item.approval_id}` · {item.state} · `{item.tool_name}`"
+            (
+                f"- `{item.approval_id}` · {item.state} · `{item.tool_name}`"
+                f"\n  - Effect/risk: `{item.reason or 'unknown'}`"
+                f"\n  - Full arguments: "
+                f"`{json.dumps(item.arguments, ensure_ascii=False, sort_keys=True)}`"
+            )
             for item in execution.approvals
         ) or "- None"
         interactions = "\n".join(

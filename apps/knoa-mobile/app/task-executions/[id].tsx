@@ -236,12 +236,7 @@ export default function TaskExecutionDetailScreen() {
       {approvals.map((approval, index) => (
         <View key={approval.approval_id} style={styles.approval}>
           <Text style={styles.approvalTitle}>{t("execution.approvalTitle")}{approvals.length > 1 ? ` · ${index + 1}/${approvals.length}` : ""}</Text>
-          <Text style={styles.tool}>{approval.tool_name}</Text>
-          <ApprovalDetails
-            approval={approval}
-            showArguments={technicalExpanded || approval.reason.startsWith("external_side_effect:")}
-            t={t}
-          />
+          <ApprovalDetails approval={approval} t={t} />
           <View style={styles.row}>
             <Action
               label={t("common.cancel")}
@@ -392,19 +387,22 @@ export default function TaskExecutionDetailScreen() {
   }
 }
 
-function ApprovalDetails({ approval, showArguments, t }: { approval: TaskApproval; showArguments: boolean; t: ReturnType<typeof useI18n>["t"] }) {
+function ApprovalDetails({ approval, t }: { approval: TaskApproval; t: ReturnType<typeof useI18n>["t"] }) {
   const [effect, risk] = approval.reason.split(":", 2);
+  const hasArguments = Object.keys(approval.arguments).length > 0;
   return (
     <View style={styles.approvalDetails}>
+      <Text style={styles.approvalLabel}>{t("execution.tool")}</Text>
+      <Text selectable style={styles.tool}>{approval.tool_name}</Text>
       <Text style={styles.approvalReason}>{t("execution.effect", { value: effectLabel(effect ?? "", t) })}</Text>
       <Text style={styles.approvalReason}>{t("execution.risk", { value: riskLabel(risk ?? "", t) })}</Text>
       <Text style={styles.approvalReason}>{t("execution.reversibility")}</Text>
-      {showArguments && Object.keys(approval.arguments).length ? (
+      {hasArguments ? (
         <>
-          <Text style={styles.approvalReason}>{t("execution.arguments")}</Text>
+          <Text style={styles.approvalLabel}>{t("execution.arguments")}</Text>
           <Text selectable style={styles.arguments}>{JSON.stringify(approval.arguments, null, 2)}</Text>
         </>
-      ) : null}
+      ) : <Text style={styles.approvalReason}>{t("execution.noArguments")}</Text>}
     </View>
   );
 }
@@ -512,7 +510,8 @@ const styles = StyleSheet.create({
   failureText: { color: colors.ink },
   approval: { padding: 18, borderRadius: 18, backgroundColor: colors.warningSoft, borderWidth: 1, borderColor: colors.warning, gap: 8 },
   approvalTitle: { color: colors.ink, fontSize: 17, fontWeight: "700" },
-  tool: { color: colors.accent, fontFamily: "monospace" },
+  tool: { color: colors.accent, fontFamily: "monospace", fontSize: 13 },
+  approvalLabel: { color: colors.ink, fontWeight: "700", marginTop: 3 },
   approvalReason: { color: colors.ink, lineHeight: 22 },
   approvalDetails: { gap: 5 },
   arguments: { color: colors.ink, fontFamily: "monospace", fontSize: 12, backgroundColor: colors.surface, borderRadius: 10, padding: 10 },

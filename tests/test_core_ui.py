@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from knoa_platform.config import AppConfig
@@ -145,6 +147,34 @@ async def test_tui_can_select_agent_and_resolve_interaction() -> None:
 
     assert app._agent_id == "knoa"
     assert client.resolved == ("interaction-a", {"action": "decline"})
+
+
+def test_task_execution_markdown_shows_full_approval_arguments() -> None:
+    execution = SimpleNamespace(
+        execution_id="execution-a",
+        task_id="task-a",
+        agent_id_snapshot="knoa",
+        state="waiting_approval",
+        final_result="",
+        failure_code="",
+        phase="",
+        interactions=(),
+        approvals=(
+            SimpleNamespace(
+                approval_id="approval-a",
+                tool_name="run_command",
+                arguments={"command": "pwd && find /tmp -name gs_map"},
+                reason="local_write:high",
+                state="pending",
+            ),
+        ),
+    )
+
+    rendered = CoreChatApp._execution_markdown(execution)
+
+    assert "run_command" in rendered
+    assert "local_write:high" in rendered
+    assert "pwd && find /tmp -name gs_map" in rendered
 
 
 def _snapshot(**updates) -> ChatTurnSnapshot:
