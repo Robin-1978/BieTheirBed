@@ -1,0 +1,41 @@
+enabled: true
+transport: stdio
+command: python3
+args:
+  - server.py
+working_directory: .
+inherit_env:
+  - GITLAB_URL
+  - GITLAB_TOKEN
+  - GITLAB_PROJECTS
+  - GITLAB_POLL_INTERVAL_SECONDS
+  - GITLAB_MAX_PIPELINES
+  - GITLAB_EVENT_RETENTION_DAYS
+  - GITLAB_MCP_STATE_PATH
+  - GITLAB_ACTIONS_ENABLED
+timeout_seconds: 60
+tools:
+  gitlab.get_pipeline:
+    effect: read_only
+    capabilities: [mcp, network]
+    risk: low
+  gitlab.list_pipeline_jobs:
+    effect: read_only
+    capabilities: [mcp, network]
+    risk: low
+  gitlab.get_job:
+    effect: read_only
+    capabilities: [mcp, network]
+    risk: low
+  gitlab.get_job_trace:
+    effect: read_only
+    capabilities: [mcp, network]
+    risk: low
+  gitlab.retry_pipeline:
+    effect: external_side_effect
+    capabilities: [mcp, network]
+    risk: high
+  gitlab.retry_job:
+    effect: external_side_effect
+    capabilities: [mcp, network]
+    risk: high

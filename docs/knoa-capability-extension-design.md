@@ -86,11 +86,11 @@ are untrusted metadata. Every callable remote tool requires local policy:
 
 ```yaml
 tools:
-  monitor.list_observations:
+  knowledge.search_documents:
     effect: read_only
-    capabilities: []
+    capabilities: [network]
     risk: low
-  gitlab.retry_job:
+  delivery.trigger_operation:
     effect: external_side_effect
     capabilities: [network]
     risk: high
@@ -113,8 +113,8 @@ Rules:
 Public names are deterministic and collision checked:
 
 ```text
-monitor.list_observations
-→ mcp__monitor__monitor_list_observations
+knowledge.search_documents
+→ mcp__knowledge__knowledge_search_documents
 ```
 
 ## 4. Configured remote servers
@@ -144,7 +144,7 @@ metadata.
 Local packages are manually copied/imported below the runtime root:
 
 ```text
-~/.knoa/mcp/monitor/
+~/.knoa/mcp/knowledge/
 ├── mcp.yaml
 └── server package files
 ```
@@ -155,24 +155,18 @@ Example manifest:
 enabled: true
 transport: stdio
 command: python
-args: ["-m", "monitor", "mcp"]
+args: ["-m", "knowledge_provider"]
 working_directory: "."
 inherit_env:
-  - MONITOR_DB_PATH
-  - MONITOR_ACTIONS_ENABLED
-  - GITLAB_URL
-  - GITLAB_TOKEN
-  - GITLAB_PROJECTS
-  - JIRA_URL
-  - JIRA_TOKEN
-  - JIRA_PROJECTS
+  - KNOWLEDGE_API_URL
+  - KNOWLEDGE_API_TOKEN
 timeout_seconds: 30
 tools:
-  monitor.list_observations:
+  knowledge.search_documents:
     effect: read_only
-    capabilities: []
+    capabilities: [network]
     risk: low
-  gitlab.retry_job:
+  knowledge.publish_document:
     effect: external_side_effect
     capabilities: [network]
     risk: high
@@ -239,19 +233,20 @@ change granted capabilities or silently replace an installed package. Import
 does not download URLs, resolve marketplaces, install dependencies, upgrade or
 remove packages. Those operations require separate trust and lifecycle design.
 
-## 8. Monitor reference integration
+## 8. Independent provider reference packages
 
-Monitor is the first real local stdio MCP package. It keeps ownership of:
+Provider capabilities live in independent standard MCP packages. Knoa imports
+only their package contract and launches each package in a child process; Core
+never imports provider modules.
 
-- GitLab/Jira polling and normalization;
-- SQLite observations;
-- guarded GitLab retry operations;
-- project allowlists, idempotency and action audit;
-- provider plugin discovery internal to Monitor.
+The repository includes two deployable references:
 
-Monitor exposes those operations with the official `mcp.server.fastmcp.FastMCP`
-SDK over stdio. Knoa sees only standard MCP discovery and calls. The earlier
-handwritten line-oriented JSON-RPC implementation has been removed.
+- `examples/jira_mcp_server`: Jira evidence, assignment Resources and guarded writes;
+- `examples/gitlab_mcp_server`: failed-pipeline Resources, bounded CI evidence and guarded retry.
+
+Both use the official MCP 2.x Server API over stdio. App, CLI and Textual TUI
+consume the same generic Task, Execution, Tool, HumanInteraction and Approval
+surfaces. No client contains Jira or GitLab workflow branches.
 
 ## 9. Standard audio transcription capability
 

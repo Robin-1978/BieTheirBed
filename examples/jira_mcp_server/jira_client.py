@@ -237,6 +237,17 @@ class JiraStateStore:
                 );
                 CREATE INDEX IF NOT EXISTS assignment_events_by_retention
                     ON assignment_events(retained_until, event_id);
+                CREATE TABLE IF NOT EXISTS assignment_sources (
+                    source_id TEXT PRIMARY KEY,
+                    initialized_at REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS observed_assignments (
+                    source_id TEXT NOT NULL,
+                    event_id TEXT NOT NULL,
+                    issue_key TEXT NOT NULL,
+                    observed_at REAL NOT NULL,
+                    PRIMARY KEY(source_id, event_id)
+                );
                 CREATE TABLE IF NOT EXISTS comment_actions (
                     idempotency_key TEXT PRIMARY KEY,
                     issue_key TEXT NOT NULL,
@@ -247,6 +258,55 @@ class JiraStateStore:
                     updated_at REAL NOT NULL
                 );
                 """
+            )
+
+    def assignment_source_initialized(self, source_id: str) -> bool:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT 1 FROM assignment_sources WHERE source_id=?",
+                (source_id,),
+            ).fetchone()
+        return row is not None
+
+    def initialize_assignment_source(
+        self,
+        source_id: str,
+        assignments: tuple[tuple[str, str], ...],
+    ) -> None:
+        now = time.time()
+        with self._connect() as db:
+            db.executemany(
+                """INSERT OR IGNORE INTO observed_assignments(
+                       source_id, event_id, issue_key, observed_at
+                   ) VALUES (?, ?, ?, ?)""",
+                ((source_id, event_id, issue_key, now) for event_id, issue_key in assignments),
+            )
+            db.execute(
+                "INSERT OR IGNORE INTO assignment_sources(source_id, initialized_at) VALUES (?, ?)",
+                (source_id, now),
+            )
+
+    def assignment_observed(self, source_id: str, event_id: str) -> bool:
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT 1 FROM observed_assignments
+                   WHERE source_id=? AND event_id=?""",
+                (source_id, event_id),
+            ).fetchone()
+        return row is not None
+
+    def record_observed_assignment(
+        self,
+        source_id: str,
+        event_id: str,
+        issue_key: str,
+    ) -> None:
+        with self._connect() as db:
+            db.execute(
+                """INSERT OR IGNORE INTO observed_assignments(
+                       source_id, event_id, issue_key, observed_at
+                   ) VALUES (?, ?, ?, ?)""",
+                (source_id, event_id, issue_key, time.time()),
             )
 
     def _connect(self) -> sqlite3.Connection:
@@ -410,40 +470,32 @@ class JiraClient:
 
     async def poll_assignment_events(self) -> tuple[dict[str, str], ...]:
         current_user_ids = await self.current_user_ids()
-        created: list[dict[str, str]] = []
-        retention = self.settings.retention_days * 24 * 60 * 60
+        source_identity = json.dumps(
+            {
+                "base_url": self.settings.base_url,
+                "username": self.settings.username.casefold(),
+                "jql": self.settings.jql,
+                "max_issues": self.settings.max_issues,
+            },
+            sort_keys=True,
+        )
+        source_id = hashlib.sha256(source_identity.encode("utf-8")).hexdigest()[:32]
+        candidates: list[tuple[str, str]] = []
         for issue in await self.search_assigned_issues():
             issue_key = validate_issue_key(str(issue.get("key", "")))
-            changelog = issue.get("changelog")
-            histories = (
-                changelog.get("histories", []) if isinstance(changelog, dict) else []
-            )
-            matching_history_id = ""
-            for history in reversed(histories):
-                if not isinstance(history, dict):
-                    continue
-                for item in history.get("items", []):
-                    if not isinstance(item, dict) or item.get("field") != "assignee":
-                        continue
-                    target = {
-                        str(item.get(name, "")).casefold()
-                        for name in ("to", "toString")
-                        if item.get(name)
-                    }
-                    if target & current_user_ids:
-                        matching_history_id = str(history.get("id", ""))
-                        break
-                if matching_history_id:
-                    break
-            if matching_history_id:
-                identity = f"assignment:{issue_key}:{matching_history_id}"
-            else:
-                fields = issue.get("fields", {})
-                identity = (
-                    f"initial:{issue.get('id', issue_key)}:{fields.get('created', '')}"
-                )
-            event_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
+            event_id = self._assignment_event_id(issue, current_user_ids)
+            candidates.append((event_id, issue_key))
+        if not self.store.assignment_source_initialized(source_id):
+            self.store.initialize_assignment_source(source_id, tuple(candidates))
+            return ()
+
+        created: list[dict[str, str]] = []
+        retention = self.settings.retention_days * 24 * 60 * 60
+        for event_id, issue_key in candidates:
+            if self.store.assignment_observed(source_id, event_id):
+                continue
             if self.store.get_assignment_event(event_id) is not None:
+                self.store.record_observed_assignment(source_id, event_id, issue_key)
                 continue
             try:
                 evidence = await self.materialize_issue(issue_key)
@@ -465,7 +517,41 @@ class JiraClient:
                         "manifest": str(evidence["manifest"]),
                     }
                 )
+            self.store.record_observed_assignment(source_id, event_id, issue_key)
         return tuple(created)
+
+    @staticmethod
+    def _assignment_event_id(
+        issue: dict[str, Any], current_user_ids: set[str]
+    ) -> str:
+        issue_key = validate_issue_key(str(issue.get("key", "")))
+        changelog = issue.get("changelog")
+        histories = (
+            changelog.get("histories", []) if isinstance(changelog, dict) else []
+        )
+        matching_history_id = ""
+        for history in reversed(histories):
+            if not isinstance(history, dict):
+                continue
+            for item in history.get("items", []):
+                if not isinstance(item, dict) or item.get("field") != "assignee":
+                    continue
+                target = {
+                    str(item.get(name, "")).casefold()
+                    for name in ("to", "toString")
+                    if item.get(name)
+                }
+                if target & current_user_ids:
+                    matching_history_id = str(history.get("id", ""))
+                    break
+            if matching_history_id:
+                break
+        if matching_history_id:
+            identity = f"assignment:{issue_key}:{matching_history_id}"
+        else:
+            fields = issue.get("fields", {})
+            identity = f"initial:{issue.get('id', issue_key)}:{fields.get('created', '')}"
+        return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
 
     async def get_issue(
         self, issue_key: str, *, changelog: bool = False

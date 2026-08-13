@@ -10,7 +10,7 @@ This is a runnable standard MCP stdio server backed by a real Jira REST API. It 
 - guarded Jira comment writes with explicit `outcome_unknown` handling;
 - automatic Knoa Durable Task creation through a generic Resource Task Source.
 
-It is an example integration, not a dependency on Monitor or the local Jira skill.
+It is an example integration and does not depend on the local Jira skill.
 
 The directory is also a deployable Knoa MCP Package because it contains
 `mcp.yaml`. From a principal-owned Knoa Session, deploy or update the same
