@@ -6,6 +6,12 @@ from dataclasses import dataclass
 
 from knoa_platform.agent_runtime.contracts import RuntimeScope
 from knoa_platform.agent_runtime.tool_step import ProposedToolCall
+from knoa_platform.approvals import (
+    ApprovalReviewDecision,
+    ApprovalReviewer,
+    ApprovalReviewMode,
+    ApprovalReviewRequest,
+)
 from knoa_platform.tasks.event_hub import TaskEventHub
 from knoa_platform.tasks.identity import task_tool_step_id
 from knoa_platform.tasks.models import TaskApprovalRecord, TaskState
@@ -21,11 +27,22 @@ class _ApprovalWaiter:
 class DurableApprovalService:
     """Persist approval before delivery and resolve it from any owned client."""
 
-    def __init__(self, repository: TaskRepository, events: TaskEventHub) -> None:
+    def __init__(
+        self,
+        repository: TaskRepository,
+        events: TaskEventHub,
+        *,
+        reviewer: ApprovalReviewer | None = None,
+        review_mode: ApprovalReviewMode = ApprovalReviewMode.OFF,
+        auto_max_risk: str = "medium",
+    ) -> None:
         self._repository = repository
         self._events = events
         self._waiters: dict[str, _ApprovalWaiter] = {}
         self._lock = asyncio.Lock()
+        self._reviewer = reviewer
+        self._review_mode = review_mode
+        self._auto_max_risk = auto_max_risk
 
     async def confirm(
         self,
@@ -55,14 +72,76 @@ class DurableApprovalService:
                 task_id=run_id,
                 future=future,
             )
-        await self._events.publish(event)
         try:
+            if (
+                _created
+                and self._reviewer is not None
+                and self._review_mode is not ApprovalReviewMode.OFF
+            ):
+                task = await asyncio.to_thread(
+                    self._repository.get,
+                    scope.principal_id,
+                    run_id,
+                )
+                review = await self._reviewer.review(
+                    ApprovalReviewRequest(
+                        principal_id=scope.principal_id,
+                        run_id=run_id,
+                        tool_name=call.name,
+                        arguments=call.arguments,
+                        effect=reason.partition(":")[0] or "unknown",
+                        risk=reason.partition(":")[2] or "high",
+                        reason=reason,
+                        context={
+                            "user_intent": task.goal,
+                            "session_handle": scope.session_handle,
+                        },
+                    )
+                )
+                rules = ",".join(review.rule_ids)
+                approval, event = await asyncio.to_thread(
+                    self._repository.annotate_approval_review,
+                    scope.principal_id,
+                    approval.approval_id,
+                    reason=(
+                        f"{reason}; reviewer[{review.reviewer_id}/{review.model}]="
+                        f"{review.decision.value}: {review.reason}"
+                        f"{'; rules=' + rules if rules else ''}"
+                    )[:2000],
+                )
+            await self._events.publish(event)
+            if (
+                _created
+                and self._reviewer is not None
+                and self._review_mode is ApprovalReviewMode.AUTO
+                and self._may_auto_resolve(review.decision, reason)
+            ):
+                resolved, _changed, _state = await self.resolve(
+                    scope.principal_id,
+                    approval.approval_id,
+                    approved=review.decision is ApprovalReviewDecision.APPROVE,
+                    resolved_by=f"approval_reviewer:{review.reviewer_id}",
+                )
+                return resolved.state.value == "approved"
             return await future
         finally:
             async with self._lock:
                 current = self._waiters.get(approval.approval_id)
                 if current is not None and current.future is future:
                     self._waiters.pop(approval.approval_id, None)
+
+    def _may_auto_resolve(
+        self,
+        decision: ApprovalReviewDecision,
+        policy_reason: str,
+    ) -> bool:
+        if self._review_mode is not ApprovalReviewMode.AUTO:
+            return False
+        if decision is ApprovalReviewDecision.ESCALATE:
+            return False
+        risk = policy_reason.partition(":")[2] or "high"
+        allowed = {"low"} if self._auto_max_risk == "low" else {"low", "medium"}
+        return risk in allowed
 
     async def resolve(
         self,

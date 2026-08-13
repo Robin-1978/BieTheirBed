@@ -5,7 +5,6 @@ import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any
 
 from knoa_agent_contracts import (
     ArtifactProduced,
@@ -28,24 +27,30 @@ from knoa_platform.agent_runtime.session_store import (
     RuntimeSessionRepository,
 )
 from knoa_platform.agent_runtime.tool_step import ProposedToolCall, ToolStepResult
-from knoa_platform.artifacts import ArtifactRef
 from knoa_platform.agents import AgentExecutionService, ExecuteAgentTurn
+from knoa_platform.approvals import (
+    ApprovalReviewDecision,
+    ApprovalReviewer,
+    ApprovalReviewMode,
+    ApprovalReviewRequest,
+)
+from knoa_platform.artifacts import ArtifactRef
+from knoa_platform.context.session_context import SessionContextService
 from knoa_platform.conversation.models import (
+    TERMINAL_CHAT_TURN_STATES,
     ChatApproval,
+    ChatTimelineEntry,
     ChatTurn,
     ChatTurnSignal,
     ChatTurnState,
     ConversationSession,
     ConversationSessionState,
-    ChatTimelineEntry,
-    TERMINAL_CHAT_TURN_STATES,
 )
 from knoa_platform.conversation.repository import (
     ChatTurnNotFoundError,
-    ConversationSessionConflictError,
     ConversationRepository,
+    ConversationSessionConflictError,
 )
-from knoa_platform.context.session_context import SessionContextService
 from knoa_platform.interactions import HumanInteractionService, ScopedInteractionPort
 from knoa_platform.tasks.identity import task_tool_step_id
 from knoa_platform.tools.base import ToolPolicy
@@ -116,11 +121,18 @@ class ConversationApprovalService:
         self,
         repository: ConversationRepository,
         notify: Callable[[str], Awaitable[None]],
+        *,
+        reviewer: ApprovalReviewer | None = None,
+        review_mode: ApprovalReviewMode = ApprovalReviewMode.OFF,
+        auto_max_risk: str = "medium",
     ) -> None:
         self._repository = repository
         self._notify = notify
         self._waiters: dict[str, asyncio.Future[bool]] = {}
         self._lock = asyncio.Lock()
+        self._reviewer = reviewer
+        self._review_mode = review_mode
+        self._auto_max_risk = auto_max_risk
 
     async def confirm(
         self,
@@ -144,13 +156,75 @@ class ConversationApprovalService:
             if approval.approval_id in self._waiters:
                 raise RuntimeError("Approval already has a live waiter")
             self._waiters[approval.approval_id] = future
-        await self._notify(run_id)
         try:
+            if (
+                _created
+                and self._reviewer is not None
+                and self._review_mode is not ApprovalReviewMode.OFF
+            ):
+                turn = await asyncio.to_thread(
+                    self._repository.get,
+                    scope.principal_id,
+                    run_id,
+                )
+                review = await self._reviewer.review(
+                    ApprovalReviewRequest(
+                        principal_id=scope.principal_id,
+                        run_id=run_id,
+                        tool_name=call.name,
+                        arguments=call.arguments,
+                        effect=reason.partition(":")[0] or "unknown",
+                        risk=reason.partition(":")[2] or "high",
+                        reason=reason,
+                        context={
+                            "user_intent": turn.user_input,
+                            "session_handle": scope.session_handle,
+                        },
+                    )
+                )
+                rules = ",".join(review.rule_ids)
+                approval = await asyncio.to_thread(
+                    self._repository.annotate_approval_review,
+                    scope.principal_id,
+                    approval.approval_id,
+                    reason=(
+                        f"{reason}; reviewer[{review.reviewer_id}/{review.model}]="
+                        f"{review.decision.value}: {review.reason}"
+                        f"{'; rules=' + rules if rules else ''}"
+                    )[:2000],
+                )
+            await self._notify(run_id)
+            if (
+                _created
+                and self._reviewer is not None
+                and self._review_mode is ApprovalReviewMode.AUTO
+                and self._may_auto_resolve(review.decision, reason)
+            ):
+                resolved, _changed = await self.resolve(
+                    scope.principal_id,
+                    approval.approval_id,
+                    approved=review.decision is ApprovalReviewDecision.APPROVE,
+                    resolved_by=f"approval_reviewer:{review.reviewer_id}",
+                )
+                return resolved.state == "approved"
             return await future
         finally:
             async with self._lock:
                 if self._waiters.get(approval.approval_id) is future:
                     self._waiters.pop(approval.approval_id, None)
+
+    def _may_auto_resolve(
+        self,
+        decision: ApprovalReviewDecision,
+        policy_reason: str,
+    ) -> bool:
+        if self._review_mode is not ApprovalReviewMode.AUTO:
+            return False
+        if decision is ApprovalReviewDecision.ESCALATE:
+            return False
+        risk = policy_reason.partition(":")[2] or "high"
+        allowed = {"low"} if self._auto_max_risk == "low" else {"low", "medium"}
+        return risk in allowed
 
     async def resolve(
         self,
@@ -241,6 +315,9 @@ class ConversationService:
         hub: ConversationHub | None = None,
         session_context: SessionContextService | None = None,
         interactions: HumanInteractionService | None = None,
+        approval_reviewer: ApprovalReviewer | None = None,
+        approval_review_mode: ApprovalReviewMode = ApprovalReviewMode.OFF,
+        approval_auto_max_risk: str = "medium",
     ) -> None:
         self._sessions = sessions
         self._repository = repository
@@ -249,7 +326,13 @@ class ConversationService:
         self._hub = hub or ConversationHub()
         self._live: dict[str, _LiveTurn] = {}
         self._executions: dict[str, asyncio.Task[None]] = {}
-        self._approvals = ConversationApprovalService(repository, self._notify)
+        self._approvals = ConversationApprovalService(
+            repository,
+            self._notify,
+            reviewer=approval_reviewer,
+            review_mode=approval_review_mode,
+            auto_max_risk=approval_auto_max_risk,
+        )
         self._tool_commits = ConversationToolCommitService(repository)
         self._interactions = interactions
         self._interaction_port: ScopedInteractionPort | None = (

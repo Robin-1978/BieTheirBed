@@ -1058,3 +1058,32 @@ class ConversationRepository:
             ).fetchone()
             assert resolved is not None
             return self._approval(resolved), changed, str(row["turn_id"])
+
+    def annotate_approval_review(
+        self,
+        principal_id: str,
+        approval_id: str,
+        *,
+        reason: str,
+    ) -> ChatApproval:
+        normalized_reason = reason.strip()[:2000]
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT a.* FROM conversation_approvals a
+                   JOIN conversation_turns t ON t.turn_id=a.turn_id
+                   WHERE a.approval_id=? AND t.principal_id=?""",
+                (approval_id, principal_id),
+            ).fetchone()
+            if row is None:
+                raise ChatTurnNotFoundError(approval_id)
+            if str(row["state"]) == "pending":
+                db.execute(
+                    "UPDATE conversation_approvals SET reason=? WHERE approval_id=?",
+                    (normalized_reason, approval_id),
+                )
+            updated = db.execute(
+                "SELECT * FROM conversation_approvals WHERE approval_id=?",
+                (approval_id,),
+            ).fetchone()
+            assert updated is not None
+            return self._approval(updated)

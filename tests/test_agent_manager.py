@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from knoa_agent_contracts import AgentDescriptor, RuntimeHealth, RuntimeLimits
-from knoa_platform.agents import AgentDisabledError, AgentManager
+from knoa_platform.agents import AgentDisabledError, AgentManager, AgentNotFoundError
 
 
 class FakeRuntime:
@@ -87,3 +87,18 @@ async def test_manager_enforces_runtime_capacity_and_drain() -> None:
     assert runtime.drained
     with pytest.raises(AgentDisabledError):
         manager.resolve_agent_id("knoa")
+
+
+@pytest.mark.asyncio
+async def test_system_agent_uses_same_runtime_manager_but_is_not_selectable() -> None:
+    reviewer = FakeRuntime("reviewer_agent")
+    manager = AgentManager(
+        {"knoa": FakeRuntime("knoa"), "reviewer_agent": reviewer},
+        enabled={"knoa": True, "reviewer_agent": True},
+        system_agents=frozenset({"reviewer_agent"}),
+    )
+
+    with pytest.raises(AgentNotFoundError, match="not user-selectable"):
+        manager.resolve_agent_id("reviewer_agent")
+    async with manager.lease_system("reviewer_agent") as runtime:
+        assert runtime is reviewer

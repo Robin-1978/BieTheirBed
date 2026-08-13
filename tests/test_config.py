@@ -20,6 +20,8 @@ class TestAppConfig:
         assert cfg.default_agent == "knoa"
         assert cfg.agents["knoa"].enabled is True
         assert cfg.agents["codex"].enabled is False
+        assert cfg.agents["reviewer_agent"].enabled is False
+        assert cfg.approval_review.mode == "off"
 
     def test_codex_can_be_selected_as_dynamic_default(self):
         cfg = AppConfig(
@@ -36,8 +38,44 @@ class TestAppConfig:
         assert cfg.default_agent == "codex"
 
     def test_agent_configuration_is_a_small_trusted_set(self):
-        with pytest.raises(ValueError, match="trusted knoa and codex"):
+        with pytest.raises(ValueError, match="trusted knoa, codex and reviewer_agent"):
             AppConfig(agents={"knoa": {}, "arbitrary_plugin": {}})
+
+    def test_reviewer_agent_is_configured_as_a_restricted_system_agent(self):
+        cfg = AppConfig(
+            providers={
+                "local": {
+                    "driver": "llamacpp",
+                    "server_url": "http://127.0.0.1:8192",
+                }
+            },
+            models={"reviewer": {"provider": "local", "model": "qwen3.5-4b"}},
+            default_model="reviewer",
+            agents={
+                "knoa": {"enabled": True},
+                "reviewer_agent": {
+                    "enabled": True,
+                    "model": "reviewer",
+                },
+            },
+            approval_review={"mode": "suggest"},
+        )
+
+        assert cfg.approval_review.mode == "suggest"
+        assert cfg.agents["reviewer_agent"].model == "reviewer"
+
+    def test_enabled_review_requires_enabled_reviewer_agent(self):
+        with pytest.raises(ValueError, match="requires enabled reviewer_agent"):
+            AppConfig(approval_review={"mode": "suggest", "model": "main"})
+
+    def test_enabled_reviewer_agent_requires_explicit_model(self):
+        with pytest.raises(ValueError, match="requires a model"):
+            AppConfig(
+                agents={
+                    "knoa": {"enabled": True},
+                    "reviewer_agent": {"enabled": True},
+                }
+            )
 
     def test_audio_transcription_requires_public_mcp_tool(self):
         with pytest.raises(ValueError, match="requires an MCP tool"):

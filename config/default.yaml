@@ -99,6 +99,20 @@ agents:
     request_timeout_seconds: 120
     max_line_bytes: 4194304
     max_event_queue: 1024
+  # Restricted system Agent. It reuses the same Agent Runtime/provider stack,
+  # but is never exposed as a Session choice and receives no Tools.
+  reviewer_agent:
+    enabled: false
+    max_concurrency: 1
+    model: ""
+
+approval_review:
+  mode: "off" # off | suggest | auto
+  agent: "reviewer_agent"
+  model: ""
+  timeout_seconds: 15
+  max_output_tokens: 256
+  auto_max_risk: "medium"
 
 # Loopback-only standard MCP endpoint used by out-of-process Agents.
 capability_mcp_host: "127.0.0.1"
