@@ -1,10 +1,12 @@
-import type { TaskTraceEntry } from "@/api/models";
+import type { TaskState, TaskTraceEntry } from "@/api/models";
+
+export type TaskTimelineToolState = "running" | "completed" | "failed" | "cancelled" | "incomplete";
 
 export type TaskTimelineItem =
-  | { kind: "tool"; key: string; toolName: string; state: "running" | "completed" }
+  | { kind: "tool"; key: string; toolName: string; state: TaskTimelineToolState }
   | { kind: "entry"; key: string; entry: TaskTraceEntry };
 
-export function mergeTaskTimeline(entries: TaskTraceEntry[]): TaskTimelineItem[] {
+export function mergeTaskTimeline(entries: TaskTraceEntry[], executionState?: TaskState): TaskTimelineItem[] {
   const rows: TaskTimelineItem[] = [];
   const positions = new Map<string, number>();
   entries.forEach((entry, index) => {
@@ -37,5 +39,19 @@ export function mergeTaskTimeline(entries: TaskTraceEntry[]): TaskTimelineItem[]
       entry,
     });
   });
-  return rows;
+  if (executionState !== "completed" && executionState !== "failed" && executionState !== "cancelled") {
+    return rows;
+  }
+
+  return rows.map((row) => {
+    if (row.kind !== "tool" || row.state !== "running") return row;
+    return {
+      ...row,
+      state: executionState === "cancelled"
+        ? "cancelled"
+        : executionState === "failed"
+          ? "failed"
+          : "incomplete",
+    };
+  });
 }

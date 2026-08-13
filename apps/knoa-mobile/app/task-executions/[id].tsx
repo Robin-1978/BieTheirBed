@@ -78,8 +78,8 @@ export default function TaskExecutionDetailScreen() {
     () => mergeTaskTimeline((execution?.trace?.entries ?? []).filter(
       (entry) => entry.entry_type !== "final_output"
         && (entry.entry_type !== "content" || !execution?.final_result),
-    )),
-    [execution?.final_result, execution?.trace?.entries],
+    ), execution?.state),
+    [execution?.final_result, execution?.state, execution?.trace?.entries],
   );
 
   async function command(action: "cancel" | "pause" | "resume" | "rerun") {
@@ -438,13 +438,28 @@ function TraceEntry({
   onArtifact(artifact: ChatArtifact, action: "open" | "save"): void;
   t: ReturnType<typeof useI18n>["t"];
 }) {
-  if (entry.kind === "tool") return (
-    <View style={styles.toolRow}>
-      {entry.state === "running" ? <ActivityIndicator color={colors.accent} size="small" /> : <Text style={styles.toolResult}>✓</Text>}
-      <Text style={styles.toolName}>{entry.toolName || t("execution.tool")}</Text>
-      <Text style={styles.toolState}>{entry.state === "running" ? t("execution.running") : t("execution.completed")}</Text>
-    </View>
-  );
+  if (entry.kind === "tool") {
+    if (entry.state === "running") return (
+      <View style={styles.toolRow}>
+        <ActivityIndicator color={colors.accent} size="small" />
+        <Text style={styles.toolName}>{entry.toolName || t("execution.tool")}</Text>
+        <Text style={styles.toolState}>{t("execution.running")}</Text>
+      </View>
+    );
+    const presentation = {
+      completed: { symbol: "✓", label: t("execution.completed"), color: colors.accent },
+      failed: { symbol: "!", label: t("taskState.failed"), color: colors.danger },
+      cancelled: { symbol: "×", label: t("taskState.cancelled"), color: colors.muted },
+      incomplete: { symbol: "!", label: t("execution.notCompleted"), color: colors.warning },
+    }[entry.state];
+    return (
+      <View style={styles.toolRow}>
+        <Text style={[styles.toolResult, { color: presentation.color }]}>{presentation.symbol}</Text>
+        <Text style={styles.toolName}>{entry.toolName || t("execution.tool")}</Text>
+        <Text style={styles.toolState}>{presentation.label}</Text>
+      </View>
+    );
+  }
   const source = entry.entry;
   if (source.entry_type === "reasoning") return source.content ? <Text style={styles.reasoning}>{source.content}</Text> : null;
   if (source.entry_type === "warning") return <Text style={styles.warning}>{source.content}</Text>;
