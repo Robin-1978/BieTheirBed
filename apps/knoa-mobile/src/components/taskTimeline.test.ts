@@ -29,4 +29,33 @@ describe("mergeTaskTimeline", () => {
       { kind: "entry", key: "reasoning:2:1", entry: entry({ entry_type: "reasoning", content: "继续处理", occurred_at: 2 }) },
     ]);
   });
+
+  it("keeps an unmatched tool call running while the execution is active", () => {
+    expect(mergeTaskTimeline([
+      entry({ entry_type: "tool_call", tool_call_id: "call-1", tool_name: "run_command" }),
+    ], "waiting_approval")).toEqual([
+      { kind: "tool", key: "tool:call-1", toolName: "run_command", state: "running" },
+    ]);
+  });
+
+  it.each([
+    ["cancelled", "cancelled"],
+    ["failed", "failed"],
+    ["completed", "incomplete"],
+  ] as const)("closes an unmatched tool call when the execution is %s", (executionState, toolState) => {
+    expect(mergeTaskTimeline([
+      entry({ entry_type: "tool_call", tool_call_id: "call-1", tool_name: "run_command" }),
+    ], executionState)).toEqual([
+      { kind: "tool", key: "tool:call-1", toolName: "run_command", state: toolState },
+    ]);
+  });
+
+  it("preserves a matched tool result after the execution is cancelled", () => {
+    expect(mergeTaskTimeline([
+      entry({ entry_type: "tool_call", tool_call_id: "call-1", tool_name: "run_command" }),
+      entry({ entry_type: "tool_result", tool_call_id: "call-1", tool_name: "run_command", occurred_at: 2 }),
+    ], "cancelled")).toEqual([
+      { kind: "tool", key: "tool:call-1", toolName: "run_command", state: "completed" },
+    ]);
+  });
 });
