@@ -265,6 +265,67 @@ class TaskDefinitionRepositoryMixin:
             ).fetchall()
         return tuple(self._definition_record(row) for row in rows)
 
+    def list_event_task_definitions(
+        self,
+        event_source: str,
+        *,
+        limit: int = 1000,
+    ) -> tuple[TaskDefinitionRecord, ...]:
+        """List active definitions for one internal event provider.
+
+        This intentionally has no public principal selector: it is used only by
+        trusted ingress adapters, which still deliver through each Task's
+        principal-owned Trigger binding.
+        """
+        normalized_source = event_source.strip()
+        if not normalized_source or len(normalized_source) > 128:
+            raise ValueError("Event source must contain 1-128 characters")
+        if not 1 <= limit <= 5000:
+            raise ValueError("Event Task list limit must be between 1 and 5000")
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT tasks.*, task_launch_policies.policy_json,
+                          (SELECT COUNT(*) FROM task_executions
+                           WHERE task_executions.task_id=tasks.task_id)
+                              AS execution_count
+                   FROM tasks JOIN task_launch_policies USING(task_id)
+                   WHERE tasks.state=?
+                   ORDER BY tasks.updated_at DESC, tasks.task_id DESC
+                   LIMIT ?""",
+                (TaskDefinitionState.ACTIVE.value, limit),
+            ).fetchall()
+        definitions = tuple(self._definition_record(row) for row in rows)
+        return tuple(
+            definition
+            for definition in definitions
+            if definition.launch_policy.kind.value == "event"
+            and definition.launch_policy.event_source == normalized_source
+        )
+
+    def normalize_event_launch_policies(self) -> int:
+        """Rewrite accepted legacy policy fields to the canonical wire shape."""
+        changed = 0
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute(
+                "SELECT task_id, policy_json FROM task_launch_policies"
+            ).fetchall()
+            for row in rows:
+                raw = str(row["policy_json"])
+                try:
+                    policy = TaskLaunchPolicy.model_validate_json(raw)
+                except ValueError:
+                    continue
+                canonical = policy.model_dump_json()
+                if canonical == raw:
+                    continue
+                db.execute(
+                    "UPDATE task_launch_policies SET policy_json=? WHERE task_id=?",
+                    (canonical, str(row["task_id"])),
+                )
+                changed += 1
+        return changed
+
     def update_task_definition(
         self,
         principal_id: str,

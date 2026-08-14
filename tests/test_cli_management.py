@@ -23,9 +23,6 @@ async def test_explicit_cli_mcp_deployment_calls_owner_admin_api(
             self.call = None
             self.disconnected = False
 
-        async def create_session(self):
-            return "session-a"
-
         async def deploy_mcp_package(self, path, server_id, **kwargs):
             self.call = (path, server_id, kwargs)
             return MCPPackageDeploymentSnapshot(
@@ -34,7 +31,7 @@ async def test_explicit_cli_mcp_deployment_calls_owner_admin_api(
                 extension_id=f"mcp:{server_id}",
                 state="running",
                 tools=(f"mcp__{server_id}__ping",),
-                resource_task=kwargs["resource_uri"],
+                resource_task="",
             )
 
         async def disconnect(self):
@@ -55,25 +52,13 @@ async def test_explicit_cli_mcp_deployment_calls_owner_admin_api(
         "mcp-package-deploy",
         path=str(source),
         server_id="jira",
-        resource_uri="jira://assigned-to-me/events",
-        route_id="events",
-        include_root=False,
-        disable_resource_tools=False,
-        priority=0,
     )
 
     assert result == 0
     assert client.call == (
         str(source.resolve()),
         "jira",
-        {
-            "resource_uri": "jira://assigned-to-me/events",
-            "route_id": "events",
-            "session_handle": "session-a",
-            "include_root": False,
-            "tools_enabled": True,
-            "priority": 0,
-        },
+        {},
     )
     assert client.disconnected
     assert '"state": "running"' in capsys.readouterr().out

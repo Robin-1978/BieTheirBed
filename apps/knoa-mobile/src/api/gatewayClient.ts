@@ -7,6 +7,7 @@ import type {
   ConversationSession,
   GatewaySession,
   HumanInteraction,
+  MCPResourceCatalogItem,
   PairingPayload,
   Task,
   TaskDefinitionState,
@@ -443,6 +444,13 @@ export class GatewayClient {
 
   async tools(sessionHandle: string): Promise<Json> {
     return this.json(`/v1/tools?session_handle=${encodeURIComponent(sessionHandle)}`);
+  }
+
+  async listMcpResources(): Promise<MCPResourceCatalogItem[]> {
+    const response = await this.json<{ result?: { resources?: MCPResourceCatalogItem[] } }>(
+      "/v1/mcp/resources",
+    );
+    return response.result?.resources ?? [];
   }
 
   async deviceAudit(afterId = 0): Promise<Json> {

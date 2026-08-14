@@ -115,7 +115,6 @@ from knoa_platform.tools.describe_tool import DescribeTool
 from knoa_platform.tools.exchange import ExchangeTool
 from knoa_platform.tools.hotkey import HotkeyTool
 from knoa_platform.tools.mcp_connect import (
-    MCPConfigureResourceTaskTool,
     MCPConnectTool,
     MCPDisableTool,
     MCPInspectTool,
@@ -693,7 +692,6 @@ def build_core_runtime(
     )
     registry.register(MCPInspectTool(mcp_onboarding))
     registry.register(MCPConnectTool(mcp_onboarding))
-    registry.register(MCPConfigureResourceTaskTool(mcp_onboarding))
     registry.register(MCPDisableTool(mcp_onboarding))
 
     def status_details(scope: RuntimeScope) -> dict[str, object]:
@@ -747,6 +745,7 @@ def build_core_runtime(
             )
             for status in extensions.statuses
         ),
+        mcp_resources=mcp_resource_tasks.catalog,
         agent_selector=agent_manager.resolve_agent_id,
     )
     artifact_service = ArtifactService(sessions, artifacts)

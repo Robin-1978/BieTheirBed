@@ -178,6 +178,18 @@ class TaskService:
             limit=limit,
         )
 
+    async def list_event_definitions(
+        self,
+        event_source: str,
+        *,
+        limit: int = 1000,
+    ) -> tuple[TaskDefinitionRecord, ...]:
+        return await asyncio.to_thread(
+            self._repository.list_event_task_definitions,
+            event_source,
+            limit=limit,
+        )
+
     async def update_definition(
         self,
         principal_id: str,

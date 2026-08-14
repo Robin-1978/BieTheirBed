@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import * as Crypto from "expo-crypto";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -17,7 +17,7 @@ import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 import { immediatePolicy, isLaunchPolicyValid, TaskLaunchEditor } from "@/components/TaskLaunchEditor";
 import { AgentSelector } from "@/components/AgentSelector";
-import type { TaskLaunchPolicy } from "@/api/models";
+import type { MCPResourceCatalogItem, TaskLaunchPolicy } from "@/api/models";
 import { useI18n } from "@/i18n";
 import { AppPressable } from "@/components/AppPressable";
 
@@ -33,7 +33,15 @@ export default function NewTaskScreen() {
   const [notifyApproval, setNotifyApproval] = useState(true);
   const [launchPolicy, setLaunchPolicy] = useState<TaskLaunchPolicy>(immediatePolicy);
   const [agentId, setAgentId] = useState(gateway.defaultAgentId || "knoa");
+  const [mcpResources, setMcpResources] = useState<MCPResourceCatalogItem[]>([]);
   const requestIdentity = useRef<{ fingerprint: string; requestId: string } | null>(null);
+
+  useEffect(() => {
+    if (!gateway.client) return;
+    void gateway.runAuthenticated((client) => client.listMcpResources())
+      .then(setMcpResources)
+      .catch(() => setMcpResources([]));
+  }, [gateway.client, gateway.runAuthenticated]);
 
   async function create() {
     if (gateway.requiredUpdate) {
@@ -118,7 +126,7 @@ export default function NewTaskScreen() {
             lockedLabel={t("agent.lockedTask")}
             onChange={setAgentId}
           />
-          <TaskLaunchEditor policy={launchPolicy} onChange={setLaunchPolicy} />
+          <TaskLaunchEditor policy={launchPolicy} onChange={setLaunchPolicy} mcpResources={mcpResources} />
           <View style={styles.notificationCard}>
             <Text style={styles.launchTitle}>{t("taskNew.notifyMe")}</Text>
             <Toggle label={t("taskNew.completed")} value={notifyCompleted} onChange={setNotifyCompleted} />

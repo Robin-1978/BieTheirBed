@@ -196,16 +196,10 @@ mcp_servers:
       - JIRA_BASE_URL
       - JIRA_USERNAME
       - JIRA_API_TOKEN
-    resource_tasks:
-      assigned_issues:
-        uri: "jira://assigned-to-me"
-        principal_id: "personal:owner"
-        session_handle: "jira-analysis"
-        tools_enabled: true
-        priority: 4
 ```
 
-这是 Knoa 本地配置，不是 MCP 协议扩展。它表达用户信任和产品路由：允许指定 Server 的指定 Resource 范围提供 Task 级指令。它不能赋予新工具权限。
+MCP Server 配置只描述连接和 Tool policy。旧 `resource_tasks` 字段仅兼容读取，
+不会再写回或参与运行时路由。自动化由用户创建的 Task Definition 表达。
 
 ### 6.3 一键 MCP Onboarding
 
@@ -217,10 +211,11 @@ mcp_servers:
 4. `mcp_connect` 的确认 payload 包含将实际启用的精确 Tool 名称；只有用户确认且 Tool 明确声明 `readOnlyHint=true` 时才生成只读本地 policy；
 5. 未选择、未声明、写入型或语义含糊的 Tool 保持 `withheld`；
 6. 将连接和用户确认后的 policy 原子写入 Knoa 私有配置，并立即激活 Provider；
-7. 返回发现的 Resource/Prompt；若用户要求自动执行，Agent 再调用 confirmation-gated `mcp_configure_resource_task`，把用户选定的 Resource URI 绑定到当前 principal-owned Session 并立即激活。
+7. 返回发现的 Resource/Prompt；若用户要求自动执行，App、CLI/TUI 或 Agent 创建
+   `event_source=mcp:<server_id>` 的 Task Definition，并保存选定 Resource URI selector。
 8. 若用户撤销连接，confirmation-gated `mcp_disable` 停止 Provider、移除动态 Tool，并持久化 `enabled=false`；不得留下无法回滚的半配置状态。
 
-`ToolAnnotations` 在这里仅用于筛选保守候选，不能给 Tool 自行授权；authority 来自包含精确 Tool 列表的用户确认。标准 MCP 没有“这个 Resource 应自动驱动 Agent”的通用语义，因此第一步不会自动创建 `resource_tasks`；第二步由用户明确选择 Resource URI，工具从当前 scoped Session 自动取得 principal/session，而不是要求用户手写 YAML。
+`ToolAnnotations` 在这里仅用于筛选保守候选，不能给 Tool 自行授权；authority 来自包含精确 Tool 列表的用户确认。标准 MCP 没有“这个 Resource 应自动驱动 Agent”的通用语义，因此连接 MCP 不会自动创建 Task；用户通过 Task Definition 明确选择 Resource URI 和自动化行为。
 
 ### 6.4 标准处理流程
 

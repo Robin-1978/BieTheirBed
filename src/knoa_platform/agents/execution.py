@@ -180,7 +180,6 @@ class AgentExecutionService:
                         frozenset(self._gateway.authorized_tool_names(grant)),
                     )
                     if self._context_provider is not None
-                    and binding.agent_id == "knoa"
                     else RuntimeTurnContext()
                 )
                 turn = await runtime.start_turn(
@@ -216,7 +215,10 @@ class AgentExecutionService:
                             raise RuntimeError("Agent Runtime emitted multiple terminals")
                         interaction_handle: InteractionHandle | None = None
                         if isinstance(event, InteractionRequested):
-                            if event.kind != "user_input" or request.interaction is None:
+                            if (
+                                event.kind not in {"user_input", "mcp_elicitation"}
+                                or request.interaction is None
+                            ):
                                 raise RuntimeError(
                                     "Agent Runtime requested an unsupported interaction"
                                 )

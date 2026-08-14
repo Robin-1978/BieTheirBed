@@ -333,13 +333,15 @@ async def test_create_task_builds_mcp_event_launch_policy() -> None:
         "kind": "event",
         "event_source": "mcp:jira",
         "source_config": {
-            "resource_uri_prefix": "jira://assigned-to-me/events"
+            "resource_uri_prefix": "jira://assigned-to-me/events",
+            "include_root": True,
+            "include_descendants": False,
         },
     }
 
 
 def test_mcp_event_requires_an_explicit_resource_match() -> None:
-    with pytest.raises(ValueError, match="exactly one resource_uri"):
+    with pytest.raises(ValueError, match="Resource URI"):
         TaskLaunchPolicy(
             kind=TaskLaunchKind.EVENT,
             event_source="mcp:jira",

@@ -12,6 +12,7 @@ from knoa_agent_contracts import (
     RuntimeInteractionResolution,
     RuntimeSteerCommand,
     RuntimeTurnRequest,
+    RuntimeTurnContext,
     TextPart,
 )
 from knoa_codex_agent import CodexAgentRuntime, CodexSessionRepository
@@ -165,7 +166,43 @@ async def test_codex_runtime_maps_thread_turn_and_stream_events(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-async def test_codex_runtime_steers_interrupts_and_resolves_approval(tmp_path: Path) -> None:
+async def test_codex_runtime_receives_platform_context_as_separate_input(
+    tmp_path: Path,
+) -> None:
+    factory = ClientFactory()
+    runtime = CodexAgentRuntime(
+        session_repository(tmp_path),
+        home=tmp_path / "codex-home",
+        cwd=tmp_path,
+        client_factory=factory,
+    )
+    session = await runtime.create_session(
+        CreateRuntimeSession(operation_id="bind-a", binding_epoch=1)
+    )
+    await runtime.start_turn(
+        RuntimeTurnRequest(
+            session=session,
+            operation_id="operation-context",
+            input=(TextPart(text="hello"),),
+            mcp=grant(),
+            context=RuntimeTurnContext(
+                core_memory=("preferred_language: zh",),
+                relevant_memory=("preferred_editor: vim",),
+                episodic_memory=("previous task: inspect CI",),
+                skill_instructions="Use the available tools before guessing.",
+            ),
+        )
+    )
+    request = next(params for method, params in factory.clients[-1].requests if method == "turn/start")
+    context_text = request["input"][0]["text"]
+    assert context_text.startswith("<knoa_runtime_context>")
+    assert '"semantic_role":"context_not_user_command"' in context_text
+    assert "preferred_language: zh" in context_text
+    assert request["input"][1] == {"type": "text", "text": "hello"}
+
+
+@pytest.mark.asyncio
+async def test_codex_runtime_declines_native_approval_and_allows_steering(tmp_path: Path) -> None:
     factory = ClientFactory()
     runtime = CodexAgentRuntime(
         CodexSessionRepository(tmp_path / "sessions.db"),
@@ -193,18 +230,9 @@ async def test_codex_runtime_steers_interrupts_and_resolves_approval(tmp_path: P
             "params": {"threadId": "thread-a", "turnId": "turn-a"},
         }
     )
-    interaction = await consume
-    assert interaction.event_type == "interaction_requested"
-    resolved = await runtime.resolve_interaction(
-        RuntimeInteractionResolution(
-            session=session,
-            runtime_turn_ref="turn-a",
-            interaction_id=interaction.interaction_id,
-            interaction_epoch=interaction.interaction_epoch,
-            command_id="resolve-a",
-            value={"decision": "decline"},
-        )
-    )
+    warning = await consume
+    assert warning.event_type == "runtime_warning"
+    assert warning.code == "native_approval_not_supported"
 
     steer = await runtime.steer_turn(
         RuntimeSteerCommand(
@@ -224,12 +252,11 @@ async def test_codex_runtime_steers_interrupts_and_resolves_approval(tmp_path: P
 
     assert steer.status == "accepted"
     assert interrupt.status == "accepted"
-    assert resolved.status == "accepted"
     assert client.responses == [(77, {"decision": "decline"}, None)]
 
 
 @pytest.mark.asyncio
-async def test_codex_runtime_rejects_session_wide_approval(tmp_path: Path) -> None:
+async def test_codex_runtime_declines_file_change_approval(tmp_path: Path) -> None:
     factory = ClientFactory()
     runtime = CodexAgentRuntime(
         CodexSessionRepository(tmp_path / "sessions.db"),
@@ -253,25 +280,14 @@ async def test_codex_runtime_rejects_session_wide_approval(tmp_path: Path) -> No
     await client.emit(
         {
             "id": 88,
-            "method": "item/commandExecution/requestApproval",
+            "method": "item/fileChange/requestApproval",
             "params": {"threadId": "thread-a", "turnId": "turn-a"},
         }
     )
-    interaction = await consume
-
-    result = await runtime.resolve_interaction(
-        RuntimeInteractionResolution(
-            session=session,
-            runtime_turn_ref="turn-a",
-            interaction_id=interaction.interaction_id,
-            interaction_epoch=interaction.interaction_epoch,
-            command_id="resolve-a",
-            value={"decision": "acceptForSession"},
-        )
-    )
-
-    assert result.status == "rejected"
-    assert client.responses == []
+    warning = await consume
+    assert warning.event_type == "runtime_warning"
+    assert warning.code == "native_approval_not_supported"
+    assert client.responses == [(88, {"decision": "decline"}, None)]
 
 
 @pytest.mark.asyncio

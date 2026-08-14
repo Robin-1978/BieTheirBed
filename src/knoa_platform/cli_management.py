@@ -10,6 +10,7 @@ from typing import Any
 from knoa_platform.config import AppConfig
 from knoa_platform.service.core_client import CoreRequestError
 from knoa_platform.service.core_lifecycle import get_core_client
+from knoa_platform.tasks import TaskLaunchKind, TaskLaunchPolicy
 
 
 def enabled_agents(config: AppConfig) -> tuple[str, ...]:
@@ -66,20 +67,39 @@ async def run_client_command(config: AppConfig, command: str, **values: Any) -> 
                 client_request_id=str(uuid.uuid4()),
             )
             print(execution.model_dump_json(indent=2))
+        elif command == "mcp-resources":
+            catalog = await client.list_mcp_resources()
+            for resource in catalog.resources:
+                print(
+                    f"{resource.server_id}\t{resource.uri}\t"
+                    f"{resource.name}\t{resource.mime_type}"
+                )
+        elif command == "task-create-event":
+            session_handle = await client.create_session(
+                activate=False,
+                agent_id=values.get("agent_id"),
+            )
+            result = await client.create_product_task(
+                session_handle,
+                values["goal"],
+                client_request_id=str(uuid.uuid4()),
+                title=values.get("title", ""),
+                agent_id=values.get("agent_id"),
+                launch_policy=_mcp_event_policy(values),
+            )
+            print(result.task.model_dump_json(indent=2))
+        elif command == "task-set-event":
+            task = await client.get_product_task(values["task_id"])
+            updated = await client.update_product_task(
+                task.task_id,
+                launch_policy=_mcp_event_policy(values),
+                expected_revision=task.revision,
+            )
+            print(updated.model_dump_json(indent=2))
         elif command == "mcp-package-deploy":
-            resource_uri = str(values.get("resource_uri", "")).strip()
-            session_handle = ""
-            if resource_uri:
-                session_handle = await client.create_session()
             deployment = await client.deploy_mcp_package(
                 str(Path(values["path"]).expanduser().resolve()),
                 values["server_id"],
-                resource_uri=resource_uri,
-                route_id=values.get("route_id", "events"),
-                session_handle=session_handle,
-                include_root=bool(values.get("include_root", False)),
-                tools_enabled=not bool(values.get("disable_resource_tools", False)),
-                priority=int(values.get("priority", 0)),
             )
             print(deployment.model_dump_json(indent=2))
         else:  # pragma: no cover - argparse constrains this
@@ -90,3 +110,15 @@ async def run_client_command(config: AppConfig, command: str, **values: Any) -> 
     finally:
         await client.disconnect()
     return 0
+
+
+def _mcp_event_policy(values: dict[str, Any]) -> TaskLaunchPolicy:
+    return TaskLaunchPolicy(
+        kind=TaskLaunchKind.EVENT,
+        event_source=f"mcp:{str(values['server_id']).strip()}",
+        source_config={
+            "resource_uri_prefix": str(values["resource_uri"]).strip(),
+            "include_root": True,
+            "include_descendants": bool(values.get("include_descendants", False)),
+        },
+    )

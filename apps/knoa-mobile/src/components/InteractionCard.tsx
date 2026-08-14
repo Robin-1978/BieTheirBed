@@ -3,6 +3,7 @@ import { ActivityIndicator, StyleSheet, Text, TextInput, View } from "react-nati
 
 import type { HumanInteraction } from "@/api/models";
 import { AppPressable } from "@/components/AppPressable";
+import { useI18n } from "@/i18n";
 import { colors } from "@/theme";
 
 export function InteractionCard({
@@ -14,6 +15,7 @@ export function InteractionCard({
   submitting: boolean;
   onSubmit(value: Record<string, unknown>): void;
 }) {
+  const { t } = useI18n();
   const fields = interaction.display.fields ?? [];
   const elicitationContent = interaction.resolution_schema.properties?.content;
   const formSchema = interaction.kind === "mcp_elicitation" && elicitationContent?.type === "object"
@@ -39,10 +41,10 @@ export function InteractionCard({
 
   return (
     <View style={styles.card}>
-      <Text style={styles.eyebrow}>{interaction.kind === "mcp_elicitation" ? "MCP Server 请求输入 · 这不是写入授权" : "需要你的输入 · 这不是写入授权"}</Text>
-      <Text style={styles.title}>{interaction.display.title || "补充信息"}</Text>
+      <Text style={styles.eyebrow}>{interaction.kind === "mcp_elicitation" ? t("interaction.mcpElicitation") : t("interaction.userInput")}</Text>
+      <Text style={styles.title}>{interaction.display.title || t("interaction.defaultTitle")}</Text>
       {interaction.display.description ? <Text style={styles.description}>{interaction.display.description}</Text> : null}
-      {!supported ? <Text style={styles.unsupported}>当前版本暂不支持这个表单，请在其他客户端处理。</Text> : fields.map((field) => {
+      {!supported ? <Text style={styles.unsupported}>{t("interaction.unsupported")}</Text> : fields.map((field) => {
         const schema = properties[field.id] ?? {};
         const options: Array<{ value: string; label: string; description?: string }> = field.options
           ?? (schema.enum ?? []).map((value) => ({ value, label: value }));
@@ -54,7 +56,7 @@ export function InteractionCard({
             {schema.type === "boolean" ? (
               <View style={styles.options}>
                 {[true, false].map((value) => (
-                  <Option key={String(value)} selected={values[field.id] === value} label={value ? "是" : "否"} onPress={() => setValues((current) => ({ ...current, [field.id]: value }))} />
+                  <Option key={String(value)} selected={values[field.id] === value} label={value ? t("interaction.yes") : t("interaction.no")} onPress={() => setValues((current) => ({ ...current, [field.id]: value }))} />
                 ))}
               </View>
             ) : options.length ? (
@@ -79,7 +81,7 @@ export function InteractionCard({
         <View style={styles.actions}>
           {interaction.kind === "mcp_elicitation" ? (
             <AppPressable disabled={submitting} onPress={() => onSubmit({ action: "decline" })} style={[styles.secondary, submitting && styles.disabled]}>
-              <Text style={styles.secondaryText}>拒绝提供</Text>
+              <Text style={styles.secondaryText}>{t("interaction.decline")}</Text>
             </AppPressable>
           ) : null}
           <AppPressable
@@ -87,7 +89,7 @@ export function InteractionCard({
             onPress={() => onSubmit(interaction.kind === "mcp_elicitation" ? { action: "accept", content: values } : values)}
             style={[styles.submit, (!complete || submitting) && styles.disabled]}
           >
-            {submitting ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.submitText}>提交选择</Text>}
+            {submitting ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.submitText}>{t("interaction.submit")}</Text>}
           </AppPressable>
         </View>
       ) : null}

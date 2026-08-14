@@ -13,6 +13,8 @@ from knoa_platform.agent_runtime.contracts import (
     MemoryClearResult,
     MemoryListResult,
     MemoryRecord,
+    MCPResourceCatalogRecord,
+    MCPResourceCatalogResult,
     RuntimeScope,
     RuntimeStatus,
     ToolDescriptorRecord,
@@ -41,6 +43,7 @@ class ControlService:
         ) = None,
         status_details: Callable[[RuntimeScope], dict[str, Any]] | None = None,
         extension_statuses: Callable[[], Iterable[ExtensionStatusRecord]] | None = None,
+        mcp_resources: Callable[[], Iterable[MCPResourceCatalogRecord]] | None = None,
         agent_selector: Callable[[str | None], str] | None = None,
         config_admin_principals: frozenset[str] = frozenset({"local"}),
     ) -> None:
@@ -51,6 +54,7 @@ class ControlService:
         self._config_controller = config_controller
         self._status_details = status_details
         self._extension_statuses = extension_statuses
+        self._mcp_resources = mcp_resources
         self._agent_selector = agent_selector or (lambda requested: requested or "knoa")
         self._config_admin_principals = config_admin_principals
 
@@ -158,3 +162,16 @@ class ControlService:
         if owned.principal_id not in self._config_admin_principals:
             raise PermissionError("Configuration capability denied")
         return await self._config_controller.set_config(request)
+
+    async def list_mcp_resources(
+        self,
+        principal_id: str,
+    ) -> MCPResourceCatalogResult:
+        if not principal_id.strip():
+            raise PermissionError("Principal is required")
+        resources = (
+            tuple(self._mcp_resources())
+            if self._mcp_resources is not None
+            else ()
+        )
+        return MCPResourceCatalogResult(resources=resources)

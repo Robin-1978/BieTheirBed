@@ -43,6 +43,15 @@ export type TaskLaunchPolicy = {
 
 export type TaskLaunchReason = "created" | "manual" | "scheduled" | "event" | "rerun" | "follow_up";
 
+export type MCPResourceCatalogItem = {
+  server_id: string;
+  uri: string;
+  name: string;
+  description: string;
+  mime_type: string;
+  subscribable: boolean;
+};
+
 export type ArtifactInput = {
   artifact_id: string;
   caption?: string;
@@ -80,10 +89,19 @@ export type ChatApproval = {
   tool_name: string;
   arguments: Record<string, unknown>;
   reason: string;
+  display?: ApprovalDisplay;
   state: string;
   created_at: number;
   resolved_at: number | null;
   resolved_by: string;
+};
+
+export type ApprovalDisplay = {
+  tool_name: string;
+  effect: string;
+  risk: string;
+  arguments_preview: string;
+  reversible: boolean;
 };
 
 export type HumanInteraction = {
@@ -208,6 +226,7 @@ export type TaskApproval = {
   tool_name: string;
   arguments: Record<string, unknown>;
   reason: string;
+  display?: ApprovalDisplay;
   state: "pending" | "approved" | "denied" | "expired";
   created_at: number;
   resolved_at: number | null;

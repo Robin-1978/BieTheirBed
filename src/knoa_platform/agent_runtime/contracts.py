@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, Protocol, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from knoa_platform.artifacts import ArtifactRef
 
@@ -103,6 +103,21 @@ class ToolListResult(ContractModel):
     descriptors: tuple[ToolDescriptorRecord, ...] = ()
 
 
+class MCPResourceCatalogRecord(ContractModel):
+    """A discovered, read-only MCP Resource exposed to client configuration UIs."""
+
+    server_id: Identifier128
+    uri: Annotated[str, StringConstraints(max_length=4096)]
+    name: Annotated[str, StringConstraints(max_length=256)] = ""
+    description: Annotated[str, StringConstraints(max_length=2000)] = ""
+    mime_type: Annotated[str, StringConstraints(max_length=256)] = ""
+    subscribable: bool = False
+
+
+class MCPResourceCatalogResult(ContractModel):
+    resources: tuple[MCPResourceCatalogRecord, ...] = ()
+
+
 class ConfigSetRequest(ContractModel):
     field_name: NonEmptyString
     value: bool | int | float | str
@@ -175,6 +190,11 @@ class ControlServicePort(Protocol):
         self,
         scope: RuntimeScope,
     ) -> ToolListResult: ...
+
+    async def list_mcp_resources(
+        self,
+        principal_id: NonEmptyString,
+    ) -> MCPResourceCatalogResult: ...
 
     async def set_config(
         self,

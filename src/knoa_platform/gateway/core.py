@@ -8,6 +8,7 @@ from typing import Protocol
 from knoa_platform.agent_runtime.contracts import (
     ArtifactDownloadResult,
     ArtifactTranscriptionResult,
+    MCPResourceCatalogResult,
     RuntimeStatus,
     ToolListResult,
 )
@@ -212,6 +213,8 @@ class GatewayCoreClient(Protocol):
     async def status(self, session_handle: str) -> RuntimeStatus: ...
 
     async def list_tools(self, session_handle: str) -> ToolListResult: ...
+
+    async def list_mcp_resources(self) -> MCPResourceCatalogResult: ...
 
     async def resolve_approval(
         self,
@@ -675,6 +678,12 @@ class GatewayCoreBridge:
         session_handle: str,
     ) -> ToolListResult:
         return await (await self._client_for(principal_id)).list_tools(session_handle)
+
+    async def list_mcp_resources(
+        self,
+        principal_id: str,
+    ) -> MCPResourceCatalogResult:
+        return await (await self._client_for(principal_id)).list_mcp_resources()
 
     async def resolve_approval(
         self,

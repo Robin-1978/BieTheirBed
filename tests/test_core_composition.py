@@ -195,7 +195,6 @@ def test_core_composition_builds_forward_only_registry_and_profiles(
         "mcp_connect",
         "mcp_inspect",
         "mcp_disable",
-        "mcp_configure_resource_task",
         "tool_help",
     } <= local
     assert {"web_search", "web_fetch", "weather", "currency"} <= remote

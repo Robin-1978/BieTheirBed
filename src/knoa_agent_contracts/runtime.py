@@ -15,7 +15,6 @@ Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 
 AgentCapability: TypeAlias = Literal[
     "turn.steer",
-    "interaction.approval",
     "interaction.user_input",
     "mcp.client",
     "input.image",
@@ -224,8 +223,6 @@ class InteractionRequested(_RuntimeEvent):
     interaction_id: Identifier
     interaction_epoch: int = Field(ge=1)
     kind: Literal[
-        "tool_approval",
-        "permission_approval",
         "user_input",
         "mcp_elicitation",
     ]

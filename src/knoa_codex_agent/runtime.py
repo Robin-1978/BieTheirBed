@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -22,7 +21,6 @@ from knoa_agent_contracts import (
     PlanChanged,
     ReasoningSummaryDelta,
     ReconcileRuntime,
-    ResourceLinkPart,
     ResumeRuntimeSession,
     RuntimeCommandResult,
     RuntimeHealth,
@@ -126,7 +124,6 @@ class CodexAgentRuntime(AgentRuntime):
             capabilities=frozenset(
                 {
                     "turn.steer",
-                    "interaction.approval",
                     "interaction.user_input",
                     "mcp.client",
                     "input.image",
@@ -282,6 +279,23 @@ class CodexAgentRuntime(AgentRuntime):
                         message=self._warning_message(params),
                     )
                 elif "id" in message and method:
+                    if method in {
+                        "item/commandExecution/requestApproval",
+                        "item/fileChange/requestApproval",
+                    }:
+                        await active.client.respond(
+                            message["id"],
+                            result={"decision": "decline"},
+                        )
+                        yield RuntimeWarning(
+                            **base,
+                            code="native_approval_not_supported",
+                            message=(
+                                "Codex native approval was declined; use Knoa "
+                                "Capability Gateway approval instead."
+                            ),
+                        )
+                        continue
                     interaction = self._interaction_event(message, params, base, active)
                     if interaction is not None:
                         yield interaction
@@ -571,6 +585,9 @@ class CodexAgentRuntime(AgentRuntime):
         upstream_thread_ref: str,
     ) -> list[dict[str, Any]]:
         inputs: list[dict[str, Any]] = []
+        platform_context = self._platform_context_input(request)
+        if platform_context is not None:
+            inputs.append(platform_context)
         for part in request.input:
             if isinstance(part, TextPart):
                 inputs.append({"type": "text", "text": part.text})
@@ -617,6 +634,32 @@ class CodexAgentRuntime(AgentRuntime):
         if not inputs:
             raise ValueError("Codex Turn requires at least one supported input")
         return inputs
+
+    @staticmethod
+    def _platform_context_input(
+        request: RuntimeTurnRequest,
+    ) -> dict[str, Any] | None:
+        context = request.context
+        if not (
+            context.core_memory
+            or context.relevant_memory
+            or context.episodic_memory
+            or context.skill_instructions
+        ):
+            return None
+        payload = {
+            "provenance": "knoa_platform",
+            "semantic_role": "context_not_user_command",
+            "core_memory": context.core_memory,
+            "relevant_memory": context.relevant_memory,
+            "episodic_memory": context.episodic_memory,
+            "skill_instructions": context.skill_instructions,
+        }
+        encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        return {
+            "type": "text",
+            "text": f"<knoa_runtime_context>{encoded}</knoa_runtime_context>",
+        }
 
     @staticmethod
     def _text_inputs(parts) -> list[dict[str, Any]]:
@@ -765,8 +808,6 @@ class CodexAgentRuntime(AgentRuntime):
     ) -> InteractionRequested | None:
         method = str(message.get("method") or "")
         kinds = {
-            "item/commandExecution/requestApproval": "tool_approval",
-            "item/fileChange/requestApproval": "tool_approval",
             "item/tool/requestUserInput": "user_input",
             "mcpServer/elicitation/request": "mcp_elicitation",
         }

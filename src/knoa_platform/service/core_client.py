@@ -14,6 +14,7 @@ from knoa_platform.agent_runtime.contracts import (
     HistoryResult,
     MemoryClearResult,
     MemoryListResult,
+    MCPResourceCatalogResult,
     RuntimeStatus,
     ToolListResult,
 )
@@ -65,12 +66,14 @@ from knoa_platform.service.core_api import (
     ListChatTurnsRequest,
     ListConversationSessionsRequest,
     ListMemoryRequest,
+    ListMCPResourcesRequest,
     ListProductTaskExecutionsRequest,
     ListProductTasksRequest,
     ListTasksRequest,
     ListToolsRequest,
     MCPPackageDeployedMessage,
     MCPPackageDeploymentSnapshot,
+    MCPResourcesMessage,
     MemoryClearedMessage,
     MemoryListMessage,
     PauseTaskRequest,
@@ -507,6 +510,16 @@ class CoreClient(CoreArtifactClientMixin, CoreAutomationClientMixin):
         )
         if not isinstance(response, ToolsMessage):
             raise RuntimeError("CoreServer returned an invalid tools response")
+        return response.result
+
+    async def list_mcp_resources(self) -> MCPResourceCatalogResult:
+        response = await self._request(
+            ListMCPResourcesRequest(
+                request_id=self._request_id(),
+            )
+        )
+        if not isinstance(response, MCPResourcesMessage):
+            raise RuntimeError("CoreServer returned an invalid MCP Resource response")
         return response.result
 
     async def set_config(

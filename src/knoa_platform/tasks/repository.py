@@ -125,6 +125,7 @@ class TaskRepository(
         self._trace_retention_seconds = float(trace_retention_seconds)
         initialize_wal(self._path)
         self._initialize()
+        self.normalize_event_launch_policies()
 
     def _connect(self) -> sqlite3.Connection:
         connection = connect_sqlite(self._path, foreign_keys=True)

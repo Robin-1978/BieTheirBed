@@ -101,6 +101,14 @@ class _Tasks:
             if definition.principal_id == principal_id
         )
 
+    async def list_event_definitions(self, event_source: str, **kwargs):
+        self.calls.append(("list_event", event_source, kwargs))
+        return tuple(
+            definition
+            for definition in self.definitions
+            if definition.launch_policy.event_source == event_source
+        )
+
     async def launch_binding(self, principal_id: str, task_id: str):
         self.calls.append(("binding", principal_id, task_id))
         return self.bindings.get(task_id)
@@ -118,6 +126,10 @@ class _Tasks:
         )
         self.bindings[task_id] = (provider_kind, provider_id)
 
+    async def unbind_launch(self, principal_id: str, task_id: str) -> None:
+        self.calls.append(("unbind", principal_id, task_id))
+        self.bindings.pop(task_id, None)
+
 
 class _Triggers:
     def __init__(self) -> None:
@@ -132,6 +144,11 @@ class _Triggers:
 
     async def delete(self, principal_id: str, trigger_id: str) -> None:
         self.deleted.append((principal_id, trigger_id))
+
+    async def get(self, principal_id: str, trigger_id: str):
+        if trigger_id.startswith("missing-"):
+            raise LookupError(trigger_id)
+        return SimpleNamespace(trigger_id=trigger_id)
 
     async def receive(
         self,
@@ -167,7 +184,11 @@ def _definition(
             kind=TaskLaunchKind.EVENT,
             event_source="mcp:jira",
             source_config=(
-                {"resource_uri_prefix": "jira://assigned-to-me/events"}
+                {
+                    "resource_uri_prefix": "jira://assigned-to-me/events",
+                    "include_root": True,
+                    "include_descendants": True,
+                }
                 if source_config is None
                 else source_config
             ),
@@ -219,7 +240,7 @@ async def test_resource_inventory_triggers_one_existing_event_task() -> None:
     assert payload["resource_uri"] == event
     assert payload["contents"][0]["text"] == "Analyze Jira issue PROJECT-1"
     assert outside not in provider.subscribed
-    assert set(provider.subscribed) == {root, event}
+    assert provider.subscribed == [event]
 
 
 @pytest.mark.asyncio
@@ -365,3 +386,50 @@ async def test_legacy_event_task_repairs_missing_trigger_binding() -> None:
     assert tasks.bindings["task-a"] == ("event", "trigger-repaired")
     assert len(triggers.created) == 1
     assert len(triggers.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_stale_trigger_binding_is_replaced() -> None:
+    event = "jira://assigned-to-me/events/assignment-1"
+    provider = _Provider((_resource(event),))
+    provider.snapshots[event] = _snapshot(event, "Analyze Jira issue PROJECT-1")
+    tasks = _Tasks((_definition(),))
+    tasks.bindings["task-a"] = ("event", "missing-trigger")
+    triggers = _Triggers()
+    bridge = MCPResourceTaskBridge((provider,), tasks, _Sessions(), triggers)
+
+    await bridge.reconcile_once()
+
+    assert ("unbind", "principal-a", "task-a") in tasks.calls
+    assert tasks.bindings["task-a"] == ("event", "trigger-repaired")
+    assert len(triggers.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_missing_binding_is_repaired_without_any_resource() -> None:
+    provider = _Provider(())
+    tasks = _Tasks((_definition(),))
+    tasks.bindings.clear()
+    bridge = MCPResourceTaskBridge((provider,), tasks, _Sessions(), _Triggers())
+
+    await bridge.reconcile_once()
+
+    assert tasks.bindings["task-a"] == ("event", "trigger-repaired")
+    assert bridge.catalog() == ()
+
+
+@pytest.mark.asyncio
+async def test_legacy_server_routes_do_not_activate_event_delivery() -> None:
+    event = "jira://assigned-to-me/events/assignment-1"
+    provider = _Provider((_resource(event),))
+    provider.snapshots[event] = _snapshot(event, "Analyze Jira issue PROJECT-1")
+    triggers = _Triggers()
+    bridge = MCPResourceTaskBridge((provider,), _Tasks(()), _Sessions(), triggers)
+
+    await bridge.reconcile_once()
+
+    assert triggers.calls == []
+    assert provider.subscribed == []
+    assert [(item.server_id, item.uri) for item in bridge.catalog()] == [
+        ("jira", event)
+    ]

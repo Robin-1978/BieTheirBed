@@ -97,7 +97,12 @@ class MCPServerConfig(ExtensionConfigModel):
     inherit_env: tuple[str, ...] = Field(default=(), max_length=64)
     timeout_seconds: float = Field(default=30.0, ge=1.0, le=300.0)
     tools: dict[str, MCPToolPolicyConfig] = Field(default_factory=dict)
-    resource_tasks: dict[str, MCPResourceTaskConfig] = Field(default_factory=dict)
+    # Read-only compatibility for pre-0.2.10 configuration. Event routing now
+    # belongs to TaskLaunchPolicy and this field is never serialized again.
+    resource_tasks: dict[str, MCPResourceTaskConfig] = Field(
+        default_factory=dict,
+        exclude=True,
+    )
 
     @field_validator("url")
     @classmethod

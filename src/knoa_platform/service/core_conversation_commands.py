@@ -10,6 +10,7 @@ from knoa_platform.agent_runtime.contracts import (
     ControlServicePort,
     RuntimeScope,
 )
+from knoa_platform.approvals.display import approval_display
 from knoa_platform.conversation import ConversationService
 from knoa_platform.service.core_api import (
     CancelChatTurnRequest,
@@ -36,7 +37,9 @@ from knoa_platform.service.core_api import (
     ListChatTurnsRequest,
     ListConversationSessionsRequest,
     ListMemoryRequest,
+    ListMCPResourcesRequest,
     ListToolsRequest,
+    MCPResourcesMessage,
     MemoryClearedMessage,
     MemoryListMessage,
     ResolveChatApprovalRequest,
@@ -195,7 +198,14 @@ class ConversationCommandHandler:
             )
             await send(ChatApprovalResolvedMessage(
                 request_id=request.request_id,
-                approval=ChatApprovalSnapshot.model_validate(approval.model_dump()),
+                approval=ChatApprovalSnapshot(
+                    **approval.model_dump(),
+                    display=approval_display(
+                        approval.tool_name,
+                        approval.arguments,
+                        approval.reason,
+                    ),
+                ),
                 resolved=changed,
             ))
         elif isinstance(request, GetStatusRequest):
@@ -227,6 +237,11 @@ class ConversationCommandHandler:
             await send(ToolsMessage(
                 request_id=request.request_id,
                 result=await self._control.list_tools(scope),
+            ))
+        elif isinstance(request, ListMCPResourcesRequest):
+            await send(MCPResourcesMessage(
+                request_id=request.request_id,
+                result=await self._control.list_mcp_resources(principal),
             ))
         elif isinstance(request, SetConfigRequest):
             scope = RuntimeScope(principal_id=principal, session_handle=request.session_handle)

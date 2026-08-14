@@ -171,6 +171,18 @@ class DeviceRoutes:
             return self._core_error(exc)
         return JSONResponse({"result": result.model_dump(mode="json")})
 
+    async def _list_mcp_resources(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=120)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        try:
+            result = await self._core.list_mcp_resources(
+                authenticated.device.principal_id,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse({"result": result.model_dump(mode="json")})
+
     async def _latest_android_release(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=30)
         if isinstance(authenticated, JSONResponse):
