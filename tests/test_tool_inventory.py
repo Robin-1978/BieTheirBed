@@ -2,7 +2,18 @@ from __future__ import annotations
 
 import pytest
 
-from knoa_agent import ToolInventory
+from knoa_agent import SemanticSelection, ToolInventory
+
+
+class SemanticSelector:
+    def select(self, query, candidates):
+        del candidates
+        if "构建日志" in query:
+            return SemanticSelection(
+                names=frozenset({"mcp__jira__issue_get"}),
+                mode="bge",
+            )
+        return SemanticSelection()
 
 
 class Client:
@@ -144,7 +155,7 @@ async def test_projection_keeps_builtin_tools_static_and_mcp_tools_deferred() ->
         "write_file",
     ]
     assert selected[1]["inputSchema"]["required"] == ["query"]
-    assert "description" not in selected[1]
+    assert selected[1]["description"] == "Search the web for relevant sources"
 
     assert inventory.activate(
         "session-a",
@@ -155,12 +166,45 @@ async def test_projection_keeps_builtin_tools_static_and_mcp_tools_deferred() ->
 
     jira = selected[0]
     assert jira["name"] == "mcp__jira__issue_get"
-    assert "description" not in jira
+    assert jira["description"] == "Get one Jira issue"
     assert jira["inputSchema"] == {
         "type": "object",
         "properties": {"issue_key": {"type": "string"}},
         "required": ["issue_key"],
     }
+
+
+@pytest.mark.asyncio
+async def test_resource_task_automatically_injects_tools_from_its_mcp_source() -> None:
+    inventory = ToolInventory(schema_char_budget=4000, semantic_selector=SemanticSelector())
+    snapshot = await inventory.load("session-a", "digest-a", Client())
+
+    projection = await inventory.project_for_turn(
+        "session-a",
+        snapshot,
+        "MCP server: jira\nMCP resource: jira://assigned/event-1",
+    )
+
+    assert projection.mode == "source"
+    assert projection.matched_names == ("mcp__jira__issue_get",)
+    assert projection.schema_hits == 1
+    assert "mcp__jira__issue_get" in {tool["name"] for tool in projection.tools}
+
+
+@pytest.mark.asyncio
+async def test_optional_bge_match_is_or_merged_with_deterministic_selection() -> None:
+    inventory = ToolInventory(schema_char_budget=4000, semantic_selector=SemanticSelector())
+    snapshot = await inventory.load("session-a", "digest-a", Client())
+
+    projection = await inventory.project_for_turn(
+        "session-a",
+        snapshot,
+        "分析构建日志为什么失败",
+    )
+
+    assert projection.mode == "bge"
+    assert projection.matched_names == ("mcp__jira__issue_get",)
+    assert projection.schema_hits == 1
 
 
 @pytest.mark.asyncio

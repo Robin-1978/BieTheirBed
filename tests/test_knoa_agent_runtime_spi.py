@@ -410,7 +410,7 @@ async def test_knoa_runtime_statically_injects_weather_for_chinese_query(
         "tool_help",
         "weather",
     ]
-    assert "description" not in provider.requests[0].tools[1]
+    assert provider.requests[0].tools[1]["description"] == "Get weather for a location."
 
 
 @pytest.mark.asyncio
@@ -441,6 +441,7 @@ async def test_tool_help_activates_deferred_mcp_tool_on_next_model_step(
 
     assert events[-1].status == "completed"
     assert [tool["name"] for tool in provider.requests[0].tools] == [
+        "mcp__jira__issue_get",
         "tool_help",
         "weather",
     ]

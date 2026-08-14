@@ -232,6 +232,7 @@ class JiraStateStore:
                 CREATE TABLE IF NOT EXISTS assignment_events (
                     event_id TEXT PRIMARY KEY,
                     issue_key TEXT NOT NULL,
+                    snapshot_json TEXT NOT NULL DEFAULT '{}',
                     detected_at REAL NOT NULL,
                     retained_until REAL NOT NULL
                 );
@@ -259,6 +260,15 @@ class JiraStateStore:
                 );
                 """
             )
+            columns = {
+                str(row[1])
+                for row in db.execute("PRAGMA table_info(assignment_events)")
+            }
+            if "snapshot_json" not in columns:
+                db.execute(
+                    "ALTER TABLE assignment_events "
+                    "ADD COLUMN snapshot_json TEXT NOT NULL DEFAULT '{}'"
+                )
 
     def assignment_source_initialized(self, source_id: str) -> bool:
         with self._connect() as db:
@@ -323,14 +333,21 @@ class JiraStateStore:
         issue_key: str,
         *,
         retention_seconds: float,
+        snapshot: dict[str, Any] | None = None,
     ) -> bool:
         now = time.time()
         with self._connect() as db:
             cursor = db.execute(
                 """INSERT OR IGNORE INTO assignment_events(
-                       event_id, issue_key, detected_at, retained_until
-                   ) VALUES (?, ?, ?, ?)""",
-                (event_id, issue_key, now, now + retention_seconds),
+                       event_id, issue_key, snapshot_json, detected_at, retained_until
+                   ) VALUES (?, ?, ?, ?, ?)""",
+                (
+                    event_id,
+                    issue_key,
+                    json.dumps(snapshot or {}, ensure_ascii=False, sort_keys=True),
+                    now,
+                    now + retention_seconds,
+                ),
             )
             return cursor.rowcount == 1
 
@@ -345,21 +362,30 @@ class JiraStateStore:
         self.cleanup_events()
         with self._connect() as db:
             rows = db.execute(
-                """SELECT event_id, issue_key, detected_at
+                """SELECT event_id, issue_key, snapshot_json, detected_at
                    FROM assignment_events
                    ORDER BY detected_at, event_id"""
             ).fetchall()
-        return tuple(dict(row) for row in rows)
+        return tuple(
+            {
+                **dict(row),
+                "snapshot": json.loads(row["snapshot_json"]),
+            }
+            for row in rows
+        )
 
     def get_assignment_event(self, event_id: str) -> dict[str, Any] | None:
         self.cleanup_events()
         with self._connect() as db:
             row = db.execute(
-                """SELECT event_id, issue_key, detected_at
+                """SELECT event_id, issue_key, snapshot_json, detected_at
                    FROM assignment_events WHERE event_id=?""",
                 (event_id,),
             ).fetchone()
-        return None if row is None else dict(row)
+        return None if row is None else {
+            **dict(row),
+            "snapshot": json.loads(row["snapshot_json"]),
+        }
 
     def get_comment_action(self, idempotency_key: str) -> dict[str, Any] | None:
         with self._connect() as db:
@@ -508,6 +534,11 @@ class JiraClient:
                 event_id,
                 issue_key,
                 retention_seconds=retention,
+                snapshot=(
+                    evidence.get("snapshot")
+                    if isinstance(evidence.get("snapshot"), dict)
+                    else {}
+                ),
             ):
                 created.append(
                     {
@@ -1028,12 +1059,55 @@ class JiraClient:
                 "attachments": downloaded,
             }
             self._write_json(manifest_path, manifest)
+            snapshot = {
+                "issue": {
+                    **issue,
+                    "description": str(issue.get("description", ""))[:8_000],
+                    "changelog": None,
+                },
+                "comments": [
+                    {
+                        **comment,
+                        "body": str(comment.get("body", ""))[:2_000],
+                    }
+                    for comment in comments[:10]
+                ],
+                "attachments": [
+                    {
+                        key: attachment.get(key)
+                        for key in (
+                            "attachment_id",
+                            "filename",
+                            "mime_type",
+                            "size",
+                            "sha256",
+                            "path",
+                        )
+                    }
+                    for attachment in downloaded[:50]
+                ],
+                "snapshot_limits": {
+                    "description_chars": 8_000,
+                    "comments": 10,
+                    "comment_chars": 2_000,
+                    "attachments": 50,
+                    "complete_comments": len(comments) <= 10,
+                    "complete_attachments": len(downloaded) <= 50,
+                },
+                "evidence": {
+                    "directory": str(issue_root),
+                    "manifest": str(manifest_path),
+                },
+                "prepared_by": "jira-mcp",
+                "prepared_at": manifest["materialized_at"],
+            }
             return {
                 "issue_key": key,
                 "evidence_directory": str(issue_root),
                 "manifest": str(manifest_path),
                 "attachment_count": len(downloaded),
                 "attachments": downloaded,
+                "snapshot": snapshot,
             }
 
     async def get_attachment_excerpt(

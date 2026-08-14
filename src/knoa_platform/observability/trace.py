@@ -114,6 +114,9 @@ class LLMTraceRecorder(JsonlRecorder):
         prompt_tokens_estimated: int = 0,
         prompt_tokens_source: str = "provider",
         completion_tokens_source: str = "provider",
+        tool_selection_mode: str = "",
+        tool_selection_hits: int = 0,
+        schema_hits: int = 0,
     ) -> None:
         self.record({
             "kind": "llm_call",
@@ -141,6 +144,9 @@ class LLMTraceRecorder(JsonlRecorder):
             "message_budget": message_budget,
             "schema_tokens": schema_tokens,
             "failover_used": failover_used,
+            "tool_selection_mode": tool_selection_mode,
+            "tool_selection_hits": tool_selection_hits,
+            "schema_hits": schema_hits,
         })
 
     def session_totals(

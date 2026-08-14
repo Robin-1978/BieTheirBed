@@ -20,7 +20,12 @@ Retry requires both `GITLAB_ACTIONS_ENABLED=true` and Knoa host approval. Every
 call requires a stable idempotency key; an ambiguous network outcome is stored
 as `outcome_unknown` and is never blindly repeated.
 
-The package polls configured projects for failed pipelines. Its first successful
+The package polls configured projects for failed pipelines. It filters events to
+pipelines attributable to the authenticated GitLab user: a direct Pipeline user,
+an associated Merge Request authored by that user, or a matching commit email.
+This deliberately keeps a later `ci-robot` packaging Pipeline when its SHA still
+belongs to that user's Merge Request, while ignoring unrelated developers'
+failures. Its first successful
 poll records a baseline without creating historical Tasks. Later failed states
 are published as immutable Resources below:
 
@@ -30,9 +35,12 @@ gitlab://failed-pipelines/events/{event_id}
 
 Bind the collection Resource to a principal-owned Session through `mcp_deploy`
 or `mcp_configure_resource_task` to create one durable diagnostic Task per
-event. The Task tells the Agent to inspect bounded CI evidence, inspect a bound
-set of Pipeline Jobs and their traces, report compile/build totals, compare
-failed jobs with successful jobs, and return `retry`, `stop`, or `needs_human`.
+event. Before publishing the Resource, the GitLab MCP Server prepares a bounded
+immutable snapshot containing compact Pipeline and Job data, failed Job trace
+tails, deterministic fingerprints, compile/build totals, ownership evidence and
+OOM signals. The Agent analyzes that snapshot directly and returns `retry`,
+`stop`, or `needs_human`; read Tools are only for missing evidence or later
+inspection.
 The diagnostic Task explicitly forbids local workspace, filesystem and shell
 access. Immediately before a Job retry, both the Agent and Provider re-read the
 Job and its Pipeline Job list. The Provider permits only `failed` or `canceled`
