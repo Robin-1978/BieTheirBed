@@ -128,25 +128,20 @@ class GitLabMCPApplication:
                 raise LookupError("GitLab failure event was not found")
             payload = event["payload"]
             text = (
-                "Diagnose this failed GitLab CI state using only the read-only GitLab "
-                "MCP Tools. Inspect the pipeline, list all jobs, and read bounded traces "
-                "for every failed compile/build job. Do not access a local workspace, "
+                "The GitLab MCP Server already prepared a bounded, immutable failure "
+                "snapshot containing pipeline metadata, compact Job summaries, failed "
+                "Job trace tails, fingerprints, compile/build totals, ownership evidence "
+                "and deterministic OOM signals. Analyze that snapshot first. Do not "
+                "repeat the initial get_pipeline/list_pipeline_jobs/get_job_trace sequence "
+                "unless the snapshot explicitly says it is incomplete. Do not access a local workspace, "
                 "do not call shell or filesystem Tools, and do not search the host. "
-                "Report the relevant compile/build job totals as: total, succeeded, "
-                "failed and skipped; list each failed job and its deterministic failure "
-                "fingerprint. Compare failed jobs with successful jobs from the same "
-                "pipeline. If failed jobs contain 'gcc: internal compiler error: Killed "
-                "(program cc1plus)' while other compile jobs succeeded, classify the "
-                "cause as likely Runner memory pressure/OOM rather than a general code "
-                "compile failure. Finish with exactly one decision: retry, stop or "
+                "Report the supplied compile/build totals and failed Job fingerprints. "
+                "Finish with exactly one decision: retry, stop or "
                 "needs_human, plus a short reason. A retry proposal must name one exact "
-                "failed job. Immediately before proposing or calling retry_job, read "
-                "that exact job again with gitlab.get_job, list its Pipeline Jobs again, "
-                "and confirm the target is failed or canceled and no newer Job with the "
-                "same name is active. Never retry when that logical Job already has a "
-                "created, pending, preparing, running, waiting_for_resource, scheduled "
-                "or canceling instance. Retry remains a high-risk host-approved MCP Tool "
-                "call. Do not retry the same failure fingerprint blindly.\n\n"
+                "failed job. retry_job performs a final live server-side check that the "
+                "target remains failed/canceled and no same-name Job is active; do not "
+                "retry the same failure fingerprint blindly. Retry remains a high-risk "
+                "host-approved MCP Tool call.\n\n"
                 + json.dumps(payload, ensure_ascii=False, indent=2)
             )
         else:
@@ -165,9 +160,9 @@ class GitLabMCPApplication:
         )
         tools = []
         for name, identifier, description in (
-            ("gitlab.get_pipeline", "pipeline_id", "Read one configured GitLab pipeline."),
-            ("gitlab.list_pipeline_jobs", "pipeline_id", "List jobs for one configured pipeline."),
-            ("gitlab.get_job", "job_id", "Read one configured GitLab CI job."),
+            ("gitlab.get_pipeline", "pipeline_id", "Get a GitLab CI pipeline by project path and pipeline ID."),
+            ("gitlab.list_pipeline_jobs", "pipeline_id", "List compact GitLab CI job summaries for a pipeline; use this before reading failed job traces."),
+            ("gitlab.get_job", "job_id", "Get the current status and metadata of one GitLab CI job."),
         ):
             tools.append(
                 types.Tool(
@@ -186,7 +181,7 @@ class GitLabMCPApplication:
         tools.append(
             types.Tool(
                 name="gitlab.get_job_trace",
-                description="Read a bounded tail of one configured GitLab CI job trace.",
+                description="Read only the bounded tail of one GitLab CI job log; use it to identify OOM, compiler, test, or infrastructure failures.",
                 input_schema=_schema(
                     {
                         "project": {"type": "string"},
@@ -200,8 +195,8 @@ class GitLabMCPApplication:
             )
         )
         for name, identifier, description in (
-            ("gitlab.retry_pipeline", "pipeline_id", "Retry a configured GitLab pipeline after host approval."),
-            ("gitlab.retry_job", "job_id", "Retry one configured GitLab CI job after host approval."),
+            ("gitlab.retry_pipeline", "pipeline_id", "Retry a GitLab CI pipeline after host approval and server-side guards."),
+            ("gitlab.retry_job", "job_id", "Retry one failed GitLab CI job after host approval; the server blocks active or duplicate logical jobs."),
         ):
             tools.append(
                 types.Tool(

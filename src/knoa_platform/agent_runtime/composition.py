@@ -7,7 +7,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from knoa_agent import ContextCheckpointRepository, KnoaAgentRuntime
+from knoa_agent import (
+    ContextCheckpointRepository,
+    DisabledToolSelector,
+    KnoaAgentRuntime,
+    ToolInventory,
+)
 from knoa_agent_contracts import RuntimeTurnContext, TurnFinished, UsageReported
 from knoa_codex_agent import CodexAgentRuntime, CodexSessionRepository
 from knoa_platform.agent_runtime.artifact_service import ArtifactService
@@ -373,6 +378,9 @@ def build_core_runtime(
             completion_tokens_source=str(
                 usage.get("completion_tokens_source") or "unavailable"
             ),
+            tool_selection_mode=str(usage.get("tool_selection_mode") or ""),
+            tool_selection_hits=_usage_integer(usage, "tool_selection_hits"),
+            schema_hits=_usage_integer(usage, "schema_hits"),
         )
 
     async def observe_turn(
@@ -506,6 +514,9 @@ def build_core_runtime(
             ),
             agent_id="reviewer_agent",
             display_name="Knoa Reviewer",
+            tool_inventory=ToolInventory(
+                semantic_selector=DisabledToolSelector()
+            ),
         )
     codex_config = config.agents.get("codex")
     if codex_config is not None and codex_config.enabled:

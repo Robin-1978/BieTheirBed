@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -28,6 +29,10 @@ _ACTIVE_JOB_STATUSES = frozenset(
     }
 )
 _RETRYABLE_JOB_STATUSES = frozenset({"failed", "canceled"})
+_SNAPSHOT_TRACE_LINES = 120
+_SNAPSHOT_TRACE_BYTES = 8 * 1024
+_SNAPSHOT_MAX_FAILED_JOBS = 8
+logger = logging.getLogger("gitlab-mcp-example")
 
 
 def _required_env(name: str) -> str:
@@ -172,6 +177,15 @@ class GitLabStateStore:
                 is not None
             )
 
+    def record_observed_failure(self, source_id: str, event_id: str) -> None:
+        with self._connect() as db:
+            db.execute(
+                """INSERT OR IGNORE INTO observed_failures(
+                       source_id, event_id, observed_at
+                   ) VALUES (?, ?, ?)""",
+                (source_id, event_id, time.time()),
+            )
+
     def add_failure_event(
         self,
         source_id: str,
@@ -285,6 +299,7 @@ class GitLabClient:
             follow_redirects=False,
         )
         self._action_locks: dict[str, asyncio.Lock] = {}
+        self._current_user: dict[str, Any] | None = None
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -317,6 +332,106 @@ class GitLabClient:
             raise TypeError("GitLab returned an invalid pipeline")
         return payload
 
+    async def current_user(self) -> dict[str, Any]:
+        if self._current_user is None:
+            payload = await self._json("GET", "/api/v4/user")
+            if not isinstance(payload, dict) or not payload.get("id"):
+                raise TypeError("GitLab returned an invalid current user")
+            self._current_user = payload
+        return dict(self._current_user)
+
+    async def pipeline_attribution(
+        self,
+        project: str,
+        pipeline: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Decide whether a pipeline belongs to the authenticated contributor.
+
+        A main-branch pipeline may be triggered by the merger, and a packaging
+        pipeline may be triggered by ``ci-robot``.  The commit's associated MR
+        author therefore takes precedence over the pipeline trigger user.
+        """
+        owner = await self.current_user()
+        owner_id = str(owner.get("id", ""))
+        owner_username = str(owner.get("username", "")).casefold()
+        owner_emails = {
+            str(owner.get(key, "")).casefold()
+            for key in ("email", "public_email", "commit_email")
+            if owner.get(key)
+        }
+        trigger = pipeline.get("user") if isinstance(pipeline.get("user"), dict) else {}
+        trigger_matches = (
+            str(trigger.get("id", "")) == owner_id
+            or str(trigger.get("username", "")).casefold() == owner_username
+        )
+        sha = str(pipeline.get("sha", "")).strip()
+        merge_requests: list[dict[str, Any]] = []
+        if sha:
+            payload = await self._json(
+                "GET",
+                f"/api/v4/projects/{self._project(project)}/repository/commits/{sha}/merge_requests",
+            )
+            if not isinstance(payload, list):
+                raise TypeError("GitLab returned an invalid commit merge request list")
+            merge_requests = [item for item in payload if isinstance(item, dict)]
+        owned_merge_requests = [
+            item for item in merge_requests
+            if isinstance(item.get("author"), dict)
+            and (
+                str(item["author"].get("id", "")) == owner_id
+                or str(item["author"].get("username", "")).casefold()
+                == owner_username
+            )
+        ]
+        commit_matches = False
+        commit: dict[str, Any] = {}
+        if sha and not trigger_matches and not owned_merge_requests:
+            payload = await self._json(
+                "GET",
+                f"/api/v4/projects/{self._project(project)}/repository/commits/{sha}",
+            )
+            if not isinstance(payload, dict):
+                raise TypeError("GitLab returned an invalid commit")
+            commit = payload
+            commit_matches = any(
+                str(payload.get(key, "")).casefold() in owner_emails
+                for key in ("author_email", "committer_email")
+            )
+        reasons = []
+        if trigger_matches:
+            reasons.append("pipeline_user")
+        if owned_merge_requests:
+            reasons.append("merge_request_author")
+        if commit_matches:
+            reasons.append("commit_email")
+        return {
+            "eligible": bool(reasons),
+            "reasons": reasons,
+            "owner": {
+                "id": owner.get("id"),
+                "username": owner.get("username"),
+            },
+            "pipeline_user": {
+                "id": trigger.get("id"),
+                "username": trigger.get("username"),
+            },
+            "merge_requests": [
+                {
+                    "iid": item.get("iid"),
+                    "title": item.get("title"),
+                    "source_branch": item.get("source_branch"),
+                    "target_branch": item.get("target_branch"),
+                    "author": item.get("author"),
+                }
+                for item in owned_merge_requests
+            ],
+            "commit": {
+                key: commit.get(key)
+                for key in ("id", "title", "author_email", "committer_email")
+                if key in commit
+            },
+        }
+
     async def list_pipeline_jobs(
         self, project: str, pipeline_id: str
     ) -> tuple[dict[str, Any], ...]:
@@ -328,7 +443,9 @@ class GitLabClient:
         )
         if not isinstance(payload, list):
             raise TypeError("GitLab returned an invalid job list")
-        return tuple(item for item in payload if isinstance(item, dict))
+        return tuple(
+            self._job_summary(item) for item in payload if isinstance(item, dict)
+        )
 
     async def get_job(self, project: str, job_id: str) -> dict[str, Any]:
         job_id = self._numeric_id(job_id, "job")
@@ -353,7 +470,7 @@ class GitLabClient:
         if not 1024 <= max_bytes <= 1_048_576:
             raise ValueError("max_bytes must be between 1024 and 1048576")
         path = f"/api/v4/projects/{self._project(project)}/jobs/{job_id}/trace"
-        chunks: list[bytes] = []
+        buffer = bytearray()
         total = 0
         async with self._client.stream(
             "GET", path, headers={"Range": f"bytes=-{max_bytes}"}
@@ -362,12 +479,10 @@ class GitLabClient:
             partial = response.status_code == 206
             async for chunk in response.aiter_bytes():
                 total += len(chunk)
-                if total > max_bytes:
-                    raise RuntimeError(
-                        "GitLab did not honor the bounded trace range request"
-                    )
-                chunks.append(chunk)
-        lines = b"".join(chunks).decode("utf-8", errors="replace").splitlines()
+                buffer.extend(chunk)
+                if len(buffer) > max_bytes:
+                    del buffer[: len(buffer) - max_bytes]
+        lines = bytes(buffer).decode("utf-8", errors="replace").splitlines()
         selected = lines[-tail_lines:]
         return {
             "project": project,
@@ -375,7 +490,173 @@ class GitLabClient:
             "trace": "\n".join(selected),
             "tail_lines": len(selected),
             "truncated_by_lines": len(lines) > len(selected),
-            "truncated_by_bytes": partial,
+            "truncated_by_bytes": partial or total > max_bytes,
+        }
+
+    @staticmethod
+    def _job_summary(item: dict[str, Any]) -> dict[str, Any]:
+        pipeline = item.get("pipeline") if isinstance(item.get("pipeline"), dict) else {}
+        runner = item.get("runner") if isinstance(item.get("runner"), dict) else {}
+        return {
+            key: item.get(key)
+            for key in (
+                "id",
+                "name",
+                "stage",
+                "status",
+                "failure_reason",
+                "allow_failure",
+                "created_at",
+                "started_at",
+                "finished_at",
+                "duration",
+                "queued_duration",
+                "web_url",
+            )
+            if key in item
+        } | {
+            "pipeline_id": pipeline.get("id"),
+            "runner": runner.get("description") or runner.get("name"),
+        }
+
+    @staticmethod
+    def _pipeline_summary(item: dict[str, Any]) -> dict[str, Any]:
+        user = item.get("user") if isinstance(item.get("user"), dict) else {}
+        return {
+            key: item.get(key)
+            for key in (
+                "id",
+                "status",
+                "ref",
+                "sha",
+                "source",
+                "created_at",
+                "updated_at",
+                "web_url",
+            )
+            if key in item
+        } | {
+            "user": {
+                "id": user.get("id"),
+                "username": user.get("username"),
+                "name": user.get("name"),
+            }
+        }
+
+    @staticmethod
+    def _latest_logical_jobs(
+        attempts: tuple[dict[str, Any], ...]
+    ) -> tuple[dict[str, Any], ...]:
+        """Collapse retried Job attempts to the newest instance per Job name."""
+        latest: dict[str, dict[str, Any]] = {}
+        unnamed: list[dict[str, Any]] = []
+        for job in attempts:
+            name = str(job.get("name", "")).strip()
+            if not name:
+                unnamed.append(job)
+                continue
+            current = latest.get(name)
+            if current is None or int(job.get("id", 0) or 0) > int(
+                current.get("id", 0) or 0
+            ):
+                latest[name] = job
+        return tuple(
+            sorted(
+                (*latest.values(), *unnamed),
+                key=lambda job: int(job.get("id", 0) or 0),
+            )
+        )
+
+    async def prepare_failure_snapshot(
+        self,
+        project: str,
+        pipeline_id: str,
+        *,
+        pipeline: dict[str, Any] | None = None,
+        attribution: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Collect the bounded evidence an Agent needs for a failed pipeline.
+
+        This is intentionally GitLab-specific.  The generic Platform only carries
+        the resulting Resource/Task; it does not know how to diagnose CI failures.
+        The snapshot is sufficient for an initial decision.  Retry still performs
+        its own live checks in ``_retry``.
+        """
+        pipeline = pipeline or await self.get_pipeline(project, pipeline_id)
+        attempts = await self.list_pipeline_jobs(project, pipeline_id)
+        jobs = self._latest_logical_jobs(attempts)
+        failed = [
+            job for job in jobs
+            if str(job.get("status", "")).casefold() in _RETRYABLE_JOB_STATUSES
+        ]
+        traces: list[dict[str, Any]] = []
+        for job in failed[:_SNAPSHOT_MAX_FAILED_JOBS]:
+            job_id = str(job.get("id", ""))
+            if not _NUMERIC_ID.fullmatch(job_id):
+                continue
+            trace = await self.get_job_trace(
+                project,
+                job_id,
+                tail_lines=_SNAPSHOT_TRACE_LINES,
+                max_bytes=_SNAPSHOT_TRACE_BYTES,
+            )
+            trace_text = str(trace.get("trace", ""))
+            traces.append({
+                "job": job,
+                "trace": trace,
+                "failure_fingerprint": hashlib.sha256(
+                    trace_text.encode("utf-8")
+                ).hexdigest()[:20],
+            })
+        compile_jobs = [
+            job for job in jobs
+            if any(
+                marker in str(job.get("name", "")).casefold()
+                or marker in str(job.get("stage", "")).casefold()
+                for marker in ("build", "compile")
+            )
+            and str(job.get("status", "")).casefold() != "manual"
+        ]
+        failed_compile = [
+            job for job in compile_jobs
+            if str(job.get("status", "")).casefold() in _RETRYABLE_JOB_STATUSES
+        ]
+        succeeded_compile = [
+            job for job in compile_jobs
+            if str(job.get("status", "")).casefold() == "success"
+        ]
+        oom_jobs = [
+            item["job"] for item in traces
+            if "killed (program cc1plus)" in str(item["trace"].get("trace", "")).casefold()
+            or "out of memory" in str(item["trace"].get("trace", "")).casefold()
+            or re.search(
+                r"\boom\b",
+                str(item["trace"].get("trace", "")),
+                flags=re.IGNORECASE,
+            )
+        ]
+        return {
+            "pipeline": self._pipeline_summary(pipeline),
+            "jobs": jobs,
+            "failed_jobs": failed,
+            "failed_job_traces": traces,
+            "compile_summary": {
+                "total": len(compile_jobs),
+                "succeeded": len(succeeded_compile),
+                "failed": len(failed_compile),
+                "skipped": sum(
+                    str(job.get("status", "")).casefold() == "skipped"
+                    for job in compile_jobs
+                ),
+            },
+            "signals": {
+                "likely_oom": bool(oom_jobs and succeeded_compile),
+                "oom_job_ids": [str(job.get("id")) for job in oom_jobs],
+                "snapshot_complete": len(failed) <= _SNAPSHOT_MAX_FAILED_JOBS,
+            },
+            "prepared_by": "gitlab-mcp",
+            "prepared_at": time.time(),
+            "attribution": attribution or {},
         }
 
     async def poll_failure_events(self) -> tuple[dict[str, Any], ...]:
@@ -422,6 +703,30 @@ class GitLabClient:
         for event_id, payload in candidates:
             if self.store.failure_observed(source_id, event_id):
                 continue
+            try:
+                pipeline = await self.get_pipeline(
+                    project, str(event_payload["pipeline_id"])
+                )
+                attribution = await self.pipeline_attribution(project, pipeline)
+                if not attribution["eligible"]:
+                    self.store.record_observed_failure(source_id, event_id)
+                    continue
+                snapshot = await self.prepare_failure_snapshot(
+                    project,
+                    str(event_payload["pipeline_id"]),
+                    pipeline=pipeline,
+                    attribution=attribution,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "GitLab failure snapshot preparation failed for %s pipeline %s",
+                    project,
+                    event_payload["pipeline_id"],
+                )
+                continue
+            event_payload["snapshot"] = snapshot
             if self.store.add_failure_event(
                 source_id, event_id, payload, retention
             ):

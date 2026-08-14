@@ -834,11 +834,12 @@ Gateway 的 `tools/list` 返回当前 grant 授权范围内的标准 MCP Tool in
 1. **Inventory cache**：按 `runtime_session_ref + scope_digest` 缓存标准 Tool definition、schema digest 和短描述；`scope_digest` 变化或收到标准 list-changed 信号后失效。
 2. **确定性规范化**：Tool 按稳定名称排序，JSON Schema 使用确定性序列化；不把动态健康状态、时间戳、token 或随机顺序混入模型 Tool definition。
 3. **会话静态核心**：普通会话必需的 built-in tools 使用确定性排序的精简调用签名静态注入，构成稳定的模型前缀。当前核心包含文件、网络、桌面、附件、记忆、天气以及会话内任务等直接用户能力；不按中英文关键词裁剪，避免“查天气”一类召回遗漏。
-4. **MCP 按需激活**：Platform MCP 管理工具和上游 MCP tools 默认只存在于完整 inventory，不进入普通模型调用。模型通过常驻的 `tool_help` 发现并确认具体工具后，`KnoaAgentRuntime` 从下一次 ModelStep 起把命中的工具加入该 Runtime Session 的活动集合；后续相关 Turn 可复用，`scope_digest` 变化时重新核对授权 inventory。
-5. **模型签名不是 MCP Tool**：Knoa Agent 对活动 Tool 生成私有的最小 model signature，只保留名称、参数结构、基础类型、`required`、`enum` 和必要组合结构；删除重复 description、`pattern`、长度、范围、默认值和输出 schema。该投影只用于 LLM provider 的 function-calling 字段，不对外发布，也不冒充 MCP 协议对象。
-6. **按需完整帮助**：`tool_help` 返回该工具的完整 MCP description、权威 `inputSchema`、验证约束和 examples。帮助结果只进入当前工作上下文，不改变 Platform registry；它可以触发 Knoa Agent 会话级 model signature 激活。
-7. **独立 schema budget**：model signature 使用独立预算。静态核心加已激活集合超限时明确失败或减少已激活 MCP 集合，不能删掉 `required`、参数形状等导致模型无法正确构造调用的信息。
-8. **提交端完整校验**：无论模型看见的是精简 signature 还是完整帮助，Gateway 在每次 `tools/call` 时仍按标准 MCP inventory 对应的权威完整 schema、policy、Approval 和 binding epoch 重新校验；模型侧 schema 从来不是授权或验证依据。
+4. **MCP Turn 召回**：Platform MCP 管理工具和上游 MCP tools 默认只存在于完整 inventory。首个 ModelStep 前，Agent 合并 MCP Resource Task 的同源 server namespace、确定性词法匹配和可选本地 BGE 语义匹配。BGE 依赖或模型不可用时自动退化，不阻塞 Turn。
+5. **MCP 按需激活**：召回结果直接加入 Runtime Session 的活动集合；常驻 `tool_help` 仍提供完整发现回退和 exact-name schema 帮助。后续相关 Turn 可复用，`scope_digest` 变化时重新核对授权 inventory。
+6. **模型签名不是 MCP Tool**：Knoa Agent 对活动 Tool 生成私有的最小 model signature，只保留名称、一个有界短描述、参数结构、基础类型、`required`、`enum` 和必要组合结构；删除 `pattern`、长度、范围、默认值和输出 schema。该投影只用于 LLM provider 的 function-calling 字段，不对外发布，也不冒充 MCP 协议对象。
+7. **按需完整帮助**：`tool_help` 返回该工具的完整 MCP description、权威 `inputSchema`、验证约束和 examples。帮助结果只进入当前工作上下文，不改变 Platform registry；它可以触发 Knoa Agent 会话级 model signature 激活。
+8. **独立 schema budget**：model signature 使用独立预算。静态核心加已激活集合超限时明确失败或减少已激活 MCP 集合，不能删掉 `required`、参数形状等导致模型无法正确构造调用的信息。
+9. **提交端完整校验**：无论模型看见的是精简 signature 还是完整帮助，Gateway 在每次 `tools/call` 时仍按标准 MCP inventory 对应的权威完整 schema、policy、Approval 和 binding epoch 重新校验；模型侧 schema 从来不是授权或验证依据。
 
 这里的 `tools/list` 是标准 MCP Client 与 MCP Server 之间的发现操作，不是直接注入模型的一个 Tool。模型侧只看到 `tool_help` 和当前活动 Tool signatures。发现闭环为：
 
@@ -846,12 +847,13 @@ Gateway 的 `tools/list` 返回当前 grant 授权范围内的标准 MCP Tool in
 MCP tools/list -> Agent inventory
                        |
                        +-> static built-in signatures
-                       `-> tool_help discovery -> session activation
-                                                   -> next ModelStep signature
+                       +-> source / lexical / optional BGE recall
+                       `-> tool_help discovery fallback -> session activation
+                                                           -> ModelStep signature
 MCP tools/call <- Gateway full-schema validation <- model tool call
 ```
 
-第一期不引入 embedding Tool router、关键词自动召回或单独的 Tool recommendation 模型。built-in 核心保持静态；MCP tool 通过明确的 `tool_help` 发现与会话级激活进入模型。只有真实 inventory 规模和发现失败率证明需要时，再增加语义检索，并保留确定性的全量发现回退。
+当前实现不引入独立 Tool router 服务或 recommendation LLM。built-in 核心保持静态；MCP tool 使用 Agent 内的同源/词法/可选 BGE 轻量召回，并保留 `tool_help` 的确定性完整发现回退。该改动来自真实 execution 数据：仅发现 GitLab tools 曾消耗 6 次 `tool_help`，因此满足 YAGNI 的问题证据门槛。
 
 为了保留 LLM prompt/KV cache 命中，Knoa Agent 采用：
 
@@ -1081,6 +1083,7 @@ Codex App Server MCP Client ─┘       |- Platform built-in handlers
 - Platform control、Artifact mediation 等少量平台内聚能力可以保留为 built-in handler，但必须包装成标准 MCP Tool/Resource；
 - 文件、Shell、桌面等 PC 业务能力属于 Knoa MCP Server；
 - Jira 逻辑属于 Jira MCP Server；
+- 业务事件的采集、关联、过滤与有界快照属于对应 MCP Server：例如 GitLab MCP 负责把 MR、主分支 Pipeline、同 SHA 的 ci-robot 打包 Pipeline、Jobs 和失败日志关联起来；Jira MCP 负责准备工单、评论和附件证据。Platform 只接收标准 Resource 并创建通用 Task，不重复实现业务判断；
 - Agent 不持有 `ToolRegistry`、上游 Server token 或 Approval repository；它只持有 MCP Client 和当前 Turn 的 grant；
 - Agent 从 `tools/list` 得到的 descriptor 如何进入 Prompt，属于 Agent 的 Prompt/context 策略；Platform 只决定哪些能力可见和可调用；
 - Gateway 调用上游 Tool 前执行 policy、Approval、幂等、预算和审计。Agent 自己声称“已批准”不产生 authority。

@@ -52,21 +52,32 @@ upper bound; it is not copied directly into every model request.
 
 Knoa Agent owns a separate model projection. Necessary conversation built-ins
 are injected as a small, deterministically ordered static signature set. The
-signature keeps names, parameter shapes, basic types, `required`, and enums, but
-does not duplicate full descriptions or validation-only constraints. This stable
+signature keeps names, one bounded description, parameter shapes, basic types,
+`required`, and enums, but omits validation-only constraints. This stable
 prefix avoids the earlier selector/embedding miss for ordinary abilities such as
 weather and improves prompt-cache reuse.
 
 Platform MCP management tools and proxied upstream MCP tools remain discoverable
 in the complete inventory but are not part of the ordinary static model prefix.
-The always-visible `tool_help` meta-tool supports query discovery and exact-name
-full-schema lookup. After an exact lookup, Knoa Agent activates that MCP tool for
-the Runtime Session and includes its compact signature from the next model step.
+Before the first model step, Knoa Agent OR-merges deterministic MCP-source matching,
+lexical matching and an optional local BGE match. MCP Resource Tasks therefore see
+the tools from their declared `MCP server` immediately; ordinary turns still work
+when BGE dependencies are absent. The always-visible `tool_help` meta-tool remains
+the complete discovery fallback and exact-name full-schema lookup. Selection mode,
+match count and schema-hit count are written into the per-call LLM trace.
 
 The model projection is not a security or validation boundary. Every call still
 passes the Gateway's complete JSON Schema validation, policy, approval,
 idempotency, binding-epoch, and verified-execution checks. Standard MCP
 `tools/list` and `tools/call` remain unchanged; no private MCP method is added.
+
+Business event preparation belongs to the upstream MCP Server. A GitLab Server
+may correlate Merge Requests, robot-triggered Pipelines, Jobs and bounded traces;
+a Jira Server may materialize issues, comments and attachments. It publishes a
+bounded immutable Resource snapshot sufficient for the Agent's initial decision.
+Knoa Platform only transports that Resource into a generic Task and enforces
+session, capability, approval and audit policy. MCP Tools remain available for
+missing evidence and live checks immediately before external side effects.
 
 ### 1.3 Context capacity, compaction, and live configuration
 

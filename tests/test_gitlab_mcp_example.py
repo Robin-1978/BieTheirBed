@@ -61,6 +61,16 @@ async def test_first_failed_pipeline_poll_is_baseline_then_new_state_is_event(
         return list(pipelines)
 
     client._json = request  # type: ignore[method-assign]
+    client.get_pipeline = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+    async def prepare(_project: str, _pipeline_id: str, **_kwargs):
+        return {"prepared_by": "gitlab-mcp"}
+    async def pipeline(_project: str, pipeline_id: str):
+        return {"id": int(pipeline_id), "sha": "abc", "user": {"id": 1}}
+    async def attribution(_project: str, _pipeline: dict):
+        return {"eligible": True, "reasons": ["pipeline_user"]}
+    client.get_pipeline = pipeline  # type: ignore[method-assign]
+    client.pipeline_attribution = attribution  # type: ignore[method-assign]
+    client.prepare_failure_snapshot = prepare  # type: ignore[method-assign]
     try:
         assert await client.poll_failure_events() == ()
         assert await client.poll_failure_events() == ()
@@ -73,6 +83,120 @@ async def test_first_failed_pipeline_poll_is_baseline_then_new_state_is_event(
     assert len(created) == 1
     assert created[0]["pipeline_id"] == "7"
     assert repeated == ()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_attribution_keeps_owned_mr_and_ci_robot_same_sha(
+    tmp_path: Path,
+) -> None:
+    client = GitLabClient(_settings(tmp_path), GitLabStateStore(tmp_path / "gitlab.db"))
+    client._current_user = {"id": 306, "username": "guyiming"}
+
+    async def request(method: str, path: str, **kwargs):
+        assert method == "GET"
+        assert path.endswith("/repository/commits/abc/merge_requests")
+        return [{
+            "iid": 328,
+            "title": "Owned change",
+            "author": {"id": 306, "username": "guyiming"},
+            "source_branch": "feature/owned",
+            "target_branch": "master",
+        }]
+
+    client._json = request  # type: ignore[method-assign]
+    try:
+        direct = await client.pipeline_attribution(
+            "team/repo",
+            {"sha": "abc", "user": {"id": 306, "username": "guyiming"}},
+        )
+        robot = await client.pipeline_attribution(
+            "team/repo",
+            {"sha": "abc", "user": {"id": 80, "username": "ci-robot"}},
+        )
+    finally:
+        await client.close()
+
+    assert direct["eligible"] is True
+    assert robot["eligible"] is True
+    assert "merge_request_author" in robot["reasons"]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_attribution_rejects_another_users_mr(tmp_path: Path) -> None:
+    client = GitLabClient(_settings(tmp_path), GitLabStateStore(tmp_path / "gitlab.db"))
+    client._current_user = {
+        "id": 306,
+        "username": "guyiming",
+        "commit_email": "guyiming@example.test",
+    }
+
+    async def request(method: str, path: str, **kwargs):
+        assert method == "GET"
+        if path.endswith("/merge_requests"):
+            return [{"author": {"id": 999, "username": "other"}}]
+        return {"author_email": "other@example.test"}
+
+    client._json = request  # type: ignore[method-assign]
+    try:
+        result = await client.pipeline_attribution(
+            "team/repo",
+            {"sha": "abc", "user": {"id": 80, "username": "ci-robot"}},
+        )
+    finally:
+        await client.close()
+
+    assert result["eligible"] is False
+
+
+@pytest.mark.asyncio
+async def test_failure_snapshot_contains_bounded_business_evidence(
+    tmp_path: Path,
+) -> None:
+    client = GitLabClient(_settings(tmp_path), GitLabStateStore(tmp_path / "gitlab.db"))
+
+    async def pipeline(_project: str, _pipeline_id: str):
+        return {"id": 7, "status": "failed", "sha": "abc", "ref": "master"}
+
+    async def jobs(_project: str, _pipeline_id: str):
+        return (
+            {"id": 9, "name": "build-x86", "stage": "build", "status": "failed"},
+            {"id": 10, "name": "build-arm", "stage": "build", "status": "failed"},
+            {"id": 13, "name": "build-x86", "stage": "build", "status": "success"},
+            {"id": 12, "name": "indigo", "stage": "build", "status": "manual"},
+            {"id": 11, "name": "docs", "stage": "docs", "status": "skipped"},
+        )
+
+    async def trace(_project: str, job_id: str, **_kwargs):
+        assert job_id == "10"
+        return {
+            "job_id": "10",
+            "trace": "gcc: internal compiler error: Killed (program cc1plus)",
+            "tail_lines": 1,
+            "truncated_by_lines": False,
+            "truncated_by_bytes": False,
+        }
+
+    client.get_pipeline = pipeline  # type: ignore[method-assign]
+    client.list_pipeline_jobs = jobs  # type: ignore[method-assign]
+    client.get_job_trace = trace  # type: ignore[method-assign]
+    try:
+        snapshot = await client.prepare_failure_snapshot(
+            "team/repo",
+            "7",
+            attribution={"eligible": True, "reasons": ["merge_request_author"]},
+        )
+    finally:
+        await client.close()
+
+    assert snapshot["compile_summary"] == {
+        "total": 2,
+        "succeeded": 1,
+        "failed": 1,
+        "skipped": 0,
+    }
+    assert snapshot["signals"]["likely_oom"] is True
+    assert snapshot["signals"]["oom_job_ids"] == ["10"]
+    assert len(snapshot["failed_job_traces"][0]["failure_fingerprint"]) == 20
 
 
 @pytest.mark.asyncio
@@ -104,6 +228,69 @@ async def test_read_tools_are_allowlisted_and_trace_is_bounded(tmp_path: Path) -
 
     assert trace["trace"] == "two\nthree"
     assert trace["truncated_by_bytes"] is True
+
+
+@pytest.mark.asyncio
+async def test_trace_falls_back_to_streaming_tail_when_range_is_ignored(
+    tmp_path: Path,
+) -> None:
+    client = GitLabClient(_settings(tmp_path), GitLabStateStore(tmp_path / "gitlab.db"))
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=(b"old-line\n" * 400) + b"oom-marker\nlast-line\n",
+            request=request,
+        )
+
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        base_url="https://gitlab.example.test",
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        trace = await client.get_job_trace(
+            "team/repo", "9", tail_lines=2, max_bytes=1024
+        )
+    finally:
+        await client.close()
+
+    assert trace["trace"] == "oom-marker\nlast-line"
+    assert trace["truncated_by_bytes"] is True
+
+
+@pytest.mark.asyncio
+async def test_pipeline_jobs_are_compact_summaries(tmp_path: Path) -> None:
+    client = GitLabClient(_settings(tmp_path), GitLabStateStore(tmp_path / "gitlab.db"))
+
+    async def request(method: str, path: str, **kwargs):
+        return [{
+            "id": 9,
+            "name": "build-x86",
+            "stage": "build",
+            "status": "failed",
+            "failure_reason": "script_failure",
+            "pipeline": {"id": 7, "huge": "ignored"},
+            "runner": {"description": "runner-a", "huge": "ignored"},
+            "commit": {"message": "must not be copied"},
+            "user": {"name": "must not be copied"},
+        }]
+
+    client._json = request  # type: ignore[method-assign]
+    try:
+        jobs = await client.list_pipeline_jobs("team/repo", "7")
+    finally:
+        await client.close()
+
+    assert jobs == ({
+        "id": 9,
+        "name": "build-x86",
+        "stage": "build",
+        "status": "failed",
+        "failure_reason": "script_failure",
+        "pipeline_id": 7,
+        "runner": "runner-a",
+    },)
 
 
 @pytest.mark.asyncio
@@ -274,12 +461,11 @@ async def test_mcp_exposes_resources_and_six_tools(tmp_path: Path) -> None:
         ),
     )
     text = instruction.contents[0].text
-    assert "total, succeeded, failed and skipped" in text
-    assert "Runner memory pressure/OOM" in text
+    assert "compile/build totals" in text
+    assert "deterministic OOM signals" in text
     assert "do not call shell or filesystem Tools" in text
     assert "local workspace" in text
-    assert "confirm the target is failed or canceled" in text
-    assert "no newer Job with the same name is active" in text
-    assert "created, pending, preparing, running" in text
+    assert "final live server-side check" in text
+    assert "no same-name Job is active" in text
     assert "inspect the referenced branch" not in text
     await app.gitlab.close()

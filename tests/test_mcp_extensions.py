@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -422,6 +423,34 @@ async def test_mcp_elicitation_uses_current_tool_step_interaction_owner(
         "cancel",
     ]
     await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_mcp_structured_result_drops_duplicate_json_text(tmp_path: Path) -> None:
+    definition = MCPToolDefinition(
+        name="ping",
+        description="Ping",
+        input_schema={"type": "object", "properties": {}},
+    )
+    payload = {"jobs": [{"id": 9, "status": "failed"}]}
+    client = _FakeMCPClient(
+        (definition,),
+        SimpleNamespace(
+            content=[SimpleNamespace(type="text", text=json.dumps(payload))],
+            structuredContent=payload,
+            isError=False,
+        ),
+    )
+    registry = ToolRegistry()
+    manager = ExtensionManager(registry, (_provider(_config(), client),))
+    await manager.start()
+    result = await ToolStep(registry, ToolArgumentPolicy(tmp_path)).execute(
+        _context(frozenset({ToolCapability.NETWORK, ToolCapability.MCP})),
+        ProposedToolCall(call_id="call-a", name="mcp__docs__ping"),
+    )
+    await manager.stop()
+
+    assert result.output == {"structured_content": payload}
 
 
 @pytest.mark.asyncio

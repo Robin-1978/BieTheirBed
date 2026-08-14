@@ -224,10 +224,12 @@ class KnoaAgentRuntime(AgentRuntime):
                     request.mcp.scope_digest,
                     client,
                 )
-                tools = self._tool_inventory.project(
+                projection = await self._tool_inventory.project_for_turn(
                     request.session.runtime_session_ref,
                     inventory,
+                    self._turn_query(request),
                 )
+                tools = projection.tools
                 durable_user = self._durable_user_message(request)
                 model_user = await self._model_user_message(request, client)
                 model_messages = [*durable_history, model_user]
@@ -351,6 +353,9 @@ class KnoaAgentRuntime(AgentRuntime):
                             "available_tools": len(tools),
                             "inventory_tools": len(inventory.tools),
                             "selected_tools": len(tools),
+                            "tool_selection_mode": projection.mode,
+                            "tool_selection_hits": len(projection.matched_names),
+                            "schema_hits": projection.schema_hits,
                             "provider_model": str(
                                 getattr(terminal_chunk, "provider_model", "") or ""
                             ),
@@ -435,6 +440,14 @@ class KnoaAgentRuntime(AgentRuntime):
                                 tools = self._tool_inventory.project(
                                     request.session.runtime_session_ref,
                                     inventory,
+                                )
+                                projection = projection.__class__(
+                                    tools=tools,
+                                    mode=projection.mode + "+tool_help",
+                                    matched_names=tuple(
+                                        sorted({*projection.matched_names, *activated})
+                                    ),
+                                    schema_hits=projection.schema_hits + len(activated),
                                 )
                 status = "interrupted" if cancellation.is_set() else "failed"
                 yield TurnFinished(
@@ -529,6 +542,14 @@ class KnoaAgentRuntime(AgentRuntime):
                 if isinstance(function, dict) and function.get("name"):
                     names.append(str(function["name"]))
         return frozenset(names)
+
+    @staticmethod
+    def _turn_query(request: RuntimeTurnRequest) -> str:
+        return "\n".join(
+            part.text
+            for part in request.input
+            if isinstance(part, TextPart) and part.text
+        )
 
     async def health_check(self) -> RuntimeHealth:
         try:

@@ -857,10 +857,18 @@ def _render_mcp_result(result: Any) -> dict[str, Any]:
         detail = "\n".join(error_texts).strip()
         return {"error": detail[:2000] or "MCP tool reported an error"}
 
-    output: dict[str, Any] = {"content": content}
     structured = _attribute(result, "structured_content", "structuredContent")
+    output: dict[str, Any]
     if structured is not None:
-        output["structured_content"] = structured
+        # MCP servers commonly return the same JSON twice: once as structured
+        # content and once as a compatibility TextContent block.  Keep the
+        # authoritative structured form and only retain non-text content.
+        non_text = [block for block in content if block.get("type") != "text"]
+        output = {"structured_content": structured}
+        if non_text:
+            output["content"] = non_text
+    else:
+        output = {"content": content}
     encoded = json.dumps(output, ensure_ascii=False, default=str).encode("utf-8")
     if len(encoded) > _MAX_RESULT_BYTES:
         return {"error": "MCP tool result exceeds the configured size limit"}

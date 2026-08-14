@@ -665,6 +665,9 @@ async def test_materialize_issue_writes_complete_manifest(tmp_path: Path) -> Non
     assert manifest["format"] == "knoa-jira-evidence-v1"
     assert manifest["attachments"][0]["path"].endswith("attachment-1-agent.log")
     assert result["attachment_count"] == 1
+    assert result["snapshot"]["issue"]["summary"] == "Failure"
+    assert result["snapshot"]["comments"][0]["id"] == "comment-1"
+    assert result["snapshot"]["attachments"][0]["filename"] == "agent.log"
 
 
 @pytest.mark.asyncio
@@ -768,6 +771,12 @@ async def test_assignment_resource_points_agent_to_materialized_directory(
         event_id,
         "PROJECT-123",
         retention_seconds=3600,
+        snapshot={
+            "prepared_by": "jira-mcp",
+            "issue": {"key": "PROJECT-123", "summary": "Prepared failure"},
+            "comments": [{"id": "comment-1", "body": "Prepared comment"}],
+            "attachments": [],
+        },
     )
 
     class Context:
@@ -788,6 +797,9 @@ async def test_assignment_resource_points_agent_to_materialized_directory(
     assert f"Source code root: {tmp_path / 'code'}" in text
     assert f"Additional local log root: {tmp_path / 'logs'}" in text
     assert "First instruction" in text
+    assert "bounded immutable event snapshot" in text
+    assert "Prepared failure" in text
+    assert "Prepared comment" in text
 
     prompt.write_text("Updated without restart", encoding="utf-8")
     refreshed = await app._read_resource(

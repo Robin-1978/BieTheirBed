@@ -6,7 +6,8 @@ This is a runnable standard MCP stdio server backed by a real Jira REST API. It 
 - durable immutable Resources for “assigned to me” transitions;
 - local materialization of issue, comments and all Jira attachments before an
   assignment Resource is published;
-- a lightweight MCP Resource pointing the Agent to the materialized directory;
+- a bounded Jira event snapshot embedded in the immutable MCP Resource, plus a
+  pointer to the complete materialized evidence directory for deeper analysis;
 - guarded Jira comment writes with explicit `outcome_unknown` handling;
 - automatic Knoa Durable Task creation through a generic Resource Task Source.
 
@@ -103,7 +104,9 @@ issue the server creates:
     └── attachment-id-diagnostics.zip
 ```
 
-The server does not extract archives. The selected Agent can use its authorized
+The assignment Resource already contains bounded issue fields, recent comments
+and attachment metadata, so the Agent does not need to repeat the initial Jira
+reads. The server does not extract archives. The selected Agent can use its authorized
 filesystem, shell, archive, image and code-analysis capabilities directly on
 this directory.
 
