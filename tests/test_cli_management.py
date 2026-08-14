@@ -4,9 +4,25 @@ from types import SimpleNamespace
 
 import pytest
 
-from knoa_platform.cli_management import run_client_command
+from knoa_platform.cli_management import _mcp_event_policy, run_client_command
 from knoa_platform.service.core_api import CoreError, MCPPackageDeploymentSnapshot
 from knoa_platform.service.core_client import CoreRequestError
+
+
+def test_mcp_event_policy_supports_descendant_events_without_collection_root() -> None:
+    policy = _mcp_event_policy(
+        {
+            "server_id": "jira",
+            "resource_uri": "jira://assigned-to-me/events",
+            "descendants_only": True,
+        }
+    )
+
+    assert policy.source_config == {
+        "resource_uri_prefix": "jira://assigned-to-me/events",
+        "include_root": False,
+        "include_descendants": True,
+    }
 
 
 @pytest.mark.asyncio

@@ -8,7 +8,7 @@ from knoa_platform.branding import (
     ASSISTANT_NAME_EN,
 )
 
-__version__ = "0.2.10"
+__version__ = "0.2.11"
 
 
 def _gateway_ttl(value: str) -> int:
@@ -114,10 +114,20 @@ def build_parser() -> argparse.ArgumentParser:
     tasks.add_argument("--limit", type=int, default=50)
     task = commands.add_parser("task", help="Show one durable product Task")
     task.add_argument("task_id")
+    task_state = commands.add_parser("task-state", help="Change a durable Task state")
+    task_state.add_argument("task_id")
+    task_state.add_argument("state", choices=("active", "paused", "archived"))
+    task_delete = commands.add_parser("task-delete", help="Delete a durable Task")
+    task_delete.add_argument("task_id")
     executions = commands.add_parser("executions", help="List a Task's Executions")
     executions.add_argument("task_id")
     execution = commands.add_parser("execution", help="Show one Task Execution")
     execution.add_argument("execution_id")
+    cancel_execution = commands.add_parser(
+        "execution-cancel", help="Cancel a running Task Execution"
+    )
+    cancel_execution.add_argument("execution_id")
+    cancel_execution.add_argument("--reason", default="")
     approve = commands.add_parser("approve", help="Approve a pending tool call")
     approve.add_argument("approval_id")
     deny = commands.add_parser("deny", help="Deny a pending tool call")
@@ -139,6 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
     create_event.add_argument("--title", default="")
     create_event.add_argument("--agent-id", default=None)
     create_event.add_argument("--include-descendants", action="store_true")
+    create_event.add_argument("--descendants-only", action="store_true")
     set_event = commands.add_parser(
         "task-set-event",
         help="Change an existing Task to an MCP Resource trigger",
@@ -147,6 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
     set_event.add_argument("server_id")
     set_event.add_argument("resource_uri")
     set_event.add_argument("--include-descendants", action="store_true")
+    set_event.add_argument("--descendants-only", action="store_true")
     mcp_deploy = commands.add_parser(
         "mcp-package-deploy",
         help="Explicitly deploy a local MCP package without invoking an Agent",
@@ -414,7 +426,8 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if args.command in {
-        "agents", "tasks", "task", "executions", "execution",
+        "agents", "tasks", "task", "task-state", "task-delete",
+        "executions", "execution", "execution-cancel",
         "approve", "deny", "resolve", "follow-up", "mcp-package-deploy",
         "mcp-resources", "task-create-event", "task-set-event",
     }:

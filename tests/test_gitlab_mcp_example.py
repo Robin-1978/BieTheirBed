@@ -86,6 +86,46 @@ async def test_first_failed_pipeline_poll_is_baseline_then_new_state_is_event(
 
 
 @pytest.mark.asyncio
+async def test_poll_prepares_each_new_pipeline_with_its_own_identity(
+    tmp_path: Path,
+) -> None:
+    client = GitLabClient(_settings(tmp_path), GitLabStateStore(tmp_path / "gitlab.db"))
+    pipelines = [
+        {"id": 7, "status": "failed", "sha": "a", "ref": "main", "updated_at": "1"},
+        {"id": 8, "status": "failed", "sha": "b", "ref": "main", "updated_at": "1"},
+    ]
+    prepared: list[str] = []
+
+    async def request(_method: str, _path: str, **_kwargs):
+        return list(pipelines)
+
+    async def pipeline(_project: str, pipeline_id: str):
+        return {"id": int(pipeline_id), "sha": pipeline_id, "user": {"id": 1}}
+
+    async def attribution(_project: str, pipeline: dict):
+        return {"eligible": True, "reasons": [str(pipeline["id"])]}
+
+    async def prepare(_project: str, pipeline_id: str, **_kwargs):
+        prepared.append(pipeline_id)
+        return {"pipeline_id": pipeline_id}
+
+    client._json = request  # type: ignore[method-assign]
+    client.get_pipeline = pipeline  # type: ignore[method-assign]
+    client.pipeline_attribution = attribution  # type: ignore[method-assign]
+    client.prepare_failure_snapshot = prepare  # type: ignore[method-assign]
+    try:
+        assert await client.poll_failure_events() == ()
+        pipelines[:] = [{**item, "updated_at": "2"} for item in pipelines]
+        created = await client.poll_failure_events()
+    finally:
+        await client.close()
+
+    assert prepared == ["7", "8"]
+    assert [item["pipeline_id"] for item in created] == ["7", "8"]
+    assert [item["snapshot"]["pipeline_id"] for item in created] == ["7", "8"]
+
+
+@pytest.mark.asyncio
 async def test_pipeline_attribution_keeps_owned_mr_and_ci_robot_same_sha(
     tmp_path: Path,
 ) -> None:
@@ -117,7 +157,9 @@ async def test_pipeline_attribution_keeps_owned_mr_and_ci_robot_same_sha(
         await client.close()
 
     assert direct["eligible"] is True
+    assert direct["category"] == "direct_user"
     assert robot["eligible"] is True
+    assert robot["category"] == "owned_merge_request_downstream"
     assert "merge_request_author" in robot["reasons"]
 
 
@@ -146,6 +188,7 @@ async def test_pipeline_attribution_rejects_another_users_mr(tmp_path: Path) -> 
         await client.close()
 
     assert result["eligible"] is False
+    assert result["category"] == "unrelated"
 
 
 @pytest.mark.asyncio
@@ -452,6 +495,7 @@ async def test_mcp_exposes_resources_and_six_tools(tmp_path: Path) -> None:
     resources = await app._list_resources(None, None)
     assert [str(resource.uri) for resource in resources.resources] == [
         "gitlab://failed-pipelines",
+        "gitlab://failed-pipelines/events",
         "gitlab://failed-pipelines/events/event-1",
     ]
     instruction = await app._read_resource(
@@ -462,6 +506,7 @@ async def test_mcp_exposes_resources_and_six_tools(tmp_path: Path) -> None:
     )
     text = instruction.contents[0].text
     assert "compile/build totals" in text
+    assert "attribution category and Pipeline trigger user" in text
     assert "deterministic OOM signals" in text
     assert "do not call shell or filesystem Tools" in text
     assert "local workspace" in text

@@ -542,6 +542,7 @@ class FeishuConversationMixin:
                 session,
                 text,
                 attachments,
+                client_request_id=str(uuid.uuid4()),
             )
             turn_id = accepted.turn_id
             presentation.bind_task(turn_id)

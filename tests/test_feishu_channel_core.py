@@ -4,6 +4,7 @@ import asyncio
 import json
 import threading
 import time
+import uuid
 from types import SimpleNamespace
 
 import pytest
@@ -122,7 +123,15 @@ class _CoreClient:
         self.transcriptions.append((session, artifact_id))
         return SimpleNamespace(transcript="整理这段会议录音")
 
-    async def create_chat_turn(self, session, text, attachments):
+    async def create_chat_turn(
+        self,
+        session,
+        text,
+        attachments,
+        *,
+        client_request_id,
+    ):
+        assert uuid.UUID(client_request_id)
         self.runs.append((session, text, attachments))
         return _chat_snapshot()
 
@@ -387,10 +396,20 @@ async def test_feishu_new_message_is_not_blocked_by_running_task(tmp_path) -> No
 
         def __init__(self) -> None:
             self.started = []
+            self.request_ids = []
             self.both_started = asyncio.Event()
             self.release = asyncio.Event()
 
-        async def create_chat_turn(self, _session, text, _attachments):
+        async def create_chat_turn(
+            self,
+            _session,
+            text,
+            _attachments,
+            *,
+            client_request_id,
+        ):
+            assert uuid.UUID(client_request_id)
+            self.request_ids.append(client_request_id)
             turn_id = f"turn-{len(self.started) + 1}"
             self.started.append(text)
             if len(self.started) == 2:
@@ -427,6 +446,7 @@ async def test_feishu_new_message_is_not_blocked_by_running_task(tmp_path) -> No
     await asyncio.wait_for(client.both_started.wait(), timeout=1.0)
 
     assert client.started == ["第一项", "第二项"]
+    assert len(set(client.request_ids)) == 2
     client.release.set()
     await asyncio.gather(first, second)
 
@@ -612,7 +632,10 @@ async def test_feishu_long_result_uses_preview_and_delivers_full_artifact(
     )
 
     class LongResultClient:
-        async def create_chat_turn(self, _session, _text, _attachments):
+        async def create_chat_turn(
+            self, _session, _text, _attachments, *, client_request_id
+        ):
+            assert uuid.UUID(client_request_id)
             return _chat_snapshot(turn_id="turn-long")
 
         async def chat_turn_updates(self, _turn_id):
@@ -710,7 +733,10 @@ async def test_feishu_confirmation_updates_the_single_streaming_card(
         def __init__(self) -> None:
             self.resolved = asyncio.Event()
 
-        async def create_chat_turn(self, _session, _text, _attachments):
+        async def create_chat_turn(
+            self, _session, _text, _attachments, *, client_request_id
+        ):
+            assert uuid.UUID(client_request_id)
             return _chat_snapshot()
 
         async def chat_turn_updates(self, _turn_id):
@@ -1432,7 +1458,10 @@ async def test_feishu_card_io_does_not_block_core_event_consumption(tmp_path) ->
         def __init__(self) -> None:
             self.consumed = asyncio.Event()
 
-        async def create_chat_turn(self, _session, _text, _attachments):
+        async def create_chat_turn(
+            self, _session, _text, _attachments, *, client_request_id
+        ):
+            assert uuid.UUID(client_request_id)
             return _chat_snapshot(turn_id="turn-burst")
 
         async def chat_turn_updates(self, _turn_id):

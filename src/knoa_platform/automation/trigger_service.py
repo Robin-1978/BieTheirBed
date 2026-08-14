@@ -245,3 +245,16 @@ class TriggerService:
         if created:
             self._dispatcher.wake()
         return event
+
+    async def baseline(
+        self,
+        principal_id: str,
+        trigger_id: str,
+        events: tuple[tuple[str, dict[str, Any]], ...] = (),
+    ) -> int:
+        return await asyncio.to_thread(
+            self._repository.baseline,
+            principal_id,
+            trigger_id,
+            events,
+        )

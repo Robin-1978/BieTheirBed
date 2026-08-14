@@ -148,6 +148,42 @@ def test_external_event_id_deduplicates_same_payload(tmp_path: Path) -> None:
         )
 
 
+def test_trigger_baseline_suppresses_retained_inventory_but_not_future_events(
+    tmp_path: Path,
+) -> None:
+    repository, _dispatcher, _service, scope, _tasks = _components(
+        tmp_path,
+        _Clock(100.0),
+    )
+    trigger, _ = repository.create(
+        scope,
+        client_request_id="request-a",
+        name="jira update",
+        goal="review issue",
+    )
+
+    inserted = repository.baseline(
+        scope.principal_id,
+        trigger.trigger_id,
+        (("retained-event", {"issue": "KNOA-1"}),),
+    )
+
+    assert inserted == 1
+    assert repository.claim_next("worker-a") is None
+    assert repository.get(scope.principal_id, trigger.trigger_id).last_event_at == 100.0
+    future, created = repository.receive(
+        scope.principal_id,
+        trigger.trigger_id,
+        external_event_id="future-event",
+        payload={"issue": "KNOA-2"},
+    )
+
+    assert created is True
+    claimed = repository.claim_next("worker-a")
+    assert claimed is not None
+    assert claimed.trigger_event_id == future.trigger_event_id
+
+
 def test_paused_trigger_rejects_new_events(tmp_path: Path) -> None:
     repository, _dispatcher, _service, scope, _tasks = _components(
         tmp_path,

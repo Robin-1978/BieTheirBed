@@ -24,6 +24,7 @@ except ImportError:  # installed as a self-contained MCP package
 
 logger = logging.getLogger("gitlab-mcp-example")
 _COLLECTION_URI = "gitlab://failed-pipelines"
+_EVENT_COLLECTION_URI = "gitlab://failed-pipelines/events"
 _EVENT_PREFIX = "gitlab://failed-pipelines/events/"
 
 
@@ -79,6 +80,9 @@ class GitLabMCPApplication:
                     await self._subscriptions.publish(
                         ResourceUpdated(uri=_COLLECTION_URI)
                     )
+                    await self._subscriptions.publish(
+                        ResourceUpdated(uri=_EVENT_COLLECTION_URI)
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -92,7 +96,16 @@ class GitLabMCPApplication:
                 name="Failed GitLab pipeline event inventory",
                 description="Collection wake-up Resource; event members are immutable.",
                 mime_type="text/markdown",
-            )
+            ),
+            types.Resource(
+                uri=_EVENT_COLLECTION_URI,
+                name="Failed GitLab pipeline events",
+                description=(
+                    "Select this Resource and its descendants for eligible failed "
+                    "pipeline events; individual members are immutable."
+                ),
+                mime_type="text/markdown",
+            ),
         ]
         for event in self.store.list_failure_events():
             payload = event["payload"]
@@ -112,7 +125,7 @@ class GitLabMCPApplication:
 
     async def _read_resource(self, _context: Any, params: types.ReadResourceRequestParams):
         uri = params.uri
-        if uri == _COLLECTION_URI:
+        if uri in {_COLLECTION_URI, _EVENT_COLLECTION_URI}:
             lines = ["# Failed GitLab pipeline events", ""]
             lines.extend(
                 f"- {_EVENT_PREFIX}{event['event_id']}"
@@ -135,7 +148,10 @@ class GitLabMCPApplication:
                 "repeat the initial get_pipeline/list_pipeline_jobs/get_job_trace sequence "
                 "unless the snapshot explicitly says it is incomplete. Do not access a local workspace, "
                 "do not call shell or filesystem Tools, and do not search the host. "
-                "Report the supplied compile/build totals and failed Job fingerprints. "
+                "State the attribution category and Pipeline trigger user first, so the "
+                "user can distinguish a direct Pipeline from a downstream Pipeline "
+                "triggered by a robot or merger for the user's MR/commit. Report the "
+                "supplied compile/build totals and failed Job fingerprints. "
                 "Finish with exactly one decision: retry, stop or "
                 "needs_human, plus a short reason. A retry proposal must name one exact "
                 "failed job. retry_job performs a final live server-side check that the "

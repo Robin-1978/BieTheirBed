@@ -33,9 +33,9 @@ are published as immutable Resources below:
 gitlab://failed-pipelines/events/{event_id}
 ```
 
-Bind the collection Resource to a principal-owned Session through `mcp_deploy`
-or `mcp_configure_resource_task` to create one durable diagnostic Task per
-event. Before publishing the Resource, the GitLab MCP Server prepares a bounded
+Create a user-owned Task Definition matching descendants of
+`gitlab://failed-pipelines/events`. Each immutable event creates one Execution
+under that Task. Before publishing the Resource, the GitLab MCP Server prepares a bounded
 immutable snapshot containing compact Pipeline and Job data, failed Job trace
 tails, deterministic fingerprints, compile/build totals, ownership evidence and
 OOM signals. The Agent analyzes that snapshot directly and returns `retry`,
@@ -61,14 +61,8 @@ GITLAB_MCP_STATE_PATH=/home/user/.knoa/data/gitlab-mcp.db
 GITLAB_ACTIONS_ENABLED=false
 ```
 
-Deploy from an owned Knoa Session:
+Deploy the package:
 
-```text
-mcp_deploy(
-  path=/absolute/path/to/examples/gitlab_mcp_server,
-  server_id=gitlab,
-  resource_uri=gitlab://failed-pipelines,
-  route_id=failed,
-  priority=4
-)
+```bash
+scripts/knoa mcp-package-deploy /absolute/path/to/examples/gitlab_mcp_server gitlab
 ```
