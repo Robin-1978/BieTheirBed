@@ -13,7 +13,7 @@ from knoa_platform.extensions.mcp import (
 )
 from knoa_platform.extensions.mcp_resource_tasks import MCPResourceTaskBridge
 from knoa_platform.extensions.models import MCPServerConfig
-from knoa_platform.tasks import TaskLaunchKind, TaskLaunchReason
+from knoa_platform.tasks import TaskLaunchKind, TaskLaunchPolicy
 
 
 class _Provider:
@@ -85,16 +85,94 @@ class _Sessions:
 
 
 class _Tasks:
+    def __init__(self, definitions=()) -> None:
+        self.calls = []
+        self.definitions = tuple(definitions)
+        self.bindings = {
+            definition.task_id: ("event", f"trigger-{definition.task_id}")
+            for definition in self.definitions
+        }
+
+    async def list_definitions(self, principal_id: str, **kwargs):
+        self.calls.append(("list", principal_id, kwargs))
+        return tuple(
+            definition
+            for definition in self.definitions
+            if definition.principal_id == principal_id
+        )
+
+    async def launch_binding(self, principal_id: str, task_id: str):
+        self.calls.append(("binding", principal_id, task_id))
+        return self.bindings.get(task_id)
+
+    async def bind_launch(
+        self,
+        principal_id: str,
+        task_id: str,
+        *,
+        provider_kind: str,
+        provider_id: str,
+    ) -> None:
+        self.calls.append(
+            ("bind", principal_id, task_id, provider_kind, provider_id)
+        )
+        self.bindings[task_id] = (provider_kind, provider_id)
+
+
+class _Triggers:
     def __init__(self) -> None:
         self.calls = []
+        self.seen = set()
+        self.created = []
+        self.deleted = []
 
-    async def create_definition(self, scope: RuntimeScope, **kwargs):
-        self.calls.append(("define", scope, kwargs))
-        return SimpleNamespace(task_id="task-a"), None
+    async def create(self, scope: RuntimeScope, **kwargs):
+        self.created.append((scope, kwargs))
+        return SimpleNamespace(trigger_id="trigger-repaired")
 
-    async def execute_definition(self, principal_id: str, task_id: str, **kwargs):
-        self.calls.append(("execute", principal_id, task_id, kwargs))
-        return SimpleNamespace(execution_id="execution-a")
+    async def delete(self, principal_id: str, trigger_id: str) -> None:
+        self.deleted.append((principal_id, trigger_id))
+
+    async def receive(
+        self,
+        principal_id: str,
+        trigger_id: str,
+        *,
+        external_event_id: str,
+        payload,
+    ):
+        key = (trigger_id, external_event_id)
+        if key not in self.seen:
+            self.seen.add(key)
+            self.calls.append(
+                (principal_id, trigger_id, external_event_id, payload)
+            )
+        return SimpleNamespace(external_event_id=external_event_id)
+
+
+def _definition(
+    task_id: str = "task-a",
+    *,
+    source_config=None,
+):
+    return SimpleNamespace(
+        task_id=task_id,
+        principal_id="principal-a",
+        session_handle="session-a",
+        title="Analyze assigned issues",
+        goal="Analyze the MCP Resource event.",
+        tools_enabled=True,
+        priority=0,
+        launch_policy=TaskLaunchPolicy(
+            kind=TaskLaunchKind.EVENT,
+            event_source="mcp:jira",
+            source_config=(
+                {"resource_uri_prefix": "jira://assigned-to-me/events"}
+                if source_config is None
+                else source_config
+            ),
+        ),
+    )
 
 
 def _resource(uri: str) -> MCPResourceDefinition:
@@ -119,31 +197,27 @@ def _snapshot(uri: str, text: str) -> MCPResourceSnapshot:
 
 
 @pytest.mark.asyncio
-async def test_resource_inventory_creates_one_owned_event_task() -> None:
+async def test_resource_inventory_triggers_one_existing_event_task() -> None:
     root = "jira://assigned-to-me"
     event = "jira://assigned-to-me/events/assignment-1"
     outside = "jira://other/events/assignment-2"
     provider = _Provider((_resource(root), _resource(event), _resource(outside)))
     provider.snapshots[event] = _snapshot(event, "Analyze Jira issue PROJECT-1")
-    tasks = _Tasks()
-    bridge = MCPResourceTaskBridge((provider,), tasks, _Sessions())
+    tasks = _Tasks((_definition(),))
+    triggers = _Triggers()
+    bridge = MCPResourceTaskBridge((provider,), tasks, _Sessions(), triggers)
 
     await bridge.reconcile_once()
     await bridge.reconcile_once()
 
-    assert len(tasks.calls) == 2
-    _kind, scope, request = tasks.calls[0]
-    assert scope == RuntimeScope(
-        principal_id="principal-a",
-        session_handle="isolated-task-session",
-    )
-    assert request["title"] == "assignment-1"
-    assert request["priority"] == 4
-    assert request["launch_policy"].kind is TaskLaunchKind.EVENT
-    assert request["launch_policy"].event_source == "mcp:jira"
-    assert request["launch_policy"].source_config == {"resource_uri": event}
-    assert "Analyze Jira issue PROJECT-1" in request["goal"]
-    assert tasks.calls[1][3]["launch_reason"] is TaskLaunchReason.EVENT
+    assert len(triggers.calls) == 1
+    principal_id, trigger_id, external_event_id, payload = triggers.calls[0]
+    assert principal_id == "principal-a"
+    assert trigger_id == "trigger-task-a"
+    assert external_event_id.startswith("mcp-resource:")
+    assert payload["server_id"] == "jira"
+    assert payload["resource_uri"] == event
+    assert payload["contents"][0]["text"] == "Analyze Jira issue PROJECT-1"
     assert outside not in provider.subscribed
     assert set(provider.subscribed) == {root, event}
 
@@ -155,14 +229,15 @@ async def test_invalid_session_is_retried_without_consuming_resource() -> None:
     provider.snapshots[event] = _snapshot(event, "Analyze Jira issue PROJECT-1")
     sessions = _Sessions()
     sessions.available = False
-    tasks = _Tasks()
-    bridge = MCPResourceTaskBridge((provider,), tasks, sessions)
+    tasks = _Tasks((_definition(),))
+    triggers = _Triggers()
+    bridge = MCPResourceTaskBridge((provider,), tasks, sessions, triggers)
 
     await bridge.reconcile_once()
     sessions.available = True
     await bridge.reconcile_once()
 
-    assert len(tasks.calls) == 2
+    assert len(triggers.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -171,7 +246,12 @@ async def test_completed_inventory_unsubscribes_removed_resources() -> None:
     event = "jira://assigned-to-me/events/assignment-1"
     provider = _Provider((_resource(root), _resource(event)))
     provider.snapshots[event] = _snapshot(event, "Analyze Jira issue PROJECT-1")
-    bridge = MCPResourceTaskBridge((provider,), _Tasks(), _Sessions())
+    bridge = MCPResourceTaskBridge(
+        (provider,),
+        _Tasks((_definition(),)),
+        _Sessions(),
+        _Triggers(),
+    )
 
     await bridge.reconcile_once()
     provider.resources = (_resource(root),)
@@ -185,7 +265,12 @@ async def test_completed_inventory_unsubscribes_removed_resources() -> None:
 async def test_reconciliation_tolerates_provider_removed_during_inventory() -> None:
     root = "jira://assigned-to-me"
     provider = _Provider((_resource(root),))
-    bridge = MCPResourceTaskBridge((provider,), _Tasks(), _Sessions())
+    bridge = MCPResourceTaskBridge(
+        (provider,),
+        _Tasks((_definition(),)),
+        _Sessions(),
+        _Triggers(),
+    )
 
     async def list_and_remove():
         await bridge.remove_provider(provider)
@@ -205,10 +290,78 @@ async def test_unsafe_or_lookalike_resource_uri_is_not_authorized() -> None:
     traversal = "jira://assigned-to-me/events/%2Fsecret"
     provider = _Provider((_resource(valid), _resource(lookalike), _resource(traversal)))
     provider.snapshots[valid] = _snapshot(valid, "Analyze Jira issue PROJECT-1")
-    tasks = _Tasks()
-    bridge = MCPResourceTaskBridge((provider,), tasks, _Sessions())
+    tasks = _Tasks((_definition(),))
+    triggers = _Triggers()
+    bridge = MCPResourceTaskBridge((provider,), tasks, _Sessions(), triggers)
 
     await bridge.reconcile_once()
 
-    assert len(tasks.calls) == 2
+    assert len(triggers.calls) == 1
     assert provider.subscribed == [valid]
+
+
+@pytest.mark.asyncio
+async def test_mutable_resource_content_digest_creates_a_new_trigger_event() -> None:
+    event = "jira://assigned-to-me/events/assignment-1"
+    provider = _Provider((_resource(event),))
+    provider.snapshots[event] = _snapshot(event, "first revision")
+    triggers = _Triggers()
+    bridge = MCPResourceTaskBridge(
+        (provider,),
+        _Tasks((_definition(),)),
+        _Sessions(),
+        triggers,
+    )
+
+    await bridge.reconcile_once()
+    provider.snapshots[event] = _snapshot(event, "second revision")
+    await bridge.reconcile_once()
+
+    assert len(triggers.calls) == 2
+    assert triggers.calls[0][2] != triggers.calls[1][2]
+
+
+@pytest.mark.asyncio
+async def test_resource_without_matching_task_definition_is_not_delivered() -> None:
+    event = "jira://assigned-to-me/events/assignment-1"
+    provider = _Provider((_resource(event),))
+    provider.snapshots[event] = _snapshot(event, "Analyze Jira issue PROJECT-1")
+    triggers = _Triggers()
+    bridge = MCPResourceTaskBridge(
+        (provider,),
+        _Tasks(
+            (
+                _definition(
+                    source_config={"resource_uri": "jira://other/event"}
+                ),
+            )
+        ),
+        _Sessions(),
+        triggers,
+    )
+
+    await bridge.reconcile_once()
+
+    assert triggers.calls == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_event_task_repairs_missing_trigger_binding() -> None:
+    event = "jira://assigned-to-me/events/assignment-1"
+    provider = _Provider((_resource(event),))
+    provider.snapshots[event] = _snapshot(event, "Analyze Jira issue PROJECT-1")
+    tasks = _Tasks((_definition(),))
+    tasks.bindings.clear()
+    triggers = _Triggers()
+    bridge = MCPResourceTaskBridge(
+        (provider,),
+        tasks,
+        _Sessions(),
+        triggers,
+    )
+
+    await bridge.reconcile_once()
+
+    assert tasks.bindings["task-a"] == ("event", "trigger-repaired")
+    assert len(triggers.created) == 1
+    assert len(triggers.calls) == 1

@@ -71,3 +71,58 @@ async def test_generic_interaction_persists_validates_and_wakes_waiter(
         ("conversation_turn", "turn-a", "pending"),
         ("conversation_turn", "turn-a", "resolved"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_start_marks_persisted_pending_interaction_runtime_lost(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "platform.db"
+    repository = HumanInteractionRepository(
+        database,
+        id_factory=lambda: "interaction-a",
+        clock=lambda: 10.0,
+    )
+    original = HumanInteractionService(repository)
+    event = InteractionRequested(
+        runtime_session_ref="runtime-session-a",
+        runtime_turn_ref="runtime-turn-a",
+        occurred_at=1.0,
+        interaction_id="runtime-input-a",
+        interaction_epoch=1,
+        kind="user_input",
+        display={"title": "Choose", "fields": []},
+        resolution_schema={
+            "type": "object",
+            "properties": {"target": {"type": "string"}},
+            "required": ["target"],
+            "additionalProperties": False,
+        },
+    )
+    await original.for_owner("task_execution").begin(
+        RuntimeScope(principal_id="principal-a", session_handle="session-a"),
+        "task-a",
+        event,
+    )
+    await original.close()
+
+    changed = []
+
+    async def observe(interaction) -> None:
+        changed.append(interaction)
+
+    restarted = HumanInteractionService(repository, changed=observe)
+    recovered = await restarted.start()
+
+    assert recovered == tuple(changed)
+    assert len(recovered) == 1
+    assert recovered[0].state == "runtime_lost"
+    assert recovered[0].resolved_at == 10.0
+    assert recovered[0].resolved_by == "platform_restart"
+    interaction, resolved = await restarted.resolve(
+        "principal-a",
+        "interaction-a",
+        {"target": "a"},
+    )
+    assert resolved is False
+    assert interaction.state == "runtime_lost"

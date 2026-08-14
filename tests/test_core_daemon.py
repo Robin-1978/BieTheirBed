@@ -47,6 +47,11 @@ class _TriggerDispatcher(_Host):
     pass
 
 
+class _Interactions(_Host):
+    async def close(self) -> None:
+        await self.stop()
+
+
 @pytest.mark.asyncio
 async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     tmp_path,
@@ -59,6 +64,7 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     conversation_service = _ConversationService()
     schedule_dispatcher = _ScheduleDispatcher()
     trigger_dispatcher = _TriggerDispatcher()
+    interactions = _Interactions()
     capability_mcp_host = _Host()
     pid = tmp_path / "service.pid"
     composition = SimpleNamespace(
@@ -69,6 +75,7 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
         conversation_service=conversation_service,
         schedule_dispatcher=schedule_dispatcher,
         trigger_dispatcher=trigger_dispatcher,
+        interactions=interactions,
         capability_mcp_host=capability_mcp_host,
         paths=SimpleNamespace(pid=pid),
         artifacts=SimpleNamespace(cleanup_expired=lambda: None),
@@ -91,6 +98,7 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     assert conversation_service.started
     assert schedule_dispatcher.started
     assert trigger_dispatcher.started
+    assert interactions.started
     assert capability_mcp_host.started
     assert pid.exists()
     assert str(tmp_path / "service.log") in pid.read_text(encoding="utf-8")
@@ -105,5 +113,6 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     assert conversation_service.stopped
     assert schedule_dispatcher.stopped
     assert trigger_dispatcher.stopped
+    assert interactions.stopped
     assert capability_mcp_host.stopped
     assert not pid.exists()

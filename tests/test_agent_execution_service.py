@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from knoa_agent import ContextCheckpointRepository, KnoaAgentRuntime
-from knoa_platform.agent_runtime.contracts import ArtifactAttachment, RuntimeScope
+from knoa_platform.agent_runtime.contracts import ArtifactAttachment
 from knoa_platform.agent_runtime.model_step import ProviderChunk
 from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
 from knoa_platform.agent_runtime.tool_step import ToolArgumentPolicy, ToolStep
@@ -32,6 +32,32 @@ class Provider:
             self.requests.append(request)
             yield ProviderChunk(content_delta="done")
             yield ProviderChunk(finish_reason="stop", terminal=True)
+
+        return iterate()
+
+
+class SerialProvider:
+    def __init__(self) -> None:
+        self.requests = []
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.active = 0
+        self.max_active = 0
+
+    def stream(self, request, cancellation):
+        del cancellation
+
+        async def iterate():
+            self.requests.append(request)
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            self.started.set()
+            try:
+                await self.release.wait()
+                yield ProviderChunk(content_delta="done")
+                yield ProviderChunk(finish_reason="stop", terminal=True)
+            finally:
+                self.active -= 1
 
         return iterate()
 
@@ -139,7 +165,7 @@ async def test_execution_service_rejects_agent_switch_after_session_binding(
         capabilities_for=lambda _scope: frozenset(),
     )
 
-    with pytest.raises(Exception):
+    with pytest.raises(LookupError):
         async for _event in execution.execute_turn(
             ExecuteAgentTurn(
                 scope=scope,
@@ -153,3 +179,63 @@ async def test_execution_service_rejects_agent_switch_after_session_binding(
             )
         ):
             pass
+
+
+@pytest.mark.asyncio
+async def test_execution_service_serializes_turns_for_one_platform_session(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "platform.db"
+    sessions = RuntimeSessionRepository(database, handle_factory=lambda: "session-a")
+    scope = sessions.create("principal-a")
+    artifacts = ArtifactStore(tmp_path / "attachments", db_path=database)
+    registry = ToolRegistry()
+    gateway = CapabilityGateway(
+        registry,
+        ToolStep(registry, ToolArgumentPolicy(tmp_path)),
+        artifacts,
+    )
+    provider = SerialProvider()
+    runtime = KnoaAgentRuntime(
+        provider,
+        ContextCheckpointRepository(tmp_path / "agent" / "context.db"),
+        GatewayMCPConnector(gateway),
+        system_prompt="system",
+        health_probe=healthy,
+    )
+    execution = AgentExecutionService(
+        AgentManager({"knoa": runtime}),
+        AgentSessionBindingRepository(database),
+        gateway,
+        artifacts,
+        capabilities_for=lambda _scope: frozenset(),
+    )
+
+    async def consume(turn_id: str) -> list:
+        return [
+            event
+            async for event in execution.execute_turn(
+                ExecuteAgentTurn(
+                    scope=scope,
+                    turn_id=turn_id,
+                    client_request_id=f"request-{turn_id}",
+                    input=turn_id,
+                    attachments=(),
+                    tools_enabled=False,
+                    cancellation=asyncio.Event(),
+                )
+            )
+        ]
+
+    first = asyncio.create_task(consume("turn-a"))
+    await provider.started.wait()
+    second = asyncio.create_task(consume("turn-b"))
+    await asyncio.sleep(0.05)
+
+    assert provider.active == 1
+    assert len(provider.requests) == 1
+    provider.release.set()
+    await asyncio.gather(first, second)
+
+    assert provider.max_active == 1
+    assert len(provider.requests) == 2

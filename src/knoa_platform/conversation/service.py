@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
 from knoa_agent_contracts import (
@@ -65,12 +64,6 @@ class _LiveTurn:
     timeline: list[ChatTimelineEntry] = field(default_factory=list)
     artifacts: list[ArtifactRef] = field(default_factory=list)
     notify_task: asyncio.Task[None] | None = None
-
-
-@dataclass
-class _SessionLease:
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    users: int = 0
 
 
 class _LatestSubscription:
@@ -335,8 +328,6 @@ class ConversationService:
         self._interaction_port: ScopedInteractionPort | None = (
             None if interactions is None else interactions.for_owner("conversation_turn")
         )
-        self._session_leases: dict[str, _SessionLease] = {}
-        self._session_leases_guard = asyncio.Lock()
 
     async def start(self) -> None:
         await asyncio.to_thread(self._repository.recover_interrupted)
@@ -592,10 +583,6 @@ class ConversationService:
         await self._notify(turn_id)
 
     async def _execute(self, turn: ChatTurn) -> None:
-        async with self._session_lease(turn.session_handle):
-            await self._execute_locked(turn)
-
-    async def _execute_locked(self, turn: ChatTurn) -> None:
         live = self._live[turn.turn_id]
         scope = RuntimeScope(
             principal_id=turn.principal_id,
@@ -666,7 +653,7 @@ class ConversationService:
                 finished=True,
             )
             raise
-        except Exception:
+        except Exception:  # noqa: BLE001 - Runtime failure becomes durable Turn state
             await asyncio.to_thread(
                 self._repository.checkpoint,
                 turn.principal_id,
@@ -688,20 +675,6 @@ class ConversationService:
         finally:
             await self._flush_notify(turn.turn_id)
             self._live.pop(turn.turn_id, None)
-
-    @asynccontextmanager
-    async def _session_lease(self, session_handle: str) -> AsyncIterator[None]:
-        async with self._session_leases_guard:
-            lease = self._session_leases.setdefault(session_handle, _SessionLease())
-            lease.users += 1
-        try:
-            async with lease.lock:
-                yield
-        finally:
-            async with self._session_leases_guard:
-                lease.users -= 1
-                if lease.users == 0:
-                    self._session_leases.pop(session_handle, None)
 
     async def _apply_event(
         self,

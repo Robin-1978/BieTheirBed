@@ -5,6 +5,7 @@
 ## Architecture
 
 - [Knoa Architecture](architecture.md)
+- [Knoa 实现反推架构审计](knoa-implementation-architecture-audit.md)
 - [Knoa Product Forward Blueprint](knoa-product-forward-blueprint.md)
 - [Knoa Product Forward Implementation Plan](knoa-product-forward-implementation-plan.md)
 - [Knoa User Experience Audit](knoa-user-experience-audit.md)

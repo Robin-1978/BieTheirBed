@@ -165,6 +165,13 @@ sequenceDiagram
 - **事件启动**：Jira、GitLab、Webhook、文件变化等事件产生执行记录。
 - Agent 可以在权限允许时创建 Task，但必须说明目标和启动方式。
 
+事件启动沿用 Task 的 `launch_policy`，不增加独立的“绑定”页面。创建或编辑任务
+时，用户选择 `Webhook` 或 `MCP Resource`；选择 MCP Resource 后只填写 MCP Server
+标识和 Resource URI 前缀。UI 展示业务可读的来源和匹配范围，不展示内部 Trigger ID。
+
+Agent 可以根据用户自然语言生成同一份启动策略草稿，用户确认后保存；事件到达后由
+Core 按已保存策略确定性匹配，不在每次事件到达时再次请求 Agent 判断是否触发。
+
 普通聊天回合不进入任务列表。任务执行结果可以主动投递回来源 Channel。
 
 ## 6. 执行详情

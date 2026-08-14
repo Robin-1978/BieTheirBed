@@ -656,6 +656,7 @@ def build_core_runtime(
         (*mcp_providers, *mcp_package_providers),
         task_service,
         sessions,
+        trigger_service,
     )
     mcp_packages = MCPPackageService(
         paths.mcp,
@@ -667,7 +668,9 @@ def build_core_runtime(
         secret_root=paths.mcp_secrets,
     )
     registry.register(MCPDeployTool(mcp_packages))
-    registry.register(CreateTaskTool(sessions, task_service, schedule_service))
+    registry.register(
+        CreateTaskTool(sessions, task_service, schedule_service, trigger_service)
+    )
     registry.register(
         TaskControlTool(
             sessions,
