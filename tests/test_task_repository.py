@@ -930,3 +930,42 @@ def test_task_launch_policy_rejects_mixed_or_incomplete_configuration() -> None:
     )
     assert scheduled.interval_seconds == 300
     assert event.event_source == "webhook"
+
+
+def test_repository_rewrites_legacy_mcp_event_policy(tmp_path: Path) -> None:
+    repository, scope = _repository(tmp_path)
+    definition, _ = repository.create_task_definition(
+        scope,
+        client_request_id="legacy-event-definition",
+        title="Legacy Jira event",
+        goal="Analyze one Jira event",
+        launch_policy=TaskLaunchPolicy(),
+    )
+    database = tmp_path / "assistant.db"
+    legacy = (
+        '{"kind":"event","schedule_type":null,"run_at":null,'
+        '"interval_seconds":null,"cron":"","timezone":"Asia/Shanghai",'
+        '"event_source":"mcp:jira","source_config":'
+        '{"resource_uri":"jira://assigned-to-me/events"}}'
+    )
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "UPDATE task_launch_policies SET policy_json=? WHERE task_id=?",
+            (legacy, definition.task_id),
+        )
+
+    reopened = TaskRepository(database)
+    migrated = reopened.get_task_definition(scope.principal_id, definition.task_id)
+
+    assert migrated.launch_policy.source_config == {
+        "resource_uri_prefix": "jira://assigned-to-me/events",
+        "include_root": True,
+        "include_descendants": False,
+    }
+    with sqlite3.connect(database) as connection:
+        stored = connection.execute(
+            "SELECT policy_json FROM task_launch_policies WHERE task_id=?",
+            (definition.task_id,),
+        ).fetchone()[0]
+    assert '"resource_uri"' not in stored
+    assert '"resource_uri_prefix"' in stored

@@ -197,10 +197,9 @@ the standard `ToolStep` boundary.
 
 MCP Servers that expose standard Resources can also be configured as explicit
 Resource Task Sources. Core performs bounded `resources/list`/`read`, negotiates
-optional subscriptions and creates one principal-owned Durable Task per
-immutable Resource URI. Notifications are wake-up hints only; no MCP Resource
-creates work unless its URI scope, principal and owned Session are configured
-locally. See the runnable [Jira MCP reference server](examples/jira_mcp_server/README.md)
+optional subscriptions and matches Resource snapshots to existing Event Task
+Definitions. Notifications are wake-up hints only; no MCP Resource creates work
+unless an active Task Definition selects its Server and URI scope. See the runnable [Jira MCP reference server](examples/jira_mcp_server/README.md)
 and [GitLab MCP reference server](examples/gitlab_mcp_server/README.md) for
 automatic Resource-driven Task examples. They are independent Provider
 packages; Knoa Core and clients contain no Jira/GitLab-specific branches.
@@ -231,9 +230,9 @@ For an already running remote or stdio MCP Server, the Agent first uses
 read-only `mcp_inspect`, then proposes a confirmation-gated `mcp_connect` call
 containing the exact Tool names to enable. Only user-confirmed Tools that also
 declare `readOnlyHint=true` are persisted and activated. Write, ambiguous or
-unselected Tools remain withheld. Resource-to-Task automation still requires
-an explicit Resource URI; `mcp_configure_resource_task` binds it to the current
-owned Session and activates the route without a restart. `mcp_disable` provides
+unselected Tools remain withheld. Resource-to-Task automation is configured on
+the Task Definition with `event_source=mcp:<server_id>` and a Resource URI
+selector. `mcp_disable` provides
 a confirmation-gated rollback that stops the Provider and persists it disabled.
 
 Enable the independently mounted Feishu channel in
@@ -480,7 +479,7 @@ socket and PID files use the operating system runtime directory.
 | `image_inspect` | describe, ocr, locate, compare | Observe visible image content by `image_id`; diagnosis and solutions remain with the main model |
 | `screenshot` | — | Capture a full-desktop PNG for delivery to the current conversation |
 | `artifact_prepare` | path | Borrow an existing file for client delivery without copying or deleting it; protected paths are blocked and out-of-workspace paths require confirmation |
-| `mcp_deploy` | path, server_id, resource_uri? | Validate, atomically install or update, activate, and optionally route a local MCP package Resource into the current Session after explicit confirmation |
+| `mcp_deploy` | path, server_id | Validate, atomically install or update, and activate a local MCP package after explicit confirmation |
 | `describe_tool` | tool_name | Meta-tool: query the full JSON schema of any registered tool |
 
 ## Development

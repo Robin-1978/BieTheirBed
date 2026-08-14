@@ -8,7 +8,7 @@ from knoa_platform.branding import (
     ASSISTANT_NAME_EN,
 )
 
-__version__ = "0.2.9"
+__version__ = "0.2.10"
 
 
 def _gateway_ttl(value: str) -> int:
@@ -128,21 +128,31 @@ def build_parser() -> argparse.ArgumentParser:
     follow_up = commands.add_parser("follow-up", help="Continue a durable Task")
     follow_up.add_argument("task_id")
     follow_up.add_argument("input")
+    commands.add_parser("mcp-resources", help="List discovered MCP Resources")
+    create_event = commands.add_parser(
+        "task-create-event",
+        help="Create a durable Task triggered by an MCP Resource",
+    )
+    create_event.add_argument("server_id")
+    create_event.add_argument("resource_uri")
+    create_event.add_argument("goal")
+    create_event.add_argument("--title", default="")
+    create_event.add_argument("--agent-id", default=None)
+    create_event.add_argument("--include-descendants", action="store_true")
+    set_event = commands.add_parser(
+        "task-set-event",
+        help="Change an existing Task to an MCP Resource trigger",
+    )
+    set_event.add_argument("task_id")
+    set_event.add_argument("server_id")
+    set_event.add_argument("resource_uri")
+    set_event.add_argument("--include-descendants", action="store_true")
     mcp_deploy = commands.add_parser(
         "mcp-package-deploy",
         help="Explicitly deploy a local MCP package without invoking an Agent",
     )
     mcp_deploy.add_argument("path")
     mcp_deploy.add_argument("server_id")
-    mcp_deploy.add_argument("--resource-uri", default="")
-    mcp_deploy.add_argument("--route-id", default="events")
-    mcp_deploy.add_argument("--include-root", action="store_true", default=False)
-    mcp_deploy.add_argument(
-        "--disable-resource-tools",
-        action="store_true",
-        default=False,
-    )
-    mcp_deploy.add_argument("--priority", type=int, choices=range(10), default=0)
     gateway = commands.add_parser(
         "gateway",
         help="Manage Secure Gateway pairing and devices locally",
@@ -406,6 +416,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in {
         "agents", "tasks", "task", "executions", "execution",
         "approve", "deny", "resolve", "follow-up", "mcp-package-deploy",
+        "mcp-resources", "task-create-event", "task-set-event",
     }:
         from knoa_platform.cli_management import run_client_command
         from knoa_platform.config import load_config

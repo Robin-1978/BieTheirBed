@@ -1069,9 +1069,12 @@ const ChatTurn = memo(function ChatTurn({
         ) : null}
         {approval ? (
           <View style={styles.approval}>
-            <Text style={styles.approvalReason}>{approval.reason || approval.tool_name}</Text>
-            {Object.keys(approval.arguments).length ? (
-              <Text selectable style={styles.approvalArguments}>{JSON.stringify(approval.arguments, null, 2)}</Text>
+            <Text style={styles.approvalReason}>{t("execution.tool")}: {approval.tool_name}</Text>
+            <Text style={styles.approvalReason}>{t("execution.effect", { value: chatApprovalEffectLabel(approval.display?.effect ?? "unknown", t) })}</Text>
+            <Text style={styles.approvalReason}>{t("execution.risk", { value: chatApprovalRiskLabel(approval.display?.risk ?? "unknown", t) })}</Text>
+            <Text style={styles.approvalReason}>{approval.display?.reversible ? t("execution.reversible") : t("execution.irreversible")}</Text>
+            {(approval.display?.arguments_preview || Object.keys(approval.arguments).length) ? (
+              <Text selectable style={styles.approvalArguments}>{approval.display?.arguments_preview || JSON.stringify(approval.arguments, null, 2)}</Text>
             ) : null}
             <View style={styles.approvalActions}>
               <AppPressable style={styles.deny} disabled={Boolean(resolving)} onPress={() => onResolve(approval, false)}>
@@ -1101,6 +1104,25 @@ const ChatTurn = memo(function ChatTurn({
     </View>
   );
 });
+
+function chatApprovalEffectLabel(value: string, t: ReturnType<typeof useI18n>["t"]): string {
+  return ({
+    read_only: t("execution.effect.readOnly"),
+    internal_write: t("execution.effect.internal"),
+    local_write: t("execution.effect.local"),
+    external_side_effect: t("execution.effect.external"),
+    desktop_control: t("execution.effect.desktop"),
+    unknown: t("execution.effect.unknown"),
+  } as Record<string, string>)[value] ?? t("execution.effect.controlled");
+}
+
+function chatApprovalRiskLabel(value: string, t: ReturnType<typeof useI18n>["t"]): string {
+  return ({
+    low: t("execution.risk.low"),
+    medium: t("execution.risk.medium"),
+    high: t("execution.risk.high"),
+  } as Record<string, string>)[value] ?? t("execution.risk.unknown");
+}
 
 function PendingTurn({
   pending,

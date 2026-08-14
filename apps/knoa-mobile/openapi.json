@@ -375,6 +375,58 @@
         }
       }
     },
+    "/v1/mcp/resources": {
+      "get": {
+        "operationId": "listMcpResources",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "MCP Resource catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPResourceCatalogResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/sessions": {
       "post": {
         "operationId": "createCoreSession",
@@ -4734,6 +4786,11 @@
             "title": "Reason",
             "type": "string"
           },
+          "display": {
+            "additionalProperties": true,
+            "title": "Display",
+            "type": "object"
+          },
           "state": {
             "title": "State",
             "type": "string"
@@ -5570,6 +5627,79 @@
         "title": "HumanInteractionSnapshot",
         "type": "object"
       },
+      "MCPResourceCatalogRecord": {
+        "additionalProperties": false,
+        "description": "A discovered, read-only MCP Resource exposed to client configuration UIs.",
+        "properties": {
+          "server_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Server Id",
+            "type": "string"
+          },
+          "uri": {
+            "maxLength": 4096,
+            "title": "Uri",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Description",
+            "type": "string"
+          },
+          "mime_type": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "subscribable": {
+            "default": false,
+            "title": "Subscribable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "server_id",
+          "uri"
+        ],
+        "title": "MCPResourceCatalogRecord",
+        "type": "object"
+      },
+      "MCPResourceCatalogResponse": {
+        "properties": {
+          "result": {
+            "$ref": "#/components/schemas/MCPResourceCatalogResult"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "MCPResourceCatalogResponse",
+        "type": "object"
+      },
+      "MCPResourceCatalogResult": {
+        "additionalProperties": false,
+        "properties": {
+          "resources": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MCPResourceCatalogRecord"
+            },
+            "title": "Resources",
+            "type": "array"
+          }
+        },
+        "title": "MCPResourceCatalogResult",
+        "type": "object"
+      },
       "PairChallengeRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6153,6 +6283,11 @@
             "default": "",
             "title": "Reason",
             "type": "string"
+          },
+          "display": {
+            "additionalProperties": true,
+            "title": "Display",
+            "type": "object"
           },
           "state": {
             "$ref": "#/components/schemas/ApprovalState"

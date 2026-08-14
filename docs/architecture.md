@@ -86,8 +86,8 @@ Agent Runtime SPI 统一 Session、Turn、事件流、中断、恢复和结构�
 当前接入：
 
 - Knoa Agent：使用平台提供的 Memory、Skill、Context 与 Capability MCP。
-- Codex Agent：使用相同的 Agent Runtime 接入和 Capability MCP，但不自动继承
-  Knoa Agent 的全部上下文策略。
+- Codex Agent：使用相同的 Agent Runtime 接入、Capability MCP 和
+  `RuntimeTurnContext`；它在自己的 runtime 内决定如何渲染、压缩和消费这些上下文。
 - Reviewer Agent：受限系统 Agent，没有业务 Tool，只向 Platform 提供审批建议。
 
 同一 Platform Session 的 Turn 在 `AgentExecutionService` 中统一串行。需要并行的
@@ -210,9 +210,25 @@ MCP Resource Event 示例：
   "kind": "event",
   "event_source": "mcp:jira",
   "source_config": {
-    "resource_uri_prefix": "jira://assigned-to-me/events"
+    "resource_uri_prefix": "jira://assigned-to-me/events",
+    "include_root": true,
+    "include_descendants": false
   }
 }
+```
+
+MCP Resource 的发现通过 `GET /v1/mcp/resources` 暴露给 App、CLI 和 TUI。客户端可以
+从 Catalog 选择 Server、Resource 和“仅此 Resource/包含子 Resource”，也可以保留
+手工 URI 作为兼容兜底。Catalog 只提供事实，不创建 Task。
+
+MCP Event 的运行链路是：
+
+```text
+MCP Resource inventory/notification
+  -> MCP Resource Bridge
+  -> 已有 Task Definition 的 launch_policy 匹配
+  -> Trigger binding
+  -> 新建 Task Execution
 ```
 
 ## 6. MCP 边界与事件自动化
@@ -237,6 +253,11 @@ MCP Server 不拥有：
 MCP 标准提供 Resource 与 Resource notification，但不提供通用的
 “Event 创建 Knoa Task”协议。Knoa 将 Resource inventory/notification 和 bounded
 snapshot 规范化为内部 Trigger event：
+
+HumanInteraction 只表示需要用户输入的交互，当前标准 kind 为 `user_input` 和
+`mcp_elicitation`。工具写入授权属于独立 Approval 流程，不伪装成
+HumanInteraction。Approval API 返回 effect、risk、arguments_preview、reversible
+等结构化字段；各 Channel 按自己的 locale 渲染，不由 Core 写死中文或英文句子。
 
 ```text
 MCP Resource inventory / notification

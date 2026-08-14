@@ -149,20 +149,10 @@ class MCPOnboardingService:
         route_id: str,
         route: MCPResourceTaskConfig,
     ) -> None:
-        provider = self._providers.get(server_id)
-        if provider is None:
-            raise ValueError("MCP server is not active")
-        self._resource_tasks.validate_route(route)
-        persisted = await self._config.add_mcp_resource_task(
-            server_id,
-            route_id,
-            route,
+        del server_id, route_id, route
+        raise ValueError(
+            "MCP Resource routing is configured by a Task Definition launch policy"
         )
-        if not persisted.applied:
-            raise ValueError(
-                persisted.error or "MCP Resource Task could not be persisted"
-            )
-        self._resource_tasks.add_route(provider, route_id, route)
 
 
 def _read_only_policy(tool: MCPToolDefinition) -> MCPToolPolicyConfig:

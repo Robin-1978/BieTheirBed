@@ -116,6 +116,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mcp/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listMcpResources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sessions": {
         parameters: {
             query?: never;
@@ -918,6 +934,10 @@ export interface components {
              * @default
              */
             reason: string;
+            /** Display */
+            display?: {
+                [key: string]: unknown;
+            };
             /** State */
             state: string;
             /** Created At */
@@ -1332,6 +1352,48 @@ export interface components {
              */
             expires_at: number | null;
         };
+        /**
+         * MCPResourceCatalogRecord
+         * @description A discovered, read-only MCP Resource exposed to client configuration UIs.
+         */
+        MCPResourceCatalogRecord: {
+            /** Server Id */
+            server_id: string;
+            /** Uri */
+            uri: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Mime Type
+             * @default
+             */
+            mime_type: string;
+            /**
+             * Subscribable
+             * @default false
+             */
+            subscribable: boolean;
+        };
+        /** MCPResourceCatalogResponse */
+        MCPResourceCatalogResponse: {
+            result: components["schemas"]["MCPResourceCatalogResult"];
+        };
+        /** MCPResourceCatalogResult */
+        MCPResourceCatalogResult: {
+            /**
+             * Resources
+             * @default []
+             */
+            resources: components["schemas"]["MCPResourceCatalogRecord"][];
+        };
         /** PairChallengeRequest */
         PairChallengeRequest: {
             /** Grant Id */
@@ -1571,6 +1633,10 @@ export interface components {
              * @default
              */
             reason: string;
+            /** Display */
+            display?: {
+                [key: string]: unknown;
+            };
             state: components["schemas"]["ApprovalState"];
             /** Created At */
             created_at: number;
@@ -2261,6 +2327,53 @@ export interface operations {
             };
             /** @description Request rejected */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listMcpResources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description MCP Resource catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MCPResourceCatalogResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

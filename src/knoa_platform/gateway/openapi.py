@@ -49,6 +49,7 @@ from knoa_platform.gateway.protocol import (
     SessionResponse,
     TaskEventListResponse,
     ToolListResponse,
+    MCPResourceCatalogResponse,
     UpdateConversationSessionRequest,
     UpdateProductTaskRequest,
 )
@@ -97,6 +98,7 @@ _MODELS: tuple[type[BaseModel], ...] = (
     ArtifactTranscriptionResponse,
     RuntimeStatusResponse,
     ToolListResponse,
+    MCPResourceCatalogResponse,
 )
 
 
@@ -226,6 +228,16 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     "responses": {
                         "200": _json_response("Enabled Agents", AgentListResponse),
                         **_errors("401", "429"),
+                    },
+                }
+            },
+            "/v1/mcp/resources": {
+                "get": {
+                    "operationId": "listMcpResources",
+                    "security": bearer,
+                    "responses": {
+                        "200": _json_response("MCP Resource catalog", MCPResourceCatalogResponse),
+                        **_errors("401", "429", "500"),
                     },
                 }
             },

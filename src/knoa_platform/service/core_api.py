@@ -24,10 +24,12 @@ from knoa_platform.agent_runtime.contracts import (
     HistoryResult,
     MemoryClearResult,
     MemoryListResult,
+    MCPResourceCatalogResult,
     RuntimeStatus,
     ToolListResult,
 )
 from knoa_platform.artifacts import ArtifactRef
+from knoa_platform.approvals.display import approval_display
 from knoa_platform.interactions import HumanInteraction
 from knoa_platform.automation import (
     ScheduleRecord,
@@ -287,6 +289,11 @@ class ProductTaskExecutionSnapshot(CoreModel):
                     tool_name=approval.tool_name,
                     arguments=approval.arguments,
                     reason=approval.reason,
+                    display=approval_display(
+                        approval.tool_name,
+                        approval.arguments,
+                        approval.reason,
+                    ),
                     state=approval.state,
                     created_at=approval.created_at,
                     resolved_at=approval.resolved_at,
@@ -305,6 +312,7 @@ class TaskApprovalSnapshot(CoreModel):
     tool_name: NonEmpty
     arguments: dict[str, Any] = Field(default_factory=dict)
     reason: str = ""
+    display: dict[str, Any] = Field(default_factory=dict)
     state: ApprovalState
     created_at: float = Field(ge=0.0)
     resolved_at: float | None = Field(default=None, ge=0.0)
@@ -328,6 +336,7 @@ class ChatApprovalSnapshot(CoreModel):
     tool_name: NonEmpty
     arguments: dict[str, Any] = Field(default_factory=dict)
     reason: str = ""
+    display: dict[str, Any] = Field(default_factory=dict)
     state: str
     created_at: float = Field(ge=0.0)
     resolved_at: float | None = Field(default=None, ge=0.0)
@@ -395,7 +404,14 @@ class ChatTurnSnapshot(CoreModel):
                 for step in turn.tool_steps
             ),
             approvals=tuple(
-                ChatApprovalSnapshot.model_validate(approval.model_dump())
+                ChatApprovalSnapshot(
+                    **approval.model_dump(),
+                    display=approval_display(
+                        approval.tool_name,
+                        approval.arguments,
+                        approval.reason,
+                    ),
+                )
                 for approval in turn.approvals
             ),
             interactions=tuple(
@@ -998,6 +1014,12 @@ class ListToolsRequest(SessionRequest):
     method: Literal["tools"] = "tools"
 
 
+class ListMCPResourcesRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["mcp_resources"] = "mcp_resources"
+
+
 class SetConfigRequest(SessionRequest):
     method: Literal["config_set"] = "config_set"
     field_name: Annotated[
@@ -1080,6 +1102,7 @@ CoreRequest: TypeAlias = Annotated[
     | ListMemoryRequest
     | ClearMemoryRequest
     | ListToolsRequest
+    | ListMCPResourcesRequest
     | SetConfigRequest
     | UploadArtifactRequest
     | DownloadArtifactRequest
@@ -1354,6 +1377,13 @@ class ToolsMessage(CoreModel):
     result: ToolListResult
 
 
+class MCPResourcesMessage(CoreModel):
+    message_type: Literal["mcp_resources"] = "mcp_resources"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    result: MCPResourceCatalogResult
+
+
 class ConfigSetMessage(CoreModel):
     message_type: Literal["config_set"] = "config_set"
     api_version: Literal["v1"] = "v1"
@@ -1501,6 +1531,7 @@ CoreServerMessage: TypeAlias = Annotated[
     | MemoryListMessage
     | MemoryClearedMessage
     | ToolsMessage
+    | MCPResourcesMessage
     | ConfigSetMessage
     | ArtifactUploadedMessage
     | ArtifactDownloadedMessage

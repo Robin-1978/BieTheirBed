@@ -135,7 +135,7 @@ async def test_onboarding_discovers_and_enables_only_annotated_read_tools(
 
 
 @pytest.mark.asyncio
-async def test_onboarding_adds_resource_task_route_without_restart(
+async def test_onboarding_rejects_legacy_resource_task_route(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "local.yaml"
@@ -176,10 +176,8 @@ async def test_onboarding_adds_resource_task_route_without_restart(
         }
     )
 
-    await service.configure_resource_task("jira", "assigned", route)
+    with pytest.raises(ValueError, match="Task Definition launch policy"):
+        await service.configure_resource_task("jira", "assigned", route)
 
-    assert bridge.calls == [(provider, "assigned", route)]
-    saved = yaml.safe_load(path.read_text())
-    assert saved["mcp_servers"]["jira"]["resource_tasks"]["assigned"]["uri"] == (
-        "jira://assigned-to-me"
-    )
+    assert bridge.calls == []
+    assert not path.exists()

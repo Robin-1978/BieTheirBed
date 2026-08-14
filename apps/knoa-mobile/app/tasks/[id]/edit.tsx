@@ -12,7 +12,7 @@ import {
   View,
 } from "react-native";
 
-import type { Task, TaskLaunchPolicy } from "@/api/models";
+import type { MCPResourceCatalogItem, Task, TaskLaunchPolicy } from "@/api/models";
 import { immediatePolicy, isLaunchPolicyValid, TaskLaunchEditor } from "@/components/TaskLaunchEditor";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
@@ -33,6 +33,14 @@ export default function EditTaskScreen() {
   const [notifyFailed, setNotifyFailed] = useState(true);
   const [notifyApproval, setNotifyApproval] = useState(true);
   const [launchPolicy, setLaunchPolicy] = useState<TaskLaunchPolicy>(immediatePolicy);
+  const [mcpResources, setMcpResources] = useState<MCPResourceCatalogItem[]>([]);
+
+  useEffect(() => {
+    if (!gateway.client) return;
+    void gateway.runAuthenticated((client) => client.listMcpResources())
+      .then(setMcpResources)
+      .catch(() => setMcpResources([]));
+  }, [gateway.client, gateway.runAuthenticated]);
 
   useEffect(() => {
     if (!gateway.client || !taskId) return;
@@ -91,7 +99,7 @@ export default function EditTaskScreen() {
           style={styles.goalInput}
           accessibilityLabel={t("taskNew.goal")}
         />
-        <TaskLaunchEditor policy={launchPolicy} onChange={setLaunchPolicy} />
+        <TaskLaunchEditor policy={launchPolicy} onChange={setLaunchPolicy} mcpResources={mcpResources} />
         <View style={styles.notificationCard}>
           <Text style={styles.label}>{t("taskNew.notifyMe")}</Text>
           <Toggle label={t("taskNew.completed")} value={notifyCompleted} onChange={setNotifyCompleted} />

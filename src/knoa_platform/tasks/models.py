@@ -282,6 +282,23 @@ class TaskLaunchPolicy(TaskModel):
     event_source: Annotated[str, StringConstraints(max_length=128)] = ""
     source_config: dict[str, Any] = Field(default_factory=dict)
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_mcp_source_config(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        event_source = str(value.get("event_source") or "")
+        source_config = value.get("source_config")
+        if not event_source.startswith("mcp:") or not isinstance(source_config, dict):
+            return value
+        normalized = dict(source_config)
+        legacy_exact = normalized.pop("resource_uri", None)
+        if legacy_exact is not None:
+            normalized.setdefault("resource_uri_prefix", legacy_exact)
+        normalized.setdefault("include_root", True)
+        normalized.setdefault("include_descendants", False)
+        return {**value, "source_config": normalized}
+
     @model_validator(mode="after")
     def validate_kind_fields(self) -> TaskLaunchPolicy:
         if self.kind is TaskLaunchKind.IMMEDIATE:
@@ -306,17 +323,23 @@ class TaskLaunchPolicy(TaskModel):
             if self.event_source.startswith("mcp:"):
                 if not _MCP_EVENT_SOURCE.fullmatch(self.event_source):
                     raise ValueError("MCP event_source must be mcp:<server_id>")
-                exact = self.source_config.get("resource_uri")
                 prefix = self.source_config.get("resource_uri_prefix")
-                if (exact is None) == (prefix is None):
-                    raise ValueError(
-                        "MCP event requires exactly one resource_uri or "
-                        "resource_uri_prefix"
-                    )
-                resource_uri = exact if exact is not None else prefix
-                if not isinstance(resource_uri, str) or not resource_uri.strip():
+                if not isinstance(prefix, str) or not prefix.strip():
                     raise ValueError("MCP Resource URI must be a non-empty string")
-                parsed = urlsplit(resource_uri.strip())
+                unknown = set(self.source_config) - {
+                    "resource_uri_prefix",
+                    "include_root",
+                    "include_descendants",
+                }
+                if unknown:
+                    raise ValueError("MCP event source_config contains unsupported fields")
+                if not isinstance(self.source_config.get("include_root", True), bool):
+                    raise ValueError("MCP include_root must be a boolean")
+                if not isinstance(
+                    self.source_config.get("include_descendants", False), bool
+                ):
+                    raise ValueError("MCP include_descendants must be a boolean")
+                parsed = urlsplit(prefix.strip())
                 if not parsed.scheme or parsed.query or parsed.fragment:
                     raise ValueError("MCP Resource URI must be an absolute URI without query or fragment")
         return self

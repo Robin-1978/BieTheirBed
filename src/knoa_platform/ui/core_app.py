@@ -37,6 +37,7 @@ from knoa_platform.ui.widgets import (
     ICON_READY,
     ICON_WARN,
 )
+from knoa_platform.tasks import TaskLaunchKind, TaskLaunchPolicy
 
 
 _CONFIRM_TIMEOUT = 120.0
@@ -59,6 +60,9 @@ _HELP = """\
 | `/memory clear` | Clear memories |
 | `/history` | Show conversation history |
 | `/tools` | List available tools |
+| `/mcp-resources` | List discovered MCP Resources |
+| `/task-create-event <server> <uri> <goal>` | Create an MCP Resource Task |
+| `/task-set-event <task-id> <server> <uri> [tree]` | Configure an MCP Event Task |
 | `/status` | Show Core status |
 | `/config set key=value` | Persist a supported setting |
 | `/export` | Export conversation |
@@ -354,14 +358,18 @@ class CoreChatApp(App):
             return False
         future = asyncio.get_running_loop().create_future()
         self._confirm_pending = future
-        details = ", ".join(
-            f"{key}={value}" for key, value in list(approval.arguments.items())[:4]
-        )
+        display = approval.display
+        details = str(display.get("arguments_preview") or "{}")
+        effect = str(display.get("effect") or "unknown")
+        risk = str(display.get("risk") or "unknown")
+        reversible = bool(display.get("reversible", False))
         self.call_later(
             self._mount_confirmation,
             approval.tool_name,
             details,
-            approval.reason,
+            effect,
+            risk,
+            reversible,
         )
         try:
             return await asyncio.wait_for(future, timeout=_CONFIRM_TIMEOUT)
@@ -378,11 +386,20 @@ class CoreChatApp(App):
             return current[len(previous):]
         return current if not previous else ""
 
-    def _mount_confirmation(self, tool: str, details: str, reason: str) -> None:
+    def _mount_confirmation(
+        self,
+        tool: str,
+        details: str,
+        effect: str,
+        risk: str,
+        reversible: bool,
+    ) -> None:
         self.query_one("#chat-log", VerticalScroll).mount(
             CommandOutput(
                 f"**⚠️ Confirmation required: {tool}**\n\n"
-                f"`{details}`\n\nReason: `{reason}`\n\n"
+                f"Effect: `{effect}` · Risk: `{risk}` · "
+                f"Reversible: `{'yes' if reversible else 'no'}`\n\n"
+                f"Arguments: `{details}`\n\n"
                 "Type `/confirm` or `/deny`."
             )
         )
@@ -408,6 +425,13 @@ class CoreChatApp(App):
             tools = (await self._client.list_tools(self._session_handle)).tools
             rows = "\n".join(f"| `{name}` |" for name in tools)
             await log.mount(CommandOutput(f"| Tool |\n|------|\n{rows}"))
+        elif cmd == "/mcp-resources":
+            catalog = await self._client.list_mcp_resources()
+            rows = "\n".join(
+                f"| `{item.server_id}` | `{item.uri}` | {item.name or '—'} |"
+                for item in catalog.resources
+            ) or "| — | — | No discovered Resources |"
+            await log.mount(CommandOutput("| Server | URI | Name |\n|---|---|---|\n" + rows))
         elif cmd == "/agents":
             rows = "\n".join(
                 f"| `{agent_id}` | {'selected' if agent_id == self._agent_id else ''} |"
@@ -522,6 +546,42 @@ class CoreChatApp(App):
                     client_request_id=str(uuid.uuid4()),
                 )
                 await log.mount(CommandOutput(f"Started Execution `{execution.execution_id}`."))
+        elif cmd.startswith("/task-create-event "):
+            parts = command.split(None, 3)
+            if len(parts) != 4:
+                await log.mount(CommandOutput(f"{ICON_WARN} Usage: `/task-create-event <server> <uri> <goal>`"))
+            else:
+                server, uri, goal = parts[1:]
+                session = await self._client.create_session(agent_id=self._agent_id, activate=False)
+                result = await self._client.create_product_task(
+                    session,
+                    goal,
+                    client_request_id=str(uuid.uuid4()),
+                    title=goal.splitlines()[0][:80],
+                    launch_policy=TaskLaunchPolicy(
+                        kind=TaskLaunchKind.EVENT,
+                        event_source=f"mcp:{server}",
+                        source_config={"resource_uri_prefix": uri, "include_root": True, "include_descendants": False},
+                    ),
+                    agent_id=self._agent_id,
+                )
+                await log.mount(CommandOutput(f"Created Task `{result.task.task_id}`."))
+        elif cmd.startswith("/task-set-event "):
+            parts = command.split()
+            if len(parts) not in {4, 5}:
+                await log.mount(CommandOutput(f"{ICON_WARN} Usage: `/task-set-event <task-id> <server> <uri> [tree]`"))
+            else:
+                task = await self._client.get_product_task(parts[1])
+                updated = await self._client.update_product_task(
+                    task.task_id,
+                    launch_policy=TaskLaunchPolicy(
+                        kind=TaskLaunchKind.EVENT,
+                        event_source=f"mcp:{parts[2]}",
+                        source_config={"resource_uri_prefix": parts[3], "include_root": True, "include_descendants": len(parts) == 5 and parts[4].lower() == "tree"},
+                    ),
+                    expected_revision=task.revision,
+                )
+                await log.mount(CommandOutput(f"Updated Task `{updated.task_id}`."))
         elif cmd == "/confirm":
             self._resolve_confirmation(True, log)
         elif cmd == "/deny":
@@ -547,9 +607,10 @@ class CoreChatApp(App):
         approvals = "\n".join(
             (
                 f"- `{item.approval_id}` · {item.state} · `{item.tool_name}`"
-                f"\n  - Effect/risk: `{item.reason or 'unknown'}`"
-                f"\n  - Full arguments: "
-                f"`{json.dumps(item.arguments, ensure_ascii=False, sort_keys=True)}`"
+                f"\n  - Effect: `{getattr(item, 'display', {}).get('effect') or item.reason or 'unknown'}`"
+                f" · risk: `{getattr(item, 'display', {}).get('risk', 'unknown')}`"
+                f" · reversible: `{bool(getattr(item, 'display', {}).get('reversible', False))}`"
+                f"\n  - Arguments: `{getattr(item, 'display', {}).get('arguments_preview') or json.dumps(item.arguments, ensure_ascii=False, sort_keys=True)}`"
             )
             for item in execution.approvals
         ) or "- None"

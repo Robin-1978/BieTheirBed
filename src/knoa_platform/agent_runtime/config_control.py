@@ -95,40 +95,11 @@ class PersistentConfigController:
         route_id: str,
         route: MCPResourceTaskConfig,
     ) -> ConfigSetResult:
-        server = self._config.mcp_servers.get(server_id)
-        if server is None:
-            return ConfigSetResult(applied=False, error="MCP server is not configured")
-        if route_id in server.resource_tasks:
-            return ConfigSetResult(
-                applied=False,
-                error="MCP Resource Task route is already configured",
-            )
-        updated_server = server.model_copy(
-            update={"resource_tasks": {**server.resource_tasks, route_id: route}}
+        del server_id, route_id, route
+        return ConfigSetResult(
+            applied=False,
+            error="MCP Resource routing is configured by a Task Definition launch policy",
         )
-        candidate_data = self._config.model_dump(mode="python")
-        candidate_data["mcp_servers"] = {
-            **self._config.mcp_servers,
-            server_id: updated_server,
-        }
-        try:
-            candidate = AppConfig.model_validate(candidate_data)
-        except ValueError:
-            return ConfigSetResult(applied=False, error="MCP Resource Task is invalid")
-        existing = self._read_existing()
-        if isinstance(existing, ConfigSetResult):
-            return existing
-        configured = dict(existing.get("mcp_servers") or {})
-        configured[server_id] = updated_server.model_dump(
-            mode="json",
-            exclude_defaults=True,
-        )
-        existing["mcp_servers"] = configured
-        result = self._write_existing(existing)
-        if result is not None:
-            return result
-        self._config = candidate
-        return ConfigSetResult(applied=True, restart_required=False)
 
     async def set_mcp_server_enabled(
         self,

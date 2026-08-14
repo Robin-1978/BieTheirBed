@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from knoa_platform.agent_runtime.contracts import (
     ArtifactTranscriptionResult,
+    MCPResourceCatalogResult,
     RuntimeStatus,
     ToolListResult,
 )
@@ -350,6 +351,10 @@ class RuntimeStatusResponse(BaseModel):
 
 class ToolListResponse(BaseModel):
     result: ToolListResult
+
+
+class MCPResourceCatalogResponse(BaseModel):
+    result: MCPResourceCatalogResult
 
 
 class AuditEventResponse(BaseModel):

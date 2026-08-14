@@ -133,6 +133,7 @@ class SecureGatewayAdapter(
                 Route("/v1/auth/complete", self._auth_complete, methods=["POST"]),
                 Route("/v1/session", self._session, methods=["GET"]),
                 Route("/v1/agents", self._agents, methods=["GET"]),
+                Route("/v1/mcp/resources", self._list_mcp_resources, methods=["GET"]),
                 Route("/v1/sessions", self._create_session, methods=["POST"]),
                 Route("/v1/conversations/sessions", self._list_conversation_sessions, methods=["GET"]),
                 Route(
@@ -269,6 +270,11 @@ class SecureGatewayAdapter(
                 ),
                 Route("/v1/runtime/status", self._runtime_status, methods=["GET"]),
                 Route("/v1/tools", self._list_tools, methods=["GET"]),
+                Route(
+                    "/v1/mcp/resources",
+                    self._list_mcp_resources,
+                    methods=["GET"],
+                ),
                 Route(
                     "/v1/mobile/releases/android/latest",
                     self._latest_android_release,

@@ -75,7 +75,6 @@ async def test_mcp_deploy_requires_confirmation_and_activates_after_approval(
         arguments={
             "path": "package",
             "server_id": "monitor",
-            "resource_uri": "monitor://events",
         },
     )
 
@@ -87,8 +86,7 @@ async def test_mcp_deploy_requires_confirmation_and_activates_after_approval(
     path, server_id, route = packages.calls[0]
     assert path == str((tmp_path / "package").resolve())
     assert server_id == "monitor"
-    assert route[1].session_handle == "session-a"
-    assert route[1].uri == "monitor://events"
+    assert route is None
     assert completed.status == "completed"
     assert completed.output["action"] == "installed"
     assert completed.output["tools"] == ["mcp__monitor__ping"]

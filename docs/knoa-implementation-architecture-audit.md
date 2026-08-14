@@ -2,11 +2,12 @@
 
 > 审计日期：2026-08-14
 >
-> 审计基线：`a0a8926`（`knoa-v0.2.8`）
+> 审计基线：当前工作区（`knoa-v0.2.10` 演进中）
 >
 > 方法：以当前代码调用链、持久化模型和测试为证据，不以既有设计文档为前提。
 >
-> 审计时验证：`.venv/bin/pytest -q`，780 passed，1 warning。
+> 审计时验证：Python 全量测试、Mobile TypeScript typecheck 和 Mobile Vitest
+> 均通过。
 
 ## 0. 2026-08-14 收敛复核
 
@@ -20,8 +21,8 @@
   `TaskLaunchEditor` 已统一支持 `mcp:<server_id> + resource_uri[_prefix]`；
 - `docs/architecture.md` 已替换为当前实现架构，不再保留旧安全边界描述。
 
-复核基线：779 个 Python 测试收集并全量通过；Mobile TypeScript typecheck 通过，
-36 个 Vitest 测试通过。下文 P1 内容保留为“发现依据”，不再代表当前缺陷状态。
+复核基线：Python 全量测试、Mobile TypeScript typecheck 和 36 个 Vitest 测试通过。
+下文 P1 内容保留为“发现依据”，已在本轮实现中更新的项目以当前架构章节为准。
 
 ## 1. 执行结论
 
@@ -40,10 +41,12 @@ Knoa 已经不是等待实现的 Agent Platform 设计。下列核心能力已�
 - `Policy` 还不是独立 Platform SPI，目前是 Tool 自带的 `ToolPolicy` 加 ToolStep 内的固定规则。
 - HumanInteraction 虽然持久化，但服务重启后的恢复语义不完整。
 - 同一 Agent Session 的 Turn 串行化没有在统一执行入口强制保证。
-- 外部 Agent 能获得 Platform MCP Tools，但目前不会获得 Knoa Agent 的 Memory/Skill 上下文。
+- 所有 Agent Runtime 都从 Platform 接收同一 `RuntimeTurnContext`；每个 Agent
+  自己决定上下文的渲染、排序和压缩方式。
 - Notification 目前主要是 Task 事件流上的飞书实现，不是通用 Notification SPI。
 - Task 可以在 Core 重启后恢复治理状态，但不会无条件、无感地继续执行。
-- MCP Resource 自动化尚未实现“事件匹配用户已有 Task Definition”；当前 Bridge 会为每个 Resource URI 创建新的 Task Definition。
+- MCP Resource 自动化已收敛为“事件匹配用户已有 Task Definition”；旧
+  `resource_tasks` 仅兼容读取，不再参与运行时路由。
 
 因此下一阶段的正确方向不是增加更多架构名词，而是：
 
@@ -104,20 +107,26 @@ Webhook
 MCP Resource
   -> MCPResourceTaskBridge
   -> Resource snapshot
-  -> TaskService.create_definition / execute_definition
+  -> existing Event Task Definition matching
+  -> Trigger binding
+  -> TaskService.execute_definition
 ```
 
-第二条路径仍然由 Platform Bridge 调用 TaskService；MCP Server 本身没有直接获得 Task Repository 或 Core 状态修改权限。但它没有经过通用 `TriggerService`，因此当前架构不应声称“所有外部事件统一通过 Trigger Gateway”。
+第二条路径仍然由 Platform Bridge 调用 Task/Trigger ports；MCP Server 本身没有直接
+获得 Task Repository 或 Core 状态修改权限。MCP Resource 与 Webhook 可以继续使用
+不同的 Adapter，但都只激活已存在的 Task Definition。
 
-更关键的是，当前 `MCPResourceTaskConfig` 只有 Resource URI scope、principal、session、tools 和 priority，没有要激活的 `task_id`。Bridge 读取 Resource 后，把 Resource 正文拼成 goal，并调用 `create_definition()`。因此当前实现是：
+运行时路由由 Task 的 `launch_policy` 定义；旧 `MCPResourceTaskConfig` 只做一版
+兼容读取，不再决定业务工作流：
 
 ```text
 MCP Resource URI
-  -> Bridge 生成 Task Definition
+  -> Bridge 匹配已有 Task Definition
+  -> Trigger binding
   -> Task Execution
 ```
 
-而不是目标模型：
+这就是当前目标模型：
 
 ```text
 MCP Resource Event
@@ -211,23 +220,20 @@ Agent proposed call
 
 ## 5. 优先发现
 
-### P1：MCP Resource Bridge 目前不是 Trigger-bound Task Definition 模型
+### P1：MCP Resource Bridge 已收敛为 Trigger-bound Task Definition 模型
 
 你与其他 Agent 讨论的目标模型是正确的：MCP Server 只提供业务事实，用户创建的 Task Definition 决定自动化行为。
 
-当前实现与它有三处实质差异：
-
-1. `MCPResourceTaskConfig` 没有绑定已有 Task Definition。
-2. `MCPResourceTaskBridge._create_task()` 使用 Resource 内容动态创建 Task Definition。
-3. `_RouteState.processed` 按 URI 永久去重；同一个 mutable Resource URI 的再次 `resources/updated` 不会产生新 Execution。当前实现实际上假设每个业务事件都有一个新的、不可变 Resource URI。
-
-这意味着 Jira Issue 使用固定 URI，例如 `jira://issue/ABC-123`，即使内容持续更新，也不符合当前 Bridge 的一次 URI 一次 Task 语义。现有测试使用的是更接近 append-only event Resource 的形式：
+当前 Bridge 按 `mcp:<server_id>` 和 canonical URI selector 匹配已有 Task
+Definition，修复缺失或失效的 Trigger binding，并使用 snapshot digest 做幂等。
+因此用户可以选择 append-only Event Resource，也可以让 mutable Resource 的内容
+更新形成新的事件版本。
 
 ```text
 jira://assigned-to-me/events/assignment-1
 ```
 
-建议的最小目标模型：
+当前的最小模型：
 
 ```text
 MCP Resource notification / inventory
@@ -319,15 +325,11 @@ TaskDefinition.task_id
 
 应明确 1.0 协议：Approval 继续由 Platform Confirmation 管理；HumanInteraction 只承诺 `user_input` 和 `mcp_elicitation`。然后要么让执行服务接受两者，要么从 Agent 主动事件契约中删除当前不支持的 kind，避免“协议写了但 Host 拒绝”。
 
-### P2：Agent SPI 目前是执行可替换，不是上下文完全可替换
+### P2：Agent SPI 的执行和 Context 输入已统一，消费策略仍由 Agent 决定
 
-所有 Agent 都能得到 Capability MCP endpoint；只有 `agent_id == "knoa"` 时才注入 `RuntimeTurnContext` 中的 Memory 和 Skill。Codex Agent 目前得到空 Context。
-
-这不是安全缺陷，但文档必须准确：
-
-> Agent SPI 已实现 Runtime 和 Tool 接入可替换；Platform Memory/Skill 的跨 Agent 统一注入尚未实现。
-
-在第二个 Agent 明确需要同类上下文之前，不新增通用 Context Plugin SPI。
+所有 Agent 都得到 Capability MCP endpoint 和同一个 `RuntimeTurnContext`。Knoa
+Agent 使用自己的 ContextEngine；Codex 将其作为明确标记的 platform context 输入。
+Agent 自己负责排序、预算和压缩。本轮没有新增 Context Plugin SPI。
 
 ### P3：Notification 尚不需要独立平台抽象
 

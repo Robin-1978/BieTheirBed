@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from knoa_platform.extensions.mcp_onboarding import MCPOnboardingService
-from knoa_platform.extensions.models import MCPResourceTaskConfig, MCPServerConfig
+from knoa_platform.extensions.models import MCPServerConfig
 from knoa_platform.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRisk
 
 
@@ -156,8 +156,8 @@ class MCPConnectTool(ToolBase):
             "prompts": [prompt.name for prompt in result.prompts],
             "detail": result.detail,
             "automation_note": (
-                "Use mcp_configure_resource_task with one discovered Resource URI "
-                "to enable automatic durable Tasks for the current Session."
+                "Create or update a Task Definition with event_source=mcp:"
+                f"{result.server_id} and a selected resource_uri_prefix."
             ),
         }
 
@@ -180,86 +180,6 @@ class MCPConnectTool(ToolBase):
                     **_connection_properties(),
                 },
                 "required": ["server_id", "transport", "enabled_tools"],
-                "additionalProperties": False,
-            },
-        }
-
-
-class MCPConfigureResourceTaskTool(ToolBase):
-    name = "mcp_configure_resource_task"
-    description = (
-        "Bind one discovered MCP Resource URI to the current principal-owned "
-        "Session as an automatic durable Task source after user confirmation."
-    )
-    effect = ToolEffect.LOCAL_WRITE
-    capabilities = frozenset(
-        {
-            ToolCapability.HOST_WRITE,
-            ToolCapability.MCP,
-            ToolCapability.TASK_MANAGEMENT,
-        }
-    )
-    risk = ToolRisk.HIGH
-
-    def __init__(self, onboarding: MCPOnboardingService) -> None:
-        self._onboarding = onboarding
-
-    async def execute(self, **kwargs: Any) -> Any:
-        del kwargs
-        return {"error": "This operation requires a principal-owned Session"}
-
-    async def execute_scoped(self, scope: Any, **kwargs: Any) -> Any:
-        server_id = str(kwargs.get("server_id", "")).strip()
-        route_id = str(kwargs.get("route_id", "")).strip()
-        try:
-            route = MCPResourceTaskConfig.model_validate(
-                {
-                    "uri": kwargs.get("uri", ""),
-                    "principal_id": scope.principal_id,
-                    "session_handle": scope.session_handle,
-                    "include_root": kwargs.get("include_root", False),
-                    "tools_enabled": kwargs.get("tools_enabled", True),
-                    "priority": kwargs.get("priority", 0),
-                }
-            )
-            await self._onboarding.configure_resource_task(
-                server_id,
-                route_id,
-                route,
-            )
-        except (OSError, ValueError) as exc:
-            return {"error": str(exc)}
-        return {
-            "configured": True,
-            "server_id": server_id,
-            "route_id": route_id,
-            "uri": route.uri,
-            "principal_id": route.principal_id,
-            "session_handle": route.session_handle,
-            "active": True,
-        }
-
-    def definition(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "description": self.description,
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "server_id": {
-                        "type": "string",
-                        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,23}$",
-                    },
-                    "route_id": {
-                        "type": "string",
-                        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
-                    },
-                    "uri": {"type": "string", "minLength": 1, "maxLength": 4096},
-                    "include_root": {"type": "boolean"},
-                    "tools_enabled": {"type": "boolean"},
-                    "priority": {"type": "integer", "minimum": 0, "maximum": 9},
-                },
-                "required": ["server_id", "route_id", "uri"],
                 "additionalProperties": False,
             },
         }

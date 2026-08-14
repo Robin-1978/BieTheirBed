@@ -1,17 +1,20 @@
 import { useState } from "react";
 import { StyleSheet, Text, TextInput, View } from "react-native";
 
-import type { TaskLaunchKind, TaskLaunchPolicy } from "@/api/models";
+import type { MCPResourceCatalogItem, TaskLaunchKind, TaskLaunchPolicy } from "@/api/models";
 import { AppPressable } from "@/components/AppPressable";
 import { useI18n } from "@/i18n";
 import { colors } from "@/theme";
 
 type SchedulePreset = "one_time" | "daily" | "weekly" | "interval" | "cron";
 
-export function TaskLaunchEditor({ policy, onChange }: { policy: TaskLaunchPolicy; onChange(policy: TaskLaunchPolicy): void }) {
+export function TaskLaunchEditor({ policy, onChange, mcpResources = [] }: { policy: TaskLaunchPolicy; onChange(policy: TaskLaunchPolicy): void; mcpResources?: MCPResourceCatalogItem[] }) {
   const { t } = useI18n();
   const [advanced, setAdvanced] = useState(policy.kind === "event" || isAdvancedCron(policy.cron));
   const [preset, setPreset] = useState<SchedulePreset>(() => schedulePreset(policy));
+  const selectedServer = mcpServerId(policy);
+  const serverIds = [...new Set(mcpResources.map((item) => item.server_id))].sort();
+  const visibleResources = mcpResources.filter((item) => item.server_id === selectedServer);
 
   function selectKind(kind: TaskLaunchKind) {
     if (kind === "immediate") onChange(immediatePolicy());
@@ -113,7 +116,7 @@ export function TaskLaunchEditor({ policy, onChange }: { policy: TaskLaunchPolic
           <Text style={styles.label}>{t("taskLaunch.eventType")}</Text>
           <View style={styles.options}>
             <Choice label={t("taskLaunch.webhook")} selected={!isMcpEvent(policy)} onPress={() => onChange({ ...policy, event_source: "webhook", source_config: {} })} />
-            <Choice label={t("taskLaunch.mcpResource")} selected={isMcpEvent(policy)} onPress={() => onChange({ ...policy, event_source: mcpServerId(policy) ? `mcp:${mcpServerId(policy)}` : "mcp:", source_config: { resource_uri_prefix: resourceUri(policy) } })} />
+            <Choice label={t("taskLaunch.mcpResource")} selected={isMcpEvent(policy)} onPress={() => onChange({ ...policy, event_source: mcpServerId(policy) ? `mcp:${mcpServerId(policy)}` : "mcp:", source_config: { resource_uri_prefix: resourceUri(policy), include_root: true, include_descendants: false } })} />
           </View>
           {!isMcpEvent(policy) ? (
             <>
@@ -123,9 +126,30 @@ export function TaskLaunchEditor({ policy, onChange }: { policy: TaskLaunchPolic
           ) : (
             <>
               <Text style={styles.label}>{t("taskLaunch.mcpServer")}</Text>
+              {serverIds.length ? (
+                <View style={styles.catalogList}>
+                  {serverIds.map((server) => (
+                    <CatalogChoice key={server} label={server} detail={t("taskLaunch.discoveredServer")} selected={server === selectedServer} onPress={() => {
+                      const first = mcpResources.find((item) => item.server_id === server);
+                      onChange({ ...policy, event_source: `mcp:${server}`, source_config: first ? { resource_uri_prefix: first.uri, include_root: true, include_descendants: false } : {} });
+                    }} />
+                  ))}
+                </View>
+              ) : null}
               <TextInput accessibilityLabel={t("taskLaunch.mcpServer")} autoCapitalize="none" placeholder={t("taskLaunch.mcpServerPlaceholder")} placeholderTextColor={colors.muted} style={styles.input} value={mcpServerId(policy)} onChangeText={(server) => onChange({ ...policy, event_source: `mcp:${server.trim()}` })} />
               <Text style={styles.label}>{t("taskLaunch.mcpResourceUri")}</Text>
-              <TextInput accessibilityLabel={t("taskLaunch.mcpResourceUri")} autoCapitalize="none" placeholder={t("taskLaunch.mcpResourceUriPlaceholder")} placeholderTextColor={colors.muted} style={styles.input} value={resourceUri(policy)} onChangeText={(uri) => onChange({ ...policy, source_config: { ...policy.source_config, resource_uri_prefix: uri.trim() } })} />
+              {visibleResources.length ? (
+                <View style={styles.catalogList}>
+                  {visibleResources.map((resource) => (
+                    <CatalogChoice key={resource.uri} label={resource.name || resource.uri} detail={resource.uri} selected={resource.uri === resourceUri(policy)} onPress={() => onChange({ ...policy, source_config: { resource_uri_prefix: resource.uri, include_root: true, include_descendants: false } })} />
+                  ))}
+                </View>
+              ) : null}
+              <TextInput accessibilityLabel={t("taskLaunch.mcpResourceUri")} autoCapitalize="none" placeholder={t("taskLaunch.mcpResourceUriPlaceholder")} placeholderTextColor={colors.muted} style={styles.input} value={resourceUri(policy)} onChangeText={(uri) => onChange({ ...policy, source_config: { resource_uri_prefix: uri.trim(), include_root: true, include_descendants: Boolean(policy.source_config?.include_descendants) } })} />
+              <View style={styles.options}>
+                <Choice label={t("taskLaunch.resourceOnly")} selected={!Boolean(policy.source_config?.include_descendants)} onPress={() => onChange({ ...policy, source_config: { ...policy.source_config, include_root: true, include_descendants: false } })} />
+                <Choice label={t("taskLaunch.resourceTree")} selected={Boolean(policy.source_config?.include_descendants)} onPress={() => onChange({ ...policy, source_config: { ...policy.source_config, include_root: true, include_descendants: true } })} />
+              </View>
               <Text style={styles.help}>{t("taskLaunch.mcpResourceHelp")}</Text>
             </>
           )}
@@ -178,7 +202,7 @@ function mcpServerId(policy: TaskLaunchPolicy): string {
 
 function resourceUri(policy: TaskLaunchPolicy): string {
   const config = policy.source_config ?? {};
-  return String(config.resource_uri_prefix ?? config.resource_uri ?? "");
+  return String(config.resource_uri_prefix ?? "");
 }
 
 function isDailyCron(value: string): boolean {
@@ -243,6 +267,10 @@ function Choice({ label, selected, onPress, compact = false }: { label: string; 
   return <AppPressable accessibilityRole="radio" accessibilityState={{ checked: selected }} onPress={onPress} style={[styles.choice, compact && styles.choiceCompact, selected && styles.choiceSelected]}><Text style={[styles.choiceText, selected && styles.choiceTextSelected]}>{label}</Text></AppPressable>;
 }
 
+function CatalogChoice({ label, detail, selected, onPress }: { label: string; detail: string; selected: boolean; onPress(): void }) {
+  return <AppPressable accessibilityRole="radio" accessibilityState={{ checked: selected }} onPress={onPress} style={[styles.catalogChoice, selected && styles.catalogChoiceSelected]}><Text style={[styles.catalogLabel, selected && styles.catalogLabelSelected]}>{label}</Text><Text numberOfLines={2} style={styles.catalogDetail}>{detail}</Text></AppPressable>;
+}
+
 const styles = StyleSheet.create({
   card: { marginTop: 6, padding: 14, borderRadius: 12, backgroundColor: colors.accentSoft, gap: 10 },
   title: { color: colors.ink, fontWeight: "700" },
@@ -253,6 +281,12 @@ const styles = StyleSheet.create({
   choiceText: { color: colors.muted, fontWeight: "600" },
   choiceTextSelected: { color: "white" },
   fields: { gap: 8 },
+  catalogList: { gap: 6 },
+  catalogChoice: { padding: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, gap: 3 },
+  catalogChoiceSelected: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
+  catalogLabel: { color: colors.ink, fontWeight: "700" },
+  catalogLabelSelected: { color: colors.accent },
+  catalogDetail: { color: colors.muted, fontSize: 11, lineHeight: 16 },
   label: { color: colors.ink, fontWeight: "600", fontSize: 13 },
   input: { minHeight: 44, borderRadius: 10, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, paddingHorizontal: 11, color: colors.ink },
   help: { color: colors.muted, fontSize: 12, lineHeight: 18 },

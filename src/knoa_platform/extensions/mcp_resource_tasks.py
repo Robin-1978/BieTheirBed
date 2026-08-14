@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
+from knoa_platform.agent_runtime.contracts import MCPResourceCatalogRecord
 from knoa_platform.agent_runtime.contracts import RuntimeScope
 from knoa_platform.extensions.mcp import (
     MCPResourceDefinition,
@@ -40,6 +41,13 @@ class MCPTaskCreationPort(Protocol):
         limit: int = 100,
     ) -> tuple[Any, ...]: ...
 
+    async def list_event_definitions(
+        self,
+        event_source: str,
+        *,
+        limit: int = 1000,
+    ) -> tuple[Any, ...]: ...
+
     async def launch_binding(
         self,
         principal_id: str,
@@ -55,6 +63,8 @@ class MCPTaskCreationPort(Protocol):
         provider_id: str,
     ) -> None: ...
 
+    async def unbind_launch(self, principal_id: str, task_id: str) -> None: ...
+
 
 class MCPTriggerIngressPort(Protocol):
     async def create(
@@ -69,6 +79,8 @@ class MCPTriggerIngressPort(Protocol):
     ) -> Any: ...
 
     async def delete(self, principal_id: str, trigger_id: str) -> None: ...
+
+    async def get(self, principal_id: str, trigger_id: str) -> Any: ...
 
     async def receive(
         self,
@@ -229,13 +241,8 @@ class MCPResourceTaskBridge:
         self._routes: dict[str, dict[str, _RouteState]] = {}
         self._subscribed: dict[str, set[str]] = {}
         self._pending_updates: dict[str, set[str]] = {}
+        self._catalog: dict[str, tuple[MCPResourceCatalogRecord, ...]] = {}
         self._candidates = tuple(providers)
-        for provider in providers:
-            config = provider.config
-            if config is None or not config.resource_tasks:
-                continue
-            for route_id, route in config.resource_tasks.items():
-                self.add_route(provider, route_id, route, wake=False)
         self._tasks = tasks
         self._sessions = sessions
         self._triggers = triggers
@@ -267,17 +274,28 @@ class MCPResourceTaskBridge:
         if wake:
             self._wake.set()
 
-    def add_provider(self, provider: MCPServerProvider) -> None:
-        """Attach every persisted Resource Task route from one running provider."""
+    def add_provider(
+        self,
+        provider: MCPServerProvider,
+        *,
+        wake: bool = True,
+    ) -> None:
+        """Attach one running MCP provider for discovery and Task event ingress."""
 
         if self._providers.get(provider.server_id) is provider:
             return
         config = provider.config
         if config is None:
             raise ValueError("MCP provider has no active configuration")
-        for route_id, route in config.resource_tasks.items():
-            self.add_route(provider, route_id, route, wake=False)
-        if config.resource_tasks:
+        self._providers[provider.server_id] = provider
+        self._subscribed[provider.server_id] = set()
+        self._pending_updates[provider.server_id] = set()
+        self._routes.setdefault(provider.server_id, {})
+        provider.add_notification_listener(self._listener(provider.server_id))
+        # Resource-to-task routing is defined by active Task Definitions.
+        # ``resource_tasks`` remains readable for one-version compatibility,
+        # but is intentionally not consulted by the runtime bridge.
+        if wake:
             self._wake.set()
 
     async def remove_provider(self, provider: MCPServerProvider) -> None:
@@ -299,6 +317,14 @@ class MCPResourceTaskBridge:
         self._routes.pop(server_id, None)
         self._subscribed.pop(server_id, None)
         self._pending_updates.pop(server_id, None)
+        self._catalog.pop(server_id, None)
+
+    def catalog(self) -> tuple[MCPResourceCatalogRecord, ...]:
+        return tuple(
+            resource
+            for server_id in sorted(self._catalog)
+            for resource in self._catalog[server_id]
+        )
 
     @staticmethod
     def validate_route(config: MCPResourceTaskConfig) -> _CanonicalURI:
@@ -369,6 +395,11 @@ class MCPResourceTaskBridge:
                 pass
 
     async def reconcile_once(self) -> None:
+        # Keep explicit one-shot reconciliation useful without making Core
+        # composition attach providers before ExtensionManager starts them.
+        for provider in self._candidates:
+            if provider.server_id not in self._providers:
+                self.add_provider(provider, wake=False)
         for server_id, provider in tuple(self._providers.items()):
             try:
                 await self._reconcile_provider(server_id, provider)
@@ -400,58 +431,61 @@ class MCPResourceTaskBridge:
                 continue
             canonical_resources[canonical.text] = resource
 
+        self._catalog[server_id] = tuple(
+            MCPResourceCatalogRecord(
+                server_id=server_id,
+                uri=canonical_uri,
+                name=resource.name,
+                description=resource.description,
+                mime_type=resource.mime_type,
+                subscribable=capabilities.subscribe,
+            )
+            for canonical_uri, resource in sorted(canonical_resources.items())
+        )
+
         desired_subscriptions: set[str] = set()
-        routes = self._routes.get(server_id)
-        if routes is None or self._providers.get(server_id) is not provider:
-            return
-        for route_id, state in tuple(routes.items()):
+        definitions = await self._tasks.list_event_definitions(
+            f"mcp:{server_id}",
+            limit=5000,
+        )
+        owned_definitions: list[Any] = []
+        for definition in definitions:
             try:
                 await asyncio.to_thread(
                     self._sessions.resolve,
-                    state.config.principal_id,
-                    state.config.session_handle,
+                    definition.principal_id,
+                    definition.session_handle,
                 )
             except Exception:  # noqa: BLE001 - session repository boundary is generic
                 logger.warning(
-                    "MCP Resource Task route has no owned Session: %s/%s",
+                    "MCP Event Task has no owned Session: %s/%s",
                     server_id,
-                    route_id,
+                    definition.task_id,
                 )
                 continue
-            authorized = {
-                canonical_uri
-                for canonical_uri in canonical_resources
-                if _within_scope(state.root, _canonical_uri(canonical_uri))
-            }
-            state.known = authorized
-            desired_subscriptions.update(authorized)
-            definitions = await self._tasks.list_definitions(
-                state.config.principal_id,
-                state=TaskDefinitionState.ACTIVE,
-                limit=100,
+            await self._ensure_trigger_binding(definition)
+            owned_definitions.append(definition)
+        for canonical_uri in sorted(canonical_resources):
+            candidate = _canonical_uri(canonical_uri)
+            matching = tuple(
+                definition
+                for definition in owned_definitions
+                if self._matches_definition(
+                    definition,
+                    server_id=server_id,
+                    resource_uri=candidate,
+                )
             )
-            for canonical_uri in sorted(authorized):
-                candidate = _canonical_uri(canonical_uri)
-                if candidate.text == state.root.text and not state.config.include_root:
-                    continue
-                matching = tuple(
-                    definition
-                    for definition in definitions
-                    if self._matches_definition(
-                        definition,
-                        server_id=server_id,
-                        resource_uri=candidate,
-                    )
-                )
-                if not matching:
-                    continue
-                await self._emit_resource_event(
-                    server_id,
-                    provider,
-                    canonical_uri,
-                    canonical_resources[canonical_uri],
-                    matching,
-                )
+            if not matching:
+                continue
+            desired_subscriptions.add(canonical_uri)
+            await self._emit_resource_event(
+                server_id,
+                provider,
+                canonical_uri,
+                canonical_resources[canonical_uri],
+                matching,
+            )
         if capabilities.subscribe and self._providers.get(server_id) is provider:
             await self._sync_subscriptions(
                 provider,
@@ -505,19 +539,19 @@ class MCPResourceTaskBridge:
         if policy.event_source != f"mcp:{server_id}":
             return False
         config = policy.source_config
-        exact = config.get("resource_uri")
-        if isinstance(exact, str):
-            try:
-                return _canonical_uri(exact).text == resource_uri.text
-            except ValueError:
-                return False
         prefix = config.get("resource_uri_prefix")
         if isinstance(prefix, str):
             try:
-                return _within_scope(_canonical_uri(prefix), resource_uri)
+                root = _canonical_uri(prefix)
+                if root.text == resource_uri.text:
+                    return bool(config.get("include_root", True))
+                return bool(config.get("include_descendants", False)) and _within_scope(
+                    root,
+                    resource_uri,
+                )
             except ValueError:
                 return False
-        return True
+        return False
 
     async def _emit_resource_event(
         self,
@@ -551,7 +585,22 @@ class MCPResourceTaskBridge:
             definition.task_id,
         )
         if binding is not None:
-            return binding[1] if binding[0] == "event" else None
+            if binding[0] != "event":
+                logger.error(
+                    "MCP Event Task has a non-event launch binding: task=%s kind=%s",
+                    definition.task_id,
+                    binding[0],
+                )
+                return None
+            try:
+                await self._triggers.get(definition.principal_id, binding[1])
+            except LookupError:
+                await self._tasks.unbind_launch(
+                    definition.principal_id,
+                    definition.task_id,
+                )
+            else:
+                return binding[1]
 
         trigger = await self._triggers.create(
             RuntimeScope(

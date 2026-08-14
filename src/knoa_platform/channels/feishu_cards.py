@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from knoa_platform import __version__
+from knoa_platform.approvals.display import approval_display
 from knoa_platform.branding import ASSISTANT_NAME
 from knoa_platform.conversation import ChatTurnState
 from knoa_platform.service.core_api import (
@@ -255,6 +256,23 @@ def _brief_json(value: Any, limit: int = 240) -> str:
     if len(rendered) <= limit:
         return rendered
     return rendered[: max(1, limit - 1)] + "…"
+
+
+def _approval_summary(display: dict[str, Any], fallback: str = "") -> str:
+    effect = {
+        "read_only": "只读取数据",
+        "internal_write": "修改 Knoa 内部状态",
+        "local_write": "修改本机内容",
+        "external_side_effect": "影响外部系统",
+        "desktop_control": "操作桌面",
+    }.get(str(display.get("effect") or ""), "影响范围未知")
+    risk = {
+        "low": "低",
+        "medium": "中",
+        "high": "高",
+    }.get(str(display.get("risk") or ""), "未知")
+    reversible = "可撤销" if display.get("reversible") else "不保证可撤销"
+    return f"影响：{effect}；风险：{risk}；{reversible}" if display else fallback
 
 
 def _summarize_tool_result(result: Any) -> str:
@@ -559,8 +577,9 @@ class _StreamingCardState:
             self.timeline.append(step)
         step.approval_id = payload.approval_id
         step.approval_resource_id = message.task_id
-        step.confirmation_reason = (
-            payload.reason or "该操作可能改变系统状态"
+        step.confirmation_reason = _approval_summary(
+            approval_display(payload.tool_name, payload.tool_args, payload.reason),
+            payload.reason,
         )
         step.confirmation_status = "pending"
         self.phase = "working"
@@ -589,7 +608,10 @@ class _StreamingCardState:
             self.timeline.append(step)
         step.approval_id = approval.approval_id
         step.approval_resource_id = turn_id
-        step.confirmation_reason = approval.reason or "该操作可能改变系统状态"
+        step.confirmation_reason = _approval_summary(
+            approval.display,
+            approval.reason,
+        )
         step.confirmation_status = (
             "pending"
             if approval.state == "pending"

@@ -388,19 +388,22 @@ export default function TaskExecutionDetailScreen() {
 }
 
 function ApprovalDetails({ approval, t }: { approval: TaskApproval; t: ReturnType<typeof useI18n>["t"] }) {
-  const [effect, risk] = approval.reason.split(":", 2);
-  const hasArguments = Object.keys(approval.arguments).length > 0;
+  const [legacyEffect, legacyRisk] = approval.reason.split(":", 2);
+  const effect = approval.display?.effect || legacyEffect || "unknown";
+  const risk = approval.display?.risk || legacyRisk || "unknown";
+  const argumentsPreview = approval.display?.arguments_preview || (Object.keys(approval.arguments).length ? JSON.stringify(approval.arguments, null, 2) : "");
+  const hasArguments = Boolean(argumentsPreview);
   return (
     <View style={styles.approvalDetails}>
       <Text style={styles.approvalLabel}>{t("execution.tool")}</Text>
       <Text selectable style={styles.tool}>{approval.tool_name}</Text>
-      <Text style={styles.approvalReason}>{t("execution.effect", { value: effectLabel(effect ?? "", t) })}</Text>
-      <Text style={styles.approvalReason}>{t("execution.risk", { value: riskLabel(risk ?? "", t) })}</Text>
-      <Text style={styles.approvalReason}>{t("execution.reversibility")}</Text>
+      <Text style={styles.approvalReason}>{t("execution.effect", { value: effectLabel(effect, t) })}</Text>
+      <Text style={styles.approvalReason}>{t("execution.risk", { value: riskLabel(risk, t) })}</Text>
+      <Text style={styles.approvalReason}>{approval.display?.reversible ? t("execution.reversible") : t("execution.irreversible")}</Text>
       {hasArguments ? (
         <>
           <Text style={styles.approvalLabel}>{t("execution.arguments")}</Text>
-          <Text selectable style={styles.arguments}>{JSON.stringify(approval.arguments, null, 2)}</Text>
+          <Text selectable style={styles.arguments}>{argumentsPreview}</Text>
         </>
       ) : <Text style={styles.approvalReason}>{t("execution.noArguments")}</Text>}
     </View>
@@ -408,7 +411,7 @@ function ApprovalDetails({ approval, t }: { approval: TaskApproval; t: ReturnTyp
 }
 
 function effectLabel(value: string, t: ReturnType<typeof useI18n>["t"]): string {
-  return ({ local_write: t("execution.effect.local"), external_side_effect: t("execution.effect.external"), desktop_control: t("execution.effect.desktop"), unknown: t("execution.effect.unknown") } as Record<string, string>)[value] ?? t("execution.effect.controlled");
+  return ({ read_only: t("execution.effect.readOnly"), internal_write: t("execution.effect.internal"), local_write: t("execution.effect.local"), external_side_effect: t("execution.effect.external"), desktop_control: t("execution.effect.desktop"), unknown: t("execution.effect.unknown") } as Record<string, string>)[value] ?? t("execution.effect.controlled");
 }
 
 function riskLabel(value: string, t: ReturnType<typeof useI18n>["t"]): string {

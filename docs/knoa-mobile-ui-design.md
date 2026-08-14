@@ -169,10 +169,18 @@ sequenceDiagram
 时，用户选择 `Webhook` 或 `MCP Resource`；选择 MCP Resource 后只填写 MCP Server
 标识和 Resource URI 前缀。UI 展示业务可读的来源和匹配范围，不展示内部 Trigger ID。
 
+当 MCP Server 已连接时，Task 编辑器优先从 Resource Catalog 下拉选择 Server 和
+Resource；用户仍可切换到手工 URI 输入。所有文案由 App 的 locale 字典提供，Core
+只返回 `server_id`、URI、名称、描述和匹配选项等结构化字段。
+
 Agent 可以根据用户自然语言生成同一份启动策略草稿，用户确认后保存；事件到达后由
 Core 按已保存策略确定性匹配，不在每次事件到达时再次请求 Agent 判断是否触发。
 
 普通聊天回合不进入任务列表。任务执行结果可以主动投递回来源 Channel。
+
+CLI 和 Textual TUI 使用同一 Core API：CLI 提供 `mcp-resources`、
+`task-create-event`、`task-set-event`，TUI 提供对应命令和交互式列表；它们不维护
+另一套 Task 或 Trigger 状态机。
 
 ## 6. 执行详情
 
