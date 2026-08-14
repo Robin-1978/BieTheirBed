@@ -843,7 +843,10 @@ async def test_reference_server_runs_over_real_stdio_mcp(
     finally:
         await client.close()
 
-    assert [str(resource.uri) for resource in resources] == ["jira://assigned-to-me"]
+    assert [str(resource.uri) for resource in resources] == [
+        "jira://assigned-to-me",
+        "jira://assigned-to-me/events",
+    ]
     assert [tool.name for tool in tools] == [
         "jira.get_issue",
         "jira.download_attachment",

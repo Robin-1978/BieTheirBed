@@ -40,6 +40,7 @@ except ImportError:  # Executed as a self-contained installed MCP package.
 logger = logging.getLogger("jira-mcp-example")
 
 _COLLECTION_URI = "jira://assigned-to-me"
+_EVENT_COLLECTION_URI = "jira://assigned-to-me/events"
 _EVENT_PREFIX = "jira://assigned-to-me/events/"
 _ISSUE_PREFIX = "jira://issues/"
 _MANIFEST_SUFFIX = "/manifest"
@@ -144,6 +145,7 @@ class JiraMCPApplication:
     async def _notify_inventory_changed(self) -> None:
         await self._subscriptions.publish(ResourcesListChanged())
         await self._subscriptions.publish(ResourceUpdated(uri=_COLLECTION_URI))
+        await self._subscriptions.publish(ResourceUpdated(uri=_EVENT_COLLECTION_URI))
         dead: list[int] = []
         for key, (session, protocol_version) in tuple(self._sessions.items()):
             if protocol_version in MODERN_PROTOCOL_VERSIONS:
@@ -170,7 +172,16 @@ class JiraMCPApplication:
                 name="Jira issues assigned to the authenticated user",
                 description="Collection wake-up Resource; event members are immutable.",
                 mime_type="text/markdown",
-            )
+            ),
+            types.Resource(
+                uri=_EVENT_COLLECTION_URI,
+                name="Jira assignment events",
+                description=(
+                    "Select this Resource and its descendants for new assignment "
+                    "events; individual event members are immutable."
+                ),
+                mime_type="text/markdown",
+            ),
         ]
         issue_keys: set[str] = set()
         for event in self.store.list_assignment_events():
@@ -225,7 +236,7 @@ class JiraMCPApplication:
     ) -> types.ReadResourceResult:
         self._remember_session(context)
         uri = params.uri
-        if uri == _COLLECTION_URI:
+        if uri in {_COLLECTION_URI, _EVENT_COLLECTION_URI}:
             events = self.store.list_assignment_events()
             lines = ["# Jira assignment event inventory", ""]
             lines.extend(

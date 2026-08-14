@@ -73,6 +73,11 @@ def test_python_module_entry_preserves_cli_exit_code(monkeypatch) -> None:
 def test_parser_exposes_generic_task_and_interaction_commands() -> None:
     parser = knoa_platform.build_parser()
     assert parser.parse_args(["tasks", "--limit", "5"]).command == "tasks"
+    task_state = parser.parse_args(["task-state", "task-a", "archived"])
+    assert task_state.state == "archived"
+    assert parser.parse_args(["task-delete", "task-a"]).task_id == "task-a"
+    cancel = parser.parse_args(["execution-cancel", "execution-a", "--reason", "old"])
+    assert cancel.reason == "old"
     resolved = parser.parse_args(["resolve", "interaction-a", '{"action":"decline"}'])
     assert resolved.interaction_id == "interaction-a"
     assert parser.parse_args(["follow-up", "task-a", "continue"]).command == "follow-up"
@@ -81,6 +86,16 @@ def test_parser_exposes_generic_task_and_interaction_commands() -> None:
     )
     assert deployment.command == "mcp-package-deploy"
     assert deployment.server_id == "jira"
+    event = parser.parse_args(
+        [
+            "task-create-event",
+            "jira",
+            "jira://assigned-to-me/events",
+            "Analyze assignments",
+            "--descendants-only",
+        ]
+    )
+    assert event.descendants_only is True
 
 
 def test_mcp_package_deploy_dispatches_without_duplicate_config(

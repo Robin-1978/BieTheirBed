@@ -91,6 +91,13 @@ class MCPTriggerIngressPort(Protocol):
         payload: dict[str, Any],
     ) -> Any: ...
 
+    async def baseline(
+        self,
+        principal_id: str,
+        trigger_id: str,
+        events: tuple[tuple[str, dict[str, Any]], ...] = (),
+    ) -> int: ...
+
 
 class MCPSessionResolutionPort(Protocol):
     def resolve(self, principal_id: str, session_handle: str) -> RuntimeScope: ...
@@ -221,6 +228,13 @@ def _resource_payload(
         "resource_description": resource.description,
         "contents": contents,
     }
+
+
+def _trigger_needs_baseline(trigger: Any) -> bool:
+    return (
+        getattr(trigger, "last_event_at", 0.0) is None
+        and getattr(trigger, "event_count", 1) == 0
+    )
 
 
 class MCPResourceTaskBridge:
@@ -449,6 +463,7 @@ class MCPResourceTaskBridge:
             limit=5000,
         )
         owned_definitions: list[Any] = []
+        trigger_bindings: dict[str, tuple[str, Any]] = {}
         for definition in definitions:
             try:
                 await asyncio.to_thread(
@@ -463,8 +478,23 @@ class MCPResourceTaskBridge:
                     definition.task_id,
                 )
                 continue
-            await self._ensure_trigger_binding(definition)
+            trigger_id = await self._ensure_trigger_binding(definition)
+            if trigger_id is None:
+                continue
+            try:
+                trigger = await self._triggers.get(
+                    definition.principal_id,
+                    trigger_id,
+                )
+            except LookupError:
+                continue
+            trigger_bindings[definition.task_id] = (trigger_id, trigger)
             owned_definitions.append(definition)
+        baseline_events: dict[str, list[tuple[str, dict[str, Any]]]] = {
+            definition.task_id: []
+            for definition in owned_definitions
+            if _trigger_needs_baseline(trigger_bindings[definition.task_id][1])
+        }
         for canonical_uri in sorted(canonical_resources):
             candidate = _canonical_uri(canonical_uri)
             matching = tuple(
@@ -479,13 +509,51 @@ class MCPResourceTaskBridge:
             if not matching:
                 continue
             desired_subscriptions.add(canonical_uri)
-            await self._emit_resource_event(
-                server_id,
-                provider,
-                canonical_uri,
-                canonical_resources[canonical_uri],
-                matching,
-            )
+            for definition in matching:
+                trigger_id, trigger = trigger_bindings[definition.task_id]
+                if _trigger_needs_baseline(trigger):
+                    try:
+                        snapshot = await provider.read_resource(canonical_uri)
+                        baseline_events[definition.task_id].append(
+                            (
+                                _resource_event_id(server_id, canonical_uri, snapshot),
+                                _resource_payload(
+                                    server_id,
+                                    canonical_uri,
+                                    canonical_resources[canonical_uri],
+                                    snapshot,
+                                ),
+                            )
+                        )
+                    except Exception:  # noqa: BLE001 - one Resource must not block others
+                        logger.exception(
+                            "MCP Resource baseline read failed: %s %s",
+                            server_id,
+                            canonical_uri,
+                        )
+                    continue
+                await self._emit_resource_event(
+                    server_id,
+                    provider,
+                    canonical_uri,
+                    canonical_resources[canonical_uri],
+                    (definition,),
+                )
+        for definition in owned_definitions:
+            trigger_id, trigger = trigger_bindings[definition.task_id]
+            if not _trigger_needs_baseline(trigger):
+                continue
+            try:
+                await self._triggers.baseline(
+                    definition.principal_id,
+                    trigger_id,
+                    tuple(baseline_events[definition.task_id]),
+                )
+            except Exception:  # noqa: BLE001 - retried next reconciliation
+                logger.exception(
+                    "MCP Resource Task baseline failed: %s",
+                    definition.task_id,
+                )
         if capabilities.subscribe and self._providers.get(server_id) is provider:
             await self._sync_subscriptions(
                 provider,

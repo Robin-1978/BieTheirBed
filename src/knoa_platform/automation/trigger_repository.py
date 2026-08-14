@@ -503,6 +503,79 @@ class TriggerRepository:
             assert row is not None
             return self._event(row), True
 
+    def baseline(
+        self,
+        principal_id: str,
+        trigger_id: str,
+        events: tuple[tuple[str, dict[str, Any]], ...] = (),
+    ) -> int:
+        """Mark the current Resource inventory as observed without delivery."""
+        principal = self._identifier(principal_id, label="principal_id", limit=256)
+        normalized_trigger = self._identifier(trigger_id, label="trigger_id")
+        normalized_events = tuple(
+            (
+                self._identifier(external_id, label="external_event_id", limit=256),
+                self._payload_json(payload),
+            )
+            for external_id, payload in events
+        )
+        now = self._clock()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            trigger = db.execute(
+                """SELECT * FROM runtime_triggers
+                   WHERE trigger_id=? AND principal_id=?""",
+                (normalized_trigger, principal),
+            ).fetchone()
+            if trigger is None:
+                raise TriggerNotFoundError("Trigger not found")
+            if TriggerState(str(trigger["state"])) is not TriggerState.ACTIVE:
+                raise TriggerTransitionError("Paused trigger cannot be baselined")
+            if trigger["last_event_at"] is not None:
+                return 0
+            inserted = 0
+            for external_id, payload_json in normalized_events:
+                event_id = self._event_id(normalized_trigger, external_id)
+                existing = db.execute(
+                    """SELECT payload_json FROM runtime_trigger_events
+                       WHERE trigger_id=? AND external_event_id=?""",
+                    (normalized_trigger, external_id),
+                ).fetchone()
+                if existing is not None:
+                    if str(existing["payload_json"]) != payload_json:
+                        raise TriggerIdempotencyConflictError(
+                            "External event ID conflicts with another payload"
+                        )
+                    continue
+                db.execute(
+                    """INSERT INTO runtime_trigger_events(
+                           trigger_event_id, trigger_id, principal_id,
+                           session_handle, external_event_id, payload_json, state,
+                           attempt_count, next_attempt_at, lease_owner,
+                           lease_expires_at, task_id, failure_code, received_at,
+                           updated_at
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, '', NULL, '', ?, ?, ?)""",
+                    (
+                        event_id,
+                        normalized_trigger,
+                        principal,
+                        str(trigger["session_handle"]),
+                        external_id,
+                        payload_json,
+                        TriggerEventState.BASELINED.value,
+                        "initial_inventory",
+                        now,
+                        now,
+                    ),
+                )
+                inserted += 1
+            db.execute(
+                """UPDATE runtime_triggers SET last_event_at=?, updated_at=?
+                   WHERE trigger_id=? AND principal_id=?""",
+                (now, now, normalized_trigger, principal),
+            )
+            return inserted
+
     def get_event(self, trigger_event_id: str) -> TriggerEventRecord:
         normalized_id = self._identifier(
             trigger_event_id, label="trigger_event_id"

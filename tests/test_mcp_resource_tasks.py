@@ -134,13 +134,21 @@ class _Tasks:
 class _Triggers:
     def __init__(self) -> None:
         self.calls = []
+        self.baselines = []
         self.seen = set()
         self.created = []
         self.deleted = []
+        self.records = {}
 
     async def create(self, scope: RuntimeScope, **kwargs):
         self.created.append((scope, kwargs))
-        return SimpleNamespace(trigger_id="trigger-repaired")
+        trigger = SimpleNamespace(
+            trigger_id="trigger-repaired",
+            event_count=0,
+            last_event_at=None,
+        )
+        self.records[trigger.trigger_id] = trigger
+        return trigger
 
     async def delete(self, principal_id: str, trigger_id: str) -> None:
         self.deleted.append((principal_id, trigger_id))
@@ -148,7 +156,21 @@ class _Triggers:
     async def get(self, principal_id: str, trigger_id: str):
         if trigger_id.startswith("missing-"):
             raise LookupError(trigger_id)
-        return SimpleNamespace(trigger_id=trigger_id)
+        return self.records.get(
+            trigger_id,
+            SimpleNamespace(trigger_id=trigger_id, event_count=1, last_event_at=1.0),
+        )
+
+    async def baseline(self, principal_id: str, trigger_id: str, events=()):
+        self.baselines.append((principal_id, trigger_id, events))
+        self.records[trigger_id] = SimpleNamespace(
+            trigger_id=trigger_id,
+            event_count=len(events),
+            last_event_at=1.0,
+        )
+        for external_event_id, _payload in events:
+            self.seen.add((trigger_id, external_event_id))
+        return len(events)
 
     async def receive(
         self,
@@ -385,7 +407,8 @@ async def test_legacy_event_task_repairs_missing_trigger_binding() -> None:
 
     assert tasks.bindings["task-a"] == ("event", "trigger-repaired")
     assert len(triggers.created) == 1
-    assert len(triggers.calls) == 1
+    assert len(triggers.baselines) == 1
+    assert triggers.calls == []
 
 
 @pytest.mark.asyncio
@@ -402,7 +425,37 @@ async def test_stale_trigger_binding_is_replaced() -> None:
 
     assert ("unbind", "principal-a", "task-a") in tasks.calls
     assert tasks.bindings["task-a"] == ("event", "trigger-repaired")
+    assert len(triggers.baselines) == 1
+    assert triggers.calls == []
+
+
+@pytest.mark.asyncio
+async def test_new_event_task_baselines_existing_resources_then_delivers_new_one() -> None:
+    old_event = "jira://assigned-to-me/events/assignment-1"
+    new_event = "jira://assigned-to-me/events/assignment-2"
+    provider = _Provider((_resource(old_event),))
+    provider.snapshots[old_event] = _snapshot(old_event, "old assignment")
+    triggers = _Triggers()
+    triggers.records["trigger-task-a"] = SimpleNamespace(
+        trigger_id="trigger-task-a",
+        event_count=0,
+        last_event_at=None,
+    )
+    bridge = MCPResourceTaskBridge(
+        (provider,),
+        _Tasks((_definition(),)),
+        _Sessions(),
+        triggers,
+    )
+
+    await bridge.reconcile_once()
+    provider.resources = (_resource(old_event), _resource(new_event))
+    provider.snapshots[new_event] = _snapshot(new_event, "new assignment")
+    await bridge.reconcile_once()
+
+    assert len(triggers.baselines) == 1
     assert len(triggers.calls) == 1
+    assert triggers.calls[0][3]["resource_uri"] == new_event
 
 
 @pytest.mark.asyncio

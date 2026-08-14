@@ -37,7 +37,11 @@ from knoa_platform.ui.widgets import (
     ICON_READY,
     ICON_WARN,
 )
-from knoa_platform.tasks import TaskLaunchKind, TaskLaunchPolicy
+from knoa_platform.tasks import (
+    TaskDefinitionState,
+    TaskLaunchKind,
+    TaskLaunchPolicy,
+)
 
 
 _CONFIRM_TIMEOUT = 120.0
@@ -52,7 +56,10 @@ _HELP = """\
 | `/new` | Start a new conversation |
 | `/agents`, `/agent <id>` | List or select an Agent for new conversations |
 | `/tasks`, `/task <id>` | List or inspect durable Tasks |
+| `/task-state <id> <active\\|paused\\|archived>` | Change a durable Task state |
+| `/task-delete <id>` | Delete a durable Task and its Execution history |
 | `/executions <task-id>`, `/execution <id>` | List or inspect Executions |
+| `/execution-cancel <id> [reason]` | Cancel a running Execution |
 | `/approve <id>`, `/deny <id>` | Resolve a Task approval |
 | `/resolve <id> <json>` | Resolve a HumanInteraction or MCP Elicitation |
 | `/follow-up <task-id> <text>` | Continue a Task with a new Execution |
@@ -61,8 +68,8 @@ _HELP = """\
 | `/history` | Show conversation history |
 | `/tools` | List available tools |
 | `/mcp-resources` | List discovered MCP Resources |
-| `/task-create-event <server> <uri> <goal>` | Create an MCP Resource Task |
-| `/task-set-event <task-id> <server> <uri> [tree]` | Configure an MCP Event Task |
+| `/task-create-event <server> <uri> [--descendants-only] <goal>` | Create an MCP Resource Task |
+| `/task-set-event <task-id> <server> <uri> [tree\\|descendants]` | Configure an MCP Event Task |
 | `/status` | Show Core status |
 | `/config set key=value` | Persist a supported setting |
 | `/export` | Export conversation |
@@ -458,6 +465,19 @@ class CoreChatApp(App):
         elif cmd.startswith("/task "):
             task = await self._client.get_product_task(command.split(None, 1)[1].strip())
             await log.mount(CommandOutput(self._product_task_markdown(task)))
+        elif cmd.startswith("/task-state "):
+            parts = command.split()
+            if len(parts) != 3 or parts[2].lower() not in {"active", "paused", "archived"}:
+                await log.mount(CommandOutput(f"{ICON_WARN} Usage: `/task-state <id> <active|paused|archived>`"))
+            else:
+                updated = await self._client.set_product_task_state(
+                    parts[1], TaskDefinitionState(parts[2].lower())
+                )
+                await log.mount(CommandOutput(f"Task `{updated.task_id}` is now `{updated.state.value}`."))
+        elif cmd.startswith("/task-delete "):
+            task_id = command.split(None, 1)[1].strip()
+            await self._client.delete_product_task(task_id)
+            await log.mount(CommandOutput(f"Deleted Task `{task_id}`."))
         elif cmd.startswith("/executions "):
             task_id = command.split(None, 1)[1].strip()
             executions = await self._client.list_product_task_executions(task_id)
@@ -470,6 +490,13 @@ class CoreChatApp(App):
             execution_id = command.split(None, 1)[1].strip()
             execution = await self._client.get_product_task_execution(execution_id)
             await log.mount(CommandOutput(self._execution_markdown(execution)))
+        elif cmd.startswith("/execution-cancel "):
+            parts = command.split(None, 2)
+            result = await self._client.cancel_task(
+                parts[1],
+                reason=parts[2] if len(parts) == 3 else "",
+            )
+            await log.mount(CommandOutput(f"Cancel accepted: `{result.result.accepted}`."))
         elif cmd == "/history":
             messages = (await self._client.history(self._session_handle)).messages
             await log.mount(CommandOutput(self._history_table(messages)))
@@ -547,11 +574,13 @@ class CoreChatApp(App):
                 )
                 await log.mount(CommandOutput(f"Started Execution `{execution.execution_id}`."))
         elif cmd.startswith("/task-create-event "):
-            parts = command.split(None, 3)
-            if len(parts) != 4:
-                await log.mount(CommandOutput(f"{ICON_WARN} Usage: `/task-create-event <server> <uri> <goal>`"))
+            parts = command.split(None, 4)
+            descendants_only = len(parts) == 5 and parts[3] == "--descendants-only"
+            if len(parts) != 4 and not descendants_only:
+                await log.mount(CommandOutput(f"{ICON_WARN} Usage: `/task-create-event <server> <uri> [--descendants-only] <goal>`"))
             else:
-                server, uri, goal = parts[1:]
+                server, uri = parts[1:3]
+                goal = parts[4] if descendants_only else parts[3]
                 session = await self._client.create_session(agent_id=self._agent_id, activate=False)
                 result = await self._client.create_product_task(
                     session,
@@ -561,23 +590,24 @@ class CoreChatApp(App):
                     launch_policy=TaskLaunchPolicy(
                         kind=TaskLaunchKind.EVENT,
                         event_source=f"mcp:{server}",
-                        source_config={"resource_uri_prefix": uri, "include_root": True, "include_descendants": False},
+                        source_config={"resource_uri_prefix": uri, "include_root": not descendants_only, "include_descendants": descendants_only},
                     ),
                     agent_id=self._agent_id,
                 )
                 await log.mount(CommandOutput(f"Created Task `{result.task.task_id}`."))
         elif cmd.startswith("/task-set-event "):
             parts = command.split()
-            if len(parts) not in {4, 5}:
-                await log.mount(CommandOutput(f"{ICON_WARN} Usage: `/task-set-event <task-id> <server> <uri> [tree]`"))
+            if len(parts) not in {4, 5} or (len(parts) == 5 and parts[4].lower() not in {"tree", "descendants"}):
+                await log.mount(CommandOutput(f"{ICON_WARN} Usage: `/task-set-event <task-id> <server> <uri> [tree|descendants]`"))
             else:
+                scope = parts[4].lower() if len(parts) == 5 else "exact"
                 task = await self._client.get_product_task(parts[1])
                 updated = await self._client.update_product_task(
                     task.task_id,
                     launch_policy=TaskLaunchPolicy(
                         kind=TaskLaunchKind.EVENT,
                         event_source=f"mcp:{parts[2]}",
-                        source_config={"resource_uri_prefix": parts[3], "include_root": True, "include_descendants": len(parts) == 5 and parts[4].lower() == "tree"},
+                        source_config={"resource_uri_prefix": parts[3], "include_root": scope != "descendants", "include_descendants": scope in {"tree", "descendants"}},
                     ),
                     expected_revision=task.revision,
                 )

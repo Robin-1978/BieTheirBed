@@ -33,6 +33,7 @@ class TriggerState(str, Enum):
 
 
 class TriggerEventState(str, Enum):
+    BASELINED = "baselined"
     RECEIVED = "received"
     CLAIMED = "claimed"
     RETRY_WAIT = "retry_wait"

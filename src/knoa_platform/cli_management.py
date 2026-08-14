@@ -10,7 +10,7 @@ from typing import Any
 from knoa_platform.config import AppConfig
 from knoa_platform.service.core_client import CoreRequestError
 from knoa_platform.service.core_lifecycle import get_core_client
-from knoa_platform.tasks import TaskLaunchKind, TaskLaunchPolicy
+from knoa_platform.tasks import TaskDefinitionState, TaskLaunchKind, TaskLaunchPolicy
 
 
 def enabled_agents(config: AppConfig) -> tuple[str, ...]:
@@ -40,6 +40,15 @@ async def run_client_command(config: AppConfig, command: str, **values: Any) -> 
         elif command == "task":
             task = await client.get_product_task(values["task_id"])
             print(task.model_dump_json(indent=2))
+        elif command == "task-state":
+            task = await client.set_product_task_state(
+                values["task_id"],
+                TaskDefinitionState(values["state"]),
+            )
+            print(task.model_dump_json(indent=2))
+        elif command == "task-delete":
+            await client.delete_product_task(values["task_id"])
+            print(json.dumps({"deleted": True, "task_id": values["task_id"]}))
         elif command == "executions":
             executions = await client.list_product_task_executions(values["task_id"])
             for execution in executions:
@@ -50,6 +59,12 @@ async def run_client_command(config: AppConfig, command: str, **values: Any) -> 
         elif command == "execution":
             execution = await client.get_product_task_execution(values["execution_id"])
             print(execution.model_dump_json(indent=2))
+        elif command == "execution-cancel":
+            result = await client.cancel_task(
+                values["execution_id"],
+                reason=values.get("reason", ""),
+            )
+            print(result.model_dump_json(indent=2))
         elif command in {"approve", "deny"}:
             result = await client.resolve_approval(
                 values["approval_id"],
@@ -113,12 +128,15 @@ async def run_client_command(config: AppConfig, command: str, **values: Any) -> 
 
 
 def _mcp_event_policy(values: dict[str, Any]) -> TaskLaunchPolicy:
+    descendants_only = bool(values.get("descendants_only", False))
     return TaskLaunchPolicy(
         kind=TaskLaunchKind.EVENT,
         event_source=f"mcp:{str(values['server_id']).strip()}",
         source_config={
             "resource_uri_prefix": str(values["resource_uri"]).strip(),
-            "include_root": True,
-            "include_descendants": bool(values.get("include_descendants", False)),
+            "include_root": not descendants_only,
+            "include_descendants": (
+                descendants_only or bool(values.get("include_descendants", False))
+            ),
         },
     )

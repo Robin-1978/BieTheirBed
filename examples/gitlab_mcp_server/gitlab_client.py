@@ -404,9 +404,18 @@ class GitLabClient:
             reasons.append("merge_request_author")
         if commit_matches:
             reasons.append("commit_email")
+        if trigger_matches:
+            category = "direct_user"
+        elif owned_merge_requests:
+            category = "owned_merge_request_downstream"
+        elif commit_matches:
+            category = "owned_commit_downstream"
+        else:
+            category = "unrelated"
         return {
             "eligible": bool(reasons),
             "reasons": reasons,
+            "category": category,
             "owner": {
                 "id": owner.get("id"),
                 "username": owner.get("username"),
@@ -703,9 +712,11 @@ class GitLabClient:
         for event_id, payload in candidates:
             if self.store.failure_observed(source_id, event_id):
                 continue
+            project = str(payload["project"])
+            pipeline_id = str(payload["pipeline_id"])
             try:
                 pipeline = await self.get_pipeline(
-                    project, str(event_payload["pipeline_id"])
+                    project, pipeline_id
                 )
                 attribution = await self.pipeline_attribution(project, pipeline)
                 if not attribution["eligible"]:
@@ -713,7 +724,7 @@ class GitLabClient:
                     continue
                 snapshot = await self.prepare_failure_snapshot(
                     project,
-                    str(event_payload["pipeline_id"]),
+                    pipeline_id,
                     pipeline=pipeline,
                     attribution=attribution,
                 )
@@ -723,10 +734,10 @@ class GitLabClient:
                 logger.exception(
                     "GitLab failure snapshot preparation failed for %s pipeline %s",
                     project,
-                    event_payload["pipeline_id"],
+                    pipeline_id,
                 )
                 continue
-            event_payload["snapshot"] = snapshot
+            payload["snapshot"] = snapshot
             if self.store.add_failure_event(
                 source_id, event_id, payload, retention
             ):

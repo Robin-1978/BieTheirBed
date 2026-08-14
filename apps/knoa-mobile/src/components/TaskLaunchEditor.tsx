@@ -148,7 +148,8 @@ export function TaskLaunchEditor({ policy, onChange, mcpResources = [] }: { poli
               <TextInput accessibilityLabel={t("taskLaunch.mcpResourceUri")} autoCapitalize="none" placeholder={t("taskLaunch.mcpResourceUriPlaceholder")} placeholderTextColor={colors.muted} style={styles.input} value={resourceUri(policy)} onChangeText={(uri) => onChange({ ...policy, source_config: { resource_uri_prefix: uri.trim(), include_root: true, include_descendants: Boolean(policy.source_config?.include_descendants) } })} />
               <View style={styles.options}>
                 <Choice label={t("taskLaunch.resourceOnly")} selected={!Boolean(policy.source_config?.include_descendants)} onPress={() => onChange({ ...policy, source_config: { ...policy.source_config, include_root: true, include_descendants: false } })} />
-                <Choice label={t("taskLaunch.resourceTree")} selected={Boolean(policy.source_config?.include_descendants)} onPress={() => onChange({ ...policy, source_config: { ...policy.source_config, include_root: true, include_descendants: true } })} />
+                <Choice label={t("taskLaunch.resourceTree")} selected={Boolean(policy.source_config?.include_descendants) && Boolean(policy.source_config?.include_root ?? true)} onPress={() => onChange({ ...policy, source_config: { ...policy.source_config, include_root: true, include_descendants: true } })} />
+                <Choice label={t("taskLaunch.descendantEvents")} selected={Boolean(policy.source_config?.include_descendants) && policy.source_config?.include_root === false} onPress={() => onChange({ ...policy, source_config: { ...policy.source_config, include_root: false, include_descendants: true } })} />
               </View>
               <Text style={styles.help}>{t("taskLaunch.mcpResourceHelp")}</Text>
             </>
