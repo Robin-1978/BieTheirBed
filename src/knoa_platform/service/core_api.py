@@ -78,6 +78,19 @@ class ArtifactInputRef(CoreModel):
     caption: Annotated[str, StringConstraints(max_length=1000)] = ""
 
 
+class MCPPackageDeploymentSnapshot(CoreModel):
+    action: Literal["installed", "updated"]
+    server_id: Annotated[
+        NonEmpty,
+        StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,23}$"),
+    ]
+    extension_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+    state: Literal["configured", "running", "failed", "stopped"]
+    tools: tuple[Annotated[NonEmpty, StringConstraints(max_length=256)], ...] = ()
+    detail: Annotated[str, StringConstraints(max_length=2000)] = ""
+    resource_task: Annotated[str, StringConstraints(max_length=4096)] = ""
+
+
 class TaskSnapshot(CoreModel):
     task_id: TaskId
     session_handle: SessionHandle
@@ -842,6 +855,34 @@ class ResolveApprovalRequest(CoreModel):
     approved: bool
 
 
+class DeployMCPPackageRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["mcp_package_deploy"] = "mcp_package_deploy"
+    path: Annotated[NonEmpty, StringConstraints(max_length=4096)]
+    server_id: Annotated[
+        NonEmpty,
+        StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,23}$"),
+    ]
+    resource_uri: Annotated[str, StringConstraints(max_length=4096)] = ""
+    route_id: Annotated[
+        str,
+        StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$"),
+    ] = "events"
+    session_handle: Annotated[str, StringConstraints(max_length=256)] = ""
+    include_root: bool = False
+    tools_enabled: bool = True
+    priority: int = Field(default=0, ge=0, le=9)
+
+    @model_validator(mode="after")
+    def require_session_for_resource_task(self) -> DeployMCPPackageRequest:
+        if self.resource_uri and not self.session_handle:
+            raise ValueError(
+                "MCP Resource Task deployment requires a Session handle"
+            )
+        return self
+
+
 class CreateScheduleRequest(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
@@ -1022,6 +1063,7 @@ CoreRequest: TypeAlias = Annotated[
     | PauseTaskRequest
     | ResumeTaskRequest
     | ResolveApprovalRequest
+    | DeployMCPPackageRequest
     | CreateScheduleRequest
     | GetScheduleRequest
     | ListSchedulesRequest
@@ -1371,6 +1413,13 @@ class ApprovalResolvedMessage(CoreModel):
     state: ApprovalState
 
 
+class MCPPackageDeployedMessage(CoreModel):
+    message_type: Literal["mcp_package_deployed"] = "mcp_package_deployed"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    deployment: MCPPackageDeploymentSnapshot
+
+
 class ScheduleAcceptedMessage(CoreModel):
     message_type: Literal["schedule_accepted"] = "schedule_accepted"
     api_version: Literal["v1"] = "v1"
@@ -1460,6 +1509,7 @@ CoreServerMessage: TypeAlias = Annotated[
     | TaskPauseResultMessage
     | TaskResumedMessage
     | ApprovalResolvedMessage
+    | MCPPackageDeployedMessage
     | ScheduleAcceptedMessage
     | ScheduleSnapshotMessage
     | ScheduleListMessage

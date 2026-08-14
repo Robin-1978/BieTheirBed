@@ -28,6 +28,7 @@ from knoa_platform.service.core_api import (
     ChatApprovalSnapshot,
     ChatTimelineEntrySnapshot,
     ChatTurnSnapshot,
+    CoreError,
     TaskCancelResultMessage,
 )
 from knoa_platform.service.core_client import CoreRequestError
@@ -37,6 +38,7 @@ from knoa_platform.tasks import (
     TaskCancelResult,
     TaskEvent,
     TaskEventPayload,
+    TaskOrigin,
     TaskState,
 )
 
@@ -1084,6 +1086,16 @@ async def test_feishu_principal_feed_notifies_background_task_and_saves_cursor(
     class BackgroundClient:
         is_connected = True
 
+        async def get_product_task_execution(self, execution_id):
+            assert execution_id == "task-background"
+            return SimpleNamespace(task_id="product-task-a")
+
+        async def get_product_task(self, task_id):
+            assert task_id == "product-task-a"
+            return SimpleNamespace(
+                notification_policy={"completed": True}
+            )
+
         async def principal_task_events(self, *, after_id=0):
             assert after_id == 0
             yield feed_event
@@ -1154,6 +1166,118 @@ async def test_feishu_principal_feed_skips_foreground_task_duplicate(
 
 
 @pytest.mark.asyncio
+async def test_feishu_principal_feed_respects_product_task_notification_policy(
+    tmp_path,
+) -> None:
+    channel = FeishuChannel(_config(tmp_path))
+    feed_event = PrincipalTaskEvent(
+        feed_event_id=5,
+        principal_id="principal-a",
+        event=TaskEvent(
+            task_id="execution-a",
+            event_seq=3,
+            occurred_at=1.0,
+            event_type="completed",
+            payload=TaskEventPayload(state=TaskState.COMPLETED),
+        ),
+    )
+
+    class NotificationsDisabled:
+        async def get_product_task_execution(self, execution_id):
+            assert execution_id == "execution-a"
+            return SimpleNamespace(task_id="product-task-a")
+
+        async def get_product_task(self, task_id):
+            assert task_id == "product-task-a"
+            return SimpleNamespace(notification_policy={"completed": False})
+
+        async def get_task(self, _task_id):
+            raise AssertionError("disabled notification must not load the execution")
+
+    assert await channel._deliver_principal_task_event(
+        "ou-user",
+        NotificationsDisabled(),
+        feed_event,
+    )
+
+
+@pytest.mark.asyncio
+async def test_feishu_principal_feed_ignores_ad_hoc_cli_task(tmp_path) -> None:
+    channel = FeishuChannel(_config(tmp_path))
+    feed_event = PrincipalTaskEvent(
+        feed_event_id=6,
+        principal_id="principal-a",
+        event=TaskEvent(
+            task_id="cli-task-a",
+            event_seq=3,
+            occurred_at=1.0,
+            event_type="approval_requested",
+            payload=TaskEventPayload(
+                state=TaskState.WAITING_APPROVAL,
+                approval_id="approval-a",
+            ),
+        ),
+    )
+
+    class AdHocTaskClient:
+        async def get_product_task_execution(self, execution_id):
+            assert execution_id == "cli-task-a"
+            raise CoreRequestError(
+                CoreError(
+                    request_id="request-a",
+                    code="task_not_found",
+                    message="Task not found",
+                    correlation_id="correlation-a",
+                )
+            )
+
+        async def get_task(self, task_id):
+            assert task_id == "cli-task-a"
+            return SimpleNamespace(origin=TaskOrigin.USER)
+
+    assert await channel._deliver_principal_task_event(
+        "ou-user",
+        AdHocTaskClient(),
+        feed_event,
+    )
+    assert channel._pending_confirmations == {}
+
+
+@pytest.mark.asyncio
+async def test_feishu_keeps_notifications_for_agent_created_background_task(
+    tmp_path,
+) -> None:
+    channel = FeishuChannel(_config(tmp_path))
+
+    class AgentTaskClient:
+        async def get_product_task_execution(self, execution_id):
+            raise CoreRequestError(
+                CoreError(
+                    request_id="request-a",
+                    code="task_not_found",
+                    message="Task not found",
+                    correlation_id="correlation-a",
+                )
+            )
+
+        async def get_task(self, task_id):
+            assert task_id == "agent-task-a"
+            return SimpleNamespace(origin=TaskOrigin.AGENT)
+
+    policy = await channel._task_notification_policy(
+        AgentTaskClient(),
+        "agent-task-a",
+    )
+
+    assert policy == {
+        "waiting_approval": True,
+        "completed": True,
+        "failed": True,
+        "cancelled": True,
+    }
+
+
+@pytest.mark.asyncio
 async def test_feishu_principal_feed_resolves_background_approval_in_card(
     tmp_path,
 ) -> None:
@@ -1179,6 +1303,16 @@ async def test_feishu_principal_feed_resolves_background_approval_in_card(
         def __init__(self) -> None:
             self.resolutions = []
             self.fail_once = True
+
+        async def get_product_task_execution(self, execution_id):
+            assert execution_id == "task-background"
+            return SimpleNamespace(task_id="product-task-a")
+
+        async def get_product_task(self, task_id):
+            assert task_id == "product-task-a"
+            return SimpleNamespace(
+                notification_policy={"waiting_approval": True}
+            )
 
         async def get_task(self, task_id):
             assert task_id == "task-background"

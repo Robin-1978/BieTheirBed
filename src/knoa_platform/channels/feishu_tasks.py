@@ -14,10 +14,11 @@ from knoa_platform.channels.feishu_cards import (
     _StreamingCardState,
     _principal_for_log,
 )
-from knoa_platform.service.core_client import CoreClient
+from knoa_platform.service.core_client import CoreClient, CoreRequestError
 from knoa_platform.tasks import (
     PrincipalTaskEvent,
     TaskEvent,
+    TaskOrigin,
     TaskState,
 )
 
@@ -52,6 +53,30 @@ _TASK_STATE_LABELS = {
 }
 
 class FeishuTaskMixin:
+
+    async def _task_notification_policy(
+        self,
+        client: CoreClient,
+        execution_id: str,
+    ) -> dict[str, bool] | None:
+        """Return the owning product Task policy, or None for ad-hoc Tasks."""
+
+        try:
+            execution = await client.get_product_task_execution(execution_id)
+            task = await client.get_product_task(execution.task_id)
+        except CoreRequestError as exc:
+            if exc.code != "task_not_found":
+                raise
+            task = await client.get_task(execution_id)
+            if task.origin is TaskOrigin.USER:
+                return None
+            return {
+                "waiting_approval": True,
+                "completed": True,
+                "failed": True,
+                "cancelled": True,
+            }
+        return task.notification_policy
 
     def _load_notification_cursors(self) -> None:
         try:
@@ -152,18 +177,48 @@ class FeishuTaskMixin:
         feed_event: PrincipalTaskEvent,
     ) -> bool:
         event = feed_event.event
-        if event.event_type == "approval_requested":
-            if event.task_id in self._foreground_task_ids:
+        if (
+            event.event_type == "approval_requested"
+            and event.task_id in self._foreground_task_ids
+        ):
+            return True
+        if (
+            event.event_type in _TASK_TERMINAL_EVENT_TYPES
+            and event.task_id in self._foreground_task_ids
+        ):
+            self._foreground_task_ids.discard(event.task_id)
+            return True
+        if event.event_type in (
+            _TASK_TERMINAL_EVENT_TYPES | {"approval_requested"}
+        ):
+            try:
+                policy = await self._task_notification_policy(
+                    client,
+                    event.task_id,
+                )
+            except Exception:
+                logger.warning(
+                    "Feishu Task notification policy lookup failed task_id=%s",
+                    event.task_id,
+                    exc_info=True,
+                )
+                return False
+            if policy is None:
                 return True
+            policy_key = (
+                "waiting_approval"
+                if event.event_type == "approval_requested"
+                else event.event_type
+            )
+            if not policy.get(policy_key, False):
+                return True
+        if event.event_type == "approval_requested":
             return await self._deliver_background_approval(
                 open_id,
                 client,
                 event,
             )
         if event.event_type not in _TASK_TERMINAL_EVENT_TYPES:
-            return True
-        if event.task_id in self._foreground_task_ids:
-            self._foreground_task_ids.discard(event.task_id)
             return True
         try:
             snapshot = await client.get_task(event.task_id)

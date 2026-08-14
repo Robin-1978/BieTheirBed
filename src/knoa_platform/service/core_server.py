@@ -72,6 +72,7 @@ from knoa_platform.service.core_auth import (
 from knoa_platform.service.core_automation_commands import AutomationCommandHandler
 from knoa_platform.service.core_conversation_commands import ConversationCommandHandler
 from knoa_platform.service.core_interaction_commands import HumanInteractionCommandHandler
+from knoa_platform.service.core_mcp_commands import MCPPackageCommandHandler
 from knoa_platform.service.core_task_commands import TaskCommandHandler
 from knoa_platform.tasks import (
     TaskCapacityError,
@@ -106,6 +107,9 @@ class CoreServer:
         conversations: ConversationService | None = None,
         transcription: ArtifactTranscriptionServicePort | None = None,
         interactions: HumanInteractionService | None = None,
+        mcp_packages: Any | None = None,
+        sessions: Any | None = None,
+        owner_principal_id: str = "",
         authentication_timeout_seconds: float = 10.0,
         max_subscriptions_per_connection: int = 8,
     ) -> None:
@@ -121,13 +125,22 @@ class CoreServer:
         self._authenticator = authenticator
         self._authentication_timeout = max(0.01, authentication_timeout_seconds)
         self._max_subscriptions = max_subscriptions_per_connection
-        self._command_handlers = (
+        command_handlers: list[Any] = [
             HumanInteractionCommandHandler(interactions),
             ConversationCommandHandler(control, conversations),
             TaskCommandHandler(tasks, schedules, triggers),
             AutomationCommandHandler(schedules, triggers),
             ArtifactCommandHandler(artifacts, transcription),
-        )
+        ]
+        if mcp_packages is not None and sessions is not None and owner_principal_id:
+            command_handlers.append(
+                MCPPackageCommandHandler(
+                    mcp_packages,
+                    sessions,
+                    owner_principal_id=owner_principal_id,
+                )
+            )
+        self._command_handlers = tuple(command_handlers)
 
     @staticmethod
     def _error(request_id: str, code: str, message: str) -> CoreError:

@@ -8,7 +8,7 @@ from knoa_platform.branding import (
     ASSISTANT_NAME_EN,
 )
 
-__version__ = "0.2.7"
+__version__ = "0.2.8"
 
 
 def _gateway_ttl(value: str) -> int:
@@ -128,6 +128,21 @@ def build_parser() -> argparse.ArgumentParser:
     follow_up = commands.add_parser("follow-up", help="Continue a durable Task")
     follow_up.add_argument("task_id")
     follow_up.add_argument("input")
+    mcp_deploy = commands.add_parser(
+        "mcp-package-deploy",
+        help="Explicitly deploy a local MCP package without invoking an Agent",
+    )
+    mcp_deploy.add_argument("path")
+    mcp_deploy.add_argument("server_id")
+    mcp_deploy.add_argument("--resource-uri", default="")
+    mcp_deploy.add_argument("--route-id", default="events")
+    mcp_deploy.add_argument("--include-root", action="store_true", default=False)
+    mcp_deploy.add_argument(
+        "--disable-resource-tools",
+        action="store_true",
+        default=False,
+    )
+    mcp_deploy.add_argument("--priority", type=int, choices=range(10), default=0)
     gateway = commands.add_parser(
         "gateway",
         help="Manage Secure Gateway pairing and devices locally",
@@ -390,13 +405,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command in {
         "agents", "tasks", "task", "executions", "execution",
-        "approve", "deny", "resolve", "follow-up",
+        "approve", "deny", "resolve", "follow-up", "mcp-package-deploy",
     }:
         from knoa_platform.cli_management import run_client_command
         from knoa_platform.config import load_config
 
         command_values = vars(args).copy()
         command_values.pop("command", None)
+        command_values.pop("config", None)
         return asyncio.run(
             run_client_command(
                 load_config(config_path),
