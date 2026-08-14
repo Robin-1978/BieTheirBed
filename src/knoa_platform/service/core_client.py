@@ -49,6 +49,7 @@ from knoa_platform.service.core_api import (
     DeleteConversationSessionRequest,
     DeleteProductTaskExecutionRequest,
     DeleteProductTaskRequest,
+    DeployMCPPackageRequest,
     ExecuteProductTaskRequest,
     GetChatTurnRequest,
     GetConversationSessionRequest,
@@ -68,6 +69,8 @@ from knoa_platform.service.core_api import (
     ListProductTasksRequest,
     ListTasksRequest,
     ListToolsRequest,
+    MCPPackageDeployedMessage,
+    MCPPackageDeploymentSnapshot,
     MemoryClearedMessage,
     MemoryListMessage,
     PauseTaskRequest,
@@ -523,6 +526,35 @@ class CoreClient(CoreArtifactClientMixin, CoreAutomationClientMixin):
         if not isinstance(response, ConfigSetMessage):
             raise RuntimeError("CoreServer returned an invalid config response")
         return response.result
+
+    async def deploy_mcp_package(
+        self,
+        path: str,
+        server_id: str,
+        *,
+        resource_uri: str = "",
+        route_id: str = "events",
+        session_handle: str = "",
+        include_root: bool = False,
+        tools_enabled: bool = True,
+        priority: int = 0,
+    ) -> MCPPackageDeploymentSnapshot:
+        response = await self._request(
+            DeployMCPPackageRequest(
+                request_id=self._request_id(),
+                path=path,
+                server_id=server_id,
+                resource_uri=resource_uri,
+                route_id=route_id,
+                session_handle=session_handle,
+                include_root=include_root,
+                tools_enabled=tools_enabled,
+                priority=priority,
+            )
+        )
+        if not isinstance(response, MCPPackageDeployedMessage):
+            raise RuntimeError("CoreServer returned an invalid MCP deployment response")
+        return response.deployment
 
     async def create_task(
         self,

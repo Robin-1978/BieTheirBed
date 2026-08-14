@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import runpy
 from types import SimpleNamespace
 
 import pytest
@@ -60,12 +61,48 @@ def test_version_uses_product_name_and_platform_version(capsys) -> None:
     assert capsys.readouterr().out == f"Knoa {__version__}\n"
 
 
+def test_python_module_entry_preserves_cli_exit_code(monkeypatch) -> None:
+    monkeypatch.setattr(knoa_platform, "main", lambda: 7)
+
+    with pytest.raises(SystemExit) as exc_info:
+        runpy.run_module("knoa_platform.__main__", run_name="__main__")
+
+    assert exc_info.value.code == 7
+
+
 def test_parser_exposes_generic_task_and_interaction_commands() -> None:
     parser = knoa_platform.build_parser()
     assert parser.parse_args(["tasks", "--limit", "5"]).command == "tasks"
     resolved = parser.parse_args(["resolve", "interaction-a", '{"action":"decline"}'])
     assert resolved.interaction_id == "interaction-a"
     assert parser.parse_args(["follow-up", "task-a", "continue"]).command == "follow-up"
+    deployment = parser.parse_args(
+        ["mcp-package-deploy", "/workspace/jira", "jira"]
+    )
+    assert deployment.command == "mcp-package-deploy"
+    assert deployment.server_id == "jira"
+
+
+def test_mcp_package_deploy_dispatches_without_duplicate_config(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    async def run_client_command(config, command, **values):
+        calls.append((config, command, values))
+        return 0
+
+    config = SimpleNamespace()
+    monkeypatch.setattr("knoa_platform.config.load_config", lambda _path: config)
+    monkeypatch.setattr(
+        "knoa_platform.cli_management.run_client_command",
+        run_client_command,
+    )
+
+    assert main(["mcp-package-deploy", "/workspace/jira", "jira"]) == 0
+    assert calls[0][0] is config
+    assert calls[0][1] == "mcp-package-deploy"
+    assert "config" not in calls[0][2]
 
 
 def test_start_uses_authoritative_service_lifecycle(monkeypatch) -> None:

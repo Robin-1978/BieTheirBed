@@ -13,6 +13,7 @@ from knoa_platform.service.core_api import (
     CreateScheduleRequest,
     CreateTriggerRequest,
     CreateTaskRequest,
+    DeployMCPPackageRequest,
     DownloadArtifactRequest,
     FireTriggerRequest,
     GetTaskRequest,
@@ -62,6 +63,25 @@ def test_task_request_rejects_caller_supplied_principal() -> None:
 
     with pytest.raises(ValidationError):
         parse_core_request_json(raw)
+
+
+def test_explicit_mcp_deployment_requires_session_only_for_resource_route() -> None:
+    request = parse_core_request_json(
+        DeployMCPPackageRequest(
+            request_id="deploy-1",
+            path="/workspace/jira",
+            server_id="jira",
+        ).model_dump_json()
+    )
+
+    assert isinstance(request, DeployMCPPackageRequest)
+    with pytest.raises(ValidationError):
+        DeployMCPPackageRequest(
+            request_id="deploy-2",
+            path="/workspace/jira",
+            server_id="jira",
+            resource_uri="jira://assigned-to-me/events",
+        )
 
 
 def test_task_commands_are_versioned_and_method_specific() -> None:

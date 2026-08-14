@@ -211,6 +211,13 @@ make an unavailable MCP Server available.
 
 ## 7. Agent-assisted local import
 
+Explicit owner-operated deployment is a management operation, not an Agent
+Tool call. Local clients such as Codex use
+`knoa mcp-package-deploy <path> <server-id>`;
+the exact command is the authorization and no approval Task is created.
+The owner-only Core command still applies the same validation, snapshot,
+atomic replacement, rollback and activation path described below.
+
 `mcp_deploy` lets the Agent prepare an installation or atomic update while preserving user
 authority. It accepts only an existing local directory and a safe target server
 ID. Because installing an MCP package introduces executable code, the tool is

@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import json
+import sys
 import uuid
+from pathlib import Path
 from typing import Any
 
 from knoa_platform.config import AppConfig
+from knoa_platform.service.core_client import CoreRequestError
 from knoa_platform.service.core_lifecycle import get_core_client
 
 
@@ -63,8 +66,27 @@ async def run_client_command(config: AppConfig, command: str, **values: Any) -> 
                 client_request_id=str(uuid.uuid4()),
             )
             print(execution.model_dump_json(indent=2))
+        elif command == "mcp-package-deploy":
+            resource_uri = str(values.get("resource_uri", "")).strip()
+            session_handle = ""
+            if resource_uri:
+                session_handle = await client.create_session()
+            deployment = await client.deploy_mcp_package(
+                str(Path(values["path"]).expanduser().resolve()),
+                values["server_id"],
+                resource_uri=resource_uri,
+                route_id=values.get("route_id", "events"),
+                session_handle=session_handle,
+                include_root=bool(values.get("include_root", False)),
+                tools_enabled=not bool(values.get("disable_resource_tools", False)),
+                priority=int(values.get("priority", 0)),
+            )
+            print(deployment.model_dump_json(indent=2))
         else:  # pragma: no cover - argparse constrains this
             raise ValueError(f"Unsupported client command: {command}")
+    except CoreRequestError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
     finally:
         await client.disconnect()
     return 0

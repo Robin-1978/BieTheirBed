@@ -209,7 +209,16 @@ This process boundary isolates crashes and dependency conflicts. Strong
 resource or host-access containment is a separate OS-level sandbox policy and
 is not implied by stdio process isolation.
 
-When explicitly requested, the Agent can call the confirmation-gated
+An owner or local operator such as Codex should use the explicit management
+command when the deployment itself was already requested by the user:
+
+```bash
+knoa mcp-package-deploy ./examples/jira_mcp_server jira
+```
+
+This command is owner-only, invokes no Agent, creates no approval Task, and
+therefore does not ask for confirmation again in Feishu. When an Agent decides
+to deploy during its own execution, it must instead call the confirmation-gated
 `mcp_deploy` Built-in Tool with an existing local package directory. Knoa
 validates and snapshots the package, omits hidden metadata and symlinks,
 rejects size-limit violations, installs it atomically,
@@ -246,6 +255,11 @@ durable principal Task feed with a persisted cursor, so Schedule and Trigger
 results are delivered proactively without coupling Feishu to Core automation.
 Feishu also exposes `/tasks`, `/task <id>`, and `/stop <id>` for owned durable
 Tasks. New messages can enqueue new Tasks while earlier work continues.
+Background approval and terminal notifications are emitted only for Product
+Task Executions and follow that Task's `waiting_approval`, `completed`, and
+`failed` notification policy. Ad-hoc user/CLI Tasks are not mirrored into
+Feishu, while Agent-created background Tasks retain approval and terminal
+notifications.
 Images, ordinary files, and Feishu voice messages enter the same owned Core
 Artifact boundary. Attached text files preserve their safe name and can be
 inspected through the bounded `read_artifact` Built-in Tool without exposing a
