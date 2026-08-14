@@ -28,15 +28,16 @@ class CreateTaskTool(ToolBase):
     name = "create_task"
     description = (
         "Create one independent Task with an explicit launch policy. The Task can start "
-        "immediately, run once at a future time, repeat at a fixed interval, or follow "
-        "a standard five-field Cron schedule."
+        "immediately, run once at a future time, repeat at a fixed interval, follow "
+        "a standard five-field Cron schedule, or start from a configured event."
     )
     details = (
         "Use launch.kind='immediate' for background work that should start now; "
         "'one_time' with an RFC 3339 timestamp for one future run; 'interval' with an "
-        "interval in seconds; or 'cron' with exactly five fields (minute hour day month "
-        "weekday) and an IANA timezone. The goal must be self-contained because the Task "
-        "runs independently from the current conversation."
+        "interval in seconds; 'cron' with exactly five fields (minute hour day month "
+        "weekday) and an IANA timezone; or 'event' with event_source and source_config. "
+        "The goal must be self-contained because the Task runs independently from the "
+        "current conversation."
     )
     examples: ClassVar[list[dict[str, Any]]] = [
         {
@@ -78,9 +79,15 @@ class CreateTaskTool(ToolBase):
     capabilities = frozenset({ToolCapability.TASK_MANAGEMENT})
     risk = ToolRisk.LOW
 
-    def __init__(self, sessions: DetachedSessionPort, tasks: Any, schedules: Any) -> None:
+    def __init__(
+        self,
+        sessions: DetachedSessionPort,
+        tasks: Any,
+        schedules: Any,
+        triggers: Any | None = None,
+    ) -> None:
         self._sessions = sessions
-        self._lifecycle = ProductTaskLifecycle(tasks, schedules, None)
+        self._lifecycle = ProductTaskLifecycle(tasks, schedules, triggers)
 
     async def execute(self, **kwargs: Any) -> Any:
         del kwargs

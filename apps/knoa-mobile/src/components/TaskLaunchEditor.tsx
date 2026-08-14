@@ -19,7 +19,7 @@ export function TaskLaunchEditor({ policy, onChange }: { policy: TaskLaunchPolic
       setPreset("one_time");
       onChange({ ...immediatePolicy(), kind, schedule_type: "one_time", run_at: Date.now() / 1000 + 3600 });
     }
-    else onChange({ ...immediatePolicy(), kind, event_source: "webhook" });
+    else onChange({ ...immediatePolicy(), kind, event_source: "webhook", source_config: {} });
   }
 
   function selectPreset(next: SchedulePreset) {
@@ -110,8 +110,25 @@ export function TaskLaunchEditor({ policy, onChange }: { policy: TaskLaunchPolic
       ) : null}
       {policy.kind === "event" ? (
         <View style={styles.fields}>
-          <Text style={styles.label}>{t("taskLaunch.eventSource")}</Text>
-          <TextInput accessibilityLabel={t("taskLaunch.eventSource")} autoCapitalize="none" placeholder={t("taskLaunch.eventPlaceholder")} placeholderTextColor={colors.muted} style={styles.input} value={policy.event_source} onChangeText={(event_source) => onChange({ ...policy, event_source })} />
+          <Text style={styles.label}>{t("taskLaunch.eventType")}</Text>
+          <View style={styles.options}>
+            <Choice label={t("taskLaunch.webhook")} selected={!isMcpEvent(policy)} onPress={() => onChange({ ...policy, event_source: "webhook", source_config: {} })} />
+            <Choice label={t("taskLaunch.mcpResource")} selected={isMcpEvent(policy)} onPress={() => onChange({ ...policy, event_source: mcpServerId(policy) ? `mcp:${mcpServerId(policy)}` : "mcp:", source_config: { resource_uri_prefix: resourceUri(policy) } })} />
+          </View>
+          {!isMcpEvent(policy) ? (
+            <>
+              <Text style={styles.label}>{t("taskLaunch.eventSource")}</Text>
+              <TextInput accessibilityLabel={t("taskLaunch.eventSource")} autoCapitalize="none" placeholder={t("taskLaunch.eventPlaceholder")} placeholderTextColor={colors.muted} style={styles.input} value={policy.event_source} onChangeText={(event_source) => onChange({ ...policy, event_source })} />
+            </>
+          ) : (
+            <>
+              <Text style={styles.label}>{t("taskLaunch.mcpServer")}</Text>
+              <TextInput accessibilityLabel={t("taskLaunch.mcpServer")} autoCapitalize="none" placeholder={t("taskLaunch.mcpServerPlaceholder")} placeholderTextColor={colors.muted} style={styles.input} value={mcpServerId(policy)} onChangeText={(server) => onChange({ ...policy, event_source: `mcp:${server.trim()}` })} />
+              <Text style={styles.label}>{t("taskLaunch.mcpResourceUri")}</Text>
+              <TextInput accessibilityLabel={t("taskLaunch.mcpResourceUri")} autoCapitalize="none" placeholder={t("taskLaunch.mcpResourceUriPlaceholder")} placeholderTextColor={colors.muted} style={styles.input} value={resourceUri(policy)} onChangeText={(uri) => onChange({ ...policy, source_config: { ...policy.source_config, resource_uri_prefix: uri.trim() } })} />
+              <Text style={styles.help}>{t("taskLaunch.mcpResourceHelp")}</Text>
+            </>
+          )}
           <Text style={styles.help}>{t("taskLaunch.eventHelp")}</Text>
         </View>
       ) : null}
@@ -132,7 +149,11 @@ export function immediatePolicy(): TaskLaunchPolicy {
 
 export function isLaunchPolicyValid(policy: TaskLaunchPolicy): boolean {
   if (policy.kind === "immediate") return true;
-  if (policy.kind === "event") return Boolean(policy.event_source.trim());
+  if (policy.kind === "event") {
+    if (!policy.event_source.trim()) return false;
+    if (isMcpEvent(policy)) return Boolean(mcpServerId(policy) && resourceUri(policy));
+    return true;
+  }
   if (policy.schedule_type === "one_time") return Boolean(policy.run_at && policy.run_at > Date.now() / 1000);
   if (policy.schedule_type === "interval") return Boolean(policy.interval_seconds && policy.interval_seconds > 0);
   if (policy.schedule_type === "cron") return Boolean(policy.cron.trim() && policy.timezone.trim());
@@ -145,6 +166,19 @@ function schedulePreset(policy: TaskLaunchPolicy): SchedulePreset {
   if (isDailyCron(policy.cron)) return "daily";
   if (isWeeklyCron(policy.cron)) return "weekly";
   return "cron";
+}
+
+function isMcpEvent(policy: TaskLaunchPolicy): boolean {
+  return policy.event_source.trim().toLowerCase().startsWith("mcp:");
+}
+
+function mcpServerId(policy: TaskLaunchPolicy): string {
+  return isMcpEvent(policy) ? policy.event_source.trim().slice(4).trim() : "";
+}
+
+function resourceUri(policy: TaskLaunchPolicy): string {
+  const config = policy.source_config ?? {};
+  return String(config.resource_uri_prefix ?? config.resource_uri ?? "");
 }
 
 function isDailyCron(value: string): boolean {
@@ -184,7 +218,9 @@ function formatLocalTime(value: number | null): string {
 
 function policySummary(policy: TaskLaunchPolicy, preset: SchedulePreset, t: ReturnType<typeof useI18n>["t"]): string {
   if (policy.kind === "immediate") return t("taskLaunch.summaryImmediate");
-  if (policy.kind === "event") return t("taskLaunch.summaryEvent", { source: policy.event_source || "—" });
+  if (policy.kind === "event") return isMcpEvent(policy)
+    ? t("taskLaunch.summaryMcpEvent", { server: mcpServerId(policy), uri: resourceUri(policy) || "—" })
+    : t("taskLaunch.summaryEvent", { source: policy.event_source || "—" });
   if (preset === "one_time") return policy.run_at
     ? t("taskLaunch.summaryOnce", { time: new Date(policy.run_at * 1000).toLocaleString() })
     : t("taskLaunch.summaryInvalid");

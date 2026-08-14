@@ -1,8 +1,10 @@
 """Typed domain records for durable Tasks."""
 from __future__ import annotations
 
+import re
 from enum import Enum
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
@@ -12,6 +14,7 @@ from knoa_platform.interactions import HumanInteraction
 
 NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 Identifier = Annotated[NonEmpty, StringConstraints(max_length=128)]
+_MCP_EVENT_SOURCE = re.compile(r"^mcp:[A-Za-z][A-Za-z0-9_-]{0,23}$")
 
 
 class TaskModel(BaseModel):
@@ -300,6 +303,22 @@ class TaskLaunchPolicy(TaskModel):
                 raise ValueError("Event launch policy requires event_source")
             if self.schedule_type is not None or self.run_at is not None or self.interval_seconds is not None or self.cron:
                 raise ValueError("Event launch policy cannot contain schedule fields")
+            if self.event_source.startswith("mcp:"):
+                if not _MCP_EVENT_SOURCE.fullmatch(self.event_source):
+                    raise ValueError("MCP event_source must be mcp:<server_id>")
+                exact = self.source_config.get("resource_uri")
+                prefix = self.source_config.get("resource_uri_prefix")
+                if (exact is None) == (prefix is None):
+                    raise ValueError(
+                        "MCP event requires exactly one resource_uri or "
+                        "resource_uri_prefix"
+                    )
+                resource_uri = exact if exact is not None else prefix
+                if not isinstance(resource_uri, str) or not resource_uri.strip():
+                    raise ValueError("MCP Resource URI must be a non-empty string")
+                parsed = urlsplit(resource_uri.strip())
+                if not parsed.scheme or parsed.query or parsed.fragment:
+                    raise ValueError("MCP Resource URI must be an absolute URI without query or fragment")
         return self
 
 

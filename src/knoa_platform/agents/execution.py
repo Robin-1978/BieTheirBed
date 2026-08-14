@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -66,6 +67,12 @@ class ExecuteAgentTurn:
     interaction: InteractionPort | None = None
 
 
+@dataclass
+class _SessionTurnLease:
+    lock: asyncio.Lock
+    users: int = 0
+
+
 class AgentExecutionService:
     """The only Platform component that resolves and invokes Agent Runtimes."""
 
@@ -106,8 +113,18 @@ class AgentExecutionService:
         self._context_provider = context_provider
         self._binding_locks: dict[str, asyncio.Lock] = {}
         self._binding_locks_guard = asyncio.Lock()
+        self._turn_leases: dict[tuple[str, str], _SessionTurnLease] = {}
+        self._turn_leases_guard = asyncio.Lock()
 
     async def execute_turn(
+        self,
+        request: ExecuteAgentTurn,
+    ) -> AsyncIterator[RuntimeTurnEvent]:
+        async with self._session_turn_lease(request.scope):
+            async for event in self._execute_turn_locked(request):
+                yield event
+
+    async def _execute_turn_locked(
         self,
         request: ExecuteAgentTurn,
     ) -> AsyncIterator[RuntimeTurnEvent]:
@@ -242,6 +259,27 @@ class AgentExecutionService:
                     )
             finally:
                 await self._gateway.grants.revoke(grant.token)
+
+    @asynccontextmanager
+    async def _session_turn_lease(
+        self,
+        scope: RuntimeScope,
+    ) -> AsyncIterator[None]:
+        key = (scope.principal_id, scope.session_handle)
+        async with self._turn_leases_guard:
+            lease = self._turn_leases.get(key)
+            if lease is None:
+                lease = _SessionTurnLease(lock=asyncio.Lock())
+                self._turn_leases[key] = lease
+            lease.users += 1
+        try:
+            async with lease.lock:
+                yield
+        finally:
+            async with self._turn_leases_guard:
+                lease.users -= 1
+                if lease.users == 0:
+                    self._turn_leases.pop(key, None)
 
     async def health(self, agent_id: str | None = None):
         return await self._manager.health(

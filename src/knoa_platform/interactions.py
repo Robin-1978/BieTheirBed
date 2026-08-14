@@ -216,6 +216,36 @@ class HumanInteractionRepository:
             ).fetchall()
         return tuple(self._record(row) for row in rows)
 
+    def recover_runtime_lost(self) -> tuple[HumanInteraction, ...]:
+        """Close interactions whose in-memory Runtime waiter was lost."""
+        now = self._clock()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute(
+                """SELECT * FROM human_interactions
+                   WHERE state='pending'
+                   ORDER BY created_at, interaction_id"""
+            ).fetchall()
+            if not rows:
+                return ()
+            db.execute(
+                """UPDATE human_interactions
+                   SET state='runtime_lost', resolved_at=?,
+                       resolved_by='platform_restart'
+                WHERE state='pending'""",
+                (now,),
+            )
+        return tuple(
+            self._record(row).model_copy(
+                update={
+                    "state": "runtime_lost",
+                    "resolved_at": now,
+                    "resolved_by": "platform_restart",
+                }
+            )
+            for row in rows
+        )
+
     def resolve(
         self,
         principal_id: str,
@@ -291,6 +321,15 @@ class HumanInteractionService:
 
     def for_owner(self, owner_kind: OwnerKind) -> ScopedInteractionPort:
         return ScopedInteractionPort(self, owner_kind)
+
+    async def start(self) -> tuple[HumanInteraction, ...]:
+        recovered = await asyncio.to_thread(
+            self._repository.recover_runtime_lost
+        )
+        if self._changed is not None:
+            for interaction in recovered:
+                await self._changed(interaction)
+        return recovered
 
     async def list_owner(
         self,

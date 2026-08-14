@@ -78,6 +78,27 @@ async def resolve_task_launch(raw: Any) -> ResolvedTaskLaunch:
         )
 
     try:
+        if kind == "event":
+            _reject_unexpected(
+                launch,
+                allowed=frozenset({"kind", "event_source", "source_config"}),
+            )
+            event_source = str(launch.get("event_source", "")).strip()
+            if not event_source:
+                raise LaunchPolicyError(
+                    "launch.event_source is required for event"
+                )
+            source_config = launch.get("source_config", {})
+            if not isinstance(source_config, dict):
+                raise LaunchPolicyError("launch.source_config must be an object")
+            return ResolvedTaskLaunch(
+                policy=TaskLaunchPolicy(
+                    kind=TaskLaunchKind.EVENT,
+                    event_source=event_source,
+                    source_config=source_config,
+                ),
+                next_fire_at=None,
+            )
         if kind == "one_time":
             _reject_unexpected(launch, allowed=frozenset({"kind", "at"}))
             spec = ScheduleSpec(
@@ -122,7 +143,7 @@ async def resolve_task_launch(raw: Any) -> ResolvedTaskLaunch:
             )
         else:
             raise LaunchPolicyError(
-                "launch.kind must be one of: immediate, one_time, interval, cron"
+                "launch.kind must be one of: immediate, one_time, interval, cron, event"
             )
         due = await asyncio.to_thread(next_fire_at, spec, after=now)
     except LaunchPolicyError:
@@ -159,6 +180,7 @@ def public_launch(policy: TaskLaunchPolicy) -> dict[str, Any]:
         return {
             "kind": "event",
             "event_source": policy.event_source,
+            "source_config": policy.source_config,
         }
     if policy.schedule_type == "one_time":
         return {
@@ -185,7 +207,7 @@ def launch_schema() -> dict[str, Any]:
         "properties": {
             "kind": {
                 "type": "string",
-                "enum": ["immediate", "one_time", "interval", "cron"],
+                "enum": ["immediate", "one_time", "interval", "cron", "event"],
                 "description": (
                     "immediate starts now; one_time runs once at launch.at; "
                     "interval repeats every launch.interval_seconds; cron uses "
@@ -219,6 +241,21 @@ def launch_schema() -> dict[str, Any]:
                 "type": "string",
                 "default": "Asia/Shanghai",
                 "description": "IANA timezone for cron, for example Asia/Shanghai.",
+            },
+            "event_source": {
+                "type": "string",
+                "maxLength": 128,
+                "description": (
+                    "Event provider identifier, for example webhook or mcp:gitlab."
+                ),
+            },
+            "source_config": {
+                "type": "object",
+                "description": (
+                    "Provider-specific event matching data. For MCP use "
+                    "resource_uri or resource_uri_prefix."
+                ),
+                "additionalProperties": True,
             },
         },
         "required": ["kind"],

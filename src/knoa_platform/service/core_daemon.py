@@ -43,6 +43,9 @@ class CoreDaemon:
             await composition.capability_mcp_host.start()
             await composition.conversation_service.start()
             await composition.task_service.start()
+            interactions = getattr(composition, "interactions", None)
+            if interactions is not None:
+                await interactions.start()
             await composition.mcp_resource_tasks.start()
             await composition.schedule_dispatcher.start()
             await composition.trigger_dispatcher.start()

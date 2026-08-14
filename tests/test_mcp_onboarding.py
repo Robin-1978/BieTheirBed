@@ -112,7 +112,7 @@ async def test_onboarding_discovers_and_enables_only_annotated_read_tools(
     service = MCPOnboardingService(
         manager,
         PersistentConfigController(AppConfig(), path),
-        MCPResourceTaskBridge((), object(), object()),
+        MCPResourceTaskBridge((), object(), object(), object()),
     )
 
     result = await service.connect(

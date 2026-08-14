@@ -308,6 +308,45 @@ async def test_create_task_allows_interval_with_first_run_anchor() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_task_builds_mcp_event_launch_policy() -> None:
+    sessions = _Sessions()
+    tasks = _Executions()
+    triggers = _Triggers()
+    tool = CreateTaskTool(sessions, tasks, _Schedules(), triggers)
+
+    result = await tool.execute_scoped(
+        RuntimeScope(principal_id="personal:owner", session_handle="chat-a"),
+        title="Analyze assigned Jira issues",
+        goal="Analyze each newly assigned Jira issue.",
+        launch={
+            "kind": "event",
+            "event_source": "mcp:jira",
+            "source_config": {
+                "resource_uri_prefix": "jira://assigned-to-me/events"
+            },
+        },
+    )
+
+    assert tasks.bound == ("event", "trigger-a")
+    assert result["execution_id"] == ""
+    assert result["launch"] == {
+        "kind": "event",
+        "event_source": "mcp:jira",
+        "source_config": {
+            "resource_uri_prefix": "jira://assigned-to-me/events"
+        },
+    }
+
+
+def test_mcp_event_requires_an_explicit_resource_match() -> None:
+    with pytest.raises(ValueError, match="exactly one resource_uri"):
+        TaskLaunchPolicy(
+            kind=TaskLaunchKind.EVENT,
+            event_source="mcp:jira",
+        )
+
+
+@pytest.mark.asyncio
 async def test_create_task_rolls_back_scheduled_task_when_binding_fails() -> None:
     tasks = _Executions()
     tasks.fail_bind = True
@@ -344,6 +383,7 @@ def test_create_task_help_documents_launch_policy_in_english() -> None:
         "one_time",
         "interval",
         "cron",
+        "event",
     ]
     cron_description = launch["properties"]["cron"]["description"]
     assert "Do not include seconds" in cron_description
