@@ -29,7 +29,7 @@ _PRINCIPAL_FEED_EVENT_TYPES = frozenset(
         "cancelled",
     }
 )
-_DURABLE_TASK_EVENT_TYPES = _PRINCIPAL_FEED_EVENT_TYPES | {"warning"}
+_DURABLE_TASK_EVENT_TYPES = _PRINCIPAL_FEED_EVENT_TYPES | {"artifact", "warning"}
 _TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.QUEUED: frozenset({TaskState.RUNNING, TaskState.CANCELLED}),
     TaskState.RUNNING: frozenset(

@@ -25,12 +25,14 @@ from knoa_platform.agent_runtime.contracts import (
 from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
 from knoa_platform.agent_runtime.tool_step import ToolOutcomeUnknownError
 from knoa_platform.agents import AgentExecutionService, ExecuteAgentTurn
+from knoa_platform.artifacts import artifact_refs_from_tool_output
 from knoa_platform.interactions import ScopedInteractionPort
 from knoa_platform.tasks.approval import DurableApprovalService
 from knoa_platform.tasks.event_hub import TaskEventHub
 from knoa_platform.tasks.models import (
     TERMINAL_TASK_STATES,
     TaskRecord,
+    TaskEventPayload,
     TaskState,
     TaskTraceEntry,
 )
@@ -291,6 +293,39 @@ class TaskExecutor:
                 if entry is not None:
                     self._append_trace_entry(entries, entry)
                     trace_dirty = True
+                if (
+                    isinstance(runtime_event, ToolCallFinished)
+                    and runtime_event.status == "completed"
+                ):
+                    known_artifact_ids = {
+                        item.artifact.artifact_id
+                        for item in entries
+                        if item.artifact is not None
+                    }
+                    for artifact in artifact_refs_from_tool_output(
+                        runtime_event.output
+                    ):
+                        if artifact.artifact_id in known_artifact_ids:
+                            continue
+                        artifact_entry = TaskTraceEntry(
+                            entry_type="artifact",
+                            artifact=artifact,
+                            occurred_at=time.time(),
+                        )
+                        self._append_trace_entry(entries, artifact_entry)
+                        trace_dirty = True
+                        known_artifact_ids.add(artifact.artifact_id)
+                        artifact_event = await asyncio.to_thread(
+                            self._repository.append_event,
+                            task.principal_id,
+                            task.task_id,
+                            "artifact",
+                            TaskEventPayload(
+                                artifact=artifact,
+                                artifact_id=artifact.artifact_id,
+                            ),
+                        )
+                        await self._events.publish(artifact_event)
                 if isinstance(runtime_event, TurnFinished):
                     terminal = runtime_event
                     final_output = runtime_event.final_output

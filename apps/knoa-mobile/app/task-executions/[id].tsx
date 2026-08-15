@@ -42,6 +42,7 @@ export default function TaskExecutionDetailScreen() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [technicalExpanded, setTechnicalExpanded] = useState(false);
+  const [stepsExpanded, setStepsExpanded] = useState(false);
   const [followUp, setFollowUp] = useState("");
   const [followUpFiles, setFollowUpFiles] = useState<PendingFollowUpFile[]>([]);
 
@@ -81,6 +82,10 @@ export default function TaskExecutionDetailScreen() {
     ), execution?.state),
     [execution?.final_result, execution?.state, execution?.trace?.entries],
   );
+  const terminal = execution ? isTerminal(execution.state) : false;
+  const summaryText = execution?.launch_reason === "event"
+    ? task?.title ?? t("taskDetail.reason.event")
+    : execution?.goal_snapshot ?? "";
 
   async function command(action: "cancel" | "pause" | "resume" | "rerun") {
     if (!execution || working) return;
@@ -219,7 +224,7 @@ export default function TaskExecutionDetailScreen() {
           <Text style={styles.reason}>{launchReasonLabel(execution.launch_reason, t)}</Text>
           <Text style={styles.state}>{stateLabel(execution.state, t)}</Text>
         </View>
-        <Text style={styles.goal}>{execution.goal_snapshot}</Text>
+        <Text style={styles.goal}>{summaryText}</Text>
         <Text style={styles.snapshot}>{formatExecutionTime(execution.created_at, t("execution.started"))}</Text>
       </View>
 
@@ -227,7 +232,10 @@ export default function TaskExecutionDetailScreen() {
       {message ? <Text style={styles.message}>{message}</Text> : null}
 
       {execution.final_result ? (
-        <View style={styles.final}><AppMarkdown value={execution.final_result} style={styles.markdown} /></View>
+        <View style={styles.final}>
+          <Text style={styles.sectionTitle}>{t("execution.result")}</Text>
+          <AppMarkdown value={execution.final_result} style={styles.markdown} />
+        </View>
       ) : null}
       {execution.failure_code ? (
         <View style={styles.failure}><Text style={styles.failureTitle}>{t("execution.incomplete")}</Text><Text style={styles.failureText}>{t("execution.incompleteHelp")}</Text></View>
@@ -266,8 +274,18 @@ export default function TaskExecutionDetailScreen() {
 
       {timeline.length ? (
         <View style={styles.timeline}>
-          <Text style={styles.sectionTitle}>{t("execution.steps")}</Text>
-          {timeline.map((entry) => (
+          {terminal ? (
+            <AppPressable
+              onPress={() => setStepsExpanded((value) => !value)}
+              style={styles.stepsToggle}
+            >
+              <Text style={styles.sectionTitle}>
+                {stepsExpanded ? t("execution.hideSteps") : t("execution.showSteps")}
+              </Text>
+              <AppIcon name={stepsExpanded ? "chevron-down" : "chevron-right"} color={colors.muted} size={17} />
+            </AppPressable>
+          ) : <Text style={styles.sectionTitle}>{t("execution.steps")}</Text>}
+          {!terminal || stepsExpanded ? timeline.map((entry) => (
             <TraceEntry
               key={entry.key}
               entry={entry}
@@ -275,7 +293,7 @@ export default function TaskExecutionDetailScreen() {
               onArtifact={(artifact, action) => void openArtifact(artifact, action)}
               t={t}
             />
-          ))}
+          )) : null}
         </View>
       ) : null}
 
@@ -327,6 +345,12 @@ export default function TaskExecutionDetailScreen() {
           <Text style={styles.technicalLine}>{t("execution.taskRevision", { revision: execution.task_revision })}</Text>
           {execution.phase ? <Text selectable style={styles.technicalLine}>{t("execution.phase", { phase: execution.phase })}</Text> : null}
           {execution.failure_code ? <Text selectable style={styles.technicalLine}>{t("execution.failureCode", { code: execution.failure_code })}</Text> : null}
+          {execution.launch_reason === "event" ? (
+            <>
+              <Text style={styles.technicalLabel}>{t("execution.eventInput")}</Text>
+              <Text selectable style={styles.technicalPayload}>{execution.goal_snapshot}</Text>
+            </>
+          ) : null}
         </View>
       ) : null}
 
@@ -521,7 +545,7 @@ const styles = StyleSheet.create({
   goal: { color: colors.ink, fontSize: 18, lineHeight: 27, fontWeight: "600" },
   phase: { color: colors.muted },
   snapshot: { color: colors.muted, fontSize: 12 },
-  final: { backgroundColor: colors.surface, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: colors.line },
+  final: { backgroundColor: colors.surface, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: colors.line, gap: 8 },
   markdown: { width: "100%", alignSelf: "stretch" },
   failure: { padding: 18, borderRadius: 18, backgroundColor: colors.dangerSoft, gap: 6 },
   failureTitle: { color: colors.danger, fontWeight: "700" },
@@ -535,6 +559,7 @@ const styles = StyleSheet.create({
   arguments: { color: colors.ink, fontFamily: "monospace", fontSize: 12, backgroundColor: colors.surface, borderRadius: 10, padding: 10 },
   row: { flexDirection: "row", gap: 10 },
   timeline: { backgroundColor: colors.surface, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: colors.line, gap: 10 },
+  stepsToggle: { minHeight: 30, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   followUpCard: { backgroundColor: colors.surface, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: colors.line, gap: 10 },
   followUpHint: { color: colors.muted, lineHeight: 20 },
   followUpInput: { minHeight: 96, borderWidth: 1, borderColor: colors.line, borderRadius: 13, padding: 12, color: colors.ink, textAlignVertical: "top", backgroundColor: colors.surfaceMuted },
@@ -565,7 +590,9 @@ const styles = StyleSheet.create({
   technicalToggle: { minHeight: 44, paddingHorizontal: 4, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
   technicalToggleText: { color: colors.muted, fontWeight: "600" },
   technicalCard: { padding: 14, borderRadius: 14, backgroundColor: colors.surfaceMuted, gap: 6 },
+  technicalLabel: { color: colors.ink, fontSize: 12, fontWeight: "700", marginTop: 8 },
   technicalLine: { color: colors.muted, fontSize: 12, fontFamily: "monospace" },
+  technicalPayload: { color: colors.muted, fontSize: 11, fontFamily: "monospace", lineHeight: 16 },
   deleteButton: { alignItems: "center", padding: 14, marginTop: 8 },
   deleteText: { color: colors.danger, fontWeight: "600" },
 });

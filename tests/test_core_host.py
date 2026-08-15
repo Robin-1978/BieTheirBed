@@ -10,7 +10,6 @@ from knoa_agent_contracts import RuntimeHealth, TurnFinished
 from knoa_platform.agent_runtime.contracts import (
     ConfigSetRequest,
     ConfigSetResult,
-    RuntimeScope,
 )
 from knoa_platform.agent_runtime.control import ControlService
 from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository

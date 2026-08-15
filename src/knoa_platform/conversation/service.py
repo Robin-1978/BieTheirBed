@@ -33,7 +33,7 @@ from knoa_platform.approvals import (
     ApprovalReviewMode,
     ApprovalReviewRequest,
 )
-from knoa_platform.artifacts import ArtifactRef
+from knoa_platform.artifacts import ArtifactRef, artifact_refs_from_tool_output
 from knoa_platform.conversation.models import (
     TERMINAL_CHAT_TURN_STATES,
     ChatApproval,
@@ -714,6 +714,14 @@ class ConversationService:
                     blocked=event.status != "completed",
                 )
             )
+            if event.status == "completed":
+                known_artifact_ids = {
+                    artifact.artifact_id for artifact in live.artifacts
+                }
+                for artifact in artifact_refs_from_tool_output(event.output):
+                    if artifact.artifact_id not in known_artifact_ids:
+                        live.artifacts.append(artifact)
+                        known_artifact_ids.add(artifact.artifact_id)
         elif isinstance(event, (PlanChanged, RuntimeWarning, ContextCompacted)):
             live.timeline.append(
                 ChatTimelineEntry(

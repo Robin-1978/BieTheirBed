@@ -9,6 +9,7 @@ export type AppIconName =
   | "camera"
   | "chat"
   | "check"
+  | "chevron-down"
   | "chevron-right"
   | "clock"
   | "edit"
@@ -38,6 +39,7 @@ const glyphs: Record<AppIconName, React.ComponentProps<typeof Ionicons>["name"]>
   camera: "camera-outline",
   chat: "chatbubble-ellipses-outline",
   check: "checkmark",
+  "chevron-down": "chevron-down",
   "chevron-right": "chevron-forward",
   clock: "time-outline",
   edit: "create-outline",
