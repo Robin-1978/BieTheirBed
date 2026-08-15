@@ -16,6 +16,7 @@ const FLAG_GRANT_READ_URI_PERMISSION = 1;
 
 type StoredResume = {
   versionCode: number;
+  sha256?: string;
   fileUri: string;
   resumeData: string;
 };
@@ -31,6 +32,10 @@ export type AndroidUpdateProgress = {
   total: number;
 };
 
+export type AndroidUpdateCheckpoint = AndroidUpdateProgress & {
+  fileUri: string;
+};
+
 export function installedAndroidVersionCode(): number {
   const value = Number.parseInt(Application.nativeBuildVersion ?? "0", 10);
   return Number.isSafeInteger(value) && value >= 0 ? value : 0;
@@ -44,6 +49,8 @@ export function isAndroidUpdateAvailable(
 }
 
 export class AndroidUpdateDownload {
+  private checkpointPromise: Promise<AndroidUpdateCheckpoint | null> | null = null;
+
   private constructor(
     private readonly release: AndroidRelease,
     private readonly task: FileSystem.DownloadResumable,
@@ -56,19 +63,12 @@ export class AndroidUpdateDownload {
   }): Promise<AndroidUpdateDownload> {
     requireAndroid();
     if (!FileSystem.cacheDirectory) throw new Error("系统没有可用的更新缓存目录");
-    const fileUri = `${FileSystem.cacheDirectory}knoa-update-${input.release.version_code}.apk`;
-    const stored = await loadResume();
+    const fileUri = updateFileUri(input.release);
+    const checkpoint = await loadCheckpoint(input.release, fileUri);
     let resumeData: string | undefined;
-    if (stored?.versionCode === input.release.version_code && stored.fileUri === fileUri) {
-      const partial = await FileSystem.getInfoAsync(fileUri);
-      if (partial.exists) {
-        resumeData = stored.resumeData;
-      } else {
-        await clearStoredResume(stored);
-      }
-    } else {
-      await clearStoredResume(stored);
-      await FileSystem.deleteAsync(fileUri, { idempotent: true });
+    if (checkpoint) {
+      resumeData = String(checkpoint.downloaded);
+      input.onProgress({ downloaded: checkpoint.downloaded, total: checkpoint.total });
     }
     const downloadUrl = new URL(
       input.release.download_path,
@@ -94,13 +94,17 @@ export class AndroidUpdateDownload {
   }
 
   async start(): Promise<string> {
-    const result = this.task.savable().resumeData
+    const resuming = Boolean(this.task.savable().resumeData);
+    const result = resuming
       ? await this.task.resumeAsync()
       : await this.task.downloadAsync();
     if (!result || (result.status !== 200 && result.status !== 206)) {
       throw new Error("更新包下载失败");
     }
     try {
+      if (resuming && result.status !== 206) {
+        throw new Error("更新服务器未接受断点续传，请重新下载");
+      }
       await verifyPackage(result.uri, this.release);
       await SecureStore.deleteItemAsync(RESUME_KEY);
       await SecureStore.setItemAsync(READY_KEY, JSON.stringify({
@@ -116,16 +120,56 @@ export class AndroidUpdateDownload {
     }
   }
 
-  async pause(): Promise<void> {
-    const paused = await this.task.pauseAsync();
-    if (!paused.resumeData) throw new Error("当前下载无法保存断点");
+  async pause(): Promise<AndroidUpdateCheckpoint> {
+    const checkpoint = await this.preserveCheckpoint();
+    if (!checkpoint) throw new Error("当前下载无法保存断点");
+    return checkpoint;
+  }
+
+  async preserveCheckpoint(): Promise<AndroidUpdateCheckpoint | null> {
+    if (!this.checkpointPromise) {
+      this.checkpointPromise = this.captureCheckpoint().finally(() => {
+        this.checkpointPromise = null;
+      });
+    }
+    return this.checkpointPromise;
+  }
+
+  private async captureCheckpoint(): Promise<AndroidUpdateCheckpoint | null> {
+    try {
+      await this.task.pauseAsync();
+    } catch {
+      // A failed native request may no longer be pausable. Android resume data
+      // is the number of bytes already written, so the partial file remains a
+      // valid checkpoint even when pauseAsync itself fails.
+    }
+    const partial = await FileSystem.getInfoAsync(this.task.fileUri);
+    const downloaded = partial.exists ? resumableByteCount(partial.size, this.release.size_bytes) : 0;
+    if (!downloaded) {
+      await SecureStore.deleteItemAsync(RESUME_KEY);
+      return null;
+    }
     const stored: StoredResume = {
       versionCode: this.release.version_code,
-      fileUri: paused.fileUri,
-      resumeData: paused.resumeData,
+      sha256: this.release.sha256,
+      fileUri: this.task.fileUri,
+      resumeData: String(downloaded),
     };
     await SecureStore.setItemAsync(RESUME_KEY, JSON.stringify(stored));
+    return {
+      fileUri: this.task.fileUri,
+      downloaded,
+      total: this.release.size_bytes,
+    };
   }
+}
+
+export async function loadAndroidUpdateCheckpoint(
+  release: AndroidRelease,
+): Promise<AndroidUpdateCheckpoint | null> {
+  requireAndroid();
+  if (!FileSystem.cacheDirectory) return null;
+  return loadCheckpoint(release, updateFileUri(release));
 }
 
 export async function loadReadyAndroidPackage(release: AndroidRelease): Promise<string> {
@@ -187,6 +231,9 @@ async function loadResume(): Promise<StoredResume | null> {
     const value = JSON.parse(raw) as Partial<StoredResume>;
     if (
       Number.isSafeInteger(value.versionCode) &&
+      (value.sha256 === undefined || (
+        typeof value.sha256 === "string" && /^[0-9a-f]{64}$/.test(value.sha256)
+      )) &&
       typeof value.fileUri === "string" &&
       value.fileUri.startsWith("file://") &&
       typeof value.resumeData === "string" &&
@@ -199,6 +246,58 @@ async function loadResume(): Promise<StoredResume | null> {
   }
   await SecureStore.deleteItemAsync(RESUME_KEY);
   return null;
+}
+
+async function loadCheckpoint(
+  release: AndroidRelease,
+  fileUri: string,
+): Promise<AndroidUpdateCheckpoint | null> {
+  let stored = await loadResume();
+  if (
+    stored && (
+      stored.versionCode !== release.version_code ||
+      (stored.sha256 !== undefined && stored.sha256 !== release.sha256) ||
+      stored.fileUri !== fileUri
+    )
+  ) {
+    await clearStoredResume(stored);
+    stored = null;
+  }
+  const partial = await FileSystem.getInfoAsync(fileUri);
+  const downloaded = partial.exists ? resumableByteCount(partial.size, release.size_bytes) : 0;
+  if (!downloaded) {
+    await clearStoredResume(stored);
+    if (stored?.fileUri !== fileUri) {
+      await FileSystem.deleteAsync(fileUri, { idempotent: true });
+    }
+    return null;
+  }
+  if (!stored || stored.resumeData !== String(downloaded) || stored.sha256 !== release.sha256) {
+    await SecureStore.setItemAsync(RESUME_KEY, JSON.stringify({
+      versionCode: release.version_code,
+      sha256: release.sha256,
+      fileUri,
+      resumeData: String(downloaded),
+    } satisfies StoredResume));
+  }
+  return { fileUri, downloaded, total: release.size_bytes };
+}
+
+function updateFileUri(release: AndroidRelease): string {
+  return `${FileSystem.cacheDirectory}knoa-update-${release.version_code}-${release.sha256}.apk`;
+}
+
+export function resumableByteCount(size: number, expectedSize: number): number {
+  if (
+    !Number.isSafeInteger(size) ||
+    !Number.isSafeInteger(expectedSize) ||
+    size <= 0 ||
+    expectedSize <= 0 ||
+    size >= expectedSize
+  ) {
+    return 0;
+  }
+  return size;
 }
 
 async function clearStoredResume(stored: StoredResume | null): Promise<void> {
