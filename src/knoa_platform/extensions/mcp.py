@@ -749,6 +749,12 @@ class StdioMCPClient(_SessionClientMixin):
                     f"Required MCP environment variable is not set: {name}"
                 )
             environment[name] = value
+        for name in self._config.optional_env:
+            value = self._private_environment.get(name)
+            if value is None:
+                value = os.environ.get(name)
+            if value is not None:
+                environment[name] = value
         return environment
 
     async def start(self) -> None:

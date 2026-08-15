@@ -85,6 +85,8 @@ def test_jira_write_tools_are_host_confirmation_gated() -> None:
         }
     assert tools["jira.find_assignable_users"]["effect"] == "read_only"
     assert tools["jira.list_transitions"]["effect"] == "read_only"
+    assert "JIRA_USERNAME" in manifest["optional_env"]
+    assert "JIRA_API_VERSION" in manifest["optional_env"]
 
 
 def test_bearer_settings_do_not_require_username(
@@ -339,6 +341,46 @@ async def test_assign_issue_requires_write_switch_and_uses_jira_identity_field(
 
 
 @pytest.mark.asyncio
+async def test_assign_issue_verifies_ambiguous_network_outcome(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, write_enabled=True)
+    client = JiraClient(settings, JiraStateStore(settings.state_path))
+
+    async def request(method: str, _path: str, **_kwargs):
+        if method == "PUT":
+            raise httpx.ReadTimeout("unknown outcome")
+        return {"fields": {"assignee": {"name": "zhangsan"}}}
+
+    client._request = request  # type: ignore[method-assign]
+    try:
+        result = await client.assign_issue("PROJECT-123", "zhangsan")
+    finally:
+        await client.close()
+
+    assert result["status"] == "succeeded"
+    assert result["verified_after_ambiguous_response"] is True
+
+
+@pytest.mark.asyncio
+async def test_assign_issue_never_blindly_retries_unknown_outcome(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, write_enabled=True)
+    client = JiraClient(settings, JiraStateStore(settings.state_path))
+
+    async def request(method: str, _path: str, **_kwargs):
+        if method == "PUT":
+            raise httpx.ReadTimeout("unknown outcome")
+        return {"fields": {"assignee": {"name": "another-user"}}}
+
+    client._request = request  # type: ignore[method-assign]
+    try:
+        result = await client.assign_issue("PROJECT-123", "zhangsan")
+    finally:
+        await client.close()
+
+    assert result["status"] == "outcome_unknown"
+    assert result["retry_allowed"] is False
+
+
+@pytest.mark.asyncio
 async def test_list_and_apply_transition_use_fields_discovered_from_jira(
     tmp_path: Path,
 ) -> None:
@@ -385,7 +427,7 @@ async def test_list_and_apply_transition_use_fields_discovered_from_jira(
     )
     assert calls[0][2]["params"] == {"expand": "transitions.fields"}
     assert calls[1][0] == "GET"
-    assert calls[2][2]["json"] == {
+    assert calls[3][2]["json"] == {
         "transition": {"id": "71"},
         "fields": {"customfield_1": {"id": "2"}},
     }
@@ -420,6 +462,68 @@ async def test_transition_rejects_unknown_fields_before_write(tmp_path: Path) ->
         await client.close()
 
     assert posts == 0
+
+
+@pytest.mark.asyncio
+async def test_transition_verifies_target_status_after_ambiguous_response(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path, write_enabled=True)
+    client = JiraClient(settings, JiraStateStore(settings.state_path))
+
+    status_reads = 0
+
+    async def request(method: str, path: str, **_kwargs):
+        nonlocal status_reads
+        if method == "POST":
+            raise httpx.ReadTimeout("unknown outcome")
+        if path.endswith("/transitions"):
+            return {
+                "transitions": [
+                    {"id": "71", "name": "提交验证", "to": {"name": "待验证"}, "fields": {}}
+                ]
+            }
+        status_reads += 1
+        status = "处理中" if status_reads == 1 else "待验证"
+        return {"fields": {"status": {"name": status}}}
+
+    client._request = request  # type: ignore[method-assign]
+    try:
+        result = await client.transition_issue("PROJECT-123", "71")
+    finally:
+        await client.close()
+
+    assert result["status"] == "succeeded"
+    assert result["verified_after_ambiguous_response"] is True
+
+
+@pytest.mark.asyncio
+async def test_transition_returns_unknown_when_state_cannot_confirm_success(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path, write_enabled=True)
+    client = JiraClient(settings, JiraStateStore(settings.state_path))
+
+    async def request(method: str, path: str, **_kwargs):
+        if method == "POST":
+            raise httpx.ReadTimeout("unknown outcome")
+        if path.endswith("/transitions"):
+            return {
+                "transitions": [
+                    {"id": "71", "name": "提交验证", "to": {"name": "待验证"}, "fields": {}}
+                ]
+            }
+        return {"fields": {"status": {"name": "处理中"}}}
+
+    client._request = request  # type: ignore[method-assign]
+    try:
+        result = await client.transition_issue("PROJECT-123", "71")
+    finally:
+        await client.close()
+
+    assert result["status"] == "outcome_unknown"
+    assert result["transition_still_available"] is True
+    assert result["retry_allowed"] is False
 
 
 @pytest.mark.asyncio
@@ -664,10 +768,64 @@ async def test_materialize_issue_writes_complete_manifest(tmp_path: Path) -> Non
     assert json.loads((evidence / "comments.json").read_text(encoding="utf-8"))["comments"][0]["id"] == "comment-1"
     assert manifest["format"] == "knoa-jira-evidence-v1"
     assert manifest["attachments"][0]["path"].endswith("attachment-1-agent.log")
+    assert manifest["snapshot_complete"] is True
     assert result["attachment_count"] == 1
+    assert result["attachment_error_count"] == 0
     assert result["snapshot"]["issue"]["summary"] == "Failure"
     assert result["snapshot"]["comments"][0]["id"] == "comment-1"
     assert result["snapshot"]["attachments"][0]["filename"] == "agent.log"
+
+
+@pytest.mark.asyncio
+async def test_materialize_issue_keeps_event_evidence_when_one_attachment_fails(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    client = JiraClient(settings, JiraStateStore(settings.state_path))
+
+    async def get_issue(_issue_key: str, *, changelog: bool = False):
+        return {"key": "PROJECT-123", "summary": "Failure", "changelog": changelog}
+
+    async def get_comments(_issue_key: str, *, limit: int = 50):
+        return ({"id": "comment-1", "body": "Observed failure"},)
+
+    attachments = (
+        {"id": "bad", "filename": "broken.log"},
+        {"id": "good", "filename": "good.log"},
+    )
+
+    async def attachment_records(_issue_key: str):
+        return attachments
+
+    async def download(_issue_key: str, attachment_id: str, **_kwargs):
+        if attachment_id == "bad":
+            raise httpx.ReadTimeout("attachment unavailable")
+        return {
+            "attachment_id": "good",
+            "filename": "good.log",
+            "mime_type": "text/plain",
+            "size": 4,
+            "sha256": "abcd",
+            "path": str(settings.attachment_root / "PROJECT-123/good.log"),
+            "reused": False,
+        }
+
+    client.get_issue = get_issue  # type: ignore[method-assign]
+    client.get_comments = get_comments  # type: ignore[method-assign]
+    client._attachment_records = attachment_records  # type: ignore[method-assign]
+    client.download_attachment = download  # type: ignore[method-assign]
+    try:
+        result = await client.materialize_issue("PROJECT-123")
+    finally:
+        await client.close()
+
+    manifest = json.loads(Path(result["manifest"]).read_text(encoding="utf-8"))
+    assert result["attachment_count"] == 1
+    assert result["attachment_error_count"] == 1
+    assert result["snapshot_complete"] is False
+    assert manifest["snapshot_complete"] is False
+    assert manifest["attachment_errors"][0]["attachment_id"] == "bad"
+    assert result["snapshot"]["snapshot_limits"]["complete_attachments"] is False
 
 
 @pytest.mark.asyncio
@@ -739,6 +897,19 @@ async def test_reference_server_declares_standard_mcp_capabilities(
         assert options.capabilities.resources.list_changed is True
         assert options.capabilities.tools is not None
         assert options.capabilities.prompts is not None
+        tools = await app._list_tools(
+            type(
+                "Context",
+                (),
+                {"session": object(), "protocol_version": "2025-06-18"},
+            )(),
+            None,
+        )
+        transition = next(
+            tool for tool in tools.tools if tool.name == "jira.transition_issue"
+        )
+        assert transition.annotations is not None
+        assert transition.annotations.idempotent_hint is False
     finally:
         await app.jira.close()
 

@@ -117,7 +117,7 @@ class GitLabMCPApplication:
                         f"Diagnose failed pipeline {payload['project']} "
                         f"#{payload['pipeline_id']}"
                     ),
-                    description="Immutable task instruction for one failed CI state.",
+                    description="Immutable bounded evidence for one failed CI state.",
                     mime_type="text/markdown",
                     annotations=types.Annotations(audience=["assistant"], priority=1.0),
                 )
@@ -142,27 +142,16 @@ class GitLabMCPApplication:
                 raise LookupError("GitLab failure event was not found")
             payload = event["payload"]
             text = (
-                "The GitLab MCP Server already prepared a bounded, immutable failure "
-                "snapshot containing pipeline metadata, compact Job summaries, failed "
-                "Job trace tails, fingerprints, compile/build totals, ownership evidence "
-                "and deterministic OOM signals. Analyze that snapshot first. Do not "
-                "repeat the initial get_pipeline/list_pipeline_jobs/get_job_trace sequence "
-                "unless the snapshot explicitly says it is incomplete. Do not access a local workspace, "
-                "do not call shell or filesystem Tools, and do not search the host. "
-                "State the attribution category and Pipeline trigger user first, so the "
-                "user can distinguish a direct Pipeline from a downstream Pipeline "
-                "triggered by a robot or merger for the user's MR/commit. Report the "
-                "supplied compile/build totals and failed Job fingerprints. "
-                "Finish with exactly one decision: retry, stop or "
-                "needs_human, plus a short reason. If the decision is retry, name one "
-                "exact failed job and call gitlab.retry_job in this same Execution; "
-                "do not merely recommend or describe a future retry. Calling the Tool "
-                "is how Knoa creates the host approval request. Only report retry as "
-                "requested or completed after that Tool call returns. retry_job performs "
-                "a final live server-side check that the target remains failed/canceled "
-                "and no same-name Job is active; do not retry the same failure "
-                "fingerprint blindly. Retry remains a high-risk host-approved MCP Tool "
-                "call.\n\n"
+                "This immutable GitLab failure event contains a bounded snapshot with "
+                "pipeline metadata, compact Job summaries, failed Job trace tails, "
+                "fingerprints, compile/build totals, ownership evidence and "
+                "deterministic OOM signals. The snapshot is domain evidence, not a "
+                "Knoa workflow instruction. Read Tools can refresh facts when the "
+                "snapshot reports incomplete data. gitlab.retry_job is the precise "
+                "side-effect operation; it performs a final live check that the target "
+                "is still failed or canceled and that no same-name Job is already "
+                "active. Knoa host policy and approval govern whether that operation "
+                "may execute.\n\n"
                 + json.dumps(payload, ensure_ascii=False, indent=2)
             )
         else:
@@ -215,24 +204,20 @@ class GitLabMCPApplication:
                 annotations=read_only,
             )
         )
-        for name, identifier, description in (
-            ("gitlab.retry_pipeline", "pipeline_id", "Retry a GitLab CI pipeline after host approval and server-side guards."),
-            ("gitlab.retry_job", "job_id", "Retry one failed GitLab CI job after host approval; the server blocks active or duplicate logical jobs."),
-        ):
-            tools.append(
-                types.Tool(
-                    name=name,
-                    description=description,
-                    input_schema=_schema(
-                        {
-                            "project": {"type": "string"},
-                            identifier: {"type": ["string", "integer"]},
-                        },
-                        ["project", identifier],
-                    ),
-                    annotations=retry,
-                )
+        tools.append(
+            types.Tool(
+                name="gitlab.retry_job",
+                description="Retry one failed GitLab CI job after host approval; the server blocks active or duplicate logical jobs.",
+                input_schema=_schema(
+                    {
+                        "project": {"type": "string"},
+                        "job_id": {"type": ["string", "integer"]},
+                    },
+                    ["project", "job_id"],
+                ),
+                annotations=retry,
             )
+        )
         return types.ListToolsResult(tools=tools)
 
     async def _call_tool(self, _context: Any, params: types.CallToolRequestParams):
@@ -252,13 +237,6 @@ class GitLabMCPApplication:
                     str(args.get("job_id", "")),
                     tail_lines=int(args.get("tail_lines", 400)),
                     max_bytes=int(args.get("max_bytes", 131_072)),
-                )
-            elif name == "gitlab.retry_pipeline":
-                pipeline_id = str(args.get("pipeline_id", ""))
-                payload = await self.gitlab.retry_pipeline(
-                    project,
-                    pipeline_id,
-                    self._retry_key(name, project, pipeline_id),
                 )
             elif name == "gitlab.retry_job":
                 job_id = str(args.get("job_id", ""))

@@ -13,5 +13,9 @@ class TaskTransitionError(RuntimeError):
     pass
 
 
+class TaskAlreadyActiveError(TaskTransitionError):
+    pass
+
+
 class TaskCapacityError(RuntimeError):
     pass

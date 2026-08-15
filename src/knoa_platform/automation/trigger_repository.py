@@ -791,3 +791,47 @@ class TriggerRepository:
             ).fetchone()
             assert updated is not None
             return self._event(updated)
+
+    def defer_delivery(
+        self,
+        trigger_event_id: str,
+        *,
+        reason: str,
+    ) -> TriggerEventRecord:
+        """Release a claimed event without consuming its failure budget."""
+
+        event_id = self._identifier(trigger_event_id, label="trigger_event_id")
+        normalized_reason = self._identifier(reason, label="reason", limit=256)
+        now = self._clock()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                """SELECT * FROM runtime_trigger_events
+                   WHERE trigger_event_id=?""",
+                (event_id,),
+            ).fetchone()
+            if row is None:
+                raise TriggerNotFoundError("Trigger event not found")
+            current = self._event(row)
+            if current.state is not TriggerEventState.CLAIMED:
+                raise TriggerTransitionError("Trigger event is not claimed")
+            db.execute(
+                """UPDATE runtime_trigger_events SET
+                       state=?, attempt_count=MAX(0, attempt_count-1),
+                       next_attempt_at=?, lease_owner='', lease_expires_at=NULL,
+                       failure_code=?, updated_at=? WHERE trigger_event_id=?""",
+                (
+                    TriggerEventState.RETRY_WAIT.value,
+                    now + self._retry_base_seconds,
+                    normalized_reason,
+                    now,
+                    event_id,
+                ),
+            )
+            updated = db.execute(
+                """SELECT * FROM runtime_trigger_events
+                   WHERE trigger_event_id=?""",
+                (event_id,),
+            ).fetchone()
+            assert updated is not None
+            return self._event(updated)

@@ -554,7 +554,7 @@ class JiraMCPApplication:
                     annotations=types.ToolAnnotations(
                         read_only_hint=False,
                         destructive_hint=False,
-                        idempotent_hint=True,
+                        idempotent_hint=False,
                         open_world_hint=True,
                     ),
                 ),

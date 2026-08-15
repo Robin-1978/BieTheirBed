@@ -11,7 +11,7 @@ from knoa_platform.agent_runtime.contracts import (
     RuntimeScope,
 )
 from knoa_platform.tasks.approval import DurableApprovalService
-from knoa_platform.tasks.errors import TaskTransitionError
+from knoa_platform.tasks.errors import TaskAlreadyActiveError, TaskTransitionError
 from knoa_platform.tasks.event_hub import TaskEventHub
 from knoa_platform.tasks.executor import TaskExecutor
 from knoa_platform.tasks.models import (
@@ -295,7 +295,7 @@ class TaskService:
             if execution.state not in TERMINAL_TASK_STATES
         )
         if active:
-            raise TaskTransitionError("Task already has an active execution")
+            raise TaskAlreadyActiveError("Task already has an active execution")
         scope = RuntimeScope(
             principal_id=definition.principal_id,
             session_handle=definition.session_handle,
@@ -452,7 +452,7 @@ class TaskService:
             if execution.state not in TERMINAL_TASK_STATES
         )
         if active:
-            raise TaskTransitionError("Task already has an active execution")
+            raise TaskAlreadyActiveError("Task already has an active execution")
         goal = normalized_input or "Review the attached human-provided evidence and continue the Task analysis."
         scope = RuntimeScope(
             principal_id=definition.principal_id,

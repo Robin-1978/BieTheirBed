@@ -31,10 +31,6 @@ tools:
     effect: read_only
     capabilities: [mcp, network]
     risk: low
-  gitlab.retry_pipeline:
-    effect: external_side_effect
-    capabilities: [mcp, network]
-    risk: high
   gitlab.retry_job:
     effect: external_side_effect
     capabilities: [mcp, network]

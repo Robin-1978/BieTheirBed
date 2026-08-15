@@ -34,8 +34,8 @@ PYTHONDONTWRITEBYTECODE=1
 ```
 
 Knoa loads this private service environment on startup. The MCP package receives
-only the names explicitly declared in `inherit_env`; secrets are never copied
-into the package or `local.yaml`.
+only the names explicitly declared in `inherit_env` or `optional_env`; secrets
+are never copied into the package or `local.yaml`.
 
 ## 1. Configure Jira credentials
 
@@ -77,9 +77,10 @@ in the MCP package. Store them in the server-scoped private environment:
 
 The file must be a regular file with mode `0600`. Knoa reads it only while
 starting the `jira` stdio MCP child and only injects names explicitly listed by
-`inherit_env` in `mcp.yaml`. Package install/update preserves this file because
-credentials and package lifecycle are separate. Other MCP Servers do not
-receive these values.
+`inherit_env` or `optional_env` in `mcp.yaml`. Required variables use
+`inherit_env`; conditional or defaulted variables use `optional_env`. Package
+install/update preserves this file because credentials and package lifecycle
+are separate. Other MCP Servers do not receive these values.
 
 `JIRA_ATTACHMENT_ROOT` is selected only by the MCP Server operator. Jira issue
 keys, attachment names, descriptions and comments cannot change it. For each
