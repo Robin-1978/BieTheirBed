@@ -61,6 +61,7 @@ rsync -a --delete --no-owner --no-group --no-perms \
   --exclude='**/.cxx' \
   --exclude='key.properties' \
   "$SOURCE_MOBILE/" "$MOBILE/"
+mkdir -p "$KNOA_MOBILE_SOURCE_ROOT/assets/branding"
 rsync -a --delete --no-owner --no-group --no-perms \
   "$REPO/assets/branding/" "$KNOA_MOBILE_SOURCE_ROOT/assets/branding/"
 
@@ -78,11 +79,19 @@ echo "    GRADLE_USER_HOME=$GRADLE_USER_HOME"
 echo "    JAVA_HOME=$JAVA_HOME"
 
 cd "$ANDROID"
+GRADLE_RELEASE_ARGS=(
+  -PreactNativeArchitectures="${KNOA_MOBILE_ARCHITECTURES:-arm64-v8a}"
+  -Pandroid.enableMinifyInReleaseBuilds=true
+  -Pandroid.enableShrinkResourcesInReleaseBuilds=true
+)
+if [[ "${KNOA_MOBILE_CLEAN_BUILD:-false}" == "true" ]]; then
+  echo "    clean release: Gradle build cache disabled; all tasks rerun"
+  GRADLE_RELEASE_ARGS+=(--no-build-cache --rerun-tasks)
+fi
+GRADLE_RELEASE_ARGS+=(assembleRelease)
+
 bash ./gradlew \
-  -PreactNativeArchitectures="${KNOA_MOBILE_ARCHITECTURES:-arm64-v8a}" \
-  -Pandroid.enableMinifyInReleaseBuilds=true \
-  -Pandroid.enableShrinkResourcesInReleaseBuilds=true \
-  assembleRelease
+  "${GRADLE_RELEASE_ARGS[@]}"
 
 BUILT_APK="$ANDROID/app/build/outputs/apk/release/app-release.apk"
 APK="$KNOA_MOBILE_BUILD_DIR/app/outputs/apk/release/app-release.apk"
