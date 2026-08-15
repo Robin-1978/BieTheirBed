@@ -7,6 +7,7 @@ import pytest
 
 from knoa_platform.agent_runtime.contracts import RuntimeScope
 from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
+from knoa_platform.agent_runtime.tool_step import ProposedToolCall
 from knoa_platform.tasks import (
     TaskCapacityError,
     TaskEventPayload,
@@ -21,6 +22,7 @@ from knoa_platform.tasks import (
     TaskTraceEntry,
     TaskTransitionError,
 )
+from knoa_platform.tasks.identity import task_approval_action_id
 
 
 def _repository(tmp_path: Path) -> tuple[TaskRepository, RuntimeScope]:
@@ -700,6 +702,54 @@ def test_approval_is_persistent_idempotent_and_atomically_resolved(
         scope.principal_id,
         task.task_id,
     )] == [1, 2, 3, 4]
+
+
+def test_resolved_approval_replays_for_same_action_with_new_call_id(
+    tmp_path: Path,
+) -> None:
+    repository, scope = _repository(tmp_path)
+    task, _ = repository.create(
+        scope,
+        client_request_id="request-a",
+        goal="retry one failed job",
+    )
+    repository.claim_next("worker-a")
+    first_call = ProposedToolCall(
+        call_id="call-before-restart",
+        name="gitlab.retry_job",
+        arguments={"project": "team/repo", "job_id": 9},
+    )
+    approval, _, created = repository.request_approval(
+        scope.principal_id,
+        task.task_id,
+        tool_step_id=task_approval_action_id(task.task_id, first_call),
+        tool_call_id=first_call.call_id,
+        tool_name=first_call.name,
+        arguments=first_call.arguments,
+        reason="external_side_effect:high",
+    )
+    repository.resolve_approval(
+        scope.principal_id,
+        approval.approval_id,
+        approved=False,
+        resume_state=TaskState.QUEUED,
+    )
+    repository.claim_next("worker-b")
+    replay_call = first_call.model_copy(update={"call_id": "call-after-restart"})
+    replay, _, replay_created = repository.request_approval(
+        scope.principal_id,
+        task.task_id,
+        tool_step_id=task_approval_action_id(task.task_id, replay_call),
+        tool_call_id=replay_call.call_id,
+        tool_name=replay_call.name,
+        arguments=replay_call.arguments,
+        reason="external_side_effect:high",
+    )
+
+    assert created is True
+    assert replay_created is False
+    assert replay.approval_id == approval.approval_id
+    assert replay.state.value == "denied"
 
 
 def test_cancelling_waiting_task_cancels_pending_approval(tmp_path: Path) -> None:

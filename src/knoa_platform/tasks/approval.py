@@ -13,7 +13,7 @@ from knoa_platform.approvals import (
     ApprovalReviewRequest,
 )
 from knoa_platform.tasks.event_hub import TaskEventHub
-from knoa_platform.tasks.identity import task_tool_step_id
+from knoa_platform.tasks.identity import task_approval_action_id
 from knoa_platform.tasks.models import TaskApprovalRecord, TaskState
 from knoa_platform.tasks.repository import TaskRepository
 
@@ -55,7 +55,7 @@ class DurableApprovalService:
             self._repository.request_approval,
             scope.principal_id,
             run_id,
-            tool_step_id=task_tool_step_id(run_id, call),
+            tool_step_id=task_approval_action_id(run_id, call),
             tool_call_id=call.call_id,
             tool_name=call.name,
             arguments=call.arguments,

@@ -472,8 +472,7 @@ class TaskToolRepositoryMixin:
                     if existing is not None:
                         approval = self._approval_record(existing)
                         if (
-                            approval.tool_call_id != normalized_call_id
-                            or approval.tool_name != normalized_tool_name
+                            approval.tool_name != normalized_tool_name
                             or approval.arguments != arguments
                             or approval.reason != normalized_reason
                         ):
