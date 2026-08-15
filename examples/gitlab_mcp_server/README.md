@@ -11,10 +11,9 @@ It exposes four bounded read-only diagnostic Tools:
 - `gitlab.get_job`
 - `gitlab.get_job_trace`
 
-and two high-risk side-effect Tools:
+and one high-risk side-effect Tool:
 
 - `gitlab.retry_job`
-- `gitlab.retry_pipeline`
 
 Retry requires both `GITLAB_ACTIONS_ENABLED=true` and Knoa host approval. Every
 call requires a stable idempotency key; an ambiguous network outcome is stored
@@ -38,15 +37,24 @@ Create a user-owned Task Definition matching descendants of
 under that Task. Before publishing the Resource, the GitLab MCP Server prepares a bounded
 immutable snapshot containing compact Pipeline and Job data, failed Job trace
 tails, deterministic fingerprints, compile/build totals, ownership evidence and
-OOM signals. The Agent analyzes that snapshot directly and returns `retry`,
-`stop`, or `needs_human`; read Tools are only for missing evidence or later
-inspection.
-The diagnostic Task explicitly forbids local workspace, filesystem and shell
-access. Immediately before a Job retry, both the Agent and Provider re-read the
-Job and its Pipeline Job list. The Provider permits only `failed` or `canceled`
-and rejects the retry when a newer Job with the same name is already `created`,
-`pending`, `preparing`, `running` or otherwise active. Retry remains an
-ordinary approval-gated MCP Tool call.
+OOM signals. The Resource contains domain facts, not a user workflow. Put the
+trusted action policy in the user-owned Task Definition. A practical Task goal
+is:
+
+```text
+Analyze the prepared failed-pipeline snapshot. Report attribution, compile/build
+totals and each failed Job's fingerprint. For every failed Job that is confirmed
+as OOM while peer compile Jobs succeeded, and that is still safely retryable,
+call the source GitLab MCP's precise Job retry Tool. Otherwise return stop or
+needs_human with the reason. Only report a retry after the Tool returns.
+```
+
+Immediately before each Job retry, the Provider re-reads the Job and its Pipeline
+Job list. It permits only `failed` or `canceled` and rejects the retry when a
+newer Job with the same name is already `created`, `pending`, `preparing`,
+`running` or otherwise active. Each Job is checked independently, so one Task
+may safely retry multiple eligible failed Jobs. Retry remains an ordinary
+approval-gated MCP Tool call.
 
 Store private configuration in `~/.knoa/secrets/mcp/gitlab.env` with mode 0600:
 

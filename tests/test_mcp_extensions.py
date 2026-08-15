@@ -662,6 +662,41 @@ def test_stdio_environment_is_explicit_and_missing_values_fail(
         StdioMCPClient(config)._environment()
 
 
+def test_stdio_optional_environment_is_allowlisted_but_not_required(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PATH", "/safe/bin")
+    monkeypatch.delenv("OPTIONAL_MCP_SETTING", raising=False)
+    config = MCPServerConfig.model_validate(
+        {
+            "enabled": True,
+            "transport": "stdio",
+            "command": "python",
+            "optional_env": ["OPTIONAL_MCP_SETTING"],
+        }
+    )
+
+    environment = StdioMCPClient(config)._environment()
+    assert "OPTIONAL_MCP_SETTING" not in environment
+
+    environment = StdioMCPClient(
+        config,
+        private_environment={"OPTIONAL_MCP_SETTING": "configured"},
+    )._environment()
+    assert environment["OPTIONAL_MCP_SETTING"] == "configured"
+
+    with pytest.raises(ValidationError, match="both required and optional"):
+        MCPServerConfig.model_validate(
+            {
+                "enabled": True,
+                "transport": "stdio",
+                "command": "python",
+                "inherit_env": ["DUPLICATE_SETTING"],
+                "optional_env": ["DUPLICATE_SETTING"],
+            }
+        )
+
+
 def test_stdio_private_environment_overrides_process_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

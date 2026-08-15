@@ -2,6 +2,7 @@
 
 from knoa_platform.tasks.approval import DurableApprovalService
 from knoa_platform.tasks.errors import (
+    TaskAlreadyActiveError,
     TaskCapacityError,
     TaskIdempotencyConflictError,
     TaskNotFoundError,
@@ -52,6 +53,7 @@ __all__ = [
     "TaskApprovalRecord",
     "TaskAttemptRecord",
     "TaskAttemptState",
+    "TaskAlreadyActiveError",
     "TaskCapacityError",
     "TaskCancelResult",
     "TaskEvent",

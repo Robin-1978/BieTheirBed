@@ -221,6 +221,15 @@ def _user_identity(user: Any) -> set[str]:
     }
 
 
+def _ambiguous_write_error(exc: BaseException) -> bool:
+    if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
+        return True
+    return (
+        isinstance(exc, httpx.HTTPStatusError)
+        and exc.response.status_code >= 500
+    )
+
+
 class JiraStateStore:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -694,11 +703,41 @@ class JiraClient:
         if not normalized_assignee or len(normalized_assignee) > 256:
             raise ValueError("Jira assignee ID must contain 1-256 characters")
         identity_field = "accountId" if self.settings.api_version == "3" else "name"
-        await self._request(
-            "PUT",
-            f"{self.api_root}/issue/{key}/assignee",
-            json={identity_field: normalized_assignee},
-        )
+        try:
+            await self._request(
+                "PUT",
+                f"{self.api_root}/issue/{key}/assignee",
+                json={identity_field: normalized_assignee},
+            )
+        except Exception as exc:
+            if not _ambiguous_write_error(exc):
+                raise
+            confirmed = False
+            try:
+                issue = await self._request(
+                    "GET",
+                    f"{self.api_root}/issue/{key}",
+                    params={"fields": "assignee"},
+                )
+                fields = issue.get("fields", {}) if isinstance(issue, dict) else {}
+                assignee = fields.get("assignee") if isinstance(fields, dict) else None
+                confirmed = normalized_assignee.casefold() in _user_identity(assignee)
+            except Exception:
+                logger.warning("Could not verify ambiguous Jira assignment for %s", key)
+            if confirmed:
+                return {
+                    "status": "succeeded",
+                    "issue_key": key,
+                    "assignee_id": normalized_assignee,
+                    "verified_after_ambiguous_response": True,
+                }
+            return {
+                "status": "outcome_unknown",
+                "issue_key": key,
+                "assignee_id": normalized_assignee,
+                "retry_allowed": False,
+                "message": "Verify the current Jira assignee before retrying.",
+            }
         return {
             "status": "succeeded",
             "issue_key": key,
@@ -805,11 +844,81 @@ class JiraClient:
         }
         if normalized_fields:
             payload["fields"] = normalized_fields
-        await self._request(
-            "POST",
-            f"{self.api_root}/issue/{key}/transitions",
-            json=payload,
-        )
+        previous_status = ""
+        try:
+            issue_before = await self._request(
+                "GET",
+                f"{self.api_root}/issue/{key}",
+                params={"fields": "status"},
+            )
+            fields_before = (
+                issue_before.get("fields", {})
+                if isinstance(issue_before, dict)
+                else {}
+            )
+            previous_status = _named(
+                fields_before.get("status")
+                if isinstance(fields_before, dict)
+                else None
+            )
+        except Exception:
+            logger.warning("Could not snapshot Jira status before transition for %s", key)
+        try:
+            await self._request(
+                "POST",
+                f"{self.api_root}/issue/{key}/transitions",
+                json=payload,
+            )
+        except Exception as exc:
+            if not _ambiguous_write_error(exc):
+                raise
+            target_status = str(selected.get("target_status", "")).strip()
+            current_status = ""
+            transition_still_available: bool | None = None
+            try:
+                issue = await self._request(
+                    "GET",
+                    f"{self.api_root}/issue/{key}",
+                    params={"fields": "status"},
+                )
+                fields_payload = (
+                    issue.get("fields", {}) if isinstance(issue, dict) else {}
+                )
+                current_status = _named(
+                    fields_payload.get("status")
+                    if isinstance(fields_payload, dict)
+                    else None
+                )
+                if (
+                    target_status
+                    and previous_status
+                    and previous_status.casefold() != target_status.casefold()
+                    and current_status.casefold() == target_status.casefold()
+                ):
+                    return {
+                        "status": "succeeded",
+                        "issue_key": key,
+                        "transition_id": normalized_transition,
+                        "target_status": target_status,
+                        "verified_after_ambiguous_response": True,
+                    }
+                available = await self.list_transitions(key)
+                transition_still_available = any(
+                    item.get("id") == normalized_transition for item in available
+                )
+            except Exception:
+                logger.warning("Could not verify ambiguous Jira transition for %s", key)
+            return {
+                "status": "outcome_unknown",
+                "issue_key": key,
+                "transition_id": normalized_transition,
+                "target_status": target_status,
+                "previous_status": previous_status,
+                "current_status": current_status,
+                "transition_still_available": transition_still_available,
+                "retry_allowed": False,
+                "message": "Verify Jira workflow state before retrying.",
+            }
         return {
             "status": "succeeded",
             "issue_key": key,
@@ -1035,15 +1144,34 @@ class JiraClient:
             comments = await self.get_comments(key, limit=100)
             attachments = await self._attachment_records(key)
             downloaded: list[dict[str, Any]] = []
+            attachment_errors: list[dict[str, Any]] = []
             for attachment in attachments:
                 attachment_id = str(attachment.get("id", ""))
-                downloaded.append(
-                    await self.download_attachment(
+                try:
+                    downloaded.append(
+                        await self.download_attachment(
+                            key,
+                            attachment_id,
+                            attachments=attachments,
+                        )
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.warning(
+                        "Jira attachment materialization failed for %s attachment %s (%s)",
                         key,
                         attachment_id,
-                        attachments=attachments,
+                        type(exc).__name__,
                     )
-                )
+                    attachment_errors.append(
+                        {
+                            "attachment_id": attachment_id,
+                            "filename": str(attachment.get("filename", ""))[:1000],
+                            "error_type": type(exc).__name__,
+                            "message": str(exc)[:1000],
+                        }
+                    )
             issue_path = issue_root / "issue.json"
             comments_path = issue_root / "comments.json"
             manifest_path = issue_root / "manifest.json"
@@ -1057,6 +1185,8 @@ class JiraClient:
                 "issue": str(issue_path),
                 "comments": str(comments_path),
                 "attachments": downloaded,
+                "attachment_errors": attachment_errors,
+                "snapshot_complete": not attachment_errors,
             }
             self._write_json(manifest_path, manifest)
             snapshot = {
@@ -1086,13 +1216,17 @@ class JiraClient:
                     }
                     for attachment in downloaded[:50]
                 ],
+                "attachment_errors": attachment_errors[:50],
+                "snapshot_complete": not attachment_errors,
                 "snapshot_limits": {
                     "description_chars": 8_000,
                     "comments": 10,
                     "comment_chars": 2_000,
                     "attachments": 50,
                     "complete_comments": len(comments) <= 10,
-                    "complete_attachments": len(downloaded) <= 50,
+                    "complete_attachments": (
+                        not attachment_errors and len(downloaded) <= 50
+                    ),
                 },
                 "evidence": {
                     "directory": str(issue_root),
@@ -1106,7 +1240,10 @@ class JiraClient:
                 "evidence_directory": str(issue_root),
                 "manifest": str(manifest_path),
                 "attachment_count": len(downloaded),
+                "attachment_error_count": len(attachment_errors),
                 "attachments": downloaded,
+                "attachment_errors": attachment_errors,
+                "snapshot_complete": not attachment_errors,
                 "snapshot": snapshot,
             }
 

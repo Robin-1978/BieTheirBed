@@ -95,6 +95,7 @@ class MCPServerConfig(ExtensionConfigModel):
     args: tuple[str, ...] = Field(default=(), max_length=64)
     working_directory: str = ""
     inherit_env: tuple[str, ...] = Field(default=(), max_length=64)
+    optional_env: tuple[str, ...] = Field(default=(), max_length=64)
     timeout_seconds: float = Field(default=30.0, ge=1.0, le=300.0)
     tools: dict[str, MCPToolPolicyConfig] = Field(default_factory=dict)
     # Read-only compatibility for pre-0.2.10 configuration. Event routing now
@@ -134,7 +135,7 @@ class MCPServerConfig(ExtensionConfigModel):
             raise ValueError("MCP arguments must contain at most 4096 safe characters")
         return values
 
-    @field_validator("inherit_env")
+    @field_validator("inherit_env", "optional_env")
     @classmethod
     def validate_inherit_env(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         normalized = tuple(value.strip() for value in values)
@@ -145,11 +146,25 @@ class MCPServerConfig(ExtensionConfigModel):
         return normalized
 
     @model_validator(mode="after")
+    def reject_duplicate_environment_names(self) -> MCPServerConfig:
+        if set(self.inherit_env) & set(self.optional_env):
+            raise ValueError(
+                "MCP environment names cannot be both required and optional"
+            )
+        return self
+
+    @model_validator(mode="after")
     def validate_enabled_server(self) -> MCPServerConfig:
         if self.transport == "streamable_http":
             if self.enabled and not self.url:
                 raise ValueError("Enabled Streamable HTTP MCP server requires a URL")
-            if self.command or self.args or self.working_directory or self.inherit_env:
+            if (
+                self.command
+                or self.args
+                or self.working_directory
+                or self.inherit_env
+                or self.optional_env
+            ):
                 raise ValueError(
                     "Streamable HTTP MCP server must not configure stdio fields"
                 )

@@ -32,12 +32,12 @@ def test_gitlab_manifest_keeps_retry_behind_high_risk_approval() -> None:
     manifest = yaml.safe_load(
         (Path(__file__).parents[1] / "examples/gitlab_mcp_server/mcp.yaml").read_text()
     )
-    for name in ("gitlab.retry_job", "gitlab.retry_pipeline"):
-        assert manifest["tools"][name] == {
-            "effect": "external_side_effect",
-            "capabilities": ["mcp", "network"],
-            "risk": "high",
-        }
+    assert manifest["tools"]["gitlab.retry_job"] == {
+        "effect": "external_side_effect",
+        "capabilities": ["mcp", "network"],
+        "risk": "high",
+    }
+    assert "gitlab.retry_pipeline" not in manifest["tools"]
     assert manifest["tools"]["gitlab.get_job_trace"]["effect"] == "read_only"
 
 
@@ -466,7 +466,7 @@ async def test_retry_job_rejects_newer_active_instance_with_same_name(
 
 
 @pytest.mark.asyncio
-async def test_mcp_exposes_resources_and_six_tools(tmp_path: Path) -> None:
+async def test_mcp_exposes_resources_and_five_tools(tmp_path: Path) -> None:
     app = GitLabMCPApplication(_settings(tmp_path))
     result = await app._list_tools(None, None)
     names = {tool.name for tool in result.tools}
@@ -475,7 +475,6 @@ async def test_mcp_exposes_resources_and_six_tools(tmp_path: Path) -> None:
         "gitlab.list_pipeline_jobs",
         "gitlab.get_job",
         "gitlab.get_job_trace",
-        "gitlab.retry_pipeline",
         "gitlab.retry_job",
     }
     retry_job = next(tool for tool in result.tools if tool.name == "gitlab.retry_job")
@@ -509,14 +508,10 @@ async def test_mcp_exposes_resources_and_six_tools(tmp_path: Path) -> None:
     )
     text = instruction.contents[0].text
     assert "compile/build totals" in text
-    assert "attribution category and Pipeline trigger user" in text
     assert "deterministic OOM signals" in text
-    assert "do not call shell or filesystem Tools" in text
-    assert "local workspace" in text
-    assert "final live server-side check" in text
-    assert "no same-name Job is active" in text
-    assert "call gitlab.retry_job in this same Execution" in text
-    assert "how Knoa creates the host approval request" in text
-    assert "do not merely recommend" in text
-    assert "inspect the referenced branch" not in text
+    assert "domain evidence, not a Knoa workflow instruction" in text
+    assert "final live check" in text
+    assert "no same-name Job is already active" in text
+    assert "host policy and approval" in text
+    assert "call gitlab.retry_job" not in text
     await app.gitlab.close()
