@@ -50,7 +50,11 @@ export function TaskReminderBanner() {
     >
       <AppPressable accessibilityRole="button" accessibilityLabel={title} onPress={open} style={styles.banner}>
         <View style={styles.icon}>
-          <AppIcon name={activeReminder.category === "failed" ? "x" : "check"} color={colors.accent} size={18} />
+          <AppIcon
+            name={activeReminder.category === "failed" ? "x" : activeReminder.category === "approval" ? "alert" : "check"}
+            color={activeReminder.category === "failed" ? colors.danger : activeReminder.category === "approval" ? colors.warning : colors.accent}
+            size={18}
+          />
         </View>
         <View style={styles.copy}>
           <Text style={styles.title}>{title}</Text>

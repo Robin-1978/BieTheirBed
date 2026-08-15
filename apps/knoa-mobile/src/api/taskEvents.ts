@@ -3,6 +3,7 @@ import EventSource from "react-native-sse";
 import { loadEventCursor, storeEventCursor } from "@/security/deviceIdentity";
 import type { PrincipalTaskEvent } from "./models";
 import { EventCursor } from "./eventCursor";
+export { isPresentationTaskEvent, shouldRefreshExecution } from "./taskEventPolicy";
 
 const TASK_EVENT_TYPES = [
   "task_created",
@@ -24,7 +25,7 @@ const TASK_EVENT_TYPES = [
   "failed",
   "cancelled",
 ] as const;
-type TaskEventType = (typeof TASK_EVENT_TYPES)[number];
+export type TaskEventType = (typeof TASK_EVENT_TYPES)[number];
 
 export type TaskEventSubscription = { close(): void };
 

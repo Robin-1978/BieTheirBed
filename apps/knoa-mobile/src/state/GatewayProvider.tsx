@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 
 import { GatewayClient, GatewayError } from "@/api/gatewayClient";
 import type { AgentSummary, AndroidRelease, PrincipalTaskEvent } from "@/api/models";
-import { subscribeTaskEvents, type TaskEventSubscription } from "@/api/taskEvents";
+import { isPresentationTaskEvent, subscribeTaskEvents, type TaskEventSubscription } from "@/api/taskEvents";
 import { authenticateDevice, pairDevice } from "@/security/pairing";
 import {
   clearSession,
@@ -236,7 +236,9 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         gatewayUrl: state.gatewayUrl,
         token: state.sessionToken,
         onEvent: (event) => {
-          commit({ latestEvent: event });
+          if (isPresentationTaskEvent(event.event.event_type)) {
+            commit({ latestEvent: event });
+          }
           for (const listener of eventListenersRef.current) {
             try {
               listener(event);

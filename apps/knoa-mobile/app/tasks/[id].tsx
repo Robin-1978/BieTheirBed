@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -25,6 +25,7 @@ export default function TaskDetailScreen() {
   const [executions, setExecutions] = useState<TaskExecution[]>([]);
   const [working, setWorking] = useState("");
   const [error, setError] = useState("");
+  const latestRefreshEvent = useRef(gateway.latestEvent?.feed_event_id ?? 0);
 
   const refresh = useCallback(async () => {
     if (!gateway.client || !taskId) return;
@@ -41,7 +42,13 @@ export default function TaskDetailScreen() {
     }
   }, [gateway.client, gateway.runAuthenticated, t, taskId]);
 
-  useEffect(() => { void refresh(); }, [refresh, gateway.latestEvent]);
+  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    if (!gateway.latestEvent || gateway.latestEvent.feed_event_id <= latestRefreshEvent.current) return;
+    latestRefreshEvent.current = gateway.latestEvent.feed_event_id;
+    const timer = setTimeout(() => void refresh(), 250);
+    return () => clearTimeout(timer);
+  }, [gateway.latestEvent, refresh]);
 
   async function executeNow() {
     if (!task || working) return;

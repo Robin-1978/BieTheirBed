@@ -240,6 +240,38 @@ class TaskRepository(
                 if execution_count is None and "execution_count" in row.keys()
                 else int(execution_count or 0)
             ),
+            latest_execution_state=(
+                TaskState(str(row["latest_execution_state"]))
+                if "latest_execution_state" in row.keys()
+                and row["latest_execution_state"] is not None
+                else None
+            ),
+            latest_execution_phase=(
+                str(row["latest_execution_phase"] or "")
+                if "latest_execution_phase" in row.keys()
+                else ""
+            ),
+            latest_execution_summary=(
+                str(row["latest_execution_summary"] or "")
+                if "latest_execution_summary" in row.keys()
+                else ""
+            ),
+            latest_execution_failure_code=(
+                str(row["latest_execution_failure_code"] or "")
+                if "latest_execution_failure_code" in row.keys()
+                else ""
+            ),
+            latest_execution_updated_at=(
+                float(row["latest_execution_updated_at"])
+                if "latest_execution_updated_at" in row.keys()
+                and row["latest_execution_updated_at"] is not None
+                else None
+            ),
+            pending_approval_count=(
+                int(row["pending_approval_count"])
+                if "pending_approval_count" in row.keys()
+                else 0
+            ),
             created_at=float(row["created_at"]),
             updated_at=float(row["updated_at"]),
         )

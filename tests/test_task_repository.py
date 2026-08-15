@@ -454,6 +454,9 @@ def test_task_definition_keeps_multiple_execution_snapshots(tmp_path: Path) -> N
     assert current.revision == 2
     assert current.execution_count == 2
     assert current.latest_execution_id == "execution-b"
+    assert current.latest_execution_state is TaskState.QUEUED
+    assert current.latest_execution_updated_at == 1000.0
+    assert current.pending_approval_count == 0
     assert [item.execution_id for item in executions] == ["execution-b", "execution-a"]
     assert executions[0].goal_snapshot == "Prepare the revised report"
     assert executions[1].goal_snapshot == first_snapshot.goal_snapshot

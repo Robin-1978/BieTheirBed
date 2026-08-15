@@ -1554,6 +1554,33 @@ export interface components {
             latest_execution_id: string;
             /** Execution Count */
             execution_count: number;
+            /** @default null */
+            latest_execution_state: components["schemas"]["TaskState"] | null;
+            /**
+             * Latest Execution Phase
+             * @default
+             */
+            latest_execution_phase: string;
+            /**
+             * Latest Execution Summary
+             * @default
+             */
+            latest_execution_summary: string;
+            /**
+             * Latest Execution Failure Code
+             * @default
+             */
+            latest_execution_failure_code: string;
+            /**
+             * Latest Execution Updated At
+             * @default null
+             */
+            latest_execution_updated_at: number | null;
+            /**
+             * Pending Approval Count
+             * @default 0
+             */
+            pending_approval_count: number;
             /** Created At */
             created_at: number;
             /** Updated At */

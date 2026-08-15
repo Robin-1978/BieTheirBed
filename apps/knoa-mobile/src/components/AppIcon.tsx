@@ -4,6 +4,7 @@ import { View } from "react-native";
 
 export type AppIconName =
   | "agent"
+  | "alert"
   | "archive"
   | "arrow-down"
   | "camera"
@@ -34,6 +35,7 @@ export type AppIconName =
 
 const glyphs: Record<AppIconName, React.ComponentProps<typeof Ionicons>["name"]> = {
   agent: "sparkles-outline",
+  alert: "alert-circle-outline",
   archive: "archive-outline",
   "arrow-down": "arrow-down",
   camera: "camera-outline",

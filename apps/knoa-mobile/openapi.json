@@ -6101,6 +6101,52 @@
             "title": "Execution Count",
             "type": "integer"
           },
+          "latest_execution_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskState"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "latest_execution_phase": {
+            "default": "",
+            "title": "Latest Execution Phase",
+            "type": "string"
+          },
+          "latest_execution_summary": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Latest Execution Summary",
+            "type": "string"
+          },
+          "latest_execution_failure_code": {
+            "default": "",
+            "title": "Latest Execution Failure Code",
+            "type": "string"
+          },
+          "latest_execution_updated_at": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Latest Execution Updated At"
+          },
+          "pending_approval_count": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Pending Approval Count",
+            "type": "integer"
+          },
           "created_at": {
             "minimum": 0.0,
             "title": "Created At",

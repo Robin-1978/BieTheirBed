@@ -7,6 +7,7 @@ import {
 } from "@/reminders/taskReminderModel";
 
 export {
+  markExecutionRemindersRead,
   markAllTaskRemindersRead,
   markTaskReminderRead,
   mergeTaskReminder,

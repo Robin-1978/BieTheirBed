@@ -40,6 +40,7 @@ import type { ArtifactInput, ChatApproval, ChatTurnSnapshot, HumanInteraction } 
 import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { AppMarkdown } from "@/components/AppMarkdown";
 import { AppPressable } from "@/components/AppPressable";
+import { ApprovalRequestDetails } from "@/components/ApprovalRequestDetails";
 import { AgentSelector } from "@/components/AgentSelector";
 import { ArtifactViewer } from "@/components/ArtifactViewer";
 import { InteractionCard } from "@/components/InteractionCard";
@@ -649,6 +650,7 @@ export default function ChatScreen() {
       ? !canSend
       : sending || transcribing || (!gateway.client && !recording.isRecording);
   const selectedAgentId = gateway.activeAgentId || gateway.selectedAgentId;
+  const selectedAgentName = gateway.agents.find((agent) => agent.agent_id === selectedAgentId)?.display_name ?? selectedAgentId;
   const agentLocked = Boolean(gateway.activeAgentId || gateway.sessionHandle);
 
   return (
@@ -659,7 +661,7 @@ export default function ChatScreen() {
       keyboardVerticalOffset={insets.top + (Platform.OS === "ios" ? 44 : 56)}
     >
       <View style={styles.topbar}>
-        <Text style={styles.subtitle}>{t("chat.subtitle")}</Text>
+        <Text style={styles.subtitle} numberOfLines={1}>{t("chat.agentSubtitle", { agent: selectedAgentName })}</Text>
         <View style={styles.topActions}>
           <AppPressable
             accessibilityLabel={t("chat.newTopic")}
@@ -800,7 +802,21 @@ export default function ChatScreen() {
               : <Text style={styles.loadOlderText}>{t("chat.loadOlder")}</Text>}
           </AppPressable>
         ) : null}
-        ListEmptyComponent={<Text style={styles.empty}>{t("chat.empty")}</Text>}
+        ListEmptyComponent={(
+          <View style={styles.empty}>
+            <Text style={styles.emptyTitle}>{t("chat.empty")}</Text>
+            <Text style={styles.emptyBody}>{t("chat.emptyBody")}</Text>
+            <View style={styles.emptyExamples}>
+              {[t("chat.exampleGitLab"), t("chat.exampleJira"), t("chat.exampleTask")].map((example) => (
+                <AppPressable key={example} onPress={() => setText(example)} style={styles.emptyExample}>
+                  <Text style={styles.emptyExampleText}>{example}</Text>
+                  <AppIcon name="chevron-right" color={colors.accent} size={16} />
+                </AppPressable>
+              ))}
+            </View>
+            <Text style={styles.emptyHint}>{t("chat.emptyTaskHint")}</Text>
+          </View>
+        )}
         renderItem={({ item }) => item.kind === "pending" ? (
           <PendingTurn
             pending={item.pending}
@@ -1069,23 +1085,17 @@ const ChatTurn = memo(function ChatTurn({
         ) : null}
         {approval ? (
           <View style={styles.approval}>
-            <Text style={styles.approvalReason}>{t("execution.tool")}: {approval.tool_name}</Text>
-            <Text style={styles.approvalReason}>{t("execution.effect", { value: chatApprovalEffectLabel(approval.display?.effect ?? "unknown", t) })}</Text>
-            <Text style={styles.approvalReason}>{t("execution.risk", { value: chatApprovalRiskLabel(approval.display?.risk ?? "unknown", t) })}</Text>
-            <Text style={styles.approvalReason}>{approval.display?.reversible ? t("execution.reversible") : t("execution.irreversible")}</Text>
-            {(approval.display?.arguments_preview || Object.keys(approval.arguments).length) ? (
-              <Text selectable style={styles.approvalArguments}>{approval.display?.arguments_preview || JSON.stringify(approval.arguments, null, 2)}</Text>
-            ) : null}
+            <ApprovalRequestDetails toolName={approval.tool_name} arguments={approval.arguments} display={approval.display} />
             <View style={styles.approvalActions}>
               <AppPressable style={styles.deny} disabled={Boolean(resolving)} onPress={() => onResolve(approval, false)}>
                 {resolving === approval.approval_id && resolvingApproved === false
                   ? <ActivityIndicator color={colors.ink} size="small" />
-                  : <Text style={styles.denyText}>{t("common.cancel")}</Text>}
+                  : <Text style={styles.denyText}>{t("execution.denyAction")}</Text>}
               </AppPressable>
               <AppPressable style={styles.approve} disabled={Boolean(resolving)} onPress={() => onResolve(approval, true)}>
                 {resolving === approval.approval_id && resolvingApproved === true
                   ? <ActivityIndicator color="white" size="small" />
-                  : <Text style={styles.approveText}>{t("execution.confirm")}</Text>}
+                  : <Text style={styles.approveText}>{t("execution.allowAction")}</Text>}
               </AppPressable>
             </View>
           </View>
@@ -1104,25 +1114,6 @@ const ChatTurn = memo(function ChatTurn({
     </View>
   );
 });
-
-function chatApprovalEffectLabel(value: string, t: ReturnType<typeof useI18n>["t"]): string {
-  return ({
-    read_only: t("execution.effect.readOnly"),
-    internal_write: t("execution.effect.internal"),
-    local_write: t("execution.effect.local"),
-    external_side_effect: t("execution.effect.external"),
-    desktop_control: t("execution.effect.desktop"),
-    unknown: t("execution.effect.unknown"),
-  } as Record<string, string>)[value] ?? t("execution.effect.controlled");
-}
-
-function chatApprovalRiskLabel(value: string, t: ReturnType<typeof useI18n>["t"]): string {
-  return ({
-    low: t("execution.risk.low"),
-    medium: t("execution.risk.medium"),
-    high: t("execution.risk.high"),
-  } as Record<string, string>)[value] ?? t("execution.risk.unknown");
-}
 
 function PendingTurn({
   pending,
@@ -1308,12 +1299,18 @@ const styles = StyleSheet.create({
   listArea: { flex: 1 },
   list: { flex: 1 },
   topbar: { paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  subtitle: { color: colors.muted, fontSize: 13 },
+  subtitle: { color: colors.muted, fontSize: 13, flex: 1, marginRight: 8 },
   topActions: { flexDirection: "row", gap: 6 },
   topAction: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 12 },
   selectedAgentAction: { backgroundColor: colors.accentSoft },
   messages: { padding: 16, paddingBottom: 24, gap: 18, flexGrow: 1 },
-  empty: { color: colors.muted, textAlign: "center", marginTop: 80, fontSize: 17 },
+  empty: { marginTop: 42, alignSelf: "center", width: "100%", maxWidth: 520, gap: 10 },
+  emptyTitle: { color: colors.ink, textAlign: "center", fontSize: 20, fontWeight: "700" },
+  emptyBody: { color: colors.muted, textAlign: "center", lineHeight: 21, paddingHorizontal: 12 },
+  emptyExamples: { marginTop: 6, gap: 8 },
+  emptyExample: { minHeight: 46, paddingHorizontal: 13, borderRadius: 13, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, flexDirection: "row", alignItems: "center", gap: 8 },
+  emptyExampleText: { color: colors.ink, flex: 1, fontWeight: "600", lineHeight: 20 },
+  emptyHint: { color: colors.muted, textAlign: "center", fontSize: 12, lineHeight: 18, paddingHorizontal: 8 },
   loadOlder: { alignSelf: "center", paddingHorizontal: 14, paddingVertical: 8, marginBottom: 4 },
   loadOlderText: { color: colors.accent, fontWeight: "600", fontSize: 13 },
   jumpLatest: { position: "absolute", right: 16, bottom: 12, minHeight: 40, paddingHorizontal: 13, borderRadius: 20, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.line },
@@ -1333,8 +1330,6 @@ const styles = StyleSheet.create({
   activity: { color: colors.muted },
   pendingError: { color: colors.danger, flex: 1 },
   approval: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 12, gap: 10 },
-  approvalReason: { color: colors.ink, lineHeight: 21 },
-  approvalArguments: { color: colors.muted, fontFamily: "monospace", fontSize: 12, lineHeight: 18 },
   approvalActions: { flexDirection: "row", gap: 10 },
   turnActions: { flexDirection: "row", gap: 10, marginTop: 12 },
   turnAction: { alignSelf: "flex-start", marginTop: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.line, paddingHorizontal: 12, paddingVertical: 8 },
