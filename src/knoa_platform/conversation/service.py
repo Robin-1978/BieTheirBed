@@ -163,14 +163,13 @@ class ConversationApprovalService:
                     ApprovalReviewRequest(
                         principal_id=scope.principal_id,
                         run_id=run_id,
-                        tool_name=call.name,
-                        arguments=call.arguments,
-                        effect=reason.partition(":")[0] or "unknown",
-                        risk=reason.partition(":")[2] or "high",
-                        reason=reason,
-                        context={
-                            "user_intent": turn.user_input,
-                            "session_handle": scope.session_handle,
+                        human_instruction=turn.user_input,
+                        proposed_action={
+                            "tool_name": call.name,
+                            "arguments": call.arguments,
+                            "effect": reason.partition(":")[0] or "unknown",
+                            "risk": reason.partition(":")[2] or "high",
+                            "reason": reason,
                         },
                     )
                 )

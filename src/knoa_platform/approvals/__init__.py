@@ -1,6 +1,7 @@
 """Platform-owned approval review primitives."""
 
 from knoa_platform.approvals.reviewer import (
+    APPROVAL_REVIEWER_SYSTEM_PROMPT,
     ApprovalReviewDecision,
     ApprovalReviewer,
     ApprovalReviewMode,
@@ -11,6 +12,7 @@ from knoa_platform.approvals.reviewer import (
 )
 
 __all__ = [
+    "APPROVAL_REVIEWER_SYSTEM_PROMPT",
     "ApprovalReviewDecision",
     "ApprovalReviewMode",
     "ApprovalReviewRequest",
