@@ -9,6 +9,7 @@ import {
   markTaskReminderRead,
   mergeTaskReminder,
   storeTaskReminders,
+  unreadTaskReminderIndex,
   type TaskReminder,
   type TaskReminderCategory,
 } from "@/reminders/taskReminders";
@@ -18,9 +19,12 @@ type TaskReminderState = {
   reminders: TaskReminder[];
   activeReminder: TaskReminder | null;
   unreadCount: number;
+  unreadExecutionIds: ReadonlySet<string>;
+  unreadTaskIds: ReadonlySet<string>;
   dismissActive(): void;
   markRead(reminderId: string): void;
   markExecutionRead(executionId: string): void;
+  setExecutionViewing(executionId: string | null): void;
   markAllRead(): void;
 };
 
@@ -44,6 +48,7 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
   const processQueueRef = useRef<Promise<void>>(Promise.resolve());
   const appIsActiveRef = useRef(AppState.currentState === "active");
   const seenEventIdsRef = useRef(new Set<number>());
+  const viewingExecutionRef = useRef("");
 
   const replaceAndStore = useCallback((transform: (current: TaskReminder[]) => TaskReminder[]) => {
     setReminders((current) => {
@@ -86,6 +91,7 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
         (client) => client.getTask(execution.task_id),
       );
       if (!(task.notification_policy[actionable.policyKey] ?? true)) return;
+      const read = viewingExecutionRef.current === execution.execution_id;
       const reminder: TaskReminder = {
         reminderId: `feed:${feed.feed_event_id}`,
         feedEventId: feed.feed_event_id,
@@ -94,10 +100,10 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
         executionId: execution.execution_id,
         taskTitle: task.title || task.goal,
         occurredAt: feed.event.occurred_at,
-        read: false,
+        read,
       };
       replaceAndStore((current) => mergeTaskReminder(current, reminder));
-      if (appIsActiveRef.current) {
+      if (!read && appIsActiveRef.current) {
         setActiveReminder(reminder);
         Vibration.vibrate(45);
       }
@@ -136,21 +142,35 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
     setActiveReminder((current) => current?.executionId === executionId ? null : current);
   }, [replaceAndStore]);
 
+  const setExecutionViewing = useCallback((executionId: string | null) => {
+    viewingExecutionRef.current = executionId ?? "";
+    if (!executionId) return;
+    replaceAndStore((current) => markExecutionRemindersRead(current, executionId));
+    setActiveReminder((current) => current?.executionId === executionId ? null : current);
+  }, [replaceAndStore]);
+
   const markAllRead = useCallback(() => {
     replaceAndStore(markAllTaskRemindersRead);
   }, [replaceAndStore]);
 
   const dismissActive = useCallback(() => setActiveReminder(null), []);
 
-  const value = useMemo<TaskReminderState>(() => ({
-    reminders,
-    activeReminder,
-    unreadCount: reminders.filter((reminder) => !reminder.read).length,
-    dismissActive,
-    markRead,
-    markExecutionRead,
-    markAllRead,
-  }), [activeReminder, dismissActive, markAllRead, markExecutionRead, markRead, reminders]);
+  const value = useMemo<TaskReminderState>(() => {
+    const unread = reminders.filter((reminder) => !reminder.read);
+    const index = unreadTaskReminderIndex(reminders);
+    return {
+      reminders,
+      activeReminder,
+      unreadCount: unread.length,
+      unreadExecutionIds: index.executionIds,
+      unreadTaskIds: index.taskIds,
+      dismissActive,
+      markRead,
+      markExecutionRead,
+      setExecutionViewing,
+      markAllRead,
+    };
+  }, [activeReminder, dismissActive, markAllRead, markExecutionRead, markRead, reminders, setExecutionViewing]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

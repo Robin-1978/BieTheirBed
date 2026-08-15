@@ -6,6 +6,7 @@ import {
   markAllTaskRemindersRead,
   markTaskReminderRead,
   mergeTaskReminder,
+  unreadTaskReminderIndex,
 } from "./taskReminderModel";
 
 function reminder(feedEventId: number): TaskReminder {
@@ -39,5 +40,16 @@ describe("task reminders", () => {
   it("marks only reminders belonging to the opened execution", () => {
     const source = [reminder(3), reminder(5)];
     expect(markExecutionRemindersRead(source, "execution-5").map((item) => item.read)).toEqual([false, true]);
+  });
+
+  it("indexes unread executions and their owning tasks without duplicates", () => {
+    const source = [
+      reminder(3),
+      { ...reminder(4), taskId: "task-b", executionId: "execution-3" },
+      { ...reminder(5), taskId: "task-c", read: true },
+    ];
+    const index = unreadTaskReminderIndex(source);
+    expect([...index.executionIds]).toEqual(["execution-3"]);
+    expect([...index.taskIds]).toEqual(["task-a", "task-b"]);
   });
 });

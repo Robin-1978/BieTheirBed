@@ -40,6 +40,7 @@ _TEXT_MESSAGE_CHARS = 4000
 _MAX_CORE_ARTIFACT_RAW_BYTES = 45 * 1024 * 1024
 _LONG_RESULT_CARD_CHARS = 12_000
 _LONG_RESULT_PREVIEW_CHARS = 1_800
+_BACKGROUND_TASK_PREVIEW_CHARS = 1_200
 _PRINCIPAL_WATCH_RETRY_SECONDS = 2.0
 _TASK_TERMINAL_EVENT_TYPES = frozenset({"completed", "failed", "cancelled"})
 _TASK_STATE_LABELS = {
@@ -52,7 +53,47 @@ _TASK_STATE_LABELS = {
     TaskState.CANCELLED: "已停止",
 }
 
+
+def _compact_background_result(text: str) -> str:
+    """Keep the first-screen conclusion readable; App retains the full result."""
+
+    normalized = text.strip()
+    if len(normalized) <= _BACKGROUND_TASK_PREVIEW_CHARS:
+        return normalized
+    head_limit = 720
+    tail_limit = 360
+    head = normalized[:head_limit].rstrip()
+    tail_start = max(
+        normalized.rfind("\n## 决策"),
+        normalized.rfind("\n## 结论"),
+        normalized.rfind("\n## Decision"),
+        normalized.rfind("\n## Conclusion"),
+    )
+    tail = (
+        normalized[tail_start:].strip()
+        if tail_start >= head_limit
+        else normalized[-tail_limit:].strip()
+    )
+    if len(tail) > tail_limit:
+        tail = tail[:tail_limit].rstrip()
+    return (
+        f"{head}\n\n…\n\n{tail}\n\n"
+        "完整结论和执行过程请在 Knoa Execution 中查看。"
+    )
+
 class FeishuTaskMixin:
+
+    async def _task_notification_title(
+        self,
+        client: CoreClient,
+        execution_id: str,
+    ) -> str:
+        try:
+            execution = await client.get_product_task_execution(execution_id)
+            task = await client.get_product_task(execution.task_id)
+        except Exception:  # noqa: BLE001 - a title must never block notification delivery
+            return ""
+        return str(getattr(task, "title", "") or "").strip()[:80]
 
     async def _task_notification_policy(
         self,
@@ -230,14 +271,18 @@ class FeishuTaskMixin:
             )
             return False
 
+        task_title = await self._task_notification_title(client, event.task_id)
+
         if event.event_type == "completed":
-            text = snapshot.final_summary or event.payload.content or "已完成"
+            text = _compact_background_result(
+                snapshot.final_summary or event.payload.content or "已完成"
+            )
             template = "blue"
-            title = ASSISTANT_NAME
+            title = f"已完成 · {task_title}" if task_title else ASSISTANT_NAME
         elif event.event_type == "cancelled":
             text = "已停止"
             template = "grey"
-            title = "已停止"
+            title = f"已停止 · {task_title}" if task_title else "已停止"
         else:
             reason = (
                 snapshot.final_summary
@@ -245,9 +290,9 @@ class FeishuTaskMixin:
                 or snapshot.failure_code
                 or "任务未完成"
             )
-            text = f"× {reason}"
+            text = f"× {_compact_background_result(reason)}"
             template = "red"
-            title = "处理出错"
+            title = f"处理出错 · {task_title}" if task_title else "处理出错"
         try:
             return await asyncio.to_thread(
                 self._send_card,

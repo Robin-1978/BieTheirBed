@@ -47,6 +47,17 @@ export function markAllTaskRemindersRead(reminders: TaskReminder[]): TaskReminde
   return reminders.map((reminder) => reminder.read ? reminder : { ...reminder, read: true });
 }
 
+export function unreadTaskReminderIndex(reminders: TaskReminder[]): {
+  executionIds: ReadonlySet<string>;
+  taskIds: ReadonlySet<string>;
+} {
+  const unread = reminders.filter((reminder) => !reminder.read);
+  return {
+    executionIds: new Set(unread.map((reminder) => reminder.executionId)),
+    taskIds: new Set(unread.map((reminder) => reminder.taskId)),
+  };
+}
+
 export function isTaskReminder(value: unknown): value is TaskReminder {
   if (!value || typeof value !== "object") return false;
   const reminder = value as Partial<TaskReminder>;

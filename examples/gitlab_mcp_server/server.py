@@ -140,20 +140,7 @@ class GitLabMCPApplication:
             event = self.store.get_failure_event(event_id)
             if event is None:
                 raise LookupError("GitLab failure event was not found")
-            payload = event["payload"]
-            text = (
-                "This immutable GitLab failure event contains a bounded snapshot with "
-                "pipeline metadata, compact Job summaries, failed Job trace tails, "
-                "fingerprints, compile/build totals, ownership evidence and "
-                "deterministic OOM signals. The snapshot is domain evidence, not a "
-                "Knoa workflow instruction. Read Tools can refresh facts when the "
-                "snapshot reports incomplete data. gitlab.retry_job is the precise "
-                "side-effect operation; it performs a final live check that the target "
-                "is still failed or canceled and that no same-name Job is already "
-                "active. Knoa host policy and approval govern whether that operation "
-                "may execute.\n\n"
-                + json.dumps(payload, ensure_ascii=False, indent=2)
-            )
+            text = str(event["resource_text"])
         else:
             raise LookupError("Unknown GitLab Resource URI")
         return types.ReadResourceResult(

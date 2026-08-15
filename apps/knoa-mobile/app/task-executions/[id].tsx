@@ -34,7 +34,7 @@ export default function TaskExecutionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const executionId = String(id ?? "");
   const gateway = useGateway();
-  const { markExecutionRead } = useTaskReminders();
+  const { setExecutionViewing } = useTaskReminders();
   const { t } = useI18n();
   const [execution, setExecution] = useState<TaskExecution | null>(null);
   const [task, setTask] = useState<Task | null>(null);
@@ -58,17 +58,15 @@ export default function TaskExecutionDetailScreen() {
       const definition = await gateway.runAuthenticated((client) => client.getTask(snapshot.task_id));
       setExecution(snapshot);
       setTask(definition);
+      setExecutionViewing(executionId);
     } catch {
       setError(t("execution.loadFailed"));
     }
-  }, [executionId, gateway.client, gateway.runAuthenticated, t]);
+  }, [executionId, gateway.client, gateway.runAuthenticated, setExecutionViewing, t]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  useEffect(() => {
-    if (!executionId) return;
-    markExecutionRead(executionId);
-  }, [executionId, markExecutionRead]);
+  useEffect(() => () => setExecutionViewing(null), [executionId, setExecutionViewing]);
 
   useEffect(() => {
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
