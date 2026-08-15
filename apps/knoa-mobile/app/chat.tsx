@@ -50,6 +50,7 @@ import { useI18n } from "@/i18n";
 import { saveArtifactFile } from "@/api/saveArtifactFile";
 import { loadConversationDraft, removeConversationDraft, storeConversationDraft } from "@/security/conversationDrafts";
 import { useGateway } from "@/state/GatewayProvider";
+import { shouldResetConversation } from "@/state/conversationTransition";
 import { loadConversationCache, storeConversationCache } from "@/storage/conversationCache";
 import { mergeConversationTurns } from "@/storage/conversationMerge";
 import { colors } from "@/theme";
@@ -178,7 +179,10 @@ export default function ChatScreen() {
     const sessionHandle = gateway.sessionHandle;
     const previousSession = displayedSession.current;
     displayedSession.current = sessionHandle;
-    const switchedConversation = previousSession !== sessionHandle;
+    const switchedConversation = shouldResetConversation(
+      previousSession,
+      sessionHandle,
+    );
     if (switchedConversation) {
       setTurns([]);
       setPendingTurn(null);
