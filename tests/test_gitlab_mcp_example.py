@@ -478,6 +478,9 @@ async def test_mcp_exposes_resources_and_six_tools(tmp_path: Path) -> None:
         "gitlab.retry_pipeline",
         "gitlab.retry_job",
     }
+    retry_job = next(tool for tool in result.tools if tool.name == "gitlab.retry_job")
+    assert retry_job.input_schema["required"] == ["project", "job_id"]
+    assert "idempotency_key" not in retry_job.input_schema["properties"]
     app.store.add_failure_event(
         "source",
         "event-1",

@@ -17,3 +17,16 @@ def task_tool_step_id(task_id: str, call: ProposedToolCall) -> str:
     return hashlib.sha256(
         f"{task_id}\0{call.call_id}\0{call.name}\0{canonical}".encode("utf-8")
     ).hexdigest()[:32]
+
+
+def task_approval_action_id(task_id: str, call: ProposedToolCall) -> str:
+    """Identify one approval action independently of model-generated call IDs."""
+    canonical = json.dumps(
+        call.arguments,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(
+        f"{task_id}\0approval\0{call.name}\0{canonical}".encode("utf-8")
+    ).hexdigest()[:32]

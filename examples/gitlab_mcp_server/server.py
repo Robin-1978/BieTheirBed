@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -226,9 +227,8 @@ class GitLabMCPApplication:
                         {
                             "project": {"type": "string"},
                             identifier: {"type": ["string", "integer"]},
-                            "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 128},
                         },
-                        ["project", identifier, "idempotency_key"],
+                        ["project", identifier],
                     ),
                     annotations=retry,
                 )
@@ -254,16 +254,18 @@ class GitLabMCPApplication:
                     max_bytes=int(args.get("max_bytes", 131_072)),
                 )
             elif name == "gitlab.retry_pipeline":
+                pipeline_id = str(args.get("pipeline_id", ""))
                 payload = await self.gitlab.retry_pipeline(
                     project,
-                    str(args.get("pipeline_id", "")),
-                    str(args.get("idempotency_key", "")),
+                    pipeline_id,
+                    self._retry_key(name, project, pipeline_id),
                 )
             elif name == "gitlab.retry_job":
+                job_id = str(args.get("job_id", ""))
                 payload = await self.gitlab.retry_job(
                     project,
-                    str(args.get("job_id", "")),
-                    str(args.get("idempotency_key", "")),
+                    job_id,
+                    self._retry_key(name, project, job_id),
                 )
             else:
                 raise LookupError("Unknown GitLab tool")
@@ -280,6 +282,11 @@ class GitLabMCPApplication:
                 content=[types.TextContent(text=f"{type(exc).__name__}: {str(exc)[:1000]}")],
                 is_error=True,
             )
+
+    @staticmethod
+    def _retry_key(tool_name: str, project: str, target_id: str) -> str:
+        action = f"{tool_name}\0{project}\0{target_id}".encode("utf-8")
+        return f"knoa-{hashlib.sha256(action).hexdigest()[:32]}"
 
     def initialization_options(self):
         return self.server.create_initialization_options(
