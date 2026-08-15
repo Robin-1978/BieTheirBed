@@ -55,9 +55,9 @@ manually.
 
 The App checks the authenticated Gateway release manifest when the workbench
 opens. Downloads use the native resumable downloader against the Gateway's HTTP
-Range endpoint. Moving the App to the background saves the resume state. Before
-opening Android's installer, the App verifies the complete file size and
-SHA-256 digest.
+Range endpoint. Network interruptions, leaving the update page, and moving the
+App to the background preserve the partial-file checkpoint. Before opening
+Android's installer, the App verifies the complete file size and SHA-256 digest.
 
 Android always shows a system installation confirmation unless the device is
 managed or rooted. The first installation must also allow this App to install

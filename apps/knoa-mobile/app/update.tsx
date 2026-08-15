@@ -21,6 +21,7 @@ import {
   installAndroidPackage,
   installedAndroidVersionCode,
   isAndroidUpdateAvailable,
+  loadAndroidUpdateCheckpoint,
   loadReadyAndroidPackage,
   openUnknownSourcesSettings,
   type AndroidUpdateProgress,
@@ -58,12 +59,26 @@ export default function UpdateScreen() {
 
   useEffect(() => {
     if (!release || !isAndroidUpdateAvailable(release, currentVersionCode)) return;
-    void loadReadyAndroidPackage(release).then((uri) => {
-      if (!uri) return;
-      setPackageUri(uri);
-      setProgress({ downloaded: release.size_bytes, total: release.size_bytes });
-      setState("ready");
+    let cancelled = false;
+    void (async () => {
+      const uri = await loadReadyAndroidPackage(release);
+      if (cancelled) return;
+      if (uri) {
+        setPackageUri(uri);
+        setProgress({ downloaded: release.size_bytes, total: release.size_bytes });
+        setState("ready");
+        return;
+      }
+      const checkpoint = await loadAndroidUpdateCheckpoint(release);
+      if (cancelled || !checkpoint) return;
+      setProgress(checkpoint);
+      setState("paused");
+    })().catch(() => {
+      // A corrupt or unavailable checkpoint must not block a fresh download.
     });
+    return () => {
+      cancelled = true;
+    };
   }, [currentVersionCode, release]);
 
   useEffect(() => {
@@ -89,8 +104,9 @@ export default function UpdateScreen() {
     setPackageUri("");
     setState("downloading");
     pausing.current = false;
+    let controller: AndroidUpdateDownload | null = null;
     try {
-      const controller = await AndroidUpdateDownload.create({
+      controller = await AndroidUpdateDownload.create({
         gatewayUrl: gateway.gatewayUrl,
         release,
         onProgress: setProgress,
@@ -102,10 +118,17 @@ export default function UpdateScreen() {
       setProgress({ downloaded: release.size_bytes, total: release.size_bytes });
       setState("ready");
     } catch (error) {
-      download.current = null;
       if (pausing.current) return;
-      setState("error");
-      setMessage(t("update.downloadFailed"));
+      const checkpoint = await controller?.preserveCheckpoint().catch(() => null);
+      download.current = null;
+      if (checkpoint) {
+        setProgress(checkpoint);
+        setState("paused");
+        setMessage(t("update.downloadInterrupted"));
+      } else {
+        setState("error");
+        setMessage(t("update.downloadFailed"));
+      }
     }
   }
 
@@ -113,8 +136,9 @@ export default function UpdateScreen() {
     if (!download.current || state !== "downloading") return;
     pausing.current = true;
     try {
-      await download.current.pause();
+      const checkpoint = await download.current.pause();
       download.current = null;
+      setProgress(checkpoint);
       setState("paused");
     } catch (error) {
       pausing.current = false;
@@ -192,7 +216,10 @@ export default function UpdateScreen() {
               <Button label={t("update.pause")} secondary onPress={() => void pauseDownload()} />
             ) : null}
             {state === "idle" || state === "paused" || state === "error" ? (
-              <Button label={state === "paused" ? t("update.resume") : t("update.download")} onPress={() => void startDownload()} />
+              <Button
+                label={state === "paused" ? t("update.resume") : state === "error" ? t("update.retry") : t("update.download")}
+                onPress={() => void startDownload()}
+              />
             ) : null}
             {state === "ready" ? <Button label={t("update.install")} onPress={() => void install()} /> : null}
           </View>
