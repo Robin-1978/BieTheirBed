@@ -361,6 +361,12 @@ class TaskDefinitionRecord(TaskModel):
     revision: int = Field(ge=1)
     latest_execution_id: Annotated[str, StringConstraints(max_length=128)] = ""
     execution_count: int = Field(default=0, ge=0)
+    latest_execution_state: TaskState | None = None
+    latest_execution_phase: Annotated[str, StringConstraints(max_length=256)] = ""
+    latest_execution_summary: Annotated[str, StringConstraints(max_length=2000)] = ""
+    latest_execution_failure_code: Annotated[str, StringConstraints(max_length=256)] = ""
+    latest_execution_updated_at: float | None = Field(default=None, ge=0.0)
+    pending_approval_count: int = Field(default=0, ge=0)
     created_at: float = Field(ge=0.0)
     updated_at: float = Field(ge=0.0)
 

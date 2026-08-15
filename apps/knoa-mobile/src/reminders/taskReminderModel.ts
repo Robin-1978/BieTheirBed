@@ -34,6 +34,15 @@ export function markTaskReminderRead(
     : reminder);
 }
 
+export function markExecutionRemindersRead(
+  reminders: TaskReminder[],
+  executionId: string,
+): TaskReminder[] {
+  return reminders.map((reminder) => reminder.executionId === executionId && !reminder.read
+    ? { ...reminder, read: true }
+    : reminder);
+}
+
 export function markAllTaskRemindersRead(reminders: TaskReminder[]): TaskReminder[] {
   return reminders.map((reminder) => reminder.read ? reminder : { ...reminder, read: true });
 }

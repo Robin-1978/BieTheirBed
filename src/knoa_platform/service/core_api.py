@@ -171,6 +171,12 @@ class ProductTaskSnapshot(CoreModel):
     revision: int = Field(ge=1)
     latest_execution_id: str = ""
     execution_count: int = Field(ge=0)
+    latest_execution_state: TaskState | None = None
+    latest_execution_phase: str = ""
+    latest_execution_summary: Annotated[str, StringConstraints(max_length=2000)] = ""
+    latest_execution_failure_code: str = ""
+    latest_execution_updated_at: float | None = Field(default=None, ge=0.0)
+    pending_approval_count: int = Field(default=0, ge=0)
     created_at: float = Field(ge=0.0)
     updated_at: float = Field(ge=0.0)
 
@@ -197,6 +203,12 @@ class ProductTaskSnapshot(CoreModel):
             revision=task.revision,
             latest_execution_id=task.latest_execution_id,
             execution_count=task.execution_count,
+            latest_execution_state=task.latest_execution_state,
+            latest_execution_phase=task.latest_execution_phase,
+            latest_execution_summary=task.latest_execution_summary,
+            latest_execution_failure_code=task.latest_execution_failure_code,
+            latest_execution_updated_at=task.latest_execution_updated_at,
+            pending_approval_count=task.pending_approval_count,
             created_at=task.created_at,
             updated_at=task.updated_at,
         )
@@ -293,6 +305,7 @@ class ProductTaskExecutionSnapshot(CoreModel):
                         approval.tool_name,
                         approval.arguments,
                         approval.reason,
+                        human_instruction=execution.goal_snapshot,
                     ),
                     state=approval.state,
                     created_at=approval.created_at,
@@ -410,6 +423,7 @@ class ChatTurnSnapshot(CoreModel):
                         approval.tool_name,
                         approval.arguments,
                         approval.reason,
+                        human_instruction=turn.user_input,
                     ),
                 )
                 for approval in turn.approvals

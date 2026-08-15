@@ -220,7 +220,26 @@ class TaskDefinitionRepositoryMixin:
                 """SELECT tasks.*, task_launch_policies.policy_json,
                           (SELECT COUNT(*) FROM task_executions
                            WHERE task_executions.task_id=tasks.task_id)
-                              AS execution_count
+                              AS execution_count,
+                          (SELECT state FROM runtime_tasks
+                           WHERE runtime_tasks.task_id=tasks.latest_execution_id)
+                              AS latest_execution_state,
+                          (SELECT phase FROM runtime_tasks
+                           WHERE runtime_tasks.task_id=tasks.latest_execution_id)
+                              AS latest_execution_phase,
+                          (SELECT substr(final_summary, 1, 2000) FROM runtime_tasks
+                           WHERE runtime_tasks.task_id=tasks.latest_execution_id)
+                              AS latest_execution_summary,
+                          (SELECT failure_code FROM runtime_tasks
+                           WHERE runtime_tasks.task_id=tasks.latest_execution_id)
+                              AS latest_execution_failure_code,
+                          (SELECT updated_at FROM runtime_tasks
+                           WHERE runtime_tasks.task_id=tasks.latest_execution_id)
+                              AS latest_execution_updated_at,
+                          (SELECT COUNT(*) FROM runtime_task_approvals
+                           WHERE runtime_task_approvals.task_id=tasks.latest_execution_id
+                             AND runtime_task_approvals.state='pending')
+                              AS pending_approval_count
                    FROM tasks JOIN task_launch_policies USING(task_id)
                    WHERE tasks.principal_id=? AND tasks.task_id=?""",
                 (principal, normalized_task_id),
@@ -256,7 +275,26 @@ class TaskDefinitionRepositoryMixin:
                 """SELECT tasks.*, task_launch_policies.policy_json,
                           (SELECT COUNT(*) FROM task_executions
                            WHERE task_executions.task_id=tasks.task_id)
-                              AS execution_count
+                              AS execution_count,
+                          (SELECT state FROM runtime_tasks
+                           WHERE runtime_tasks.task_id=tasks.latest_execution_id)
+                              AS latest_execution_state,
+                          (SELECT phase FROM runtime_tasks
+                           WHERE runtime_tasks.task_id=tasks.latest_execution_id)
+                              AS latest_execution_phase,
+                          (SELECT substr(final_summary, 1, 2000) FROM runtime_tasks
+                           WHERE runtime_tasks.task_id=tasks.latest_execution_id)
+                              AS latest_execution_summary,
+                          (SELECT failure_code FROM runtime_tasks
+                           WHERE runtime_tasks.task_id=tasks.latest_execution_id)
+                              AS latest_execution_failure_code,
+                          (SELECT updated_at FROM runtime_tasks
+                           WHERE runtime_tasks.task_id=tasks.latest_execution_id)
+                              AS latest_execution_updated_at,
+                          (SELECT COUNT(*) FROM runtime_task_approvals
+                           WHERE runtime_task_approvals.task_id=tasks.latest_execution_id
+                             AND runtime_task_approvals.state='pending')
+                              AS pending_approval_count
                    FROM tasks JOIN task_launch_policies USING(task_id)
                    WHERE """
                 + " AND ".join(clauses)

@@ -102,6 +102,14 @@ export type ApprovalDisplay = {
   risk: string;
   arguments_preview: string;
   reversible: boolean;
+  action_summary?: string;
+  target_summary?: string;
+  instruction_excerpt?: string;
+  reviewer_decision?: "approve" | "deny" | "escalate" | "";
+  reviewer_reason?: string;
+  reviewer_id?: string;
+  reviewer_model?: string;
+  manual_reason?: "policy_confirmation" | "high_risk" | "reviewer_suggest_only" | "reviewer_escalated";
 };
 
 export type HumanInteraction = {
@@ -194,6 +202,12 @@ export type Task = {
   revision: number;
   latest_execution_id: string;
   execution_count: number;
+  latest_execution_state: TaskState | null;
+  latest_execution_phase: string;
+  latest_execution_summary: string;
+  latest_execution_failure_code: string;
+  latest_execution_updated_at: number | null;
+  pending_approval_count: number;
   created_at: number;
   updated_at: number;
 };

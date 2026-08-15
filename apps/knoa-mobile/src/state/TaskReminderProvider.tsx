@@ -4,6 +4,7 @@ import { AppState, Vibration } from "react-native";
 import type { PrincipalTaskEvent } from "@/api/models";
 import {
   loadTaskReminders,
+  markExecutionRemindersRead,
   markAllTaskRemindersRead,
   markTaskReminderRead,
   mergeTaskReminder,
@@ -19,6 +20,7 @@ type TaskReminderState = {
   unreadCount: number;
   dismissActive(): void;
   markRead(reminderId: string): void;
+  markExecutionRead(executionId: string): void;
   markAllRead(): void;
 };
 
@@ -129,6 +131,11 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
     replaceAndStore((current) => markTaskReminderRead(current, reminderId));
   }, [replaceAndStore]);
 
+  const markExecutionRead = useCallback((executionId: string) => {
+    replaceAndStore((current) => markExecutionRemindersRead(current, executionId));
+    setActiveReminder((current) => current?.executionId === executionId ? null : current);
+  }, [replaceAndStore]);
+
   const markAllRead = useCallback(() => {
     replaceAndStore(markAllTaskRemindersRead);
   }, [replaceAndStore]);
@@ -141,8 +148,9 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
     unreadCount: reminders.filter((reminder) => !reminder.read).length,
     dismissActive,
     markRead,
+    markExecutionRead,
     markAllRead,
-  }), [activeReminder, dismissActive, markAllRead, markRead, reminders]);
+  }), [activeReminder, dismissActive, markAllRead, markExecutionRead, markRead, reminders]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

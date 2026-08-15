@@ -1,28 +1,28 @@
 import { router } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  FlatList,
   RefreshControl,
+  SectionList,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 
-import type { Task, TaskDefinitionState } from "@/api/models";
+import type { Task, TaskDefinitionState, TaskState } from "@/api/models";
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { PrimarySwipeNavigation } from "@/components/PrimarySwipeNavigation";
+import { currentTaskSections } from "@/components/taskListPresentation";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
-import { useTaskReminders } from "@/state/TaskReminderProvider";
 import { colors } from "@/theme";
 
 type Filter = "current" | TaskDefinitionState;
+type TaskSection = { key: string; title: string; data: Task[] };
 
 export default function TasksScreen() {
   const gateway = useGateway();
-  const { markAllRead } = useTaskReminders();
   const { t } = useI18n();
   const filters: Array<{ label: string; value: Filter }> = [
     { label: t("tasks.filter.current"), value: "current" },
@@ -35,6 +35,7 @@ export default function TasksScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const latestRefreshEvent = useRef(gateway.latestEvent?.feed_event_id ?? 0);
 
   const refresh = useCallback(async () => {
     if (!gateway.client) return;
@@ -54,13 +55,24 @@ export default function TasksScreen() {
     }
   }, [gateway.client, gateway.runAuthenticated, t]);
 
-  useEffect(() => { void refresh(); }, [refresh, gateway.latestEvent]);
-  useEffect(() => markAllRead(), [markAllRead]);
+  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    if (!gateway.latestEvent || gateway.latestEvent.feed_event_id <= latestRefreshEvent.current) return;
+    latestRefreshEvent.current = gateway.latestEvent.feed_event_id;
+    const timer = setTimeout(() => void refresh(), 250);
+    return () => clearTimeout(timer);
+  }, [gateway.latestEvent, refresh]);
 
   const visibleTasks = useMemo(
     () => tasks.filter((task) => filter === "current" ? task.state !== "archived" : task.state === filter),
     [filter, tasks],
   );
+  const sections = useMemo<TaskSection[]>(() => filter === "current"
+    ? currentTaskSections(visibleTasks).map((section) => ({
+        ...section,
+        title: taskSectionTitle(section.key, t),
+      }))
+    : [{ key: filter, title: "", data: visibleTasks }], [filter, t, visibleTasks]);
 
   return (
     <PrimarySwipeNavigation current="tasks">
@@ -110,8 +122,8 @@ export default function TasksScreen() {
           <AppPressable onPress={() => void refresh()}><Text style={styles.retry}>{t("tasks.reload")}</Text></AppPressable>
         </View>
       ) : null}
-      <FlatList
-        data={visibleTasks}
+      <SectionList
+        sections={sections}
         keyExtractor={(task) => task.task_id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />}
         contentContainerStyle={styles.list}
@@ -121,22 +133,44 @@ export default function TasksScreen() {
             <Text style={styles.emptyText}>{t("tasks.emptyBody")}</Text>
           </View>
         ) : null}
+        renderSectionHeader={({ section }) => section.title ? (
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>{section.title}</Text>
+            <Text style={styles.sectionCount}>{section.data.length}</Text>
+          </View>
+        ) : null}
         renderItem={({ item }) => (
           <AppPressable
             accessibilityRole="button"
-            accessibilityLabel={`${item.title}，${stateLabel(item.state, t)}，${t("tasks.executions", { count: item.execution_count })}`}
+            accessibilityLabel={`${item.title}，${taskStatusLabel(item, t)}，${t("tasks.executions", { count: item.execution_count })}`}
             style={styles.task}
             onPress={() => router.push(`/tasks/${item.task_id}`)}
           >
             <View style={styles.taskHeader}>
               <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
-              <Text style={[styles.state, item.state === "paused" && styles.paused]}>{stateLabel(item.state, t)}</Text>
+              <Text style={[
+                styles.state,
+                taskStatusTone(item) === "warning" && styles.warningState,
+                taskStatusTone(item) === "danger" && styles.dangerState,
+              ]}>{taskStatusLabel(item, t)}</Text>
             </View>
-            <Text style={styles.goal} numberOfLines={3}>{item.goal}</Text>
+            {item.latest_execution_state === "failed" && item.latest_execution_failure_code ? (
+              <Text style={styles.failure} numberOfLines={2}>{t("tasks.latestFailure", { code: item.latest_execution_failure_code })}</Text>
+            ) : item.latest_execution_summary ? (
+              <View style={styles.latestResult}>
+                <Text style={styles.latestLabel}>{t("tasks.latestResult")}</Text>
+                <Text style={styles.result} numberOfLines={3}>{item.latest_execution_summary}</Text>
+              </View>
+            ) : item.latest_execution_failure_code ? (
+              <Text style={styles.failure} numberOfLines={2}>{t("tasks.latestFailure", { code: item.latest_execution_failure_code })}</Text>
+            ) : (
+              <Text style={styles.goal} numberOfLines={3}>{item.goal}</Text>
+            )}
             <View style={styles.metaRow}>
               <View style={styles.metaCopy}>
                 <Text style={styles.meta}>{launchLabel(item, t)}</Text>
                 <Text style={styles.meta}>{t("tasks.executions", { count: item.execution_count })}</Text>
+                {item.state !== "active" ? <Text style={styles.meta}>{stateLabel(item.state, t)}</Text> : null}
               </View>
               <AppIcon name="chevron-right" color={colors.muted} size={18} />
             </View>
@@ -150,6 +184,42 @@ export default function TasksScreen() {
 
 function stateLabel(state: TaskDefinitionState, t: ReturnType<typeof useI18n>["t"]): string {
   return ({ active: t("tasks.state.active"), paused: t("tasks.state.paused"), archived: t("tasks.state.archived") })[state];
+}
+
+function taskSectionTitle(key: "needs_action" | "in_progress" | "recent" | "not_started", t: ReturnType<typeof useI18n>["t"]): string {
+  return ({
+    needs_action: t("tasks.section.needs_action"),
+    in_progress: t("tasks.section.in_progress"),
+    recent: t("tasks.section.recent"),
+    not_started: t("tasks.section.not_started"),
+  })[key];
+}
+
+function taskStatusLabel(task: Task, t: ReturnType<typeof useI18n>["t"]): string {
+  if (task.pending_approval_count > 0 || task.latest_execution_state === "waiting_approval") {
+    return t("taskState.waitingApproval");
+  }
+  if (task.latest_execution_state) return executionStateLabel(task.latest_execution_state, t);
+  return stateLabel(task.state, t);
+}
+
+function executionStateLabel(state: TaskState, t: ReturnType<typeof useI18n>["t"]): string {
+  return ({
+    queued: t("taskState.queued"),
+    running: t("taskState.running"),
+    waiting_approval: t("taskState.waitingApproval"),
+    paused: t("tasks.state.paused"),
+    completed: t("taskState.completed"),
+    failed: t("taskState.failed"),
+    cancelled: t("taskState.cancelled"),
+  })[state];
+}
+
+function taskStatusTone(task: Task): "normal" | "warning" | "danger" {
+  if (task.pending_approval_count > 0 || task.latest_execution_state === "waiting_approval") return "warning";
+  if (task.latest_execution_state === "failed") return "danger";
+  if (task.latest_execution_state === "paused" || task.state === "paused") return "warning";
+  return "normal";
 }
 
 function launchLabel(task: Task, t: ReturnType<typeof useI18n>["t"]): string {
@@ -179,14 +249,22 @@ const styles = StyleSheet.create({
   errorText: { color: colors.danger },
   retry: { color: colors.accent, fontWeight: "700" },
   list: { padding: 16, gap: 12, flexGrow: 1 },
+  sectionHeader: { marginTop: 7, marginBottom: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  sectionTitle: { color: colors.ink, fontSize: 16, fontWeight: "700" },
+  sectionCount: { color: colors.muted, fontSize: 12 },
   task: { padding: 16, backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.line, gap: 8 },
   taskHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   title: { flex: 1, color: colors.ink, fontWeight: "700", fontSize: 17 },
   state: { color: colors.accent, fontWeight: "600", fontSize: 12 },
-  paused: { color: colors.warning },
+  warningState: { color: colors.warning },
+  dangerState: { color: colors.danger },
   goal: { color: colors.ink, fontSize: 15, lineHeight: 22 },
+  latestResult: { gap: 3 },
+  latestLabel: { color: colors.muted, fontSize: 11, fontWeight: "700" },
+  result: { color: colors.ink, fontSize: 15, lineHeight: 22 },
+  failure: { color: colors.danger, fontSize: 14, lineHeight: 21 },
   metaRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  metaCopy: { flexDirection: "row", justifyContent: "space-between", flex: 1, marginRight: 8 },
+  metaCopy: { flexDirection: "row", flexWrap: "wrap", gap: 10, flex: 1, marginRight: 8 },
   meta: { color: colors.muted, fontSize: 12 },
   empty: { alignItems: "center", paddingTop: 64, gap: 8 },
   emptyTitle: { color: colors.ink, fontWeight: "700", fontSize: 17 },

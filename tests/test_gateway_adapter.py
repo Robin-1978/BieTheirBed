@@ -175,6 +175,11 @@ def _product_task_snapshot(
         revision=1,
         latest_execution_id="execution-a",
         execution_count=1,
+        latest_execution_state=TaskState.RUNNING,
+        latest_execution_phase="working",
+        latest_execution_summary="Checking failed jobs",
+        latest_execution_updated_at=2.0,
+        pending_approval_count=1,
         created_at=1.0,
         updated_at=2.0,
     )
@@ -607,6 +612,8 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
     assert created.json()["execution"]["execution_id"] == "execution-a"
     assert listed.json()["tasks"][0]["task_id"] == "task-a"
     assert listed.json()["tasks"][0]["execution_count"] == 1
+    assert listed.json()["tasks"][0]["latest_execution_state"] == "running"
+    assert listed.json()["tasks"][0]["pending_approval_count"] == 1
     assert detail.json()["task"]["state"] == "active"
     assert timeline.json()["events"][0]["event_seq"] == 3
     assert timeline.json()["events"][0]["payload"]["content"] == "分析中"

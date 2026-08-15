@@ -17,20 +17,24 @@ import {
 import type { AgentSummary, ArtifactInput, ChatArtifact, HumanInteraction, Task, TaskApproval, TaskExecution } from "@/api/models";
 import type { ResolvedArtifactFile } from "@/api/chatArtifacts";
 import { saveArtifactFile } from "@/api/saveArtifactFile";
+import { shouldRefreshExecution } from "@/api/taskEvents";
 import { AppPressable } from "@/components/AppPressable";
 import { AppIcon } from "@/components/AppIcon";
 import { AppMarkdown } from "@/components/AppMarkdown";
+import { ApprovalRequestDetails } from "@/components/ApprovalRequestDetails";
 import { ArtifactViewer } from "@/components/ArtifactViewer";
 import { InteractionCard } from "@/components/InteractionCard";
 import { mergeTaskTimeline, type TaskTimelineItem } from "@/components/taskTimeline";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
+import { useTaskReminders } from "@/state/TaskReminderProvider";
 import { colors } from "@/theme";
 
 export default function TaskExecutionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const executionId = String(id ?? "");
   const gateway = useGateway();
+  const { markExecutionRead } = useTaskReminders();
   const { t } = useI18n();
   const [execution, setExecution] = useState<TaskExecution | null>(null);
   const [task, setTask] = useState<Task | null>(null);
@@ -62,10 +66,26 @@ export default function TaskExecutionDetailScreen() {
   useEffect(() => { void refresh(); }, [refresh]);
 
   useEffect(() => {
-    const event = gateway.latestEvent?.event;
-    if (!event || event.task_id !== executionId) return;
-    void gateway.runAuthenticated((client) => client.getTaskExecution(executionId)).then(setExecution);
-  }, [executionId, gateway.latestEvent, gateway.runAuthenticated]);
+    if (!executionId) return;
+    markExecutionRead(executionId);
+  }, [executionId, markExecutionRead]);
+
+  useEffect(() => {
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = gateway.subscribeEvents((feed) => {
+      const event = feed.event;
+      if (event.task_id !== executionId || !shouldRefreshExecution(event.event_type)) return;
+      if (refreshTimer) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        void gateway.runAuthenticated((client) => client.getTaskExecution(executionId)).then(setExecution).catch(() => undefined);
+      }, 300);
+    });
+    return () => {
+      unsubscribe();
+      if (refreshTimer) clearTimeout(refreshTimer);
+    };
+  }, [executionId, gateway.runAuthenticated, gateway.subscribeEvents]);
 
   const approvals = useMemo(
     () => execution?.approvals.filter((item) => item.state === "pending") ?? [],
@@ -243,17 +263,17 @@ export default function TaskExecutionDetailScreen() {
 
       {approvals.map((approval, index) => (
         <View key={approval.approval_id} style={styles.approval}>
-          <Text style={styles.approvalTitle}>{t("execution.approvalTitle")}{approvals.length > 1 ? ` · ${index + 1}/${approvals.length}` : ""}</Text>
-          <ApprovalDetails approval={approval} t={t} />
+          {approvals.length > 1 ? <Text style={styles.approvalCount}>{index + 1}/{approvals.length}</Text> : null}
+          <ApprovalRequestDetails toolName={approval.tool_name} arguments={approval.arguments} display={approval.display} />
           <View style={styles.row}>
             <Action
-              label={t("common.cancel")}
+              label={t("execution.denyAction")}
               onPress={() => void resolveApproval(approval, false)}
               disabled={Boolean(working || resolvingApproval)}
               busy={resolvingApproval?.id === approval.approval_id && resolvingApproval.approved === false}
             />
             <Action
-              label={t("execution.confirm")}
+              label={t("execution.allowAction")}
               primary
               onPress={() => void resolveApproval(approval, true)}
               disabled={Boolean(working || resolvingApproval)}
@@ -411,37 +431,6 @@ export default function TaskExecutionDetailScreen() {
   }
 }
 
-function ApprovalDetails({ approval, t }: { approval: TaskApproval; t: ReturnType<typeof useI18n>["t"] }) {
-  const [legacyEffect, legacyRisk] = approval.reason.split(":", 2);
-  const effect = approval.display?.effect || legacyEffect || "unknown";
-  const risk = approval.display?.risk || legacyRisk || "unknown";
-  const argumentsPreview = approval.display?.arguments_preview || (Object.keys(approval.arguments).length ? JSON.stringify(approval.arguments, null, 2) : "");
-  const hasArguments = Boolean(argumentsPreview);
-  return (
-    <View style={styles.approvalDetails}>
-      <Text style={styles.approvalLabel}>{t("execution.tool")}</Text>
-      <Text selectable style={styles.tool}>{approval.tool_name}</Text>
-      <Text style={styles.approvalReason}>{t("execution.effect", { value: effectLabel(effect, t) })}</Text>
-      <Text style={styles.approvalReason}>{t("execution.risk", { value: riskLabel(risk, t) })}</Text>
-      <Text style={styles.approvalReason}>{approval.display?.reversible ? t("execution.reversible") : t("execution.irreversible")}</Text>
-      {hasArguments ? (
-        <>
-          <Text style={styles.approvalLabel}>{t("execution.arguments")}</Text>
-          <Text selectable style={styles.arguments}>{argumentsPreview}</Text>
-        </>
-      ) : <Text style={styles.approvalReason}>{t("execution.noArguments")}</Text>}
-    </View>
-  );
-}
-
-function effectLabel(value: string, t: ReturnType<typeof useI18n>["t"]): string {
-  return ({ read_only: t("execution.effect.readOnly"), internal_write: t("execution.effect.internal"), local_write: t("execution.effect.local"), external_side_effect: t("execution.effect.external"), desktop_control: t("execution.effect.desktop"), unknown: t("execution.effect.unknown") } as Record<string, string>)[value] ?? t("execution.effect.controlled");
-}
-
-function riskLabel(value: string, t: ReturnType<typeof useI18n>["t"]): string {
-  return ({ low: t("execution.risk.low"), medium: t("execution.risk.medium"), high: t("execution.risk.high") } as Record<string, string>)[value] ?? t("execution.risk.unknown");
-}
-
 function isTerminal(state: TaskExecution["state"]): boolean {
   return state === "completed" || state === "failed" || state === "cancelled";
 }
@@ -551,12 +540,7 @@ const styles = StyleSheet.create({
   failureTitle: { color: colors.danger, fontWeight: "700" },
   failureText: { color: colors.ink },
   approval: { padding: 18, borderRadius: 18, backgroundColor: colors.warningSoft, borderWidth: 1, borderColor: colors.warning, gap: 8 },
-  approvalTitle: { color: colors.ink, fontSize: 17, fontWeight: "700" },
-  tool: { color: colors.accent, fontFamily: "monospace", fontSize: 13 },
-  approvalLabel: { color: colors.ink, fontWeight: "700", marginTop: 3 },
-  approvalReason: { color: colors.ink, lineHeight: 22 },
-  approvalDetails: { gap: 5 },
-  arguments: { color: colors.ink, fontFamily: "monospace", fontSize: 12, backgroundColor: colors.surface, borderRadius: 10, padding: 10 },
+  approvalCount: { color: colors.muted, fontSize: 12, textAlign: "right" },
   row: { flexDirection: "row", gap: 10 },
   timeline: { backgroundColor: colors.surface, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: colors.line, gap: 10 },
   stepsToggle: { minHeight: 30, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
