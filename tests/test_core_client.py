@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
@@ -15,8 +14,6 @@ from knoa_agent_contracts import (
 from knoa_platform.agent_runtime.contracts import (
     ConfigSetRequest,
     ConfigSetResult,
-    HealthStatus,
-    RuntimeScope,
 )
 from knoa_platform.agent_runtime.control import ControlService
 from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository

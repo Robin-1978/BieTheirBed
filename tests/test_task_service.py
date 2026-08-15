@@ -9,6 +9,7 @@ import pytest
 from knoa_agent_contracts import (
     AssistantDelta,
     RuntimeHealth,
+    ToolCallFinished,
     TurnFinished,
 )
 from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
@@ -100,6 +101,39 @@ class _Runtime:
 
     async def health(self):
         return RuntimeHealth(healthy=True, state="ready")
+
+
+class _ArtifactRuntime(_Runtime):
+    async def execute_turn(self, request):
+        base = {
+            "runtime_session_ref": "agent-session-a",
+            "runtime_turn_ref": request.turn_id,
+            "occurred_at": 1.0,
+        }
+        artifact = {
+            "artifact_id": "artifact-a",
+            "kind": "file",
+            "name": "report.txt",
+            "media_type": "text/plain",
+            "size": 4,
+            "direction": "outbound",
+            "ownership": "generated",
+            "retention": "temporary",
+            "status": "available",
+            "visibility": "user",
+        }
+        yield ToolCallFinished(
+            **base,
+            tool_call_id="call-a",
+            tool_name="attach",
+            status="completed",
+            output={"success": True, "artifact": artifact},
+        )
+        yield TurnFinished(
+            **base,
+            status="completed",
+            final_output="attached",
+        )
 
 
 def _components(
@@ -264,6 +298,39 @@ async def test_task_executes_without_connection_owned_run(tmp_path: Path) -> Non
         assert repository.get(scope.principal_id, task.task_id).state is (
             TaskState.COMPLETED
         )
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_task_tool_artifact_is_streamed_and_saved_in_trace(tmp_path: Path) -> None:
+    service, repository, scope = _components(tmp_path, _ArtifactRuntime())
+    await service.start()
+    try:
+        task = await service.create(
+            scope,
+            client_request_id="request-a",
+            goal="attach report",
+        )
+
+        events = [
+            event
+            async for event in service.events(scope.principal_id, task.task_id)
+        ]
+
+        artifact_events = [event for event in events if event.event_type == "artifact"]
+        assert len(artifact_events) == 1
+        assert artifact_events[0].payload.artifact is not None
+        assert artifact_events[0].payload.artifact.artifact_id == "artifact-a"
+        trace = repository.get_trace(scope.principal_id, task.task_id)
+        assert trace is not None
+        assert [entry.entry_type for entry in trace.entries] == [
+            "tool_result",
+            "artifact",
+            "final_output",
+        ]
+        assert trace.entries[1].artifact is not None
+        assert trace.entries[1].artifact.artifact_id == "artifact-a"
     finally:
         await service.stop()
 

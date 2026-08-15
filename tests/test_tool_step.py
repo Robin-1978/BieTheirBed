@@ -15,8 +15,6 @@ from knoa_platform.agent_runtime.tool_step import (
 )
 from knoa_platform.context.memory_db import SQLiteMemoryRepository, ScopedUserMemory
 from knoa_platform.context.scope import current_memory_scope
-from knoa_platform.tools.describe_tool import DescribeTool
-from knoa_platform.tools.web_search import WebSearchTool
 from knoa_platform.tools.base import (
     ToolBase,
     ToolCapability,

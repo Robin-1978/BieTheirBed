@@ -86,6 +86,46 @@ class ProgressRuntime(ChunkRuntime):
         )
 
 
+class ArtifactRuntime(ChunkRuntime):
+    def __init__(self) -> None:
+        super().__init__(chunks=0)
+
+    async def execute_turn(self, request):
+        self.started.set()
+        artifact = {
+            "artifact_id": "artifact-a",
+            "kind": "image",
+            "name": "screenshot.jpg",
+            "media_type": "image/jpeg",
+            "size": 123,
+            "direction": "outbound",
+            "ownership": "generated",
+            "retention": "temporary",
+            "status": "available",
+            "visibility": "user",
+        }
+        for call_id in ("call-a", "call-b"):
+            yield ToolCallFinished(
+                **_base(request),
+                tool_call_id=call_id,
+                tool_name="screenshot",
+                status="completed",
+                output={"success": True, "artifact": artifact},
+            )
+        yield ToolCallFinished(
+            **_base(request),
+            tool_call_id="call-c",
+            tool_name="status",
+            status="completed",
+            output={"artifact": {"artifact_id": "invalid"}},
+        )
+        yield TurnFinished(
+            **_base(request),
+            status="completed",
+            final_output="done",
+        )
+
+
 def _service(tmp_path: Path, runtime: ChunkRuntime):
     database = tmp_path / "assistant.db"
     sessions = RuntimeSessionRepository(database, handle_factory=lambda: "session-a")
@@ -159,6 +199,27 @@ async def test_stream_publishes_monotonic_ordered_progress_snapshots(tmp_path: P
         "content",
     ]
     assert repository.get(scope.principal_id, turn.turn_id).timeline == snapshots[-1].timeline
+    await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_tool_output_artifact_is_persisted_once_on_chat_turn(
+    tmp_path: Path,
+) -> None:
+    _database, scope, repository, service = _service(tmp_path, ArtifactRuntime())
+    await service.start()
+    turn = await service.create_turn(
+        scope,
+        client_request_id="request-a",
+        user_input="capture",
+    )
+
+    snapshots = [signal.turn async for signal in service.updates(scope.principal_id, turn.turn_id)]
+
+    completed = snapshots[-1]
+    assert [artifact.artifact_id for artifact in completed.artifacts] == ["artifact-a"]
+    persisted = repository.get(scope.principal_id, turn.turn_id)
+    assert [artifact.artifact_id for artifact in persisted.artifacts] == ["artifact-a"]
     await service.stop()
 
 
