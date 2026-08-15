@@ -153,11 +153,15 @@ class GitLabMCPApplication:
                 "triggered by a robot or merger for the user's MR/commit. Report the "
                 "supplied compile/build totals and failed Job fingerprints. "
                 "Finish with exactly one decision: retry, stop or "
-                "needs_human, plus a short reason. A retry proposal must name one exact "
-                "failed job. retry_job performs a final live server-side check that the "
-                "target remains failed/canceled and no same-name Job is active; do not "
-                "retry the same failure fingerprint blindly. Retry remains a high-risk "
-                "host-approved MCP Tool call.\n\n"
+                "needs_human, plus a short reason. If the decision is retry, name one "
+                "exact failed job and call gitlab.retry_job in this same Execution; "
+                "do not merely recommend or describe a future retry. Calling the Tool "
+                "is how Knoa creates the host approval request. Only report retry as "
+                "requested or completed after that Tool call returns. retry_job performs "
+                "a final live server-side check that the target remains failed/canceled "
+                "and no same-name Job is active; do not retry the same failure "
+                "fingerprint blindly. Retry remains a high-risk host-approved MCP Tool "
+                "call.\n\n"
                 + json.dumps(payload, ensure_ascii=False, indent=2)
             )
         else:
