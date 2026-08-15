@@ -11,6 +11,7 @@ export {
   markAllTaskRemindersRead,
   markTaskReminderRead,
   mergeTaskReminder,
+  unreadTaskReminderIndex,
   type TaskReminder,
   type TaskReminderCategory,
 } from "@/reminders/taskReminderModel";

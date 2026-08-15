@@ -11,6 +11,7 @@ from examples.gitlab_mcp_server.gitlab_client import (
     GitLabClient,
     GitLabSettings,
     GitLabStateStore,
+    failure_event_resource_text,
 )
 from examples.gitlab_mcp_server.server import GitLabMCPApplication
 
@@ -39,6 +40,55 @@ def test_gitlab_manifest_keeps_retry_behind_high_risk_approval() -> None:
     }
     assert "gitlab.retry_pipeline" not in manifest["tools"]
     assert manifest["tools"]["gitlab.get_job_trace"]["effect"] == "read_only"
+
+
+def test_gitlab_state_migration_drops_legacy_events_and_freezes_resource_text(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "gitlab.db"
+    store = GitLabStateStore(path)
+    complete = {
+        "project": "team/repo",
+        "pipeline_id": "7",
+        "snapshot": {"attribution": {"eligible": True}},
+    }
+    store.add_failure_event("source", "complete", complete, 3600)
+    with store._connect() as db:
+        db.execute(
+            """INSERT INTO failure_events(
+                   event_id, payload_json, resource_text, detected_at, retained_until
+               ) VALUES (?, ?, '', 1, 9999999999)""",
+            ("legacy", '{"project":"team/repo","pipeline_id":"6"}'),
+        )
+        db.execute(
+            "UPDATE failure_events SET resource_text='' WHERE event_id='complete'"
+        )
+
+    migrated = GitLabStateStore(path)
+
+    assert migrated.get_failure_event("legacy") is None
+    event = migrated.get_failure_event("complete")
+    assert event is not None
+    assert event["resource_text"] == failure_event_resource_text(complete)
+
+
+def test_gitlab_event_resource_text_stays_frozen_after_creation(tmp_path: Path) -> None:
+    store = GitLabStateStore(tmp_path / "gitlab.db")
+    payload = {
+        "project": "team/repo",
+        "pipeline_id": "7",
+        "snapshot": {"attribution": {"eligible": True}},
+    }
+    store.add_failure_event("source", "event-1", payload, 3600)
+    expected = store.get_failure_event("event-1")["resource_text"]
+
+    with store._connect() as db:
+        db.execute(
+            "UPDATE failure_events SET payload_json=? WHERE event_id='event-1'",
+            ('{"snapshot":{"changed":true}}',),
+        )
+
+    assert store.get_failure_event("event-1")["resource_text"] == expected
 
 
 @pytest.mark.asyncio

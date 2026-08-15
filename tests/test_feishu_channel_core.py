@@ -1162,6 +1162,72 @@ async def test_feishu_principal_feed_notifies_background_task_and_saves_cursor(
 
 
 @pytest.mark.asyncio
+async def test_feishu_background_task_notification_is_titled_and_compact(
+    tmp_path,
+) -> None:
+    feed_event = PrincipalTaskEvent(
+        feed_event_id=10,
+        principal_id="principal-a",
+        event=TaskEvent(
+            task_id="execution-gitlab",
+            event_seq=5,
+            occurred_at=time.time() + 10,
+            event_type="completed",
+            payload=TaskEventPayload(state=TaskState.COMPLETED),
+        ),
+    )
+    long_result = "## 归因\n\n" + ("详细分析。" * 260) + "\n\n## 决策\n\n**retry**"
+
+    class BackgroundClient:
+        is_connected = True
+
+        async def get_product_task_execution(self, execution_id):
+            assert execution_id == "execution-gitlab"
+            return SimpleNamespace(task_id="product-task-gitlab")
+
+        async def get_product_task(self, task_id):
+            assert task_id == "product-task-gitlab"
+            return SimpleNamespace(
+                title="诊断我的 GitLab 失败 Pipeline",
+                notification_policy={"completed": True},
+            )
+
+        async def principal_task_events(self, *, after_id=0):
+            assert after_id == 0
+            yield feed_event
+            await asyncio.Event().wait()
+
+        async def get_task(self, task_id):
+            assert task_id == "execution-gitlab"
+            return SimpleNamespace(final_summary=long_result, failure_code="")
+
+    channel = FeishuChannel(_config(tmp_path))
+    channel._running = True
+    channel._clients["ou-user"] = BackgroundClient()
+    cards = []
+    channel._send_card = lambda *args: cards.append(args) or True
+
+    channel._ensure_principal_watcher("ou-user")
+    for _ in range(100):
+        if channel._notification_cursors.get("ou-user") == 10:
+            break
+        await asyncio.sleep(0.01)
+
+    channel._running = False
+    watcher = channel._principal_watchers["ou-user"]
+    watcher.cancel()
+    await asyncio.gather(watcher, return_exceptions=True)
+
+    assert len(cards) == 1
+    _, text, template, title = cards[0]
+    assert template == "blue"
+    assert title == "已完成 · 诊断我的 GitLab 失败 Pipeline"
+    assert len(text) < len(long_result)
+    assert "## 决策" in text
+    assert "Knoa Execution" in text
+
+
+@pytest.mark.asyncio
 async def test_feishu_principal_feed_skips_foreground_task_duplicate(
     tmp_path,
 ) -> None:

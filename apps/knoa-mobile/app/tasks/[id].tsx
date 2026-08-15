@@ -12,6 +12,7 @@ import {
 import type { AgentSummary, Task, TaskExecution, TaskState } from "@/api/models";
 import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { useGateway } from "@/state/GatewayProvider";
+import { useTaskReminders } from "@/state/TaskReminderProvider";
 import { colors } from "@/theme";
 import { useI18n } from "@/i18n";
 import { AppPressable } from "@/components/AppPressable";
@@ -20,6 +21,7 @@ export default function TaskDetailScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const taskId = String(params.id ?? "");
   const gateway = useGateway();
+  const { unreadExecutionIds } = useTaskReminders();
   const { t } = useI18n();
   const [task, setTask] = useState<Task | null>(null);
   const [executions, setExecutions] = useState<TaskExecution[]>([]);
@@ -153,13 +155,16 @@ export default function TaskDetailScreen() {
       {executions.length ? executions.map((execution) => (
         <AppPressable
           accessibilityRole="button"
-          accessibilityLabel={`${launchReasonLabel(execution.launch_reason, t)}，${executionStateLabel(execution.state, t)}`}
+          accessibilityLabel={`${launchReasonLabel(execution.launch_reason, t)}，${executionStateLabel(execution.state, t)}${unreadExecutionIds.has(execution.execution_id) ? `，${t("reminders.unread")}` : ""}`}
           key={execution.execution_id}
           style={styles.execution}
           onPress={() => router.push(`/task-executions/${execution.execution_id}`)}
         >
           <View style={styles.executionHeader}>
-            <Text style={styles.executionTitle}>{launchReasonLabel(execution.launch_reason, t)}</Text>
+            <View style={styles.executionTitleRow}>
+              {unreadExecutionIds.has(execution.execution_id) ? <View accessibilityElementsHidden style={styles.unreadDot} /> : null}
+              <Text style={styles.executionTitle}>{launchReasonLabel(execution.launch_reason, t)}</Text>
+            </View>
             <Text style={styles.executionState}>{executionStateLabel(execution.state, t)}</Text>
           </View>
           {execution.final_result ? <Text style={styles.result} numberOfLines={2}>{execution.final_result}</Text> : null}
@@ -234,6 +239,8 @@ const styles = StyleSheet.create({
   sectionCount: { color: colors.muted },
   execution: { padding: 16, backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.line, gap: 7 },
   executionHeader: { flexDirection: "row", justifyContent: "space-between" },
+  executionTitleRow: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 },
+  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.danger },
   executionTitle: { color: colors.ink, fontWeight: "700" },
   executionState: { color: colors.accent, fontWeight: "600" },
   result: { color: colors.ink, lineHeight: 21 },

@@ -16,6 +16,7 @@ import { PrimarySwipeNavigation } from "@/components/PrimarySwipeNavigation";
 import { currentTaskSections } from "@/components/taskListPresentation";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
+import { useTaskReminders } from "@/state/TaskReminderProvider";
 import { colors } from "@/theme";
 
 type Filter = "current" | TaskDefinitionState;
@@ -23,6 +24,7 @@ type TaskSection = { key: string; title: string; data: Task[] };
 
 export default function TasksScreen() {
   const gateway = useGateway();
+  const { unreadTaskIds } = useTaskReminders();
   const { t } = useI18n();
   const filters: Array<{ label: string; value: Filter }> = [
     { label: t("tasks.filter.current"), value: "current" },
@@ -142,12 +144,15 @@ export default function TasksScreen() {
         renderItem={({ item }) => (
           <AppPressable
             accessibilityRole="button"
-            accessibilityLabel={`${item.title}，${taskStatusLabel(item, t)}，${t("tasks.executions", { count: item.execution_count })}`}
+            accessibilityLabel={`${item.title}，${taskStatusLabel(item, t)}，${t("tasks.executions", { count: item.execution_count })}${unreadTaskIds.has(item.task_id) ? `，${t("reminders.unread")}` : ""}`}
             style={styles.task}
             onPress={() => router.push(`/tasks/${item.task_id}`)}
           >
             <View style={styles.taskHeader}>
-              <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
+              <View style={styles.titleRow}>
+                {unreadTaskIds.has(item.task_id) ? <View accessibilityElementsHidden style={styles.unreadDot} /> : null}
+                <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
+              </View>
               <Text style={[
                 styles.state,
                 taskStatusTone(item) === "warning" && styles.warningState,
@@ -254,6 +259,8 @@ const styles = StyleSheet.create({
   sectionCount: { color: colors.muted, fontSize: 12 },
   task: { padding: 16, backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.line, gap: 8 },
   taskHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  titleRow: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 },
+  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.danger },
   title: { flex: 1, color: colors.ink, fontWeight: "700", fontSize: 17 },
   state: { color: colors.accent, fontWeight: "600", fontSize: 12 },
   warningState: { color: colors.warning },
