@@ -26,6 +26,7 @@ from knoa_platform.gateway.identity import (
 from knoa_platform.gateway.releases import AndroidReleaseRepository
 from knoa_platform.gateway.routes import (
     ArtifactRoutes,
+    ConfigurationRoutes,
     ConversationRoutes,
     DeviceRoutes,
     TaskRoutes,
@@ -66,6 +67,7 @@ class SecureGatewayAdapter(
     TaskRoutes,
     ArtifactRoutes,
     DeviceRoutes,
+    ConfigurationRoutes,
     GatewayStreaming,
     GatewayHttp,
 ):
@@ -133,6 +135,41 @@ class SecureGatewayAdapter(
                 Route("/v1/auth/complete", self._auth_complete, methods=["POST"]),
                 Route("/v1/session", self._session, methods=["GET"]),
                 Route("/v1/agents", self._agents, methods=["GET"]),
+                Route("/v1/config/current", self._config_current, methods=["GET"]),
+                Route("/v1/config/history", self._config_history, methods=["GET"]),
+                Route(
+                    "/v1/config/revisions/{revision_id:str}",
+                    self._config_revision,
+                    methods=["GET"],
+                ),
+                Route("/v1/config/drafts", self._config_drafts, methods=["POST"]),
+                Route(
+                    "/v1/config/drafts/{draft_id:str}",
+                    self._config_draft,
+                    methods=["GET", "PUT"],
+                ),
+                Route(
+                    "/v1/config/drafts/{draft_id:str}/validate",
+                    self._config_validate,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/config/drafts/{draft_id:str}/preflight",
+                    self._config_preflight,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/config/drafts/{draft_id:str}/publish",
+                    self._config_publish,
+                    methods=["POST"],
+                ),
+                Route("/v1/config/rollback", self._config_rollback, methods=["POST"]),
+                Route("/v1/config/diff", self._config_diff, methods=["GET"]),
+                Route(
+                    "/v1/config/policy-preview",
+                    self._config_policy_preview,
+                    methods=["POST"],
+                ),
                 Route("/v1/mcp/resources", self._list_mcp_resources, methods=["GET"]),
                 Route("/v1/sessions", self._create_session, methods=["POST"]),
                 Route("/v1/conversations/sessions", self._list_conversation_sessions, methods=["GET"]),

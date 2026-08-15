@@ -91,6 +91,7 @@ def test_codex_runtime_reuses_normal_codex_home_when_home_is_not_configured(
 ) -> None:
     runtime = CodexAgentRuntime(
         CodexSessionRepository(tmp_path / "sessions.db"),
+        instructions="Test coder profile",
         cwd=tmp_path,
     )
 
@@ -107,11 +108,44 @@ def session_repository(tmp_path: Path) -> CodexSessionRepository:
     )
 
 
+def test_codex_runtime_enforces_resolved_native_capability_set(
+    tmp_path: Path,
+) -> None:
+    runtime = CodexAgentRuntime(
+        session_repository(tmp_path),
+        instructions="Test coder profile",
+        cwd=tmp_path,
+        sandbox="workspace-write",
+    )
+
+    assert runtime._sandbox_policy(
+        {"native_capabilities": "command_execution,workspace_read"}
+    ) == {"type": "readOnly"}
+    assert runtime._sandbox_policy(
+        {
+            "native_capabilities": (
+                "command_execution,native_file_edit,workspace_read,workspace_write"
+            )
+        }
+    ) == {
+        "type": "workspaceWrite",
+        "writableRoots": [str(tmp_path)],
+        "networkAccess": False,
+    }
+    with pytest.raises(RuntimeError, match="cannot enforce"):
+        runtime._sandbox_policy(
+            {"native_capabilities": "workspace_read"}
+        )
+    with pytest.raises(RuntimeError, match="requires explicit"):
+        runtime._sandbox_policy({"native_capabilities": ""})
+
+
 @pytest.mark.asyncio
 async def test_codex_runtime_maps_thread_turn_and_stream_events(tmp_path: Path) -> None:
     factory = ClientFactory()
     runtime = CodexAgentRuntime(
         session_repository(tmp_path),
+        instructions="Test coder profile",
         home=tmp_path / "codex-home",
         cwd=tmp_path,
         client_factory=factory,
@@ -172,6 +206,7 @@ async def test_codex_runtime_receives_platform_context_as_separate_input(
     factory = ClientFactory()
     runtime = CodexAgentRuntime(
         session_repository(tmp_path),
+        instructions="Test coder profile",
         home=tmp_path / "codex-home",
         cwd=tmp_path,
         client_factory=factory,
@@ -206,6 +241,7 @@ async def test_codex_runtime_declines_native_approval_and_allows_steering(tmp_pa
     factory = ClientFactory()
     runtime = CodexAgentRuntime(
         CodexSessionRepository(tmp_path / "sessions.db"),
+        instructions="Test coder profile",
         home=tmp_path / "codex-home",
         cwd=tmp_path,
         client_factory=factory,
@@ -260,6 +296,7 @@ async def test_codex_runtime_declines_file_change_approval(tmp_path: Path) -> No
     factory = ClientFactory()
     runtime = CodexAgentRuntime(
         CodexSessionRepository(tmp_path / "sessions.db"),
+        instructions="Test coder profile",
         home=tmp_path / "codex-home",
         cwd=tmp_path,
         client_factory=factory,
@@ -295,6 +332,7 @@ async def test_codex_runtime_exposes_user_input_as_generic_schema(tmp_path: Path
     factory = ClientFactory()
     runtime = CodexAgentRuntime(
         CodexSessionRepository(tmp_path / "sessions.db"),
+        instructions="Test coder profile",
         home=tmp_path / "codex-home",
         cwd=tmp_path,
         client_factory=factory,
@@ -379,6 +417,7 @@ async def test_codex_runtime_rejects_extra_mcp_server_inventory(tmp_path: Path) 
     factory = ClientFactory()
     runtime = CodexAgentRuntime(
         CodexSessionRepository(tmp_path / "sessions.db"),
+        instructions="Test coder profile",
         home=tmp_path / "codex-home",
         cwd=tmp_path,
         client_factory=factory,

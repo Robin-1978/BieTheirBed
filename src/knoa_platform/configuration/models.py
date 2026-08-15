@@ -1,0 +1,238 @@
+"""Versioned managed configuration contracts."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+
+from knoa_platform.agents.definitions import AgentSystemConfig
+
+SafeId = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+    ),
+]
+
+
+class ConfigurationModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class ManagedProviderConfig(ConfigurationModel):
+    driver: Literal["llamacpp", "openai", "openai_compatible", "anthropic"]
+    server_url: str = ""
+    api_base: str = ""
+    api_key_ref: str = ""
+    api_key_env: str = ""
+    requires_api_key: bool | None = None
+    timeout_seconds: float = Field(default=120.0, gt=0.0, le=3600.0)
+
+    @model_validator(mode="after")
+    def validate_secret_source(self) -> "ManagedProviderConfig":
+        if self.api_key_ref and self.api_key_env:
+            raise ValueError("Provider must use one API key source")
+        if self.driver in {"openai", "anthropic"} and not (
+            self.api_key_ref or self.api_key_env
+        ):
+            raise ValueError("Provider requires an API key reference")
+        return self
+
+
+class ManagedModelConfig(ConfigurationModel):
+    provider: SafeId
+    model: str
+    supports_vision: bool | None = None
+    context_window: int | None = Field(default=None, ge=512, le=10_000_000)
+    thinking: Literal["enabled", "disabled", "auto"] | None = None
+
+
+class ManagedSkillConfig(ConfigurationModel):
+    source: str
+    enabled: bool = True
+    content_digest: str = ""
+
+
+class ManagedMCPToolPolicyConfig(ConfigurationModel):
+    effect: Literal[
+        "read_only",
+        "internal_write",
+        "local_write",
+        "external_side_effect",
+        "desktop_control",
+    ]
+    capabilities: frozenset[
+        Literal[
+            "host_read",
+            "host_write",
+            "shell",
+            "network",
+            "desktop_observe",
+            "desktop_control",
+            "memory_read",
+            "memory_write",
+            "mcp",
+            "task_management",
+        ]
+    ] = frozenset()
+    risk: Literal["low", "medium", "high"]
+
+
+class ManagedMCPConfig(ConfigurationModel):
+    transport: Literal["stdio", "streamable_http"]
+    enabled: bool = True
+    command: tuple[str, ...] = ()
+    url: str = ""
+    working_directory: str = ""
+    inherit_env: tuple[str, ...] = ()
+    optional_env: tuple[str, ...] = ()
+    secret_refs: dict[str, str] = Field(default_factory=dict)
+    timeout_seconds: float = Field(default=30.0, ge=1.0, le=300.0)
+    tools: dict[str, ManagedMCPToolPolicyConfig] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_transport(self) -> "ManagedMCPConfig":
+        if self.transport == "stdio" and not self.command:
+            raise ValueError("stdio MCP requires a command")
+        if self.transport == "streamable_http" and not self.url:
+            raise ValueError("HTTP MCP requires a URL")
+        return self
+
+
+class ManagedApprovalReviewConfig(ConfigurationModel):
+    mode: Literal["off", "suggest", "auto"] = "off"
+    agent_id: str = "reviewer_agent"
+    timeout_seconds: float = Field(default=60.0, gt=0.0, le=120.0)
+    max_output_tokens: int = Field(default=4096, ge=64, le=8192)
+    auto_max_risk: Literal["low", "medium"] = "medium"
+
+
+class ManagedOperationalConfig(ConfigurationModel):
+    llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    max_iterations: int = Field(default=32, ge=1, le=128)
+    max_total_tool_calls: int = Field(default=50, ge=0, le=10_000)
+    max_output_tokens: int = Field(default=4096, ge=64, le=131_072)
+    context_window_budget: int = Field(default=8192, ge=512, le=10_000_000)
+    task_capacity: int = Field(default=128, ge=1, le=10_000)
+    principal_task_capacity: int = Field(default=32, ge=1, le=10_000)
+    generation_drain_seconds: float = Field(default=120.0, ge=1.0, le=3600.0)
+
+    @model_validator(mode="after")
+    def validate_capacity(self) -> "ManagedOperationalConfig":
+        if self.principal_task_capacity > self.task_capacity:
+            raise ValueError("Principal Task capacity cannot exceed global capacity")
+        return self
+
+
+class ManagedConfig(ConfigurationModel):
+    schema_version: Literal[1] = 1
+    providers: dict[SafeId, ManagedProviderConfig]
+    models: dict[SafeId, ManagedModelConfig]
+    default_model: SafeId
+    fallback_model: str = ""
+    fallback_enabled: bool = True
+    agent_system: AgentSystemConfig
+    approval_review: ManagedApprovalReviewConfig = Field(
+        default_factory=ManagedApprovalReviewConfig
+    )
+    skills: dict[SafeId, ManagedSkillConfig] = Field(default_factory=dict)
+    mcp_servers: dict[SafeId, ManagedMCPConfig] = Field(default_factory=dict)
+    operational: ManagedOperationalConfig = Field(
+        default_factory=ManagedOperationalConfig
+    )
+
+    @model_validator(mode="after")
+    def validate_references(self) -> "ManagedConfig":
+        if self.default_model not in self.models:
+            raise ValueError("default_model must reference a configured model")
+        if self.fallback_model:
+            if self.fallback_model not in self.models:
+                raise ValueError("fallback_model must reference a configured model")
+            if self.fallback_model == self.default_model:
+                raise ValueError("fallback_model must differ from default_model")
+        for alias, model in self.models.items():
+            if model.provider not in self.providers:
+                raise ValueError(f"Model '{alias}' references an unknown provider")
+        for runtime_id, runtime in self.agent_system.runtime_specs.items():
+            binding = runtime.model_binding
+            if binding.ownership == "platform" and binding.model not in self.models:
+                raise ValueError(
+                    f"RuntimeSpec '{runtime_id}' references an unknown model"
+                )
+        reviewer = self.agent_system.agents.get(self.approval_review.agent_id)
+        if self.approval_review.mode != "off" and (
+            reviewer is None or not reviewer.enabled
+        ):
+            raise ValueError(
+                "Enabled approval review requires an enabled reviewer Agent"
+            )
+        return self
+
+    @property
+    def digest(self) -> str:
+        payload = json.dumps(
+            self.model_dump(mode="json"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+
+class ConfigDraft(ConfigurationModel):
+    draft_id: SafeId
+    base_revision_id: SafeId
+    document: ManagedConfig
+    draft_version: int = Field(ge=1)
+    updated_by: str
+    updated_at: float = Field(ge=0.0)
+
+
+class ConfigRevision(ConfigurationModel):
+    revision_id: SafeId
+    parent_revision_id: str = ""
+    document: ManagedConfig
+    config_digest: str
+    change_summary: str = ""
+    created_by: str
+    created_at: float = Field(ge=0.0)
+
+
+class ConfigControlState(ConfigurationModel):
+    desired_revision_id: SafeId
+    applied_revision_id: SafeId
+    apply_status: Literal["idle", "applying", "failed"] = "idle"
+    apply_error_code: str = ""
+    updated_at: float = Field(ge=0.0)
+
+
+class ConfigValidationIssue(ConfigurationModel):
+    code: SafeId
+    path: str
+    message: str
+
+
+class ConfigValidationResult(ConfigurationModel):
+    valid: bool
+    issues: tuple[ConfigValidationIssue, ...] = ()
+
+
+class ConfigPublishResult(ConfigurationModel):
+    revision: ConfigRevision
+    state: ConfigControlState
+
+
+class ConfigConflictError(RuntimeError):
+    pass
+
+
+class ConfigApplyError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code

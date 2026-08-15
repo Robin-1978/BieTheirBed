@@ -46,6 +46,7 @@ from knoa_platform.conversation import (
     ConversationSessionConflictError,
     ConversationSessionNotFoundError,
 )
+from knoa_platform.configuration import ConfigApplyError, ConfigConflictError
 from knoa_platform.exceptions import SessionNotFoundError
 from knoa_platform.service.core_artifact_commands import ArtifactCommandHandler
 from knoa_platform.service.core_api import (
@@ -71,6 +72,9 @@ from knoa_platform.service.core_auth import (
 )
 from knoa_platform.service.core_automation_commands import AutomationCommandHandler
 from knoa_platform.service.core_conversation_commands import ConversationCommandHandler
+from knoa_platform.service.core_configuration_commands import (
+    ConfigurationCommandHandler,
+)
 from knoa_platform.service.core_interaction_commands import HumanInteractionCommandHandler
 from knoa_platform.service.core_mcp_commands import MCPPackageCommandHandler
 from knoa_platform.service.core_task_commands import TaskCommandHandler
@@ -110,6 +114,9 @@ class CoreServer:
         mcp_packages: Any | None = None,
         sessions: Any | None = None,
         owner_principal_id: str = "",
+        configuration: Any | None = None,
+        generation_states: Callable[[], tuple[Any, ...]] | None = None,
+        policy_preview: Callable[[str, Any], Awaitable[Any]] | None = None,
         authentication_timeout_seconds: float = 10.0,
         max_subscriptions_per_connection: int = 8,
     ) -> None:
@@ -132,6 +139,21 @@ class CoreServer:
             AutomationCommandHandler(schedules, triggers),
             ArtifactCommandHandler(artifacts, transcription),
         ]
+        if (
+            configuration is not None
+            and generation_states is not None
+            and policy_preview is not None
+            and owner_principal_id
+        ):
+            command_handlers.insert(
+                0,
+                ConfigurationCommandHandler(
+                    configuration,
+                    owner_principal_id=owner_principal_id,
+                    generation_states=generation_states,
+                    policy_preview=policy_preview,
+                ),
+            )
         if mcp_packages is not None and sessions is not None and owner_principal_id:
             command_handlers.append(
                 MCPPackageCommandHandler(
@@ -590,6 +612,30 @@ class CoreServer:
                     request.request_id,
                     "capability_denied",
                     "Capability denied",
+                )
+            )
+        except ConfigConflictError:
+            await send(
+                self._error(
+                    request.request_id,
+                    "config_conflict",
+                    "Configuration changed concurrently",
+                )
+            )
+        except ConfigApplyError:
+            await send(
+                self._error(
+                    request.request_id,
+                    "config_apply_failed",
+                    "Configuration validation or preflight failed",
+                )
+            )
+        except LookupError:
+            await send(
+                self._error(
+                    request.request_id,
+                    "config_not_found",
+                    "Configuration revision or draft not found",
                 )
             )
         except InvalidArtifactError:

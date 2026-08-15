@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from knoa_platform.agent_runtime.config_control import PersistentConfigController
+from knoa_platform.agent_runtime.config_control import ConfigurationController
 from knoa_platform.extensions.manager import ExtensionManager
 from knoa_platform.extensions.mcp import (
     MCPPromptDefinition,
@@ -46,7 +46,7 @@ class MCPOnboardingService:
     def __init__(
         self,
         extensions: ExtensionManager,
-        config: PersistentConfigController,
+        config: ConfigurationController,
         resource_tasks: MCPResourceTaskBridge,
         providers: tuple[MCPServerProvider, ...] = (),
     ) -> None:

@@ -102,3 +102,49 @@ async def test_system_agent_uses_same_runtime_manager_but_is_not_selectable() ->
         manager.resolve_agent_id("reviewer_agent")
     async with manager.lease_system("reviewer_agent") as runtime:
         assert runtime is reviewer
+
+
+@pytest.mark.asyncio
+async def test_generation_replacement_pins_existing_lease_and_routes_new_work() -> None:
+    previous = FakeRuntime("knoa")
+    replacement = FakeRuntime("knoa")
+    manager = AgentManager(
+        {"knoa": previous},
+        generation_ids={"knoa": "generation-1"},
+    )
+    acquired = asyncio.Event()
+    release = asyncio.Event()
+
+    async def hold_previous_generation() -> None:
+        async with manager.lease("knoa") as runtime:
+            assert runtime is previous
+            acquired.set()
+            await release.wait()
+
+    holder = asyncio.create_task(hold_previous_generation())
+    await acquired.wait()
+    await manager.replace_generations(
+        {"knoa": replacement},
+        default_agent="knoa",
+        enabled={"knoa": True},
+        max_concurrency={"knoa": 1},
+        system_agents=frozenset(),
+        generation_ids={"knoa": "generation-2"},
+        drain_seconds=1,
+    )
+
+    state = manager.generation_state()[0]
+    assert state.active_generation == "generation-2"
+    assert state.draining_generation == "generation-1"
+    assert state.draining_leases == 1
+    async with manager.lease("knoa") as runtime:
+        assert runtime is replacement
+
+    release.set()
+    await holder
+    for _ in range(20):
+        if not manager.generation_state()[0].draining_generation:
+            break
+        await asyncio.sleep(0.01)
+    assert previous.drained is True
+    assert manager.generation_state()[0].draining_generation == ""

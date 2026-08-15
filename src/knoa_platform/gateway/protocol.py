@@ -12,6 +12,15 @@ from knoa_platform.agent_runtime.contracts import (
     ToolListResult,
 )
 from knoa_platform.artifacts import ArtifactRef
+from knoa_platform.agents.definitions import ResolvedInvocationPolicy
+from knoa_platform.configuration import (
+    ConfigControlState,
+    ConfigDraft,
+    ConfigPublishResult,
+    ConfigRevision,
+    ConfigValidationResult,
+    ManagedConfig,
+)
 from knoa_platform.service.core_api import (
     ArtifactInputRef,
     ChatApprovalSnapshot,
@@ -150,6 +159,29 @@ class ResolveHumanInteractionRequest(GatewayRequest):
     value: Any
 
 
+class ReplaceConfigDraftRequest(GatewayRequest):
+    document: ManagedConfig
+    expected_version: int = Field(ge=1)
+
+
+class PublishConfigDraftRequest(GatewayRequest):
+    expected_version: int = Field(ge=1)
+    summary: str = Field(default="", max_length=2000)
+
+
+class RollbackConfigRequest(GatewayRequest):
+    revision_id: str = Field(min_length=1, max_length=128)
+    summary: str = Field(default="", max_length=2000)
+
+
+class PreviewInvocationPolicyRequest(GatewayRequest):
+    agent_id: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    invocation_kind: Literal["user", "delegate", "system"] = "user"
+    caller_id: str = Field(default="", max_length=256)
+    requested_tools: frozenset[str] | None = None
+    requested_skills: frozenset[str] | None = None
+
+
 class GatewayQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -209,6 +241,15 @@ class AuditQuery(GatewayQuery):
     limit: int = Field(default=100, ge=1, le=200)
 
 
+class ConfigHistoryQuery(GatewayQuery):
+    limit: int = Field(default=50, ge=1, le=200)
+
+
+class ConfigDiffQuery(GatewayQuery):
+    from_revision_id: str = Field(min_length=1, max_length=128)
+    to_revision_id: str = Field(min_length=1, max_length=128)
+
+
 class ErrorResponse(BaseModel):
     error: str
     message: str = ""
@@ -257,6 +298,40 @@ class AgentSummary(BaseModel):
 class AgentListResponse(BaseModel):
     default_agent: str
     agents: tuple[AgentSummary, ...]
+
+
+class ConfigCurrentResponse(BaseModel):
+    revision: ConfigRevision
+    state: ConfigControlState
+    generations: tuple[dict[str, Any], ...] = ()
+
+
+class ConfigHistoryResponse(BaseModel):
+    revisions: tuple[ConfigRevision, ...]
+
+
+class ConfigRevisionResponse(BaseModel):
+    revision: ConfigRevision
+
+
+class ConfigDraftResponse(BaseModel):
+    draft: ConfigDraft
+
+
+class ConfigValidationResponse(BaseModel):
+    result: ConfigValidationResult
+
+
+class ConfigPublishResponse(BaseModel):
+    result: ConfigPublishResult
+
+
+class ConfigDiffResponse(BaseModel):
+    changes: tuple[dict[str, Any], ...]
+
+
+class InvocationPolicyPreviewResponse(BaseModel):
+    policy: ResolvedInvocationPolicy
 
 
 class ConversationSessionResponse(BaseModel):

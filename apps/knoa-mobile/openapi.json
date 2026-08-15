@@ -375,6 +375,1123 @@
         }
       }
     },
+    "/v1/config/current": {
+      "get": {
+        "operationId": "getConfigCurrent",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigCurrentResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/config/history": {
+      "get": {
+        "operationId": "getConfigHistory",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Configuration history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigHistoryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/config/revisions/{revision_id}": {
+      "get": {
+        "operationId": "getConfigRevision",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Configuration revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigRevisionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/config/drafts": {
+      "post": {
+        "operationId": "createConfigDraft",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Configuration draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigDraftResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/config/drafts/{draft_id}": {
+      "get": {
+        "operationId": "getConfigDraft",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "draft_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Configuration draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigDraftResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "replaceConfigDraft",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "draft_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceConfigDraftRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated configuration draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigDraftResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/config/drafts/{draft_id}/validate": {
+      "post": {
+        "operationId": "validateConfigDraft",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Configuration validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigValidationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/config/drafts/{draft_id}/preflight": {
+      "post": {
+        "operationId": "preflightConfigDraft",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Configuration preflight",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigValidationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/config/drafts/{draft_id}/publish": {
+      "post": {
+        "operationId": "publishConfigDraft",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishConfigDraftRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Published configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigPublishResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/config/rollback": {
+      "post": {
+        "operationId": "rollbackConfig",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RollbackConfigRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rolled back configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigPublishResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/config/diff": {
+      "get": {
+        "operationId": "diffConfigRevisions",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "from_revision_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "to_revision_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Configuration diff",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigDiffResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/config/policy-preview": {
+      "post": {
+        "operationId": "previewInvocationPolicy",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewInvocationPolicyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Effective invocation policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvocationPolicyPreviewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/mcp/resources": {
       "get": {
         "operationId": "listMcpResources",
@@ -4262,6 +5379,36 @@
       }
     },
     "schemas": {
+      "AgentDefinition": {
+        "additionalProperties": false,
+        "properties": {
+          "runtime_spec_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+            "title": "Runtime Spec Id",
+            "type": "string"
+          },
+          "profile_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "runtime_spec_id",
+          "profile_id"
+        ],
+        "title": "AgentDefinition",
+        "type": "object"
+      },
       "AgentListResponse": {
         "properties": {
           "default_agent": {
@@ -4283,6 +5430,109 @@
         "title": "AgentListResponse",
         "type": "object"
       },
+      "AgentProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "instructions": {
+            "default": "",
+            "maxLength": 200000,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "instructions_ref": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Instructions Ref",
+            "type": "string"
+          },
+          "instructions_required": {
+            "default": true,
+            "title": "Instructions Required",
+            "type": "boolean"
+          },
+          "default_skills": {
+            "default": [],
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+              "type": "string"
+            },
+            "title": "Default Skills",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "allowed_platform_tools": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Platform Tools",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "platform_capability_ceiling": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Platform Capability Ceiling",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "runtime_native_capability_ceiling": {
+            "default": [],
+            "items": {
+              "enum": [
+                "workspace_read",
+                "workspace_write",
+                "command_execution",
+                "native_file_edit"
+              ],
+              "type": "string"
+            },
+            "title": "Runtime Native Capability Ceiling",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "runtime_limits": {
+            "$ref": "#/components/schemas/RuntimeProfileLimits"
+          },
+          "delegation": {
+            "$ref": "#/components/schemas/DelegationPolicy"
+          },
+          "visibility": {
+            "default": "delegate",
+            "enum": [
+              "user",
+              "delegate",
+              "system"
+            ],
+            "title": "Visibility",
+            "type": "string"
+          },
+          "callable_by": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Callable By",
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "display_name"
+        ],
+        "title": "AgentProfile",
+        "type": "object"
+      },
       "AgentSummary": {
         "properties": {
           "agent_id": {
@@ -4299,6 +5549,65 @@
           "display_name"
         ],
         "title": "AgentSummary",
+        "type": "object"
+      },
+      "AgentSystemConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "runtime_specs": {
+            "patternProperties": {
+              "^[A-Za-z][A-Za-z0-9_.-]{0,127}$": {
+                "$ref": "#/components/schemas/RuntimeSpec"
+              }
+            },
+            "propertyNames": {
+              "maxLength": 128,
+              "minLength": 1
+            },
+            "title": "Runtime Specs",
+            "type": "object"
+          },
+          "profiles": {
+            "patternProperties": {
+              "^[A-Za-z][A-Za-z0-9_.-]{0,127}$": {
+                "$ref": "#/components/schemas/AgentProfile"
+              }
+            },
+            "propertyNames": {
+              "maxLength": 128,
+              "minLength": 1
+            },
+            "title": "Profiles",
+            "type": "object"
+          },
+          "agents": {
+            "patternProperties": {
+              "^[a-z][a-z0-9_-]{0,63}$": {
+                "$ref": "#/components/schemas/AgentDefinition"
+              }
+            },
+            "propertyNames": {
+              "maxLength": 64,
+              "minLength": 1
+            },
+            "title": "Agents",
+            "type": "object"
+          },
+          "default_agent": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "title": "Default Agent",
+            "type": "string"
+          }
+        },
+        "required": [
+          "runtime_specs",
+          "profiles",
+          "agents",
+          "default_agent"
+        ],
+        "title": "AgentSystemConfig",
         "type": "object"
       },
       "AndroidReleaseResponse": {
@@ -5127,6 +6436,317 @@
         "title": "ChatTurnState",
         "type": "string"
       },
+      "ConfigControlState": {
+        "additionalProperties": false,
+        "properties": {
+          "desired_revision_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+            "title": "Desired Revision Id",
+            "type": "string"
+          },
+          "applied_revision_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+            "title": "Applied Revision Id",
+            "type": "string"
+          },
+          "apply_status": {
+            "default": "idle",
+            "enum": [
+              "idle",
+              "applying",
+              "failed"
+            ],
+            "title": "Apply Status",
+            "type": "string"
+          },
+          "apply_error_code": {
+            "default": "",
+            "title": "Apply Error Code",
+            "type": "string"
+          },
+          "updated_at": {
+            "minimum": 0.0,
+            "title": "Updated At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "desired_revision_id",
+          "applied_revision_id",
+          "updated_at"
+        ],
+        "title": "ConfigControlState",
+        "type": "object"
+      },
+      "ConfigCurrentResponse": {
+        "properties": {
+          "revision": {
+            "$ref": "#/components/schemas/ConfigRevision"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ConfigControlState"
+          },
+          "generations": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Generations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "revision",
+          "state"
+        ],
+        "title": "ConfigCurrentResponse",
+        "type": "object"
+      },
+      "ConfigDiffResponse": {
+        "properties": {
+          "changes": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Changes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "changes"
+        ],
+        "title": "ConfigDiffResponse",
+        "type": "object"
+      },
+      "ConfigDraft": {
+        "additionalProperties": false,
+        "properties": {
+          "draft_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+            "title": "Draft Id",
+            "type": "string"
+          },
+          "base_revision_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+            "title": "Base Revision Id",
+            "type": "string"
+          },
+          "document": {
+            "$ref": "#/components/schemas/ManagedConfig"
+          },
+          "draft_version": {
+            "minimum": 1,
+            "title": "Draft Version",
+            "type": "integer"
+          },
+          "updated_by": {
+            "title": "Updated By",
+            "type": "string"
+          },
+          "updated_at": {
+            "minimum": 0.0,
+            "title": "Updated At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "draft_id",
+          "base_revision_id",
+          "document",
+          "draft_version",
+          "updated_by",
+          "updated_at"
+        ],
+        "title": "ConfigDraft",
+        "type": "object"
+      },
+      "ConfigDraftResponse": {
+        "properties": {
+          "draft": {
+            "$ref": "#/components/schemas/ConfigDraft"
+          }
+        },
+        "required": [
+          "draft"
+        ],
+        "title": "ConfigDraftResponse",
+        "type": "object"
+      },
+      "ConfigHistoryResponse": {
+        "properties": {
+          "revisions": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigRevision"
+            },
+            "title": "Revisions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "revisions"
+        ],
+        "title": "ConfigHistoryResponse",
+        "type": "object"
+      },
+      "ConfigPublishResponse": {
+        "properties": {
+          "result": {
+            "$ref": "#/components/schemas/ConfigPublishResult"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ConfigPublishResponse",
+        "type": "object"
+      },
+      "ConfigPublishResult": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "$ref": "#/components/schemas/ConfigRevision"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ConfigControlState"
+          }
+        },
+        "required": [
+          "revision",
+          "state"
+        ],
+        "title": "ConfigPublishResult",
+        "type": "object"
+      },
+      "ConfigRevision": {
+        "additionalProperties": false,
+        "properties": {
+          "revision_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+            "title": "Revision Id",
+            "type": "string"
+          },
+          "parent_revision_id": {
+            "default": "",
+            "title": "Parent Revision Id",
+            "type": "string"
+          },
+          "document": {
+            "$ref": "#/components/schemas/ManagedConfig"
+          },
+          "config_digest": {
+            "title": "Config Digest",
+            "type": "string"
+          },
+          "change_summary": {
+            "default": "",
+            "title": "Change Summary",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "created_at": {
+            "minimum": 0.0,
+            "title": "Created At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "revision_id",
+          "document",
+          "config_digest",
+          "created_by",
+          "created_at"
+        ],
+        "title": "ConfigRevision",
+        "type": "object"
+      },
+      "ConfigRevisionResponse": {
+        "properties": {
+          "revision": {
+            "$ref": "#/components/schemas/ConfigRevision"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "ConfigRevisionResponse",
+        "type": "object"
+      },
+      "ConfigValidationIssue": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "path",
+          "message"
+        ],
+        "title": "ConfigValidationIssue",
+        "type": "object"
+      },
+      "ConfigValidationResponse": {
+        "properties": {
+          "result": {
+            "$ref": "#/components/schemas/ConfigValidationResult"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ConfigValidationResponse",
+        "type": "object"
+      },
+      "ConfigValidationResult": {
+        "additionalProperties": false,
+        "properties": {
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          },
+          "issues": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ConfigValidationIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          }
+        },
+        "required": [
+          "valid"
+        ],
+        "title": "ConfigValidationResult",
+        "type": "object"
+      },
       "ContinueProductTaskRequest": {
         "additionalProperties": false,
         "properties": {
@@ -5392,6 +7012,58 @@
         "title": "CreateProductTaskRequest",
         "type": "object"
       },
+      "DelegationPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "default": false,
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "targets": {
+            "default": [],
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "type": "string"
+            },
+            "title": "Targets",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "max_depth": {
+            "default": 0,
+            "maximum": 8,
+            "minimum": 0,
+            "title": "Max Depth",
+            "type": "integer"
+          },
+          "max_children": {
+            "default": 0,
+            "maximum": 32,
+            "minimum": 0,
+            "title": "Max Children",
+            "type": "integer"
+          },
+          "max_parallel_children": {
+            "default": 0,
+            "maximum": 32,
+            "minimum": 0,
+            "title": "Max Parallel Children",
+            "type": "integer"
+          },
+          "max_deadline_seconds": {
+            "default": 0.0,
+            "maximum": 86400.0,
+            "minimum": 0.0,
+            "title": "Max Deadline Seconds",
+            "type": "number"
+          }
+        },
+        "title": "DelegationPolicy",
+        "type": "object"
+      },
       "DeletedResponse": {
         "properties": {
           "deleted": {
@@ -5627,6 +7299,59 @@
         "title": "HumanInteractionSnapshot",
         "type": "object"
       },
+      "InvocationLimits": {
+        "additionalProperties": false,
+        "properties": {
+          "deadline_seconds": {
+            "default": 120.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 86400.0,
+            "title": "Deadline Seconds",
+            "type": "number"
+          },
+          "max_gateway_tool_calls": {
+            "default": 50,
+            "maximum": 10000,
+            "minimum": 0,
+            "title": "Max Gateway Tool Calls",
+            "type": "integer"
+          },
+          "max_artifact_bytes": {
+            "default": 33554432,
+            "minimum": 0,
+            "title": "Max Artifact Bytes",
+            "type": "integer"
+          },
+          "max_children": {
+            "default": 0,
+            "maximum": 32,
+            "minimum": 0,
+            "title": "Max Children",
+            "type": "integer"
+          },
+          "max_parallel_children": {
+            "default": 0,
+            "maximum": 32,
+            "minimum": 0,
+            "title": "Max Parallel Children",
+            "type": "integer"
+          }
+        },
+        "title": "InvocationLimits",
+        "type": "object"
+      },
+      "InvocationPolicyPreviewResponse": {
+        "properties": {
+          "policy": {
+            "$ref": "#/components/schemas/ResolvedInvocationPolicy"
+          }
+        },
+        "required": [
+          "policy"
+        ],
+        "title": "InvocationPolicyPreviewResponse",
+        "type": "object"
+      },
       "MCPResourceCatalogRecord": {
         "additionalProperties": false,
         "description": "A discovered, read-only MCP Resource exposed to client configuration UIs.",
@@ -5698,6 +7423,517 @@
           }
         },
         "title": "MCPResourceCatalogResult",
+        "type": "object"
+      },
+      "ManagedApprovalReviewConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "default": "off",
+            "enum": [
+              "off",
+              "suggest",
+              "auto"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "agent_id": {
+            "default": "reviewer_agent",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "default": 60.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 120.0,
+            "title": "Timeout Seconds",
+            "type": "number"
+          },
+          "max_output_tokens": {
+            "default": 4096,
+            "maximum": 8192,
+            "minimum": 64,
+            "title": "Max Output Tokens",
+            "type": "integer"
+          },
+          "auto_max_risk": {
+            "default": "medium",
+            "enum": [
+              "low",
+              "medium"
+            ],
+            "title": "Auto Max Risk",
+            "type": "string"
+          }
+        },
+        "title": "ManagedApprovalReviewConfig",
+        "type": "object"
+      },
+      "ManagedConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "providers": {
+            "patternProperties": {
+              "^[A-Za-z][A-Za-z0-9_.-]{0,127}$": {
+                "$ref": "#/components/schemas/ManagedProviderConfig"
+              }
+            },
+            "propertyNames": {
+              "maxLength": 128,
+              "minLength": 1
+            },
+            "title": "Providers",
+            "type": "object"
+          },
+          "models": {
+            "patternProperties": {
+              "^[A-Za-z][A-Za-z0-9_.-]{0,127}$": {
+                "$ref": "#/components/schemas/ManagedModelConfig"
+              }
+            },
+            "propertyNames": {
+              "maxLength": 128,
+              "minLength": 1
+            },
+            "title": "Models",
+            "type": "object"
+          },
+          "default_model": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+            "title": "Default Model",
+            "type": "string"
+          },
+          "fallback_model": {
+            "default": "",
+            "title": "Fallback Model",
+            "type": "string"
+          },
+          "fallback_enabled": {
+            "default": true,
+            "title": "Fallback Enabled",
+            "type": "boolean"
+          },
+          "agent_system": {
+            "$ref": "#/components/schemas/AgentSystemConfig"
+          },
+          "approval_review": {
+            "$ref": "#/components/schemas/ManagedApprovalReviewConfig"
+          },
+          "skills": {
+            "patternProperties": {
+              "^[A-Za-z][A-Za-z0-9_.-]{0,127}$": {
+                "$ref": "#/components/schemas/ManagedSkillConfig"
+              }
+            },
+            "propertyNames": {
+              "maxLength": 128,
+              "minLength": 1
+            },
+            "title": "Skills",
+            "type": "object"
+          },
+          "mcp_servers": {
+            "patternProperties": {
+              "^[A-Za-z][A-Za-z0-9_.-]{0,127}$": {
+                "$ref": "#/components/schemas/ManagedMCPConfig"
+              }
+            },
+            "propertyNames": {
+              "maxLength": 128,
+              "minLength": 1
+            },
+            "title": "Mcp Servers",
+            "type": "object"
+          },
+          "operational": {
+            "$ref": "#/components/schemas/ManagedOperationalConfig"
+          }
+        },
+        "required": [
+          "providers",
+          "models",
+          "default_model",
+          "agent_system"
+        ],
+        "title": "ManagedConfig",
+        "type": "object"
+      },
+      "ManagedMCPConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "transport": {
+            "enum": [
+              "stdio",
+              "streamable_http"
+            ],
+            "title": "Transport",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "command": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Command",
+            "type": "array"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "working_directory": {
+            "default": "",
+            "title": "Working Directory",
+            "type": "string"
+          },
+          "inherit_env": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Inherit Env",
+            "type": "array"
+          },
+          "optional_env": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Optional Env",
+            "type": "array"
+          },
+          "secret_refs": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Secret Refs",
+            "type": "object"
+          },
+          "timeout_seconds": {
+            "default": 30.0,
+            "maximum": 300.0,
+            "minimum": 1.0,
+            "title": "Timeout Seconds",
+            "type": "number"
+          },
+          "tools": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ManagedMCPToolPolicyConfig"
+            },
+            "title": "Tools",
+            "type": "object"
+          }
+        },
+        "required": [
+          "transport"
+        ],
+        "title": "ManagedMCPConfig",
+        "type": "object"
+      },
+      "ManagedMCPToolPolicyConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "effect": {
+            "enum": [
+              "read_only",
+              "internal_write",
+              "local_write",
+              "external_side_effect",
+              "desktop_control"
+            ],
+            "title": "Effect",
+            "type": "string"
+          },
+          "capabilities": {
+            "default": [],
+            "items": {
+              "enum": [
+                "host_read",
+                "host_write",
+                "shell",
+                "network",
+                "desktop_observe",
+                "desktop_control",
+                "memory_read",
+                "memory_write",
+                "mcp",
+                "task_management"
+              ],
+              "type": "string"
+            },
+            "title": "Capabilities",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "risk": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "title": "Risk",
+            "type": "string"
+          }
+        },
+        "required": [
+          "effect",
+          "risk"
+        ],
+        "title": "ManagedMCPToolPolicyConfig",
+        "type": "object"
+      },
+      "ManagedModelConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "provider": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+            "title": "Provider",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "supports_vision": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Supports Vision"
+          },
+          "context_window": {
+            "anyOf": [
+              {
+                "maximum": 10000000,
+                "minimum": 512,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Context Window"
+          },
+          "thinking": {
+            "anyOf": [
+              {
+                "enum": [
+                  "enabled",
+                  "disabled",
+                  "auto"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Thinking"
+          }
+        },
+        "required": [
+          "provider",
+          "model"
+        ],
+        "title": "ManagedModelConfig",
+        "type": "object"
+      },
+      "ManagedOperationalConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "llm_temperature": {
+            "default": 0.7,
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Llm Temperature",
+            "type": "number"
+          },
+          "max_iterations": {
+            "default": 32,
+            "maximum": 128,
+            "minimum": 1,
+            "title": "Max Iterations",
+            "type": "integer"
+          },
+          "max_total_tool_calls": {
+            "default": 50,
+            "maximum": 10000,
+            "minimum": 0,
+            "title": "Max Total Tool Calls",
+            "type": "integer"
+          },
+          "max_output_tokens": {
+            "default": 4096,
+            "maximum": 131072,
+            "minimum": 64,
+            "title": "Max Output Tokens",
+            "type": "integer"
+          },
+          "context_window_budget": {
+            "default": 8192,
+            "maximum": 10000000,
+            "minimum": 512,
+            "title": "Context Window Budget",
+            "type": "integer"
+          },
+          "task_capacity": {
+            "default": 128,
+            "maximum": 10000,
+            "minimum": 1,
+            "title": "Task Capacity",
+            "type": "integer"
+          },
+          "principal_task_capacity": {
+            "default": 32,
+            "maximum": 10000,
+            "minimum": 1,
+            "title": "Principal Task Capacity",
+            "type": "integer"
+          },
+          "generation_drain_seconds": {
+            "default": 120.0,
+            "maximum": 3600.0,
+            "minimum": 1.0,
+            "title": "Generation Drain Seconds",
+            "type": "number"
+          }
+        },
+        "title": "ManagedOperationalConfig",
+        "type": "object"
+      },
+      "ManagedProviderConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "driver": {
+            "enum": [
+              "llamacpp",
+              "openai",
+              "openai_compatible",
+              "anthropic"
+            ],
+            "title": "Driver",
+            "type": "string"
+          },
+          "server_url": {
+            "default": "",
+            "title": "Server Url",
+            "type": "string"
+          },
+          "api_base": {
+            "default": "",
+            "title": "Api Base",
+            "type": "string"
+          },
+          "api_key_ref": {
+            "default": "",
+            "title": "Api Key Ref",
+            "type": "string"
+          },
+          "api_key_env": {
+            "default": "",
+            "title": "Api Key Env",
+            "type": "string"
+          },
+          "requires_api_key": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requires Api Key"
+          },
+          "timeout_seconds": {
+            "default": 120.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 3600.0,
+            "title": "Timeout Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "driver"
+        ],
+        "title": "ManagedProviderConfig",
+        "type": "object"
+      },
+      "ManagedSkillConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "content_digest": {
+            "default": "",
+            "title": "Content Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "ManagedSkillConfig",
+        "type": "object"
+      },
+      "ModelBindingSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "ownership": {
+            "enum": [
+              "platform",
+              "runtime"
+            ],
+            "title": "Ownership",
+            "type": "string"
+          },
+          "model": {
+            "default": "",
+            "title": "Model",
+            "type": "string"
+          },
+          "hint": {
+            "default": "",
+            "title": "Hint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ownership"
+        ],
+        "title": "ModelBindingSpec",
         "type": "object"
       },
       "PairChallengeRequest": {
@@ -5803,6 +8039,69 @@
           }
         },
         "title": "PauseTaskRequest",
+        "type": "object"
+      },
+      "PreviewInvocationPolicyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "invocation_kind": {
+            "default": "user",
+            "enum": [
+              "user",
+              "delegate",
+              "system"
+            ],
+            "title": "Invocation Kind",
+            "type": "string"
+          },
+          "caller_id": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Caller Id",
+            "type": "string"
+          },
+          "requested_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requested Tools"
+          },
+          "requested_skills": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requested Skills"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "title": "PreviewInvocationPolicyRequest",
         "type": "object"
       },
       "ProductTaskExecutionListResponse": {
@@ -6176,6 +8475,46 @@
         "title": "ProductTaskSnapshot",
         "type": "object"
       },
+      "PublishConfigDraftRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "minimum": 1,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "summary": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_version"
+        ],
+        "title": "PublishConfigDraftRequest",
+        "type": "object"
+      },
+      "ReplaceConfigDraftRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/ManagedConfig"
+          },
+          "expected_version": {
+            "minimum": 1,
+            "title": "Expected Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "document",
+          "expected_version"
+        ],
+        "title": "ReplaceConfigDraftRequest",
+        "type": "object"
+      },
       "ResolveApprovalRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6203,6 +8542,138 @@
         "title": "ResolveHumanInteractionRequest",
         "type": "object"
       },
+      "ResolvedInvocationPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "agent_definition_digest": {
+            "title": "Agent Definition Digest",
+            "type": "string"
+          },
+          "runtime_spec_digest": {
+            "title": "Runtime Spec Digest",
+            "type": "string"
+          },
+          "profile_digest": {
+            "title": "Profile Digest",
+            "type": "string"
+          },
+          "invocation_kind": {
+            "enum": [
+              "user",
+              "delegate",
+              "system"
+            ],
+            "title": "Invocation Kind",
+            "type": "string"
+          },
+          "caller_id": {
+            "title": "Caller Id",
+            "type": "string"
+          },
+          "platform_capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Platform Capabilities",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "allowed_platform_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Platform Tools",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "allowed_skills": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Skills",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "runtime_native_capabilities": {
+            "items": {
+              "enum": [
+                "workspace_read",
+                "workspace_write",
+                "command_execution",
+                "native_file_edit"
+              ],
+              "type": "string"
+            },
+            "title": "Runtime Native Capabilities",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "delegation_targets": {
+            "default": [],
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "type": "string"
+            },
+            "title": "Delegation Targets",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "delegation_max_depth": {
+            "default": 0,
+            "maximum": 8,
+            "minimum": 0,
+            "title": "Delegation Max Depth",
+            "type": "integer"
+          },
+          "delegation_max_deadline_seconds": {
+            "default": 0.0,
+            "maximum": 86400.0,
+            "minimum": 0.0,
+            "title": "Delegation Max Deadline Seconds",
+            "type": "number"
+          },
+          "artifact_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Artifact Ids",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "limits": {
+            "$ref": "#/components/schemas/InvocationLimits"
+          },
+          "config_revision_id": {
+            "default": "",
+            "title": "Config Revision Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "agent_definition_digest",
+          "runtime_spec_digest",
+          "profile_digest",
+          "invocation_kind",
+          "caller_id",
+          "platform_capabilities",
+          "allowed_platform_tools",
+          "allowed_skills",
+          "runtime_native_capabilities"
+        ],
+        "title": "ResolvedInvocationPolicy",
+        "type": "object"
+      },
       "ResumeTaskRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6219,6 +8690,174 @@
           }
         },
         "title": "ResumeTaskRequest",
+        "type": "object"
+      },
+      "RollbackConfigRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "revision_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Revision Id",
+            "type": "string"
+          },
+          "summary": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision_id"
+        ],
+        "title": "RollbackConfigRequest",
+        "type": "object"
+      },
+      "RuntimeProfileLimits": {
+        "additionalProperties": false,
+        "properties": {
+          "max_iterations": {
+            "anyOf": [
+              {
+                "maximum": 128,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Iterations"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "maximum": 131072,
+                "minimum": 64,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Output Tokens"
+          }
+        },
+        "title": "RuntimeProfileLimits",
+        "type": "object"
+      },
+      "RuntimeSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "implementation": {
+            "enum": [
+              "native",
+              "codex"
+            ],
+            "title": "Implementation",
+            "type": "string"
+          },
+          "model_binding": {
+            "$ref": "#/components/schemas/ModelBindingSpec"
+          },
+          "max_concurrency": {
+            "default": 1,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Max Concurrency",
+            "type": "integer"
+          },
+          "command": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Command",
+            "type": "array"
+          },
+          "home": {
+            "default": "",
+            "title": "Home",
+            "type": "string"
+          },
+          "cwd": {
+            "default": "",
+            "title": "Cwd",
+            "type": "string"
+          },
+          "sandbox": {
+            "default": "read-only",
+            "enum": [
+              "read-only",
+              "workspace-write"
+            ],
+            "title": "Sandbox",
+            "type": "string"
+          },
+          "approval_policy": {
+            "default": "never",
+            "enum": [
+              "untrusted",
+              "on-request",
+              "never"
+            ],
+            "title": "Approval Policy",
+            "type": "string"
+          },
+          "native_capabilities": {
+            "default": [],
+            "items": {
+              "enum": [
+                "workspace_read",
+                "workspace_write",
+                "command_execution",
+                "native_file_edit"
+              ],
+              "type": "string"
+            },
+            "title": "Native Capabilities",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "instruction_authority": {
+            "default": "supported",
+            "enum": [
+              "required",
+              "supported",
+              "none"
+            ],
+            "title": "Instruction Authority",
+            "type": "string"
+          },
+          "request_timeout_seconds": {
+            "default": 120.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 3600.0,
+            "title": "Request Timeout Seconds",
+            "type": "number"
+          },
+          "max_line_bytes": {
+            "default": 4194304,
+            "minimum": 4096,
+            "title": "Max Line Bytes",
+            "type": "integer"
+          },
+          "max_event_queue": {
+            "default": 1024,
+            "maximum": 16384,
+            "minimum": 16,
+            "title": "Max Event Queue",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "implementation",
+          "model_binding"
+        ],
+        "title": "RuntimeSpec",
         "type": "object"
       },
       "RuntimeStatus": {

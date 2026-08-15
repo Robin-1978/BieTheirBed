@@ -20,6 +20,7 @@ def test_gateway_admin_pairs_lists_and_revokes_device(
 ) -> None:
     monkeypatch.delenv("KNOA_RUNTIME_ROOT", raising=False)
     monkeypatch.delenv("KNOA_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
     runtime_root = tmp_path / "runtime"
     config_path = tmp_path / "config.yaml"
     config_path.write_text(

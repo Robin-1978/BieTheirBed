@@ -131,11 +131,14 @@ async def test_tui_can_select_agent_and_resolve_interaction() -> None:
         async def resolve_interaction(self, interaction_id, value):
             self.resolved = (interaction_id, value)
 
+    base = AppConfig()
     config = AppConfig(
         default_agent="codex",
-        agents={
-            "knoa": {"enabled": True},
-            "codex": {"enabled": True, "command": ["codex", "app-server"]},
+        agent_definitions={
+            **base.agent_definitions,
+            "codex": base.agent_definitions["codex"].model_copy(
+                update={"enabled": True}
+            ),
         },
     )
     client = Client()

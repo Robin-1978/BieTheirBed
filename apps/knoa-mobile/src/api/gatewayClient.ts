@@ -4,10 +4,18 @@ import type {
   ArtifactInput,
   ChatApproval,
   ChatTurnSnapshot,
+  ConfigChange,
+  ConfigControlState,
+  ConfigDraft,
+  ConfigGeneration,
+  ConfigPublishResult,
+  ConfigRevision,
+  ConfigValidationResult,
   ConversationSession,
   GatewaySession,
   HumanInteraction,
   MCPResourceCatalogItem,
+  ManagedConfig,
   PairingPayload,
   Task,
   TaskDefinitionState,
@@ -93,6 +101,91 @@ export class GatewayClient {
   async listAgents(): Promise<{ defaultAgentId: string; agents: AgentSummary[] }> {
     const response = await this.json<{ default_agent: string; agents: AgentSummary[] }>("/v1/agents");
     return { defaultAgentId: response.default_agent, agents: response.agents };
+  }
+
+  async getConfigCurrent(): Promise<{
+    revision: ConfigRevision;
+    state: ConfigControlState;
+    generations: ConfigGeneration[];
+  }> {
+    return this.json("/v1/config/current");
+  }
+
+  async getConfigHistory(limit = 50): Promise<ConfigRevision[]> {
+    const response = await this.json<{ revisions: ConfigRevision[] }>(
+      `/v1/config/history?limit=${limit}`,
+    );
+    return response.revisions;
+  }
+
+  async createConfigDraft(): Promise<ConfigDraft> {
+    const response = await this.json<{ draft: ConfigDraft }>("/v1/config/drafts", {
+      method: "POST",
+    });
+    return response.draft;
+  }
+
+  async getConfigDraft(draftId: string): Promise<ConfigDraft> {
+    const response = await this.json<{ draft: ConfigDraft }>(
+      `/v1/config/drafts/${encodeURIComponent(draftId)}`,
+    );
+    return response.draft;
+  }
+
+  async replaceConfigDraft(
+    draftId: string,
+    document: ManagedConfig,
+    expectedVersion: number,
+  ): Promise<ConfigDraft> {
+    const response = await this.json<{ draft: ConfigDraft }>(
+      `/v1/config/drafts/${encodeURIComponent(draftId)}`,
+      {
+        method: "PUT",
+        body: { document, expected_version: expectedVersion },
+      },
+    );
+    return response.draft;
+  }
+
+  async validateConfigDraft(
+    draftId: string,
+    preflight = false,
+  ): Promise<ConfigValidationResult> {
+    const action = preflight ? "preflight" : "validate";
+    const response = await this.json<{ result: ConfigValidationResult }>(
+      `/v1/config/drafts/${encodeURIComponent(draftId)}/${action}`,
+      { method: "POST" },
+    );
+    return response.result;
+  }
+
+  async publishConfigDraft(
+    draftId: string,
+    expectedVersion: number,
+    summary: string,
+  ): Promise<ConfigPublishResult> {
+    const response = await this.json<{ result: ConfigPublishResult }>(
+      `/v1/config/drafts/${encodeURIComponent(draftId)}/publish`,
+      { method: "POST", body: { expected_version: expectedVersion, summary } },
+    );
+    return response.result;
+  }
+
+  async rollbackConfig(revisionId: string, summary: string): Promise<ConfigPublishResult> {
+    const response = await this.json<{ result: ConfigPublishResult }>(
+      "/v1/config/rollback",
+      { method: "POST", body: { revision_id: revisionId, summary } },
+    );
+    return response.result;
+  }
+
+  async getConfigDiff(fromRevisionId: string, toRevisionId: string): Promise<ConfigChange[]> {
+    const query = new URLSearchParams({
+      from_revision_id: fromRevisionId,
+      to_revision_id: toRevisionId,
+    });
+    const response = await this.json<{ changes: ConfigChange[] }>(`/v1/config/diff?${query}`);
+    return response.changes;
   }
 
   async listConversationSessions(input: {

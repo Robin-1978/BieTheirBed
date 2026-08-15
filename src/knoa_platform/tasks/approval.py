@@ -44,6 +44,16 @@ class DurableApprovalService:
         self._review_mode = review_mode
         self._auto_max_risk = auto_max_risk
 
+    def configure_review(
+        self,
+        reviewer: ApprovalReviewer | None,
+        mode: ApprovalReviewMode,
+        auto_max_risk: str,
+    ) -> None:
+        self._reviewer = reviewer
+        self._review_mode = mode
+        self._auto_max_risk = auto_max_risk
+
     async def confirm(
         self,
         scope: RuntimeScope,

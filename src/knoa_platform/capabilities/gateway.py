@@ -64,6 +64,7 @@ class CapabilityGrant:
     expires_at: float
     scope_digest: str
     artifact_ids: frozenset[str]
+    tool_names: frozenset[str]
     allow_tools: bool
 
 
@@ -87,6 +88,7 @@ class CapabilityGrantRegistry:
         tool_commit: ToolCommitPort | None,
         interaction: Any = None,
         artifact_ids: frozenset[str] = frozenset(),
+        tool_names: frozenset[str] = frozenset(),
         binding_epoch: int = 1,
         ttl_seconds: float = 300.0,
         allow_tools: bool = True,
@@ -101,6 +103,7 @@ class CapabilityGrantRegistry:
                 "binding_epoch": binding_epoch,
                 "capabilities": sorted(item.value for item in capabilities),
                 "artifact_ids": sorted(artifact_ids),
+                "tool_names": sorted(tool_names),
                 "allow_tools": allow_tools,
             },
             sort_keys=True,
@@ -120,6 +123,7 @@ class CapabilityGrantRegistry:
             expires_at=self._clock() + ttl_seconds,
             scope_digest=hashlib.sha256(canonical_scope.encode()).hexdigest(),
             artifact_ids=artifact_ids,
+            tool_names=tool_names,
             allow_tools=allow_tools,
         )
         async with self._guard:
@@ -211,6 +215,8 @@ class CapabilityGateway:
             return types.ListToolsResult(tools=[])
         tools = []
         for definition in self._registry.definitions_for(grant.capabilities):
+            if str(definition["name"]) not in grant.tool_names:
+                continue
             tools.append(
                 types.Tool(
                     name=str(definition["name"]),
@@ -233,6 +239,8 @@ class CapabilityGateway:
         grant = await self._grant(context)
         if not grant.allow_tools:
             raise PermissionError("This capability grant does not allow Tools")
+        if params.name not in grant.tool_names:
+            raise PermissionError("Tool is not authorized by the invocation policy")
         call_id = self._call_id(context, params)
         result = await self._tool_step.execute(
             ToolStepContext(
@@ -265,7 +273,17 @@ class CapabilityGateway:
     def authorized_tool_names(self, grant: CapabilityGrant) -> tuple[str, ...]:
         if not grant.allow_tools:
             return ()
-        return tuple(self._registry.list_for(grant.capabilities))
+        return tuple(
+            name
+            for name in self._registry.list_for(grant.capabilities)
+            if name in grant.tool_names
+        )
+
+    def available_tool_names(
+        self,
+        capabilities: frozenset[ToolCapability],
+    ) -> frozenset[str]:
+        return frozenset(self._registry.list_for(capabilities))
 
     async def _list_resources(
         self,

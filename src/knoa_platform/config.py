@@ -9,6 +9,24 @@ from urllib.parse import urlsplit
 import yaml
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
+from knoa_platform.agents.definitions import (
+    AgentDefinition,
+    AgentProfile,
+    AgentSystemConfig,
+    DelegationPolicy,
+    ModelBindingSpec,
+    RuntimeProfileLimits,
+    RuntimeSpec,
+)
+from knoa_platform.configuration.models import (
+    ManagedApprovalReviewConfig,
+    ManagedConfig,
+    ManagedMCPConfig,
+    ManagedMCPToolPolicyConfig,
+    ManagedModelConfig,
+    ManagedOperationalConfig,
+    ManagedProviderConfig,
+)
 from knoa_platform.extensions.models import MCP_SERVER_ID_PATTERN, MCPServerConfig
 from knoa_platform.network_tls import is_loopback_host
 from knoa_platform.runtime import default_runtime_root
@@ -143,37 +161,6 @@ class WebhookRouteConfig(BaseModel):
         return value
 
 
-class AgentConfig(BaseModel):
-    """Configuration for one trusted Agent implementation.
-
-    The mapping key is the stable ``agent_id``.  No runtime kind or arbitrary
-    Python entry point is accepted; the composition root owns the small trusted
-    implementation set.
-    """
-
-    enabled: bool = True
-    max_concurrency: int = Field(default=1, ge=1, le=32)
-    command: tuple[str, ...] = ()
-    home: str = ""
-    model: str = ""
-    cwd: str = ""
-    approval_policy: Literal["untrusted", "on-request", "never"] = "never"
-    sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = (
-        "read-only"
-    )
-    request_timeout_seconds: float = Field(default=120.0, gt=0.0, le=3600.0)
-    max_line_bytes: int = Field(default=4 * 1024 * 1024, ge=4096, le=32 * 1024 * 1024)
-    max_event_queue: int = Field(default=1024, ge=16, le=16_384)
-
-    @field_validator("command")
-    @classmethod
-    def _validate_command(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        normalized = tuple(part.strip() for part in value)
-        if any(not part or "\x00" in part for part in normalized):
-            raise ValueError("Agent command arguments must be non-empty safe strings")
-        return normalized
-
-
 class ApprovalReviewConfig(BaseModel):
     """Platform policy for the restricted system reviewer Agent."""
 
@@ -187,16 +174,89 @@ class ApprovalReviewConfig(BaseModel):
 
 class AppConfig(BaseModel):
     default_agent: str = "knoa"
-    agents: dict[str, AgentConfig] = Field(
+    runtime_specs: dict[str, RuntimeSpec] = Field(
         default_factory=lambda: {
-            "knoa": AgentConfig(enabled=True, max_concurrency=4),
-            "codex": AgentConfig(
-                enabled=False,
-                command=("codex", "app-server"),
+            "native-main": RuntimeSpec(
+                implementation="native",
+                model_binding=ModelBindingSpec(
+                    ownership="platform",
+                    model="@default",
+                ),
+                max_concurrency=4,
             ),
-            "reviewer_agent": AgentConfig(
-                enabled=False,
+            "native-approval-reviewer": RuntimeSpec(
+                implementation="native",
+                model_binding=ModelBindingSpec(
+                    ownership="platform",
+                    model="@reviewer",
+                ),
                 max_concurrency=1,
+            ),
+            "codex-default": RuntimeSpec(
+                implementation="codex",
+                model_binding=ModelBindingSpec(ownership="runtime"),
+                command=("codex", "app-server"),
+                native_capabilities=frozenset(
+                    {"workspace_read", "command_execution"}
+                ),
+                instruction_authority="required",
+            ),
+        }
+    )
+    agent_profiles: dict[str, AgentProfile] = Field(
+        default_factory=lambda: {
+            "assistant": AgentProfile(
+                display_name="Knoa",
+                instructions_ref="builtin://assistant",
+                default_skills=frozenset({"research_report"}),
+                allowed_platform_tools=frozenset({"*"}),
+                platform_capability_ceiling=frozenset({"*"}),
+                visibility="user",
+                delegation=DelegationPolicy(
+                    allowed=True,
+                    targets=frozenset({"codex"}),
+                    max_depth=1,
+                    max_children=3,
+                    max_parallel_children=3,
+                    max_deadline_seconds=1800,
+                ),
+            ),
+            "approval-reviewer": AgentProfile(
+                display_name="Knoa Reviewer",
+                instructions_ref="builtin://approval-reviewer",
+                allowed_platform_tools=frozenset(),
+                platform_capability_ceiling=frozenset(),
+                runtime_native_capability_ceiling=frozenset(),
+                runtime_limits=RuntimeProfileLimits(max_iterations=1),
+                visibility="system",
+                callable_by=frozenset({"approval_service"}),
+            ),
+            "coder": AgentProfile(
+                display_name="Codex",
+                instructions_ref="builtin://coder",
+                runtime_native_capability_ceiling=frozenset(
+                    {"workspace_read", "command_execution"}
+                ),
+                visibility="delegate",
+            ),
+        }
+    )
+    agent_definitions: dict[str, AgentDefinition] = Field(
+        default_factory=lambda: {
+            "knoa": AgentDefinition(
+                runtime_spec_id="native-main",
+                profile_id="assistant",
+                enabled=True,
+            ),
+            "reviewer_agent": AgentDefinition(
+                runtime_spec_id="native-approval-reviewer",
+                profile_id="approval-reviewer",
+                enabled=False,
+            ),
+            "codex": AgentDefinition(
+                runtime_spec_id="codex-default",
+                profile_id="coder",
+                enabled=False,
             ),
         }
     )
@@ -275,23 +335,8 @@ class AppConfig(BaseModel):
     def _validate_provider(self) -> AppConfig:
         if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", self.default_agent):
             raise ValueError("default_agent must be a stable safe Agent ID")
-        if set(self.agents) - {"knoa", "codex", "reviewer_agent"}:
-            raise ValueError(
-                "Only the trusted knoa, codex and reviewer_agent IDs are supported"
-            )
-        if "knoa" not in self.agents:
-            raise ValueError("agents must configure the built-in knoa Agent")
-        selected_agent = self.agents.get(self.default_agent)
-        if selected_agent is None or not selected_agent.enabled:
-            raise ValueError("default_agent must identify an enabled configured Agent")
-        codex = self.agents.get("codex")
-        if codex is not None and codex.enabled and not codex.command:
-            raise ValueError("Enabled codex Agent requires a command")
-        reviewer = self.agents.get("reviewer_agent")
-        if reviewer is not None and reviewer.enabled and not (
-            self.approval_review.model or reviewer.model
-        ):
-            raise ValueError("Enabled reviewer_agent requires a model")
+        system = self.agent_system_config()
+        reviewer = system.agents.get("reviewer_agent")
         if self.approval_review.mode != "off":
             if self.approval_review.agent != "reviewer_agent":
                 raise ValueError("approval_review agent must be reviewer_agent")
@@ -299,7 +344,7 @@ class AppConfig(BaseModel):
                 raise ValueError(
                     "Enabled approval review requires enabled reviewer_agent"
                 )
-            model_alias = self.approval_review.model or reviewer.model
+            model_alias = self.approval_review.model
             if not model_alias:
                 raise ValueError("Enabled approval review requires a reviewer model")
             if self.models and model_alias not in self.models:
@@ -406,6 +451,131 @@ class AppConfig(BaseModel):
                 "Set llm_api_key in config or KNOA_LLM_API_KEY environment variable."
             )
         return self
+
+    def agent_system_config(self) -> AgentSystemConfig:
+        runtimes: dict[str, RuntimeSpec] = {}
+        default_model = self.default_model or "bootstrap_default"
+        reviewer_model = self.approval_review.model or default_model
+        for runtime_id, spec in self.runtime_specs.items():
+            binding = spec.model_binding
+            if binding.ownership == "platform" and binding.model in {
+                "@default",
+                "@reviewer",
+            }:
+                binding = binding.model_copy(
+                    update={
+                        "model": (
+                            self.default_model
+                            or default_model
+                            if binding.model == "@default"
+                            else reviewer_model
+                        )
+                    }
+                )
+                spec = spec.model_copy(update={"model_binding": binding})
+            runtimes[runtime_id] = spec
+        return AgentSystemConfig(
+            runtime_specs=runtimes,
+            profiles=self.agent_profiles,
+            agents=self.agent_definitions,
+            default_agent=self.default_agent,
+        )
+
+    def managed_config(self) -> ManagedConfig:
+        providers = {
+            name: ManagedProviderConfig(
+                driver=provider.driver,
+                server_url=provider.server_url,
+                api_base=provider.api_base,
+                api_key_ref=(
+                    f"provider.{name}.api_key"
+                    if provider.api_key.get_secret_value()
+                    else ""
+                ),
+                api_key_env=provider.api_key_env,
+                requires_api_key=provider.requires_api_key,
+                timeout_seconds=provider.timeout,
+            )
+            for name, provider in self.providers.items()
+        }
+        models = {
+            name: ManagedModelConfig(
+                provider=model.provider,
+                model=model.model,
+                supports_vision=model.supports_vision,
+                context_window=model.context_window,
+                thinking=None if model.thinking is None else model.thinking.type,
+            )
+            for name, model in self.models.items()
+        }
+        default_model = self.default_model
+        if not models:
+            provider_id = "bootstrap_provider"
+            model_id = "bootstrap_default"
+            providers[provider_id] = ManagedProviderConfig(
+                driver=self.llm_provider,
+                server_url=self.llm_server_url,
+                api_base=self.llm_api_base,
+                api_key_ref=(
+                    f"provider.{provider_id}.api_key" if self.llm_api_key else ""
+                ),
+                requires_api_key=(
+                    self.llm_provider in {"openai", "openai_compatible", "anthropic"}
+                ),
+                timeout_seconds=self.llm_timeout,
+            )
+            models[model_id] = ManagedModelConfig(
+                provider=provider_id,
+                model=self.llm_model_name,
+                supports_vision=self.supports_vision,
+                context_window=self.context_window_budget,
+            )
+            default_model = model_id
+        return ManagedConfig(
+            providers=providers,
+            models=models,
+            default_model=default_model,
+            fallback_model=self.fallback_model if self.models else "",
+            fallback_enabled=self.fallback_enabled,
+            agent_system=self.agent_system_config(),
+            approval_review=ManagedApprovalReviewConfig(
+                mode=self.approval_review.mode,
+                agent_id=self.approval_review.agent,
+                timeout_seconds=self.approval_review.timeout_seconds,
+                max_output_tokens=self.approval_review.max_output_tokens,
+                auto_max_risk=self.approval_review.auto_max_risk,
+            ),
+            mcp_servers={
+                server_id: ManagedMCPConfig(
+                    transport=server.transport,
+                    enabled=server.enabled,
+                    command=(server.command, *server.args) if server.command else (),
+                    url=server.url,
+                    working_directory=server.working_directory,
+                    inherit_env=server.inherit_env,
+                    optional_env=server.optional_env,
+                    timeout_seconds=server.timeout_seconds,
+                    tools={
+                        tool_name: ManagedMCPToolPolicyConfig(
+                            effect=policy.effect.value,
+                            capabilities=frozenset(
+                                capability.value for capability in policy.capabilities
+                            ),
+                            risk=policy.risk.value,
+                        )
+                        for tool_name, policy in server.tools.items()
+                    },
+                )
+                for server_id, server in self.mcp_servers.items()
+            },
+            operational=ManagedOperationalConfig(
+                llm_temperature=self.llm_temperature,
+                max_iterations=self.max_iterations,
+                max_total_tool_calls=self.max_total_tool_calls,
+                max_output_tokens=self.max_tokens,
+                context_window_budget=self.context_window_budget,
+            ),
+        )
 
     def resolve_model(self, alias: str | None = None) -> ResolvedModelConfig:
         """Resolve a model alias into one complete transport configuration."""

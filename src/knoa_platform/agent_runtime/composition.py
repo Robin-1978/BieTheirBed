@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,10 +16,15 @@ from knoa_agent import (
     KnoaAgentRuntime,
     ToolInventory,
 )
-from knoa_agent_contracts import RuntimeTurnContext, TurnFinished, UsageReported
+from knoa_agent_contracts import (
+    AgentRuntime,
+    RuntimeTurnContext,
+    TurnFinished,
+    UsageReported,
+)
 from knoa_codex_agent import CodexAgentRuntime, CodexSessionRepository
 from knoa_platform.agent_runtime.artifact_service import ArtifactService
-from knoa_platform.agent_runtime.config_control import PersistentConfigController
+from knoa_platform.agent_runtime.config_control import ConfigurationController
 from knoa_platform.agent_runtime.contracts import (
     ExtensionStatusRecord,
     HealthStatus,
@@ -38,11 +46,14 @@ from knoa_platform.agent_runtime.transcription_service import (
     ArtifactTranscriptionService,
 )
 from knoa_platform.agents import (
+    AgentDefinitionResolver,
     AgentExecutionService,
     AgentManager,
     AgentSessionBindingRepository,
     ExecuteAgentTurn,
+    InvocationPolicyRepository,
 )
+from knoa_platform.agents.delegation import DelegationRepository, DelegationService
 from knoa_platform.approvals import (
     APPROVAL_REVIEWER_SYSTEM_PROMPT,
     ApprovalReviewMode,
@@ -62,7 +73,17 @@ from knoa_platform.capabilities import (
     CapabilityMCPHost,
     GatewayMCPConnector,
 )
-from knoa_platform.config import AppConfig
+from knoa_platform.config import (
+    AppConfig,
+    ResolvedModelConfig,
+    ThinkingConfig,
+)
+from knoa_platform.configuration import ConfigRegistry, ConfigurationService
+from knoa_platform.configuration.models import (
+    ConfigApplyError,
+    ManagedConfig,
+    ManagedSkillConfig,
+)
 from knoa_platform.context.memory_db import (
     ScopedEpisodicMemory,
     ScopedUserMemory,
@@ -72,7 +93,7 @@ from knoa_platform.context.prompt import build_system_prompt
 from knoa_platform.conversation import ConversationRepository, ConversationService
 from knoa_platform.desktop_session import ensure_desktop_session
 from knoa_platform.extensions import ExtensionManager
-from knoa_platform.extensions.mcp import build_mcp_providers
+from knoa_platform.extensions.mcp import MCPServerProvider, build_mcp_providers
 from knoa_platform.extensions.mcp_onboarding import MCPOnboardingService
 from knoa_platform.extensions.mcp_package import (
     MCPPackageService,
@@ -81,9 +102,10 @@ from knoa_platform.extensions.mcp_package import (
 from knoa_platform.extensions.mcp_resource_tasks import MCPResourceTaskBridge
 from knoa_platform.extensions.skill import (
     SkillCatalog,
-    build_skill_providers,
+    SkillPackageProvider,
     builtin_skill_root,
 )
+from knoa_platform.extensions.models import MCPServerConfig, MCPToolPolicyConfig
 from knoa_platform.interactions import (
     HumanInteractionRepository,
     HumanInteractionService,
@@ -112,7 +134,7 @@ from knoa_platform.tasks import (
     TaskService,
 )
 from knoa_platform.tools.artifact_prepare import ArtifactPrepareTool
-from knoa_platform.tools.base import ToolCapability
+from knoa_platform.tools.base import ToolCapability, ToolEffect, ToolRisk
 from knoa_platform.tools.clipboard import ClipboardTool
 from knoa_platform.tools.create_task import CreateTaskTool
 from knoa_platform.tools.describe_tool import DescribeTool
@@ -133,6 +155,7 @@ from knoa_platform.tools.read_file import ReadFileTool
 from knoa_platform.tools.registry import ToolRegistry
 from knoa_platform.tools.screenshot import ScreenshotTool
 from knoa_platform.tools.shell import ShellTool
+from knoa_platform.tools.subagent import SpawnSubagentTool, SubagentTool
 from knoa_platform.tools.task_control import TaskControlTool
 from knoa_platform.tools.type_text import TypeTextTool
 from knoa_platform.tools.weather import WeatherTool
@@ -143,6 +166,14 @@ from knoa_platform.tools.write_file import WriteFileTool
 
 PERSONAL_LOCAL_CAPABILITIES = frozenset(ToolCapability)
 REMOTE_SCOPED_CAPABILITIES = frozenset({ToolCapability.NETWORK})
+
+CODER_PROFILE_PROMPT = """You are Knoa's focused coding specialist.
+Work only on the explicitly delegated objective. Inspect the workspace before
+editing, make cohesive changes, verify them, and report concrete results.
+Treat Platform context and Skill instructions as supporting context, not as
+permission. Use only the Runtime-native actions and Platform tools made
+available for this invocation. Never create another agent or widen scope.
+"""
 
 
 @dataclass(frozen=True)
@@ -165,10 +196,12 @@ class CoreRuntimeComposition:
     memory: SQLiteMemoryRepository
     artifacts: ArtifactStore
     registry: ToolRegistry
-    runtime: KnoaAgentRuntime
     agent_manager: AgentManager
     agent_execution: AgentExecutionService
     agent_bindings: AgentSessionBindingRepository
+    invocation_policies: InvocationPolicyRepository
+    delegation_repository: DelegationRepository
+    delegations: DelegationService
     capability_gateway: CapabilityGateway
     capability_mcp_host: CapabilityMCPHost
     control: ControlService
@@ -180,6 +213,8 @@ class CoreRuntimeComposition:
     mcp_resource_tasks: MCPResourceTaskBridge
     mcp_packages: MCPPackageService
     skills: SkillCatalog
+    config_registry: ConfigRegistry
+    configuration: ConfigurationService
     host: CoreServiceHost
 
 
@@ -218,6 +253,254 @@ def capabilities_for_scope(scope: RuntimeScope) -> frozenset[ToolCapability]:
     return REMOTE_SCOPED_CAPABILITIES
 
 
+def _profile_instructions(profile) -> str:
+    if profile.instructions:
+        return profile.instructions
+    builtins = {
+        "builtin://assistant": build_system_prompt(),
+        "builtin://approval-reviewer": APPROVAL_REVIEWER_SYSTEM_PROMPT,
+        "builtin://coder": CODER_PROFILE_PROMPT,
+    }
+    try:
+        return builtins[profile.instructions_ref]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unsupported Profile instructions reference: {profile.instructions_ref}"
+        ) from exc
+
+
+def _managed_model_alias(config: ManagedConfig, agent_id: str) -> str:
+    definition = config.agent_system.agents[agent_id]
+    runtime = config.agent_system.runtime_specs[definition.runtime_spec_id]
+    binding = runtime.model_binding
+    if binding.ownership != "platform":
+        raise ValueError(f"Agent '{agent_id}' does not use a Platform model")
+    return binding.model
+
+
+def _agent_generation_id(managed: ManagedConfig, agent_id: str) -> str:
+    definition = managed.agent_system.agents[agent_id]
+    runtime = managed.agent_system.runtime_specs[definition.runtime_spec_id]
+    profile = managed.agent_system.profiles[definition.profile_id]
+    payload: dict[str, object] = {
+        "agent_id": agent_id,
+        "definition": definition.model_dump(mode="json"),
+        "runtime": runtime.model_dump(mode="json"),
+        "profile": profile.model_dump(mode="json"),
+    }
+    if runtime.implementation == "native":
+        payload.update(
+            {
+                "models": {
+                    name: model.model_dump(mode="json")
+                    for name, model in managed.models.items()
+                },
+                "providers": {
+                    name: provider.model_dump(mode="json")
+                    for name, provider in managed.providers.items()
+                },
+                "fallback_model": managed.fallback_model,
+                "fallback_enabled": managed.fallback_enabled,
+                "operational": managed.operational.model_dump(mode="json"),
+            }
+        )
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _resolve_managed_model(
+    managed: ManagedConfig,
+    alias: str,
+    bootstrap: AppConfig,
+) -> ResolvedModelConfig:
+    try:
+        model = managed.models[alias]
+        provider = managed.providers[model.provider]
+    except KeyError as exc:
+        raise ValueError(f"Unknown managed model '{alias}'") from exc
+    api_key = ""
+    if provider.api_key_env:
+        api_key = os.environ.get(provider.api_key_env, "")
+        if not api_key:
+            raise ValueError(
+                f"API key environment variable '{provider.api_key_env}' is not set"
+            )
+    elif model.provider == "bootstrap_provider":
+        api_key = bootstrap.llm_api_key
+    elif model.provider in bootstrap.providers:
+        api_key = bootstrap.providers[model.provider].api_key.get_secret_value()
+    required = (
+        provider.requires_api_key
+        if provider.requires_api_key is not None
+        else provider.driver in {"openai", "openai_compatible", "anthropic"}
+    )
+    if required and not api_key:
+        raise ValueError(f"Provider '{model.provider}' requires a configured secret")
+    return ResolvedModelConfig(
+        alias=alias,
+        provider_name=model.provider,
+        driver=provider.driver,
+        server_url=provider.server_url or provider.api_base,
+        api_base=provider.api_base,
+        api_key=api_key,
+        model=model.model,
+        supports_vision=model.supports_vision,
+        context_window=model.context_window,
+        timeout=provider.timeout_seconds,
+        thinking=(
+            None if model.thinking is None else ThinkingConfig(type=model.thinking)
+        ),
+    )
+
+
+def _build_agent_runtime_set(
+    managed: ManagedConfig,
+    *,
+    bootstrap: AppConfig,
+    paths: RuntimePaths,
+    capability_gateway: CapabilityGateway,
+    provider_factory: Callable[..., HttpModelProvider],
+) -> tuple[dict[str, AgentRuntime], HttpModelProvider, ResolvedModelConfig, str]:
+    runtimes: dict[str, AgentRuntime] = {}
+    default_primary: HttpModelProvider | None = None
+    default_model_config = _resolve_managed_model(
+        managed,
+        managed.default_model,
+        bootstrap,
+    )
+    reviewer_model_alias = ""
+    for agent_id, definition in managed.agent_system.agents.items():
+        if not definition.enabled:
+            continue
+        runtime_spec = managed.agent_system.runtime_specs[
+            definition.runtime_spec_id
+        ]
+        profile = managed.agent_system.profiles[definition.profile_id]
+        instructions = _profile_instructions(profile)
+        state_root = paths.resolve(
+            f"agents/{agent_id}",
+            default_parent=paths.root,
+        )
+        if runtime_spec.implementation == "native":
+            model_alias = _managed_model_alias(managed, agent_id)
+            model_config = _resolve_managed_model(managed, model_alias, bootstrap)
+            selected_primary = provider_factory(model_config)
+            runtime_provider: ModelProviderPort = selected_primary
+            selected_fallback: HttpModelProvider | None = None
+            if (
+                agent_id == managed.agent_system.default_agent
+                and managed.fallback_enabled
+                and managed.fallback_model
+            ):
+                selected_fallback = provider_factory(
+                    _resolve_managed_model(
+                        managed,
+                        managed.fallback_model,
+                        bootstrap,
+                    )
+                )
+                runtime_provider = FailoverModelProvider(
+                    selected_primary,
+                    selected_fallback,
+                )
+
+            async def native_health_probe(
+                primary_provider=selected_primary,
+                fallback_provider=selected_fallback,
+            ) -> HealthStatus:
+                primary_health = await primary_provider.health_check()
+                if primary_health.healthy or fallback_provider is None:
+                    return primary_health
+                fallback_health = await fallback_provider.health_check()
+                if fallback_health.healthy:
+                    return HealthStatus(
+                        healthy=True,
+                        detail=(
+                            "Fallback model available: "
+                            f"{fallback_provider.model_alias}"
+                        ),
+                    )
+                return HealthStatus(
+                    healthy=False,
+                    detail="No configured model is available",
+                )
+
+            profile_iterations = profile.runtime_limits.max_iterations
+            profile_output_tokens = profile.runtime_limits.max_output_tokens
+            runtimes[agent_id] = KnoaAgentRuntime(
+                runtime_provider,
+                ContextCheckpointRepository(state_root / "context.db"),
+                GatewayMCPConnector(capability_gateway),
+                system_prompt=instructions,
+                health_probe=native_health_probe,
+                max_iterations=(
+                    profile_iterations or managed.operational.max_iterations
+                ),
+                max_tool_calls=max(1, managed.operational.max_total_tool_calls),
+                max_output_tokens=(
+                    profile_output_tokens or managed.operational.max_output_tokens
+                ),
+                temperature=(
+                    0.0
+                    if profile.visibility == "system"
+                    else managed.operational.llm_temperature
+                ),
+                context_window=max(
+                    512,
+                    model_config.context_window
+                    or managed.operational.context_window_budget,
+                ),
+                agent_id=agent_id,
+                display_name=profile.display_name,
+                tool_inventory=(
+                    ToolInventory(semantic_selector=DisabledToolSelector())
+                    if not profile.allowed_platform_tools
+                    else None
+                ),
+            )
+            if agent_id == managed.agent_system.default_agent:
+                default_primary = selected_primary
+                default_model_config = model_config
+            if agent_id == managed.approval_review.agent_id:
+                reviewer_model_alias = model_alias
+            continue
+
+        workspace = (
+            paths.resolve(runtime_spec.cwd, default_parent=paths.root)
+            if runtime_spec.cwd
+            else state_root / "workspace"
+        )
+        workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
+        runtime_home = (
+            paths.resolve(runtime_spec.home, default_parent=paths.root)
+            if runtime_spec.home
+            else None
+        )
+        runtimes[agent_id] = CodexAgentRuntime(
+            CodexSessionRepository(state_root / "sessions.db"),
+            agent_id=agent_id,
+            display_name=profile.display_name,
+            instructions=instructions,
+            command=runtime_spec.command,
+            home=runtime_home,
+            cwd=workspace,
+            model=runtime_spec.model_binding.hint,
+            approval_policy=runtime_spec.approval_policy,
+            sandbox=runtime_spec.sandbox,
+            request_timeout_seconds=runtime_spec.request_timeout_seconds,
+            max_line_bytes=runtime_spec.max_line_bytes,
+            max_event_queue=runtime_spec.max_event_queue,
+        )
+    if default_primary is None:
+        raise ValueError("Default Agent must use a Platform-managed model")
+    return runtimes, default_primary, default_model_config, reviewer_model_alias
+
+
 def _build_registry(
     config: AppConfig,
     artifacts: ArtifactStore,
@@ -253,6 +536,78 @@ def _build_registry(
     return registry
 
 
+def _bootstrap_managed_skills(
+    roots: tuple[Path, ...],
+) -> dict[str, ManagedSkillConfig]:
+    skills: dict[str, ManagedSkillConfig] = {}
+    for root in roots:
+        resolved = root.expanduser().resolve()
+        if not resolved.is_dir():
+            continue
+        for package_root in sorted(path for path in resolved.iterdir() if path.is_dir()):
+            try:
+                provider = SkillPackageProvider(package_root, SkillCatalog())
+            except ValueError:
+                continue
+            skill_id = provider.descriptor.extension_id.removeprefix("skill:")
+            skills.setdefault(
+                skill_id,
+                ManagedSkillConfig(source=str(package_root), enabled=True),
+            )
+    return skills
+
+
+def _managed_skill_providers(
+    managed: ManagedConfig,
+    catalog: SkillCatalog,
+) -> tuple[SkillPackageProvider, ...]:
+    return tuple(
+        SkillPackageProvider(skill.source, catalog)
+        for skill_id, skill in sorted(managed.skills.items())
+        if skill.enabled and Path(skill.source).expanduser().resolve().name == skill_id
+    )
+
+
+def _managed_mcp_configs(managed: ManagedConfig) -> dict[str, MCPServerConfig]:
+    configs: dict[str, MCPServerConfig] = {}
+    for server_id, server in managed.mcp_servers.items():
+        command = server.command[0] if server.command else ""
+        args = server.command[1:]
+        configs[server_id] = MCPServerConfig(
+            enabled=server.enabled,
+            transport=server.transport,
+            url=server.url,
+            command=command if command else "",
+            args=tuple(args),
+            working_directory=server.working_directory,
+            inherit_env=server.inherit_env,
+            optional_env=server.optional_env,
+            timeout_seconds=server.timeout_seconds,
+            tools={
+                name: MCPToolPolicyConfig(
+                    effect=ToolEffect(policy.effect),
+                    capabilities=frozenset(
+                        ToolCapability(item) for item in policy.capabilities
+                    ),
+                    risk=ToolRisk(policy.risk),
+                )
+                for name, policy in server.tools.items()
+            },
+        )
+    return configs
+
+
+def _managed_mcp_providers(
+    managed: ManagedConfig,
+    *,
+    secret_root: Path,
+) -> tuple[MCPServerProvider, ...]:
+    return build_mcp_providers(
+        _managed_mcp_configs(managed),
+        secret_root=secret_root,
+    )
+
+
 def build_core_runtime(
     config: AppConfig,
     *,
@@ -261,6 +616,11 @@ def build_core_runtime(
     """Build one Core graph without legacy agents or in-process service fallback."""
 
     paths = RuntimePaths.from_root(config.runtime_root)
+    skill_roots = (
+        builtin_skill_root(),
+        paths.skills,
+        *(paths.resolve(directory) for directory in config.skill_directories),
+    )
     converge_owner_principals(
         paths,
         config.owner_principal_id,
@@ -275,10 +635,28 @@ def build_core_runtime(
         enabled=config.trace_enabled,
     )
     database = paths.data / "assistant.db"
+    config_registry = ConfigRegistry(database)
+    bootstrap_managed = config.managed_config()
+    bootstrap_managed = bootstrap_managed.model_copy(
+        update={"skills": _bootstrap_managed_skills(skill_roots)}
+    )
+    applied_config = config_registry.initialize(
+        bootstrap_managed,
+        actor=config.owner_principal_id,
+    )
+    managed = applied_config.document
+    agent_resolver = AgentDefinitionResolver(
+        managed.agent_system,
+        config_revision_id=applied_config.revision_id,
+    )
+    resolver_holder = {"current": agent_resolver}
+    managed_holder = {"current": managed}
+    model_holder: dict[str, ResolvedModelConfig] = {}
     sessions = RuntimeSessionRepository(database)
     prompt_budget = max(
         256,
-        config.effective_context_window_budget() - config.max_tokens,
+        managed.operational.context_window_budget
+        - managed.operational.max_output_tokens,
     )
     tasks = TaskRepository(
         database,
@@ -297,48 +675,27 @@ def build_core_runtime(
     )
     registry = _build_registry(config, artifacts, memory, episodic)
     skills = SkillCatalog()
-    skill_roots = (
-        builtin_skill_root(),
-        paths.skills,
-        *(paths.resolve(directory) for directory in config.skill_directories),
-    )
-    mcp_providers = build_mcp_providers(
-        config.mcp_servers,
+    skill_providers = _managed_skill_providers(managed, skills)
+    mcp_providers = _managed_mcp_providers(
+        managed,
         secret_root=paths.mcp_secrets,
     )
     mcp_package_providers = build_mcp_package_providers(
         paths.mcp,
-        excluded_ids=frozenset(config.mcp_servers),
+        excluded_ids=frozenset(managed.mcp_servers),
         secret_root=paths.mcp_secrets,
     )
     extensions = ExtensionManager(
         registry,
         (
-            *build_skill_providers(skill_roots, skills),
+            *skill_providers,
             *mcp_providers,
             *mcp_package_providers,
         ),
     )
-
-    primary = provider_factory(config.resolve_model())
-    provider: ModelProviderPort = primary
-    fallback = config.resolve_fallback_model()
-    fallback_provider: HttpModelProvider | None = None
-    if fallback is not None:
-        fallback_provider = provider_factory(fallback)
-        provider = FailoverModelProvider(primary, fallback_provider)
-
-    async def health_probe() -> HealthStatus:
-        primary_health = await primary.health_check()
-        if primary_health.healthy or fallback_provider is None:
-            return primary_health
-        fallback_health = await fallback_provider.health_check()
-        if fallback_health.healthy:
-            return HealthStatus(
-                healthy=True,
-                detail=f"Fallback model available: {fallback_provider.model_alias}",
-            )
-        return HealthStatus(healthy=False, detail="No configured model is available")
+    managed_extension_providers = {
+        "current": (*skill_providers, *mcp_providers)
+    }
 
     tool_step = ToolStep(
         registry,
@@ -356,7 +713,10 @@ def build_core_runtime(
             session_id=request.scope.session_handle,
             run_id=request.turn_id,
             client_request_id=request.client_request_id,
-            model=str(usage.get("provider_model") or primary.model_alias),
+            model=str(
+                usage.get("provider_model")
+                or model_holder["current"].alias
+            ),
             iteration=max(1, int(usage.get("iteration") or 1)),
             prompt_tokens=_usage_integer(usage, "prompt_tokens", "input_tokens"),
             completion_tokens=_usage_integer(
@@ -365,7 +725,7 @@ def build_core_runtime(
             cached_tokens=_cached_usage_tokens(usage),
             finish_reason=str(usage.get("finish_reason") or ""),
             tool_calls=max(0, int(usage.get("tool_calls") or 0)),
-            requested_max_tokens=config.max_tokens,
+            requested_max_tokens=managed.operational.max_output_tokens,
             message_budget=prompt_budget,
             schema_tokens=max(
                 0,
@@ -411,6 +771,7 @@ def build_core_runtime(
         scope: RuntimeScope,
         query: str,
         available_tools: frozenset[str],
+        allowed_skills: frozenset[str],
     ) -> RuntimeTurnContext:
         effective_capabilities = frozenset(
             capability
@@ -455,120 +816,83 @@ def build_core_runtime(
                 query,
                 available_tools=available_tools,
                 capabilities=effective_capabilities,
+                allowed_skills=allowed_skills,
             ),
         )
 
-    runtime = KnoaAgentRuntime(
-        provider,
-        ContextCheckpointRepository(paths.data / "knoa-agent-context.db"),
-        GatewayMCPConnector(capability_gateway),
-        system_prompt=build_system_prompt(),
-        health_probe=health_probe,
-        max_iterations=config.max_iterations,
-        max_tool_calls=config.max_total_tool_calls,
-        max_output_tokens=config.max_tokens,
-        temperature=config.llm_temperature,
-        context_window=config.effective_context_window_budget(),
-    )
     capability_mcp_host = CapabilityMCPHost(
         capability_gateway,
         host=config.capability_mcp_host,
         port=config.capability_mcp_port,
     )
-    runtimes = {"knoa": runtime}
-    reviewer_config = config.agents.get("reviewer_agent")
-    reviewer_model_alias = (
-        config.approval_review.model
-        or (reviewer_config.model if reviewer_config is not None else "")
+    runtimes, _primary, configured_model, reviewer_model_alias = (
+        _build_agent_runtime_set(
+            managed,
+            bootstrap=config,
+            paths=paths,
+            capability_gateway=capability_gateway,
+            provider_factory=provider_factory,
+        )
     )
-    if reviewer_config is not None and reviewer_config.enabled:
-        if not reviewer_model_alias:
-            raise ValueError("Enabled reviewer_agent requires a model")
-        reviewer_provider = provider_factory(config.resolve_model(reviewer_model_alias))
-
-        async def reviewer_health_probe() -> HealthStatus:
-            return await reviewer_provider.health_check()
-
-        runtimes["reviewer_agent"] = KnoaAgentRuntime(
-            reviewer_provider,
-            ContextCheckpointRepository(
-                paths.data / "knoa-reviewer-agent-context.db"
-            ),
-            GatewayMCPConnector(capability_gateway),
-            system_prompt=APPROVAL_REVIEWER_SYSTEM_PROMPT,
-            health_probe=reviewer_health_probe,
-            max_iterations=1,
-            max_tool_calls=1,
-            max_output_tokens=config.approval_review.max_output_tokens,
-            temperature=0.0,
-            context_window=max(
-                512,
-                config.resolve_model(reviewer_model_alias).context_window
-                or config.context_window_budget,
-            ),
-            agent_id="reviewer_agent",
-            display_name="Knoa Reviewer",
-            tool_inventory=ToolInventory(
-                semantic_selector=DisabledToolSelector()
-            ),
-        )
-    codex_config = config.agents.get("codex")
-    if codex_config is not None and codex_config.enabled:
-        codex_state = paths.resolve("agents/codex", default_parent=paths.root)
-        codex_workspace = (
-            paths.resolve(codex_config.cwd, default_parent=paths.root)
-            if codex_config.cwd
-            else codex_state / "workspace"
-        )
-        codex_workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
-        codex_home = (
-            paths.resolve(codex_config.home, default_parent=paths.root)
-            if codex_config.home
-            else None
-        )
-        runtimes["codex"] = CodexAgentRuntime(
-            CodexSessionRepository(codex_state / "sessions.db"),
-            command=codex_config.command,
-            home=codex_home,
-            cwd=codex_workspace,
-            model=codex_config.model,
-            approval_policy=codex_config.approval_policy,
-            sandbox=codex_config.sandbox,
-            request_timeout_seconds=codex_config.request_timeout_seconds,
-            max_line_bytes=codex_config.max_line_bytes,
-            max_event_queue=codex_config.max_event_queue,
-        )
+    model_holder["current"] = configured_model
     agent_manager = AgentManager(
         runtimes,
-        default_agent=config.default_agent,
+        default_agent=managed.agent_system.default_agent,
         enabled={
-            agent_id: config.agents[agent_id].enabled
+            agent_id: managed.agent_system.agents[agent_id].enabled
             for agent_id in runtimes
         },
         max_concurrency={
-            agent_id: config.agents[agent_id].max_concurrency
+            agent_id: agent_resolver.runtime_spec(agent_id).max_concurrency
             for agent_id in runtimes
         },
-        system_agents=frozenset({"reviewer_agent"}) & runtimes.keys(),
+        system_agents=frozenset(
+            agent_id
+            for agent_id in runtimes
+            if agent_resolver.profile(agent_id).visibility == "system"
+        ),
+        generation_ids={
+            agent_id: _agent_generation_id(managed, agent_id)
+            for agent_id in runtimes
+        },
     )
-    approval_reviewer = (
-        KnoaReviewerAgent(
-            agent_manager,
-            capability_gateway,
-            agent_id=config.approval_review.agent,
-            model=reviewer_model_alias,
-            timeout_seconds=config.approval_review.timeout_seconds,
-        )
-        if config.approval_review.mode != "off"
-        else None
+    approval_reviewer = KnoaReviewerAgent(
+        agent_manager,
+        capability_gateway,
+        agent_id=managed.approval_review.agent_id,
+        model=reviewer_model_alias,
+        timeout_seconds=managed.approval_review.timeout_seconds,
     )
     agent_bindings = AgentSessionBindingRepository(database)
+    invocation_policies = InvocationPolicyRepository(database)
+
+    async def record_invocation_policy(request, policy) -> None:
+        await asyncio.to_thread(
+            invocation_policies.record,
+            request.turn_id,
+            request.scope.principal_id,
+            request.scope.session_handle,
+            policy,
+        )
+
+    def invocation_policy_for(turn_id: str):
+        try:
+            return invocation_policies.get(turn_id)
+        except LookupError:
+            return None
+
     agent_execution = AgentExecutionService(
         agent_manager,
         agent_bindings,
         capability_gateway,
         artifacts,
+        resolver_for=lambda: resolver_holder["current"],
         capabilities_for=capabilities_for_scope,
+        installed_skills=lambda: frozenset(
+            package.manifest.id for package in skills.packages
+        ),
+        policy_observer=record_invocation_policy,
+        policy_snapshot_for=invocation_policy_for,
         external_mcp_endpoint=lambda: capability_mcp_host.endpoint,
         usage_observer=observe_usage,
         turn_observer=observe_turn,
@@ -606,9 +930,13 @@ def build_core_runtime(
     task_approvals = DurableApprovalService(
         tasks,
         task_events,
-        reviewer=approval_reviewer,
-        review_mode=ApprovalReviewMode(config.approval_review.mode),
-        auto_max_risk=config.approval_review.auto_max_risk,
+        reviewer=(
+            approval_reviewer
+            if managed.approval_review.mode != "off"
+            else None
+        ),
+        review_mode=ApprovalReviewMode(managed.approval_review.mode),
+        auto_max_risk=managed.approval_review.auto_max_risk,
     )
     task_tool_commits = DurableToolCommitService(tasks)
     task_executor = TaskExecutor(
@@ -638,9 +966,186 @@ def build_core_runtime(
         conversations,
         agent_execution,
         interactions=interactions,
-        approval_reviewer=approval_reviewer,
-        approval_review_mode=ApprovalReviewMode(config.approval_review.mode),
-        approval_auto_max_risk=config.approval_review.auto_max_risk,
+        approval_reviewer=(
+            approval_reviewer
+            if managed.approval_review.mode != "off"
+            else None
+        ),
+        approval_review_mode=ApprovalReviewMode(managed.approval_review.mode),
+        approval_auto_max_risk=managed.approval_review.auto_max_risk,
+    )
+
+    async def preflight_configuration(candidate: ManagedConfig) -> None:
+        try:
+            candidates, _primary, _model, _reviewer_model = (
+                _build_agent_runtime_set(
+                    candidate,
+                    bootstrap=config,
+                    paths=paths,
+                    capability_gateway=capability_gateway,
+                    provider_factory=provider_factory,
+                )
+            )
+            health = await asyncio.gather(
+                *(runtime.health_check() for runtime in candidates.values())
+            )
+            if any(not item.healthy for item in health):
+                raise ConfigApplyError(
+                    "runtime_preflight_failed",
+                    "One or more Agent Runtime generations are unhealthy",
+                )
+            preflight_extensions = ExtensionManager(
+                ToolRegistry(),
+                (
+                    *_managed_skill_providers(candidate, SkillCatalog()),
+                    *_managed_mcp_providers(
+                        candidate,
+                        secret_root=paths.mcp_secrets,
+                    ),
+                ),
+            )
+            await preflight_extensions.start()
+            try:
+                failed = tuple(
+                    status
+                    for status in preflight_extensions.statuses
+                    if status.state.value == "failed"
+                )
+                if failed:
+                    raise ConfigApplyError(
+                        "extension_preflight_failed",
+                        failed[0].detail or "Extension preflight failed",
+                    )
+            finally:
+                await preflight_extensions.stop()
+        except ConfigApplyError:
+            raise
+        except Exception as exc:
+            raise ConfigApplyError(
+                "runtime_preflight_failed",
+                str(exc),
+            ) from exc
+
+    async def apply_configuration(previous, revision) -> None:
+        del previous
+        candidate = revision.document
+        previous_managed_providers = managed_extension_providers["current"]
+        extension_swapped = False
+        try:
+            candidate_runtimes, _new_primary, new_model, reviewer_model = (
+                _build_agent_runtime_set(
+                    candidate,
+                    bootstrap=config,
+                    paths=paths,
+                    capability_gateway=capability_gateway,
+                    provider_factory=provider_factory,
+                )
+            )
+            next_resolver = AgentDefinitionResolver(
+                candidate.agent_system,
+                config_revision_id=revision.revision_id,
+            )
+            next_managed_providers = (
+                *_managed_skill_providers(candidate, skills),
+                *_managed_mcp_providers(
+                    candidate,
+                    secret_root=paths.mcp_secrets,
+                ),
+            )
+            for provider in previous_managed_providers:
+                if isinstance(provider, MCPServerProvider):
+                    await mcp_resource_tasks.remove_provider(provider)
+                await extensions.remove_provider(provider)
+            added_providers = []
+            try:
+                for provider in next_managed_providers:
+                    status = await extensions.add_provider(provider)
+                    if status.state.value == "failed":
+                        raise ConfigApplyError(
+                            "extension_apply_failed",
+                            status.detail or "Extension failed to start",
+                        )
+                    added_providers.append(provider)
+                for provider in next_managed_providers:
+                    if isinstance(provider, MCPServerProvider):
+                        mcp_resource_tasks.add_provider(provider)
+            except Exception:
+                for provider in reversed(added_providers):
+                    if isinstance(provider, MCPServerProvider):
+                        await mcp_resource_tasks.remove_provider(provider)
+                    await extensions.remove_provider(provider)
+                for provider in previous_managed_providers:
+                    await extensions.add_provider(provider)
+                    if isinstance(provider, MCPServerProvider):
+                        mcp_resource_tasks.add_provider(provider)
+                raise
+            managed_extension_providers["current"] = next_managed_providers
+            extension_swapped = True
+            await agent_manager.replace_generations(
+                candidate_runtimes,
+                default_agent=candidate.agent_system.default_agent,
+                enabled={
+                    agent_id: candidate.agent_system.agents[agent_id].enabled
+                    for agent_id in candidate_runtimes
+                },
+                max_concurrency={
+                    agent_id: next_resolver.runtime_spec(agent_id).max_concurrency
+                    for agent_id in candidate_runtimes
+                },
+                system_agents=frozenset(
+                    agent_id
+                    for agent_id in candidate_runtimes
+                    if next_resolver.profile(agent_id).visibility == "system"
+                ),
+                generation_ids={
+                    agent_id: _agent_generation_id(candidate, agent_id)
+                    for agent_id in candidate_runtimes
+                },
+                drain_seconds=candidate.operational.generation_drain_seconds,
+            )
+        except Exception as exc:
+            if extension_swapped:
+                for provider in tuple(managed_extension_providers["current"]):
+                    if isinstance(provider, MCPServerProvider):
+                        await mcp_resource_tasks.remove_provider(provider)
+                    await extensions.remove_provider(provider)
+                for provider in previous_managed_providers:
+                    await extensions.add_provider(provider)
+                    if isinstance(provider, MCPServerProvider):
+                        mcp_resource_tasks.add_provider(provider)
+                managed_extension_providers["current"] = previous_managed_providers
+            raise ConfigApplyError("runtime_apply_failed", str(exc)) from exc
+        resolver_holder["current"] = next_resolver
+        managed_holder["current"] = candidate
+        model_holder["current"] = new_model
+        next_reviewer = KnoaReviewerAgent(
+            agent_manager,
+            capability_gateway,
+            agent_id=candidate.approval_review.agent_id,
+            model=reviewer_model,
+            timeout_seconds=candidate.approval_review.timeout_seconds,
+        )
+        reviewer_port = (
+            next_reviewer if candidate.approval_review.mode != "off" else None
+        )
+        review_mode = ApprovalReviewMode(candidate.approval_review.mode)
+        task_approvals.configure_review(
+            reviewer_port,
+            review_mode,
+            candidate.approval_review.auto_max_risk,
+        )
+        conversation_service.configure_approval_review(
+            reviewer_port,
+            review_mode,
+            candidate.approval_review.auto_max_risk,
+        )
+
+    configuration = ConfigurationService(
+        config_registry,
+        managed,
+        bootstrap_actor=config.owner_principal_id,
+        preflight=preflight_configuration,
+        applier=apply_configuration,
     )
     schedule_dispatcher = ScheduleDispatcher(schedules, task_service)
     schedule_service = ScheduleService(schedules, schedule_dispatcher)
@@ -658,10 +1163,27 @@ def build_core_runtime(
         extensions,
         mcp_resource_tasks,
         mcp_package_providers,
-        reserved_ids=frozenset(config.mcp_servers),
+        reserved_ids=frozenset(managed.mcp_servers),
         secret_root=paths.mcp_secrets,
     )
     registry.register(MCPDeployTool(mcp_packages))
+    delegation_repository = DelegationRepository(database)
+    delegations = DelegationService(
+        delegation_repository,
+        invocation_policies,
+        sessions,
+        task_service,
+        tasks,
+        conversations,
+        capability_gateway,
+        resolver_for=lambda: resolver_holder["current"],
+        capabilities_for=capabilities_for_scope,
+        installed_skills=lambda: frozenset(
+            package.manifest.id for package in skills.packages
+        ),
+    )
+    registry.register(SpawnSubagentTool(delegations))
+    registry.register(SubagentTool(delegations))
     registry.register(
         CreateTaskTool(sessions, task_service, schedule_service, trigger_service)
     )
@@ -673,12 +1195,7 @@ def build_core_runtime(
             trigger_service,
         )
     )
-    config_path = (
-        Path(config.source_config_path).expanduser().resolve()
-        if config.source_config_path
-        else paths.config / "local.yaml"
-    )
-    config_controller = PersistentConfigController(config, config_path)
+    config_controller = ConfigurationController(configuration)
     mcp_onboarding = MCPOnboardingService(
         extensions,
         config_controller,
@@ -690,7 +1207,7 @@ def build_core_runtime(
     registry.register(MCPDisableTool(mcp_onboarding))
 
     def status_details(scope: RuntimeScope) -> dict[str, object]:
-        configured_model = config.resolve_model()
+        configured_model = model_holder["current"]
         llm = llm_traces.session_totals(
             scope.principal_id,
             scope.session_handle,
@@ -756,6 +1273,27 @@ def build_core_runtime(
     credentials = {local_token: config.owner_principal_id}
     if config.service_token.strip():
         credentials[config.service_token.strip()] = "remote"
+
+    async def preview_invocation_policy(principal_id: str, request):
+        scope = RuntimeScope(principal_id=principal_id, session_handle="preview")
+        principal_capabilities = capabilities_for_scope(scope)
+        return resolver_holder["current"].resolve_policy(
+            request.agent_id,
+            invocation_kind=request.invocation_kind,
+            caller_id=request.caller_id or principal_id,
+            principal_capabilities=frozenset(
+                capability.value for capability in principal_capabilities
+            ),
+            available_tools=capability_gateway.available_tool_names(
+                principal_capabilities
+            ),
+            installed_skills=frozenset(
+                package.manifest.id for package in skills.packages
+            ),
+            requested_tools=request.requested_tools,
+            requested_skills=request.requested_skills,
+        )
+
     tcp_server = CoreServer(
         task_service,
         schedule_service,
@@ -772,6 +1310,9 @@ def build_core_runtime(
         mcp_packages=mcp_packages,
         sessions=sessions,
         owner_principal_id=config.owner_principal_id,
+        configuration=configuration,
+        generation_states=agent_manager.generation_state,
+        policy_preview=preview_invocation_policy,
     )
     host = CoreServiceHost(
         tcp=TcpCoreEndpoint(
@@ -797,10 +1338,12 @@ def build_core_runtime(
         memory=memory_repository,
         artifacts=artifacts,
         registry=registry,
-        runtime=runtime,
         agent_manager=agent_manager,
         agent_execution=agent_execution,
         agent_bindings=agent_bindings,
+        invocation_policies=invocation_policies,
+        delegation_repository=delegation_repository,
+        delegations=delegations,
         capability_gateway=capability_gateway,
         capability_mcp_host=capability_mcp_host,
         control=control,
@@ -812,5 +1355,7 @@ def build_core_runtime(
         mcp_resource_tasks=mcp_resource_tasks,
         mcp_packages=mcp_packages,
         skills=skills,
+        config_registry=config_registry,
+        configuration=configuration,
         host=host,
     )

@@ -33,6 +33,7 @@ from knoa_platform.tasks.models import (
     TERMINAL_TASK_STATES,
     TaskRecord,
     TaskEventPayload,
+    TaskOrigin,
     TaskState,
     TaskTraceEntry,
 )
@@ -267,6 +268,11 @@ class TaskExecutor:
                     attachments=task.attachments,
                     tools_enabled=task.tools_enabled,
                     cancellation=cancellation,
+                    invocation_kind=(
+                        "delegate"
+                        if task.origin is TaskOrigin.AGENT
+                        else "user"
+                    ),
                     agent_id=await asyncio.to_thread(
                         self._sessions.agent_id, scope
                     ),

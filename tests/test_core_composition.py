@@ -20,6 +20,7 @@ from knoa_platform.agent_runtime.contracts import (
 from knoa_platform.agent_runtime.model_step import ProviderChunk
 from knoa_platform.agents import ExecuteAgentTurn
 from knoa_platform.config import AppConfig
+from knoa_platform.configuration import ManagedSkillConfig
 from knoa_platform.runtime import RuntimePaths
 from knoa_platform.service.core_client import CoreClient
 from knoa_platform.service.credentials import (
@@ -214,6 +215,108 @@ def test_core_composition_builds_forward_only_registry_and_profiles(
     assert "schedule_task" not in local
 
 
+@pytest.mark.asyncio
+async def test_managed_skill_publish_is_hot_and_preserves_agent_generation(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "hot_skill"
+    package.mkdir()
+    (package / "instructions.md").write_text(
+        "Use the hot-loaded instructions.",
+        encoding="utf-8",
+    )
+    (package / "skill.yaml").write_text(
+        "\n".join(
+            (
+                "id: hot_skill",
+                "version: 1.0.0",
+                "name: Hot Skill",
+                "description: Hot-loaded test skill",
+                "instructions: instructions.md",
+                "triggers: [hot reload]",
+                "required_tools: []",
+                "required_capabilities: []",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    composition = build_core_runtime(
+        _config(tmp_path, service_port=0),
+        provider_factory=_OfflineProvider,
+    )
+    await composition.extensions.start()
+    try:
+        before_generations = {
+            item.agent_id: item.active_generation
+            for item in composition.agent_manager.generation_state()
+        }
+        current = composition.configuration.current().document
+        candidate = current.model_copy(
+            update={
+                "skills": {
+                    **current.skills,
+                    "hot_skill": ManagedSkillConfig(source=str(package)),
+                }
+            }
+        )
+        draft = composition.configuration.create_draft(actor="personal:owner")
+        draft = composition.configuration.replace_draft(
+            draft.draft_id,
+            candidate,
+            expected_version=draft.draft_version,
+            actor="personal:owner",
+        )
+
+        result = await composition.configuration.publish(
+            draft.draft_id,
+            expected_version=draft.draft_version,
+            actor="personal:owner",
+            summary="Enable hot Skill",
+        )
+
+        assert result.state.applied_revision_id == result.revision.revision_id
+        assert "hot_skill" in {
+            item.manifest.id for item in composition.skills.packages
+        }
+        assert {
+            item.agent_id: item.active_generation
+            for item in composition.agent_manager.generation_state()
+        } == before_generations
+
+        current = composition.configuration.current().document
+        disabled = current.model_copy(
+            update={
+                "skills": {
+                    **current.skills,
+                    "hot_skill": current.skills["hot_skill"].model_copy(
+                        update={"enabled": False}
+                    ),
+                }
+            }
+        )
+        draft = composition.configuration.create_draft(actor="personal:owner")
+        draft = composition.configuration.replace_draft(
+            draft.draft_id,
+            disabled,
+            expected_version=draft.draft_version,
+            actor="personal:owner",
+        )
+        result = await composition.configuration.publish(
+            draft.draft_id,
+            expected_version=draft.draft_version,
+            actor="personal:owner",
+            summary="Disable hot Skill",
+        )
+
+        assert result.state.applied_revision_id == result.revision.revision_id
+        assert "hot_skill" not in {
+            item.manifest.id for item in composition.skills.packages
+        }
+    finally:
+        await composition.extensions.stop()
+
+
 def test_builtin_agent_tool_contracts_are_english_only(tmp_path: Path) -> None:
     composition = build_core_runtime(
         _config(tmp_path, service_port=0),
@@ -240,16 +343,21 @@ def test_builtin_agent_tool_contracts_are_english_only(tmp_path: Path) -> None:
 def test_codex_uses_private_neutral_workspace_when_cwd_is_empty(
     tmp_path: Path,
 ) -> None:
+    base = _config(tmp_path, service_port=0)
     composition = build_core_runtime(
-        _config(
-            tmp_path,
-            service_port=0,
-            agents={
-                "knoa": {"enabled": True},
-                "codex": {
-                    "enabled": True,
-                    "command": ["codex", "app-server"],
-                    "cwd": "",
+        base.model_copy(
+            update={
+                "agent_definitions": {
+                    **base.agent_definitions,
+                    "codex": base.agent_definitions["codex"].model_copy(
+                        update={"enabled": True}
+                    ),
+                },
+                "runtime_specs": {
+                    **base.runtime_specs,
+                    "codex-default": base.runtime_specs["codex-default"].model_copy(
+                        update={"cwd": ""}
+                    ),
                 },
             },
         ),
@@ -548,7 +656,7 @@ async def test_new_session_status_uses_configured_model_alias(tmp_path: Path) ->
     status = await composition.control.get_status(scope)
 
     assert status.status == "ready"
-    assert status.details["model"] == "default"
+    assert status.details["model"] == "bootstrap_default"
     assert status.details["model_calls"] == 0
     assert status.details["total_tokens"] == 0
 

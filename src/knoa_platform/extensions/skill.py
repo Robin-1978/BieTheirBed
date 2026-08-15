@@ -204,11 +204,14 @@ class SkillCatalog:
         *,
         available_tools: frozenset[str],
         capabilities: frozenset[ToolCapability],
+        allowed_skills: frozenset[str],
     ) -> str:
         normalized = query.casefold()
         selected: list[tuple[int, SkillPackage]] = []
         for package in self.packages:
             manifest = package.manifest
+            if manifest.id not in allowed_skills:
+                continue
             hits = sum(1 for trigger in manifest.triggers if trigger in normalized)
             if not hits:
                 continue

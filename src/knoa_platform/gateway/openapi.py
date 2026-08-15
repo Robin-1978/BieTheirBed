@@ -23,6 +23,13 @@ from knoa_platform.gateway.protocol import (
     ChatApprovalResolvedResponse,
     ChatTurnListResponse,
     ChatTurnResponse,
+    ConfigCurrentResponse,
+    ConfigDiffResponse,
+    ConfigDraftResponse,
+    ConfigHistoryResponse,
+    ConfigPublishResponse,
+    ConfigRevisionResponse,
+    ConfigValidationResponse,
     ConversationSessionListResponse,
     ConversationSessionResponse,
     ContinueProductTaskRequest,
@@ -43,6 +50,11 @@ from knoa_platform.gateway.protocol import (
     ProductTaskResponse,
     ResolveApprovalRequest,
     ResolveHumanInteractionRequest,
+    PreviewInvocationPolicyRequest,
+    PublishConfigDraftRequest,
+    ReplaceConfigDraftRequest,
+    RollbackConfigRequest,
+    InvocationPolicyPreviewResponse,
     ResumeTaskRequest,
     RuntimeStatusResponse,
     SessionCreatedResponse,
@@ -99,6 +111,18 @@ _MODELS: tuple[type[BaseModel], ...] = (
     RuntimeStatusResponse,
     ToolListResponse,
     MCPResourceCatalogResponse,
+    ConfigCurrentResponse,
+    ConfigHistoryResponse,
+    ConfigRevisionResponse,
+    ConfigDraftResponse,
+    ConfigValidationResponse,
+    ConfigPublishResponse,
+    ConfigDiffResponse,
+    InvocationPolicyPreviewResponse,
+    ReplaceConfigDraftRequest,
+    PublishConfigDraftRequest,
+    RollbackConfigRequest,
+    PreviewInvocationPolicyRequest,
 )
 
 
@@ -229,6 +253,97 @@ def gateway_openapi_schema() -> dict[str, Any]:
                         "200": _json_response("Enabled Agents", AgentListResponse),
                         **_errors("401", "429"),
                     },
+                }
+            },
+            "/v1/config/current": {
+                "get": {
+                    "operationId": "getConfigCurrent",
+                    "security": bearer,
+                    "responses": {"200": _json_response("Current configuration", ConfigCurrentResponse), **_errors("401", "403", "429", "503")},
+                }
+            },
+            "/v1/config/history": {
+                "get": {
+                    "operationId": "getConfigHistory",
+                    "security": bearer,
+                    "parameters": [_query("limit", {"type": "integer", "minimum": 1, "maximum": 200})],
+                    "responses": {"200": _json_response("Configuration history", ConfigHistoryResponse), **_errors("400", "401", "403", "429", "503")},
+                }
+            },
+            "/v1/config/revisions/{revision_id}": {
+                "get": {
+                    "operationId": "getConfigRevision",
+                    "security": bearer,
+                    "parameters": [{"name": "revision_id", "in": "path", "required": True, "schema": {"type": "string", "maxLength": 128}}],
+                    "responses": {"200": _json_response("Configuration revision", ConfigRevisionResponse), **_errors("400", "401", "403", "404", "429", "503")},
+                }
+            },
+            "/v1/config/drafts": {
+                "post": {
+                    "operationId": "createConfigDraft",
+                    "security": bearer,
+                    "responses": {"201": _json_response("Configuration draft", ConfigDraftResponse), **_errors("401", "403", "429", "503")},
+                }
+            },
+            "/v1/config/drafts/{draft_id}": {
+                "get": {
+                    "operationId": "getConfigDraft",
+                    "security": bearer,
+                    "parameters": [{"name": "draft_id", "in": "path", "required": True, "schema": {"type": "string", "maxLength": 128}}],
+                    "responses": {"200": _json_response("Configuration draft", ConfigDraftResponse), **_errors("400", "401", "403", "404", "429", "503")},
+                },
+                "put": {
+                    "operationId": "replaceConfigDraft",
+                    "security": bearer,
+                    "parameters": [{"name": "draft_id", "in": "path", "required": True, "schema": {"type": "string", "maxLength": 128}}],
+                    "requestBody": _json_body(ReplaceConfigDraftRequest),
+                    "responses": {"200": _json_response("Updated configuration draft", ConfigDraftResponse), **_errors("400", "401", "403", "409", "413", "415", "429", "503")},
+                },
+            },
+            "/v1/config/drafts/{draft_id}/validate": {
+                "post": {
+                    "operationId": "validateConfigDraft",
+                    "security": bearer,
+                    "responses": {"200": _json_response("Configuration validation", ConfigValidationResponse), **_errors("400", "401", "403", "404", "429", "503")},
+                }
+            },
+            "/v1/config/drafts/{draft_id}/preflight": {
+                "post": {
+                    "operationId": "preflightConfigDraft",
+                    "security": bearer,
+                    "responses": {"200": _json_response("Configuration preflight", ConfigValidationResponse), **_errors("400", "401", "403", "404", "429", "503")},
+                }
+            },
+            "/v1/config/drafts/{draft_id}/publish": {
+                "post": {
+                    "operationId": "publishConfigDraft",
+                    "security": bearer,
+                    "requestBody": _json_body(PublishConfigDraftRequest),
+                    "responses": {"200": _json_response("Published configuration", ConfigPublishResponse), **_errors("400", "401", "403", "404", "409", "415", "422", "429", "503")},
+                }
+            },
+            "/v1/config/rollback": {
+                "post": {
+                    "operationId": "rollbackConfig",
+                    "security": bearer,
+                    "requestBody": _json_body(RollbackConfigRequest),
+                    "responses": {"200": _json_response("Rolled back configuration", ConfigPublishResponse), **_errors("400", "401", "403", "404", "415", "422", "429", "503")},
+                }
+            },
+            "/v1/config/diff": {
+                "get": {
+                    "operationId": "diffConfigRevisions",
+                    "security": bearer,
+                    "parameters": [_query("from_revision_id", {"type": "string", "maxLength": 128}, required=True), _query("to_revision_id", {"type": "string", "maxLength": 128}, required=True)],
+                    "responses": {"200": _json_response("Configuration diff", ConfigDiffResponse), **_errors("400", "401", "403", "404", "429", "503")},
+                }
+            },
+            "/v1/config/policy-preview": {
+                "post": {
+                    "operationId": "previewInvocationPolicy",
+                    "security": bearer,
+                    "requestBody": _json_body(PreviewInvocationPolicyRequest),
+                    "responses": {"200": _json_response("Effective invocation policy", InvocationPolicyPreviewResponse), **_errors("400", "401", "403", "415", "422", "429", "503")},
                 }
             },
             "/v1/mcp/resources": {

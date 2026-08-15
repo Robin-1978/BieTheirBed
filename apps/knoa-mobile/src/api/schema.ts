@@ -116,6 +116,182 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/config/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getConfigCurrent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/config/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getConfigHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/config/revisions/{revision_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getConfigRevision"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/config/drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createConfigDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/config/drafts/{draft_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getConfigDraft"];
+        put: operations["replaceConfigDraft"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/config/drafts/{draft_id}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["validateConfigDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/config/drafts/{draft_id}/preflight": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["preflightConfigDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/config/drafts/{draft_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["publishConfigDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/config/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["rollbackConfig"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/config/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["diffConfigRevisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/config/policy-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["previewInvocationPolicy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mcp/resources": {
         parameters: {
             query?: never;
@@ -712,6 +888,18 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AgentDefinition */
+        AgentDefinition: {
+            /** Runtime Spec Id */
+            runtime_spec_id: string;
+            /** Profile Id */
+            profile_id: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+        };
         /** AgentListResponse */
         AgentListResponse: {
             /** Default Agent */
@@ -719,12 +907,82 @@ export interface components {
             /** Agents */
             agents: components["schemas"]["AgentSummary"][];
         };
+        /** AgentProfile */
+        AgentProfile: {
+            /** Display Name */
+            display_name: string;
+            /**
+             * Instructions
+             * @default
+             */
+            instructions: string;
+            /**
+             * Instructions Ref
+             * @default
+             */
+            instructions_ref: string;
+            /**
+             * Instructions Required
+             * @default true
+             */
+            instructions_required: boolean;
+            /**
+             * Default Skills
+             * @default []
+             */
+            default_skills: string[];
+            /**
+             * Allowed Platform Tools
+             * @default []
+             */
+            allowed_platform_tools: string[];
+            /**
+             * Platform Capability Ceiling
+             * @default []
+             */
+            platform_capability_ceiling: string[];
+            /**
+             * Runtime Native Capability Ceiling
+             * @default []
+             */
+            runtime_native_capability_ceiling: ("workspace_read" | "workspace_write" | "command_execution" | "native_file_edit")[];
+            runtime_limits?: components["schemas"]["RuntimeProfileLimits"];
+            delegation?: components["schemas"]["DelegationPolicy"];
+            /**
+             * Visibility
+             * @default delegate
+             * @enum {string}
+             */
+            visibility: "user" | "delegate" | "system";
+            /**
+             * Callable By
+             * @default []
+             */
+            callable_by: string[];
+        };
         /** AgentSummary */
         AgentSummary: {
             /** Agent Id */
             agent_id: string;
             /** Display Name */
             display_name: string;
+        };
+        /** AgentSystemConfig */
+        AgentSystemConfig: {
+            /** Runtime Specs */
+            runtime_specs: {
+                [key: string]: components["schemas"]["RuntimeSpec"];
+            };
+            /** Profiles */
+            profiles: {
+                [key: string]: components["schemas"]["AgentProfile"];
+            };
+            /** Agents */
+            agents: {
+                [key: string]: components["schemas"]["AgentDefinition"];
+            };
+            /** Default Agent */
+            default_agent: string;
         };
         /** AndroidReleaseResponse */
         AndroidReleaseResponse: {
@@ -1114,6 +1372,126 @@ export interface components {
          * @enum {string}
          */
         ChatTurnState: "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
+        /** ConfigControlState */
+        ConfigControlState: {
+            /** Desired Revision Id */
+            desired_revision_id: string;
+            /** Applied Revision Id */
+            applied_revision_id: string;
+            /**
+             * Apply Status
+             * @default idle
+             * @enum {string}
+             */
+            apply_status: "idle" | "applying" | "failed";
+            /**
+             * Apply Error Code
+             * @default
+             */
+            apply_error_code: string;
+            /** Updated At */
+            updated_at: number;
+        };
+        /** ConfigCurrentResponse */
+        ConfigCurrentResponse: {
+            revision: components["schemas"]["ConfigRevision"];
+            state: components["schemas"]["ConfigControlState"];
+            /**
+             * Generations
+             * @default []
+             */
+            generations: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** ConfigDiffResponse */
+        ConfigDiffResponse: {
+            /** Changes */
+            changes: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** ConfigDraft */
+        ConfigDraft: {
+            /** Draft Id */
+            draft_id: string;
+            /** Base Revision Id */
+            base_revision_id: string;
+            document: components["schemas"]["ManagedConfig"];
+            /** Draft Version */
+            draft_version: number;
+            /** Updated By */
+            updated_by: string;
+            /** Updated At */
+            updated_at: number;
+        };
+        /** ConfigDraftResponse */
+        ConfigDraftResponse: {
+            draft: components["schemas"]["ConfigDraft"];
+        };
+        /** ConfigHistoryResponse */
+        ConfigHistoryResponse: {
+            /** Revisions */
+            revisions: components["schemas"]["ConfigRevision"][];
+        };
+        /** ConfigPublishResponse */
+        ConfigPublishResponse: {
+            result: components["schemas"]["ConfigPublishResult"];
+        };
+        /** ConfigPublishResult */
+        ConfigPublishResult: {
+            revision: components["schemas"]["ConfigRevision"];
+            state: components["schemas"]["ConfigControlState"];
+        };
+        /** ConfigRevision */
+        ConfigRevision: {
+            /** Revision Id */
+            revision_id: string;
+            /**
+             * Parent Revision Id
+             * @default
+             */
+            parent_revision_id: string;
+            document: components["schemas"]["ManagedConfig"];
+            /** Config Digest */
+            config_digest: string;
+            /**
+             * Change Summary
+             * @default
+             */
+            change_summary: string;
+            /** Created By */
+            created_by: string;
+            /** Created At */
+            created_at: number;
+        };
+        /** ConfigRevisionResponse */
+        ConfigRevisionResponse: {
+            revision: components["schemas"]["ConfigRevision"];
+        };
+        /** ConfigValidationIssue */
+        ConfigValidationIssue: {
+            /** Code */
+            code: string;
+            /** Path */
+            path: string;
+            /** Message */
+            message: string;
+        };
+        /** ConfigValidationResponse */
+        ConfigValidationResponse: {
+            result: components["schemas"]["ConfigValidationResult"];
+        };
+        /** ConfigValidationResult */
+        ConfigValidationResult: {
+            /** Valid */
+            valid: boolean;
+            /**
+             * Issues
+             * @default []
+             */
+            issues: components["schemas"]["ConfigValidationIssue"][];
+        };
         /** ContinueProductTaskRequest */
         ContinueProductTaskRequest: {
             /** Client Request Id */
@@ -1232,6 +1610,39 @@ export interface components {
              * @default null
              */
             agent_id: string | null;
+        };
+        /** DelegationPolicy */
+        DelegationPolicy: {
+            /**
+             * Allowed
+             * @default false
+             */
+            allowed: boolean;
+            /**
+             * Targets
+             * @default []
+             */
+            targets: string[];
+            /**
+             * Max Depth
+             * @default 0
+             */
+            max_depth: number;
+            /**
+             * Max Children
+             * @default 0
+             */
+            max_children: number;
+            /**
+             * Max Parallel Children
+             * @default 0
+             */
+            max_parallel_children: number;
+            /**
+             * Max Deadline Seconds
+             * @default 0
+             */
+            max_deadline_seconds: number;
         };
         /** DeletedResponse */
         DeletedResponse: {
@@ -1352,6 +1763,38 @@ export interface components {
              */
             expires_at: number | null;
         };
+        /** InvocationLimits */
+        InvocationLimits: {
+            /**
+             * Deadline Seconds
+             * @default 120
+             */
+            deadline_seconds: number;
+            /**
+             * Max Gateway Tool Calls
+             * @default 50
+             */
+            max_gateway_tool_calls: number;
+            /**
+             * Max Artifact Bytes
+             * @default 33554432
+             */
+            max_artifact_bytes: number;
+            /**
+             * Max Children
+             * @default 0
+             */
+            max_children: number;
+            /**
+             * Max Parallel Children
+             * @default 0
+             */
+            max_parallel_children: number;
+        };
+        /** InvocationPolicyPreviewResponse */
+        InvocationPolicyPreviewResponse: {
+            policy: components["schemas"]["ResolvedInvocationPolicy"];
+        };
         /**
          * MCPResourceCatalogRecord
          * @description A discovered, read-only MCP Resource exposed to client configuration UIs.
@@ -1394,6 +1837,281 @@ export interface components {
              */
             resources: components["schemas"]["MCPResourceCatalogRecord"][];
         };
+        /** ManagedApprovalReviewConfig */
+        ManagedApprovalReviewConfig: {
+            /**
+             * Mode
+             * @default off
+             * @enum {string}
+             */
+            mode: "off" | "suggest" | "auto";
+            /**
+             * Agent Id
+             * @default reviewer_agent
+             */
+            agent_id: string;
+            /**
+             * Timeout Seconds
+             * @default 60
+             */
+            timeout_seconds: number;
+            /**
+             * Max Output Tokens
+             * @default 4096
+             */
+            max_output_tokens: number;
+            /**
+             * Auto Max Risk
+             * @default medium
+             * @enum {string}
+             */
+            auto_max_risk: "low" | "medium";
+        };
+        /** ManagedConfig */
+        ManagedConfig: {
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /** Providers */
+            providers: {
+                [key: string]: components["schemas"]["ManagedProviderConfig"];
+            };
+            /** Models */
+            models: {
+                [key: string]: components["schemas"]["ManagedModelConfig"];
+            };
+            /** Default Model */
+            default_model: string;
+            /**
+             * Fallback Model
+             * @default
+             */
+            fallback_model: string;
+            /**
+             * Fallback Enabled
+             * @default true
+             */
+            fallback_enabled: boolean;
+            agent_system: components["schemas"]["AgentSystemConfig"];
+            approval_review?: components["schemas"]["ManagedApprovalReviewConfig"];
+            /** Skills */
+            skills?: {
+                [key: string]: components["schemas"]["ManagedSkillConfig"];
+            };
+            /** Mcp Servers */
+            mcp_servers?: {
+                [key: string]: components["schemas"]["ManagedMCPConfig"];
+            };
+            operational?: components["schemas"]["ManagedOperationalConfig"];
+        };
+        /** ManagedMCPConfig */
+        ManagedMCPConfig: {
+            /**
+             * Transport
+             * @enum {string}
+             */
+            transport: "stdio" | "streamable_http";
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Command
+             * @default []
+             */
+            command: string[];
+            /**
+             * Url
+             * @default
+             */
+            url: string;
+            /**
+             * Working Directory
+             * @default
+             */
+            working_directory: string;
+            /**
+             * Inherit Env
+             * @default []
+             */
+            inherit_env: string[];
+            /**
+             * Optional Env
+             * @default []
+             */
+            optional_env: string[];
+            /** Secret Refs */
+            secret_refs?: {
+                [key: string]: string;
+            };
+            /**
+             * Timeout Seconds
+             * @default 30
+             */
+            timeout_seconds: number;
+            /** Tools */
+            tools?: {
+                [key: string]: components["schemas"]["ManagedMCPToolPolicyConfig"];
+            };
+        };
+        /** ManagedMCPToolPolicyConfig */
+        ManagedMCPToolPolicyConfig: {
+            /**
+             * Effect
+             * @enum {string}
+             */
+            effect: "read_only" | "internal_write" | "local_write" | "external_side_effect" | "desktop_control";
+            /**
+             * Capabilities
+             * @default []
+             */
+            capabilities: ("host_read" | "host_write" | "shell" | "network" | "desktop_observe" | "desktop_control" | "memory_read" | "memory_write" | "mcp" | "task_management")[];
+            /**
+             * Risk
+             * @enum {string}
+             */
+            risk: "low" | "medium" | "high";
+        };
+        /** ManagedModelConfig */
+        ManagedModelConfig: {
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /**
+             * Supports Vision
+             * @default null
+             */
+            supports_vision: boolean | null;
+            /**
+             * Context Window
+             * @default null
+             */
+            context_window: number | null;
+            /**
+             * Thinking
+             * @default null
+             */
+            thinking: ("enabled" | "disabled" | "auto") | null;
+        };
+        /** ManagedOperationalConfig */
+        ManagedOperationalConfig: {
+            /**
+             * Llm Temperature
+             * @default 0.7
+             */
+            llm_temperature: number;
+            /**
+             * Max Iterations
+             * @default 32
+             */
+            max_iterations: number;
+            /**
+             * Max Total Tool Calls
+             * @default 50
+             */
+            max_total_tool_calls: number;
+            /**
+             * Max Output Tokens
+             * @default 4096
+             */
+            max_output_tokens: number;
+            /**
+             * Context Window Budget
+             * @default 8192
+             */
+            context_window_budget: number;
+            /**
+             * Task Capacity
+             * @default 128
+             */
+            task_capacity: number;
+            /**
+             * Principal Task Capacity
+             * @default 32
+             */
+            principal_task_capacity: number;
+            /**
+             * Generation Drain Seconds
+             * @default 120
+             */
+            generation_drain_seconds: number;
+        };
+        /** ManagedProviderConfig */
+        ManagedProviderConfig: {
+            /**
+             * Driver
+             * @enum {string}
+             */
+            driver: "llamacpp" | "openai" | "openai_compatible" | "anthropic";
+            /**
+             * Server Url
+             * @default
+             */
+            server_url: string;
+            /**
+             * Api Base
+             * @default
+             */
+            api_base: string;
+            /**
+             * Api Key Ref
+             * @default
+             */
+            api_key_ref: string;
+            /**
+             * Api Key Env
+             * @default
+             */
+            api_key_env: string;
+            /**
+             * Requires Api Key
+             * @default null
+             */
+            requires_api_key: boolean | null;
+            /**
+             * Timeout Seconds
+             * @default 120
+             */
+            timeout_seconds: number;
+        };
+        /** ManagedSkillConfig */
+        ManagedSkillConfig: {
+            /** Source */
+            source: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Content Digest
+             * @default
+             */
+            content_digest: string;
+        };
+        /** ModelBindingSpec */
+        ModelBindingSpec: {
+            /**
+             * Ownership
+             * @enum {string}
+             */
+            ownership: "platform" | "runtime";
+            /**
+             * Model
+             * @default
+             */
+            model: string;
+            /**
+             * Hint
+             * @default
+             */
+            hint: string;
+        };
         /** PairChallengeRequest */
         PairChallengeRequest: {
             /** Grant Id */
@@ -1430,6 +2148,32 @@ export interface components {
              * @default
              */
             reason: string;
+        };
+        /** PreviewInvocationPolicyRequest */
+        PreviewInvocationPolicyRequest: {
+            /** Agent Id */
+            agent_id: string;
+            /**
+             * Invocation Kind
+             * @default user
+             * @enum {string}
+             */
+            invocation_kind: "user" | "delegate" | "system";
+            /**
+             * Caller Id
+             * @default
+             */
+            caller_id: string;
+            /**
+             * Requested Tools
+             * @default null
+             */
+            requested_tools: string[] | null;
+            /**
+             * Requested Skills
+             * @default null
+             */
+            requested_skills: string[] | null;
         };
         /** ProductTaskExecutionListResponse */
         ProductTaskExecutionListResponse: {
@@ -1586,6 +2330,22 @@ export interface components {
             /** Updated At */
             updated_at: number;
         };
+        /** PublishConfigDraftRequest */
+        PublishConfigDraftRequest: {
+            /** Expected Version */
+            expected_version: number;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+        };
+        /** ReplaceConfigDraftRequest */
+        ReplaceConfigDraftRequest: {
+            document: components["schemas"]["ManagedConfig"];
+            /** Expected Version */
+            expected_version: number;
+        };
         /** ResolveApprovalRequest */
         ResolveApprovalRequest: {
             /** Approved */
@@ -1595,6 +2355,58 @@ export interface components {
         ResolveHumanInteractionRequest: {
             /** Value */
             value: unknown;
+        };
+        /** ResolvedInvocationPolicy */
+        ResolvedInvocationPolicy: {
+            /** Agent Id */
+            agent_id: string;
+            /** Agent Definition Digest */
+            agent_definition_digest: string;
+            /** Runtime Spec Digest */
+            runtime_spec_digest: string;
+            /** Profile Digest */
+            profile_digest: string;
+            /**
+             * Invocation Kind
+             * @enum {string}
+             */
+            invocation_kind: "user" | "delegate" | "system";
+            /** Caller Id */
+            caller_id: string;
+            /** Platform Capabilities */
+            platform_capabilities: string[];
+            /** Allowed Platform Tools */
+            allowed_platform_tools: string[];
+            /** Allowed Skills */
+            allowed_skills: string[];
+            /** Runtime Native Capabilities */
+            runtime_native_capabilities: ("workspace_read" | "workspace_write" | "command_execution" | "native_file_edit")[];
+            /**
+             * Delegation Targets
+             * @default []
+             */
+            delegation_targets: string[];
+            /**
+             * Delegation Max Depth
+             * @default 0
+             */
+            delegation_max_depth: number;
+            /**
+             * Delegation Max Deadline Seconds
+             * @default 0
+             */
+            delegation_max_deadline_seconds: number;
+            /**
+             * Artifact Ids
+             * @default []
+             */
+            artifact_ids: string[];
+            limits?: components["schemas"]["InvocationLimits"];
+            /**
+             * Config Revision Id
+             * @default
+             */
+            config_revision_id: string;
         };
         /** ResumeTaskRequest */
         ResumeTaskRequest: {
@@ -1608,6 +2420,96 @@ export interface components {
              * @default false
              */
             acknowledge_outcome_unknown: boolean;
+        };
+        /** RollbackConfigRequest */
+        RollbackConfigRequest: {
+            /** Revision Id */
+            revision_id: string;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+        };
+        /** RuntimeProfileLimits */
+        RuntimeProfileLimits: {
+            /**
+             * Max Iterations
+             * @default null
+             */
+            max_iterations: number | null;
+            /**
+             * Max Output Tokens
+             * @default null
+             */
+            max_output_tokens: number | null;
+        };
+        /** RuntimeSpec */
+        RuntimeSpec: {
+            /**
+             * Implementation
+             * @enum {string}
+             */
+            implementation: "native" | "codex";
+            model_binding: components["schemas"]["ModelBindingSpec"];
+            /**
+             * Max Concurrency
+             * @default 1
+             */
+            max_concurrency: number;
+            /**
+             * Command
+             * @default []
+             */
+            command: string[];
+            /**
+             * Home
+             * @default
+             */
+            home: string;
+            /**
+             * Cwd
+             * @default
+             */
+            cwd: string;
+            /**
+             * Sandbox
+             * @default read-only
+             * @enum {string}
+             */
+            sandbox: "read-only" | "workspace-write";
+            /**
+             * Approval Policy
+             * @default never
+             * @enum {string}
+             */
+            approval_policy: "untrusted" | "on-request" | "never";
+            /**
+             * Native Capabilities
+             * @default []
+             */
+            native_capabilities: ("workspace_read" | "workspace_write" | "command_execution" | "native_file_edit")[];
+            /**
+             * Instruction Authority
+             * @default supported
+             * @enum {string}
+             */
+            instruction_authority: "required" | "supported" | "none";
+            /**
+             * Request Timeout Seconds
+             * @default 120
+             */
+            request_timeout_seconds: number;
+            /**
+             * Max Line Bytes
+             * @default 4194304
+             */
+            max_line_bytes: number;
+            /**
+             * Max Event Queue
+             * @default 1024
+             */
+            max_event_queue: number;
         };
         /** RuntimeStatus */
         RuntimeStatus: {
@@ -2354,6 +3256,948 @@ export interface operations {
             };
             /** @description Request rejected */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getConfigCurrent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigCurrentResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getConfigHistory: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Configuration history */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigHistoryResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getConfigRevision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                revision_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Configuration revision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigRevisionResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    createConfigDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Configuration draft */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigDraftResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getConfigDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                draft_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Configuration draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigDraftResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    replaceConfigDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                draft_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplaceConfigDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated configuration draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigDraftResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    validateConfigDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Configuration validation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigValidationResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    preflightConfigDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Configuration preflight */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigValidationResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    publishConfigDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublishConfigDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Published configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigPublishResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    rollbackConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RollbackConfigRequest"];
+            };
+        };
+        responses: {
+            /** @description Rolled back configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigPublishResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    diffConfigRevisions: {
+        parameters: {
+            query: {
+                from_revision_id: string;
+                to_revision_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Configuration diff */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigDiffResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    previewInvocationPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewInvocationPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description Effective invocation policy */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvocationPolicyPreviewResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -150,6 +150,11 @@ export default function CapabilitiesScreen() {
 
       <Section title={i18n.t("settings.deviceAndApp")}>
         <Metric
+          label={i18n.t("settings.systemConfiguration")}
+          value={i18n.t("settings.systemConfigurationDetail")}
+          onPress={() => router.push("/settings/system")}
+        />
+        <Metric
           label={i18n.t("settings.appVersion")}
           value={`${Application.nativeApplicationVersion ?? i18n.t("settings.development")} (${Application.nativeBuildVersion ?? "—"})`}
           onPress={() => router.push("/update")}

@@ -121,3 +121,38 @@ class AgentSessionBindingRepository:
                    WHERE session_handle=? AND principal_id=?""",
                 (scope.session_handle, scope.principal_id),
             )
+
+    def rebind(
+        self,
+        scope: RuntimeScope,
+        session: RuntimeSession,
+        *,
+        agent_config_digest: str,
+        expected_revision: int,
+    ) -> AgentSessionBinding:
+        now = self._clock()
+        with self._connect() as db:
+            cursor = db.execute(
+                """UPDATE agent_session_bindings SET
+                       agent_id=?, agent_config_digest=?, runtime_session_ref=?,
+                       runtime_protocol_version=?, binding_epoch=?, state='ready',
+                       updated_at=?, revision=revision+1
+                   WHERE session_handle=? AND principal_id=? AND revision=?""",
+                (
+                    session.agent_id,
+                    agent_config_digest,
+                    session.runtime_session_ref,
+                    session.runtime_protocol_version,
+                    session.binding_epoch,
+                    now,
+                    scope.session_handle,
+                    scope.principal_id,
+                    expected_revision,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("Agent Session binding changed during rebind")
+        rebound = self.get(scope)
+        if rebound is None:
+            raise RuntimeError("Agent Session binding was not persisted")
+        return rebound

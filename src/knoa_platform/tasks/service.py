@@ -75,6 +75,7 @@ class TaskService:
         parent_task_id: str = "",
         origin: TaskOrigin = TaskOrigin.USER,
         agent_id: str | None = None,
+        defer_start: bool = False,
     ) -> TaskRecord:
         selected = await asyncio.to_thread(self._executor.agent_id, scope)
         if agent_id is not None and selected != agent_id:
@@ -101,8 +102,12 @@ class TaskService:
             )
             if first:
                 await self._events.publish(first[0])
-            self._executor.wake()
+            if not defer_start:
+                self._executor.wake()
         return task
+
+    def wake(self) -> None:
+        self._executor.wake()
 
     async def create_definition(
         self,

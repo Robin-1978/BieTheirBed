@@ -14,6 +14,15 @@ from knoa_platform.agent_runtime.contracts import (
 )
 from knoa_platform.artifacts import ArtifactRef
 from knoa_platform.config import AppConfig
+from knoa_platform.agents.definitions import ResolvedInvocationPolicy
+from knoa_platform.configuration import (
+    ConfigControlState,
+    ConfigDraft,
+    ConfigPublishResult,
+    ConfigRevision,
+    ConfigValidationResult,
+    ManagedConfig,
+)
 from knoa_platform.runtime import RuntimePaths
 from knoa_platform.service.core_api import (
     ApprovalResolvedMessage,
@@ -215,6 +224,18 @@ class GatewayCoreClient(Protocol):
     async def list_tools(self, session_handle: str) -> ToolListResult: ...
 
     async def list_mcp_resources(self) -> MCPResourceCatalogResult: ...
+
+    async def get_config_current(self) -> tuple[ConfigRevision, ConfigControlState, tuple[dict, ...]]: ...
+    async def get_config_history(self, *, limit: int = 50) -> tuple[ConfigRevision, ...]: ...
+    async def get_config_revision(self, revision_id: str) -> ConfigRevision: ...
+    async def create_config_draft(self) -> ConfigDraft: ...
+    async def get_config_draft(self, draft_id: str) -> ConfigDraft: ...
+    async def replace_config_draft(self, draft_id: str, document: ManagedConfig, *, expected_version: int) -> ConfigDraft: ...
+    async def validate_config_draft(self, draft_id: str, *, preflight: bool = False) -> ConfigValidationResult: ...
+    async def publish_config_draft(self, draft_id: str, *, expected_version: int, summary: str = "") -> ConfigPublishResult: ...
+    async def rollback_config(self, revision_id: str, *, summary: str = "") -> ConfigPublishResult: ...
+    async def get_config_diff(self, from_revision_id: str, to_revision_id: str) -> tuple[dict, ...]: ...
+    async def preview_invocation_policy(self, agent_id: str, *, invocation_kind: str = "user", caller_id: str = "", requested_tools: frozenset[str] | None = None, requested_skills: frozenset[str] | None = None) -> ResolvedInvocationPolicy: ...
 
     async def resolve_approval(
         self,
@@ -684,6 +705,95 @@ class GatewayCoreBridge:
         principal_id: str,
     ) -> MCPResourceCatalogResult:
         return await (await self._client_for(principal_id)).list_mcp_resources()
+
+    async def get_config_current(self, principal_id: str):
+        return await (await self._client_for(principal_id)).get_config_current()
+
+    async def get_config_history(self, principal_id: str, *, limit: int = 50):
+        return await (await self._client_for(principal_id)).get_config_history(limit=limit)
+
+    async def get_config_revision(self, principal_id: str, revision_id: str):
+        return await (await self._client_for(principal_id)).get_config_revision(revision_id)
+
+    async def create_config_draft(self, principal_id: str):
+        return await (await self._client_for(principal_id)).create_config_draft()
+
+    async def get_config_draft(self, principal_id: str, draft_id: str):
+        return await (await self._client_for(principal_id)).get_config_draft(draft_id)
+
+    async def replace_config_draft(
+        self,
+        principal_id: str,
+        draft_id: str,
+        document: ManagedConfig,
+        *,
+        expected_version: int,
+    ):
+        return await (await self._client_for(principal_id)).replace_config_draft(
+            draft_id,
+            document,
+            expected_version=expected_version,
+        )
+
+    async def validate_config_draft(
+        self,
+        principal_id: str,
+        draft_id: str,
+        *,
+        preflight: bool = False,
+    ):
+        return await (await self._client_for(principal_id)).validate_config_draft(
+            draft_id,
+            preflight=preflight,
+        )
+
+    async def publish_config_draft(
+        self,
+        principal_id: str,
+        draft_id: str,
+        *,
+        expected_version: int,
+        summary: str = "",
+    ):
+        return await (await self._client_for(principal_id)).publish_config_draft(
+            draft_id,
+            expected_version=expected_version,
+            summary=summary,
+        )
+
+    async def rollback_config(
+        self,
+        principal_id: str,
+        revision_id: str,
+        *,
+        summary: str = "",
+    ):
+        return await (await self._client_for(principal_id)).rollback_config(
+            revision_id,
+            summary=summary,
+        )
+
+    async def get_config_diff(
+        self,
+        principal_id: str,
+        from_revision_id: str,
+        to_revision_id: str,
+    ):
+        return await (await self._client_for(principal_id)).get_config_diff(
+            from_revision_id,
+            to_revision_id,
+        )
+
+    async def preview_invocation_policy(
+        self,
+        principal_id: str,
+        agent_id: str,
+        **kwargs,
+    ):
+        return await (await self._client_for(principal_id)).preview_invocation_policy(
+            agent_id,
+            **kwargs,
+        )
 
     async def resolve_approval(
         self,

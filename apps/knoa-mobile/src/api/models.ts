@@ -17,6 +17,117 @@ export type AgentSummary = {
   display_name: string;
 };
 
+export type ManagedAgentDefinition = {
+  runtime_spec_id: string;
+  profile_id: string;
+  enabled: boolean;
+};
+
+export type ManagedAgentProfile = {
+  display_name: string;
+  instructions: string;
+  instructions_ref: string;
+  instructions_required: boolean;
+  default_skills: string[];
+  allowed_platform_tools: string[];
+  platform_capability_ceiling: string[];
+  runtime_native_capability_ceiling: string[];
+  runtime_limits: { max_iterations: number | null; max_output_tokens: number | null };
+  delegation: {
+    allowed: boolean;
+    targets: string[];
+    max_depth: number;
+    max_children: number;
+    max_parallel_children: number;
+    max_deadline_seconds: number;
+  };
+  visibility: "user" | "delegate" | "system";
+  callable_by: string[];
+};
+
+export type ManagedRuntimeSpec = {
+  implementation: "native" | "codex";
+  model_binding: { ownership: "platform" | "runtime"; model: string; hint: string };
+  max_concurrency: number;
+  command: string[];
+  sandbox: string;
+  approval_policy: string;
+  native_capabilities: string[];
+  instruction_authority: string;
+};
+
+export type ManagedConfig = {
+  schema_version: 1;
+  providers: Record<string, Record<string, unknown>>;
+  models: Record<string, { provider: string; model: string; [key: string]: unknown }>;
+  default_model: string;
+  fallback_model: string;
+  fallback_enabled: boolean;
+  agent_system: {
+    runtime_specs: Record<string, ManagedRuntimeSpec>;
+    profiles: Record<string, ManagedAgentProfile>;
+    agents: Record<string, ManagedAgentDefinition>;
+    default_agent: string;
+  };
+  approval_review: Record<string, unknown>;
+  skills: Record<string, { source: string; enabled: boolean; content_digest: string }>;
+  mcp_servers: Record<string, { transport: string; enabled: boolean; [key: string]: unknown }>;
+  operational: Record<string, number>;
+};
+
+export type ConfigRevision = {
+  revision_id: string;
+  parent_revision_id: string;
+  document: ManagedConfig;
+  config_digest: string;
+  change_summary: string;
+  created_by: string;
+  created_at: number;
+};
+
+export type ConfigControlState = {
+  desired_revision_id: string;
+  applied_revision_id: string;
+  apply_status: "idle" | "applying" | "failed";
+  apply_error_code: string;
+  updated_at: number;
+};
+
+export type ConfigGeneration = {
+  agent_id: string;
+  active_generation: string;
+  draining_generation: string;
+  active_leases: number;
+  draining_leases: number;
+  enabled: boolean;
+};
+
+export type ConfigDraft = {
+  draft_id: string;
+  base_revision_id: string;
+  document: ManagedConfig;
+  draft_version: number;
+  updated_by: string;
+  updated_at: number;
+};
+
+export type ConfigValidationResult = {
+  valid: boolean;
+  issues: Array<{ code: string; path: string; message: string }>;
+};
+
+export type ConfigPublishResult = {
+  revision: ConfigRevision;
+  state: ConfigControlState;
+};
+
+export type ConfigChange = {
+  op: "add" | "remove" | "replace";
+  path: string;
+  old?: unknown;
+  value?: unknown;
+};
+
 export type TaskState =
   | "queued"
   | "running"
