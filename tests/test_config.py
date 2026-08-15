@@ -22,6 +22,8 @@ class TestAppConfig:
         assert cfg.agents["codex"].enabled is False
         assert cfg.agents["reviewer_agent"].enabled is False
         assert cfg.approval_review.mode == "off"
+        assert cfg.approval_review.timeout_seconds == 60.0
+        assert cfg.approval_review.max_output_tokens == 4096
 
     def test_codex_can_be_selected_as_dynamic_default(self):
         cfg = AppConfig(

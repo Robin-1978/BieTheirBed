@@ -110,8 +110,8 @@ approval_review:
   mode: "off" # off | suggest | auto
   agent: "reviewer_agent"
   model: ""
-  timeout_seconds: 15
-  max_output_tokens: 256
+  timeout_seconds: 60
+  max_output_tokens: 4096
   auto_max_risk: "medium"
 
 # Loopback-only standard MCP endpoint used by out-of-process Agents.

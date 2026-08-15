@@ -180,8 +180,8 @@ class ApprovalReviewConfig(BaseModel):
     mode: Literal["off", "suggest", "auto"] = "off"
     agent: str = "reviewer_agent"
     model: str = ""
-    timeout_seconds: float = Field(default=15.0, gt=0.0, le=120.0)
-    max_output_tokens: int = Field(default=256, ge=64, le=1024)
+    timeout_seconds: float = Field(default=60.0, gt=0.0, le=120.0)
+    max_output_tokens: int = Field(default=4096, ge=64, le=8192)
     auto_max_risk: Literal["low", "medium"] = "medium"
 
 
