@@ -82,6 +82,9 @@ class CodexAgentRuntime(AgentRuntime):
         self,
         sessions: CodexSessionRepository,
         *,
+        agent_id: str = "codex",
+        display_name: str = "Codex",
+        instructions: str,
         command: Sequence[str] = ("codex", "app-server"),
         home: str | Path | None = None,
         cwd: str | Path,
@@ -94,7 +97,18 @@ class CodexAgentRuntime(AgentRuntime):
         clock: Callable[[], float] = time.time,
         client_factory: ClientFactory | None = None,
     ) -> None:
+        if not agent_id.strip():
+            raise ValueError("Codex Agent ID is required")
+        if not display_name.strip():
+            raise ValueError("Codex Agent display name is required")
+        if not instructions.strip():
+            raise ValueError("Codex Agent Profile instructions are required")
+        if sandbox not in {"read-only", "workspace-write"}:
+            raise ValueError("Codex sandbox must be read-only or workspace-write")
         self._sessions = sessions
+        self._agent_id = agent_id.strip()
+        self._display_name = display_name.strip()
+        self._instructions = instructions.strip()
         self._command = tuple(command)
         self._home = None if home in (None, "") else Path(home).expanduser().resolve()
         if self._home is not None:
@@ -116,8 +130,8 @@ class CodexAgentRuntime(AgentRuntime):
     @property
     def descriptor(self) -> AgentDescriptor:
         return AgentDescriptor(
-            agent_id="codex",
-            display_name="Codex",
+            agent_id=self._agent_id,
+            display_name=self._display_name,
             implementation_version="1.0.0",
             protocol_name="codex-app-server",
             protocol_version="2",
@@ -201,7 +215,14 @@ class CodexAgentRuntime(AgentRuntime):
                     "threadId": upstream_thread_ref,
                     "input": inputs,
                     "approvalPolicy": self._approval_policy,
-                    "sandboxPolicy": self._sandbox_policy(),
+                    "sandboxPolicy": self._sandbox_policy(request.options),
+                    "collaborationMode": {
+                        "mode": "default",
+                        "settings": {
+                            "model": self._model,
+                            "developer_instructions": self._instructions,
+                        },
+                    },
                     **({"model": self._model} if self._model else {}),
                 },
             )
@@ -672,11 +693,39 @@ class CodexAgentRuntime(AgentRuntime):
             raise ValueError("Codex steering currently accepts text input only")
         return result
 
-    def _sandbox_policy(self) -> dict[str, Any]:
+    def _sandbox_policy(
+        self,
+        options: dict[str, bool | int | float | str] | None = None,
+    ) -> dict[str, Any]:
+        requested = str((options or {}).get("native_capabilities") or "")
+        capabilities = frozenset(
+            item for item in requested.split(",") if item
+        )
+        if capabilities:
+            read_only = frozenset({"workspace_read", "command_execution"})
+            workspace_write = frozenset(
+                {
+                    "workspace_read",
+                    "workspace_write",
+                    "command_execution",
+                    "native_file_edit",
+                }
+            )
+            if capabilities == read_only:
+                return {"type": "readOnly"}
+            if self._sandbox == "workspace-write" and capabilities == workspace_write:
+                return {
+                    "type": "workspaceWrite",
+                    "writableRoots": [self._cwd],
+                    "networkAccess": False,
+                }
+            raise RuntimeError(
+                "Codex Runtime cannot enforce the resolved native capability set"
+            )
+        if "native_capabilities" in (options or {}):
+            raise RuntimeError("Codex Runtime requires explicit native capabilities")
         if self._sandbox == "read-only":
             return {"type": "readOnly"}
-        if self._sandbox == "danger-full-access":
-            return {"type": "dangerFullAccess"}
         return {
             "type": "workspaceWrite",
             "writableRoots": [self._cwd],
@@ -685,15 +734,17 @@ class CodexAgentRuntime(AgentRuntime):
 
     def _runtime_session(self, ref: str, epoch: int) -> RuntimeSession:
         return RuntimeSession(
-            agent_id="codex",
+            agent_id=self._agent_id,
             runtime_session_ref=ref,
             runtime_protocol_version="2",
             binding_epoch=epoch,
         )
 
-    @staticmethod
-    def _require_session(session: RuntimeSession) -> None:
-        if session.agent_id != "codex" or session.runtime_protocol_version != "2":
+    def _require_session(self, session: RuntimeSession) -> None:
+        if (
+            session.agent_id != self._agent_id
+            or session.runtime_protocol_version != "2"
+        ):
             raise ValueError("Runtime Session belongs to another Agent")
 
     async def _active_turn(

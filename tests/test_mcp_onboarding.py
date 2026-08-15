@@ -3,10 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import yaml
-
-from knoa_platform.agent_runtime.config_control import PersistentConfigController
+from knoa_platform.agent_runtime.config_control import ConfigurationController
 from knoa_platform.config import AppConfig
+from knoa_platform.configuration import ConfigRegistry, ConfigurationService
 from knoa_platform.extensions.manager import ExtensionManager
 from knoa_platform.extensions.mcp import (
     MCPPromptDefinition,
@@ -92,6 +91,15 @@ class _ProviderClient(_DiscoveryClient):
         return (await super().list_tools())[:1]
 
 
+def _controller(tmp_path: Path, initial: AppConfig | None = None):
+    service = ConfigurationService(
+        ConfigRegistry(tmp_path / "config.db"),
+        (initial or AppConfig()).managed_config(),
+        bootstrap_actor="test",
+    )
+    return ConfigurationController(service), service
+
+
 @pytest.mark.asyncio
 async def test_onboarding_discovers_and_enables_only_annotated_read_tools(
     tmp_path: Path,
@@ -108,10 +116,10 @@ async def test_onboarding_discovers_and_enables_only_annotated_read_tools(
     registry = ToolRegistry()
     manager = ExtensionManager(registry)
     await manager.start()
-    path = tmp_path / "local.yaml"
+    controller, configuration = _controller(tmp_path)
     service = MCPOnboardingService(
         manager,
-        PersistentConfigController(AppConfig(), path),
+        controller,
         MCPResourceTaskBridge((), object(), object(), object()),
     )
 
@@ -128,9 +136,9 @@ async def test_onboarding_discovers_and_enables_only_annotated_read_tools(
     assert result.prompts[0].name == "jira.analyze_issue"
     assert discovery.closed
     assert registry.list_tools() == ["mcp__jira__jira_get_issue"]
-    saved = yaml.safe_load(path.read_text())
-    assert set(saved["mcp_servers"]["jira"]["tools"]) == {"jira.get_issue"}
-    assert "resource_tasks" not in saved["mcp_servers"]["jira"]
+    saved = configuration.current().document
+    assert "jira" in saved.mcp_servers
+    assert set(saved.mcp_servers["jira"].tools) == {"jira.get_issue"}
     await manager.stop()
 
 
@@ -138,7 +146,6 @@ async def test_onboarding_discovers_and_enables_only_annotated_read_tools(
 async def test_onboarding_rejects_legacy_resource_task_route(
     tmp_path: Path,
 ) -> None:
-    path = tmp_path / "local.yaml"
     initial = AppConfig(
         mcp_servers={
             "jira": {
@@ -147,7 +154,7 @@ async def test_onboarding_rejects_legacy_resource_task_route(
             }
         }
     )
-    controller = PersistentConfigController(initial, path)
+    controller, _configuration = _controller(tmp_path, initial)
 
     class _Bridge:
         def __init__(self) -> None:
@@ -180,4 +187,3 @@ async def test_onboarding_rejects_legacy_resource_task_route(
         await service.configure_resource_task("jira", "assigned", route)
 
     assert bridge.calls == []
-    assert not path.exists()

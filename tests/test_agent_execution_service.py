@@ -11,10 +11,16 @@ from knoa_platform.agent_runtime.model_step import ProviderChunk
 from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
 from knoa_platform.agent_runtime.tool_step import ToolArgumentPolicy, ToolStep
 from knoa_platform.agents import (
+    AgentDefinition,
+    AgentDefinitionResolver,
+    AgentProfile,
+    AgentSystemConfig,
     AgentExecutionService,
     AgentManager,
     AgentSessionBindingRepository,
     ExecuteAgentTurn,
+    ModelBindingSpec,
+    RuntimeSpec,
 )
 from knoa_platform.artifacts import ArtifactStore
 from knoa_platform.capabilities import CapabilityGateway, GatewayMCPConnector
@@ -66,6 +72,38 @@ async def healthy():
     return type("Health", (), {"healthy": True, "detail": "ok"})()
 
 
+def resolver() -> AgentDefinitionResolver:
+    return AgentDefinitionResolver(
+        AgentSystemConfig(
+            runtime_specs={
+                "native-main": RuntimeSpec(
+                    implementation="native",
+                    model_binding=ModelBindingSpec(
+                        ownership="platform",
+                        model="main",
+                    ),
+                )
+            },
+            profiles={
+                "assistant": AgentProfile(
+                    display_name="Knoa",
+                    instructions="system",
+                    visibility="user",
+                    allowed_platform_tools=frozenset({"*"}),
+                    platform_capability_ceiling=frozenset({"*"}),
+                )
+            },
+            agents={
+                "knoa": AgentDefinition(
+                    runtime_spec_id="native-main",
+                    profile_id="assistant",
+                )
+            },
+            default_agent="knoa",
+        )
+    )
+
+
 @pytest.mark.asyncio
 async def test_execution_service_persists_binding_and_passes_artifact_by_mcp(
     tmp_path: Path,
@@ -104,6 +142,7 @@ async def test_execution_service_persists_binding_and_passes_artifact_by_mcp(
         gateway,
         artifacts,
         capabilities_for=lambda _scope: frozenset(),
+        resolver_for=resolver,
     )
 
     events = [
@@ -163,6 +202,7 @@ async def test_execution_service_rejects_agent_switch_after_session_binding(
         gateway,
         artifacts,
         capabilities_for=lambda _scope: frozenset(),
+        resolver_for=resolver,
     )
 
     with pytest.raises(LookupError):
@@ -209,6 +249,7 @@ async def test_execution_service_serializes_turns_for_one_platform_session(
         gateway,
         artifacts,
         capabilities_for=lambda _scope: frozenset(),
+        resolver_for=resolver,
     )
 
     async def consume(turn_id: str) -> list:

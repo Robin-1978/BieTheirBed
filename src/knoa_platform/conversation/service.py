@@ -126,6 +126,16 @@ class ConversationApprovalService:
         self._review_mode = review_mode
         self._auto_max_risk = auto_max_risk
 
+    def configure_review(
+        self,
+        reviewer: ApprovalReviewer | None,
+        mode: ApprovalReviewMode,
+        auto_max_risk: str,
+    ) -> None:
+        self._reviewer = reviewer
+        self._review_mode = mode
+        self._auto_max_risk = auto_max_risk
+
     async def confirm(
         self,
         scope: RuntimeScope,
@@ -327,6 +337,14 @@ class ConversationService:
         self._interaction_port: ScopedInteractionPort | None = (
             None if interactions is None else interactions.for_owner("conversation_turn")
         )
+
+    def configure_approval_review(
+        self,
+        reviewer: ApprovalReviewer | None,
+        mode: ApprovalReviewMode,
+        auto_max_risk: str,
+    ) -> None:
+        self._approvals.configure_review(reviewer, mode, auto_max_risk)
 
     async def start(self) -> None:
         await asyncio.to_thread(self._repository.recover_interrupted)

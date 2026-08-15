@@ -77,34 +77,83 @@ mcp_servers: {}
 # Additional roots containing Skill package directories. Knoa also loads its
 # packaged built-in Skills and ~/.knoa/skills.
 skill_directories: []
-# Stable Agent selected for newly bound Sessions.
+# Agent execution configuration, role profiles and stable identities are
+# separate typed domains. The YAML is an initialization/import document; after
+# first startup the versioned Config Registry is the managed source of truth.
 default_agent: knoa
-agents:
-  knoa:
-    enabled: true
+runtime_specs:
+  native-main:
+    implementation: native
+    model_binding:
+      ownership: platform
+      model: "@default"
     max_concurrency: 4
-  codex:
-    enabled: false
+  native-approval-reviewer:
+    implementation: native
+    model_binding:
+      ownership: platform
+      model: "@reviewer"
+    max_concurrency: 1
+  codex-default:
+    implementation: codex
+    model_binding:
+      ownership: runtime
     max_concurrency: 1
     command: ["codex", "app-server"]
-    # Empty means: let Codex use its normal ~/.codex configuration and
-    # authentication. Set this only when an isolated Codex identity is wanted.
-    home: ""
-    model: ""
-    # Empty uses a private neutral workspace under
-    # ~/.knoa/agents/codex/workspace, never the Knoa service source directory.
-    cwd: ""
+    home: "agents/codex/home"
+    cwd: "agents/codex/workspace"
     approval_policy: "never"
     sandbox: "read-only"
+    native_capabilities: [workspace_read, command_execution]
+    instruction_authority: required
     request_timeout_seconds: 120
     max_line_bytes: 4194304
     max_event_queue: 1024
-  # Restricted system Agent. It reuses the same Agent Runtime/provider stack,
-  # but is never exposed as a Session choice and receives no Tools.
+
+agent_profiles:
+  assistant:
+    display_name: Knoa
+    instructions_ref: "builtin://assistant"
+    default_skills: [research_report]
+    allowed_platform_tools: ["*"]
+    platform_capability_ceiling: ["*"]
+    visibility: user
+    delegation:
+      allowed: true
+      targets: [codex]
+      max_depth: 1
+      max_children: 3
+      max_parallel_children: 3
+      max_deadline_seconds: 1800
+  approval-reviewer:
+    display_name: Knoa Reviewer
+    instructions_ref: "builtin://approval-reviewer"
+    allowed_platform_tools: []
+    platform_capability_ceiling: []
+    runtime_native_capability_ceiling: []
+    runtime_limits:
+      max_iterations: 1
+    visibility: system
+    callable_by: [approval_service]
+  coder:
+    display_name: Codex
+    instructions_ref: "builtin://coder"
+    runtime_native_capability_ceiling: [workspace_read, command_execution]
+    visibility: delegate
+
+agent_definitions:
+  knoa:
+    runtime_spec_id: native-main
+    profile_id: assistant
+    enabled: true
   reviewer_agent:
+    runtime_spec_id: native-approval-reviewer
+    profile_id: approval-reviewer
     enabled: false
-    max_concurrency: 1
-    model: ""
+  codex:
+    runtime_spec_id: codex-default
+    profile_id: coder
+    enabled: false
 
 approval_review:
   mode: "off" # off | suggest | auto

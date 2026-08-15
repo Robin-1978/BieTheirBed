@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -32,6 +31,10 @@ from knoa_platform.agent_runtime.tool_step import ConfirmationPort, ToolCommitPo
 from knoa_platform.agents.bindings import (
     AgentSessionBinding,
     AgentSessionBindingRepository,
+)
+from knoa_platform.agents.definitions import (
+    AgentDefinitionResolver,
+    ResolvedInvocationPolicy,
 )
 from knoa_platform.agents.manager import AgentManager
 from knoa_platform.artifacts import ArtifactStore
@@ -62,6 +65,10 @@ class ExecuteAgentTurn:
     tools_enabled: bool
     cancellation: asyncio.Event
     agent_id: str | None = None
+    invocation_kind: str = "user"
+    caller_id: str = ""
+    parent_policy: ResolvedInvocationPolicy | None = None
+    resolved_policy: ResolvedInvocationPolicy | None = None
     confirmation: ConfirmationPort | None = None
     tool_commit: ToolCommitPort | None = None
     interaction: InteractionPort | None = None
@@ -83,9 +90,17 @@ class AgentExecutionService:
         gateway: CapabilityGateway,
         artifacts: ArtifactStore,
         *,
+        resolver_for: Callable[[], AgentDefinitionResolver],
         capabilities_for: Callable[[RuntimeScope], frozenset[ToolCapability]],
+        installed_skills: Callable[[], frozenset[str]] = lambda: frozenset(),
+        policy_snapshot_for: Callable[
+            [str], ResolvedInvocationPolicy | None
+        ] = lambda _turn_id: None,
         external_mcp_endpoint: Callable[[], str] | None = None,
-        agent_config_digest: Callable[[str], str] | None = None,
+        policy_observer: Callable[
+            [ExecuteAgentTurn, ResolvedInvocationPolicy], Awaitable[None]
+        ]
+        | None = None,
         usage_observer: Callable[
             [ExecuteAgentTurn, UsageReported], Awaitable[None]
         ]
@@ -95,7 +110,8 @@ class AgentExecutionService:
         ]
         | None = None,
         context_provider: Callable[
-            [RuntimeScope, str, frozenset[str]], Awaitable[RuntimeTurnContext]
+            [RuntimeScope, str, frozenset[str], frozenset[str]],
+            Awaitable[RuntimeTurnContext],
         ]
         | None = None,
     ) -> None:
@@ -103,11 +119,12 @@ class AgentExecutionService:
         self._bindings = bindings
         self._gateway = gateway
         self._artifacts = artifacts
+        self._resolver_for = resolver_for
         self._capabilities_for = capabilities_for
+        self._installed_skills = installed_skills
+        self._policy_snapshot_for = policy_snapshot_for
         self._external_mcp_endpoint = external_mcp_endpoint
-        self._agent_config_digest = agent_config_digest or (
-            lambda agent_id: hashlib.sha256(agent_id.encode()).hexdigest()
-        )
+        self._policy_observer = policy_observer
         self._usage_observer = usage_observer
         self._turn_observer = turn_observer
         self._context_provider = context_provider
@@ -129,7 +146,79 @@ class AgentExecutionService:
         request: ExecuteAgentTurn,
     ) -> AsyncIterator[RuntimeTurnEvent]:
         started = time.monotonic()
-        binding = await self._ensure_binding(request.scope, request.agent_id)
+        resolver = self._resolver_for()
+        policy_snapshot = (
+            request.resolved_policy or self._policy_snapshot_for(request.turn_id)
+        )
+        if request.invocation_kind == "delegate" and policy_snapshot is None:
+            raise PermissionError("missing_delegation_policy")
+        if policy_snapshot is not None:
+            if (
+                resolver.definition_digest(policy_snapshot.agent_id)
+                != policy_snapshot.agent_definition_digest
+            ):
+                raise RuntimeError("agent_definition_changed")
+        principal_capabilities = self._capabilities_for(request.scope)
+        available_tools = self._gateway.available_tool_names(
+            principal_capabilities
+        )
+        policy = resolver.resolve_policy(
+            (
+                policy_snapshot.agent_id
+                if policy_snapshot is not None
+                else request.agent_id
+            ),
+            invocation_kind=(
+                policy_snapshot.invocation_kind
+                if policy_snapshot is not None
+                else request.invocation_kind  # type: ignore[arg-type]
+            ),
+            caller_id=(
+                policy_snapshot.caller_id
+                if policy_snapshot is not None
+                else request.caller_id or request.scope.principal_id
+            ),
+            principal_capabilities=frozenset(
+                item.value for item in principal_capabilities
+            ),
+            available_tools=available_tools,
+            installed_skills=self._installed_skills(),
+            requested_capabilities=(
+                policy_snapshot.platform_capabilities
+                if policy_snapshot is not None
+                else None
+            ),
+            requested_tools=(
+                policy_snapshot.allowed_platform_tools
+                if policy_snapshot is not None
+                else None if request.tools_enabled else frozenset()
+            ),
+            requested_skills=(
+                policy_snapshot.allowed_skills
+                if policy_snapshot is not None
+                else None
+            ),
+            requested_native_capabilities=(
+                policy_snapshot.runtime_native_capabilities
+                if policy_snapshot is not None
+                else None
+            ),
+            parent=request.parent_policy,
+            artifact_ids=(
+                policy_snapshot.artifact_ids
+                if policy_snapshot is not None
+                else frozenset(
+                    attachment.artifact_id for attachment in request.attachments
+                )
+            ),
+        )
+        binding = await self._ensure_binding(
+            request.scope,
+            policy.agent_id,
+            policy.agent_definition_digest,
+        )
+        if self._policy_observer is not None:
+            await self._policy_observer(request, policy)
         async with self._manager.lease(binding.agent_id) as runtime:
             session = await runtime.resume_session(
                 ResumeRuntimeSession(
@@ -137,10 +226,10 @@ class AgentExecutionService:
                     session=binding.runtime_session(),
                 )
             )
-            capabilities = (
-                self._capabilities_for(request.scope)
-                if request.tools_enabled
-                else frozenset()
+            capabilities = frozenset(
+                capability
+                for capability in principal_capabilities
+                if capability.value in policy.platform_capabilities
             )
             grant = await self._gateway.grants.issue(
                 scope=request.scope,
@@ -154,9 +243,14 @@ class AgentExecutionService:
                 artifact_ids=frozenset(
                     attachment.artifact_id for attachment in request.attachments
                 ),
+                tool_names=policy.allowed_platform_tools,
                 binding_epoch=session.binding_epoch,
+                ttl_seconds=min(300.0, policy.limits.deadline_seconds),
+                allow_tools=bool(policy.allowed_platform_tools),
             )
-            external = binding.agent_id != "knoa"
+            external = (
+                resolver.runtime_spec(binding.agent_id).implementation == "codex"
+            )
             if external and self._external_mcp_endpoint is None:
                 raise RuntimeError("External Agent requires the capability MCP host")
             endpoint = McpEndpointGrant(
@@ -178,6 +272,7 @@ class AgentExecutionService:
                         request.scope,
                         request.input,
                         frozenset(self._gateway.authorized_tool_names(grant)),
+                        policy.allowed_skills,
                     )
                     if self._context_provider is not None
                     else RuntimeTurnContext()
@@ -189,6 +284,11 @@ class AgentExecutionService:
                         input=self._input_parts(request),
                         mcp=endpoint,
                         context=turn_context,
+                        options={
+                            "native_capabilities": ",".join(
+                                sorted(policy.runtime_native_capabilities)
+                            )
+                        },
                     )
                 )
                 interrupt = asyncio.create_task(
@@ -291,35 +391,50 @@ class AgentExecutionService:
     async def _ensure_binding(
         self,
         scope: RuntimeScope,
-        requested_agent_id: str | None = None,
+        requested_agent_id: str,
+        agent_config_digest: str,
     ) -> AgentSessionBinding:
         existing = await asyncio.to_thread(self._bindings.get, scope)
         if existing is not None:
-            if requested_agent_id is not None:
-                selected = self._manager.resolve_agent_id(requested_agent_id)
-                if existing.agent_id != selected:
-                    raise ValueError(
-                        "Session is already bound to a different Agent"
-                    )
-            return existing
+            selected = self._manager.resolve_agent_id(requested_agent_id)
+            if existing.agent_id != selected:
+                raise ValueError("Session is already bound to a different Agent")
+            if existing.agent_config_digest == agent_config_digest:
+                return existing
         lock = await self._binding_lock(scope.session_handle)
         async with lock:
             existing = await asyncio.to_thread(self._bindings.get, scope)
             if existing is not None:
-                return existing
+                if existing.agent_id != requested_agent_id:
+                    raise ValueError("Session is already bound to a different Agent")
+                if existing.agent_config_digest == agent_config_digest:
+                    return existing
+                binding_epoch = existing.binding_epoch + 1
+            else:
+                binding_epoch = 1
             agent_id = self._manager.resolve_agent_id(requested_agent_id)
             async with self._manager.lease(agent_id) as runtime:
                 session = await runtime.create_session(
                     CreateRuntimeSession(
-                        operation_id=f"bind:{scope.session_handle}:{agent_id}:1",
-                        binding_epoch=1,
+                        operation_id=(
+                            f"bind:{scope.session_handle}:{agent_id}:{binding_epoch}"
+                        ),
+                        binding_epoch=binding_epoch,
                     )
+                )
+            if existing is not None:
+                return await asyncio.to_thread(
+                    self._bindings.rebind,
+                    scope,
+                    session,
+                    agent_config_digest=agent_config_digest,
+                    expected_revision=existing.revision,
                 )
             return await asyncio.to_thread(
                 self._bindings.create,
                 scope,
                 session,
-                agent_config_digest=self._agent_config_digest(agent_id),
+                agent_config_digest=agent_config_digest,
             )
 
     async def _binding_lock(self, session_handle: str) -> asyncio.Lock:

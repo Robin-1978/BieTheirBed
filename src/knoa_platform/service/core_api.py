@@ -29,6 +29,15 @@ from knoa_platform.agent_runtime.contracts import (
     ToolListResult,
 )
 from knoa_platform.artifacts import ArtifactRef
+from knoa_platform.agents.definitions import ResolvedInvocationPolicy
+from knoa_platform.configuration.models import (
+    ConfigControlState,
+    ConfigDraft,
+    ConfigPublishResult,
+    ConfigRevision,
+    ConfigValidationResult,
+    ManagedConfig,
+)
 from knoa_platform.approvals.display import approval_display
 from knoa_platform.interactions import HumanInteraction
 from knoa_platform.automation import (
@@ -1043,6 +1052,83 @@ class SetConfigRequest(SessionRequest):
     value: bool | int | float | str
 
 
+class GetConfigCurrentRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["config_current"] = "config_current"
+
+
+class GetConfigHistoryRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["config_history"] = "config_history"
+    limit: int = Field(default=50, ge=1, le=200)
+
+
+class GetConfigRevisionRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["config_revision"] = "config_revision"
+    revision_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+
+
+class CreateConfigDraftRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["config_draft_create"] = "config_draft_create"
+
+
+class GetConfigDraftRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["config_draft_get"] = "config_draft_get"
+    draft_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+
+
+class ReplaceConfigDraftRequest(GetConfigDraftRequest):
+    method: Literal["config_draft_replace"] = "config_draft_replace"
+    document: ManagedConfig
+    expected_version: int = Field(ge=1)
+
+
+class ValidateConfigDraftRequest(GetConfigDraftRequest):
+    method: Literal["config_draft_validate"] = "config_draft_validate"
+
+
+class PreflightConfigDraftRequest(GetConfigDraftRequest):
+    method: Literal["config_draft_preflight"] = "config_draft_preflight"
+
+
+class PublishConfigDraftRequest(GetConfigDraftRequest):
+    method: Literal["config_draft_publish"] = "config_draft_publish"
+    expected_version: int = Field(ge=1)
+    summary: Annotated[str, StringConstraints(max_length=2000)] = ""
+
+
+class RollbackConfigRequest(GetConfigRevisionRequest):
+    method: Literal["config_rollback"] = "config_rollback"
+    summary: Annotated[str, StringConstraints(max_length=2000)] = ""
+
+
+class GetConfigDiffRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["config_diff"] = "config_diff"
+    from_revision_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+    to_revision_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+
+
+class PreviewInvocationPolicyRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["config_policy_preview"] = "config_policy_preview"
+    agent_id: Annotated[NonEmpty, StringConstraints(max_length=64)]
+    invocation_kind: Literal["user", "delegate", "system"] = "user"
+    caller_id: Annotated[str, StringConstraints(max_length=256)] = ""
+    requested_tools: frozenset[str] | None = None
+    requested_skills: frozenset[str] | None = None
+
+
 class UploadArtifactRequest(SessionRequest):
     method: Literal["artifact_upload"] = "artifact_upload"
     data_url: Annotated[str, StringConstraints(min_length=1, max_length=64 * 1024 * 1024)]
@@ -1118,6 +1204,18 @@ CoreRequest: TypeAlias = Annotated[
     | ListToolsRequest
     | ListMCPResourcesRequest
     | SetConfigRequest
+    | GetConfigCurrentRequest
+    | GetConfigHistoryRequest
+    | GetConfigRevisionRequest
+    | CreateConfigDraftRequest
+    | GetConfigDraftRequest
+    | ReplaceConfigDraftRequest
+    | ValidateConfigDraftRequest
+    | PreflightConfigDraftRequest
+    | PublishConfigDraftRequest
+    | RollbackConfigRequest
+    | GetConfigDiffRequest
+    | PreviewInvocationPolicyRequest
     | UploadArtifactRequest
     | DownloadArtifactRequest
     | TranscribeArtifactRequest,
@@ -1133,6 +1231,9 @@ def parse_core_request_json(raw: str | bytes) -> CoreRequest:
 
 ErrorCode = Literal[
     "invalid_request",
+    "config_conflict",
+    "config_not_found",
+    "config_apply_failed",
     "resource_exhausted",
     "unauthenticated",
     "session_not_found",
@@ -1405,6 +1506,64 @@ class ConfigSetMessage(CoreModel):
     result: ConfigSetResult
 
 
+class ConfigCurrentMessage(CoreModel):
+    message_type: Literal["config_current"] = "config_current"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    revision: ConfigRevision
+    state: ConfigControlState
+    generations: tuple[dict[str, Any], ...] = ()
+
+
+class ConfigHistoryMessage(CoreModel):
+    message_type: Literal["config_history"] = "config_history"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    revisions: tuple[ConfigRevision, ...]
+
+
+class ConfigRevisionMessage(CoreModel):
+    message_type: Literal["config_revision"] = "config_revision"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    revision: ConfigRevision
+
+
+class ConfigDraftMessage(CoreModel):
+    message_type: Literal["config_draft"] = "config_draft"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    draft: ConfigDraft
+
+
+class ConfigValidationMessage(CoreModel):
+    message_type: Literal["config_validation"] = "config_validation"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    result: ConfigValidationResult
+
+
+class ConfigPublishedMessage(CoreModel):
+    message_type: Literal["config_published"] = "config_published"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    result: ConfigPublishResult
+
+
+class ConfigDiffMessage(CoreModel):
+    message_type: Literal["config_diff"] = "config_diff"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    changes: tuple[dict[str, Any], ...]
+
+
+class InvocationPolicyPreviewMessage(CoreModel):
+    message_type: Literal["config_policy_preview"] = "config_policy_preview"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    policy: ResolvedInvocationPolicy
+
+
 class ArtifactUploadedMessage(CoreModel):
     message_type: Literal["artifact_uploaded"] = "artifact_uploaded"
     api_version: Literal["v1"] = "v1"
@@ -1547,6 +1706,14 @@ CoreServerMessage: TypeAlias = Annotated[
     | ToolsMessage
     | MCPResourcesMessage
     | ConfigSetMessage
+    | ConfigCurrentMessage
+    | ConfigHistoryMessage
+    | ConfigRevisionMessage
+    | ConfigDraftMessage
+    | ConfigValidationMessage
+    | ConfigPublishedMessage
+    | ConfigDiffMessage
+    | InvocationPolicyPreviewMessage
     | ArtifactUploadedMessage
     | ArtifactDownloadedMessage
     | ArtifactTranscribedMessage

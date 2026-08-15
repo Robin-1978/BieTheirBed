@@ -99,16 +99,19 @@ def test_skill_catalog_activates_selectively_and_checks_dependencies(
 
     inactive = catalog.active_context(
         "say hello",
+        allowed_skills=frozenset({"research"}),
         available_tools=frozenset({"web_search"}),
         capabilities=granted,
     )
     missing_tool = catalog.active_context(
         "create a research report",
+        allowed_skills=frozenset({"research"}),
         available_tools=frozenset(),
         capabilities=granted,
     )
     active = catalog.active_context(
         "create a research report",
+        allowed_skills=frozenset({"research"}),
         available_tools=frozenset({"web_search"}),
         capabilities=granted,
     )

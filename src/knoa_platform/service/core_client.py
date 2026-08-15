@@ -19,6 +19,15 @@ from knoa_platform.agent_runtime.contracts import (
     ToolListResult,
 )
 from knoa_platform.conversation import TERMINAL_CHAT_TURN_STATES
+from knoa_platform.agents.definitions import ResolvedInvocationPolicy
+from knoa_platform.configuration import (
+    ConfigControlState,
+    ConfigDraft,
+    ConfigPublishResult,
+    ConfigRevision,
+    ConfigValidationResult,
+    ManagedConfig,
+)
 from knoa_platform.service.core_api import (
     CORE_WS_MAX_SIZE,
     ApprovalResolvedMessage,
@@ -36,6 +45,13 @@ from knoa_platform.service.core_api import (
     ChatTurnSubscribedMessage,
     ClearMemoryRequest,
     ConfigSetMessage,
+    ConfigCurrentMessage,
+    ConfigDiffMessage,
+    ConfigDraftMessage,
+    ConfigHistoryMessage,
+    ConfigPublishedMessage,
+    ConfigRevisionMessage,
+    ConfigValidationMessage,
     ContinueProductTaskRequest,
     ConversationSessionDeletedMessage,
     ConversationSessionListMessage,
@@ -44,6 +60,7 @@ from knoa_platform.service.core_api import (
     CoreError,
     CoreServerMessage,
     CreateChatTurnRequest,
+    CreateConfigDraftRequest,
     CreateProductTaskRequest,
     CreateSessionRequest,
     CreateTaskRequest,
@@ -54,6 +71,11 @@ from knoa_platform.service.core_api import (
     ExecuteProductTaskRequest,
     GetChatTurnRequest,
     GetConversationSessionRequest,
+    GetConfigCurrentRequest,
+    GetConfigDiffRequest,
+    GetConfigDraftRequest,
+    GetConfigHistoryRequest,
+    GetConfigRevisionRequest,
     GetHistoryRequest,
     GetProductTaskExecutionRequest,
     GetProductTaskRequest,
@@ -77,6 +99,8 @@ from knoa_platform.service.core_api import (
     MemoryClearedMessage,
     MemoryListMessage,
     PauseTaskRequest,
+    PreflightConfigDraftRequest,
+    PreviewInvocationPolicyRequest,
     PrincipalTaskEventMessage,
     PrincipalTaskEventsSubscribedMessage,
     ProductTaskDeletedMessage,
@@ -86,11 +110,14 @@ from knoa_platform.service.core_api import (
     ProductTaskListMessage,
     ProductTaskMessage,
     ProductTaskSnapshot,
+    PublishConfigDraftRequest,
     RerunProductTaskExecutionRequest,
     ResolveApprovalRequest,
     ResolveChatApprovalRequest,
     ResolveHumanInteractionRequest,
     ResumeTaskRequest,
+    ReplaceConfigDraftRequest,
+    RollbackConfigRequest,
     RetryChatTurnRequest,
     SessionCreatedMessage,
     SetConfigRequest,
@@ -113,6 +140,8 @@ from knoa_platform.service.core_api import (
     UnsubscribeRequest,
     UpdateConversationSessionRequest,
     UpdateProductTaskRequest,
+    ValidateConfigDraftRequest,
+    InvocationPolicyPreviewMessage,
     parse_core_server_message_json,
 )
 from knoa_platform.service.core_client_artifacts import CoreArtifactClientMixin
@@ -539,6 +568,164 @@ class CoreClient(CoreArtifactClientMixin, CoreAutomationClientMixin):
         if not isinstance(response, ConfigSetMessage):
             raise RuntimeError("CoreServer returned an invalid config response")
         return response.result
+
+    async def get_config_current(
+        self,
+    ) -> tuple[ConfigRevision, ConfigControlState, tuple[dict[str, Any], ...]]:
+        response = await self._request(
+            GetConfigCurrentRequest(request_id=self._request_id())
+        )
+        if not isinstance(response, ConfigCurrentMessage):
+            raise RuntimeError("CoreServer returned an invalid config current response")
+        return response.revision, response.state, response.generations
+
+    async def get_config_history(self, *, limit: int = 50) -> tuple[ConfigRevision, ...]:
+        response = await self._request(
+            GetConfigHistoryRequest(request_id=self._request_id(), limit=limit)
+        )
+        if not isinstance(response, ConfigHistoryMessage):
+            raise RuntimeError("CoreServer returned an invalid config history response")
+        return response.revisions
+
+    async def get_config_revision(self, revision_id: str) -> ConfigRevision:
+        response = await self._request(
+            GetConfigRevisionRequest(
+                request_id=self._request_id(),
+                revision_id=revision_id,
+            )
+        )
+        if not isinstance(response, ConfigRevisionMessage):
+            raise RuntimeError("CoreServer returned an invalid config revision response")
+        return response.revision
+
+    async def create_config_draft(self) -> ConfigDraft:
+        response = await self._request(
+            CreateConfigDraftRequest(request_id=self._request_id())
+        )
+        if not isinstance(response, ConfigDraftMessage):
+            raise RuntimeError("CoreServer returned an invalid config draft response")
+        return response.draft
+
+    async def get_config_draft(self, draft_id: str) -> ConfigDraft:
+        response = await self._request(
+            GetConfigDraftRequest(
+                request_id=self._request_id(),
+                draft_id=draft_id,
+            )
+        )
+        if not isinstance(response, ConfigDraftMessage):
+            raise RuntimeError("CoreServer returned an invalid config draft response")
+        return response.draft
+
+    async def replace_config_draft(
+        self,
+        draft_id: str,
+        document: ManagedConfig,
+        *,
+        expected_version: int,
+    ) -> ConfigDraft:
+        response = await self._request(
+            ReplaceConfigDraftRequest(
+                request_id=self._request_id(),
+                draft_id=draft_id,
+                document=document,
+                expected_version=expected_version,
+            )
+        )
+        if not isinstance(response, ConfigDraftMessage):
+            raise RuntimeError("CoreServer returned an invalid config draft response")
+        return response.draft
+
+    async def validate_config_draft(
+        self,
+        draft_id: str,
+        *,
+        preflight: bool = False,
+    ) -> ConfigValidationResult:
+        request_type = (
+            PreflightConfigDraftRequest if preflight else ValidateConfigDraftRequest
+        )
+        response = await self._request(
+            request_type(request_id=self._request_id(), draft_id=draft_id)
+        )
+        if not isinstance(response, ConfigValidationMessage):
+            raise RuntimeError("CoreServer returned an invalid config validation response")
+        return response.result
+
+    async def publish_config_draft(
+        self,
+        draft_id: str,
+        *,
+        expected_version: int,
+        summary: str = "",
+    ) -> ConfigPublishResult:
+        response = await self._request(
+            PublishConfigDraftRequest(
+                request_id=self._request_id(),
+                draft_id=draft_id,
+                expected_version=expected_version,
+                summary=summary,
+            )
+        )
+        if not isinstance(response, ConfigPublishedMessage):
+            raise RuntimeError("CoreServer returned an invalid config publish response")
+        return response.result
+
+    async def rollback_config(
+        self,
+        revision_id: str,
+        *,
+        summary: str = "",
+    ) -> ConfigPublishResult:
+        response = await self._request(
+            RollbackConfigRequest(
+                request_id=self._request_id(),
+                revision_id=revision_id,
+                summary=summary,
+            )
+        )
+        if not isinstance(response, ConfigPublishedMessage):
+            raise RuntimeError("CoreServer returned an invalid config rollback response")
+        return response.result
+
+    async def get_config_diff(
+        self,
+        from_revision_id: str,
+        to_revision_id: str,
+    ) -> tuple[dict[str, Any], ...]:
+        response = await self._request(
+            GetConfigDiffRequest(
+                request_id=self._request_id(),
+                from_revision_id=from_revision_id,
+                to_revision_id=to_revision_id,
+            )
+        )
+        if not isinstance(response, ConfigDiffMessage):
+            raise RuntimeError("CoreServer returned an invalid config diff response")
+        return response.changes
+
+    async def preview_invocation_policy(
+        self,
+        agent_id: str,
+        *,
+        invocation_kind: str = "user",
+        caller_id: str = "",
+        requested_tools: frozenset[str] | None = None,
+        requested_skills: frozenset[str] | None = None,
+    ) -> ResolvedInvocationPolicy:
+        response = await self._request(
+            PreviewInvocationPolicyRequest(
+                request_id=self._request_id(),
+                agent_id=agent_id,
+                invocation_kind=invocation_kind,
+                caller_id=caller_id,
+                requested_tools=requested_tools,
+                requested_skills=requested_skills,
+            )
+        )
+        if not isinstance(response, InvocationPolicyPreviewMessage):
+            raise RuntimeError("CoreServer returned an invalid policy preview response")
+        return response.policy
 
     async def deploy_mcp_package(
         self,

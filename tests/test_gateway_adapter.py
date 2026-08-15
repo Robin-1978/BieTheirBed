@@ -25,6 +25,7 @@ from knoa_platform.agent_runtime.contracts import (
 )
 from knoa_platform.artifacts import ArtifactRef
 from knoa_platform.config import AppConfig
+from knoa_platform.configuration import ConfigControlState, ConfigRevision
 from knoa_platform.conversation import ChatTurnState
 from knoa_platform.gateway.adapter import SecureGatewayAdapter
 from knoa_platform.gateway.auth import GatewayAuthenticationRejectedError
@@ -222,12 +223,32 @@ def _chat_snapshot(state: ChatTurnState = ChatTurnState.COMPLETED) -> ChatTurnSn
 
 
 class _Core:
-    def __init__(self) -> None:
+    def __init__(self, config: AppConfig | None = None) -> None:
         self.calls = []
         self.closed = False
+        self.config = config or AppConfig()
 
     async def close(self):
         self.closed = True
+
+    async def get_config_current(self, principal_id):
+        self.calls.append(("get_config_current", principal_id))
+        document = self.config.managed_config()
+        return (
+            ConfigRevision(
+                revision_id="revision-a",
+                document=document,
+                config_digest=document.digest,
+                created_by=principal_id,
+                created_at=1.0,
+            ),
+            ConfigControlState(
+                desired_revision_id="revision-a",
+                applied_revision_id="revision-a",
+                updated_at=1.0,
+            ),
+            (),
+        )
 
     async def create_session(self, principal_id, **kwargs):
         self.calls.append(("create_session", principal_id, kwargs))
@@ -526,18 +547,21 @@ async def test_gateway_adapter_exposes_bounded_authentication_flow(tmp_path) -> 
 @pytest.mark.asyncio
 async def test_gateway_adapter_lists_only_enabled_agents(tmp_path) -> None:
     base = _config(tmp_path)
+    definitions = {
+        **base.agent_definitions,
+        "codex": base.agent_definitions["codex"].model_copy(
+            update={"enabled": True}
+        ),
+    }
     config = AppConfig(**{
         **base.model_dump(),
-        "agents": {
-            "knoa": {"enabled": True, "max_concurrency": 4},
-            "codex": {
-                "enabled": True,
-                "max_concurrency": 1,
-                "command": ["codex", "app-server"],
-            },
-        },
+        "agent_definitions": definitions,
     })
-    adapter = SecureGatewayAdapter(config, authentication=_Authentication())
+    adapter = SecureGatewayAdapter(
+        config,
+        authentication=_Authentication(),
+        core=_Core(config),
+    )
     transport = httpx.ASGITransport(app=adapter.app)
     headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
 
@@ -549,9 +573,28 @@ async def test_gateway_adapter_lists_only_enabled_agents(tmp_path) -> None:
         "default_agent": "knoa",
         "agents": [
             {"agent_id": "knoa", "display_name": "Knoa"},
-            {"agent_id": "codex", "display_name": "Codex"},
         ],
     }
+
+
+@pytest.mark.asyncio
+async def test_gateway_adapter_exposes_owner_configuration_current(tmp_path) -> None:
+    config = _config(tmp_path)
+    core = _Core(config)
+    adapter = SecureGatewayAdapter(
+        config,
+        authentication=_Authentication(),
+        core=core,
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://gateway.local") as http:
+        response = await http.get("/v1/config/current", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["state"]["applied_revision_id"] == "revision-a"
+    assert response.json()["revision"]["document"]["agent_system"]["default_agent"] == "knoa"
 
 
 @pytest.mark.asyncio

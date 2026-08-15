@@ -38,16 +38,25 @@ class DeviceRoutes:
         authenticated = self._authorize(request, limit=60)
         if isinstance(authenticated, JSONResponse):
             return authenticated
-        display_names = {"knoa": "Knoa", "codex": "Codex"}
+        try:
+            revision, _state, _generations = await self._core.get_config_current(
+                authenticated.device.principal_id
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        system = revision.document.agent_system
         return JSONResponse({
-            "default_agent": self._config.default_agent,
+            "default_agent": system.default_agent,
             "agents": [
                 {
                     "agent_id": agent_id,
-                    "display_name": display_names.get(agent_id, agent_id),
+                    "display_name": system.profiles[
+                        definition.profile_id
+                    ].display_name,
                 }
-                for agent_id, config in self._config.agents.items()
-                if config.enabled and agent_id != "reviewer_agent"
+                for agent_id, definition in system.agents.items()
+                if definition.enabled
+                and system.profiles[definition.profile_id].visibility == "user"
             ],
         })
 

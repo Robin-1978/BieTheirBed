@@ -76,6 +76,7 @@ async def test_gateway_can_issue_a_toolless_system_agent_grant(tmp_path) -> None
         cancellation=asyncio.Event(),
         confirmation=None,
         tool_commit=None,
+        tool_names=frozenset({"echo"}),
         allow_tools=False,
     )
 
@@ -99,6 +100,7 @@ async def test_gateway_projects_builtin_handler_as_standard_mcp_tool(tmp_path) -
         cancellation=asyncio.Event(),
         confirmation=None,
         tool_commit=None,
+        tool_names=frozenset({"echo"}),
     )
     client = GatewayMCPClient(gateway)
     try:
@@ -164,6 +166,7 @@ async def test_gateway_commits_internal_write_tool_for_durable_task(tmp_path) ->
         cancellation=asyncio.Event(),
         confirmation=None,
         tool_commit=DurableToolCommitService(repository),
+        tool_names=frozenset({"internal_write"}),
     )
     client = GatewayMCPClient(gateway)
     try:
@@ -199,6 +202,7 @@ async def test_gateway_filters_inventory_and_calls_by_grant(tmp_path) -> None:
         cancellation=asyncio.Event(),
         confirmation=None,
         tool_commit=None,
+        tool_names=frozenset({"echo"}),
     )
     client = GatewayMCPClient(gateway)
     async with client.bind(grant) as bound:
@@ -231,6 +235,7 @@ async def test_gateway_rejects_revoked_grant(tmp_path) -> None:
         cancellation=asyncio.Event(),
         confirmation=None,
         tool_commit=None,
+        tool_names=frozenset({"echo"}),
     )
     client = GatewayMCPClient(gateway)
     async with client.bind(grant) as bound:
@@ -271,6 +276,7 @@ async def test_gateway_exposes_only_granted_artifacts_as_standard_resources(
         cancellation=asyncio.Event(),
         confirmation=None,
         tool_commit=None,
+        tool_names=frozenset({"echo"}),
         artifact_ids=frozenset({first["artifact_id"]}),
     )
 
@@ -303,6 +309,7 @@ async def test_gateway_exposes_grant_as_authenticated_standard_http_mcp(tmp_path
         cancellation=asyncio.Event(),
         confirmation=None,
         tool_commit=None,
+        tool_names=frozenset({"echo"}),
     )
     host = CapabilityMCPHost(gateway, port=0)
     await host.start()

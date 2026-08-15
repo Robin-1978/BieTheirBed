@@ -14,10 +14,11 @@ from knoa_platform.tasks import TaskDefinitionState, TaskLaunchKind, TaskLaunchP
 
 
 def enabled_agents(config: AppConfig) -> tuple[str, ...]:
+    system = config.agent_system_config()
     return tuple(
         agent_id
-        for agent_id, agent in config.agents.items()
-        if agent.enabled
+        for agent_id, agent in system.agents.items()
+        if agent.enabled and system.profiles[agent.profile_id].visibility == "user"
     )
 
 

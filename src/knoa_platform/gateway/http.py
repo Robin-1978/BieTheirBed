@@ -102,17 +102,24 @@ class GatewayHttp:
         model: type[GatewayRequest],
         *,
         limit: int,
+        max_body_bytes: int = _MAX_BODY_BYTES,
     ) -> GatewayRequest | JSONResponse:
         host = request.client.host if request.client is not None else "unknown"
         key = f"{request.url.path}:{host}"
         if not self._limiter.allow(key, limit=limit):
             return JSONResponse({"error": "rate_limited"}, status_code=429)
-        return await self._parse_body(request, model)
+        return await self._parse_body(
+            request,
+            model,
+            max_body_bytes=max_body_bytes,
+        )
 
     async def _parse_body(
         self,
         request: Request,
         model: type[GatewayRequest],
+        *,
+        max_body_bytes: int = _MAX_BODY_BYTES,
     ) -> GatewayRequest | JSONResponse:
         content_type = request.headers.get("Content-Type", "").partition(";")[0]
         if content_type.strip().lower() != "application/json":
@@ -120,7 +127,7 @@ class GatewayHttp:
         body = bytearray()
         async for chunk in request.stream():
             body.extend(chunk)
-            if len(body) > _MAX_BODY_BYTES:
+            if len(body) > max_body_bytes:
                 return JSONResponse({"error": "payload_too_large"}, status_code=413)
         try:
             return model.model_validate_json(bytes(body))
@@ -143,10 +150,17 @@ class GatewayHttp:
                 "session_not_found",
                 "approval_not_found",
                 "artifact_not_found",
+                "config_not_found",
             }:
                 return JSONResponse({"error": "not_found"}, status_code=404)
             if exc.code in {"invalid_request", "invalid_state"}:
                 return JSONResponse({"error": "rejected"}, status_code=422)
+            if exc.code == "config_conflict":
+                return JSONResponse({"error": "conflict"}, status_code=409)
+            if exc.code == "config_apply_failed":
+                return JSONResponse({"error": "rejected"}, status_code=422)
+            if exc.code == "capability_denied":
+                return JSONResponse({"error": "forbidden"}, status_code=403)
             if exc.code == "artifact_too_large":
                 return JSONResponse({"error": "payload_too_large"}, status_code=413)
         if isinstance(

@@ -18,32 +18,53 @@ class TestAppConfig:
         assert cfg.owner_principal_aliases == ("local",)
         assert cfg.gateway_artifact_max_bytes == 32 * 1024 * 1024
         assert cfg.default_agent == "knoa"
-        assert cfg.agents["knoa"].enabled is True
-        assert cfg.agents["codex"].enabled is False
-        assert cfg.agents["reviewer_agent"].enabled is False
+        system = cfg.agent_system_config()
+        assert system.agents["knoa"].enabled is True
+        assert system.agents["codex"].enabled is False
+        assert system.agents["reviewer_agent"].enabled is False
         assert cfg.approval_review.mode == "off"
         assert cfg.approval_review.timeout_seconds == 60.0
         assert cfg.approval_review.max_output_tokens == 4096
 
     def test_codex_can_be_selected_as_dynamic_default(self):
+        base = AppConfig()
         cfg = AppConfig(
             default_agent="codex",
-            agents={
-                "knoa": {"enabled": True, "max_concurrency": 4},
-                "codex": {
-                    "enabled": True,
-                    "command": ["codex", "app-server"],
-                },
+            agent_definitions={
+                **base.agent_definitions,
+                "codex": base.agent_definitions["codex"].model_copy(
+                    update={"enabled": True}
+                ),
             },
         )
 
         assert cfg.default_agent == "codex"
 
-    def test_agent_configuration_is_a_small_trusted_set(self):
-        with pytest.raises(ValueError, match="trusted knoa, codex and reviewer_agent"):
-            AppConfig(agents={"knoa": {}, "arbitrary_plugin": {}})
+    def test_agent_configuration_supports_new_composed_agent_roles(self):
+        base = AppConfig()
+        cfg = AppConfig(
+            agent_profiles={
+                **base.agent_profiles,
+                "researcher": {
+                    "display_name": "Researcher",
+                    "instructions": "Research carefully",
+                    "visibility": "delegate",
+                },
+            },
+            agent_definitions={
+                **base.agent_definitions,
+                "researcher": {
+                    "runtime_spec_id": "native-main",
+                    "profile_id": "researcher",
+                    "enabled": True,
+                },
+            },
+        )
+
+        assert cfg.agent_system_config().agents["researcher"].profile_id == "researcher"
 
     def test_reviewer_agent_is_configured_as_a_restricted_system_agent(self):
+        base = AppConfig()
         cfg = AppConfig(
             providers={
                 "local": {
@@ -53,30 +74,35 @@ class TestAppConfig:
             },
             models={"reviewer": {"provider": "local", "model": "qwen3.5-4b"}},
             default_model="reviewer",
-            agents={
-                "knoa": {"enabled": True},
-                "reviewer_agent": {
-                    "enabled": True,
-                    "model": "reviewer",
-                },
+            agent_definitions={
+                **base.agent_definitions,
+                "reviewer_agent": base.agent_definitions["reviewer_agent"].model_copy(
+                    update={"enabled": True}
+                ),
             },
-            approval_review={"mode": "suggest"},
+            approval_review={"mode": "suggest", "model": "reviewer"},
         )
 
         assert cfg.approval_review.mode == "suggest"
-        assert cfg.agents["reviewer_agent"].model == "reviewer"
+        assert cfg.agent_system_config().runtime_specs[
+            "native-approval-reviewer"
+        ].model_binding.model == "reviewer"
 
     def test_enabled_review_requires_enabled_reviewer_agent(self):
         with pytest.raises(ValueError, match="requires enabled reviewer_agent"):
             AppConfig(approval_review={"mode": "suggest", "model": "main"})
 
     def test_enabled_reviewer_agent_requires_explicit_model(self):
-        with pytest.raises(ValueError, match="requires a model"):
+        base = AppConfig()
+        with pytest.raises(ValueError, match="Enabled approval review requires a reviewer model"):
             AppConfig(
-                agents={
-                    "knoa": {"enabled": True},
-                    "reviewer_agent": {"enabled": True},
-                }
+                agent_definitions={
+                    **base.agent_definitions,
+                    "reviewer_agent": base.agent_definitions["reviewer_agent"].model_copy(
+                        update={"enabled": True}
+                    ),
+                },
+                approval_review={"mode": "suggest"},
             )
 
     def test_audio_transcription_requires_public_mcp_tool(self):
