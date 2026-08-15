@@ -512,5 +512,8 @@ async def test_mcp_exposes_resources_and_six_tools(tmp_path: Path) -> None:
     assert "local workspace" in text
     assert "final live server-side check" in text
     assert "no same-name Job is active" in text
+    assert "call gitlab.retry_job in this same Execution" in text
+    assert "how Knoa creates the host approval request" in text
+    assert "do not merely recommend" in text
     assert "inspect the referenced branch" not in text
     await app.gitlab.close()
