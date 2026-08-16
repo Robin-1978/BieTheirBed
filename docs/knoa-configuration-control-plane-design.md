@@ -1,6 +1,6 @@
 # Knoa 配置控制面与管理页面架构设计
 
-> 状态：已实现，作为当前配置架构基线
+> 状态：已实现的配置基线；规划能力会明确标记
 >
 > 日期：2026-08-16
 >
@@ -8,7 +8,7 @@
 >
 > 关系：为 `docs/knoa-agent-profile-delegation-design.md` 中的 RuntimeSpec、Profile、Agent Definition、Model Binding、Skill 和治理策略提供统一管理面
 
-> 落地范围：SQLite Config Registry、immutable Revision、optimistic Draft、validate/preflight/publish/rollback、desired/applied 状态、Core/Gateway typed API、移动端独立配置页面、Agent Runtime generation swap/drain，以及 Skill/MCP provider reload 已实现。YAML 仅在首次启动导入，之后不覆盖 Registry。
+> 落地范围：SQLite Config Registry、immutable Revision、optimistic Draft、validate/preflight/publish/rollback、desired/applied 状态、Core/Gateway typed API、移动端独立配置页面、Agent Runtime generation swap/interrupt/drain、Skill digest 冻结、Skill/MCP 最小影响 reload，以及执行 generation 发布屏障已实现。YAML 仅在首次启动导入，之后不覆盖 Registry。
 
 ## 1. 决策
 
@@ -244,9 +244,9 @@ uses G2           finishes on G1
 7. Idle Product Session 在下一 Turn 绑定 G2；Runtime/Prompt 不兼容时自动创建新 Runtime Session，Product conversation 本身保留，并向用户显示配置已更新。
 8. Reviewer 使用短期 Session，切换后新审批自然使用 G2。
 
-### 6.4 Policy 收窄与紧急撤权
+### 6.4 Policy 收窄与紧急撤权（后者为规划）
 
-普通发布不修改 active Invocation 快照，但安全撤权是例外的“额外交集”：
+普通发布不修改 active Invocation 快照。未来若出现明确的活动 Turn 紧急封禁需求，可增加“额外交集”撤权 registry：
 
 ```text
 effective permission
@@ -254,7 +254,7 @@ effective permission
   ∩ current emergency revocation policy
 ```
 
-紧急禁用 Agent、Tool、Capability、MCP 或泄露 credential 时，Gateway/Runtime sandbox 必须立即拒绝后续行动；这只能收窄，不能扩大 active Invocation 权限。
+当前不实现通用动态 Policy Engine。现有机制是 Turn cancellation、grant TTL/revoke、Tool definition/origin fingerprint fail-closed，以及发布后新 Invocation 使用收窄策略。
 
 ## 7. 管理页面信息架构
 
@@ -444,7 +444,7 @@ MVP 不做：
 
 ## 11. 实施状态
 
-Phase 1 至 Phase 4 已完成：Registry 已成为初始化后的唯一真相；移动端具备 Overview、Agent、Model/Runtime、Profile、Skill/MCP、Draft、validate、preflight、publish、diff、history 与 rollback；Runtime 使用 active + draining generation 热替换；scalar/MCP convenience 写入统一经过 ConfigurationService。
+Phase 1 至 Phase 4 已完成：Registry 已成为初始化后的唯一真相；移动端具备 Overview、Agent、Runtime、Profile/delegation、Reviewer、Operational、Skill/MCP、Draft、validate、preflight、publish、diff、history 与 rollback；Runtime 使用 active + draining generation 热替换；发布屏障保证 Resolver/Runtime/Extension 对新 Invocation 一致可见，Tool fingerprint 保护旧 grant。
 
 Phase 5 已完成旧 Agent 配置入口的前向删除。BootstrapConfig 的进一步物理拆分、Secret rotation UI、step-up authentication 和更丰富的安全 impact 可视化保持为独立安全增强，避免把并未完成的安全语义伪装成普通配置热更新。
 
@@ -507,7 +507,8 @@ Knoa 的配置页面不是配置文件的图形皮肤，而是 Configuration Con
 配置真相      = versioned ManagedConfig in Config Registry
 编辑体验      = typed draft + validation + diff + impact preview
 生效机制      = atomic publish + live policy / runtime replace / component reload
-运行安全      = immutable Invocation snapshot + emergency revocation intersection
+运行安全      = immutable Invocation snapshot + grant revoke/TTL + Tool fingerprint
+规划增强      = 在真实需求出现后增加 emergency revocation intersection
 历史与恢复    = immutable revision + auditable rollback
 Secret        = write-only Secret Store reference
 YAML          = bootstrap / import / export / disaster recovery format

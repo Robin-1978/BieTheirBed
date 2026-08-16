@@ -10,6 +10,7 @@ from knoa_platform.agent_runtime.contracts import (
     HealthStatus,
     RuntimeScope,
 )
+from knoa_platform.interactions import HumanInteractionService
 from knoa_platform.tasks.approval import DurableApprovalService
 from knoa_platform.tasks.errors import TaskAlreadyActiveError, TaskTransitionError
 from knoa_platform.tasks.event_hub import TaskEventHub
@@ -33,7 +34,6 @@ from knoa_platform.tasks.models import (
     TaskState,
 )
 from knoa_platform.tasks.repository import TaskRepository
-from knoa_platform.interactions import HumanInteractionService
 
 
 class TaskService:
@@ -76,7 +76,10 @@ class TaskService:
         origin: TaskOrigin = TaskOrigin.USER,
         agent_id: str | None = None,
         defer_start: bool = False,
+        staged: bool = False,
     ) -> TaskRecord:
+        if staged and not defer_start:
+            raise ValueError("Staged Task creation must defer execution")
         selected = await asyncio.to_thread(self._executor.agent_id, scope)
         if agent_id is not None and selected != agent_id:
             raise ValueError("Task Agent must match the Session Agent")
@@ -91,6 +94,7 @@ class TaskService:
             parent_task_id=parent_task_id,
             origin=origin,
             agent_id=selected,
+            initial_phase="delegation_staged" if staged else "",
         )
         if created:
             first = await asyncio.to_thread(
@@ -108,6 +112,18 @@ class TaskService:
 
     def wake(self) -> None:
         self._executor.wake()
+
+    async def activate_staged(self, principal_id: str, task_id: str) -> TaskRecord:
+        task = await asyncio.to_thread(
+            self._repository.activate_staged,
+            principal_id,
+            task_id,
+        )
+        self._executor.wake()
+        return task
+
+    async def list_staged(self) -> tuple[TaskRecord, ...]:
+        return await asyncio.to_thread(self._repository.list_staged)
 
     async def create_definition(
         self,

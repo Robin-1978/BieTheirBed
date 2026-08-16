@@ -42,6 +42,7 @@ class CoreDaemon:
             await composition.extensions.start()
             await composition.capability_mcp_host.start()
             await composition.conversation_service.start()
+            await composition.delegations.recover_staged()
             await composition.task_service.start()
             interactions = getattr(composition, "interactions", None)
             if interactions is not None:

@@ -10,6 +10,7 @@ import base64
 import copy
 import hashlib
 import mimetypes
+import shutil
 import sqlite3
 import time
 import uuid
@@ -569,6 +570,43 @@ class ArtifactStore:
             status="delivered" if entry.delivered_at else "available",
             visibility="user",
         ).model_dump()
+
+    def share_to_session(
+        self,
+        source_session_id: str,
+        target_session_id: str,
+        artifact_id: str,
+    ) -> dict[str, Any]:
+        """Grant another Session a distinct reference to an owned Artifact."""
+
+        source = self._get(source_session_id, artifact_id)
+        digest = source.content_sha256
+        if len(digest) != 64:
+            with source.path.open("rb") as stream:
+                digest = hashlib.sha256(stream.read()).hexdigest()
+        directory = self.root / self._session_key(target_session_id) / "shared"
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        directory.chmod(0o700)
+        suffix = Path(source.name).suffix or Path(source.path).suffix or ".bin"
+        artifact_key = uuid.uuid4().hex
+        target = directory / f"{artifact_key}{suffix}"
+        temporary = directory / f".{artifact_key}.tmp"
+        shutil.copyfile(source.path, temporary)
+        temporary.chmod(0o600)
+        temporary.replace(target)
+        shared = self._register(
+            target_session_id,
+            target,
+            direction=source.direction,
+            ownership="managed",
+            retention="session",
+            name=source.name,
+            media_type=source.media_type,
+            width=source.width,
+            height=source.height,
+            content_sha256=digest,
+        )
+        return self.public_ref(target_session_id, shared.artifact_id)
 
     def read_data_url(
         self,

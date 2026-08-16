@@ -10,7 +10,7 @@ import json
 import secrets
 import time
 from contextlib import AsyncExitStack, asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import uvicorn
@@ -48,6 +48,29 @@ class _EmbeddedUvicornServer(uvicorn.Server):
 
 
 @dataclass(frozen=True)
+class InvocationBudget:
+    """Concurrency-safe counters shared by every call in one invocation."""
+
+    max_tool_calls: int
+    max_artifact_bytes: int
+    artifact_bytes: int = 0
+    _tool_calls: int = field(init=False, default=0, repr=False, compare=False)
+    _guard: asyncio.Lock = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_tool_calls", 0)
+        object.__setattr__(self, "_guard", asyncio.Lock())
+        if self.artifact_bytes > self.max_artifact_bytes:
+            raise PermissionError("Invocation Artifacts exceed the byte budget")
+
+    async def consume_tool_call(self) -> None:
+        async with self._guard:
+            if self._tool_calls >= self.max_tool_calls:
+                raise PermissionError("Invocation Tool call budget exhausted")
+            object.__setattr__(self, "_tool_calls", self._tool_calls + 1)
+
+
+@dataclass(frozen=True)
 class CapabilityGrant:
     """Opaque short-lived authority used by one Agent Turn."""
 
@@ -66,13 +89,16 @@ class CapabilityGrant:
     artifact_ids: frozenset[str]
     tool_names: frozenset[str]
     allow_tools: bool
+    budget: InvocationBudget
+    tool_digests: dict[str, str]
 
 
 class CapabilityGrantRegistry:
     """Process-local grant authority; tokens never enter model content."""
 
-    def __init__(self, *, clock=time.time) -> None:
+    def __init__(self, *, clock=time.time, tool_digest_for=None) -> None:
         self._clock = clock
+        self._tool_digest_for = tool_digest_for
         self._grants: dict[str, CapabilityGrant] = {}
         self._guard = asyncio.Lock()
 
@@ -92,6 +118,10 @@ class CapabilityGrantRegistry:
         binding_epoch: int = 1,
         ttl_seconds: float = 300.0,
         allow_tools: bool = True,
+        max_tool_calls: int = 50,
+        max_artifact_bytes: int = 32 * 1024 * 1024,
+        artifact_bytes: int = 0,
+        tool_digests: dict[str, str] | None = None,
     ) -> CapabilityGrant:
         if ttl_seconds <= 0:
             raise ValueError("Capability grant TTL must be positive")
@@ -125,6 +155,21 @@ class CapabilityGrantRegistry:
             artifact_ids=artifact_ids,
             tool_names=tool_names,
             allow_tools=allow_tools,
+            budget=InvocationBudget(
+                max_tool_calls=max_tool_calls,
+                max_artifact_bytes=max_artifact_bytes,
+                artifact_bytes=artifact_bytes,
+            ),
+            tool_digests=(
+                dict(tool_digests)
+                if tool_digests is not None
+                else {
+                    name: self._tool_digest_for(name)
+                    for name in tool_names
+                }
+                if self._tool_digest_for is not None
+                else {}
+            ),
         )
         async with self._guard:
             self._purge_expired_locked()
@@ -167,7 +212,9 @@ class CapabilityGateway:
         self._registry = registry
         self._tool_step = tool_step
         self._artifacts = artifacts
-        self.grants = grants or CapabilityGrantRegistry()
+        self.grants = grants or CapabilityGrantRegistry(
+            tool_digest_for=registry.fingerprint
+        )
         self.server = Server(
             "knoa-platform-capabilities",
             version="1.0.0",
@@ -215,7 +262,10 @@ class CapabilityGateway:
             return types.ListToolsResult(tools=[])
         tools = []
         for definition in self._registry.definitions_for(grant.capabilities):
-            if str(definition["name"]) not in grant.tool_names:
+            name = str(definition["name"])
+            if name not in grant.tool_names:
+                continue
+            if grant.tool_digests.get(name) != self._registry.fingerprint(name):
                 continue
             tools.append(
                 types.Tool(
@@ -241,6 +291,9 @@ class CapabilityGateway:
             raise PermissionError("This capability grant does not allow Tools")
         if params.name not in grant.tool_names:
             raise PermissionError("Tool is not authorized by the invocation policy")
+        if grant.tool_digests.get(params.name) != self._registry.fingerprint(params.name):
+            raise PermissionError("Tool definition changed after grant issuance")
+        await grant.budget.consume_tool_call()
         call_id = self._call_id(context, params)
         result = await self._tool_step.execute(
             ToolStepContext(
@@ -284,6 +337,9 @@ class CapabilityGateway:
         capabilities: frozenset[ToolCapability],
     ) -> frozenset[str]:
         return frozenset(self._registry.list_for(capabilities))
+
+    def tool_fingerprint(self, name: str) -> str:
+        return self._registry.fingerprint(name)
 
     async def _list_resources(
         self,

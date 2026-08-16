@@ -54,6 +54,28 @@ export type ManagedRuntimeSpec = {
   approval_policy: string;
   native_capabilities: string[];
   instruction_authority: string;
+  request_timeout_seconds?: number;
+  max_line_bytes?: number;
+  max_event_queue?: number;
+};
+
+export type ManagedApprovalReviewConfig = {
+  mode: "off" | "suggest" | "auto";
+  agent_id: string;
+  timeout_seconds: number;
+  max_output_tokens: number;
+  auto_max_risk: "low" | "medium";
+};
+
+export type ManagedOperationalConfig = {
+  llm_temperature: number;
+  max_iterations: number;
+  max_total_tool_calls: number;
+  max_output_tokens: number;
+  context_window_budget: number;
+  task_capacity: number;
+  principal_task_capacity: number;
+  generation_drain_seconds: number;
 };
 
 export type ManagedConfig = {
@@ -69,10 +91,10 @@ export type ManagedConfig = {
     agents: Record<string, ManagedAgentDefinition>;
     default_agent: string;
   };
-  approval_review: Record<string, unknown>;
+  approval_review: ManagedApprovalReviewConfig;
   skills: Record<string, { source: string; enabled: boolean; content_digest: string }>;
   mcp_servers: Record<string, { transport: string; enabled: boolean; [key: string]: unknown }>;
-  operational: Record<string, number>;
+  operational: ManagedOperationalConfig;
 };
 
 export type ConfigRevision = {

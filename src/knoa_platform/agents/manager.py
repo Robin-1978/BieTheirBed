@@ -107,6 +107,9 @@ class AgentManager:
     def default_agent(self) -> str:
         return self._default_agent
 
+    def is_system_agent(self, agent_id: str) -> bool:
+        return agent_id in self._system_agents
+
     def resolve_agent_id(self, requested: str | None = None) -> str:
         agent_id = (requested or self._default_agent).strip()
         if agent_id in self._system_agents:
@@ -298,7 +301,7 @@ class AgentManager:
         deadline: float,
     ) -> None:
         await generation.runtime.drain(deadline)
-        while generation.active_leases and time.time() < deadline:
+        while generation.active_leases:
             await asyncio.sleep(0.05)
         for managed in self._agents.values():
             if managed.draining is generation:
@@ -311,3 +314,5 @@ class AgentManager:
         managed.enabled = False
         managed.active.accepting = False
         await managed.active.runtime.drain(deadline)
+        while managed.active.active_leases:
+            await asyncio.sleep(0.05)

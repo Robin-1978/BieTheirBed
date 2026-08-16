@@ -254,6 +254,23 @@ export default function SystemConfigurationScreen() {
               <View key={id} style={styles.item}>
                 <Text style={styles.itemTitle}>{id}</Text>
                 <Text style={styles.meta}>{runtime.implementation} · {runtime.model_binding.ownership === "runtime" ? t("config.runtimeManagedModel") : runtime.model_binding.model} · ×{runtime.max_concurrency}</Text>
+                <NumericField label={t("config.maxConcurrency")} value={runtime.max_concurrency} disabled={!draft} onCommit={(value) => updateDocument((next) => { const target = next.agent_system.runtime_specs[id]; if (target) target.max_concurrency = value; })} />
+                {runtime.implementation === "codex" ? (
+                  <ChoiceRow
+                    label={t("config.sandboxBundle")}
+                    value={runtime.sandbox}
+                    disabled={!draft}
+                    choices={[["read-only", t("config.readOnly")], ["workspace-write", t("config.workspaceWrite")]]}
+                    onChange={(sandbox) => updateDocument((next) => {
+                      const target = next.agent_system.runtime_specs[id];
+                      if (!target) return;
+                      target.sandbox = sandbox;
+                      target.native_capabilities = sandbox === "workspace-write"
+                        ? ["workspace_read", "workspace_write", "command_execution", "native_file_edit"]
+                        : ["workspace_read", "command_execution"];
+                    })}
+                  />
+                ) : null}
               </View>
             ))}
           </Section>
@@ -278,8 +295,32 @@ export default function SystemConfigurationScreen() {
                     }
                   })}
                 />
+                {profile.delegation.allowed ? (
+                  <View style={styles.fieldGrid}>
+                    <NumericField label={t("config.maxChildren")} value={profile.delegation.max_children} disabled={!draft} onCommit={(value) => updateDocument((next) => { const target = next.agent_system.profiles[profileId]; if (target) target.delegation.max_children = value; })} />
+                    <NumericField label={t("config.maxParallelChildren")} value={profile.delegation.max_parallel_children} disabled={!draft} onCommit={(value) => updateDocument((next) => { const target = next.agent_system.profiles[profileId]; if (target) target.delegation.max_parallel_children = value; })} />
+                    <NumericField label={t("config.childDeadline")} value={profile.delegation.max_deadline_seconds} disabled={!draft} onCommit={(value) => updateDocument((next) => { const target = next.agent_system.profiles[profileId]; if (target) target.delegation.max_deadline_seconds = value; })} />
+                  </View>
+                ) : null}
               </View>
             ))}
+          </Section>
+
+          <Section title={t("config.approvalReview")}>
+            <ChoiceRow label={t("config.reviewMode")} value={document.approval_review.mode} disabled={!draft} choices={[["off", t("config.reviewOff")], ["suggest", t("config.reviewSuggest")], ["auto", t("config.reviewAuto")]]} onChange={(value) => updateDocument((next) => { next.approval_review.mode = value as "off" | "suggest" | "auto"; const reviewer = next.agent_system.agents[next.approval_review.agent_id]; if (reviewer && value !== "off") reviewer.enabled = true; })} />
+            <Metric label={t("config.reviewerAgent")} value={document.approval_review.agent_id} />
+            <NumericField label={t("config.reviewTimeout")} value={document.approval_review.timeout_seconds} disabled={!draft} onCommit={(value) => updateDocument((next) => { next.approval_review.timeout_seconds = value; })} />
+            <ChoiceRow label={t("config.autoMaxRisk")} value={document.approval_review.auto_max_risk} disabled={!draft} choices={[["low", t("config.riskLow")], ["medium", t("config.riskMedium")]]} onChange={(value) => updateDocument((next) => { next.approval_review.auto_max_risk = value as "low" | "medium"; })} />
+          </Section>
+
+          <Section title={t("config.operational")}>
+            <View style={styles.fieldGrid}>
+              <NumericField label={t("config.maxIterations")} value={document.operational.max_iterations} disabled={!draft} onCommit={(value) => updateDocument((next) => { next.operational.max_iterations = value; })} />
+              <NumericField label={t("config.maxToolCalls")} value={document.operational.max_total_tool_calls} disabled={!draft} onCommit={(value) => updateDocument((next) => { next.operational.max_total_tool_calls = value; })} />
+              <NumericField label={t("config.maxOutputTokens")} value={document.operational.max_output_tokens} disabled={!draft} onCommit={(value) => updateDocument((next) => { next.operational.max_output_tokens = value; })} />
+              <NumericField label={t("config.contextBudget")} value={document.operational.context_window_budget} disabled={!draft} onCommit={(value) => updateDocument((next) => { next.operational.context_window_budget = value; })} />
+              <NumericField label={t("config.drainSeconds")} value={document.operational.generation_drain_seconds} disabled={!draft} onCommit={(value) => updateDocument((next) => { next.operational.generation_drain_seconds = value; })} />
+            </View>
           </Section>
 
           <Section title={t("config.skillsAndTools")}>
@@ -359,6 +400,14 @@ function Action({ label, onPress, busy = false, primary = false }: { label: stri
   return <Pressable disabled={busy} onPress={onPress} style={[styles.action, primary && styles.actionPrimary]}>{busy ? <ActivityIndicator color={primary ? colors.white : colors.accent} /> : <><Text style={[styles.actionText, primary && styles.actionTextPrimary]}>{label}</Text><AppIcon name="chevron-right" size={17} color={primary ? colors.white : colors.accent} /></>}</Pressable>;
 }
 
+function NumericField({ label, value, disabled, onCommit }: { label: string; value: number; disabled: boolean; onCommit(value: number): void }) {
+  return <View style={styles.numericField}><Text style={styles.meta}>{label}</Text><TextInput key={String(value)} defaultValue={String(value)} editable={!disabled} keyboardType="numeric" style={styles.numericInput} onEndEditing={(event) => { const parsed = Number(event.nativeEvent.text); if (Number.isFinite(parsed) && parsed >= 0) onCommit(parsed); }} /></View>;
+}
+
+function ChoiceRow({ label, value, choices, disabled, onChange }: { label: string; value: string; choices: [string, string][]; disabled: boolean; onChange(value: string): void }) {
+  return <View style={styles.choiceBlock}><Text style={styles.meta}>{label}</Text><View style={styles.choiceRow}>{choices.map(([id, title]) => <Pressable key={id} disabled={disabled} onPress={() => onChange(id)} style={[styles.choice, value === id && styles.choiceSelected]}><Text style={[styles.choiceText, value === id && styles.choiceTextSelected]}>{title}</Text></Pressable>)}</View></View>;
+}
+
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background },
   container: { padding: 16, paddingBottom: 56, gap: 14 },
@@ -390,4 +439,13 @@ const styles = StyleSheet.create({
   cancel: { color: colors.muted, textAlign: "center", padding: 8 },
   diff: { color: colors.ink, fontFamily: "monospace", fontSize: 12 },
   rollback: { color: colors.danger, fontWeight: "700", padding: 8 },
+  fieldGrid: { gap: 8 },
+  numericField: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  numericInput: { minWidth: 100, borderRadius: 10, borderWidth: 1, borderColor: colors.line, color: colors.ink, paddingHorizontal: 10, paddingVertical: 7, textAlign: "right" },
+  choiceBlock: { gap: 7 },
+  choiceRow: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
+  choice: { borderRadius: 999, borderWidth: 1, borderColor: colors.line, paddingHorizontal: 11, paddingVertical: 7 },
+  choiceSelected: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
+  choiceText: { color: colors.muted, fontSize: 12, fontWeight: "600" },
+  choiceTextSelected: { color: colors.accent },
 });

@@ -8,6 +8,7 @@ from knoa_platform.capabilities.gateway import (
     CapabilityGrantRegistry,
     GatewayMCPClient,
     GatewayMCPConnector,
+    InvocationBudget,
 )
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "CapabilityGrantRegistry",
     "GatewayMCPClient",
     "GatewayMCPConnector",
+    "InvocationBudget",
     "BoundGatewayToolClient",
 ]

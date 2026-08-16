@@ -22,6 +22,7 @@ ConfigValidator = Callable[
 ]
 ConfigPreflight = Callable[[ManagedConfig], Awaitable[None]]
 ConfigApplier = Callable[[ConfigRevision, ConfigRevision], Awaitable[None]]
+ConfigNormalizer = Callable[[ManagedConfig], ManagedConfig]
 
 
 async def _valid(_: ManagedConfig) -> tuple[ConfigValidationIssue, ...]:
@@ -36,6 +37,10 @@ async def _apply_noop(_: ConfigRevision, __: ConfigRevision) -> None:
     return None
 
 
+def _identity(document: ManagedConfig) -> ManagedConfig:
+    return document
+
+
 class ConfigurationService:
     """The only managed configuration write boundary."""
 
@@ -48,11 +53,13 @@ class ConfigurationService:
         validator: ConfigValidator = _valid,
         preflight: ConfigPreflight = _noop,
         applier: ConfigApplier = _apply_noop,
+        normalizer: ConfigNormalizer = _identity,
     ) -> None:
         self._registry = registry
         self._validator = validator
         self._preflight = preflight
         self._applier = applier
+        self._normalizer = normalizer
         self._lock = asyncio.Lock()
         self._registry.initialize(initial, actor=bootstrap_actor)
 
@@ -112,7 +119,7 @@ class ConfigurationService:
     ) -> ConfigDraft:
         return self._registry.replace_draft(
             draft_id,
-            document,
+            self._normalizer(document),
             expected_version=expected_version,
             actor=actor,
         )
@@ -151,6 +158,16 @@ class ConfigurationService:
         summary: str,
     ) -> ConfigPublishResult:
         async with self._lock:
+            draft = self._registry.draft(draft_id)
+            normalized = self._normalizer(draft.document)
+            if normalized.digest != draft.document.digest:
+                draft = self._registry.replace_draft(
+                    draft_id,
+                    normalized,
+                    expected_version=expected_version,
+                    actor=actor,
+                )
+                expected_version = draft.draft_version
             validation = await self.validate(draft_id)
             if not validation.valid:
                 raise ConfigApplyError("validation_failed", "Configuration is invalid")
@@ -186,10 +203,12 @@ class ConfigurationService:
     ) -> ConfigPublishResult:
         async with self._lock:
             previous = self._registry.current()
+            target = self._registry.revision(revision_id)
             revision = self._registry.rollback(
                 revision_id,
                 actor=actor,
                 summary=summary,
+                document=self._normalizer(target.document),
             )
             try:
                 await self._preflight(revision.document)

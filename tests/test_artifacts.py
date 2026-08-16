@@ -38,6 +38,28 @@ def test_artifact_store_rejects_unscoped_session(tmp_path):
         store.prepare_path("", source)
 
 
+def test_artifact_share_uses_distinct_session_owned_copy(tmp_path):
+    source = tmp_path / "report.txt"
+    source.write_text("shared content", encoding="utf-8")
+    store = ArtifactStore(tmp_path / "attachments")
+    parent = store.prepare_path("parent-session", source)
+
+    child = store.share_to_session(
+        "parent-session",
+        "child-session",
+        parent["artifact_id"],
+    )
+    source.unlink()
+
+    assert child["artifact_id"] != parent["artifact_id"]
+    assert child["ownership"] == "managed"
+    assert store.read_text("child-session", child["artifact_id"])["content"] == (
+        "shared content"
+    )
+    with pytest.raises(KeyError):
+        store.public_ref("parent-session", child["artifact_id"])
+
+
 def test_borrowed_file_survives_artifact_expiry(tmp_path):
     now = [100.0]
     source = tmp_path / "report.txt"

@@ -35,7 +35,7 @@ class ManagedProviderConfig(ConfigurationModel):
     timeout_seconds: float = Field(default=120.0, gt=0.0, le=3600.0)
 
     @model_validator(mode="after")
-    def validate_secret_source(self) -> "ManagedProviderConfig":
+    def validate_secret_source(self) -> ManagedProviderConfig:
         if self.api_key_ref and self.api_key_env:
             raise ValueError("Provider must use one API key source")
         if self.driver in {"openai", "anthropic"} and not (
@@ -57,6 +57,15 @@ class ManagedSkillConfig(ConfigurationModel):
     source: str
     enabled: bool = True
     content_digest: str = ""
+
+    @model_validator(mode="after")
+    def validate_content_digest(self) -> ManagedSkillConfig:
+        if self.content_digest and (
+            len(self.content_digest) != 64
+            or any(character not in "0123456789abcdef" for character in self.content_digest)
+        ):
+            raise ValueError("Skill content_digest must be a lowercase SHA-256 digest")
+        return self
 
 
 class ManagedMCPToolPolicyConfig(ConfigurationModel):
@@ -97,7 +106,7 @@ class ManagedMCPConfig(ConfigurationModel):
     tools: dict[str, ManagedMCPToolPolicyConfig] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def validate_transport(self) -> "ManagedMCPConfig":
+    def validate_transport(self) -> ManagedMCPConfig:
         if self.transport == "stdio" and not self.command:
             raise ValueError("stdio MCP requires a command")
         if self.transport == "streamable_http" and not self.url:
@@ -124,7 +133,7 @@ class ManagedOperationalConfig(ConfigurationModel):
     generation_drain_seconds: float = Field(default=120.0, ge=1.0, le=3600.0)
 
     @model_validator(mode="after")
-    def validate_capacity(self) -> "ManagedOperationalConfig":
+    def validate_capacity(self) -> ManagedOperationalConfig:
         if self.principal_task_capacity > self.task_capacity:
             raise ValueError("Principal Task capacity cannot exceed global capacity")
         return self
@@ -148,7 +157,7 @@ class ManagedConfig(ConfigurationModel):
     )
 
     @model_validator(mode="after")
-    def validate_references(self) -> "ManagedConfig":
+    def validate_references(self) -> ManagedConfig:
         if self.default_model not in self.models:
             raise ValueError("default_model must reference a configured model")
         if self.fallback_model:
