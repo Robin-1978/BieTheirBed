@@ -2,7 +2,6 @@ import { Redirect } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { AccessibilityInfo, Animated, Easing, StyleSheet, Text, View } from "react-native";
 
-import { AppPressable } from "@/components/AppPressable";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
@@ -53,9 +52,9 @@ export default function Index() {
       breathAnimation.stop();
     };
   }, [breath, reduceMotion, rotation]);
-  if (gateway.status === "unpaired") return <Redirect href="/pair" />;
+  if (gateway.status === "selecting" || gateway.status === "unpaired") return <Redirect href="/connect" />;
   if (gateway.status === "ready") return <Redirect href="/chat" />;
-  const booting = gateway.status === "booting";
+  if (gateway.status === "error") return <Redirect href="/connect" />;
   return (
     <View style={styles.container}>
       <View style={styles.coreWrap}>
@@ -76,16 +75,8 @@ export default function Index() {
         <View style={styles.core}><Text style={styles.coreText}>诺</Text></View>
       </View>
       <Text style={styles.eyebrow}>KNOA</Text>
-      <Text style={styles.title}>{booting ? t("splash.waking") : t("splash.unavailable")}</Text>
-      {booting ? (
-        <Text style={styles.status}>{t("splash.restoring")}</Text>
-      ) : null}
-      {gateway.error ? <Text style={styles.detail}>{t("splash.connectionProblem")}</Text> : null}
-      {gateway.status === "error" ? (
-        <AppPressable style={styles.button} onPress={() => void gateway.reconnect()}>
-          <Text style={styles.buttonText}>{t("common.reconnect")}</Text>
-        </AppPressable>
-      ) : null}
+      <Text style={styles.title}>{t("splash.waking")}</Text>
+      <Text style={styles.status}>{t("splash.restoring")}</Text>
     </View>
   );
 }
@@ -103,7 +94,4 @@ const styles = StyleSheet.create({
   eyebrow: { color: colors.accent, fontSize: 11, letterSpacing: 2.2, fontWeight: "700" },
   title: { color: colors.ink, fontSize: 24, fontWeight: "700" },
   status: { color: colors.muted, fontSize: 13 },
-  detail: { color: colors.muted, textAlign: "center", maxWidth: 300 },
-  button: { backgroundColor: colors.accent, paddingHorizontal: 22, paddingVertical: 12, borderRadius: 14 },
-  buttonText: { color: "white", fontWeight: "600" },
 });

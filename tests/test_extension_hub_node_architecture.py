@@ -467,3 +467,19 @@ async def test_relay_broker_rejects_cross_node_session_delivery() -> None:
     await broker.send_to_client("node-a", frame)
 
     assert len(websocket.messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_relay_broker_exposes_live_node_registry() -> None:
+    class _WebSocket:
+        async def close(self, **_kwargs) -> None:
+            return None
+
+    broker = RelayBroker()
+    websocket = _WebSocket()
+    connection = await broker.register_node("node-a", websocket)  # type: ignore[arg-type]
+
+    assert await broker.connected_node_ids() == frozenset({"node-a"})
+
+    await broker.unregister_node("node-a", connection)
+    assert await broker.connected_node_ids() == frozenset()

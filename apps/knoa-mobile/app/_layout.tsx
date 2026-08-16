@@ -44,6 +44,7 @@ function AppNavigator() {
           }}
         >
           <Stack.Screen name="index" options={{ headerShown: false }} />
+          <Stack.Screen name="connect" options={{ title: "Hub 与 Node" }} />
           <Stack.Screen name="pair" options={{ title: t("nav.connect") }} />
           <Stack.Screen
             name="chat"

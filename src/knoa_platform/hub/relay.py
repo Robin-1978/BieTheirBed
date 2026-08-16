@@ -102,6 +102,11 @@ class RelayBroker:
                 raise ValueError("Relay session already exists")
             self._clients[session_id] = ClientRelayConnection(node_id, websocket)
 
+    async def connected_node_ids(self) -> frozenset[str]:
+        """Return the live Relay registry without exposing mutable connections."""
+        async with self._lock:
+            return frozenset(self._nodes)
+
     async def unregister_client(self, session_id: str) -> None:
         async with self._lock:
             self._clients.pop(session_id, None)

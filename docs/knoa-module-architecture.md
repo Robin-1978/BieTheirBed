@@ -2,7 +2,7 @@
 
 > 状态：目标架构与当前实现映射（未实现能力会明确标记）
 >
-> 更新日期：2026-08-16
+> 更新日期：2026-08-17
 >
 > 权威顺序：运行代码与测试 > 本文 > 专题设计文档 > 历史方案文档
 >
@@ -279,6 +279,21 @@ transport。Relay ciphertext 内承载现有 Gateway HTTP typed contract，Node 
 | Hosted Hub administration | 一次性注册/恢复 QR、本地 Node enrollment、一致性备份/恢复 | `src/knoa_platform/hub/admin.py` |
 | Node Hub Edge Adapter | Hub enrollment、identity pin、outbound connector、E2E tunnel dispatch | `src/knoa_platform/node_hub.py`、`relay_protocol.py` |
 | App transport | direct 优先、Relay fallback、Node session crypto、有限事件轮询 | `apps/knoa-mobile/src/api/gatewayTransport*.ts`、`relayCrypto.ts` |
+
+Mobile App 内部拆分为两个状态边界：
+
+```text
+Hub control state
+  Account session -> Workspace -> Node directory
+
+Selected Node execution state
+  local binding -> direct/Relay transport -> Node authentication -> Conversation/Task
+```
+
+Hub client 拥有 Hosted Account、Workspace 与 Node directory 的客户端状态；`GatewayProvider` 只拥有
+当前被选中 Node 的执行连接。App 启动时先恢复 Hub 控制面并加载本地 Node bindings，由用户选择
+Node 后才建立执行会话。单个 Node 的 offline/error 是局部状态，不能阻塞登录 Hub、切换 Workspace、
+查看目录或连接其他 Node。No-Hub 模式从本地 pinned bindings 中选择 Node，遵守相同边界。
 
 ## 6. Agent 领域模型
 
