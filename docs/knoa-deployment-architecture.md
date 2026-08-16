@@ -2,7 +2,7 @@
 
 > 状态：当前 V1 可部署架构与后续生产演进边界
 >
-> 更新日期：2026-08-16
+> 更新日期：2026-08-17
 >
 > 范围：Mobile App、Node、HubService、Relay、Agent Runtime、LLM、Skill、Tool、MCP、网络、安全、存储、故障与运维拓扑
 >
@@ -35,6 +35,26 @@ Relay 只负责转发端到端加密帧。
 
 Node 是执行服务器。HubService 是可选共享控制面。Relay 是无业务语义的数据通道，不是第二个
 业务服务器，也不是权限权威。
+
+### 2.1 Mobile App 的启动与故障边界
+
+在使用 Hub 的形态中，App 的根启动流程是控制面优先，而不是 Node 会话优先：
+
+```text
+App Installation
+  -> restore/login Hub Account
+  -> select Workspace
+  -> list/select Node
+  -> establish direct or Relay Node session
+  -> enter Conversation/Task execution UI
+```
+
+Hub Account、Workspace 和 Node directory 属于 App 可独立访问的控制面。被选中 Node 的连接、
+认证、Conversation 与 Task 属于执行会话；Node 离线、认证失败或 Relay 暂时不可用只能使该会话
+失败，不能阻断帐号登录、Workspace 切换、Node directory 或选择另一个 Node。
+
+No-Hub 形态没有 Hub 控制面，但遵循同一故障隔离原则：App 先展示本地 pinned Node bindings，
+用户选择后才建立 Node 会话。App 不在启动时自动连接历史 active Node。
 
 ## 3. 完整产品部署视图
 
@@ -332,6 +352,10 @@ App
 ```
 
 Hub account authentication只允许申请连接，不替代 Node business authorization。
+
+App 内部同样保持这两个边界：Hub client 负责 Account、Workspace 与目录；`GatewayProvider` 只负责
+用户已选择 Node 的 direct/Relay 会话。`GatewayProvider` 的错误不是 App 根状态，也不得覆盖或清除
+Hub 控制面状态。
 
 ### 9.3 Node B 调用 Node A 的本地 LLM
 

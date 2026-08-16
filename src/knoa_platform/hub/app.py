@@ -224,9 +224,18 @@ class HubApplication:
         if isinstance(authenticated, JSONResponse):
             return authenticated
         now = time.time()
+        relay_nodes = await self.relay.connected_node_ids()
         nodes = []
         for item in self.service.repository.list_nodes():
-            nodes.append({**item, "online": bool(item["last_seen"] and now - item["last_seen"] < 90)})
+            nodes.append(
+                {
+                    **item,
+                    "online": bool(
+                        item["node_id"] in relay_nodes
+                        or (item["last_seen"] and now - item["last_seen"] < 90)
+                    ),
+                }
+            )
         return JSONResponse({"nodes": nodes})
 
     async def enrollment_grants(self, request: Request) -> JSONResponse:

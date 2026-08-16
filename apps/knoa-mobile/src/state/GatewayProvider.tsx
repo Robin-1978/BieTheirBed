@@ -24,7 +24,7 @@ import { requiresAndroidUpdate } from "@/update/releasePolicy";
 type GatewayConnection = { gatewayUrl: string; token: string };
 
 type GatewayState = {
-  status: "booting" | "unpaired" | "ready" | "error";
+  status: "booting" | "selecting" | "unpaired" | "ready" | "error";
   client: GatewayClient | null;
   sessionHandle: string;
   gatewayUrl: string;
@@ -271,8 +271,33 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
   }, []);
 
   useEffect(() => {
-    void connect();
-  }, [connect]);
+    let active = true;
+    void listNodeBindings().then((nodes) => {
+      if (!active) return;
+      connectionRef.current = null;
+      commit({
+        status: "selecting",
+        nodes,
+        client: null,
+        gatewayUrl: "",
+        sessionToken: "",
+        sessionHandle: "",
+        deviceId: "",
+        nodeId: "",
+        lastConnectedAt: 0,
+        error: "",
+      });
+    }).catch((error) => {
+      if (!active) return;
+      commit({
+        status: "error",
+        error: error instanceof Error ? error.message : "无法读取 Node 绑定",
+      });
+    });
+    return () => {
+      active = false;
+    };
+  }, [commit]);
 
   useEffect(() => {
     let subscription: TaskEventSubscription | null = null;
@@ -338,7 +363,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
   }, [commit, connect]);
 
   const switchNode = useCallback(async (nodeId: string) => {
-    if (nodeId === stateRef.current.nodeId) return;
+    if (nodeId === stateRef.current.nodeId && stateRef.current.status === "ready") return;
     connectionGenerationRef.current += 1;
     provisionalConversationRef.current = null;
     await selectNode(nodeId);
