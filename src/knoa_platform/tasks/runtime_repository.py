@@ -146,6 +146,7 @@ class TaskRuntimeRepositoryMixin:
         parent_task_id: str = "",
         origin: TaskOrigin = TaskOrigin.USER,
         agent_id: str | None = None,
+        initial_phase: str = "",
     ) -> tuple[TaskRecord, bool]:
         request_id = self._normalize_identifier(
             client_request_id,
@@ -158,6 +159,9 @@ class TaskRuntimeRepositoryMixin:
         if not 0 <= priority <= 9:
             raise ValueError("Task priority must be between 0 and 9")
         normalized_parent = parent_task_id.strip()
+        normalized_phase = initial_phase.strip()
+        if len(normalized_phase) > 256:
+            raise ValueError("Task initial phase exceeds its size limit")
         attachment_json = self._attachments_payload(attachments)
         now = self._clock()
 
@@ -185,6 +189,7 @@ class TaskRuntimeRepositoryMixin:
                             and str(existing["origin"]) == origin.value
                             and str(existing["parent_task_id"] or "")
                             == normalized_parent
+                            and str(existing["phase"]) == normalized_phase
                         )
                         if not same_request:
                             raise TaskIdempotencyConflictError(
@@ -251,7 +256,7 @@ class TaskRuntimeRepositoryMixin:
                             int(tools_enabled),
                             priority,
                             TaskState.QUEUED.value,
-                            "",
+                            normalized_phase,
                             0,
                             0,
                             "",
@@ -930,6 +935,7 @@ class TaskRuntimeRepositoryMixin:
                 row = db.execute(
                     """SELECT candidate.* FROM runtime_tasks AS candidate
                        WHERE candidate.state=? AND candidate.principal_id=?
+                         AND candidate.phase != 'delegation_staged'
                          AND NOT EXISTS (
                              SELECT 1 FROM runtime_tasks AS active
                              WHERE active.session_handle=candidate.session_handle
@@ -949,6 +955,7 @@ class TaskRuntimeRepositoryMixin:
                 row = db.execute(
                     """SELECT candidate.* FROM runtime_tasks AS candidate
                        WHERE candidate.state=?
+                         AND candidate.phase != 'delegation_staged'
                          AND NOT EXISTS (
                              SELECT 1 FROM runtime_tasks AS active
                              WHERE active.session_handle=candidate.session_handle
@@ -1009,6 +1016,45 @@ class TaskRuntimeRepositoryMixin:
                 str(row["task_id"]),
             )
             return self._record(claimed)
+
+    def activate_staged(self, principal_id: str, task_id: str) -> TaskRecord:
+        """Make one fully-governed delegation Task eligible for claiming."""
+
+        principal = self._normalize_identifier(
+            principal_id,
+            label="principal_id",
+            limit=256,
+        )
+        normalized_task_id = self._normalize_identifier(
+            task_id,
+            label="task_id",
+            limit=128,
+        )
+        now = self._clock()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = self._owned_task(db, principal, normalized_task_id)
+            if TaskState(str(row["state"])) is not TaskState.QUEUED:
+                raise TaskTransitionError("Only queued delegation Tasks can be activated")
+            if str(row["phase"]) != "delegation_staged":
+                raise TaskTransitionError("Task is not staged for delegation")
+            db.execute(
+                """UPDATE runtime_tasks SET
+                       phase='', updated_at=?, revision=revision+1
+                   WHERE task_id=? AND state=? AND phase='delegation_staged'""",
+                (now, normalized_task_id, TaskState.QUEUED.value),
+            )
+            return self._record(self._owned_task(db, principal, normalized_task_id))
+
+    def list_staged(self) -> tuple[TaskRecord, ...]:
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT * FROM runtime_tasks
+                   WHERE state=? AND phase='delegation_staged'
+                   ORDER BY created_at, task_id""",
+                (TaskState.QUEUED.value,),
+            ).fetchall()
+        return tuple(self._record(row) for row in rows)
 
     def is_cancel_requested(self, principal_id: str, task_id: str) -> bool:
         return self.get(principal_id, task_id).cancel_requested

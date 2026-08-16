@@ -36,6 +36,17 @@ NativeCapability = Literal[
     "command_execution",
     "native_file_edit",
 ]
+CODEX_READ_ONLY_CAPABILITIES: frozenset[NativeCapability] = frozenset(
+    {"workspace_read", "command_execution"}
+)
+CODEX_WORKSPACE_WRITE_CAPABILITIES: frozenset[NativeCapability] = frozenset(
+    {
+        "workspace_read",
+        "workspace_write",
+        "command_execution",
+        "native_file_edit",
+    }
+)
 
 
 def _delegable_native_capabilities(
@@ -51,12 +62,28 @@ def _delegable_native_capabilities(
     return frozenset(delegated)
 
 
+def _canonical_value(value):
+    if isinstance(value, dict):
+        return {
+            key: _canonical_value(item)
+            for key, item in sorted(value.items())
+        }
+    if isinstance(value, (set, frozenset)):
+        return sorted(
+            (_canonical_value(item) for item in value),
+            key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")),
+        )
+    if isinstance(value, (list, tuple)):
+        return [_canonical_value(item) for item in value]
+    return value
+
+
 class AgentDefinitionModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     def digest(self) -> str:
         payload = json.dumps(
-            self.model_dump(mode="json"),
+            _canonical_value(self.model_dump(mode="python")),
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
@@ -70,7 +97,7 @@ class ModelBindingSpec(AgentDefinitionModel):
     hint: str = ""
 
     @model_validator(mode="after")
-    def validate_binding(self) -> "ModelBindingSpec":
+    def validate_binding(self) -> ModelBindingSpec:
         if self.ownership == "platform" and not self.model.strip():
             raise ValueError("Platform-managed model binding requires a model alias")
         if self.ownership == "runtime" and self.model:
@@ -96,7 +123,7 @@ class RuntimeSpec(AgentDefinitionModel):
     max_event_queue: int = Field(default=1024, ge=16, le=16_384)
 
     @model_validator(mode="after")
-    def validate_runtime(self) -> "RuntimeSpec":
+    def validate_runtime(self) -> RuntimeSpec:
         if self.implementation == "codex" and not self.command:
             raise ValueError("Codex RuntimeSpec requires a command")
         if (
@@ -106,6 +133,16 @@ class RuntimeSpec(AgentDefinitionModel):
             raise ValueError("Native RuntimeSpec requires a platform-managed model")
         if self.implementation == "codex" and self.model_binding.ownership != "runtime":
             raise ValueError("Codex RuntimeSpec requires a runtime-managed model")
+        if self.implementation == "codex":
+            expected = (
+                CODEX_READ_ONLY_CAPABILITIES
+                if self.sandbox == "read-only"
+                else CODEX_WORKSPACE_WRITE_CAPABILITIES
+            )
+            if self.native_capabilities != expected:
+                raise ValueError(
+                    "Codex RuntimeSpec native capabilities must match its sandbox bundle"
+                )
         return self
 
 
@@ -123,7 +160,7 @@ class DelegationPolicy(AgentDefinitionModel):
     max_deadline_seconds: float = Field(default=0.0, ge=0.0, le=86_400.0)
 
     @model_validator(mode="after")
-    def validate_delegation(self) -> "DelegationPolicy":
+    def validate_delegation(self) -> DelegationPolicy:
         if not self.allowed and any(
             (
                 self.targets,
@@ -162,7 +199,7 @@ class AgentProfile(AgentDefinitionModel):
     callable_by: frozenset[str] = frozenset()
 
     @model_validator(mode="after")
-    def validate_profile(self) -> "AgentProfile":
+    def validate_profile(self) -> AgentProfile:
         if bool(self.instructions) == bool(self.instructions_ref):
             raise ValueError("Profile requires exactly one instructions source")
         if self.visibility == "system" and not self.callable_by:
@@ -218,7 +255,7 @@ class AgentSystemConfig(AgentDefinitionModel):
     default_agent: AgentId
 
     @model_validator(mode="after")
-    def validate_references(self) -> "AgentSystemConfig":
+    def validate_references(self) -> AgentSystemConfig:
         if (
             self.default_agent not in self.agents
             or not self.agents[self.default_agent].enabled
@@ -276,12 +313,12 @@ class AgentDefinitionResolver:
         definition, runtime, profile = self._parts(agent_id)
         payload = {
             "agent_id": agent_id,
-            "definition": definition.model_dump(mode="json"),
-            "runtime": runtime.model_dump(mode="json"),
-            "profile": profile.model_dump(mode="json"),
+            "definition": definition.model_dump(mode="python"),
+            "runtime": runtime.model_dump(mode="python"),
+            "profile": profile.model_dump(mode="python"),
         }
         encoded = json.dumps(
-            payload,
+            _canonical_value(payload),
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
@@ -387,6 +424,13 @@ class AgentDefinitionResolver:
                     resolved_limits.max_parallel_children,
                     parent.limits.max_parallel_children,
                 ),
+            )
+        if runtime.implementation == "codex" and native not in {
+            CODEX_READ_ONLY_CAPABILITIES,
+            CODEX_WORKSPACE_WRITE_CAPABILITIES,
+        }:
+            raise AgentNotCallableError(
+                "Codex invocation requires one supported native capability bundle"
             )
         delegation_max_depth = profile.delegation.max_depth
         delegation_max_deadline_seconds = profile.delegation.max_deadline_seconds

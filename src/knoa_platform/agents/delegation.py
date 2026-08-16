@@ -20,6 +20,7 @@ from knoa_platform.agents.definitions import (
     ResolvedInvocationPolicy,
 )
 from knoa_platform.agents.policies import InvocationPolicyRepository
+from knoa_platform.artifacts import ArtifactStore
 from knoa_platform.capabilities import CapabilityGateway
 from knoa_platform.sqlite_connection import connect_sqlite, initialize_wal
 from knoa_platform.tasks import TERMINAL_TASK_STATES, TaskOrigin, TaskService
@@ -264,6 +265,7 @@ class DelegationService:
         task_repository,
         conversation_repository,
         gateway: CapabilityGateway,
+        artifacts: ArtifactStore,
         *,
         resolver_for: Callable[[], AgentDefinitionResolver],
         capabilities_for: Callable[[RuntimeScope], frozenset[ToolCapability]],
@@ -276,6 +278,7 @@ class DelegationService:
         self._task_repository = task_repository
         self._conversations = conversation_repository
         self._gateway = gateway
+        self._artifacts = artifacts
         self._resolver_for = resolver_for
         self._capabilities_for = capabilities_for
         self._installed_skills = installed_skills
@@ -336,6 +339,15 @@ class DelegationService:
             idempotency_key,
         )
         if existing is not None:
+            child = await self._tasks.get(
+                scope.principal_id,
+                existing.child_task_id,
+            )
+            if child.phase == "delegation_staged":
+                await self._tasks.activate_staged(
+                    scope.principal_id,
+                    existing.child_task_id,
+                )
             return existing
         parent_policy = self._policies.get(parent_id)
         if target_agent_id not in parent_policy.delegation_targets:
@@ -407,10 +419,39 @@ class DelegationService:
                 )
             }
         )
+        parent_artifact_ids = tuple(sorted(child_policy.artifact_ids))
+        artifact_bytes = sum(
+            int(
+                self._artifacts.metadata(
+                    scope.session_handle,
+                    artifact_id,
+                )["size"]
+            )
+            for artifact_id in parent_artifact_ids
+        )
+        if artifact_bytes > child_policy.limits.max_artifact_bytes:
+            raise PermissionError("Delegation Artifacts exceed the invocation budget")
         child_scope = self._sessions.create(
             scope.principal_id,
             activate=False,
             agent_id=target_agent_id,
+        )
+        try:
+            shared_artifact_ids = frozenset(
+                str(
+                    self._artifacts.share_to_session(
+                        scope.session_handle,
+                        child_scope.session_handle,
+                        artifact_id,
+                    )["artifact_id"]
+                )
+                for artifact_id in parent_artifact_ids
+            )
+        except BaseException:
+            self._artifacts.cleanup_session(child_scope.session_handle)
+            raise
+        child_policy = child_policy.model_copy(
+            update={"artifact_ids": shared_artifact_ids}
         )
         context_text = json.dumps(
             context,
@@ -425,42 +466,84 @@ class DelegationService:
             ArtifactAttachment(artifact_id=artifact_id)
             for artifact_id in sorted(child_policy.artifact_ids)
         )
-        child = await self._tasks.create(
-            child_scope,
-            client_request_id=f"delegation:{idempotency_key}",
-            goal=child_goal,
-            attachments=attachments,
-            tools_enabled=bool(child_policy.allowed_platform_tools),
-            parent_task_id=parent_id if parent_kind == "task_execution" else "",
-            origin=TaskOrigin.AGENT,
-            agent_id=target_agent_id,
-            defer_start=True,
-        )
-        self._policies.record(
-            child.task_id,
-            scope.principal_id,
-            child.session_handle,
-            child_policy,
-        )
-        parent_link = (
-            self._repository.find_for_child_task(scope.principal_id, parent_id)
-            if parent_kind == "task_execution"
-            else None
-        )
-        link = self._repository.create(
-            principal_id=scope.principal_id,
-            parent_kind=parent_kind,
-            parent_id=parent_id,
-            parent_policy=parent_policy,
-            child_session_handle=child.session_handle,
-            child_task_id=child.task_id,
-            child_policy=child_policy,
-            mode=mode,
-            depth=(parent_link.depth + 1 if parent_link is not None else 1),
-            idempotency_key=idempotency_key,
-        )
-        self._tasks.wake()
-        return link
+        try:
+            child = await self._tasks.create(
+                child_scope,
+                client_request_id=f"delegation:{idempotency_key}",
+                goal=child_goal,
+                attachments=attachments,
+                tools_enabled=bool(child_policy.allowed_platform_tools),
+                parent_task_id=parent_id if parent_kind == "task_execution" else "",
+                origin=TaskOrigin.AGENT,
+                agent_id=target_agent_id,
+                defer_start=True,
+                staged=True,
+            )
+        except BaseException:
+            self._artifacts.cleanup_session(child_scope.session_handle)
+            raise
+        try:
+            self._policies.record(
+                child.task_id,
+                scope.principal_id,
+                child.session_handle,
+                child_policy,
+            )
+            parent_link = (
+                self._repository.find_for_child_task(scope.principal_id, parent_id)
+                if parent_kind == "task_execution"
+                else None
+            )
+            link = self._repository.create(
+                principal_id=scope.principal_id,
+                parent_kind=parent_kind,
+                parent_id=parent_id,
+                parent_policy=parent_policy,
+                child_session_handle=child.session_handle,
+                child_task_id=child.task_id,
+                child_policy=child_policy,
+                mode=mode,
+                depth=(parent_link.depth + 1 if parent_link is not None else 1),
+                idempotency_key=idempotency_key,
+            )
+            await self._tasks.activate_staged(scope.principal_id, child.task_id)
+            return link
+        except BaseException:
+            try:
+                await self._tasks.cancel(
+                    scope.principal_id,
+                    child.task_id,
+                    reason="Delegation activation failed",
+                )
+            finally:
+                self._artifacts.cleanup_session(child_scope.session_handle)
+            raise
+
+    async def recover_staged(self) -> None:
+        """Activate fully linked children and fail closed on incomplete staging."""
+
+        for task in await self._tasks.list_staged():
+            link = self._repository.find_for_child_task(
+                task.principal_id,
+                task.task_id,
+            )
+            try:
+                policy = self._policies.get(task.task_id)
+            except LookupError:
+                policy = None
+            if (
+                link is not None
+                and policy is not None
+                and policy.policy_digest == link.invocation_policy_digest
+            ):
+                await self._tasks.activate_staged(task.principal_id, task.task_id)
+                continue
+            await self._tasks.cancel(
+                task.principal_id,
+                task.task_id,
+                reason="Delegation staging was incomplete during Core recovery",
+            )
+            self._artifacts.cleanup_session(task.session_handle)
 
     async def result(
         self,

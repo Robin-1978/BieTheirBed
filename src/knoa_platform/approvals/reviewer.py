@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import time
 import uuid
 from enum import Enum
 from typing import Any, Protocol
@@ -13,16 +12,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from knoa_agent_contracts import (
     AssistantDelta,
-    CreateRuntimeSession,
-    McpEndpointGrant,
-    RuntimeTurnRequest,
-    TextPart,
     TurnFinished,
 )
-from knoa_platform.agent_runtime.contracts import RuntimeScope
-from knoa_platform.agents.manager import AgentManager
-from knoa_platform.capabilities.gateway import CapabilityGateway
-
+from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
+from knoa_platform.agents.execution import AgentExecutionService, ExecuteAgentTurn
 
 APPROVAL_REVIEWER_SYSTEM_PROMPT = """<role>
 You are Knoa's restricted approval reviewer. You review one proposed action only.
@@ -109,15 +102,15 @@ class KnoaReviewerAgent:
 
     def __init__(
         self,
-        agents: AgentManager,
-        gateway: CapabilityGateway,
+        execution: AgentExecutionService,
+        sessions: RuntimeSessionRepository,
         *,
         agent_id: str = "reviewer_agent",
         model: str = "",
         timeout_seconds: float = 60.0,
     ) -> None:
-        self._agents = agents
-        self._gateway = gateway
+        self._execution = execution
+        self._sessions = sessions
         self._agent_id = agent_id
         self._model = model
         self._timeout = timeout_seconds
@@ -135,71 +128,48 @@ class KnoaReviewerAgent:
 
     async def _review(self, request: ApprovalReviewRequest) -> ApprovalReviewResult:
         operation = f"review:{uuid.uuid4().hex}"
-        scope = RuntimeScope(
-            principal_id=request.principal_id,
-            session_handle=f"review-{uuid.uuid4().hex}",
+        scope = self._sessions.create(
+            request.principal_id,
+            activate=False,
+            agent_id=self._agent_id,
         )
         cancellation = asyncio.Event()
-        async with self._agents.lease_system(self._agent_id) as runtime:
-            session = await runtime.create_session(
-                CreateRuntimeSession(operation_id=operation, binding_epoch=1)
-            )
-            grant = await self._gateway.grants.issue(
-                scope=scope,
-                run_id=request.run_id,
-                client_request_id=operation,
-                capabilities=frozenset(),
-                cancellation=cancellation,
-                confirmation=None,
-                tool_commit=None,
-                binding_epoch=session.binding_epoch,
-                ttl_seconds=max(30.0, self._timeout + 5.0),
-                allow_tools=False,
-            )
-            endpoint = McpEndpointGrant(
-                server_id="knoa-platform-capabilities",
-                transport="in_memory",
-                endpoint="memory://knoa-platform-capabilities",
-                authorization=grant.token,
-                expires_at=grant.expires_at,
-                scope_digest=grant.scope_digest,
-                binding_epoch=grant.binding_epoch,
-            )
-            content: list[str] = []
-            terminal: TurnFinished | None = None
-            try:
-                turn = await runtime.start_turn(
-                    RuntimeTurnRequest(
-                        session=session,
-                        operation_id=operation,
-                        input=(
-                            TextPart(
-                                text=json.dumps(
-                                    self._model_payload(request),
-                                    ensure_ascii=False,
-                                    sort_keys=True,
-                                )
-                            ),
-                        ),
-                        mcp=endpoint,
-                        deadline=time.time() + self._timeout,
-                    )
+        content: list[str] = []
+        terminal: TurnFinished | None = None
+        try:
+            events = await self._execution.execute_system_turn(
+                ExecuteAgentTurn(
+                    scope=scope,
+                    turn_id=operation,
+                    client_request_id=operation,
+                    input=json.dumps(
+                        self._model_payload(request),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    attachments=(),
+                    tools_enabled=False,
+                    cancellation=cancellation,
+                    agent_id=self._agent_id,
+                    invocation_kind="system",
+                    caller_id="approval_service",
                 )
-                async for event in turn.events:
-                    if isinstance(event, AssistantDelta):
-                        content.append(event.content)
-                    elif isinstance(event, TurnFinished):
-                        terminal = event
-            finally:
-                await self._gateway.grants.revoke(grant.token)
-                await runtime.delete_session(session)
-            if terminal is None or terminal.status != "completed":
-                raise RuntimeError("reviewer turn did not complete")
-            payload = self._parse_json("".join(content))
-            result = ApprovalReviewResult.model_validate(payload)
-            return result.model_copy(
-                update={"reviewer_id": self._agent_id, "model": self._model}
             )
+            for event in events:
+                if isinstance(event, AssistantDelta):
+                    content.append(event.content)
+                elif isinstance(event, TurnFinished):
+                    terminal = event
+        finally:
+            await self._execution.delete_session(scope)
+            await asyncio.to_thread(self._sessions.delete, scope)
+        if terminal is None or terminal.status != "completed":
+            raise RuntimeError("reviewer turn did not complete")
+        payload = self._parse_json("".join(content))
+        result = ApprovalReviewResult.model_validate(payload)
+        return result.model_copy(
+            update={"reviewer_id": self._agent_id, "model": self._model}
+        )
 
     @staticmethod
     def _model_payload(request: ApprovalReviewRequest) -> dict[str, Any]:

@@ -1,10 +1,13 @@
 """Safe data-only Skill packages and deterministic selective activation."""
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
+
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -15,7 +18,6 @@ from knoa_platform.extensions.manager import (
     ExtensionProvider,
 )
 from knoa_platform.tools.base import ToolBase, ToolCapability
-
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +183,24 @@ def load_skill_package(package_root: str | Path) -> SkillPackage:
     )
 
 
+def skill_package_digest(package: SkillPackage) -> str:
+    payload = {
+        "manifest": package.manifest.model_dump(mode="json"),
+        "instructions": package.instructions,
+        "resources": [
+            {"path": resource.path, "content": resource.content}
+            for resource in package.resources
+        ],
+    }
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 class SkillCatalog:
     def __init__(self) -> None:
         self._packages: dict[str, SkillPackage] = {}
@@ -254,9 +274,16 @@ class SkillCatalog:
 
 
 class SkillPackageProvider(ExtensionProvider):
-    def __init__(self, package_root: str | Path, catalog: SkillCatalog) -> None:
+    def __init__(
+        self,
+        package_root: str | Path,
+        catalog: SkillCatalog,
+        *,
+        expected_digest: str = "",
+    ) -> None:
         self._root = Path(package_root).expanduser().resolve()
         self._catalog = catalog
+        self._expected_digest = expected_digest.strip()
         self._skill_id = self._root.name
         if not SKILL_ID_PATTERN.fullmatch(self._skill_id):
             raise ValueError("Skill package directory must use a safe Skill ID")
@@ -271,6 +298,13 @@ class SkillPackageProvider(ExtensionProvider):
 
     async def start(self) -> tuple[ToolBase, ...]:
         package = load_skill_package(self._root)
+        if (
+            self._expected_digest
+            and skill_package_digest(package) != self._expected_digest
+        ):
+            raise RuntimeError(
+                f"Skill package content changed after publication: {self._skill_id}"
+            )
         self._catalog.register(package)
         return ()
 

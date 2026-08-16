@@ -7,6 +7,7 @@ import httpx
 import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from mcp.shared.exceptions import MCPError
 
 from knoa_platform.agent_runtime.contracts import RuntimeScope
 from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
@@ -136,6 +137,47 @@ async def test_gateway_projects_builtin_handler_as_standard_mcp_tool(tmp_path) -
     assert result.call_id == "model-call-a"
     assert result.status == "completed"
     assert result.output == {"echo": "hello"}
+
+
+@pytest.mark.asyncio
+async def test_gateway_enforces_invocation_tool_call_budget(tmp_path) -> None:
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+    gateway = CapabilityGateway(
+        registry,
+        ToolStep(registry, ToolArgumentPolicy(tmp_path)),
+    )
+    grant = await gateway.grants.issue(
+        scope=RuntimeScope(principal_id="principal-a", session_handle="session-a"),
+        run_id="turn-budget",
+        client_request_id="request-budget",
+        capabilities=frozenset({ToolCapability.NETWORK}),
+        cancellation=asyncio.Event(),
+        confirmation=None,
+        tool_commit=None,
+        tool_names=frozenset({"echo"}),
+        max_tool_calls=1,
+    )
+
+    async with GatewayMCPClient(gateway).bind(grant) as bound:
+        await bound.list_tools()
+        first = await bound.call_tool(
+            ProposedToolCall(
+                call_id="call-one",
+                name="echo",
+                arguments={"message": "first"},
+            )
+        )
+        with pytest.raises(MCPError, match="budget exhausted"):
+            await bound.call_tool(
+                ProposedToolCall(
+                    call_id="call-two",
+                    name="echo",
+                    arguments={"message": "second"},
+                )
+            )
+
+    assert first.status == "completed"
 
 
 @pytest.mark.asyncio

@@ -10,7 +10,7 @@
 >
 > 实施策略：前向直接切换，不保留 `AgentConfig/config.agents` 兼容层
 
-> 落地范围：typed RuntimeSpec/Profile/Agent Definition、统一 resolver、Invocation policy 快照、Capability Gateway Tool allowlist、Session rebind、受治理的 Child Task delegation、Codex Profile instruction 注入，以及 Runtime generation 热切换均已进入代码与回归测试。
+> 落地范围：typed RuntimeSpec/Profile/Agent Definition、统一 resolver、Invocation policy 快照、Capability Gateway Tool allowlist/预算/fingerprint、统一 System Agent 执行入口、Session rebind、staged Child Task delegation、跨 Session Artifact 复制、Skill digest 冻结、Codex capability bundle 校验，以及 Runtime generation 热切换与 deadline interrupt 均已进入代码与回归测试。
 
 ## 1. 决策
 
@@ -765,7 +765,7 @@ ToolStep
   -> ToolStep commit
 ```
 
-Reviewer 继续通过专用 `ApprovalReviewer` Port 调用，不通过 Agent-facing `spawn_subagent` Tool 调用。
+Reviewer 继续通过专用 `ApprovalReviewer` Port 调用，不通过 Agent-facing `spawn_subagent` Tool 调用；Port 内部统一进入 `AgentExecutionService.execute_system_turn()`，因此仍受 resolver、`callable_by`、policy observer、deadline、generation lease 和 tool-less grant 约束。
 
 ### 10.3 安全不变量
 
@@ -806,8 +806,10 @@ Parent Invocation
        |- enforce max depth/fan-out
        |- derive ResolvedInvocationPolicy subset
        |- create target-agent detached Session
-       |- atomically persist immutable DelegationLink + policy snapshot
-       `- create one-off child Task
+       |- copy authorized Artifacts into child Session
+       |- create unclaimable staged child Task
+       |- persist immutable DelegationLink + policy snapshot
+       `- activate child Task
   -> child AgentExecutionService
 ```
 
@@ -960,8 +962,8 @@ Agent Definition 在自己的 generation 内完全不可变，但 Config Revisio
 1. 每个 Config Revision 一次性解析全部 RuntimeSpec、Profile、Skill 内容和 Agent Definition digest。
 2. 受影响的新 generation 先完整构建并校验 instruction authority、native capability/sandbox、引用和健康状态；任一关键 preflight 失败都不切换 applied revision。
 3. 通过预检后原子切换 active generation；新 Invocation 只使用新 definition，旧 active Invocation 继续使用创建时 generation 和 ResolvedInvocationPolicy。
-4. 每个 Agent Definition 最多保留一个 bounded draining generation；它不接受新 Invocation，并在 active Invocation 完成或 drain deadline 到达后销毁。MVP 不提供历史 generation 路由或长期池化。
-5. Child spawn 时立即固定 definition digest，并原子创建 target-agent Session binding、DelegationLink 和 Child Task，避免排队期间延迟绑定到另一配置。
+4. 每个 Agent Definition 最多保留一个 bounded draining generation；它不接受新 Invocation，deadline 后中断 active Turn，并在 lease 归零后销毁。MVP 不提供历史 generation 路由或长期池化。
+5. Child spawn 时立即固定 definition digest；Child Task 先以 `delegation_staged` 创建，Executor 不能 claim，只有 policy snapshot 与 DelegationLink 完成后才激活。该 staged protocol 避免为多个 repository 引入通用 UnitOfWork，同时关闭“未授权 Child 抢跑”的竞态。
 6. digest 不同的 queued/paused Child Task 明确失败为 `agent_definition_changed`，由父调用者或用户重新委派；不得为了排队任务长期保留旧 generation。
 7. Idle Product Session 在下一 Turn rebind 当前 generation；若 RuntimeSpec、Prompt authority 或 Runtime 私有 Session 不兼容，则创建新 Runtime Session，保留 Product conversation 并记录 binding epoch 变化，不强行 resume 旧私有状态。
 8. Core/组件重启后，binding digest 相同才允许 resume；不同则执行同一 rebind/fail-closed 规则，不静默恢复。
@@ -969,7 +971,7 @@ Agent Definition 在自己的 generation 内完全不可变，但 Config Revisio
 10. Profile instructions 和引用 Skill 内容变化必须产生新 digest。
 11. Agent Definition digest 只覆盖 Platform 可控制的 resolved non-secret 配置、Profile、Skill 内容和 Runtime implementation version。Codex 等 runtime-managed model 的真实 model/config identity 另行记录；不可获得时标记 unknown，不伪称 digest 能覆盖外部可变状态。
 12. 生产 Codex RuntimeSpec 必须使用隔离、版本固定且可计算配置摘要的 home/config；不允许 delegate/system Agent 继承可变的 ambient `~/.codex`。
-13. 紧急撤权可以立即与旧 Invocation snapshot 再次相交并收窄权限；任何热发布或重算都不能扩大 active Invocation 创建时权限。
+13. 动态紧急撤权 registry 属于后续安全增强；当前通过 cancellation、grant TTL/revoke 和 Tool fingerprint fail-closed 收窄。任何热发布或重算都不能扩大 active Invocation 创建时权限。
 
 ## 14. Skill 导入与 Profile 组合
 

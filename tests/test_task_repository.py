@@ -10,14 +10,14 @@ from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
 from knoa_platform.agent_runtime.tool_step import ProposedToolCall
 from knoa_platform.tasks import (
     TaskCapacityError,
+    TaskDefinitionState,
     TaskEventPayload,
     TaskIdempotencyConflictError,
+    TaskLaunchKind,
+    TaskLaunchPolicy,
+    TaskLaunchReason,
     TaskNotFoundError,
     TaskRepository,
-    TaskDefinitionState,
-    TaskLaunchPolicy,
-    TaskLaunchKind,
-    TaskLaunchReason,
     TaskState,
     TaskTraceEntry,
     TaskTransitionError,
@@ -166,6 +166,28 @@ def test_claim_and_transitions_append_gap_free_events(tmp_path: Path) -> None:
         "warning",
         "completed",
     ]
+
+
+def test_delegation_staged_task_is_unclaimable_until_activation(
+    tmp_path: Path,
+) -> None:
+    repository, scope = _repository(tmp_path)
+    task, _ = repository.create(
+        scope,
+        client_request_id="delegation-a",
+        goal="delegated work",
+        initial_phase="delegation_staged",
+    )
+
+    assert repository.claim_next("worker-a") is None
+    assert repository.list_staged() == (task,)
+
+    activated = repository.activate_staged(scope.principal_id, task.task_id)
+    claimed = repository.claim_next("worker-a")
+
+    assert activated.phase == ""
+    assert claimed is not None
+    assert claimed.task_id == task.task_id
 
 
 def test_claim_serializes_one_session_without_blocking_other_sessions(

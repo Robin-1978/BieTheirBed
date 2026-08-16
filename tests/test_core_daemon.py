@@ -52,6 +52,14 @@ class _Interactions(_Host):
         await self.stop()
 
 
+class _Delegations:
+    def __init__(self) -> None:
+        self.recovered = False
+
+    async def recover_staged(self) -> None:
+        self.recovered = True
+
+
 @pytest.mark.asyncio
 async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     tmp_path,
@@ -66,6 +74,7 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     trigger_dispatcher = _TriggerDispatcher()
     interactions = _Interactions()
     capability_mcp_host = _Host()
+    delegations = _Delegations()
     pid = tmp_path / "service.pid"
     composition = SimpleNamespace(
         host=host,
@@ -77,6 +86,7 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
         trigger_dispatcher=trigger_dispatcher,
         interactions=interactions,
         capability_mcp_host=capability_mcp_host,
+        delegations=delegations,
         paths=SimpleNamespace(pid=pid),
         artifacts=SimpleNamespace(cleanup_expired=lambda: None),
     )
@@ -100,6 +110,7 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     assert trigger_dispatcher.started
     assert interactions.started
     assert capability_mcp_host.started
+    assert delegations.recovered
     assert pid.exists()
     assert str(tmp_path / "service.log") in pid.read_text(encoding="utf-8")
     assert stat.S_IMODE(pid.stat().st_mode) == 0o600

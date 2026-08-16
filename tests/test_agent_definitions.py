@@ -28,7 +28,9 @@ def _config() -> AgentSystemConfig:
                 implementation="codex",
                 model_binding=ModelBindingSpec(ownership="runtime"),
                 command=("codex", "app-server"),
-                native_capabilities=frozenset({"workspace_read"}),
+                native_capabilities=frozenset(
+                    {"workspace_read", "command_execution"}
+                ),
                 instruction_authority="required",
             ),
         },
@@ -37,7 +39,9 @@ def _config() -> AgentSystemConfig:
                 display_name="Knoa",
                 instructions="You are Knoa.",
                 allowed_platform_tools=frozenset({"read_file", "web_search"}),
-                platform_capability_ceiling=frozenset({"host_read", "network"}),
+                platform_capability_ceiling=frozenset(
+                    {"host_read", "network", "shell"}
+                ),
                 visibility="user",
                 delegation=DelegationPolicy(
                     allowed=True,
@@ -51,7 +55,9 @@ def _config() -> AgentSystemConfig:
             "coder": AgentProfile(
                 display_name="Coder",
                 instructions="Work inside the repository.",
-                runtime_native_capability_ceiling=frozenset({"workspace_read"}),
+                runtime_native_capability_ceiling=frozenset(
+                    {"workspace_read", "command_execution"}
+                ),
                 visibility="delegate",
                 delegation=DelegationPolicy(
                     allowed=True,
@@ -101,7 +107,9 @@ def test_resolver_enforces_visibility_and_parent_subset() -> None:
         None,
         invocation_kind="user",
         caller_id="personal:owner",
-        principal_capabilities=frozenset({"host_read", "host_write", "network"}),
+        principal_capabilities=frozenset(
+            {"host_read", "host_write", "network", "shell"}
+        ),
         available_tools=frozenset({"read_file", "write_file", "web_search"}),
         installed_skills=frozenset(),
     )
@@ -110,17 +118,21 @@ def test_resolver_enforces_visibility_and_parent_subset() -> None:
         "codex",
         invocation_kind="delegate",
         caller_id="knoa",
-        principal_capabilities=frozenset({"host_read", "host_write"}),
+        principal_capabilities=frozenset({"host_read", "host_write", "shell"}),
         available_tools=frozenset({"read_file", "write_file"}),
         installed_skills=frozenset(),
-        requested_native_capabilities=frozenset({"workspace_read"}),
+        requested_native_capabilities=frozenset(
+            {"workspace_read", "command_execution"}
+        ),
         parent=parent,
     )
 
     assert parent.allowed_platform_tools == frozenset({"read_file", "web_search"})
     assert child.allowed_platform_tools == frozenset()
     assert child.platform_capabilities == frozenset()
-    assert child.runtime_native_capabilities == frozenset({"workspace_read"})
+    assert child.runtime_native_capabilities == frozenset(
+        {"workspace_read", "command_execution"}
+    )
     assert child.delegation_max_depth == 0
     assert child.limits.max_children == 2
     assert child.limits.max_parallel_children == 1

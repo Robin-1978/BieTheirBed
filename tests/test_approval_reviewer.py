@@ -1,19 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
 
-from knoa_agent_contracts import (
-    AgentDescriptor,
-    AssistantDelta,
-    RuntimeLimits,
-    RuntimeSession,
-    RuntimeTurn,
-    TurnFinished,
-)
+from knoa_agent_contracts import AssistantDelta, TurnFinished
 from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
 from knoa_platform.agent_runtime.tool_step import ProposedToolCall
 from knoa_platform.approvals import (
@@ -24,7 +16,6 @@ from knoa_platform.approvals import (
     ApprovalReviewResult,
     KnoaReviewerAgent,
 )
-from knoa_platform.capabilities import CapabilityGrantRegistry
 from knoa_platform.conversation import ConversationRepository
 from knoa_platform.conversation.service import ConversationApprovalService
 from knoa_platform.tasks import TaskEventHub, TaskRepository
@@ -46,64 +37,30 @@ class Reviewer:
         )
 
 
-class CapturingRuntime:
+class CapturingExecution:
     def __init__(self) -> None:
         self.requests = []
-        self._descriptor = AgentDescriptor(
-            agent_id="reviewer_agent",
-            display_name="Reviewer",
-            implementation_version="1",
-            limits=RuntimeLimits(max_concurrent_turns=1),
-        )
+        self.deleted = []
 
-    @property
-    def descriptor(self):
-        return self._descriptor
-
-    async def create_session(self, request):
-        return RuntimeSession(
-            agent_id="reviewer_agent",
-            runtime_session_ref="review-session",
-            runtime_protocol_version="1.0",
-            binding_epoch=request.binding_epoch,
-        )
-
-    async def start_turn(self, request):
+    async def execute_system_turn(self, request):
         self.requests.append(request)
-
-        async def events():
-            yield AssistantDelta(
-                runtime_session_ref=request.session.runtime_session_ref,
+        return (
+            AssistantDelta(
+                runtime_session_ref="review-session",
                 runtime_turn_ref="review-turn",
                 occurred_at=1.0,
                 content='{"decision":"escalate","reason":"human required","rule_ids":[]}',
-            )
-            yield TurnFinished(
-                runtime_session_ref=request.session.runtime_session_ref,
+            ),
+            TurnFinished(
+                runtime_session_ref="review-session",
                 runtime_turn_ref="review-turn",
                 occurred_at=2.0,
                 status="completed",
-            )
+            ),
+        )
 
-        return RuntimeTurn(runtime_turn_ref="review-turn", events=events())
-
-    async def delete_session(self, session):
-        del session
-
-
-class ReviewerGateway:
-    def __init__(self) -> None:
-        self.grants = CapabilityGrantRegistry()
-
-
-class ReviewerManager:
-    def __init__(self, runtime) -> None:
-        self.runtime = runtime
-
-    @asynccontextmanager
-    async def lease_system(self, agent_id):
-        assert agent_id == "reviewer_agent"
-        yield self.runtime
+    async def delete_session(self, scope):
+        self.deleted.append(scope)
 
 
 def test_reviewer_json_contract_accepts_plain_and_fenced_json():
@@ -132,11 +89,12 @@ def test_reviewer_prompt_separates_human_authority_from_untrusted_action():
 
 
 @pytest.mark.asyncio
-async def test_reviewer_agent_never_receives_user_memory_context() -> None:
-    runtime = CapturingRuntime()
+async def test_reviewer_agent_uses_restricted_system_execution(tmp_path: Path) -> None:
+    execution = CapturingExecution()
+    sessions = RuntimeSessionRepository(tmp_path / "reviewer.db")
     reviewer = KnoaReviewerAgent(
-        ReviewerManager(runtime),
-        ReviewerGateway(),
+        execution,
+        sessions,
     )
 
     request = ApprovalReviewRequest(
@@ -153,10 +111,13 @@ async def test_reviewer_agent_never_receives_user_memory_context() -> None:
     result = await reviewer.review(request)
 
     assert result.decision is ApprovalReviewDecision.ESCALATE
-    assert runtime.requests[0].context.core_memory == ()
-    assert runtime.requests[0].context.relevant_memory == ()
-    assert runtime.requests[0].context.episodic_memory == ()
-    assert runtime.requests[0].context.skill_instructions == ""
+    invocation = execution.requests[0]
+    assert invocation.invocation_kind == "system"
+    assert invocation.caller_id == "approval_service"
+    assert invocation.tools_enabled is False
+    assert invocation.attachments == ()
+    assert execution.deleted == [invocation.scope]
+    assert sessions.list_for_principal("principal-a") == ()
     payload = KnoaReviewerAgent._model_payload(request)
     assert payload["human_instruction"] == "Write the report"
     assert payload["proposed_action"]["tool_name"] == "write_file"

@@ -100,12 +100,14 @@ from knoa_platform.extensions.mcp_package import (
     build_mcp_package_providers,
 )
 from knoa_platform.extensions.mcp_resource_tasks import MCPResourceTaskBridge
+from knoa_platform.extensions.models import MCPServerConfig, MCPToolPolicyConfig
 from knoa_platform.extensions.skill import (
     SkillCatalog,
     SkillPackageProvider,
     builtin_skill_root,
+    load_skill_package,
+    skill_package_digest,
 )
-from knoa_platform.extensions.models import MCPServerConfig, MCPToolPolicyConfig
 from knoa_platform.interactions import (
     HumanInteractionRepository,
     HumanInteractionService,
@@ -282,28 +284,50 @@ def _agent_generation_id(managed: ManagedConfig, agent_id: str) -> str:
     definition = managed.agent_system.agents[agent_id]
     runtime = managed.agent_system.runtime_specs[definition.runtime_spec_id]
     profile = managed.agent_system.profiles[definition.profile_id]
+    runtime_material = runtime.model_dump(
+        mode="json",
+        exclude={"native_capabilities", "instruction_authority"},
+    )
     payload: dict[str, object] = {
         "agent_id": agent_id,
-        "definition": definition.model_dump(mode="json"),
-        "runtime": runtime.model_dump(mode="json"),
-        "profile": profile.model_dump(mode="json"),
+        "runtime_spec_id": definition.runtime_spec_id,
+        "runtime": runtime_material,
+        "profile": {
+            "display_name": profile.display_name,
+            "instructions": profile.instructions,
+            "instructions_ref": profile.instructions_ref,
+            "runtime_limits": profile.runtime_limits.model_dump(mode="json"),
+            "tool_inventory_enabled": bool(profile.allowed_platform_tools),
+            "visibility": profile.visibility,
+        },
     }
     if runtime.implementation == "native":
+        model_alias = _managed_model_alias(managed, agent_id)
+        model = managed.models[model_alias]
         payload.update(
             {
-                "models": {
-                    name: model.model_dump(mode="json")
-                    for name, model in managed.models.items()
+                "model_alias": model_alias,
+                "model": model.model_dump(mode="json"),
+                "provider": managed.providers[model.provider].model_dump(mode="json"),
+                "operational": {
+                    "llm_temperature": managed.operational.llm_temperature,
+                    "max_iterations": managed.operational.max_iterations,
+                    "max_total_tool_calls": managed.operational.max_total_tool_calls,
+                    "max_output_tokens": managed.operational.max_output_tokens,
+                    "context_window_budget": managed.operational.context_window_budget,
                 },
-                "providers": {
-                    name: provider.model_dump(mode="json")
-                    for name, provider in managed.providers.items()
-                },
-                "fallback_model": managed.fallback_model,
-                "fallback_enabled": managed.fallback_enabled,
-                "operational": managed.operational.model_dump(mode="json"),
             }
         )
+        if agent_id == managed.agent_system.default_agent:
+            payload["fallback"] = {
+                "enabled": managed.fallback_enabled,
+                "model": managed.fallback_model,
+                "config": (
+                    managed.models[managed.fallback_model].model_dump(mode="json")
+                    if managed.fallback_enabled and managed.fallback_model
+                    else None
+                ),
+            }
     encoded = json.dumps(
         payload,
         ensure_ascii=False,
@@ -311,6 +335,26 @@ def _agent_generation_id(managed: ManagedConfig, agent_id: str) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _extension_generation_id(managed: ManagedConfig) -> str:
+    payload = {
+        "skills": {
+            skill_id: skill.model_dump(mode="json")
+            for skill_id, skill in sorted(managed.skills.items())
+        },
+        "mcp_servers": {
+            server_id: server.model_dump(mode="json")
+            for server_id, server in sorted(managed.mcp_servers.items())
+        },
+    }
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def _resolve_managed_model(
@@ -552,9 +596,28 @@ def _bootstrap_managed_skills(
             skill_id = provider.descriptor.extension_id.removeprefix("skill:")
             skills.setdefault(
                 skill_id,
-                ManagedSkillConfig(source=str(package_root), enabled=True),
+                ManagedSkillConfig(
+                    source=str(package_root),
+                    enabled=True,
+                    content_digest=skill_package_digest(
+                        load_skill_package(package_root)
+                    ),
+                ),
             )
     return skills
+
+
+def _freeze_skill_digests(managed: ManagedConfig) -> ManagedConfig:
+    frozen: dict[str, ManagedSkillConfig] = {}
+    for skill_id, skill in sorted(managed.skills.items()):
+        source = Path(skill.source).expanduser().resolve()
+        if source.name != skill_id:
+            raise ValueError(f"Skill source directory must match ID: {skill_id}")
+        package = load_skill_package(source)
+        frozen[skill_id] = skill.model_copy(
+            update={"source": str(source), "content_digest": skill_package_digest(package)}
+        )
+    return managed.model_copy(update={"skills": frozen})
 
 
 def _managed_skill_providers(
@@ -562,7 +625,11 @@ def _managed_skill_providers(
     catalog: SkillCatalog,
 ) -> tuple[SkillPackageProvider, ...]:
     return tuple(
-        SkillPackageProvider(skill.source, catalog)
+        SkillPackageProvider(
+            skill.source,
+            catalog,
+            expected_digest=skill.content_digest,
+        )
         for skill_id, skill in sorted(managed.skills.items())
         if skill.enabled and Path(skill.source).expanduser().resolve().name == skill_id
     )
@@ -640,9 +707,16 @@ def build_core_runtime(
     bootstrap_managed = bootstrap_managed.model_copy(
         update={"skills": _bootstrap_managed_skills(skill_roots)}
     )
+    bootstrap_managed = _freeze_skill_digests(bootstrap_managed)
     applied_config = config_registry.initialize(
         bootstrap_managed,
         actor=config.owner_principal_id,
+    )
+    frozen_applied = _freeze_skill_digests(applied_config.document)
+    applied_config = config_registry.adopt(
+        frozen_applied,
+        actor=config.owner_principal_id,
+        summary="Freeze managed Skill package content",
     )
     managed = applied_config.document
     agent_resolver = AgentDefinitionResolver(
@@ -856,13 +930,6 @@ def build_core_runtime(
             for agent_id in runtimes
         },
     )
-    approval_reviewer = KnoaReviewerAgent(
-        agent_manager,
-        capability_gateway,
-        agent_id=managed.approval_review.agent_id,
-        model=reviewer_model_alias,
-        timeout_seconds=managed.approval_review.timeout_seconds,
-    )
     agent_bindings = AgentSessionBindingRepository(database)
     invocation_policies = InvocationPolicyRepository(database)
 
@@ -881,6 +948,7 @@ def build_core_runtime(
         except LookupError:
             return None
 
+    execution_generation_barrier = asyncio.Lock()
     agent_execution = AgentExecutionService(
         agent_manager,
         agent_bindings,
@@ -897,6 +965,14 @@ def build_core_runtime(
         usage_observer=observe_usage,
         turn_observer=observe_turn,
         context_provider=platform_turn_context,
+        generation_barrier=execution_generation_barrier,
+    )
+    approval_reviewer = KnoaReviewerAgent(
+        agent_execution,
+        sessions,
+        agent_id=managed.approval_review.agent_id,
+        model=reviewer_model_alias,
+        timeout_seconds=managed.approval_review.timeout_seconds,
     )
     task_events = TaskEventHub()
     interaction_repository = HumanInteractionRepository(database)
@@ -1026,8 +1102,7 @@ def build_core_runtime(
                 str(exc),
             ) from exc
 
-    async def apply_configuration(previous, revision) -> None:
-        del previous
+    async def apply_configuration_unlocked(previous, revision) -> None:
         candidate = revision.document
         previous_managed_providers = managed_extension_providers["current"]
         extension_swapped = False
@@ -1045,42 +1120,47 @@ def build_core_runtime(
                 candidate.agent_system,
                 config_revision_id=revision.revision_id,
             )
-            next_managed_providers = (
-                *_managed_skill_providers(candidate, skills),
-                *_managed_mcp_providers(
-                    candidate,
-                    secret_root=paths.mcp_secrets,
-                ),
-            )
-            for provider in previous_managed_providers:
-                if isinstance(provider, MCPServerProvider):
-                    await mcp_resource_tasks.remove_provider(provider)
-                await extensions.remove_provider(provider)
-            added_providers = []
-            try:
-                for provider in next_managed_providers:
-                    status = await extensions.add_provider(provider)
-                    if status.state.value == "failed":
-                        raise ConfigApplyError(
-                            "extension_apply_failed",
-                            status.detail or "Extension failed to start",
-                        )
-                    added_providers.append(provider)
-                for provider in next_managed_providers:
-                    if isinstance(provider, MCPServerProvider):
-                        mcp_resource_tasks.add_provider(provider)
-            except Exception:
-                for provider in reversed(added_providers):
+            extensions_changed = _extension_generation_id(
+                previous.document
+            ) != _extension_generation_id(candidate)
+            next_managed_providers = previous_managed_providers
+            if extensions_changed:
+                next_managed_providers = (
+                    *_managed_skill_providers(candidate, skills),
+                    *_managed_mcp_providers(
+                        candidate,
+                        secret_root=paths.mcp_secrets,
+                    ),
+                )
+                for provider in previous_managed_providers:
                     if isinstance(provider, MCPServerProvider):
                         await mcp_resource_tasks.remove_provider(provider)
                     await extensions.remove_provider(provider)
-                for provider in previous_managed_providers:
-                    await extensions.add_provider(provider)
-                    if isinstance(provider, MCPServerProvider):
-                        mcp_resource_tasks.add_provider(provider)
-                raise
-            managed_extension_providers["current"] = next_managed_providers
-            extension_swapped = True
+                added_providers = []
+                try:
+                    for provider in next_managed_providers:
+                        status = await extensions.add_provider(provider)
+                        if status.state.value == "failed":
+                            raise ConfigApplyError(
+                                "extension_apply_failed",
+                                status.detail or "Extension failed to start",
+                            )
+                        added_providers.append(provider)
+                    for provider in next_managed_providers:
+                        if isinstance(provider, MCPServerProvider):
+                            mcp_resource_tasks.add_provider(provider)
+                except Exception:
+                    for provider in reversed(added_providers):
+                        if isinstance(provider, MCPServerProvider):
+                            await mcp_resource_tasks.remove_provider(provider)
+                        await extensions.remove_provider(provider)
+                    for provider in previous_managed_providers:
+                        await extensions.add_provider(provider)
+                        if isinstance(provider, MCPServerProvider):
+                            mcp_resource_tasks.add_provider(provider)
+                    raise
+                managed_extension_providers["current"] = next_managed_providers
+                extension_swapped = True
             await agent_manager.replace_generations(
                 candidate_runtimes,
                 default_agent=candidate.agent_system.default_agent,
@@ -1119,8 +1199,8 @@ def build_core_runtime(
         managed_holder["current"] = candidate
         model_holder["current"] = new_model
         next_reviewer = KnoaReviewerAgent(
-            agent_manager,
-            capability_gateway,
+            agent_execution,
+            sessions,
             agent_id=candidate.approval_review.agent_id,
             model=reviewer_model,
             timeout_seconds=candidate.approval_review.timeout_seconds,
@@ -1140,12 +1220,17 @@ def build_core_runtime(
             candidate.approval_review.auto_max_risk,
         )
 
+    async def apply_configuration(previous, revision) -> None:
+        async with execution_generation_barrier:
+            await apply_configuration_unlocked(previous, revision)
+
     configuration = ConfigurationService(
         config_registry,
         managed,
         bootstrap_actor=config.owner_principal_id,
         preflight=preflight_configuration,
         applier=apply_configuration,
+        normalizer=_freeze_skill_digests,
     )
     schedule_dispatcher = ScheduleDispatcher(schedules, task_service)
     schedule_service = ScheduleService(schedules, schedule_dispatcher)
@@ -1176,6 +1261,7 @@ def build_core_runtime(
         tasks,
         conversations,
         capability_gateway,
+        artifacts,
         resolver_for=lambda: resolver_holder["current"],
         capabilities_for=capabilities_for_scope,
         installed_skills=lambda: frozenset(

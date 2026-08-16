@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -127,6 +129,38 @@ class ToolRegistry:
         tool = self.get(name)
         return tool.policy if tool is not None else None
 
+    def fingerprint(self, name: str) -> str:
+        tool = self._tools.get(name)
+        origin = self._origins.get(name)
+        if tool is None or origin is None:
+            return ""
+        payload = {
+            "origin": {
+                "kind": origin.kind.value,
+                "extension_id": origin.extension_id,
+            },
+            "definition": self._canonical_definition(
+                tool,
+                tool.definition(),
+                label="full",
+            ),
+            "policy": {
+                "effect": tool.policy.effect.value,
+                "capabilities": sorted(
+                    capability.value for capability in tool.policy.capabilities
+                ),
+                "risk": tool.policy.risk.value,
+                "configured": tool.policy.configured,
+            },
+        }
+        canonical = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(canonical).hexdigest()
+
     def detailed_schema(self, name: str) -> dict[str, Any]:
         """Full schema plus examples for tool_help."""
         tool = self.get(name)
@@ -149,9 +183,7 @@ class ToolRegistry:
                     example[key] = prop["enum"][0]
                 elif prop.get("type") == "boolean":
                     example[key] = False
-                elif prop.get("type") == "integer":
-                    example[key] = 1
-                elif prop.get("type") == "number":
+                elif prop.get("type") == "integer" or prop.get("type") == "number":
                     example[key] = 1
                 elif prop.get("type") == "array":
                     example[key] = []

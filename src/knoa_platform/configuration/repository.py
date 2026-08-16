@@ -90,6 +90,36 @@ class ConfigRegistry:
             )
         return revision
 
+    def adopt(
+        self,
+        document: ManagedConfig,
+        *,
+        actor: str,
+        summary: str,
+    ) -> ConfigRevision:
+        """Publish and apply one startup convergence revision atomically."""
+
+        current = self.current()
+        if current.document.digest == document.digest:
+            return current
+        revision = self._new_revision(
+            document,
+            parent=current.revision_id,
+            actor=actor,
+            summary=summary,
+        )
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._insert_revision(db, revision)
+            db.execute(
+                """UPDATE config_control_state SET
+                       desired_revision_id=?, applied_revision_id=?,
+                       apply_status='idle', apply_error_code='', updated_at=?
+                   WHERE singleton=1""",
+                (revision.revision_id, revision.revision_id, self._clock()),
+            )
+        return revision
+
     def state(self) -> ConfigControlState:
         with self._connect() as db:
             row = db.execute(
@@ -269,11 +299,18 @@ class ConfigRegistry:
             )
         return self.state()
 
-    def rollback(self, revision_id: str, *, actor: str, summary: str) -> ConfigRevision:
+    def rollback(
+        self,
+        revision_id: str,
+        *,
+        actor: str,
+        summary: str,
+        document: ManagedConfig | None = None,
+    ) -> ConfigRevision:
         target = self.revision(revision_id)
         current = self.desired()
         revision = self._new_revision(
-            target.document,
+            document or target.document,
             parent=current.revision_id,
             actor=actor,
             summary=summary,

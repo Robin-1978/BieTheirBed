@@ -40,7 +40,6 @@ from knoa_agent_contracts import (
     TurnFinished,
     UsageReported,
 )
-
 from knoa_codex_agent.app_server import CodexAppServerClient
 from knoa_codex_agent.session_store import CodexSessionRepository
 
@@ -533,6 +532,22 @@ class CodexAgentRuntime(AgentRuntime):
                 if not self._active:
                     return
             await asyncio.sleep(0.05)
+        async with self._guard:
+            active_turns = tuple(self._active.items())
+        await asyncio.gather(
+            *(
+                self.interrupt_turn(
+                    RuntimeInterruptCommand(
+                        session=active.session,
+                        runtime_turn_ref=turn_id,
+                        command_id=f"drain:{turn_id}:{time.time_ns()}",
+                        reason="Agent generation drain deadline exceeded",
+                    )
+                )
+                for turn_id, active in active_turns
+            ),
+            return_exceptions=True,
+        )
 
     def _new_stdio_client(self, extra_env: Mapping[str, str]) -> AppServerClient:
         environment = dict(extra_env)

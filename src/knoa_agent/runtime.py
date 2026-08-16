@@ -571,6 +571,10 @@ class KnoaAgentRuntime(AgentRuntime):
                 if not self._active:
                     return
             await asyncio.sleep(0.05)
+        async with self._guard:
+            cancellations = tuple(active[1] for active in self._active.values())
+        for cancellation in cancellations:
+            cancellation.set()
 
     def _event_base(
         self,
