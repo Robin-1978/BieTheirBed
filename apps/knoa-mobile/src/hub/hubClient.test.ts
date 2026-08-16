@@ -17,7 +17,12 @@ vi.mock("@/security/deviceIdentity", () => ({
   publicKey: vi.fn(() => "public-key"),
 }));
 
-import { loadHubConnection, registerHostedAccount, resetHostedPassword } from "./hubClient";
+import {
+  loadHubConnection,
+  registerHostedAccount,
+  resetHostedPassword,
+  resolveAndroidRelease,
+} from "./hubClient";
 
 beforeEach(() => {
   native.cache.clear();
@@ -149,5 +154,61 @@ describe("Hosted Hub account onboarding", () => {
     expect(account.connection.token).toBe(accessToken);
     expect(fetchMock).toHaveBeenCalledTimes(3);
     await expect(loadHubConnection()).resolves.toMatchObject({ accountId: "account-2" });
+  });
+});
+
+describe("Android release ownership", () => {
+  it("uses the Node channel when there is no Hosted Account", async () => {
+    const nodeRelease = vi.fn(async () => ({
+      platform: "android" as const,
+      channel: "personal" as const,
+      version_name: "0.2.45",
+      version_code: 56,
+      min_supported_version_code: 1,
+      size_bytes: 100,
+      sha256: "a".repeat(64),
+      published_at: 1,
+      release_notes: "",
+      download_path: "/node.apk",
+    }));
+
+    await expect(resolveAndroidRelease(nodeRelease)).resolves.toMatchObject({
+      channel: "personal",
+      version_code: 56,
+    });
+    expect(nodeRelease).toHaveBeenCalledOnce();
+  });
+
+  it("uses Hosted Hub exclusively and resolves its download URL", async () => {
+    native.cache.set("knoa.hub.connection.v1", JSON.stringify({
+      url: "https://hosted.example/workspaces/ws_personal_1",
+      rootUrl: "https://hosted.example",
+      token: `khs_${"a".repeat(48)}`,
+      accountId: "account-1",
+      hubId: "hub-hosted",
+      workspaceId: "ws_personal_1",
+      identityIssuerId: "hub-hosted",
+      signingPublicKey: "signing-key",
+      deploymentMode: "hosted_single_node",
+    }));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({
+      platform: "android",
+      channel: "hosted",
+      version_name: "0.2.46",
+      version_code: 57,
+      min_supported_version_code: 1,
+      size_bytes: 100,
+      sha256: "b".repeat(64),
+      published_at: 1,
+      release_notes: "Hosted",
+      download_path: `/releases/android/57/${"b".repeat(64)}/knoa.apk`,
+    }));
+    const nodeRelease = vi.fn();
+
+    await expect(resolveAndroidRelease(nodeRelease)).resolves.toMatchObject({
+      channel: "hosted",
+      download_path: `https://hosted.example/releases/android/57/${"b".repeat(64)}/knoa.apk`,
+    });
+    expect(nodeRelease).not.toHaveBeenCalled();
   });
 });

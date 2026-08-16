@@ -15,12 +15,17 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 
 from knoa_platform.hub.app import HubApplication
 from knoa_platform.hub.repository import HubRepository
 from knoa_platform.hub.service import HubService
+from knoa_platform.mobile_releases import (
+    AndroidRelease,
+    AndroidReleaseRepository,
+    android_release_payload,
+)
 from knoa_platform.sqlite_connection import connect_sqlite, initialize_wal
 
 DEPLOYMENT_MODE = "hosted_single_node"
@@ -887,6 +892,9 @@ class HostedHubApplication:
             self.root / "control.db",
             hub_id=hub_id,
         )
+        self.mobile_releases = AndroidReleaseRepository(
+            self.root / "mobile-releases" / "android"
+        )
         self.tenants = HostedTenantDispatcher(
             self.root,
             hub_id=hub_id,
@@ -904,6 +912,21 @@ class HostedHubApplication:
                 Route("/v1/hosted/sessions", self.create_session, methods=["POST"]),
                 Route("/v1/hosted/session", self.revoke_session, methods=["DELETE"]),
                 Route("/v1/hosted/account", self.account, methods=["GET"]),
+                Route(
+                    "/v1/mobile/releases/android/latest",
+                    self.latest_android_release,
+                    methods=["GET"],
+                ),
+                Route(
+                    "/releases/android/{version_code:str}/{sha256:str}/knoa.apk",
+                    self.download_android_release,
+                    methods=["GET"],
+                ),
+                Route(
+                    "/downloads/android/latest.apk",
+                    self.download_latest_android_release,
+                    methods=["GET"],
+                ),
                 Route(
                     "/v1/hosted/account/password",
                     self.change_password,
@@ -1018,6 +1041,86 @@ class HostedHubApplication:
                 "deployment_mode": DEPLOYMENT_MODE,
                 "workspaces": self._workspace_payloads(workspaces),
             }
+        )
+
+    async def latest_android_release(self, request: Request) -> JSONResponse:
+        authenticated = self._account(request)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        try:
+            release = self.mobile_releases.latest()
+        except LookupError:
+            return JSONResponse({"error": "not_found"}, status_code=404)
+        assert release is not None
+        return JSONResponse(
+            android_release_payload(
+                release,
+                channel="hosted",
+                download_path=(
+                    f"/releases/android/{release.version_code}/"
+                    f"{release.sha256}/knoa.apk"
+                ),
+            )
+        )
+
+    async def download_android_release(
+        self,
+        request: Request,
+    ) -> JSONResponse | FileResponse:
+        raw_version_code = str(request.path_params.get("version_code", ""))
+        requested_sha256 = str(request.path_params.get("sha256", "")).lower()
+        if not raw_version_code.isascii() or not raw_version_code.isdecimal():
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        if not re.fullmatch(r"[0-9a-f]{64}", requested_sha256):
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        version_code = int(raw_version_code)
+        if version_code < 1 or version_code > 2_100_000_000:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            release = self.mobile_releases.get(version_code)
+            if release.sha256 != requested_sha256:
+                raise LookupError
+        except LookupError:
+            return JSONResponse({"error": "not_found"}, status_code=404)
+        return self._android_package(release, immutable=True)
+
+    async def download_latest_android_release(
+        self,
+        _request: Request,
+    ) -> JSONResponse | FileResponse:
+        try:
+            release = self.mobile_releases.latest()
+        except LookupError:
+            return JSONResponse({"error": "not_found"}, status_code=404)
+        assert release is not None
+        return self._android_package(release, immutable=False)
+
+    def _android_package(
+        self,
+        release: AndroidRelease,
+        *,
+        immutable: bool,
+    ) -> JSONResponse | FileResponse:
+        try:
+            package = self.mobile_releases.package_path(release)
+            metadata = package.stat()
+        except (LookupError, OSError):
+            return JSONResponse({"error": "not_found"}, status_code=404)
+        return FileResponse(
+            package,
+            media_type="application/vnd.android.package-archive",
+            filename=f"knoa-{release.version_name}.apk",
+            stat_result=metadata,
+            headers={
+                "Cache-Control": (
+                    "public, max-age=31536000, immutable"
+                    if immutable
+                    else "public, max-age=60, must-revalidate"
+                ),
+                "ETag": f'"{release.sha256}"',
+                "X-Knoa-SHA256": release.sha256,
+                "X-Content-Type-Options": "nosniff",
+            },
         )
 
     async def change_password(self, request: Request) -> JSONResponse:

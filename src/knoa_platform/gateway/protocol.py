@@ -559,7 +559,7 @@ class DeviceRevokedResponse(BaseModel):
 
 class AndroidReleaseResponse(BaseModel):
     platform: Literal["android"] = "android"
-    channel: Literal["personal"] = "personal"
+    channel: Literal["personal", "hosted"] = "personal"
     version_name: str = Field(min_length=1, max_length=32)
     version_code: int = Field(ge=1, le=2_100_000_000)
     min_supported_version_code: int = Field(ge=1, le=2_100_000_000)

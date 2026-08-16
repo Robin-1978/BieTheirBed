@@ -8,7 +8,7 @@ from knoa_platform.branding import (
     ASSISTANT_NAME_EN,
 )
 
-__version__ = "0.2.21"
+__version__ = "0.2.22"
 
 
 def _gateway_ttl(value: str) -> int:

@@ -17,6 +17,7 @@ import {
   type NodeDeviceBinding,
 } from "@/security/deviceIdentity";
 import { withAuthenticationRetry } from "./authenticationRecovery";
+import { resolveAndroidRelease } from "@/hub/hubClient";
 import { installedAndroidVersionCode, isAndroidUpdateAvailable } from "@/update/androidUpdater";
 import { requiresAndroidUpdate } from "@/update/releasePolicy";
 
@@ -175,12 +176,12 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
             : defaultAgentId),
         });
       }).catch(() => undefined);
-      void client.latestAndroidRelease()
+      void resolveAndroidRelease(() => client.latestAndroidRelease())
         .then((release) => {
           if (generation !== connectionGenerationRef.current) return;
           commit({
-            requiredUpdate: requiresAndroidUpdate(release, installedAndroidVersionCode()) ? release : null,
-            availableUpdate: isAndroidUpdateAvailable(release, installedAndroidVersionCode()) ? release : null,
+            requiredUpdate: release && requiresAndroidUpdate(release, installedAndroidVersionCode()) ? release : null,
+            availableUpdate: release && isAndroidUpdateAvailable(release, installedAndroidVersionCode()) ? release : null,
           });
         })
         .catch(() => undefined);
@@ -225,12 +226,12 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
           selectedAgentId: stateRef.current.activeAgentId || stateRef.current.selectedAgentId || defaultAgentId,
         });
       }).catch(() => undefined);
-      void client.latestAndroidRelease()
+      void resolveAndroidRelease(() => client.latestAndroidRelease())
         .then((release) => {
           if (generation !== connectionGenerationRef.current) return;
           commit({
-            requiredUpdate: requiresAndroidUpdate(release, installedAndroidVersionCode()) ? release : null,
-            availableUpdate: isAndroidUpdateAvailable(release, installedAndroidVersionCode()) ? release : null,
+            requiredUpdate: release && requiresAndroidUpdate(release, installedAndroidVersionCode()) ? release : null,
+            availableUpdate: release && isAndroidUpdateAvailable(release, installedAndroidVersionCode()) ? release : null,
           });
         })
         .catch(() => undefined);

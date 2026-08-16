@@ -6706,8 +6706,11 @@
             "type": "string"
           },
           "channel": {
-            "const": "personal",
             "default": "personal",
+            "enum": [
+              "personal",
+              "hosted"
+            ],
             "title": "Channel",
             "type": "string"
           },

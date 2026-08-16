@@ -81,6 +81,7 @@ Node 上的 ConfigurationService、Runtime sandbox 和 Capability Gateway。
 | 多电脑 | AppInstallationIdentity + N 个 NodeDeviceBinding；Node selector；Hub directory；direct 优先/Relay fallback | endpoint discovery、连接诊断与 Hosted Account UX |
 | Hub/Fleet | self-hosted single-owner Hub、presence、ticket、opaque Fleet envelope、Node apply | App Fleet rollout UI、Node 主动拉取/回报、Hosted Hub |
 | Relay | Node outbound connector；App consumer；ticket + Ed25519/X25519/HKDF/ChaCha20-Poly1305；Gateway business tunnel；有限事件轮询 | 显式 window backpressure、容量/滥用治理、Hosted Relay |
+| Mobile release | Hosted Hub 平台级 APK repository、帐号鉴权 metadata、公开 immutable/stable download；Node 本地通道 | Catalog/CDN/灰度发布（有真实规模后） |
 
 本轮已闭环 Self-hosted Hub 的首个远程数据面：Node 保存一个 Hub enrollment 并主动建立 outbound
 WebSocket；App 在 direct 网络失败后申请 90 秒 single-use ticket，经 opaque Relay 与固定 Node
@@ -213,6 +214,8 @@ Extension Center
 | Catalog listing、来源和可用版本 | Catalog service/cache |
 | Tool grant 与副作用授权 | 对应 Node Capability Gateway |
 | Runtime-native capability | 对应 Node Runtime/sandbox |
+| Hosted Account 的 Mobile APK release | Hosted Hub 根级平台 release repository |
+| No-Hub/Self-hosted Mobile APK release | 对应 Node Gateway 本地 release repository |
 
 Hub 可以表达 desired intent，但不能伪造 Node 的 applied state。Catalog 可以表达“可安装”，但
 不能表达“已授权”。Relay 可以表达“可连接”，但不能表达“可执行”。

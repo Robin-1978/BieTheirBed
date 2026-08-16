@@ -18,11 +18,16 @@ from urllib.parse import urlsplit
 import httpx
 
 from knoa_platform.gateway.protocol import NodeHubEnrollmentRequest
+from knoa_platform.mobile_releases import (
+    AndroidRelease,
+    AndroidReleaseRepository,
+    read_apk_version,
+)
 from knoa_platform.node_hub import NodeHubService, NodeHubStore
 from knoa_platform.node_identity import NodeIdentityStore
 from knoa_platform.runtime import RuntimePaths
 
-_BACKUP_VERSION = "knoa-hosted-backup-v1"
+_BACKUP_VERSION = "knoa-hosted-backup-v2"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -70,6 +75,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     restore.add_argument("--backup", required=True)
     restore.add_argument("--root", required=True)
+
+    mobile_publish = commands.add_parser(
+        "mobile-publish",
+        help="Publish a signed Knoa Android APK as a Hosted platform release",
+    )
+    mobile_publish.add_argument("apk")
+    mobile_publish.add_argument("--root", required=True)
+    mobile_publish.add_argument("--min-version-code", type=int, default=1)
+    mobile_publish.add_argument("--notes", default="")
+
+    mobile_latest = commands.add_parser(
+        "mobile-latest",
+        help="Inspect the latest Hosted Android platform release",
+    )
+    mobile_latest.add_argument("--root", required=True)
     return parser
 
 
@@ -80,6 +100,15 @@ def main(argv: list[str] | None = None) -> int:
         return _backup(Path(args.root), Path(args.output))
     if args.command == "restore":
         return _restore(Path(args.backup), Path(args.root))
+    if args.command == "mobile-publish":
+        return _mobile_publish(
+            Path(args.root),
+            Path(args.apk),
+            min_version_code=args.min_version_code,
+            notes=args.notes,
+        )
+    if args.command == "mobile-latest":
+        return _mobile_latest(Path(args.root))
     if args.command == "node-enroll":
         account_token = os.environ.get("KNOA_HUB_ACCOUNT_TOKEN", "")
         if len(account_token) < 32:
@@ -222,6 +251,59 @@ async def _node_enroll(
     return 0
 
 
+def _mobile_publish(
+    root: Path,
+    apk: Path,
+    *,
+    min_version_code: int,
+    notes: str,
+) -> int:
+    repository = AndroidReleaseRepository(
+        root.expanduser().resolve() / "mobile-releases" / "android"
+    )
+    try:
+        version_name, version_code = read_apk_version(apk)
+        release = repository.publish(
+            apk,
+            version_name=version_name,
+            version_code=version_code,
+            min_supported_version_code=min_version_code,
+            release_notes=notes,
+        )
+    except (LookupError, OSError, ValueError) as exc:
+        print(f"Hosted Android publication failed: {exc}", file=sys.stderr)
+        return 2
+    _print_mobile_release(repository, release)
+    return 0
+
+
+def _mobile_latest(root: Path) -> int:
+    repository = AndroidReleaseRepository(
+        root.expanduser().resolve() / "mobile-releases" / "android"
+    )
+    try:
+        release = repository.latest()
+        assert release is not None
+    except LookupError as exc:
+        print(f"Hosted Android release unavailable: {exc}", file=sys.stderr)
+        return 2
+    _print_mobile_release(repository, release)
+    return 0
+
+
+def _print_mobile_release(
+    repository: AndroidReleaseRepository,
+    release: AndroidRelease,
+) -> None:
+    print(f"version_name={release.version_name}")
+    print(f"version_code={release.version_code}")
+    print(f"min_supported_version_code={release.min_supported_version_code}")
+    print(f"size_bytes={release.size_bytes}")
+    print(f"sha256={release.sha256}")
+    print(f"package={repository.package_path(release)}")
+    print("download_path=/downloads/android/latest.apk")
+
+
 def _backup(root: Path, output: Path) -> int:
     source = root.expanduser().resolve()
     target = output.expanduser().resolve()
@@ -250,17 +332,19 @@ def _backup(root: Path, output: Path) -> int:
             if not database.is_file():
                 raise ValueError(f"Workspace database is missing: {workspace}")
             destination = target / "tenants" / workspace / "hub.db"
-            destination.parent.mkdir(parents=True, mode=0o700)
+            destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             _sqlite_backup(database, destination)
             workspaces.append(
                 {"workspace_id": workspace, "sha256": _sha256(destination)}
             )
+        mobile_release_files = _backup_mobile_releases(source, target)
         manifest = {
             "version": _BACKUP_VERSION,
             "created_at": time.time(),
             "control_sha256": _sha256(target / "control.db"),
             "signing_key_sha256": _sha256(target / "hub-signing.key"),
             "workspaces": workspaces,
+            "mobile_release_files": mobile_release_files,
         }
         (target / "manifest.json").write_text(
             json.dumps(manifest, sort_keys=True, indent=2) + "\n",
@@ -295,6 +379,21 @@ def _restore(backup: Path, root: Path) -> int:
             if not re.fullmatch(r"ws_[A-Za-z0-9_-]{12,96}", workspace):
                 raise ValueError("Hosted backup contains an invalid Workspace ID")
             files.append((source / "tenants" / workspace / "hub.db", str(item["sha256"])))
+        mobile_release_files = manifest["mobile_release_files"]
+        if not isinstance(mobile_release_files, list):
+            raise ValueError("Hosted backup mobile release manifest is invalid")
+        seen_release_files: set[str] = set()
+        for item in mobile_release_files:
+            name = str(item["name"])
+            if not _mobile_release_file_name(name) or name in seen_release_files:
+                raise ValueError("Hosted backup contains an invalid mobile release file")
+            seen_release_files.add(name)
+            files.append(
+                (
+                    source / "mobile-releases" / "android" / name,
+                    str(item["sha256"]),
+                )
+            )
         if any(not path.is_file() or _sha256(path) != digest for path, digest in files):
             raise ValueError("Hosted backup integrity verification failed")
         target.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -305,9 +404,18 @@ def _restore(backup: Path, root: Path) -> int:
         for item in manifest["workspaces"]:
             workspace = str(item["workspace_id"])
             destination = target / "tenants" / workspace / "hub.db"
-            destination.parent.mkdir(parents=True, mode=0o700)
+            destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             shutil.copyfile(source / "tenants" / workspace / "hub.db", destination)
             _sqlite_integrity(destination)
+        release_root = target / "mobile-releases" / "android"
+        for item in mobile_release_files:
+            name = str(item["name"])
+            destination = release_root / name
+            destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            shutil.copyfile(source / "mobile-releases" / "android" / name, destination)
+            destination.chmod(0o600)
+        if mobile_release_files:
+            _validate_mobile_releases(release_root)
     except (KeyError, OSError, sqlite3.Error, TypeError, ValueError) as exc:
         if target.exists():
             shutil.rmtree(target)
@@ -325,6 +433,74 @@ def _sqlite_backup(source: Path, target: Path) -> None:
         source_db.backup(target_db)
     target.chmod(0o600)
     _sqlite_integrity(target)
+
+
+def _backup_mobile_releases(source: Path, target: Path) -> list[dict[str, str]]:
+    source_root = source / "mobile-releases" / "android"
+    if not source_root.exists():
+        return []
+    if source_root.is_symlink() or not source_root.is_dir():
+        raise ValueError("Hosted mobile release root is invalid")
+    _validate_mobile_releases(source_root)
+    files: list[dict[str, str]] = []
+    for item in sorted(source_root.iterdir(), key=lambda path: path.name):
+        if (
+            not _mobile_release_file_name(item.name)
+            or item.is_symlink()
+            or not item.is_file()
+        ):
+            raise ValueError("Hosted mobile release root contains an invalid file")
+        destination = target / "mobile-releases" / "android" / item.name
+        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        shutil.copyfile(item, destination)
+        destination.chmod(0o600)
+        files.append({"name": item.name, "sha256": _sha256(destination)})
+    if files:
+        _validate_mobile_releases(target / "mobile-releases" / "android")
+    return files
+
+
+def _validate_mobile_releases(root: Path) -> None:
+    repository = AndroidReleaseRepository(root)
+    manifests = sorted(
+        path
+        for path in root.iterdir()
+        if path.name != "latest.json" and re.fullmatch(r"[1-9][0-9]*\.json", path.name)
+    )
+    packages = {
+        path.name
+        for path in root.iterdir()
+        if re.fullmatch(r"knoa-[1-9][0-9]*\.apk", path.name)
+    }
+    if not manifests and not packages and not (root / "latest.json").exists():
+        return
+    latest = repository.latest()
+    assert latest is not None
+    expected_packages: set[str] = set()
+    releases = []
+    for manifest in manifests:
+        version_code = int(manifest.stem)
+        release = repository.get(version_code)
+        if release.version_code != version_code:
+            raise ValueError("Hosted mobile release manifest version is inconsistent")
+        package = repository.package_path(release)
+        if _sha256(package) != release.sha256:
+            raise ValueError("Hosted mobile release package digest is inconsistent")
+        expected_packages.add(release.file_name)
+        releases.append(release)
+    if packages != expected_packages or not releases:
+        raise ValueError("Hosted mobile release repository is incomplete")
+    newest = max(releases, key=lambda release: release.version_code)
+    if latest != newest:
+        raise ValueError("Hosted latest mobile release is inconsistent")
+
+
+def _mobile_release_file_name(name: str) -> bool:
+    return bool(
+        name == "latest.json"
+        or re.fullmatch(r"[1-9][0-9]*\.json", name)
+        or re.fullmatch(r"knoa-[1-9][0-9]*\.apk", name)
+    )
 
 
 def _sqlite_integrity(path: Path) -> None:

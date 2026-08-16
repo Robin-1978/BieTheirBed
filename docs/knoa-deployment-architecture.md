@@ -46,7 +46,8 @@ Node 是执行服务器。HubService 是可选共享控制面。Relay 是无业�
                         │                               v
                         │          ┌──────── Optional Hub Deployment ──────┐
                         │          │ HubService                            │
-                        │          │ Account / Workspace / Node Directory │
+│          │ Account / Workspace / Node Directory │
+│          │ Hosted Mobile Release Channel        │
                         │          │ Resource directory / Grant / Ticket  │
                         │          │ RelayBroker: opaque encrypted frames │
                         │          └──────────────────┬────────────────────┘
@@ -137,6 +138,7 @@ Relay decrypted request ─────┘
 | HubService + Relay | `knoa-hub` | 是 | 当前作为一个进程、一个 HTTP/WSS 监听器部署 |
 | RelayBroker | 无独立 CLI | 否 | 代码模块独立，但由 `HubApplication` 同进程创建 |
 | Mobile App | Android App | 是 | 客户端，不拥有服务端业务事实 |
+| Android Release Channel | Hosted Hub 或 Node Gateway 内建模块 | 否 | Hosted Account 的 APK 属于 Hub；No-Hub/Self-hosted 的 APK 属于 Node |
 | Local LLM Server | llama.cpp/Ollama/OpenAI-compatible server | 是 | 独立进程或外部服务；Secret、模型路径和执行仍归目标 Node |
 | MCP Server | stdio 或 streamable HTTP | 可选 | 可由 Node 管理本地进程，也可远程独立部署 |
 | Codex App Server | Codex Runtime 自有入口 | 是 | 受信 Runtime adapter 使用，不进入 Knoa 原生模型 Provider |
@@ -431,12 +433,22 @@ Hosted Single-Node Root 建议为 `~/.local/share/knoa/hosted-hub`：
 hosted-hub/
 ├── control.db
 ├── hub-signing.key
+├── mobile-releases/android/
+│   ├── latest.json
+│   ├── <version_code>.json
+│   └── knoa-<version_code>.apk
 └── tenants/<workspace_id>/hub.db
 ```
 
 `control.db` 保存 Account、登录身份、scrypt 密码摘要、Session digest、Workspace、Membership 和
-一次性 grant digest，不保存 Session/grant 明文。控制库、共享 signing key 与全部 tenant database
-是一个恢复单元；缺失其中任一部分都不能宣称完成 Hosted 恢复。
+一次性 grant digest，不保存 Session/grant 明文。Hosted Android APK 是平台级发布资产，不属于任一
+Workspace 或 Node。控制库、共享 signing key、Android release tree 与全部 tenant database 是一个
+恢复单元；缺失其中任一部分都不能宣称完成 Hosted 恢复。
+
+Hosted Account App 从 Hub 根路径查询 Android release metadata，并从公开、内容寻址的 immutable
+URL 下载 APK；`/downloads/android/latest.apk` 只提供稳定人工安装入口。No-Hub 与 Self-hosted App
+仍从 Node Gateway 查询本地 release。Hosted 查询失败时禁止静默回退到 Node，避免同一帐号出现两个
+互相竞争的版本权威。
 
 ## 12. 备份、恢复与升级
 
@@ -451,7 +463,8 @@ SLO-backed 灾备，因此当前是“单节点 Hosted MVP 可部署”，不是
 Self-hosted V1 至少分别备份：
 
 - Node：Runtime Root 中的数据库、identity、config revision、Secret、Package 和 Artifact；
-- Hub：`hub.db` 与 `hub-signing.key`；
+- Self-hosted Hub：`hub.db` 与 `hub-signing.key`；
+- Hosted Hub：`control.db`、`hub-signing.key`、全部 tenant DB 与 Android release tree；
 - 明文 Secret 备份必须额外加密，不能进入普通日志或未加密对象存储；
 - 备份必须在隔离临时目录验证可读取和完整性；
 - 恢复演练必须验证旧 Node 仍接受恢复后的 Hub identity。

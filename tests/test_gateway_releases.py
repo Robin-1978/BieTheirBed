@@ -9,7 +9,7 @@ import pytest
 
 from knoa_platform.config import AppConfig
 from knoa_platform.gateway.adapter import SecureGatewayAdapter
-from knoa_platform.gateway.releases import AndroidReleaseRepository
+from knoa_platform.mobile_releases import AndroidReleaseRepository
 
 
 def _apk(path, payload: bytes = b"classes") -> bytes:
