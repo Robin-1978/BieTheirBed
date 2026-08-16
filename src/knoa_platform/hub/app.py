@@ -188,8 +188,9 @@ class HubApplication:
         return JSONResponse({"status": "ok", "hub_id": self.service.hub_id})
 
     async def hub(self, request: Request) -> JSONResponse:
-        if (error := self._owner(request)) is not None:
-            return error
+        authenticated = self._member(request)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
         return JSONResponse(
             {
                 "hub_id": self.service.hub_id,
@@ -201,22 +202,27 @@ class HubApplication:
         )
 
     async def installations(self, request: Request) -> JSONResponse:
-        if (error := self._owner(request)) is not None:
-            return error
+        authenticated = self._member(request)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
         parsed = await self._parse(request, InstallationRequest)
         if isinstance(parsed, JSONResponse):
             return parsed
-        record = self.service.repository.register_installation(
-            self.service.owner_subject_id,
-            parsed.installation_id,
-            parsed.public_key,
-            parsed.display_name,
-        )
+        try:
+            record = self.service.repository.register_installation(
+                authenticated,
+                parsed.installation_id,
+                parsed.public_key,
+                parsed.display_name,
+            )
+        except PermissionError:
+            return JSONResponse({"error": "rejected"}, status_code=403)
         return JSONResponse(record, status_code=201)
 
     async def nodes(self, request: Request) -> JSONResponse:
-        if (error := self._owner(request)) is not None:
-            return error
+        authenticated = self._member(request)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
         now = time.time()
         nodes = []
         for item in self.service.repository.list_nodes():
@@ -264,13 +270,18 @@ class HubApplication:
         return JSONResponse({"node_id": node["node_id"], "observed_at": node["last_seen"]})
 
     async def workspace(self, request: Request) -> JSONResponse:
-        if (error := self._owner(request)) is not None:
-            return error
+        authenticated = self._member(request)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
         return JSONResponse({"workspace": self.service.repository.workspace()})
 
     async def model_resources(self, request: Request) -> JSONResponse:
-        if (error := self._owner(request)) is not None:
-            return error
+        authenticated = self._authenticate(
+            request,
+            admin=request.method != "GET",
+        )
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
         if request.method == "GET":
             return JSONResponse(
                 {"resources": list(self.service.repository.list_model_resources())}
@@ -281,15 +292,19 @@ class HubApplication:
         try:
             item = self.service.repository.put_model_resource(
                 parsed.model_dump(mode="json"),
-                created_by=self.service.owner_subject_id,
+                created_by=authenticated,
             )
         except (LookupError, ValueError):
             return JSONResponse({"error": "rejected"}, status_code=422)
         return JSONResponse({"resource": item}, status_code=201)
 
     async def model_deployments(self, request: Request) -> JSONResponse:
-        if (error := self._owner(request)) is not None:
-            return error
+        authenticated = self._authenticate(
+            request,
+            admin=request.method != "GET",
+        )
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
         if request.method == "GET":
             return JSONResponse(
                 {"deployments": list(self.service.repository.list_model_deployments())}
@@ -306,8 +321,12 @@ class HubApplication:
         return JSONResponse({"deployment": item}, status_code=201)
 
     async def resource_grants(self, request: Request) -> JSONResponse:
-        if (error := self._owner(request)) is not None:
-            return error
+        authenticated = self._authenticate(
+            request,
+            admin=request.method != "GET",
+        )
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
         if request.method == "GET":
             return JSONResponse(
                 {"grants": list(self.service.repository.list_resource_grants())}
@@ -327,8 +346,9 @@ class HubApplication:
 
     async def deployment_observations(self, request: Request) -> JSONResponse:
         if request.method == "GET":
-            if (error := self._owner(request)) is not None:
-                return error
+            authenticated = self._member(request)
+            if isinstance(authenticated, JSONResponse):
+                return authenticated
             return JSONResponse(
                 {
                     "observations": list(
@@ -362,8 +382,9 @@ class HubApplication:
     async def invocation_observations(self, request: Request) -> JSONResponse:
         invocation_id = str(request.path_params["invocation_id"])
         if request.method == "GET":
-            if (error := self._owner(request)) is not None:
-                return error
+            authenticated = self._member(request)
+            if isinstance(authenticated, JSONResponse):
+                return authenticated
             return JSONResponse(
                 {
                     "observations": list(
@@ -387,14 +408,20 @@ class HubApplication:
         return JSONResponse({"accepted": True})
 
     async def tickets(self, request: Request) -> JSONResponse:
-        if (error := self._owner(request)) is not None:
-            return error
+        authenticated = self._member(request)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
         parsed = await self._parse(request, TicketRequest)
         if isinstance(parsed, JSONResponse):
             return parsed
         try:
-            token = self.service.issue_ticket(parsed.installation_id, parsed.node_id, parsed.transport)
-        except (LookupError, ValueError):
+            token = self.service.issue_ticket(
+                parsed.installation_id,
+                parsed.node_id,
+                parsed.transport,
+                subject_id=authenticated,
+            )
+        except (LookupError, PermissionError, ValueError):
             return JSONResponse({"error": "rejected"}, status_code=422)
         return JSONResponse({"ticket": token})
 
@@ -552,15 +579,28 @@ class HubApplication:
                         pass
 
     def _owner(self, request: Request) -> JSONResponse | None:
+        authenticated = self._authenticate(request, admin=True)
+        return authenticated if isinstance(authenticated, JSONResponse) else None
+
+    def _member(self, request: Request) -> str | JSONResponse:
+        return self._authenticate(request, admin=False)
+
+    def _authenticate(
+        self,
+        request: Request,
+        *,
+        admin: bool,
+    ) -> str | JSONResponse:
         authorization = request.headers.get("Authorization", "")
         scheme, _, token = authorization.partition(" ")
         try:
             if scheme.lower() != "bearer":
                 raise PermissionError
-            self.service.authenticate_owner(token)
+            if admin:
+                return self.service.authenticate_owner(token)
+            return self.service.authenticate_member(token)
         except PermissionError:
             return JSONResponse({"error": "unauthorized"}, status_code=401)
-        return None
 
     @staticmethod
     async def _parse(request: Request, model, *, max_bytes: int = 1024 * 1024):

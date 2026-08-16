@@ -37,6 +37,21 @@ class Reviewer:
         )
 
 
+class BlockingReviewer:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.cancelled = False
+
+    async def review(self, request):
+        del request
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+
+
 class CapturingExecution:
     def __init__(self) -> None:
         self.requests = []
@@ -242,6 +257,57 @@ async def test_conversation_auto_review_uses_current_instruction_for_medium_writ
     assert request.human_instruction == "Write the report to /tmp/report.md"
     assert request.proposed_action.tool_name == "write_file"
     assert request.proposed_action.arguments["path"] == "/tmp/report.md"
+
+
+@pytest.mark.asyncio
+async def test_conversation_cancel_interrupts_running_auto_reviewer(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "conversation.db"
+    sessions = RuntimeSessionRepository(database, handle_factory=lambda: "session-a")
+    scope = sessions.create("principal-a")
+    repository = ConversationRepository(
+        database,
+        turn_id_factory=lambda: "turn-a",
+        approval_id_factory=lambda: "approval-a",
+    )
+    turn, _ = repository.create(
+        scope,
+        client_request_id="request-a",
+        user_input="Write the report",
+    )
+    reviewer = BlockingReviewer()
+
+    async def notify(_turn_id: str) -> None:
+        return None
+
+    service = ConversationApprovalService(
+        repository,
+        notify,
+        reviewer=reviewer,
+        review_mode=ApprovalReviewMode.AUTO,
+    )
+    pending = asyncio.create_task(
+        service.confirm(
+            scope,
+            turn.turn_id,
+            ProposedToolCall(
+                call_id="call-a",
+                name="write_file",
+                arguments={"path": "/tmp/report.md"},
+            ),
+            "local_write:medium",
+        )
+    )
+    await reviewer.started.wait()
+
+    await service.cancel_turn(scope.principal_id, turn.turn_id)
+
+    assert await asyncio.wait_for(pending, timeout=1) is False
+    assert reviewer.cancelled is True
+    approval = repository.get_approval(scope.principal_id, "approval-a")
+    assert approval.state == "expired"
+    assert approval.resolved_by == "turn_cancelled"
 
 
 @pytest.mark.asyncio

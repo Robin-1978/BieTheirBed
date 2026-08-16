@@ -794,6 +794,26 @@ class ConversationRepository:
             )
             return self._turn(db, self._owned_turn(db, principal_id, turn_id))
 
+    def request_cancel(self, principal_id: str, turn_id: str) -> ChatTurn:
+        now = self._clock()
+        with self._connect() as db:
+            self._owned_turn(db, principal_id, turn_id)
+            db.execute(
+                """UPDATE conversation_turns SET cancel_requested=1,
+                       updated_at=?, revision=revision+1
+                   WHERE turn_id=? AND principal_id=?
+                     AND state NOT IN (?, ?, ?)""",
+                (
+                    now,
+                    turn_id,
+                    principal_id,
+                    ChatTurnState.COMPLETED.value,
+                    ChatTurnState.FAILED.value,
+                    ChatTurnState.CANCELLED.value,
+                ),
+            )
+            return self._turn(db, self._owned_turn(db, principal_id, turn_id))
+
     def recover_interrupted(self) -> tuple[ChatTurn, ...]:
         now = self._clock()
         with self._connect() as db:
@@ -1021,6 +1041,18 @@ class ConversationRepository:
             resolved_by=str(row["resolved_by"]),
         )
 
+    def get_approval(self, principal_id: str, approval_id: str) -> ChatApproval:
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT a.* FROM conversation_approvals a
+                   JOIN conversation_turns t ON t.turn_id=a.turn_id
+                   WHERE a.approval_id=? AND t.principal_id=?""",
+                (approval_id, principal_id),
+            ).fetchone()
+            if row is None:
+                raise ChatTurnNotFoundError(approval_id)
+            return self._approval(row)
+
     def resolve_approval(
         self,
         principal_id: str,
@@ -1058,6 +1090,31 @@ class ConversationRepository:
             ).fetchone()
             assert resolved is not None
             return self._approval(resolved), changed, str(row["turn_id"])
+
+    def expire_pending_approvals(
+        self,
+        principal_id: str,
+        turn_id: str,
+        *,
+        resolved_by: str,
+    ) -> tuple[str, ...]:
+        now = self._clock()
+        with self._connect() as db:
+            self._owned_turn(db, principal_id, turn_id)
+            rows = db.execute(
+                """SELECT approval_id FROM conversation_approvals
+                   WHERE turn_id=? AND state='pending'
+                   ORDER BY created_at, approval_id""",
+                (turn_id,),
+            ).fetchall()
+            approval_ids = tuple(str(row["approval_id"]) for row in rows)
+            db.execute(
+                """UPDATE conversation_approvals SET state='expired',
+                       resolved_at=?, resolved_by=?
+                   WHERE turn_id=? AND state='pending'""",
+                (now, resolved_by, turn_id),
+            )
+        return approval_ids
 
     def annotate_approval_review(
         self,

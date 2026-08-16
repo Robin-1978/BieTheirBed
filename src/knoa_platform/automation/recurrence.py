@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from knoa_platform.automation.models import ScheduleKind, ScheduleSpec
@@ -104,11 +104,11 @@ def next_fire_at(spec: ScheduleSpec, *, after: float) -> float | None:
         return spec.run_at + ordinal * spec.interval_seconds
 
     fields = _parse_cron(spec.cron_expression)
-    timezone = ZoneInfo(spec.timezone)
-    cursor = datetime.fromtimestamp(after, UTC).replace(second=0, microsecond=0)
+    schedule_timezone = ZoneInfo(spec.timezone)
+    cursor = datetime.fromtimestamp(after, timezone.utc).replace(second=0, microsecond=0)
     cursor += timedelta(minutes=1)
     for _ in range(366 * 24 * 60):
-        if _cron_matches(cursor.astimezone(timezone), fields):
+        if _cron_matches(cursor.astimezone(schedule_timezone), fields):
             return cursor.timestamp()
         cursor += timedelta(minutes=1)
     raise ValueError("Cron expression has no occurrence within one year")

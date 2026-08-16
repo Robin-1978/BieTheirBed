@@ -20,11 +20,11 @@ def main() -> int:
     parser.add_argument("--hub-id", default=os.environ.get("KNOA_HUB_ID", "hub_personal"))
     parser.add_argument(
         "--deployment-mode",
-        choices=("self_hosted", "hosted_simulation"),
+        choices=("self_hosted", "hosted_single_node"),
         default=os.environ.get("KNOA_HUB_DEPLOYMENT_MODE", "self_hosted"),
     )
     args = parser.parse_args()
-    if args.deployment_mode == "hosted_simulation":
+    if args.deployment_mode == "hosted_single_node":
         token = os.environ.get("KNOA_HUB_BOOTSTRAP_TOKEN", "")
         if len(token) < 32:
             parser.error(
