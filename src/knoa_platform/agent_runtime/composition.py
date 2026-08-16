@@ -97,10 +97,11 @@ from knoa_platform.extensions.mcp import MCPServerProvider, build_mcp_providers
 from knoa_platform.extensions.mcp_onboarding import MCPOnboardingService
 from knoa_platform.extensions.mcp_package import (
     MCPPackageService,
-    build_mcp_package_providers,
+    load_mcp_package,
 )
 from knoa_platform.extensions.mcp_resource_tasks import MCPResourceTaskBridge
 from knoa_platform.extensions.models import MCPServerConfig, MCPToolPolicyConfig
+from knoa_platform.extensions.package_store import PackageStore
 from knoa_platform.extensions.skill import (
     SkillCatalog,
     SkillPackageProvider,
@@ -115,6 +116,7 @@ from knoa_platform.interactions import (
 from knoa_platform.observability.trace import LLMTraceRecorder, TurnRecorder
 from knoa_platform.principal import converge_owner_principals, discover_owner_aliases
 from knoa_platform.runtime import RuntimePaths
+from knoa_platform.secrets import SecretStore
 from knoa_platform.service.core_auth import (
     CompositeAuthenticator,
     SignedPrincipalAuthenticator,
@@ -147,7 +149,6 @@ from knoa_platform.tools.mcp_connect import (
     MCPDisableTool,
     MCPInspectTool,
 )
-from knoa_platform.tools.mcp_deploy import MCPDeployTool
 from knoa_platform.tools.memory_tool import MemoryTool
 from knoa_platform.tools.mouse import MouseTool
 from knoa_platform.tools.notification import NotificationTool
@@ -376,6 +377,15 @@ def _resolve_managed_model(
             )
     elif model.provider == "bootstrap_provider":
         api_key = bootstrap.llm_api_key
+    elif provider.api_key_ref:
+        try:
+            api_key = SecretStore(
+                RuntimePaths.from_root(bootstrap.runtime_root).secrets / "providers"
+            ).get(provider.api_key_ref)
+        except LookupError as exc:
+            raise ValueError(
+                f"Provider secret '{provider.api_key_ref}' is not configured"
+            ) from exc
     elif model.provider in bootstrap.providers:
         api_key = bootstrap.providers[model.provider].api_key.get_secret_value()
     required = (
@@ -607,10 +617,17 @@ def _bootstrap_managed_skills(
     return skills
 
 
-def _freeze_skill_digests(managed: ManagedConfig) -> ManagedConfig:
+def _freeze_skill_digests(
+    managed: ManagedConfig,
+    packages: PackageStore,
+) -> ManagedConfig:
     frozen: dict[str, ManagedSkillConfig] = {}
     for skill_id, skill in sorted(managed.skills.items()):
-        source = Path(skill.source).expanduser().resolve()
+        source = (
+            packages.get(skill.package_id, expected_kind="skill").path
+            if skill.package_id
+            else Path(skill.source).expanduser().resolve()
+        )
         if source.name != skill_id:
             raise ValueError(f"Skill source directory must match ID: {skill_id}")
         package = load_skill_package(source)
@@ -623,21 +640,54 @@ def _freeze_skill_digests(managed: ManagedConfig) -> ManagedConfig:
 def _managed_skill_providers(
     managed: ManagedConfig,
     catalog: SkillCatalog,
+    packages: PackageStore,
 ) -> tuple[SkillPackageProvider, ...]:
     return tuple(
         SkillPackageProvider(
-            skill.source,
+            (
+                packages.get(skill.package_id, expected_kind="skill").path
+                if skill.package_id
+                else skill.source
+            ),
             catalog,
             expected_digest=skill.content_digest,
         )
         for skill_id, skill in sorted(managed.skills.items())
-        if skill.enabled and Path(skill.source).expanduser().resolve().name == skill_id
+        if skill.enabled
+        and (
+            bool(skill.package_id)
+            or Path(skill.source).expanduser().resolve().name == skill_id
+        )
     )
 
 
-def _managed_mcp_configs(managed: ManagedConfig) -> dict[str, MCPServerConfig]:
+def _managed_mcp_configs(
+    managed: ManagedConfig,
+    packages: PackageStore,
+) -> dict[str, MCPServerConfig]:
     configs: dict[str, MCPServerConfig] = {}
     for server_id, server in managed.mcp_servers.items():
+        policies = {
+            name: MCPToolPolicyConfig(
+                effect=ToolEffect(policy.effect),
+                capabilities=frozenset(
+                    ToolCapability(item) for item in policy.capabilities
+                ),
+                risk=ToolRisk(policy.risk),
+            )
+            for name, policy in server.tools.items()
+        }
+        if server.package_id:
+            record = packages.get(server.package_id, expected_kind="mcp")
+            package_config = load_mcp_package(record.path)
+            configs[server_id] = package_config.model_copy(
+                update={
+                    "enabled": server.enabled,
+                    "timeout_seconds": server.timeout_seconds,
+                    "tools": policies,
+                }
+            )
+            continue
         command = server.command[0] if server.command else ""
         args = server.command[1:]
         configs[server_id] = MCPServerConfig(
@@ -650,16 +700,7 @@ def _managed_mcp_configs(managed: ManagedConfig) -> dict[str, MCPServerConfig]:
             inherit_env=server.inherit_env,
             optional_env=server.optional_env,
             timeout_seconds=server.timeout_seconds,
-            tools={
-                name: MCPToolPolicyConfig(
-                    effect=ToolEffect(policy.effect),
-                    capabilities=frozenset(
-                        ToolCapability(item) for item in policy.capabilities
-                    ),
-                    risk=ToolRisk(policy.risk),
-                )
-                for name, policy in server.tools.items()
-            },
+            tools=policies,
         )
     return configs
 
@@ -668,11 +709,29 @@ def _managed_mcp_providers(
     managed: ManagedConfig,
     *,
     secret_root: Path,
+    packages: PackageStore,
 ) -> tuple[MCPServerProvider, ...]:
     return build_mcp_providers(
-        _managed_mcp_configs(managed),
+        _managed_mcp_configs(managed, packages),
         secret_root=secret_root,
+        inventory_digests={
+            server_id: server.inventory_digest
+            for server_id, server in managed.mcp_servers.items()
+            if server.inventory_digest
+        },
     )
+
+
+def _bootstrap_provider_secrets(config: AppConfig, store: SecretStore) -> None:
+    """Import trusted file-config credentials once into the forward SecretStore."""
+
+    for provider_id, provider in config.providers.items():
+        value = provider.api_key.get_secret_value()
+        if not value:
+            continue
+        reference = f"provider.{provider_id}.api_key"
+        if not store.status(reference)["configured"]:
+            store.put(reference, value)
 
 
 def build_core_runtime(
@@ -683,6 +742,9 @@ def build_core_runtime(
     """Build one Core graph without legacy agents or in-process service fallback."""
 
     paths = RuntimePaths.from_root(config.runtime_root)
+    packages = PackageStore(paths.packages)
+    provider_secrets = SecretStore(paths.secrets / "providers")
+    _bootstrap_provider_secrets(config, provider_secrets)
     skill_roots = (
         builtin_skill_root(),
         paths.skills,
@@ -707,12 +769,12 @@ def build_core_runtime(
     bootstrap_managed = bootstrap_managed.model_copy(
         update={"skills": _bootstrap_managed_skills(skill_roots)}
     )
-    bootstrap_managed = _freeze_skill_digests(bootstrap_managed)
+    bootstrap_managed = _freeze_skill_digests(bootstrap_managed, packages)
     applied_config = config_registry.initialize(
         bootstrap_managed,
         actor=config.owner_principal_id,
     )
-    frozen_applied = _freeze_skill_digests(applied_config.document)
+    frozen_applied = _freeze_skill_digests(applied_config.document, packages)
     applied_config = config_registry.adopt(
         frozen_applied,
         actor=config.owner_principal_id,
@@ -749,22 +811,17 @@ def build_core_runtime(
     )
     registry = _build_registry(config, artifacts, memory, episodic)
     skills = SkillCatalog()
-    skill_providers = _managed_skill_providers(managed, skills)
+    skill_providers = _managed_skill_providers(managed, skills, packages)
     mcp_providers = _managed_mcp_providers(
         managed,
         secret_root=paths.mcp_secrets,
-    )
-    mcp_package_providers = build_mcp_package_providers(
-        paths.mcp,
-        excluded_ids=frozenset(managed.mcp_servers),
-        secret_root=paths.mcp_secrets,
+        packages=packages,
     )
     extensions = ExtensionManager(
         registry,
         (
             *skill_providers,
             *mcp_providers,
-            *mcp_package_providers,
         ),
     )
     managed_extension_providers = {
@@ -1073,10 +1130,11 @@ def build_core_runtime(
             preflight_extensions = ExtensionManager(
                 ToolRegistry(),
                 (
-                    *_managed_skill_providers(candidate, SkillCatalog()),
+                    *_managed_skill_providers(candidate, SkillCatalog(), packages),
                     *_managed_mcp_providers(
                         candidate,
                         secret_root=paths.mcp_secrets,
+                        packages=packages,
                     ),
                 ),
             )
@@ -1126,10 +1184,11 @@ def build_core_runtime(
             next_managed_providers = previous_managed_providers
             if extensions_changed:
                 next_managed_providers = (
-                    *_managed_skill_providers(candidate, skills),
+                    *_managed_skill_providers(candidate, skills, packages),
                     *_managed_mcp_providers(
                         candidate,
                         secret_root=paths.mcp_secrets,
+                        packages=packages,
                     ),
                 )
                 for provider in previous_managed_providers:
@@ -1230,14 +1289,14 @@ def build_core_runtime(
         bootstrap_actor=config.owner_principal_id,
         preflight=preflight_configuration,
         applier=apply_configuration,
-        normalizer=_freeze_skill_digests,
+        normalizer=lambda candidate: _freeze_skill_digests(candidate, packages),
     )
     schedule_dispatcher = ScheduleDispatcher(schedules, task_service)
     schedule_service = ScheduleService(schedules, schedule_dispatcher)
     trigger_dispatcher = TriggerDispatcher(triggers, task_service)
     trigger_service = TriggerService(triggers, trigger_dispatcher)
     mcp_resource_tasks = MCPResourceTaskBridge(
-        (*mcp_providers, *mcp_package_providers),
+        mcp_providers,
         task_service,
         sessions,
         trigger_service,
@@ -1247,11 +1306,10 @@ def build_core_runtime(
         paths.cache / "mcp-imports",
         extensions,
         mcp_resource_tasks,
-        mcp_package_providers,
+        (),
         reserved_ids=frozenset(managed.mcp_servers),
         secret_root=paths.mcp_secrets,
     )
-    registry.register(MCPDeployTool(mcp_packages))
     delegation_repository = DelegationRepository(database)
     delegations = DelegationService(
         delegation_repository,
@@ -1393,7 +1451,7 @@ def build_core_runtime(
         conversations=conversation_service,
         transcription=transcription_service,
         interactions=interactions,
-        mcp_packages=mcp_packages,
+        mcp_packages=None,
         sessions=sessions,
         owner_principal_id=config.owner_principal_id,
         configuration=configuration,

@@ -70,6 +70,10 @@ class RuntimePaths:
         return self.root / "mcp"
 
     @property
+    def packages(self) -> Path:
+        return self.data / "packages"
+
+    @property
     def mcp_secrets(self) -> Path:
         return self.secrets / "mcp"
 

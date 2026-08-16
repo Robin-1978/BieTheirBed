@@ -22,6 +22,7 @@ from knoa_platform.agents import ExecuteAgentTurn
 from knoa_platform.config import AppConfig
 from knoa_platform.configuration import ManagedSkillConfig
 from knoa_platform.runtime import RuntimePaths
+from knoa_platform.secrets import SecretStore
 from knoa_platform.service.core_client import CoreClient
 from knoa_platform.service.credentials import (
     issue_principal_credential,
@@ -192,7 +193,6 @@ def test_core_composition_builds_forward_only_registry_and_profiles(
         "write_file",
         "screenshot",
         "mouse",
-        "mcp_deploy",
         "mcp_connect",
         "mcp_inspect",
         "mcp_disable",
@@ -213,6 +213,29 @@ def test_core_composition_builds_forward_only_registry_and_profiles(
     assert not {"screen", "ui", "schedule", "inspect_image"} & local
     assert "create_task" in local
     assert "schedule_task" not in local
+
+
+def test_named_provider_literal_secret_is_bootstrapped_into_secret_store(
+    tmp_path: Path,
+) -> None:
+    config = _config(
+        tmp_path,
+        service_port=0,
+        providers={
+            "remote": {
+                "driver": "openai_compatible",
+                "api_base": "https://models.example.test/v1",
+                "api_key": "provider-secret",
+            }
+        },
+        models={"primary": {"provider": "remote", "model": "model-1"}},
+        default_model="primary",
+    )
+
+    build_core_runtime(config, provider_factory=_OfflineProvider)
+
+    store = SecretStore(RuntimePaths.from_root(config.runtime_root).secrets / "providers")
+    assert store.get("provider.remote.api_key") == "provider-secret"
 
 
 @pytest.mark.asyncio
@@ -677,12 +700,10 @@ async def test_broken_local_mcp_package_does_not_block_core(tmp_path: Path) -> N
 
     await composition.extensions.start()
     try:
-        failed = next(
-            status
+        assert not any(
+            status.descriptor.extension_id == "mcp:broken"
             for status in composition.extensions.statuses
-            if status.descriptor.extension_id == "mcp:broken"
         )
-        assert failed.state.value == "failed"
         assert "read_file" in composition.registry.list_tools()
     finally:
         await composition.extensions.stop()

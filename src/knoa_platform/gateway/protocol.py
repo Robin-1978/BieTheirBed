@@ -11,8 +11,8 @@ from knoa_platform.agent_runtime.contracts import (
     RuntimeStatus,
     ToolListResult,
 )
-from knoa_platform.artifacts import ArtifactRef
 from knoa_platform.agents.definitions import ResolvedInvocationPolicy
+from knoa_platform.artifacts import ArtifactRef
 from knoa_platform.configuration import (
     ConfigControlState,
     ConfigDraft,
@@ -182,6 +182,29 @@ class PreviewInvocationPolicyRequest(GatewayRequest):
     requested_skills: frozenset[str] | None = None
 
 
+class ImportSkillRequest(GatewayRequest):
+    source_path: str = Field(min_length=1, max_length=4096)
+
+
+class ImportLocalMCPRequest(ImportSkillRequest):
+    server_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,23}$")
+
+
+class ImportRemoteMCPRequest(GatewayRequest):
+    server_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,23}$")
+    url: str = Field(min_length=1, max_length=4096)
+    allow_private_network: bool = False
+
+
+class ApplyFleetCandidateRequest(GatewayRequest):
+    rollout_id: str = Field(min_length=1, max_length=128)
+    envelope: dict[str, Any]
+
+
+class WriteSecretRequest(GatewayRequest):
+    value: str = Field(min_length=1, max_length=65_536)
+
+
 class GatewayQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -260,6 +283,16 @@ class ErrorResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     scope: str
+    node_id: str
+
+
+class NodeDescriptorResponse(BaseModel):
+    node_id: str
+    signing_public_key: str
+    signing_key_version: int
+    configuration_public_key: str
+    configuration_key_version: int
+    created_at: float
 
 
 class ChallengeResponse(BaseModel):
@@ -271,6 +304,22 @@ class ChallengeResponse(BaseModel):
 class PairCompleteResponse(BaseModel):
     device_id: str
     principal_id: str
+    node: NodeDescriptorResponse
+
+
+class ExtensionPackageListResponse(BaseModel):
+    packages: tuple[dict[str, Any], ...]
+
+
+class ExtensionImportResponse(BaseModel):
+    result: dict[str, Any]
+
+
+class SecretStatusResponse(BaseModel):
+    reference: str
+    configured: bool
+    rotated_at: float
+    fingerprint: str = ""
 
 
 class AuthCompleteResponse(BaseModel):

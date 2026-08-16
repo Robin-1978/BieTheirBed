@@ -13,6 +13,9 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 
 from knoa_platform.config import AppConfig
+from knoa_platform.extensions.import_service import ExtensionImportService
+from knoa_platform.extensions.package_store import PackageStore
+from knoa_platform.fleet import FleetCandidateService
 from knoa_platform.gateway.audit import GatewayAuditRepository
 from knoa_platform.gateway.auth import (
     GatewayAuthenticationService,
@@ -29,11 +32,16 @@ from knoa_platform.gateway.routes import (
     ConfigurationRoutes,
     ConversationRoutes,
     DeviceRoutes,
+    ExtensionRoutes,
+    FleetRoutes,
+    SecretRoutes,
     TaskRoutes,
 )
 from knoa_platform.gateway.streaming import GatewayStreaming
 from knoa_platform.network_tls import is_loopback_host
+from knoa_platform.node_identity import NodeIdentityStore
 from knoa_platform.runtime import RuntimePaths
+from knoa_platform.secrets import SecretStore
 
 logger = logging.getLogger(__name__)
 _MAX_BODY_BYTES = 16 * 1024
@@ -68,6 +76,9 @@ class SecureGatewayAdapter(
     ArtifactRoutes,
     DeviceRoutes,
     ConfigurationRoutes,
+    ExtensionRoutes,
+    FleetRoutes,
+    SecretRoutes,
     GatewayStreaming,
     GatewayHttp,
 ):
@@ -104,9 +115,10 @@ class SecureGatewayAdapter(
         elif not is_loopback_host(config.gateway_host):
             raise ValueError("Secure Gateway must bind to loopback before TLS")
         self._config = config
-        database = RuntimePaths.from_root(config.runtime_root).data / "gateway.db"
+        paths = RuntimePaths.from_root(config.runtime_root)
+        database = paths.data / "gateway.db"
+        identities = GatewayIdentityRepository(database)
         if authentication is None:
-            identities = GatewayIdentityRepository(database)
             authentication = GatewayAuthenticationService(
                 identities,
                 GatewayAuthRepository(database),
@@ -114,6 +126,19 @@ class SecureGatewayAdapter(
         self._authentication = authentication
         self._audit = audit or GatewayAuditRepository(database)
         self._core = core or GatewayCoreBridge(config)
+        self._node_identity = NodeIdentityStore(
+            paths.data / "node-identity.json"
+        ).load_or_create()
+        self._extension_imports = ExtensionImportService(
+            PackageStore(paths.packages),
+            self._core,
+        )
+        self._fleet_candidates = FleetCandidateService(
+            self._node_identity,
+            identities,
+            self._core,
+        )
+        self._provider_secrets = SecretStore(paths.secrets / "providers")
         self._releases = release_repository or AndroidReleaseRepository(
             RuntimePaths.from_root(config.runtime_root).data
             / "mobile-releases"
@@ -134,7 +159,14 @@ class SecureGatewayAdapter(
                 Route("/v1/auth/challenge", self._auth_challenge, methods=["POST"]),
                 Route("/v1/auth/complete", self._auth_complete, methods=["POST"]),
                 Route("/v1/session", self._session, methods=["GET"]),
+                Route("/v1/node", self._node, methods=["GET"]),
                 Route("/v1/agents", self._agents, methods=["GET"]),
+                Route("/v1/extensions/packages", self._extension_packages, methods=["GET"]),
+                Route("/v1/extensions/import/skill", self._extension_import_skill, methods=["POST"]),
+                Route("/v1/extensions/import/mcp/local", self._extension_import_local_mcp, methods=["POST"]),
+                Route("/v1/extensions/import/mcp/remote", self._extension_import_remote_mcp, methods=["POST"]),
+                Route("/v1/fleet/candidates/apply", self._fleet_apply, methods=["POST"]),
+                Route("/v1/secrets/{reference:str}", self._secret, methods=["GET", "PUT"]),
                 Route("/v1/config/current", self._config_current, methods=["GET"]),
                 Route("/v1/config/history", self._config_history, methods=["GET"]),
                 Route(

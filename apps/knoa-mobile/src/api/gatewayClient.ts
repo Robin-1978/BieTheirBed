@@ -16,6 +16,9 @@ import type {
   HumanInteraction,
   MCPResourceCatalogItem,
   ManagedConfig,
+  NodeDescriptor,
+  ExtensionPackage,
+  ExtensionImportResult,
   PairingPayload,
   Task,
   TaskDefinitionState,
@@ -66,11 +69,69 @@ export class GatewayClient {
     });
   }
 
-  async pairComplete(input: PairComplete): Promise<{ device_id: string; principal_id: string }> {
+  async pairComplete(input: PairComplete): Promise<{ device_id: string; principal_id: string; node: NodeDescriptor }> {
     return this.json("/v1/pair/complete", {
       method: "POST",
       body: input,
       authenticated: false,
+    });
+  }
+
+  async nodeDescriptor(): Promise<NodeDescriptor> {
+    return this.json("/v1/node");
+  }
+
+  async listExtensionPackages(): Promise<ExtensionPackage[]> {
+    const response = await this.json<{ packages: ExtensionPackage[] }>("/v1/extensions/packages");
+    return response.packages;
+  }
+
+  async importSkill(sourcePath: string): Promise<ExtensionImportResult> {
+    const response = await this.json<{ result: ExtensionImportResult }>("/v1/extensions/import/skill", {
+      method: "POST",
+      body: { source_path: sourcePath },
+    });
+    return response.result;
+  }
+
+  async importLocalMcp(sourcePath: string, serverId: string): Promise<ExtensionImportResult> {
+    const response = await this.json<{ result: ExtensionImportResult }>("/v1/extensions/import/mcp/local", {
+      method: "POST",
+      body: { source_path: sourcePath, server_id: serverId },
+    });
+    return response.result;
+  }
+
+  async importRemoteMcp(
+    serverId: string,
+    url: string,
+    allowPrivateNetwork: boolean,
+  ): Promise<ExtensionImportResult> {
+    const response = await this.json<{ result: ExtensionImportResult }>("/v1/extensions/import/mcp/remote", {
+      method: "POST",
+      body: { server_id: serverId, url, allow_private_network: allowPrivateNetwork },
+    });
+    return response.result;
+  }
+
+  async secretStatus(reference: string): Promise<{
+    reference: string;
+    configured: boolean;
+    rotated_at: number;
+    fingerprint?: string;
+  }> {
+    return this.json(`/v1/secrets/${encodeURIComponent(reference)}`);
+  }
+
+  async writeSecret(reference: string, value: string): Promise<{
+    reference: string;
+    configured: boolean;
+    rotated_at: number;
+    fingerprint?: string;
+  }> {
+    return this.json(`/v1/secrets/${encodeURIComponent(reference)}`, {
+      method: "PUT",
+      body: { value },
     });
   }
 
@@ -634,9 +695,12 @@ type AuthComplete = {
 export function parsePairingPayload(raw: string, now = Date.now() / 1000): PairingPayload {
   const parsed = JSON.parse(raw) as Partial<PairingPayload>;
   if (
-    parsed.version !== "v1" ||
+    parsed.version !== "v2" ||
     typeof parsed.gateway_url !== "string" ||
     !/^https?:\/\//.test(parsed.gateway_url) ||
+    typeof parsed.node_id !== "string" ||
+    typeof parsed.node_signing_public_key !== "string" ||
+    typeof parsed.node_configuration_public_key !== "string" ||
     typeof parsed.grant_id !== "string" ||
     typeof parsed.grant_secret !== "string" ||
     parsed.grant_secret.length < 32 ||

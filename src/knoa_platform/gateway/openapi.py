@@ -8,8 +8,9 @@ from pydantic import BaseModel
 from pydantic.json_schema import models_json_schema
 
 from knoa_platform.gateway.protocol import (
-    AndroidReleaseResponse,
     AgentListResponse,
+    AndroidReleaseResponse,
+    ApplyFleetCandidateRequest,
     ApprovalResolvedResponse,
     ArtifactResponse,
     ArtifactTranscriptionResponse,
@@ -30,40 +31,48 @@ from knoa_platform.gateway.protocol import (
     ConfigPublishResponse,
     ConfigRevisionResponse,
     ConfigValidationResponse,
+    ContinueProductTaskRequest,
     ConversationSessionListResponse,
     ConversationSessionResponse,
-    ContinueProductTaskRequest,
     CreateChatTurnRequest,
     CreateProductTaskRequest,
     DeletedResponse,
     DeviceRevokedResponse,
     ErrorResponse,
+    ExtensionImportResponse,
+    ExtensionPackageListResponse,
     HealthResponse,
     HumanInteractionResolvedResponse,
+    ImportLocalMCPRequest,
+    ImportRemoteMCPRequest,
+    ImportSkillRequest,
+    InvocationPolicyPreviewResponse,
+    MCPResourceCatalogResponse,
+    NodeDescriptorResponse,
     PairChallengeRequest,
     PairCompleteRequest,
     PairCompleteResponse,
     PauseTaskRequest,
+    PreviewInvocationPolicyRequest,
     ProductTaskExecutionListResponse,
     ProductTaskExecutionResponse,
     ProductTaskListResponse,
     ProductTaskResponse,
-    ResolveApprovalRequest,
-    ResolveHumanInteractionRequest,
-    PreviewInvocationPolicyRequest,
     PublishConfigDraftRequest,
     ReplaceConfigDraftRequest,
-    RollbackConfigRequest,
-    InvocationPolicyPreviewResponse,
+    ResolveApprovalRequest,
+    ResolveHumanInteractionRequest,
     ResumeTaskRequest,
+    RollbackConfigRequest,
     RuntimeStatusResponse,
+    SecretStatusResponse,
     SessionCreatedResponse,
     SessionResponse,
     TaskEventListResponse,
     ToolListResponse,
-    MCPResourceCatalogResponse,
     UpdateConversationSessionRequest,
     UpdateProductTaskRequest,
+    WriteSecretRequest,
 )
 
 _MODELS: tuple[type[BaseModel], ...] = (
@@ -71,6 +80,15 @@ _MODELS: tuple[type[BaseModel], ...] = (
     AgentListResponse,
     ErrorResponse,
     HealthResponse,
+    NodeDescriptorResponse,
+    ExtensionPackageListResponse,
+    ExtensionImportResponse,
+    SecretStatusResponse,
+    ImportSkillRequest,
+    ImportLocalMCPRequest,
+    ImportRemoteMCPRequest,
+    ApplyFleetCandidateRequest,
+    WriteSecretRequest,
     PairChallengeRequest,
     PairCompleteRequest,
     AuthChallengeRequest,
@@ -245,6 +263,16 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     },
                 }
             },
+            "/v1/node": {
+                "get": {
+                    "operationId": "getNodeDescriptor",
+                    "security": bearer,
+                    "responses": {
+                        "200": _json_response("Pinned Node identity", NodeDescriptorResponse),
+                        **_errors("401", "429"),
+                    },
+                }
+            },
             "/v1/agents": {
                 "get": {
                     "operationId": "listAgents",
@@ -254,6 +282,75 @@ def gateway_openapi_schema() -> dict[str, Any]:
                         **_errors("401", "429"),
                     },
                 }
+            },
+            "/v1/extensions/packages": {
+                "get": {
+                    "operationId": "listExtensionPackages",
+                    "security": bearer,
+                    "responses": {
+                        "200": _json_response("Immutable package inventory", ExtensionPackageListResponse),
+                        **_errors("401", "403", "422", "429"),
+                    },
+                }
+            },
+            "/v1/extensions/import/skill": {
+                "post": {
+                    "operationId": "importSkillPackage",
+                    "security": bearer,
+                    "requestBody": _json_body(ImportSkillRequest),
+                    "responses": {
+                        "201": _json_response("Inspected Skill draft", ExtensionImportResponse),
+                        **_errors("400", "401", "403", "415", "422", "429", "503"),
+                    },
+                }
+            },
+            "/v1/extensions/import/mcp/local": {
+                "post": {
+                    "operationId": "importLocalMcpPackage",
+                    "security": bearer,
+                    "requestBody": _json_body(ImportLocalMCPRequest),
+                    "responses": {
+                        "201": _json_response("Inspected local MCP draft", ExtensionImportResponse),
+                        **_errors("400", "401", "403", "415", "422", "429", "503"),
+                    },
+                }
+            },
+            "/v1/extensions/import/mcp/remote": {
+                "post": {
+                    "operationId": "importRemoteMcp",
+                    "security": bearer,
+                    "requestBody": _json_body(ImportRemoteMCPRequest),
+                    "responses": {
+                        "201": _json_response("Inspected remote MCP draft", ExtensionImportResponse),
+                        **_errors("400", "401", "403", "415", "422", "429", "503"),
+                    },
+                }
+            },
+            "/v1/fleet/candidates/apply": {
+                "post": {
+                    "operationId": "applyFleetCandidate",
+                    "security": bearer,
+                    "requestBody": _json_body(ApplyFleetCandidateRequest),
+                    "responses": {
+                        "200": _json_response("Applied Fleet candidate", ConfigPublishResponse),
+                        **_errors("400", "401", "403", "409", "415", "422", "429", "503"),
+                    },
+                }
+            },
+            "/v1/secrets/{reference}": {
+                "get": {
+                    "operationId": "getSecretStatus",
+                    "security": bearer,
+                    "parameters": [{"name": "reference", "in": "path", "required": True, "schema": {"type": "string", "maxLength": 128}}],
+                    "responses": {"200": _json_response("Secret status", SecretStatusResponse), **_errors("400", "401", "403", "429")},
+                },
+                "put": {
+                    "operationId": "writeSecret",
+                    "security": bearer,
+                    "parameters": [{"name": "reference", "in": "path", "required": True, "schema": {"type": "string", "maxLength": 128}}],
+                    "requestBody": _json_body(WriteSecretRequest),
+                    "responses": {"200": _json_response("Updated Secret status", SecretStatusResponse), **_errors("400", "401", "403", "413", "415", "422", "429")},
+                },
             },
             "/v1/config/current": {
                 "get": {

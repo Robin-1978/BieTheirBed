@@ -154,6 +154,9 @@ export default function CapabilitiesScreen() {
           value={i18n.t("settings.systemConfigurationDetail")}
           onPress={() => router.push("/settings/system")}
         />
+        <Metric label="Extension Center" value="Skill、MCP、权限检查与 PackageStore" onPress={() => router.push("/settings/extensions")} />
+        <Metric label="Model Center" value="LLM Provider、Secret 与模型绑定" onPress={() => router.push("/settings/models")} />
+        <Metric label="Node Center" value={`${gateway.nodes.length} 个 Node · 独立信任绑定`} onPress={() => router.push("/settings/nodes")} />
         <Metric
           label={i18n.t("settings.appVersion")}
           value={`${Application.nativeApplicationVersion ?? i18n.t("settings.development")} (${Application.nativeBuildVersion ?? "—"})`}

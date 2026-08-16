@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -103,6 +104,41 @@ class MCPResourceDefinition:
     name: str
     description: str
     mime_type: str
+
+
+def mcp_inventory_digest(
+    tools: tuple[MCPToolDefinition, ...],
+    resources: tuple[MCPResourceDefinition, ...] = (),
+    prompts: tuple[MCPPromptDefinition, ...] = (),
+) -> str:
+    """Canonical inventory fingerprint used to fail closed on remote drift."""
+
+    payload = {
+        "tools": [
+            {
+                "name": item.name,
+                "description": item.description,
+                "input_schema": item.input_schema,
+                "read_only": item.read_only_hint,
+                "destructive": item.destructive_hint,
+                "idempotent": item.idempotent_hint,
+                "open_world": item.open_world_hint,
+            }
+            for item in sorted(tools, key=lambda value: value.name)
+        ],
+        "resources": [
+            {"uri": item.uri, "name": item.name, "mime_type": item.mime_type}
+            for item in sorted(resources, key=lambda value: value.uri)
+        ],
+        "prompts": [
+            {"name": item.name, "description": item.description}
+            for item in sorted(prompts, key=lambda value: value.name)
+        ],
+    }
+    encoded = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -979,6 +1015,7 @@ class MCPServerProvider(ExtensionProvider):
         config_loader: Callable[[], MCPServerConfig] | None = None,
         client_factory: Callable[[MCPServerConfig], MCPClientPort] | None = None,
         private_environment_loader: Callable[[], dict[str, str]] | None = None,
+        expected_inventory_digest: str = "",
     ) -> None:
         if (config is None) == (config_loader is None):
             raise ValueError("MCP provider requires exactly one configuration source")
@@ -988,6 +1025,7 @@ class MCPServerProvider(ExtensionProvider):
         self._config_loader = config_loader
         self._client_factory = client_factory
         self._private_environment_loader = private_environment_loader
+        self._expected_inventory_digest = expected_inventory_digest.strip()
         self._descriptor = ExtensionDescriptor(
             extension_id=f"mcp:{server_id}",
             kind=ExtensionKind.MCP,
@@ -1070,9 +1108,23 @@ class MCPServerProvider(ExtensionProvider):
         self._client = client
         client.set_notification_handler(self._dispatch_notification)
         await client.start()
-        definitions = {
-            definition.name: definition for definition in await client.list_tools()
-        }
+        discovered_tools = await client.list_tools()
+        resources = (
+            await client.list_resources()
+            if client.resource_capabilities().available
+            else ()
+        )
+        try:
+            prompts = await client.list_prompts()
+        except Exception:  # noqa: BLE001 - optional MCP capability
+            prompts = ()
+        if self._expected_inventory_digest and mcp_inventory_digest(
+            discovered_tools,
+            resources,
+            prompts,
+        ) != self._expected_inventory_digest:
+            raise RuntimeError("MCP inventory drifted after permission review")
+        definitions = {definition.name: definition for definition in discovered_tools}
         tools: list[ToolBase] = []
         for remote_name, policy in config.tools.items():
             definition = definitions.get(remote_name)
@@ -1100,6 +1152,7 @@ def build_mcp_providers(
     configs: dict[str, MCPServerConfig],
     *,
     secret_root: str | Path | None = None,
+    inventory_digests: dict[str, str] | None = None,
 ) -> tuple[MCPServerProvider, ...]:
     from knoa_platform.extensions.mcp_secrets import mcp_private_environment_loader
 
@@ -1111,6 +1164,7 @@ def build_mcp_providers(
                 secret_root,
                 server_id,
             ),
+            expected_inventory_digest=(inventory_digests or {}).get(server_id, ""),
         )
         for server_id, config in configs.items()
         if config.enabled

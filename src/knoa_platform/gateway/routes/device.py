@@ -32,7 +32,19 @@ _MAX_BODY_BYTES = 16 * 1024
 class DeviceRoutes:
 
     async def _health(self, _request: Request) -> JSONResponse:
-        return JSONResponse({"status": "ok", "scope": "authentication"})
+        return JSONResponse(
+            {
+                "status": "ok",
+                "scope": "authentication",
+                "node_id": self._node_identity.node_id,
+            }
+        )
+
+    async def _node(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=120)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        return JSONResponse(self._node_identity.descriptor())
 
     async def _agents(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=60)
@@ -95,7 +107,11 @@ class DeviceRoutes:
             principal_id=device.principal_id,
         )
         return JSONResponse(
-            {"device_id": device.device_id, "principal_id": device.principal_id},
+            {
+                "device_id": device.device_id,
+                "principal_id": device.principal_id,
+                "node": self._node_identity.descriptor(),
+            },
             status_code=201,
         )
 

@@ -37,7 +37,18 @@ export async function pairDevice(
     public_key: publicKeyValue,
     signature,
   });
-  await replaceConnectionIdentity({ deviceId: paired.device_id, gatewayUrl: payload.gateway_url });
+  if (
+    paired.node.node_id !== payload.node_id
+    || paired.node.signing_public_key !== payload.node_signing_public_key
+    || paired.node.configuration_public_key !== payload.node_configuration_public_key
+  ) throw new Error("节点身份与二维码不一致，已拒绝配对");
+  await replaceConnectionIdentity({
+    nodeId: payload.node_id,
+    deviceId: paired.device_id,
+    gatewayUrl: payload.gateway_url,
+    nodeSigningPublicKey: payload.node_signing_public_key,
+    nodeConfigurationPublicKey: payload.node_configuration_public_key,
+  });
   return { gatewayUrl: payload.gateway_url, deviceId: paired.device_id };
 }
 

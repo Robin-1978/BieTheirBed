@@ -11,7 +11,10 @@ import {
   loadCoreSession,
   loadDevice,
   loadSessionToken,
+  listNodeBindings,
+  selectNode,
   storeCoreSession,
+  type NodeDeviceBinding,
 } from "@/security/deviceIdentity";
 import { withAuthenticationRetry } from "./authenticationRecovery";
 import { installedAndroidVersionCode, isAndroidUpdateAvailable } from "@/update/androidUpdater";
@@ -28,6 +31,8 @@ type GatewayState = {
   latestEvent: PrincipalTaskEvent | null;
   error: string;
   deviceId: string;
+  nodeId: string;
+  nodes: NodeDeviceBinding[];
   lastConnectedAt: number;
   requiredUpdate: AndroidRelease | null;
   availableUpdate: AndroidRelease | null;
@@ -40,6 +45,7 @@ type GatewayState = {
   reconnect(): Promise<void>;
   reauthenticate(): Promise<void>;
   removeConnection(): Promise<void>;
+  switchNode(nodeId: string): Promise<void>;
   newConversation(): Promise<void>;
   ensureConversation(): Promise<string>;
   commitConversation(sessionHandle: string): Promise<void>;
@@ -52,7 +58,7 @@ type GatewayState = {
 const Context = createContext<GatewayState | null>(null);
 
 export function GatewayProvider({ children }: React.PropsWithChildren) {
-  type StoredState = Omit<GatewayState, "pair" | "reconnect" | "reauthenticate" | "removeConnection" | "newConversation" | "ensureConversation" | "commitConversation" | "openConversation" | "connection" | "runAuthenticated" | "subscribeEvents" | "selectAgent">;
+  type StoredState = Omit<GatewayState, "pair" | "reconnect" | "reauthenticate" | "removeConnection" | "switchNode" | "newConversation" | "ensureConversation" | "commitConversation" | "openConversation" | "connection" | "runAuthenticated" | "subscribeEvents" | "selectAgent">;
   const initialState: StoredState = {
     status: "booting",
     client: null,
@@ -62,6 +68,8 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     latestEvent: null,
     error: "",
     deviceId: "",
+    nodeId: "",
+    nodes: [],
     lastConnectedAt: 0,
     requiredUpdate: null,
     availableUpdate: null,
@@ -73,7 +81,11 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
   const [state, setState] = useState<StoredState>(initialState);
   const stateRef = useRef<StoredState>(initialState);
   const connectionRef = useRef<GatewayConnection | null>(null);
-  const authenticationRef = useRef<Promise<GatewayClient> | null>(null);
+  const connectionGenerationRef = useRef(0);
+  const authenticationRef = useRef<{
+    generation: number;
+    promise: Promise<GatewayClient>;
+  } | null>(null);
   const provisionalConversationRef = useRef<Promise<string> | null>(null);
   const eventListenersRef = useRef(new Set<(event: PrincipalTaskEvent) => void>());
 
@@ -84,13 +96,16 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
   }, []);
 
   const connect = useCallback(async () => {
+    const generation = ++connectionGenerationRef.current;
     provisionalConversationRef.current = null;
     commit({ status: "booting", error: "" });
     try {
       const identity = await loadConnectionIdentity();
+      const nodes = await listNodeBindings();
+      if (generation !== connectionGenerationRef.current) return;
       if (!identity) {
         connectionRef.current = null;
-        commit({ status: "unpaired", client: null, gatewayUrl: "", sessionToken: "", sessionHandle: "", deviceId: "", lastConnectedAt: 0, requiredUpdate: null, availableUpdate: null, agents: [], activeAgentId: "", selectedAgentId: "knoa" });
+        commit({ status: "unpaired", client: null, gatewayUrl: "", sessionToken: "", sessionHandle: "", deviceId: "", nodeId: "", nodes, lastConnectedAt: 0, requiredUpdate: null, availableUpdate: null, agents: [], activeAgentId: "", selectedAgentId: "knoa" });
         return;
       }
       const device = { deviceId: identity.deviceId, gatewayUrl: identity.gatewayUrl };
@@ -118,6 +133,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         token = await loadSessionToken();
       }
       if (!token) throw new Error("未能建立安全会话");
+      if (generation !== connectionGenerationRef.current) return;
       const sessionHandle = (await loadCoreSession()) ?? "";
       let activeAgentId = "";
       if (sessionHandle) {
@@ -127,6 +143,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
           activeAgentId = "";
         }
       }
+      if (generation !== connectionGenerationRef.current) return;
       connectionRef.current = { gatewayUrl: device.gatewayUrl, token };
       commit({
         status: "ready",
@@ -135,11 +152,14 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         gatewayUrl: device.gatewayUrl,
         sessionToken: token,
         deviceId: device.deviceId,
+        nodeId: identity.nodeId,
+        nodes,
         lastConnectedAt: Date.now() / 1000,
         activeAgentId,
         selectedAgentId: activeAgentId || stateRef.current.selectedAgentId,
       });
       void client.listAgents().then(({ defaultAgentId, agents }) => {
+        if (generation !== connectionGenerationRef.current) return;
         const active = stateRef.current.activeAgentId;
         commit({
           agents,
@@ -150,12 +170,16 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         });
       }).catch(() => undefined);
       void client.latestAndroidRelease()
-        .then((release) => commit({
-          requiredUpdate: requiresAndroidUpdate(release, installedAndroidVersionCode()) ? release : null,
-          availableUpdate: isAndroidUpdateAvailable(release, installedAndroidVersionCode()) ? release : null,
-        }))
+        .then((release) => {
+          if (generation !== connectionGenerationRef.current) return;
+          commit({
+            requiredUpdate: requiresAndroidUpdate(release, installedAndroidVersionCode()) ? release : null,
+            availableUpdate: isAndroidUpdateAvailable(release, installedAndroidVersionCode()) ? release : null,
+          });
+        })
         .catch(() => undefined);
     } catch (error) {
+      if (generation !== connectionGenerationRef.current) return;
       commit({
         status: "error",
         error: error instanceof Error ? error.message : "连接失败",
@@ -164,7 +188,10 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
   }, [commit]);
 
   const refreshAuthentication = useCallback(async (): Promise<GatewayClient> => {
-    if (authenticationRef.current) return authenticationRef.current;
+    const generation = connectionGenerationRef.current;
+    if (authenticationRef.current?.generation === generation) {
+      return authenticationRef.current.promise;
+    }
     const pending = (async () => {
       const device = await loadDevice();
       if (!device) throw new Error("设备尚未配对");
@@ -174,6 +201,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       });
       const token = await loadSessionToken();
       if (!token) throw new Error("未能恢复安全会话");
+      if (generation !== connectionGenerationRef.current) throw new Error("Node 连接已切换");
       connectionRef.current = { gatewayUrl: device.gatewayUrl, token };
       commit({
         status: "ready",
@@ -182,30 +210,40 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         sessionToken: token,
         error: "",
       });
-      void client.listAgents().then(({ defaultAgentId, agents }) => commit({
-        agents,
-        defaultAgentId,
-        selectedAgentId: stateRef.current.activeAgentId || stateRef.current.selectedAgentId || defaultAgentId,
-      })).catch(() => undefined);
+      void client.listAgents().then(({ defaultAgentId, agents }) => {
+        if (generation !== connectionGenerationRef.current) return;
+        commit({
+          agents,
+          defaultAgentId,
+          selectedAgentId: stateRef.current.activeAgentId || stateRef.current.selectedAgentId || defaultAgentId,
+        });
+      }).catch(() => undefined);
       void client.latestAndroidRelease()
-        .then((release) => commit({
-          requiredUpdate: requiresAndroidUpdate(release, installedAndroidVersionCode()) ? release : null,
-          availableUpdate: isAndroidUpdateAvailable(release, installedAndroidVersionCode()) ? release : null,
-        }))
+        .then((release) => {
+          if (generation !== connectionGenerationRef.current) return;
+          commit({
+            requiredUpdate: requiresAndroidUpdate(release, installedAndroidVersionCode()) ? release : null,
+            availableUpdate: isAndroidUpdateAvailable(release, installedAndroidVersionCode()) ? release : null,
+          });
+        })
         .catch(() => undefined);
       return client;
     })();
-    authenticationRef.current = pending;
+    authenticationRef.current = { generation, promise: pending };
     try {
       return await pending;
     } catch (error) {
-      commit({
-        status: "error",
-        error: error instanceof Error ? error.message : "认证失败",
-      });
+      if (generation === connectionGenerationRef.current) {
+        commit({
+          status: "error",
+          error: error instanceof Error ? error.message : "认证失败",
+        });
+      }
       throw error;
     } finally {
-      authenticationRef.current = null;
+      if (authenticationRef.current?.promise === pending) {
+        authenticationRef.current = null;
+      }
     }
   }, [commit]);
 
@@ -262,6 +300,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
   }, [commit, runAuthenticated, state.gatewayUrl, state.sessionToken, state.status]);
 
   const pair = useCallback(async (encoded: string, displayName: string) => {
+    connectionGenerationRef.current += 1;
     provisionalConversationRef.current = null;
     await pairDevice(encoded, displayName);
     connectionRef.current = null;
@@ -270,6 +309,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
   }, [commit, connect]);
 
   const reauthenticate = useCallback(async () => {
+    connectionGenerationRef.current += 1;
     provisionalConversationRef.current = null;
     await clearSession();
     connectionRef.current = null;
@@ -278,28 +318,25 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
   }, [commit, connect]);
 
   const removeConnection = useCallback(async () => {
+    connectionGenerationRef.current += 1;
     provisionalConversationRef.current = null;
     const client = stateRef.current.client;
     if (client) await client.revokeCurrentDevice();
     await clearConnectionIdentity();
     connectionRef.current = null;
-    commit({
-      status: "unpaired",
-      client: null,
-      sessionHandle: "",
-      gatewayUrl: "",
-      sessionToken: "",
-      latestEvent: null,
-      error: "",
-      deviceId: "",
-      lastConnectedAt: 0,
-      requiredUpdate: null,
-      availableUpdate: null,
-      agents: [],
-      activeAgentId: "",
-      selectedAgentId: "knoa",
-    });
-  }, [commit]);
+    commit({ client: null, sessionHandle: "", sessionToken: "", latestEvent: null, status: "booting" });
+    await connect();
+  }, [commit, connect]);
+
+  const switchNode = useCallback(async (nodeId: string) => {
+    if (nodeId === stateRef.current.nodeId) return;
+    connectionGenerationRef.current += 1;
+    provisionalConversationRef.current = null;
+    await selectNode(nodeId);
+    connectionRef.current = null;
+    commit({ client: null, sessionHandle: "", sessionToken: "", latestEvent: null, status: "booting", error: "" });
+    await connect();
+  }, [commit, connect]);
 
   const newConversation = useCallback(async () => {
     provisionalConversationRef.current = null;
@@ -357,6 +394,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       reconnect: connect,
       reauthenticate,
       removeConnection,
+      switchNode,
       newConversation,
       ensureConversation,
       commitConversation,
@@ -366,7 +404,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       subscribeEvents,
       selectAgent,
     }),
-    [commitConversation, connect, connection, ensureConversation, newConversation, openConversation, pair, reauthenticate, removeConnection, runAuthenticated, selectAgent, state, subscribeEvents],
+    [commitConversation, connect, connection, ensureConversation, newConversation, openConversation, pair, reauthenticate, removeConnection, runAuthenticated, selectAgent, state, subscribeEvents, switchNode],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
