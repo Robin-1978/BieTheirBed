@@ -8,6 +8,7 @@ from knoa_platform.config import load_config
 from knoa_platform.gateway.audit import GatewayAuditRepository
 from knoa_platform.gateway.identity import GatewayIdentityRepository
 from knoa_platform.gateway.pairing import GatewayPairingPayload
+from knoa_platform.node_identity import NodeIdentityStore
 from knoa_platform.runtime import RuntimePaths
 
 
@@ -24,6 +25,9 @@ def run_gateway_admin(
     principal = principal_id or config.owner_principal_id
     database = RuntimePaths.from_root(config.runtime_root).data / "gateway.db"
     identities = GatewayIdentityRepository(database)
+    node_identity = NodeIdentityStore(
+        RuntimePaths.from_root(config.runtime_root).data / "node-identity.json"
+    ).load_or_create()
     audit = GatewayAuditRepository(database)
 
     try:
@@ -39,6 +43,9 @@ def run_gateway_admin(
                 payload = GatewayPairingPayload.from_grant(
                     grant,
                     config.gateway_public_url,
+                    node_id=node_identity.node_id,
+                    node_signing_public_key=node_identity.signing_public_key,
+                    node_configuration_public_key=node_identity.configuration_public_key,
                 ).encoded()
                 print(f"pairing_json={payload}")
                 _print_qr(payload)

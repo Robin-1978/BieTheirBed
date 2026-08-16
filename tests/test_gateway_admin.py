@@ -89,10 +89,13 @@ def test_gateway_admin_emits_canonical_pairing_payload_when_url_is_configured(
         if line.startswith("pairing_json=")
     )
     payload = json.loads(encoded)
-    assert payload["version"] == "v1"
+    assert payload["version"] == "v2"
     assert payload["gateway_url"] == "https://knoa.example.com"
     assert payload["grant_id"]
     assert len(payload["grant_secret"]) >= 32
+    assert payload["node_id"].startswith("node_")
+    assert len(payload["node_signing_public_key"]) >= 40
+    assert len(payload["node_configuration_public_key"]) >= 40
 
 
 def test_gateway_admin_publishes_and_inspects_private_android_release(

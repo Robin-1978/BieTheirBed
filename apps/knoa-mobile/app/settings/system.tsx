@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useLocalSearchParams } from "expo-router";
 import {
   ActivityIndicator,
   Alert,
@@ -32,6 +33,7 @@ type Current = {
 };
 
 export default function SystemConfigurationScreen() {
+  const params = useLocalSearchParams<{ draftId?: string }>();
   const gateway = useGateway();
   const { t, locale } = useI18n();
   const [current, setCurrent] = useState<Current | null>(null);
@@ -48,18 +50,20 @@ export default function SystemConfigurationScreen() {
     setWorking("load");
     setMessage("");
     try {
-      const [next, revisions] = await gateway.runAuthenticated((client) => Promise.all([
+      const [next, revisions, importedDraft] = await gateway.runAuthenticated((client) => Promise.all([
         client.getConfigCurrent(),
         client.getConfigHistory(30),
+        params.draftId ? client.getConfigDraft(params.draftId) : Promise.resolve(null),
       ]));
       setCurrent(next);
       setHistory(revisions);
+      if (importedDraft) setDraft(importedDraft);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : t("config.loadFailed"));
     } finally {
       setWorking("");
     }
-  }, [gateway.client, gateway.runAuthenticated, t]);
+  }, [gateway.client, gateway.runAuthenticated, params.draftId, t]);
 
   useEffect(() => { void load(); }, [load]);
 

@@ -333,6 +333,48 @@
         }
       }
     },
+    "/v1/node": {
+      "get": {
+        "operationId": "getNodeDescriptor",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pinned Node identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeDescriptorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/agents": {
       "get": {
         "operationId": "listAgents",
@@ -353,6 +395,670 @@
             }
           },
           "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/extensions/packages": {
+      "get": {
+        "operationId": "listExtensionPackages",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Immutable package inventory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtensionPackageListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/extensions/import/skill": {
+      "post": {
+        "operationId": "importSkillPackage",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportSkillRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Inspected Skill draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtensionImportResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/extensions/import/mcp/local": {
+      "post": {
+        "operationId": "importLocalMcpPackage",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportLocalMCPRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Inspected local MCP draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtensionImportResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/extensions/import/mcp/remote": {
+      "post": {
+        "operationId": "importRemoteMcp",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportRemoteMCPRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Inspected remote MCP draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtensionImportResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fleet/candidates/apply": {
+      "post": {
+        "operationId": "applyFleetCandidate",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyFleetCandidateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied Fleet candidate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigPublishResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/secrets/{reference}": {
+      "get": {
+        "operationId": "getSecretStatus",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "reference",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Secret status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretStatusResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "writeSecret",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "reference",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WriteSecretRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated Secret status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretStatusResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
             "description": "Request rejected",
             "content": {
               "application/json": {
@@ -5683,6 +6389,28 @@
         "title": "AndroidReleaseResponse",
         "type": "object"
       },
+      "ApplyFleetCandidateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "rollout_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Rollout Id",
+            "type": "string"
+          },
+          "envelope": {
+            "additionalProperties": true,
+            "title": "Envelope",
+            "type": "object"
+          }
+        },
+        "required": [
+          "rollout_id",
+          "envelope"
+        ],
+        "title": "ApplyFleetCandidateRequest",
+        "type": "object"
+      },
       "ApprovalResolvedResponse": {
         "properties": {
           "approval_id": {
@@ -7116,6 +7844,37 @@
         "title": "ErrorResponse",
         "type": "object"
       },
+      "ExtensionImportResponse": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ExtensionImportResponse",
+        "type": "object"
+      },
+      "ExtensionPackageListResponse": {
+        "properties": {
+          "packages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Packages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "packages"
+        ],
+        "title": "ExtensionPackageListResponse",
+        "type": "object"
+      },
       "ExtensionStatusRecord": {
         "additionalProperties": false,
         "properties": {
@@ -7176,11 +7935,16 @@
           "scope": {
             "title": "Scope",
             "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
           }
         },
         "required": [
           "status",
-          "scope"
+          "scope",
+          "node_id"
         ],
         "title": "HealthResponse",
         "type": "object"
@@ -7297,6 +8061,71 @@
           "created_at"
         ],
         "title": "HumanInteractionSnapshot",
+        "type": "object"
+      },
+      "ImportLocalMCPRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "source_path": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Source Path",
+            "type": "string"
+          },
+          "server_id": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,23}$",
+            "title": "Server Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_path",
+          "server_id"
+        ],
+        "title": "ImportLocalMCPRequest",
+        "type": "object"
+      },
+      "ImportRemoteMCPRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "server_id": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,23}$",
+            "title": "Server Id",
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          },
+          "allow_private_network": {
+            "default": false,
+            "title": "Allow Private Network",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "server_id",
+          "url"
+        ],
+        "title": "ImportRemoteMCPRequest",
+        "type": "object"
+      },
+      "ImportSkillRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "source_path": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Source Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_path"
+        ],
+        "title": "ImportSkillRequest",
         "type": "object"
       },
       "InvocationLimits": {
@@ -7576,6 +8405,16 @@
               "streamable_http"
             ],
             "title": "Transport",
+            "type": "string"
+          },
+          "package_id": {
+            "default": "",
+            "title": "Package Id",
+            "type": "string"
+          },
+          "inventory_digest": {
+            "default": "",
+            "title": "Inventory Digest",
             "type": "string"
           },
           "enabled": {
@@ -7858,6 +8697,12 @@
             "title": "Api Key Env",
             "type": "string"
           },
+          "secret_version": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Secret Version",
+            "type": "integer"
+          },
           "requires_api_key": {
             "anyOf": [
               {
@@ -7887,7 +8732,13 @@
       "ManagedSkillConfig": {
         "additionalProperties": false,
         "properties": {
+          "package_id": {
+            "default": "",
+            "title": "Package Id",
+            "type": "string"
+          },
           "source": {
+            "default": "",
             "title": "Source",
             "type": "string"
           },
@@ -7902,9 +8753,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "source"
-        ],
         "title": "ManagedSkillConfig",
         "type": "object"
       },
@@ -7934,6 +8782,44 @@
           "ownership"
         ],
         "title": "ModelBindingSpec",
+        "type": "object"
+      },
+      "NodeDescriptorResponse": {
+        "properties": {
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "signing_public_key": {
+            "title": "Signing Public Key",
+            "type": "string"
+          },
+          "signing_key_version": {
+            "title": "Signing Key Version",
+            "type": "integer"
+          },
+          "configuration_public_key": {
+            "title": "Configuration Public Key",
+            "type": "string"
+          },
+          "configuration_key_version": {
+            "title": "Configuration Key Version",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "node_id",
+          "signing_public_key",
+          "signing_key_version",
+          "configuration_public_key",
+          "configuration_key_version",
+          "created_at"
+        ],
+        "title": "NodeDescriptorResponse",
         "type": "object"
       },
       "PairChallengeRequest": {
@@ -8019,11 +8905,15 @@
           "principal_id": {
             "title": "Principal Id",
             "type": "string"
+          },
+          "node": {
+            "$ref": "#/components/schemas/NodeDescriptorResponse"
           }
         },
         "required": [
           "device_id",
-          "principal_id"
+          "principal_id",
+          "node"
         ],
         "title": "PairCompleteResponse",
         "type": "object"
@@ -8905,6 +9795,34 @@
         "title": "RuntimeStatusResponse",
         "type": "object"
       },
+      "SecretStatusResponse": {
+        "properties": {
+          "reference": {
+            "title": "Reference",
+            "type": "string"
+          },
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "rotated_at": {
+            "title": "Rotated At",
+            "type": "number"
+          },
+          "fingerprint": {
+            "default": "",
+            "title": "Fingerprint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reference",
+          "configured",
+          "rotated_at"
+        ],
+        "title": "SecretStatusResponse",
+        "type": "object"
+      },
       "SessionCreatedResponse": {
         "properties": {
           "session_handle": {
@@ -9750,6 +10668,22 @@
           }
         },
         "title": "UpdateProductTaskRequest",
+        "type": "object"
+      },
+      "WriteSecretRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "WriteSecretRequest",
         "type": "object"
       }
     }

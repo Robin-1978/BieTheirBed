@@ -31,6 +31,7 @@ class ManagedProviderConfig(ConfigurationModel):
     api_base: str = ""
     api_key_ref: str = ""
     api_key_env: str = ""
+    secret_version: int = Field(default=0, ge=0)
     requires_api_key: bool | None = None
     timeout_seconds: float = Field(default=120.0, gt=0.0, le=3600.0)
 
@@ -54,12 +55,17 @@ class ManagedModelConfig(ConfigurationModel):
 
 
 class ManagedSkillConfig(ConfigurationModel):
-    source: str
+    package_id: str = ""
+    source: str = ""
     enabled: bool = True
     content_digest: str = ""
 
     @model_validator(mode="after")
     def validate_content_digest(self) -> ManagedSkillConfig:
+        if not self.package_id and not self.source:
+            raise ValueError("Skill requires package_id or a trusted builtin source")
+        if self.package_id and not self.package_id.startswith("skill-"):
+            raise ValueError("Skill package_id must reference a Skill package")
         if self.content_digest and (
             len(self.content_digest) != 64
             or any(character not in "0123456789abcdef" for character in self.content_digest)
@@ -95,6 +101,8 @@ class ManagedMCPToolPolicyConfig(ConfigurationModel):
 
 class ManagedMCPConfig(ConfigurationModel):
     transport: Literal["stdio", "streamable_http"]
+    package_id: str = ""
+    inventory_digest: str = ""
     enabled: bool = True
     command: tuple[str, ...] = ()
     url: str = ""
@@ -107,10 +115,19 @@ class ManagedMCPConfig(ConfigurationModel):
 
     @model_validator(mode="after")
     def validate_transport(self) -> ManagedMCPConfig:
-        if self.transport == "stdio" and not self.command:
-            raise ValueError("stdio MCP requires a command")
+        if self.package_id and not self.package_id.startswith("mcp-"):
+            raise ValueError("MCP package_id must reference an MCP package")
+        if self.transport == "stdio" and not (self.command or self.package_id):
+            raise ValueError("stdio MCP requires a package_id or command")
         if self.transport == "streamable_http" and not self.url:
             raise ValueError("HTTP MCP requires a URL")
+        if self.package_id and self.transport != "stdio":
+            raise ValueError("Only stdio MCP can reference a local package")
+        if self.inventory_digest and (
+            len(self.inventory_digest) != 64
+            or any(character not in "0123456789abcdef" for character in self.inventory_digest)
+        ):
+            raise ValueError("MCP inventory_digest must be a lowercase SHA-256 digest")
         return self
 
 

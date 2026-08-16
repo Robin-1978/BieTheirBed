@@ -1,9 +1,49 @@
 export type PairingPayload = {
-  version: "v1";
+  version: "v2";
   gateway_url: string;
+  node_id: string;
+  node_signing_public_key: string;
+  node_configuration_public_key: string;
   grant_id: string;
   grant_secret: string;
   expires_at: number;
+};
+
+export type NodeDescriptor = {
+  node_id: string;
+  signing_public_key: string;
+  signing_key_version: number;
+  configuration_public_key: string;
+  configuration_key_version: number;
+  created_at: number;
+};
+
+export type ExtensionPackage = {
+  package_id: string;
+  kind: "skill" | "mcp";
+  content_digest: string;
+  source_type: string;
+  source_locator: string;
+  imported_by: string;
+  imported_at: number;
+  file_count: number;
+  size_bytes: number;
+};
+
+export type ExtensionImportResult = {
+  package: ExtensionPackage | null;
+  inspection: {
+    extension_id: string;
+    kind: "skill" | "mcp";
+    package_id: string;
+    inventory_digest: string;
+    tools: Array<Record<string, unknown>>;
+    resources: Array<Record<string, unknown>>;
+    prompts: Array<Record<string, unknown>>;
+    requested_secrets: string[];
+    withheld_tools: string[];
+  };
+  draft: ConfigDraft;
 };
 
 export type GatewaySession = {
@@ -80,7 +120,16 @@ export type ManagedOperationalConfig = {
 
 export type ManagedConfig = {
   schema_version: 1;
-  providers: Record<string, Record<string, unknown>>;
+  providers: Record<string, {
+    driver: "llamacpp" | "openai" | "openai_compatible" | "anthropic";
+    server_url: string;
+    api_base: string;
+    api_key_ref: string;
+    api_key_env: string;
+    secret_version: number;
+    requires_api_key: boolean | null;
+    timeout_seconds: number;
+  }>;
   models: Record<string, { provider: string; model: string; [key: string]: unknown }>;
   default_model: string;
   fallback_model: string;

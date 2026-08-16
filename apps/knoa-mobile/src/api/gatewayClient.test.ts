@@ -5,11 +5,14 @@ import { GatewayClient, GatewayError, parsePairingPayload } from "./gatewayClien
 afterEach(() => vi.unstubAllGlobals());
 
 describe("parsePairingPayload", () => {
-  it("accepts the canonical v1 payload", () => {
+  it("accepts the canonical v2 payload with pinned Node keys", () => {
     const payload = parsePairingPayload(
       JSON.stringify({
-        version: "v1",
+        version: "v2",
         gateway_url: "https://knoa.example.com",
+        node_id: "node-a",
+        node_signing_public_key: "s".repeat(43),
+        node_configuration_public_key: "c".repeat(43),
         grant_id: "pgr-a",
         grant_secret: "s".repeat(43),
         expires_at: 200,
@@ -23,8 +26,11 @@ describe("parsePairingPayload", () => {
     expect(() =>
       parsePairingPayload(
         JSON.stringify({
-          version: "v1",
+          version: "v2",
           gateway_url: "https://knoa.example.com",
+          node_id: "node-a",
+          node_signing_public_key: "s".repeat(43),
+          node_configuration_public_key: "c".repeat(43),
           grant_id: "pgr-a",
           grant_secret: "s".repeat(43),
           expires_at: 99,

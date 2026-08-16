@@ -1074,7 +1074,9 @@ async def test_gateway_adapter_embedded_http_lifecycle(tmp_path) -> None:
     try:
         async with httpx.AsyncClient(trust_env=False) as http:
             response = await http.get(f"http://127.0.0.1:{adapter.bound_port}/health")
-        assert response.json() == {"status": "ok", "scope": "authentication"}
+        assert response.json()["status"] == "ok"
+        assert response.json()["scope"] == "authentication"
+        assert response.json()["node_id"].startswith("node_")
     finally:
         await adapter.stop()
 
@@ -1089,7 +1091,9 @@ async def test_gateway_adapter_serves_tls_when_remote_mode_is_explicit(tmp_path)
     try:
         async with httpx.AsyncClient(verify=False, trust_env=False) as http:
             response = await http.get(f"https://127.0.0.1:{adapter.bound_port}/health")
-        assert response.json() == {"status": "ok", "scope": "authentication"}
+        assert response.json()["status"] == "ok"
+        assert response.json()["scope"] == "authentication"
+        assert response.json()["node_id"].startswith("node_")
     finally:
         await adapter.stop()
 
