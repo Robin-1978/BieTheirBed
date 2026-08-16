@@ -19,6 +19,7 @@
 - [Knoa Agent Runtime、Profile 与 Subagent 架构设计](knoa-agent-profile-delegation-design.md)
 - [Knoa 配置控制面与管理页面架构设计](knoa-configuration-control-plane-design.md)
 - [Knoa 扩展生态、模型接入与多节点 Hub 架构设计](knoa-extension-model-hub-node-design.md)
+- [Knoa Workspace 资源织网与共享执行架构设计](knoa-workspace-resource-fabric-design.md)
 - [Knoa Durable Task Design](knoa-durable-task-design.md)
 - [Knoa Task Product Design](knoa-task-product-design.md)
 - [Knoa Conversation Forward Design](knoa-conversation-design.md)

@@ -121,16 +121,26 @@ export type ManagedOperationalConfig = {
 export type ManagedConfig = {
   schema_version: 1;
   providers: Record<string, {
-    driver: "llamacpp" | "openai" | "openai_compatible" | "anthropic";
+    driver: "llamacpp" | "openai" | "openai_compatible" | "anthropic" | "workspace_remote";
     server_url: string;
     api_base: string;
     api_key_ref: string;
     api_key_env: string;
+    remote_deployment_id: string;
+    direct_gateway_url: string;
     secret_version: number;
     requires_api_key: boolean | null;
     timeout_seconds: number;
   }>;
   models: Record<string, { provider: string; model: string; [key: string]: unknown }>;
+  model_deployments: Record<string, {
+    model_alias: string;
+    resource_id: string;
+    display_name: string;
+    enabled: boolean;
+    share_enabled: boolean;
+    max_remote_concurrency: number;
+  }>;
   default_model: string;
   fallback_model: string;
   fallback_enabled: boolean;

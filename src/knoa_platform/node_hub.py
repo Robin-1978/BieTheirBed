@@ -26,11 +26,14 @@ from knoa_platform.hub.relay import RelayFrame
 from knoa_platform.node_identity import NodeIdentity
 from knoa_platform.relay_protocol import (
     ClientHello,
-    NodeCipherSession,
     accept_client_hello,
     canonical_json,
     decode_base64url,
     encode_base64url,
+)
+from knoa_platform.resource_protocol import (
+    ResourceClientHello,
+    accept_resource_client_hello,
 )
 
 logger = logging.getLogger(__name__)
@@ -229,9 +232,10 @@ class _RequestStream:
 
 @dataclass
 class _RelaySession:
-    cipher: NodeCipherSession
+    cipher: Any
     streams: dict[int, _RequestStream]
     send_lock: asyncio.Lock
+    kind: str = "app"
 
 
 class NodeRelayManager:
@@ -242,12 +246,14 @@ class NodeRelayManager:
         identity: NodeIdentity,
         identities: GatewayIdentityRepository,
         app: Any,
+        remote_models: Any | None = None,
         clock=time.time,
     ) -> None:
         self._store = store
         self._identity = identity
         self._identities = identities
         self._app = app
+        self._remote_models = remote_models
         self._clock = clock
         self._task: asyncio.Task[None] | None = None
         self._generation = 0
@@ -298,7 +304,7 @@ class NodeRelayManager:
                 delay = 1.0
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 self._connected = False
                 self._last_error = type(exc).__name__
                 logger.warning("Node Relay connection lost: %s", exc)
@@ -321,11 +327,19 @@ class NodeRelayManager:
                 raise PermissionError("Relay rejected Node presence")
             self._connected = True
             self._last_error = ""
-            async for raw in websocket:
-                message = json.loads(raw)
-                frame = RelayFrame.model_validate(message.get("frame"))
-                frame.validate_bounds()
-                await self._receive_frame(websocket, enrollment, sessions, frame)
+            publisher = asyncio.create_task(
+                self._publish_observations(enrollment),
+                name="knoa-deployment-observations",
+            )
+            try:
+                async for raw in websocket:
+                    message = json.loads(raw)
+                    frame = RelayFrame.model_validate(message.get("frame"))
+                    frame.validate_bounds()
+                    await self._receive_frame(websocket, enrollment, sessions, frame)
+            finally:
+                publisher.cancel()
+                await asyncio.gather(publisher, return_exceptions=True)
         self._connected = False
 
     async def _receive_frame(
@@ -342,18 +356,37 @@ class NodeRelayManager:
         raw = decode_base64url(frame.ciphertext)
         session = sessions.get(frame.session_id)
         if session is None:
-            hello = ClientHello.model_validate_json(raw)
-            device = self._identities.active_device_by_id(hello.device_id)
-            server_hello, cipher = accept_client_hello(
-                hello,
-                session_id=frame.session_id,
-                hub_id=enrollment.hub_id,
-                hub_signing_public_key=enrollment.hub_signing_public_key,
-                node_identity=self._identity,
-                device=device,
-                clock=self._clock,
+            envelope = json.loads(raw)
+            if envelope.get("type") == "resource_client_hello":
+                hello = ResourceClientHello.model_validate(envelope)
+                server_hello, cipher = accept_resource_client_hello(
+                    hello,
+                    session_id=frame.session_id,
+                    hub_id=enrollment.hub_id,
+                    hub_signing_public_key=enrollment.hub_signing_public_key,
+                    node_identity=self._identity,
+                    clock=self._clock,
+                )
+                kind = "resource"
+            else:
+                hello = ClientHello.model_validate(envelope)
+                device = self._identities.active_device_by_id(hello.device_id)
+                server_hello, cipher = accept_client_hello(
+                    hello,
+                    session_id=frame.session_id,
+                    hub_id=enrollment.hub_id,
+                    hub_signing_public_key=enrollment.hub_signing_public_key,
+                    node_identity=self._identity,
+                    device=device,
+                    clock=self._clock,
+                )
+                kind = "app"
+            session = _RelaySession(
+                cipher=cipher,
+                streams={},
+                send_lock=asyncio.Lock(),
+                kind=kind,
             )
-            session = _RelaySession(cipher=cipher, streams={}, send_lock=asyncio.Lock())
             sessions[frame.session_id] = session
             await _send_plaintext(
                 websocket,
@@ -393,6 +426,7 @@ class NodeRelayManager:
         path = str(message.get("path", ""))
         length = int(message.get("body_length", -1))
         raw_headers = message.get("headers", {})
+        resource_path = path.startswith("/v1/resource-invocations/")
         if (
             stream_id <= 0
             or stream_id in session.streams
@@ -404,6 +438,10 @@ class NodeRelayManager:
             or length < 0
             or length > _MAX_TUNNEL_BODY_BYTES
             or not isinstance(raw_headers, dict)
+            or (
+                session.kind == "resource"
+                and (method not in {"POST", "DELETE"} or not resource_path)
+            )
         ):
             raise ValueError("Relay request start rejected")
         headers = {
@@ -419,6 +457,44 @@ class NodeRelayManager:
             expected_length=length,
             body=bytearray(),
         )
+
+    async def _publish_observations(
+        self,
+        enrollment: NodeHubEnrollment,
+    ) -> None:
+        if self._remote_models is None:
+            return
+        while True:
+            try:
+                observations = await self._remote_models.observations()
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    for item in observations:
+                        observed_at = float(self._clock())
+                        payload = {
+                            "node_id": self._identity.node_id,
+                            **item,
+                            "health_epoch": max(1, int(observed_at)),
+                            "observed_at": observed_at,
+                            "expires_at": observed_at + 90,
+                        }
+                        transcript = {
+                            "audience": "knoa-deployment-observation-v1",
+                            "workspace_id": enrollment.hub_id,
+                            **payload,
+                        }
+                        payload["signature"] = self._identity.sign(
+                            canonical_json(transcript)
+                        )
+                        response = await client.post(
+                            f"{enrollment.hub_url}/v1/deployment-observations",
+                            json=payload,
+                        )
+                        response.raise_for_status()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Deployment observation publish failed: %s", exc)
+            await asyncio.sleep(30)
 
     @staticmethod
     def _request_body(
@@ -499,7 +575,7 @@ class NodeRelayManager:
                     session,
                     {"type": "reset", "code": "unavailable"},
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
 
     @staticmethod
@@ -596,8 +672,8 @@ def _public_key(value: str) -> str:
 __all__ = [
     "NodeHubEnrollment",
     "NodeHubEnrollmentRequest",
+    "NodeHubRoutes",
     "NodeHubService",
     "NodeHubStore",
-    "NodeHubRoutes",
     "NodeRelayManager",
 ]

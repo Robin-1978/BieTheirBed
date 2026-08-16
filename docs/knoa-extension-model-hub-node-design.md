@@ -4,9 +4,11 @@
 >
 > 更新日期：2026-08-16
 >
-> 范围：Skill、MCP、第三方 Tool、LLM Provider、扩展中心、模型中心、Account、Hub、Relay、Node、多电脑配置与自托管
+> 范围：Skill、MCP、第三方 Tool、LLM Provider、扩展中心、模型中心、Account、Workspace、HubService、Relay、Node、多电脑配置与自托管
 >
 > 关系：建立在 `knoa-module-architecture.md`、`knoa-configuration-control-plane-design.md`、`knoa-secure-gateway-design.md` 和 `knoa-capability-extension-design.md` 之上
+>
+> 后续演进：Workspace 共享资产、ModelDeployment/DeploymentObservation、跨 Node 本地 LLM 调用、Virtual Node 与跨 Workspace 共享以 `knoa-workspace-resource-fabric-design.md` 为准；本文继续作为扩展导入、现有 Hub/Relay 实现、Node-local 配置和安全连接的权威设计。本文历史段落中的“逻辑 Hub”在目标术语中等同 Workspace；运行服务称 HubService
 >
 > 设计取向：local-first、Hub-assisted、self-hostable；高内聚、低耦合；KISS、YAGNI；不引入任意进程内插件和分布式 Core
 
@@ -23,13 +25,15 @@ Knoa 需要同时解决两个产品问题：
 扩展生态：Catalog -> Staging/Inspect -> Permission Review -> Config Publish
           -> Extension Runtime -> Capability Gateway
 
-多节点：Account -> logical Hub -> Node Directory -> optional Relay
-                                    -> N 个本地 Knoa Node
+多节点：Account -> Workspace -> optional HubService
+                                  |- Node Directory / sealed rollout
+                                  `- optional Relay -> N 个 WorkspaceNode
 ```
 
-Knoa Node 始终是执行、Secret、Task、Conversation、Artifact 和本地权限的权威所有者。
-Hub 是可选控制面，Relay 是可选传输面。普通用户可以使用 Knoa 托管 Hub；高级用户可以
-自托管 Hub；单机和完全离线用户可以不使用 Hub。
+Workspace 是唯一逻辑租户。Knoa WorkspaceNode 始终是执行、Secret、Task、Conversation、Artifact
+和本地权限的权威所有者。HubService 是可选身份、目录、密文投递与 Relay 控制面，不是第二个
+资源租户。普通用户可以使用 Knoa 托管 HubService；高级用户可以自托管；单机和完全离线用户
+可以由 owner Node 承担本地 Workspace Registry，不使用 HubService。
 
 第三方可执行能力统一通过 MCP 进入平台。Skill 保持 data-only。模型服务通过少量可信
 Provider driver 接入。任何 Marketplace、作者声明、模型 Prompt 或 Hub 身份都不能绕过
@@ -93,13 +97,18 @@ direct 路径继续使用配对时固定的 Node identity、TLS 与现有 Gatewa
 ### 4.1 Account Subject
 
 人的登录身份，用于 Hub 登录、Node 所有权、恢复、订阅和 Marketplace entitlement。它不等于
-Node 内的 Agent、Runtime 或 transport session。
+Node 内的 Agent、Runtime 或 transport session。稳定身份必须带 identity issuer；V1 不把 Hosted
+与 Self-hosted HubService 中的同名 subject 自动联邦。
 
-### 4.2 Hub
+### 4.2 Workspace 与 HubService
 
-用户可拥有或加入的逻辑控制中心，拥有 Node Directory、enrollment、presence、Client Device/Node
-关系和可选 Fleet configuration intent。Hosted 形态下多个逻辑 Hub 可以共享同一服务部署；
-自托管形态通常是单用户或家庭级单租户部署。
+Workspace 是用户可拥有或加入的唯一逻辑租户，拥有 Membership、WorkspaceNode、共享资源逻辑
+身份和授权。HubService 是可选的服务部署，提供 Account authentication、Workspace/Node Directory、
+enrollment、presence、opaque Fleet envelope、connection ticket 和 Relay。Hosted 形态下一个
+HubService 承载多个 Workspace；自托管形态通常只承载一个 Personal Workspace。
+
+现有代码和协议字段中的 `hub_id` 暂时表示已部署的单租户控制中心；目标 schema 会明确拆为
+`workspace_id` 与 `hub_service/identity_issuer_id`，不长期维护两个租户聚合。
 
 ### 4.3 Node
 
@@ -149,11 +158,11 @@ Account service 不能替代 Node 的 principal authorization。
 ## 5. 总体架构
 
 ```text
-                              Optional Knoa Hub
+                           Optional Knoa HubService
                     hosted by Knoa / self-hosted / absent
                   ┌────────────────────────────────────┐
-                  │ Account │ Node Directory │ Presence│
-                  │ Catalog metadata │ Fleet intents   │
+                  │ Account │ Workspace/Node Directory │
+                  │ Presence │ opaque rollout │ Relay   │
                   └──────────────────┬─────────────────┘
                                      │
                            optional Relay transport
@@ -637,12 +646,12 @@ Session 混成一个隐式全局 Session。
 
 ### 10.1 三种部署形态
 
-#### Hosted Hub
+#### Hosted HubService
 
-普通用户登录 Knoa Account。Knoa 托管服务为每个用户提供逻辑 Hub、Node Directory、Presence
-和 Relay。用户不配置域名、TLS、端口映射或 Cloudflare。
+普通用户登录 Knoa Account。Knoa 托管服务承载用户的 Personal Workspace，并提供 Node Directory、
+Presence、opaque rollout 和 Relay。用户不配置域名、TLS、端口映射或 Cloudflare。
 
-#### Self-hosted Hub
+#### Self-hosted HubService
 
 高级用户部署一个 `knoa-hub`：
 
@@ -664,24 +673,26 @@ Node Core 不与 Hub 合并进程。
 App 通过 QR 与 Node 直接 pairing，使用 LAN、Tailscale/WireGuard 或用户自定义 Gateway URL。
 此模式保留完整本地能力，但没有自动 Node discovery、Relay、跨设备恢复和 Fleet rollout。
 
-### 10.2 Personal Hub 与 membership
+### 10.2 Personal Workspace 与 membership
 
-产品默认体验是“一个用户一个 Personal Hub”，但数据模型不能固化 Account 与 Hub 的一对一：
+产品默认体验是“一个用户一个 Personal Workspace”，但数据模型不能固化 Account 与 Workspace 的
+一对一：
 
 ```text
-Account Subject
-  -> HubMembership[]
-      -> default Personal Hub
-      -> optional self-hosted / work Hub
+issuer-scoped Account Subject
+  -> WorkspaceMembership[]
+      -> default Personal Workspace
+      -> optional family / work Workspace
 
-Hub
-  -> N Nodes
+Workspace
+  -> N WorkspaceNodes
   -> M AppInstallationIdentity records
 ```
 
-第一版 UI 只要求一个 active Personal Hub，但允许用户在 Hosted Hub、自托管 Hub 和迁移目标
-之间切换。Hosted 形态不为每个用户启动一套物理服务；Self-hosted 形态通常是一套单租户实例。
-第一阶段 membership 只有 `owner`，不建设组织层级或通用 RBAC。
+第一版 UI 只要求一个 active Personal Workspace。App 可以登录不同 Hosted/Self-hosted HubService，
+但 V1 不自动联邦不同 issuer 的 AccountSubject。Hosted 形态不为每个用户启动一套物理服务；
+Self-hosted 形态通常是一套单 Workspace 实例。第一阶段 membership 只有 `owner`，不建设组织层级
+或通用 RBAC。
 
 ### 10.3 Node Identity 与 enrollment
 
@@ -978,33 +989,37 @@ candidate 内的 Prompt、MCP URL、Provider metadata 或 Secret reference。Sel
 
 ## 12. 最小数据模型
 
-### 12.1 Hub
+### 12.1 Workspace 与 HubService
 
 ```text
 AccountSubject
+  identity_issuer_id
   subject_id
   login_identity
   state
 
-PersonalHub
-  hub_id
-  deployment_mode
+Workspace
+  workspace_id
+  identity_authority_id
+  kind=personal
 
-HubMembership
-  hub_id/subject_id
+WorkspaceMembership
+  workspace_id/identity_issuer_id/subject_id
   role=owner
   state
 
 AppInstallationRecord
   installation_id
-  hub_id
+  hub_service_id
+  subject_identity
   public_key
   display_name/state
   created_at/last_seen/revoked_at
 
 NodeRecord
   node_id
-  hub_id
+  workspace_id
+  hub_service_id
   display_name
   signing_public_key/key_version
   config_encryption_public_key/key_version
@@ -1021,7 +1036,8 @@ NodeEndpoint
 
 FleetRollout
   rollout_id
-  hub_id
+  workspace_id
+  hub_service_id
   created_by_installation_id
   state
 
@@ -1035,8 +1051,9 @@ FleetRolloutEnvelope
   status/error_code
 ```
 
-Hosted 第一版只需要 AccountSubject、PersonalHub、HubMembership、AppInstallationRecord、NodeRecord、
-presence 和 Relay connection。Fleet 表在多节点配置 UI 开始实现时再加入；Hosted Hub 不保存
+Hosted 第一版只需要 issuer-scoped AccountSubject、Workspace、WorkspaceMembership、
+AppInstallationRecord、NodeRecord、presence 和 Relay connection。Fleet 表在多节点配置 UI 开始
+实现时再加入；Hosted HubService 不保存
 `ManagedConfig`、Prompt 或可解密模板正文。
 
 ### 12.2 Node
@@ -1281,7 +1298,7 @@ SBOM、透明日志和信誉。
 
 ### 18.8 一开始建设通用企业 IAM
 
-拒绝。先做单 owner personal Hub。共享家庭、团队和组织 RBAC 需要真实产品需求后另行设计。
+拒绝。先做单 owner Personal Workspace。共享家庭、团队和组织 RBAC 需要真实产品需求后另行设计。
 
 ## 19. 最终架构决策
 
@@ -1291,9 +1308,10 @@ SBOM、透明日志和信誉。
    Gateway 负责运行授权。
 4. Provider driver 保持小集合，优先使用 OpenAI-compatible 覆盖生态。
 5. API Key 和 MCP credential 是 Node-local write-only Secret，不进入普通配置和 Hub。
-6. 产品默认一个 Personal Hub，但 Account 数据模型允许多个 HubMembership；Hosted Hub 共享
-   物理服务但逻辑隔离。
-7. 普通用户使用 Knoa Hosted Hub；高级用户可以 Self-hosted Hub；完全本地用户不需要 Hub。
+6. 产品默认一个 Personal Workspace，但 issuer-scoped Account 数据模型允许多个
+   WorkspaceMembership；Hosted HubService 共享物理服务但 Workspace 逻辑隔离。
+7. 普通用户可以使用 Knoa Hosted HubService；高级用户可以 Self-hosted HubService；完全本地用户
+   由 owner Node 承担本地 Workspace Registry，不需要 HubService。
 8. Node 使用稳定 Node ID 和用途隔离的 signing/config-encryption public keys 标识，域名/IP/Relay
    只是可替换 Transport。
 9. 默认远程路径是单一 Hub/Relay 域名和 Node 出站连接，不是每 Node 独立域名。
@@ -1311,6 +1329,7 @@ SBOM、透明日志和信誉。
 
 ## 20. 一句话定义
 
-Knoa 扩展与多节点平台是一个以 Node 为本地执行和数据权威、以 MCP 为第三方可执行能力边界、
-以 data-only Skill 为知识扩展、以 Config Revision 驱动热发布、并通过可托管或自托管 Hub 提供
-Account、Node Directory 和可选 Relay/Fleet 控制面的 local-first Agent Platform。
+Knoa 扩展与多节点平台是一个以 Workspace 为唯一逻辑租户、以 WorkspaceNode 为本地执行和数据
+权威、以 MCP 为第三方可执行能力边界、以 data-only Skill 为知识扩展、以 Config Revision 驱动
+热发布，并通过可托管或自托管 HubService 提供 Account、Workspace/Node Directory 和可选
+Relay/Fleet 控制面的 local-first Agent Platform。

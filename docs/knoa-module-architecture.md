@@ -23,7 +23,8 @@
 - `docs/knoa-agent-profile-delegation-design.md`：Agent Runtime、Profile、Invocation Policy 与 Subagent；
 - `docs/knoa-configuration-control-plane-design.md`：配置 Registry、管理页面、发布与热生效；
 - `docs/knoa-secure-gateway-design.md`：设备、认证和远程接入安全；
-- `docs/knoa-extension-model-hub-node-design.md`：扩展生态、模型中心、Account、Hub、Relay 与多节点；
+- `docs/knoa-extension-model-hub-node-design.md`：扩展生态、模型中心、Account、HubService、Relay 与多节点；
+- `docs/knoa-workspace-resource-fabric-design.md`：Workspace 资源归属、ModelDeployment、DeploymentObservation、跨 Node 模型调用与配置权威；
 - `docs/knoa-durable-task-design.md`：持久 Task 执行与恢复语义；
 - `docs/knoa-capability-extension-design.md` 与
   `docs/knoa-standard-mcp-host-design.md`：Skill/MCP 扩展与标准 MCP Host。
@@ -42,13 +43,14 @@
 | Agent Session binding | `AgentExecutionService` / binding repository |
 | Invocation policy snapshot | Agent policy repository |
 | Delegation relationship | `DelegationService` |
-| Managed configuration | `ConfigurationService` |
+| NodeOverlay 与 Node-local Managed configuration | `ConfigurationService` |
+| Workspace 明文共享定义（规划） | owner `WorkspaceRegistry Node` |
 | Tool authorization and execution | `CapabilityGateway` |
 | Artifact metadata and bytes | `ArtifactStore` |
 | Node signing/configuration identity | `NodeIdentityStore` |
 | Immutable extension package bytes | `PackageStore` |
 | Provider credentials | Node-local `SecretStore` |
-| Account、Node directory、presence、ticket | optional `HubService` |
+| Account、Workspace membership、Node directory、presence、ticket | optional `HubService`；No-Hub 由 owner Node 承担本地身份/Registry |
 | Relay connection/frame forwarding | `RelayBroker` |
 
 Channel、App、Agent Runtime、Skill 和 MCP Server 都不能绕过这些边界直接修改平台状态。
@@ -245,7 +247,7 @@ transport。Relay ciphertext 内承载现有 Gateway HTTP typed contract，Node 
 | Mobile App | Chat、Task、Approval、Artifact、配置与发布 | `apps/knoa-mobile/` |
 | Node identity | 用途隔离的 Ed25519/X25519 Node keys | `src/knoa_platform/node_identity.py` |
 | Fleet candidate | sealed candidate 校验与 Node-local publish | `src/knoa_platform/fleet.py` |
-| Personal Hub | Account、Node directory、presence、ticket、opaque Relay | `src/knoa_platform/hub/` |
+| HubService（当前单 Workspace 实现） | Account、Workspace/Node directory、presence、ticket、opaque Relay | `src/knoa_platform/hub/` |
 | Node Hub/Relay edge | Hub enrollment、presence、outbound connector、E2E tunnel dispatch | `src/knoa_platform/node_hub.py`、`relay_protocol.py` |
 | App transport | direct 优先、Relay fallback、Node session crypto、有限事件轮询 | `apps/knoa-mobile/src/api/gatewayTransport*.ts`、`relayCrypto.ts` |
 

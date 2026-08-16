@@ -148,6 +148,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/resource-invocations/{invocation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["invokeWorkspaceResource"];
+        delete: operations["cancelWorkspaceResourceInvocation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/agents": {
         parameters: {
             query?: never;
@@ -2092,6 +2108,10 @@ export interface components {
             models: {
                 [key: string]: components["schemas"]["ManagedModelConfig"];
             };
+            /** Model Deployments */
+            model_deployments?: {
+                [key: string]: components["schemas"]["ManagedModelDeploymentConfig"];
+            };
             /** Default Model */
             default_model: string;
             /**
@@ -2217,6 +2237,33 @@ export interface components {
              */
             thinking: ("enabled" | "disabled" | "auto") | null;
         };
+        /** ManagedModelDeploymentConfig */
+        ManagedModelDeploymentConfig: {
+            /** Model Alias */
+            model_alias: string;
+            /** Resource Id */
+            resource_id: string;
+            /**
+             * Display Name
+             * @default
+             */
+            display_name: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Share Enabled
+             * @default false
+             */
+            share_enabled: boolean;
+            /**
+             * Max Remote Concurrency
+             * @default 1
+             */
+            max_remote_concurrency: number;
+        };
         /** ManagedOperationalConfig */
         ManagedOperationalConfig: {
             /**
@@ -2266,7 +2313,7 @@ export interface components {
              * Driver
              * @enum {string}
              */
-            driver: "llamacpp" | "openai" | "openai_compatible" | "anthropic";
+            driver: "llamacpp" | "openai" | "openai_compatible" | "anthropic" | "workspace_remote";
             /**
              * Server Url
              * @default
@@ -2287,6 +2334,16 @@ export interface components {
              * @default
              */
             api_key_env: string;
+            /**
+             * Remote Deployment Id
+             * @default
+             */
+            remote_deployment_id: string;
+            /**
+             * Direct Gateway Url
+             * @default
+             */
+            direct_gateway_url: string;
             /**
              * Secret Version
              * @default 0
@@ -2647,6 +2704,96 @@ export interface components {
             /** Updated At */
             updated_at: number;
         };
+        /** ProposedToolCall */
+        ProposedToolCall: {
+            /** Call Id */
+            call_id: string;
+            /** Name */
+            name: string;
+            /** Arguments */
+            arguments?: {
+                [key: string]: unknown;
+            };
+        };
+        /** ProviderCallRequest */
+        ProviderCallRequest: {
+            /** Call Id */
+            call_id: string;
+            /**
+             * Purpose
+             * @enum {string}
+             */
+            purpose: "react" | "reflection";
+            /** Messages */
+            messages: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Tools
+             * @default []
+             */
+            tools: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Temperature
+             * @default 0.2
+             */
+            temperature: number;
+            /**
+             * Max Output Tokens
+             * @default 1024
+             */
+            max_output_tokens: number;
+        };
+        /** ProviderChunk */
+        ProviderChunk: {
+            /**
+             * Content Delta
+             * @default
+             */
+            content_delta: string;
+            /**
+             * Reasoning Delta
+             * @default
+             */
+            reasoning_delta: string;
+            /**
+             * Tool Calls
+             * @default []
+             */
+            tool_calls: components["schemas"]["ProposedToolCall"][];
+            /**
+             * Finish Reason
+             * @default
+             * @enum {string}
+             */
+            finish_reason: "" | "stop" | "tool_calls" | "length" | "error";
+            /** Usage */
+            usage?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Terminal
+             * @default false
+             */
+            terminal: boolean;
+            /**
+             * Error Code
+             * @default
+             */
+            error_code: string;
+            /**
+             * Provider Model
+             * @default
+             */
+            provider_model: string;
+            /**
+             * Failover Used
+             * @default false
+             */
+            failover_used: boolean;
+        };
         /** PublishConfigDraftRequest */
         PublishConfigDraftRequest: {
             /** Expected Version */
@@ -2724,6 +2871,27 @@ export interface components {
              * @default
              */
             config_revision_id: string;
+        };
+        /** ResourceInvocationCancelRequest */
+        ResourceInvocationCancelRequest: {
+            /** Ticket */
+            ticket: string;
+        };
+        /** ResourceInvocationCancelResponse */
+        ResourceInvocationCancelResponse: {
+            /** Cancel Requested */
+            cancel_requested: boolean;
+        };
+        /** ResourceInvocationRequest */
+        ResourceInvocationRequest: {
+            /** Ticket */
+            ticket: string;
+            request: components["schemas"]["ProviderCallRequest"];
+        };
+        /** ResourceInvocationResponse */
+        ResourceInvocationResponse: {
+            /** Chunks */
+            chunks: components["schemas"]["ProviderChunk"][];
         };
         /** ResumeTaskRequest */
         ResumeTaskRequest: {
@@ -3737,6 +3905,112 @@ export interface operations {
             };
             /** @description Request rejected */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    invokeWorkspaceResource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invocation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResourceInvocationRequest"];
+            };
+        };
+        responses: {
+            /** @description Replayable Provider chunks */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResourceInvocationResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cancelWorkspaceResourceInvocation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invocation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResourceInvocationCancelRequest"];
+            };
+        };
+        responses: {
+            /** @description Cancellation request status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResourceInvocationCancelResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

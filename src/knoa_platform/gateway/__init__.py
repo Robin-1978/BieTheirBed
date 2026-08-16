@@ -16,22 +16,32 @@ from knoa_platform.gateway.identity import (
     PairingGrant,
     PairingGrantRejectedError,
 )
-from knoa_platform.gateway.adapter import SecureGatewayAdapter
-from knoa_platform.gateway.core import GatewayCoreBridge
 
 __all__ = [
     "AuthenticatedGatewaySession",
     "DeviceAlreadyPairedError",
     "DeviceNotFoundError",
-    "GatewayDevice",
+    "GatewayAuthRepository",
     "GatewayAuthenticationRejectedError",
     "GatewayAuthenticationService",
-    "GatewayAuthRepository",
     "GatewayChallenge",
+    "GatewayCoreBridge",
+    "GatewayDevice",
     "GatewayIdentityRepository",
     "IssuedGatewaySession",
     "PairingGrant",
     "PairingGrantRejectedError",
     "SecureGatewayAdapter",
-    "GatewayCoreBridge",
 ]
+
+
+def __getattr__(name: str):
+    if name == "SecureGatewayAdapter":
+        from knoa_platform.gateway.adapter import SecureGatewayAdapter
+
+        return SecureGatewayAdapter
+    if name == "GatewayCoreBridge":
+        from knoa_platform.gateway.core import GatewayCoreBridge
+
+        return GatewayCoreBridge
+    raise AttributeError(name)
