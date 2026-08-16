@@ -375,6 +375,170 @@
         }
       }
     },
+    "/v1/hub": {
+      "get": {
+        "operationId": "getNodeHubStatus",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Node Hub and Relay status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeHubStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removeNodeHub",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Node removed from Hub",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeHubRemovedResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/hub/enroll": {
+      "post": {
+        "operationId": "enrollNodeHub",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NodeHubEnrollmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Node enrolled into Hub",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeHubEnrollmentResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/agents": {
       "get": {
         "operationId": "listAgents",
@@ -5313,6 +5477,89 @@
         }
       }
     },
+    "/v1/events/poll": {
+      "get": {
+        "operationId": "pollTaskEvents",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "after_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Finite principal Task event page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrincipalTaskEventListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/artifacts": {
       "post": {
         "operationId": "uploadArtifact",
@@ -8822,6 +9069,156 @@
         "title": "NodeDescriptorResponse",
         "type": "object"
       },
+      "NodeHubDescriptorResponse": {
+        "properties": {
+          "hub_url": {
+            "title": "Hub Url",
+            "type": "string"
+          },
+          "hub_id": {
+            "title": "Hub Id",
+            "type": "string"
+          },
+          "hub_signing_public_key": {
+            "title": "Hub Signing Public Key",
+            "type": "string"
+          },
+          "enrolled_at": {
+            "title": "Enrolled At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "hub_url",
+          "hub_id",
+          "hub_signing_public_key",
+          "enrolled_at"
+        ],
+        "title": "NodeHubDescriptorResponse",
+        "type": "object"
+      },
+      "NodeHubEnrollmentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "hub_url": {
+            "maxLength": 2048,
+            "minLength": 8,
+            "title": "Hub Url",
+            "type": "string"
+          },
+          "hub_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Hub Id",
+            "type": "string"
+          },
+          "hub_signing_public_key": {
+            "maxLength": 64,
+            "minLength": 40,
+            "title": "Hub Signing Public Key",
+            "type": "string"
+          },
+          "grant_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Grant Id",
+            "type": "string"
+          },
+          "grant_secret": {
+            "maxLength": 256,
+            "minLength": 32,
+            "title": "Grant Secret",
+            "type": "string"
+          },
+          "challenge": {
+            "maxLength": 256,
+            "minLength": 16,
+            "title": "Challenge",
+            "type": "string"
+          },
+          "display_name": {
+            "default": "Knoa Node",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hub_url",
+          "hub_id",
+          "hub_signing_public_key",
+          "grant_id",
+          "grant_secret",
+          "challenge"
+        ],
+        "title": "NodeHubEnrollmentRequest",
+        "type": "object"
+      },
+      "NodeHubEnrollmentResponse": {
+        "properties": {
+          "enrollment": {
+            "$ref": "#/components/schemas/NodeHubDescriptorResponse"
+          },
+          "relay_connected": {
+            "title": "Relay Connected",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enrollment",
+          "relay_connected"
+        ],
+        "title": "NodeHubEnrollmentResponse",
+        "type": "object"
+      },
+      "NodeHubRemovedResponse": {
+        "properties": {
+          "removed": {
+            "title": "Removed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "removed"
+        ],
+        "title": "NodeHubRemovedResponse",
+        "type": "object"
+      },
+      "NodeHubStatusResponse": {
+        "properties": {
+          "enrolled": {
+            "title": "Enrolled",
+            "type": "boolean"
+          },
+          "hub": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NodeHubDescriptorResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "relay_connected": {
+            "title": "Relay Connected",
+            "type": "boolean"
+          },
+          "last_error": {
+            "default": "",
+            "title": "Last Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enrolled",
+          "relay_connected"
+        ],
+        "title": "NodeHubStatusResponse",
+        "type": "object"
+      },
       "PairChallengeRequest": {
         "additionalProperties": false,
         "properties": {
@@ -8992,6 +9389,48 @@
           "agent_id"
         ],
         "title": "PreviewInvocationPolicyRequest",
+        "type": "object"
+      },
+      "PrincipalTaskEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "feed_event_id": {
+            "exclusiveMinimum": 0,
+            "title": "Feed Event Id",
+            "type": "integer"
+          },
+          "principal_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "event": {
+            "$ref": "#/components/schemas/TaskEvent"
+          }
+        },
+        "required": [
+          "feed_event_id",
+          "principal_id",
+          "event"
+        ],
+        "title": "PrincipalTaskEvent",
+        "type": "object"
+      },
+      "PrincipalTaskEventListResponse": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/PrincipalTaskEvent"
+            },
+            "title": "Events",
+            "type": "array"
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "title": "PrincipalTaskEventListResponse",
         "type": "object"
       },
       "ProductTaskExecutionListResponse": {

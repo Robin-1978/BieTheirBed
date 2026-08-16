@@ -116,6 +116,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/hub": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getNodeHubStatus"];
+        put?: never;
+        post?: never;
+        delete: operations["removeNodeHub"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/hub/enroll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["enrollNodeHub"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/agents": {
         parameters: {
             query?: never;
@@ -844,6 +876,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["streamTaskEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/events/poll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["pollTaskEvents"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2311,6 +2359,62 @@ export interface components {
             /** Created At */
             created_at: number;
         };
+        /** NodeHubDescriptorResponse */
+        NodeHubDescriptorResponse: {
+            /** Hub Url */
+            hub_url: string;
+            /** Hub Id */
+            hub_id: string;
+            /** Hub Signing Public Key */
+            hub_signing_public_key: string;
+            /** Enrolled At */
+            enrolled_at: number;
+        };
+        /** NodeHubEnrollmentRequest */
+        NodeHubEnrollmentRequest: {
+            /** Hub Url */
+            hub_url: string;
+            /** Hub Id */
+            hub_id: string;
+            /** Hub Signing Public Key */
+            hub_signing_public_key: string;
+            /** Grant Id */
+            grant_id: string;
+            /** Grant Secret */
+            grant_secret: string;
+            /** Challenge */
+            challenge: string;
+            /**
+             * Display Name
+             * @default Knoa Node
+             */
+            display_name: string;
+        };
+        /** NodeHubEnrollmentResponse */
+        NodeHubEnrollmentResponse: {
+            enrollment: components["schemas"]["NodeHubDescriptorResponse"];
+            /** Relay Connected */
+            relay_connected: boolean;
+        };
+        /** NodeHubRemovedResponse */
+        NodeHubRemovedResponse: {
+            /** Removed */
+            removed: boolean;
+        };
+        /** NodeHubStatusResponse */
+        NodeHubStatusResponse: {
+            /** Enrolled */
+            enrolled: boolean;
+            /** @default null */
+            hub: components["schemas"]["NodeHubDescriptorResponse"] | null;
+            /** Relay Connected */
+            relay_connected: boolean;
+            /**
+             * Last Error
+             * @default
+             */
+            last_error: string;
+        };
         /** PairChallengeRequest */
         PairChallengeRequest: {
             /** Grant Id */
@@ -2374,6 +2478,19 @@ export interface components {
              * @default null
              */
             requested_skills: string[] | null;
+        };
+        /** PrincipalTaskEvent */
+        PrincipalTaskEvent: {
+            /** Feed Event Id */
+            feed_event_id: number;
+            /** Principal Id */
+            principal_id: string;
+            event: components["schemas"]["TaskEvent"];
+        };
+        /** PrincipalTaskEventListResponse */
+        PrincipalTaskEventListResponse: {
+            /** Events */
+            events: components["schemas"]["PrincipalTaskEvent"][];
         };
         /** ProductTaskExecutionListResponse */
         ProductTaskExecutionListResponse: {
@@ -3475,6 +3592,151 @@ export interface operations {
             };
             /** @description Request rejected */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getNodeHubStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Node Hub and Relay status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeHubStatusResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    removeNodeHub: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Node removed from Hub */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeHubRemovedResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    enrollNodeHub: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NodeHubEnrollmentRequest"];
+            };
+        };
+        responses: {
+            /** @description Node enrolled into Hub */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeHubEnrollmentResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7468,6 +7730,65 @@ export interface operations {
             };
             /** @description Request rejected */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    pollTaskEvents: {
+        parameters: {
+            query?: {
+                after_id?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Finite principal Task event page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrincipalTaskEventListResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

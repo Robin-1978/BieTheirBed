@@ -1,6 +1,6 @@
 # Knoa 扩展生态、模型接入与多节点 Hub 架构设计
 
-> 状态：权威目标架构；Phase 1、Phase 2 与 Phase 3 控制面已首轮交付，未完成边界明确标记
+> 状态：权威目标架构；Phase 1、Phase 2 与 Phase 3 首轮已交付，生产强化边界明确标记
 >
 > 更新日期：2026-08-16
 >
@@ -74,14 +74,19 @@ Node 上的 ConfigurationService、Runtime sandbox 和 Capability Gateway。
 | LLM Provider | Model Center；四类 driver；write-only Node Secret；Revision 热发布 | Provider 连接测试、模型能力探测、Secret 管理详情页 |
 | 配置页面 | Draft/validate/preflight/publish/rollback；Extension/Model/Node Center | 更细的 diff、批量模板与运行状态诊断 |
 | 远程身份 | 独立 Node signing/configuration keys；QR key pinning；Hub enrollment | key rotation/recovery 与正式 Hosted Account |
-| 多电脑 | AppInstallationIdentity + N 个 NodeDeviceBinding；Node selector；Hub directory | App 端 Relay E2E business transport、direct/relay resolver |
+| 多电脑 | AppInstallationIdentity + N 个 NodeDeviceBinding；Node selector；Hub directory；direct 优先/Relay fallback | endpoint discovery、连接诊断与 Hosted Account UX |
 | Hub/Fleet | self-hosted single-owner Hub、presence、ticket、opaque Fleet envelope、Node apply | App Fleet rollout UI、Node 主动拉取/回报、Hosted Hub |
-| Relay | bounded opaque Relay V1 server contract 与 WebSocket broker | Node outbound connector、Client consumer、端到端握手与业务流量接入 |
+| Relay | Node outbound connector；App consumer；ticket + Ed25519/X25519/HKDF/ChaCha20-Poly1305；Gateway business tunnel；有限事件轮询 | 显式 window backpressure、容量/滥用治理、Hosted Relay |
 
-本轮交付完成了 Node 内安全执行链、App 多 Node direct 管理和 Self-hosted Hub 控制面。Relay
-服务端合同已经实现，但当前 App 业务请求仍走 direct Gateway；因此不得把当前版本描述成“无需
-每 Node 网络入口即可远程操作”。该能力必须在 Node outbound connector、App Relay consumer 和
-Client-to-Node 端到端会话协议全部接通后才算完成。
+本轮已闭环 Self-hosted Hub 的首个远程数据面：Node 保存一个 Hub enrollment 并主动建立 outbound
+WebSocket；App 在 direct 网络失败后申请 90 秒 single-use ticket，经 opaque Relay 与固定 Node
+identity 建立端到端加密 session，再把现有 Gateway HTTP typed contract 封装为加密 request/response
+stream。Hub/Relay 只看到 Node、session、stream、sequence 和 ciphertext size，不能读取业务 method、
+headers、body、Prompt、Artifact 或 Secret。
+
+direct 路径继续使用配对时固定的 Node identity、TLS 与现有 Gateway challenge/session；Relay 路径
+增加应用层 Node session。将 direct 也迁移到同一应用层加密 session、显式 `window_update` 流控、
+大文件断点续传和 Hosted 容量治理属于生产强化，不为首轮再复制业务 API 或建设通用 QUIC 栈。
 
 ## 4. 核心术语
 
@@ -820,8 +825,10 @@ Node Gateway 在加密 payload 内提供复用现有 typed schema 的 Node Proto
 - 未完成 Client-to-Node handshake 的 stream 只能承载握手 frame；
 - Relay 不能解码 typed Node payload，也不能根据 method 名称路由。
 
-Self-hosted 和 Hosted Relay 使用相同协议。Phase 3 实现前必须将 frame schema、错误码、limits 和
-互操作测试固化为独立版本化合同。
+Self-hosted 和 Hosted Relay 使用相同协议。V1 frame schema、1 MiB decoded frame 上限、64 MiB
+单请求上限、完整 transcript、双向 sequence、跨 Node 拒绝与 Python/TypeScript HKDF 互操作向量
+已固化为测试合同。首轮使用固定 192 KiB application chunk 和有界请求并发；`window_update` 字段
+保留在 Relay V1 合同中，但显式滑动窗口在出现真实吞吐/内存压力前不启用。
 
 ### 10.8 端到端安全
 
@@ -1194,7 +1201,7 @@ Revision 未应用”或“Revision 引用丢失 package”的状态。
 
 验收：一个 App 可管理至少三台独立 Node，无 Hub 也可工作。
 
-### Phase 3：Self-hosted Hub 与 Relay（控制面/Relay server 已交付，数据面未闭环）
+### Phase 3：Self-hosted Hub 与 Relay（首轮已交付）
 
 - 单 owner Account；
 - Node enrollment/directory/presence/revoke；
@@ -1209,9 +1216,10 @@ Revision 未应用”或“Revision 引用丢失 package”的状态。
 验收：N 个家庭/私有 Node 不配置独立域名即可从外网访问；Relay 无法解码业务 payload，伪造
 ticket、替换 Node key、replay handshake 和跨 Node 使用 ticket 均被拒绝。
 
-当前尚未达到该验收：Hub account、Node directory、enrollment、presence、single-use ticket、
-opaque Fleet storage 和 Relay server frame contract 已存在；Node outbound connector、App Relay
-consumer、端到端握手与 Gateway business transport 尚未接通。
+当前首轮已达到该验收的架构闭环：Hub account、Node directory、enrollment、presence、single-use
+ticket、opaque Fleet storage、Relay server、Node outbound connector、App consumer、端到端握手、
+Gateway business tunnel、Artifact chunk 与事件有限轮询已接通。正式 Hosted 上线前仍需补齐容量压测、
+显式 flow-control、Account recovery、key rotation、abuse control 与多租户隔离验证。
 
 ### Phase 4：Knoa Hosted Hub
 

@@ -9,6 +9,10 @@ from types import SimpleNamespace
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.x25519 import (
+    X25519PrivateKey,
+    X25519PublicKey,
+)
 
 from knoa_platform.config import AppConfig
 from knoa_platform.configuration.models import ConfigDraft, ConfigValidationResult
@@ -25,6 +29,15 @@ from knoa_platform.hub.relay import RelayBroker, RelayFrame
 from knoa_platform.hub.repository import HubRepository
 from knoa_platform.hub.service import HubService
 from knoa_platform.node_identity import NodeIdentityStore
+from knoa_platform.node_hub import NodeHubStore
+from knoa_platform.relay_protocol import (
+    ClientHello,
+    accept_client_hello,
+    canonical_json,
+    decode_base64url,
+    derive_session_keys,
+    encode_base64url,
+)
 from knoa_platform.secrets import SecretStore
 
 
@@ -146,6 +159,21 @@ def test_node_identity_concurrent_creation_converges(tmp_path: Path) -> None:
     assert len({identity.signing_public_key for identity in identities}) == 1
 
 
+def test_node_hub_store_is_owner_only_and_replaces_one_hub(tmp_path: Path) -> None:
+    store = NodeHubStore(tmp_path / "node-hub.json", clock=lambda: 10)
+    key = _public_key(Ed25519PrivateKey.generate())
+
+    saved = store.save(
+        hub_url="https://hub.example.com/",
+        hub_id="hub-1",
+        hub_signing_public_key=key,
+    )
+
+    assert saved.hub_url == "https://hub.example.com"
+    assert store.load() == saved
+    assert (tmp_path / "node-hub.json").stat().st_mode & 0o077 == 0
+
+
 @pytest.mark.asyncio
 async def test_sealed_fleet_candidate_checks_owner_binding_and_base_revision(
     tmp_path: Path,
@@ -256,6 +284,129 @@ def test_hub_enrollment_ticket_and_presence_are_separate_trust_steps(
     assert claims["node_id"] == node.node_id
     with pytest.raises(PermissionError):
         service.verify_and_consume_ticket(ticket)
+
+
+def test_relay_handshake_binds_hub_app_device_node_and_sequences(
+    tmp_path: Path,
+) -> None:
+    from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+
+    repository = HubRepository(tmp_path / "hub.db", hub_id="hub-1", clock=lambda: 1000)
+    hub = HubService(
+        repository,
+        tmp_path / "hub.key",
+        owner_token="o" * 43,
+        clock=lambda: 1000,
+    )
+    node = NodeIdentityStore(tmp_path / "node.json", clock=lambda: 10).load_or_create()
+    grant = repository.create_enrollment_grant()
+    enrollment_transcript = {
+        "audience": "knoa-node-enrollment-v1",
+        "hub_id": "hub-1",
+        "grant_id": grant.grant_id,
+        "challenge": grant.challenge,
+        "node_id": node.node_id,
+        "signing_public_key": node.signing_public_key,
+        "signing_key_version": 1,
+        "configuration_public_key": node.configuration_public_key,
+        "configuration_key_version": 1,
+    }
+    hub.enroll_node({
+        **enrollment_transcript,
+        "grant_secret": grant.secret,
+        "display_name": "Desktop",
+        "platform": "linux",
+        "version": "1",
+        "signature": node.sign(canonical_json(enrollment_transcript)),
+    })
+    app_signing = Ed25519PrivateKey.generate()
+    app_public = _public_key(app_signing)
+    repository.register_installation("subject_owner", "app-1", app_public, "Phone")
+    devices = GatewayIdentityRepository(tmp_path / "gateway.db", clock=lambda: 1000)
+    pairing = devices.create_pairing_grant("subject_owner")
+    device = devices.register_verified_device(
+        pairing.grant_id,
+        pairing.secret,
+        display_name="Phone",
+        public_key=app_public,
+    )
+    ticket = hub.issue_ticket("app-1", node.node_id, "relay")
+    claims = json.loads(decode_base64url(ticket.partition(".")[0]))
+    client_ephemeral = X25519PrivateKey.generate()
+    client_public = encode_base64url(
+        client_ephemeral.public_key().public_bytes(
+            serialization.Encoding.Raw,
+            serialization.PublicFormat.Raw,
+        )
+    )
+    unsigned = {
+        "audience": "knoa-node-client-hello-v1",
+        "version": 1,
+        "ticket": ticket,
+        "installation_id": "app-1",
+        "device_id": device.device_id,
+        "client_signing_public_key": app_public,
+        "client_ephemeral_public_key": client_public,
+        "client_nonce": encode_base64url(b"c" * 24),
+        "transport": "relay",
+    }
+    hello = ClientHello(
+        type="client_hello",
+        version=1,
+        ticket=ticket,
+        installation_id="app-1",
+        device_id=device.device_id,
+        client_signing_public_key=app_public,
+        client_ephemeral_public_key=client_public,
+        client_nonce=unsigned["client_nonce"],
+        transport="relay",
+        signature=_encode(app_signing.sign(canonical_json(unsigned))),
+    )
+
+    server, node_session = accept_client_hello(
+        hello,
+        session_id=claims["ticket_id"],
+        hub_id="hub-1",
+        hub_signing_public_key=hub.signing_public_key,
+        node_identity=node,
+        device=device,
+        clock=lambda: 1000,
+    )
+    shared = client_ephemeral.exchange(
+        X25519PublicKey.from_public_bytes(decode_base64url(server.server_ephemeral_public_key))
+    )
+    client_to_node, node_to_client = derive_session_keys(
+        shared,
+        ticket_id=claims["ticket_id"],
+        client_nonce=hello.client_nonce,
+        server_nonce=server.server_nonce,
+    )
+    request = {"type": "request_end"}
+    ciphertext = ChaCha20Poly1305(client_to_node).encrypt(
+        b"C2N1" + (0).to_bytes(8, "big"),
+        canonical_json(request),
+        canonical_json({
+            "audience": "knoa-node-packet-v1",
+            "session_id": claims["ticket_id"],
+            "direction": "client_to_node",
+            "sequence": 0,
+        }),
+    )
+
+    assert node_session.decrypt(0, ciphertext) == request
+    with pytest.raises(PermissionError, match="sequence"):
+        node_session.decrypt(0, ciphertext)
+    sequence, response_ciphertext = node_session.encrypt({"type": "response_end"})
+    assert json.loads(ChaCha20Poly1305(node_to_client).decrypt(
+        b"N2C1" + sequence.to_bytes(8, "big"),
+        response_ciphertext,
+        canonical_json({
+            "audience": "knoa-node-packet-v1",
+            "session_id": claims["ticket_id"],
+            "direction": "node_to_client",
+            "sequence": sequence,
+        }),
+    )) == {"type": "response_end"}
 
 
 def test_secret_store_never_exposes_value_in_status(tmp_path: Path) -> None:

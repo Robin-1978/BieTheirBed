@@ -39,6 +39,12 @@ from knoa_platform.gateway.routes import (
 )
 from knoa_platform.gateway.streaming import GatewayStreaming
 from knoa_platform.network_tls import is_loopback_host
+from knoa_platform.node_hub import (
+    NodeHubRoutes,
+    NodeHubService,
+    NodeHubStore,
+    NodeRelayManager,
+)
 from knoa_platform.node_identity import NodeIdentityStore
 from knoa_platform.runtime import RuntimePaths
 from knoa_platform.secrets import SecretStore
@@ -79,6 +85,7 @@ class SecureGatewayAdapter(
     ExtensionRoutes,
     FleetRoutes,
     SecretRoutes,
+    NodeHubRoutes,
     GatewayStreaming,
     GatewayHttp,
 ):
@@ -118,6 +125,7 @@ class SecureGatewayAdapter(
         paths = RuntimePaths.from_root(config.runtime_root)
         database = paths.data / "gateway.db"
         identities = GatewayIdentityRepository(database)
+        self._identities = identities
         if authentication is None:
             authentication = GatewayAuthenticationService(
                 identities,
@@ -160,6 +168,9 @@ class SecureGatewayAdapter(
                 Route("/v1/auth/complete", self._auth_complete, methods=["POST"]),
                 Route("/v1/session", self._session, methods=["GET"]),
                 Route("/v1/node", self._node, methods=["GET"]),
+                Route("/v1/hub", self._hub_status, methods=["GET"]),
+                Route("/v1/hub/enroll", self._hub_enroll, methods=["POST"]),
+                Route("/v1/hub", self._hub_remove, methods=["DELETE"]),
                 Route("/v1/agents", self._agents, methods=["GET"]),
                 Route("/v1/extensions/packages", self._extension_packages, methods=["GET"]),
                 Route("/v1/extensions/import/skill", self._extension_import_skill, methods=["POST"]),
@@ -253,6 +264,7 @@ class SecureGatewayAdapter(
                 Route("/v1/tasks", self._create_task, methods=["POST"]),
                 Route("/v1/tasks", self._list_tasks, methods=["GET"]),
                 Route("/v1/events", self._events, methods=["GET"]),
+                Route("/v1/events/poll", self._events_poll, methods=["GET"]),
                 Route("/v1/artifacts", self._upload_artifact, methods=["POST"]),
                 Route(
                     "/v1/artifacts/{artifact_id:str}",
@@ -363,6 +375,16 @@ class SecureGatewayAdapter(
                 ),
             ]
         )
+        self._node_hub = NodeHubService(
+            NodeHubStore(paths.data / "node-hub.json"),
+            self._node_identity,
+        )
+        self._node_relay = NodeRelayManager(
+            store=self._node_hub.store,
+            identity=self._node_identity,
+            identities=identities,
+            app=self.app,
+        )
 
     @property
     def bound_port(self) -> int | None:
@@ -401,6 +423,7 @@ class SecureGatewayAdapter(
                         self._config.gateway_host,
                         self.bound_port,
                     )
+                    await self._node_relay.start()
                     return
                 if task.done():
                     await task
@@ -412,6 +435,7 @@ class SecureGatewayAdapter(
             raise
 
     async def stop(self) -> None:
+        await self._node_relay.stop()
         server, self._server = self._server, None
         task, self._server_task = self._server_task, None
         if server is not None:

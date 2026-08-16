@@ -14,7 +14,8 @@ adapts external requests to principal-scoped Core API calls.
 
 ```text
 Knoa App
-  -> TLS / device authentication
+  -> direct TLS or opaque Hub Relay
+  -> device authentication / optional Client-to-Node E2E session
   -> Secure Gateway
   -> short-lived signed local principal credential
   -> loopback Core API
@@ -128,6 +129,12 @@ has a real product flow and stronger confirmation UI.
 HTTP is used for bounded commands and Artifact transfer; standard SSE is used
 for resumable event delivery. Event payloads retain Core sequence IDs so
 reconnect never depends on Gateway memory.
+
+For Relay, the encrypted Node Protocol tunnels this same HTTP contract through
+the existing Starlette ASGI application. It does not add arbitrary Core method
+proxying or duplicate route handlers. `GET /v1/events/poll` provides a finite,
+cursor-based page because an infinite SSE response is not buffered through the
+first Relay tunnel implementation.
 
 ## 6. TLS and deployment
 

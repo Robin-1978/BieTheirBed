@@ -25,7 +25,10 @@ Push or deep links.
 
 ```text
 Knoa Mobile
-  -> Secure Gateway HTTP/SSE
+  -> GatewayTransport
+     -> direct HTTPS/SSE
+     -> Hub opaque Relay + Client-to-Node E2E session
+  -> Secure Gateway HTTP contract
     -> authenticated principal-scoped CoreClient
       -> conversation Run / durable Task / Approval / Artifact / Automation services
 ```
@@ -82,6 +85,10 @@ compatible fixes rather than forcing an unverified major downgrade or override.
 9. The App persists only native download resume data in SecureStore, verifies
    the final size and SHA-256 digest, and delegates package-signature validation
    and installation confirmation to Android.
+10. A Relay connection uses a Hub-signed single-use ticket, AppInstallationIdentity
+    proof, the pinned Node Ed25519 key, ephemeral X25519, HKDF-SHA-256 and
+    ChaCha20-Poly1305 with monotonic per-direction sequence numbers. Hub sees
+    routing metadata and ciphertext only.
 
 ## 4. Implemented first slice
 
@@ -109,6 +116,9 @@ compatible fixes rather than forcing an unverified major downgrade or override.
   across background transitions, CDN-cacheable Range download, SHA-256
   verification and system-installer handoff;
 - generated OpenAPI TypeScript contract, strict typecheck and unit tests.
+- multi-Node direct-first resolver, Personal Hub enrollment, outbound Node
+  Relay, encrypted Gateway request/Artifact chunks and finite event polling
+  when SSE cannot traverse the Relay transport.
 
 ## 5. Next slices
 

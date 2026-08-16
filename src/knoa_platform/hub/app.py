@@ -155,7 +155,16 @@ class HubApplication:
             return JSONResponse({"error": "rejected"}, status_code=401)
         except (KeyError, ValueError):
             return JSONResponse({"error": "invalid_request"}, status_code=400)
-        return JSONResponse({"node": node}, status_code=201)
+        return JSONResponse(
+            {
+                "node": node,
+                "hub": {
+                    "hub_id": self.service.hub_id,
+                    "signing_public_key": self.service.signing_public_key,
+                },
+            },
+            status_code=201,
+        )
 
     async def presence(self, request: Request) -> JSONResponse:
         parsed = await self._parse(request, PresenceRequest)
@@ -249,15 +258,17 @@ class HubApplication:
     async def relay_client(self, websocket: WebSocket) -> None:
         await websocket.accept()
         session_id = ""
+        node_id = ""
         try:
             first = await websocket.receive_json()
             ticket = self.service.verify_and_consume_ticket(str(first.get("ticket", "")))
             if ticket["transport"] != "relay":
                 raise PermissionError("Relay ticket required")
             session_id = str(ticket["ticket_id"])
+            node_id = str(ticket["node_id"])
             await self.relay.register_client(
                 session_id,
-                str(ticket["node_id"]),
+                node_id,
                 websocket,
             )
             await websocket.send_json({"ready": True, "session_id": session_id})
@@ -267,7 +278,7 @@ class HubApplication:
                 frame.validate_bounds()
                 if frame.session_id != session_id:
                     raise ValueError("Relay session ID mismatch")
-                await self.relay.send_to_node(str(ticket["node_id"]), frame)
+                await self.relay.send_to_node(node_id, frame)
         except LookupError:
             await websocket.close(code=4404, reason="node offline")
         except (WebSocketDisconnect, ValidationError, PermissionError, ValueError):
@@ -275,6 +286,20 @@ class HubApplication:
         finally:
             if session_id:
                 await self.relay.unregister_client(session_id)
+                if node_id:
+                    try:
+                        await self.relay.send_to_node(
+                            node_id,
+                            RelayFrame(
+                                session_id=session_id,
+                                stream_id=0,
+                                frame_type="reset",
+                                sequence=0,
+                                ciphertext_length=0,
+                            ),
+                        )
+                    except Exception:
+                        pass
 
     def _owner(self, request: Request) -> JSONResponse | None:
         authorization = request.headers.get("Authorization", "")
