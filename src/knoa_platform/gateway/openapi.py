@@ -58,15 +58,19 @@ from knoa_platform.gateway.protocol import (
     PairCompleteResponse,
     PauseTaskRequest,
     PreviewInvocationPolicyRequest,
+    PrincipalTaskEventListResponse,
     ProductTaskExecutionListResponse,
     ProductTaskExecutionResponse,
-    PrincipalTaskEventListResponse,
     ProductTaskListResponse,
     ProductTaskResponse,
     PublishConfigDraftRequest,
     ReplaceConfigDraftRequest,
     ResolveApprovalRequest,
     ResolveHumanInteractionRequest,
+    ResourceInvocationCancelRequest,
+    ResourceInvocationCancelResponse,
+    ResourceInvocationRequest,
+    ResourceInvocationResponse,
     ResumeTaskRequest,
     RollbackConfigRequest,
     RuntimeStatusResponse,
@@ -151,6 +155,10 @@ _MODELS: tuple[type[BaseModel], ...] = (
     PublishConfigDraftRequest,
     RollbackConfigRequest,
     PreviewInvocationPolicyRequest,
+    ResourceInvocationRequest,
+    ResourceInvocationCancelRequest,
+    ResourceInvocationResponse,
+    ResourceInvocationCancelResponse,
 )
 
 
@@ -311,6 +319,26 @@ def gateway_openapi_schema() -> dict[str, Any]:
                         **_errors("400", "401", "415", "429", "503"),
                     },
                 }
+            },
+            "/v1/resource-invocations/{invocation_id}": {
+                "post": {
+                    "operationId": "invokeWorkspaceResource",
+                    "parameters": [{"name": "invocation_id", "in": "path", "required": True, "schema": {"type": "string", "maxLength": 128}}],
+                    "requestBody": _json_body(ResourceInvocationRequest),
+                    "responses": {
+                        "200": _json_response("Replayable Provider chunks", ResourceInvocationResponse),
+                        **_errors("400", "403", "413"),
+                    },
+                },
+                "delete": {
+                    "operationId": "cancelWorkspaceResourceInvocation",
+                    "parameters": [{"name": "invocation_id", "in": "path", "required": True, "schema": {"type": "string", "maxLength": 128}}],
+                    "requestBody": _json_body(ResourceInvocationCancelRequest),
+                    "responses": {
+                        "200": _json_response("Cancellation request status", ResourceInvocationCancelResponse),
+                        **_errors("400", "403", "413"),
+                    },
+                },
             },
             "/v1/agents": {
                 "get": {

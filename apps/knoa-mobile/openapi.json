@@ -539,6 +539,140 @@
         }
       }
     },
+    "/v1/resource-invocations/{invocation_id}": {
+      "post": {
+        "operationId": "invokeWorkspaceResource",
+        "parameters": [
+          {
+            "name": "invocation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResourceInvocationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replayable Provider chunks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceInvocationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "cancelWorkspaceResourceInvocation",
+        "parameters": [
+          {
+            "name": "invocation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResourceInvocationCancelRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cancellation request status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceInvocationCancelResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/agents": {
       "get": {
         "operationId": "listAgents",
@@ -8581,6 +8715,19 @@
             "title": "Models",
             "type": "object"
           },
+          "model_deployments": {
+            "patternProperties": {
+              "^[A-Za-z][A-Za-z0-9_.-]{0,127}$": {
+                "$ref": "#/components/schemas/ManagedModelDeploymentConfig"
+              }
+            },
+            "propertyNames": {
+              "maxLength": 128,
+              "minLength": 1
+            },
+            "title": "Model Deployments",
+            "type": "object"
+          },
           "default_model": {
             "maxLength": 128,
             "minLength": 1,
@@ -8848,6 +8995,53 @@
         "title": "ManagedModelConfig",
         "type": "object"
       },
+      "ManagedModelDeploymentConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "model_alias": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+            "title": "Model Alias",
+            "type": "string"
+          },
+          "resource_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+            "title": "Resource Id",
+            "type": "string"
+          },
+          "display_name": {
+            "default": "",
+            "title": "Display Name",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "share_enabled": {
+            "default": false,
+            "title": "Share Enabled",
+            "type": "boolean"
+          },
+          "max_remote_concurrency": {
+            "default": 1,
+            "maximum": 64,
+            "minimum": 1,
+            "title": "Max Remote Concurrency",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model_alias",
+          "resource_id"
+        ],
+        "title": "ManagedModelDeploymentConfig",
+        "type": "object"
+      },
       "ManagedOperationalConfig": {
         "additionalProperties": false,
         "properties": {
@@ -8919,7 +9113,8 @@
               "llamacpp",
               "openai",
               "openai_compatible",
-              "anthropic"
+              "anthropic",
+              "workspace_remote"
             ],
             "title": "Driver",
             "type": "string"
@@ -8942,6 +9137,16 @@
           "api_key_env": {
             "default": "",
             "title": "Api Key Env",
+            "type": "string"
+          },
+          "remote_deployment_id": {
+            "default": "",
+            "title": "Remote Deployment Id",
+            "type": "string"
+          },
+          "direct_gateway_url": {
+            "default": "",
+            "title": "Direct Gateway Url",
             "type": "string"
           },
           "secret_version": {
@@ -9804,6 +10009,150 @@
         "title": "ProductTaskSnapshot",
         "type": "object"
       },
+      "ProposedToolCall": {
+        "additionalProperties": false,
+        "properties": {
+          "call_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Call Id",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          }
+        },
+        "required": [
+          "call_id",
+          "name"
+        ],
+        "title": "ProposedToolCall",
+        "type": "object"
+      },
+      "ProviderCallRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "call_id": {
+            "title": "Call Id",
+            "type": "string"
+          },
+          "purpose": {
+            "enum": [
+              "react",
+              "reflection"
+            ],
+            "title": "Purpose",
+            "type": "string"
+          },
+          "messages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "tools": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Tools",
+            "type": "array"
+          },
+          "temperature": {
+            "default": 0.2,
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Temperature",
+            "type": "number"
+          },
+          "max_output_tokens": {
+            "default": 1024,
+            "exclusiveMinimum": 0,
+            "title": "Max Output Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "call_id",
+          "purpose",
+          "messages"
+        ],
+        "title": "ProviderCallRequest",
+        "type": "object"
+      },
+      "ProviderChunk": {
+        "additionalProperties": false,
+        "properties": {
+          "content_delta": {
+            "default": "",
+            "title": "Content Delta",
+            "type": "string"
+          },
+          "reasoning_delta": {
+            "default": "",
+            "title": "Reasoning Delta",
+            "type": "string"
+          },
+          "tool_calls": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ProposedToolCall"
+            },
+            "title": "Tool Calls",
+            "type": "array"
+          },
+          "finish_reason": {
+            "default": "",
+            "enum": [
+              "",
+              "stop",
+              "tool_calls",
+              "length",
+              "error"
+            ],
+            "title": "Finish Reason",
+            "type": "string"
+          },
+          "usage": {
+            "additionalProperties": true,
+            "title": "Usage",
+            "type": "object"
+          },
+          "terminal": {
+            "default": false,
+            "title": "Terminal",
+            "type": "boolean"
+          },
+          "error_code": {
+            "default": "",
+            "title": "Error Code",
+            "type": "string"
+          },
+          "provider_model": {
+            "default": "",
+            "title": "Provider Model",
+            "type": "string"
+          },
+          "failover_used": {
+            "default": false,
+            "title": "Failover Used",
+            "type": "boolean"
+          }
+        },
+        "title": "ProviderChunk",
+        "type": "object"
+      },
       "PublishConfigDraftRequest": {
         "additionalProperties": false,
         "properties": {
@@ -10001,6 +10350,71 @@
           "runtime_native_capabilities"
         ],
         "title": "ResolvedInvocationPolicy",
+        "type": "object"
+      },
+      "ResourceInvocationCancelRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "ticket": {
+            "maxLength": 8192,
+            "minLength": 100,
+            "title": "Ticket",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket"
+        ],
+        "title": "ResourceInvocationCancelRequest",
+        "type": "object"
+      },
+      "ResourceInvocationCancelResponse": {
+        "properties": {
+          "cancel_requested": {
+            "title": "Cancel Requested",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cancel_requested"
+        ],
+        "title": "ResourceInvocationCancelResponse",
+        "type": "object"
+      },
+      "ResourceInvocationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "ticket": {
+            "maxLength": 8192,
+            "minLength": 100,
+            "title": "Ticket",
+            "type": "string"
+          },
+          "request": {
+            "$ref": "#/components/schemas/ProviderCallRequest"
+          }
+        },
+        "required": [
+          "ticket",
+          "request"
+        ],
+        "title": "ResourceInvocationRequest",
+        "type": "object"
+      },
+      "ResourceInvocationResponse": {
+        "properties": {
+          "chunks": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderChunk"
+            },
+            "title": "Chunks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "chunks"
+        ],
+        "title": "ResourceInvocationResponse",
         "type": "object"
       },
       "ResumeTaskRequest": {

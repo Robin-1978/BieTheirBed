@@ -18,6 +18,7 @@ export default function NodeCenterScreen() {
   const [hubUrl, setHubUrl] = useState("");
   const [hubToken, setHubToken] = useState("");
   const [hubId, setHubId] = useState("");
+  const [workspaceId, setWorkspaceId] = useState("");
   const [hubNodes, setHubNodes] = useState<HubNode[]>([]);
   const [message, setMessage] = useState("");
   const [nodeHub, setNodeHub] = useState<{ enrolled: boolean; relay_connected: boolean; last_error: string } | null>(null);
@@ -27,6 +28,7 @@ export default function NodeCenterScreen() {
       if (!connection) return;
       setHubUrl(connection.url);
       setHubId(connection.hubId);
+      setWorkspaceId(connection.workspaceId);
       setHubNodes(await listHubNodes());
     }).catch(() => undefined);
   }, []);
@@ -42,6 +44,7 @@ export default function NodeCenterScreen() {
     try {
       const connection = await connectHub(hubUrl, hubToken, "Knoa Mobile");
       setHubId(connection.hubId);
+      setWorkspaceId(connection.workspaceId);
       setHubToken("");
       setHubNodes(await listHubNodes());
       setMessage("Hub 已连接，帐号令牌已写入安全存储");
@@ -97,12 +100,12 @@ export default function NodeCenterScreen() {
         </AppPressable>
       </View>
       <View style={styles.section}>
-        <Text style={styles.title}>Personal Hub</Text>
-        <Text style={styles.hint}>可连接 Knoa Hosted 或同协议的自托管 Hub。App 优先 direct；direct 不可达时，经 Hub 不透明 Relay 与 Node 建立端到端加密会话。</Text>
+        <Text style={styles.title}>Personal Workspace</Text>
+        <Text style={styles.hint}>Workspace 是资源与授权边界；HubService 只提供身份、目录、密文投递与不透明 Relay，可使用 Knoa Hosted 或自托管实现。</Text>
         <TextInput value={hubUrl} onChangeText={setHubUrl} placeholder="https://hub.example.com" placeholderTextColor={colors.muted} autoCapitalize="none" style={styles.input} />
         <TextInput value={hubToken} onChangeText={setHubToken} placeholder="帐号令牌" placeholderTextColor={colors.muted} secureTextEntry autoCapitalize="none" style={styles.input} />
         <AppPressable style={styles.primary} onPress={() => void saveHub()}><Text style={styles.primaryText}>{hubId ? "更新 Hub 连接" : "连接 Hub"}</Text></AppPressable>
-        {hubId ? <Text style={styles.key}>Hub · {hubId}</Text> : null}
+        {hubId ? <Text style={styles.key}>Workspace · {workspaceId || hubId}{"\n"}HubService · {hubId}</Text> : null}
         {hubId && gateway.nodeId ? (
           <AppPressable style={styles.primary} onPress={() => void enrollCurrentNode()}>
             <Text style={styles.primaryText}>{nodeHub?.enrolled ? "重新登记当前 Node" : "将当前 Node 加入 Hub"}</Text>

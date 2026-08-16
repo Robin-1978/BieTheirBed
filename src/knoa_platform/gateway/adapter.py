@@ -34,6 +34,7 @@ from knoa_platform.gateway.routes import (
     DeviceRoutes,
     ExtensionRoutes,
     FleetRoutes,
+    RemoteResourceRoutes,
     SecretRoutes,
     TaskRoutes,
 )
@@ -46,6 +47,10 @@ from knoa_platform.node_hub import (
     NodeRelayManager,
 )
 from knoa_platform.node_identity import NodeIdentityStore
+from knoa_platform.remote_models import (
+    RemoteModelEndpoint,
+    RemoteModelInvocationRepository,
+)
 from knoa_platform.runtime import RuntimePaths
 from knoa_platform.secrets import SecretStore
 
@@ -85,6 +90,7 @@ class SecureGatewayAdapter(
     ExtensionRoutes,
     FleetRoutes,
     SecretRoutes,
+    RemoteResourceRoutes,
     NodeHubRoutes,
     GatewayStreaming,
     GatewayHttp,
@@ -137,6 +143,17 @@ class SecureGatewayAdapter(
         self._node_identity = NodeIdentityStore(
             paths.data / "node-identity.json"
         ).load_or_create()
+        self._node_hub_store = NodeHubStore(paths.data / "node-hub.json")
+        self._remote_models = RemoteModelEndpoint(
+            RemoteModelInvocationRepository(
+                paths.data / "remote-model-invocations.db"
+            ),
+            core=self._core,
+            bootstrap=config,
+            paths=paths,
+            identity=self._node_identity,
+            hub_store=self._node_hub_store,
+        )
         self._extension_imports = ExtensionImportService(
             PackageStore(paths.packages),
             self._core,
@@ -171,6 +188,11 @@ class SecureGatewayAdapter(
                 Route("/v1/hub", self._hub_status, methods=["GET"]),
                 Route("/v1/hub/enroll", self._hub_enroll, methods=["POST"]),
                 Route("/v1/hub", self._hub_remove, methods=["DELETE"]),
+                Route(
+                    "/v1/resource-invocations/{invocation_id:str}",
+                    self._resource_invocation,
+                    methods=["POST", "DELETE"],
+                ),
                 Route("/v1/agents", self._agents, methods=["GET"]),
                 Route("/v1/extensions/packages", self._extension_packages, methods=["GET"]),
                 Route("/v1/extensions/import/skill", self._extension_import_skill, methods=["POST"]),
@@ -376,7 +398,7 @@ class SecureGatewayAdapter(
             ]
         )
         self._node_hub = NodeHubService(
-            NodeHubStore(paths.data / "node-hub.json"),
+            self._node_hub_store,
             self._node_identity,
         )
         self._node_relay = NodeRelayManager(
@@ -384,6 +406,7 @@ class SecureGatewayAdapter(
             identity=self._node_identity,
             identities=identities,
             app=self.app,
+            remote_models=self._remote_models,
         )
 
     @property

@@ -46,6 +46,8 @@ class ProviderConfig(BaseModel):
     api_base: str = ""
     api_key: SecretStr = Field(default_factory=lambda: SecretStr(""))
     api_key_env: str = ""
+    remote_deployment_id: str = ""
+    direct_gateway_url: str = ""
     requires_api_key: bool | None = None
     timeout: float = 120.0
 
@@ -131,6 +133,8 @@ class ResolvedModelConfig(BaseModel):
     context_window: int | None
     timeout: float
     thinking: ThinkingConfig | None = None
+    remote_deployment_id: str = ""
+    direct_gateway_url: str = ""
 
 
 class WebhookRouteConfig(BaseModel):
@@ -493,6 +497,8 @@ class AppConfig(BaseModel):
                     else ""
                 ),
                 api_key_env=provider.api_key_env,
+                remote_deployment_id=provider.remote_deployment_id,
+                direct_gateway_url=provider.direct_gateway_url,
                 requires_api_key=provider.requires_api_key,
                 timeout_seconds=provider.timeout,
             )
@@ -597,6 +603,8 @@ class AppConfig(BaseModel):
                 context_window=model.context_window,
                 timeout=endpoint.timeout,
                 thinking=model.thinking,
+                remote_deployment_id=endpoint.remote_deployment_id,
+                direct_gateway_url=endpoint.direct_gateway_url,
             )
         return ResolvedModelConfig(
             alias=alias or self.llm_model_name or "default",
@@ -610,6 +618,8 @@ class AppConfig(BaseModel):
             context_window=None,
             timeout=self.llm_timeout,
             thinking=None,
+            remote_deployment_id="",
+            direct_gateway_url="",
         )
 
     def resolve_fallback_model(self) -> ResolvedModelConfig | None:
@@ -643,6 +653,8 @@ class AppConfig(BaseModel):
             context_window=None,
             timeout=self.llm_timeout,
             thinking=None,
+            remote_deployment_id="",
+            direct_gateway_url="",
         )
 
     def masked_api_key(self) -> str:

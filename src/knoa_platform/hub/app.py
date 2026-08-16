@@ -77,6 +77,69 @@ class FleetReportRequest(PresenceRequest):
     result_code: str = Field(default="", max_length=128)
 
 
+class ModelResourceRequest(_Request):
+    resource_id: str = Field(min_length=1, max_length=128)
+    revision: int = Field(ge=1)
+    canonical_digest: str = Field(min_length=64, max_length=64)
+    display_name: str = Field(min_length=1, max_length=120)
+    provider_protocol: str = Field(pattern=r"^(openai_compatible|anthropic)$")
+    model_identity: str = Field(min_length=1, max_length=256)
+    declared_capabilities: dict = Field(default_factory=dict)
+
+
+class ModelDeploymentRequest(_Request):
+    deployment_id: str = Field(min_length=1, max_length=128)
+    resource_id: str = Field(min_length=1, max_length=128)
+    resource_revision: int = Field(ge=1)
+    target_node_id: str = Field(min_length=1, max_length=128)
+    desired_revision: int = Field(ge=1)
+    enabled: bool = True
+
+
+class ResourceGrantRequest(_Request):
+    grant_id: str = Field(min_length=1, max_length=128)
+    caller_node_id: str = Field(min_length=1, max_length=128)
+    target_deployment_id: str = Field(min_length=1, max_length=128)
+    max_request_deadline: float = Field(gt=0, le=3600)
+    expires_at: float
+
+
+class DeploymentObservationRequest(_Request):
+    node_id: str = Field(min_length=1, max_length=128)
+    deployment_id: str = Field(min_length=1, max_length=128)
+    applied_digest: str = Field(min_length=64, max_length=64)
+    health_epoch: int = Field(ge=1)
+    health: str = Field(pattern=r"^(healthy|degraded|unavailable)$")
+    capabilities: dict = Field(default_factory=dict)
+    available_capacity: int = Field(ge=0, le=64)
+    observed_at: float
+    expires_at: float
+    signature: str = Field(min_length=80, max_length=128)
+
+
+class ResourceTicketRequest(_Request):
+    invocation_id: str = Field(min_length=1, max_length=128)
+    caller_node_id: str = Field(min_length=1, max_length=128)
+    target_deployment_id: str = Field(min_length=1, max_length=128)
+    max_deadline: float = Field(gt=0, le=3600)
+    timestamp: float
+    nonce: str = Field(min_length=16, max_length=256)
+    signature: str = Field(min_length=80, max_length=128)
+
+
+class InvocationObservationRequest(_Request):
+    node_id: str = Field(min_length=1, max_length=128)
+    invocation_id: str = Field(min_length=1, max_length=128)
+    reported_state: str = Field(
+        pattern=r"^(admitted|running|completed|failed|cancel_requested|cancelled|outcome_unknown)$"
+    )
+    execution_epoch: str = Field(default="", max_length=128)
+    report_seq: int = Field(ge=0)
+    usage_summary: dict = Field(default_factory=dict)
+    observed_at: float
+    signature: str = Field(min_length=80, max_length=128)
+
+
 class HubApplication:
     def __init__(self, service: HubService) -> None:
         self.service = service
@@ -90,12 +153,24 @@ class HubApplication:
                 Route("/v1/node-enrollment-grants", self.enrollment_grants, methods=["POST"]),
                 Route("/v1/nodes/enroll", self.enroll, methods=["POST"]),
                 Route("/v1/nodes/presence", self.presence, methods=["POST"]),
+                Route("/v1/workspace", self.workspace, methods=["GET"]),
+                Route("/v1/model-resources", self.model_resources, methods=["GET", "POST"]),
+                Route("/v1/model-deployments", self.model_deployments, methods=["GET", "POST"]),
+                Route("/v1/resource-grants", self.resource_grants, methods=["GET", "POST"]),
+                Route("/v1/deployment-observations", self.deployment_observations, methods=["GET", "POST"]),
+                Route("/v1/resource-invocation-tickets", self.resource_invocation_tickets, methods=["POST"]),
+                Route(
+                    "/v1/resource-invocations/{invocation_id:str}/observations",
+                    self.invocation_observations,
+                    methods=["GET", "POST"],
+                ),
                 Route("/v1/connection-tickets", self.tickets, methods=["POST"]),
                 Route("/v1/fleet/rollouts", self.rollouts, methods=["POST"]),
                 Route("/v1/nodes/{node_id:str}/fleet/pull", self.fleet_pull, methods=["POST"]),
                 Route("/v1/fleet/rollouts/{rollout_id:str}/nodes/{node_id:str}/report", self.fleet_report, methods=["POST"]),
                 WebSocketRoute("/v1/relay/node", self.relay_node),
                 WebSocketRoute("/v1/relay/client", self.relay_client),
+                WebSocketRoute("/v1/relay/resource-client", self.relay_resource_client),
             ]
         )
 
@@ -108,6 +183,8 @@ class HubApplication:
         return JSONResponse(
             {
                 "hub_id": self.service.hub_id,
+                "workspace_id": self.service.workspace_id,
+                "identity_issuer_id": self.service.hub_id,
                 "deployment_mode": "self_hosted",
                 "signing_public_key": self.service.signing_public_key,
             }
@@ -175,6 +252,129 @@ class HubApplication:
         except (PermissionError, ValueError):
             return JSONResponse({"error": "rejected"}, status_code=401)
         return JSONResponse({"node_id": node["node_id"], "observed_at": node["last_seen"]})
+
+    async def workspace(self, request: Request) -> JSONResponse:
+        if (error := self._owner(request)) is not None:
+            return error
+        return JSONResponse({"workspace": self.service.repository.workspace()})
+
+    async def model_resources(self, request: Request) -> JSONResponse:
+        if (error := self._owner(request)) is not None:
+            return error
+        if request.method == "GET":
+            return JSONResponse(
+                {"resources": list(self.service.repository.list_model_resources())}
+            )
+        parsed = await self._parse(request, ModelResourceRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            item = self.service.repository.put_model_resource(
+                parsed.model_dump(mode="json"),
+                created_by=self.service.owner_subject_id,
+            )
+        except (LookupError, ValueError):
+            return JSONResponse({"error": "rejected"}, status_code=422)
+        return JSONResponse({"resource": item}, status_code=201)
+
+    async def model_deployments(self, request: Request) -> JSONResponse:
+        if (error := self._owner(request)) is not None:
+            return error
+        if request.method == "GET":
+            return JSONResponse(
+                {"deployments": list(self.service.repository.list_model_deployments())}
+            )
+        parsed = await self._parse(request, ModelDeploymentRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            item = self.service.repository.put_model_deployment(
+                parsed.model_dump(mode="json")
+            )
+        except (LookupError, PermissionError, ValueError):
+            return JSONResponse({"error": "rejected"}, status_code=422)
+        return JSONResponse({"deployment": item}, status_code=201)
+
+    async def resource_grants(self, request: Request) -> JSONResponse:
+        if (error := self._owner(request)) is not None:
+            return error
+        if request.method == "GET":
+            return JSONResponse(
+                {"grants": list(self.service.repository.list_resource_grants())}
+            )
+        parsed = await self._parse(request, ResourceGrantRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            if parsed.expires_at <= time.time():
+                raise ValueError("Resource grant is already expired")
+            item = self.service.repository.put_resource_grant(
+                parsed.model_dump(mode="json")
+            )
+        except (LookupError, PermissionError, ValueError):
+            return JSONResponse({"error": "rejected"}, status_code=422)
+        return JSONResponse({"grant": item}, status_code=201)
+
+    async def deployment_observations(self, request: Request) -> JSONResponse:
+        if request.method == "GET":
+            if (error := self._owner(request)) is not None:
+                return error
+            return JSONResponse(
+                {
+                    "observations": list(
+                        self.service.repository.list_deployment_observations()
+                    )
+                }
+            )
+        parsed = await self._parse(request, DeploymentObservationRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            item = self.service.publish_deployment_observation(
+                parsed.model_dump(mode="json")
+            )
+        except (LookupError, PermissionError, ValueError):
+            return JSONResponse({"error": "rejected"}, status_code=401)
+        return JSONResponse({"observation": item}, status_code=201)
+
+    async def resource_invocation_tickets(self, request: Request) -> JSONResponse:
+        parsed = await self._parse(request, ResourceTicketRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            ticket = self.service.issue_resource_ticket(
+                parsed.model_dump(mode="json")
+            )
+        except (LookupError, PermissionError, ValueError):
+            return JSONResponse({"error": "rejected"}, status_code=403)
+        return JSONResponse({"ticket": ticket})
+
+    async def invocation_observations(self, request: Request) -> JSONResponse:
+        invocation_id = str(request.path_params["invocation_id"])
+        if request.method == "GET":
+            if (error := self._owner(request)) is not None:
+                return error
+            return JSONResponse(
+                {
+                    "observations": list(
+                        self.service.repository.list_invocation_observations(
+                            invocation_id
+                        )
+                    )
+                }
+            )
+        parsed = await self._parse(request, InvocationObservationRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        if parsed.invocation_id != invocation_id:
+            return JSONResponse({"error": "rejected"}, status_code=401)
+        try:
+            self.service.record_invocation_observation(
+                parsed.model_dump(mode="json")
+            )
+        except (LookupError, PermissionError, ValueError):
+            return JSONResponse({"error": "rejected"}, status_code=401)
+        return JSONResponse({"accepted": True})
 
     async def tickets(self, request: Request) -> JSONResponse:
         if (error := self._owner(request)) is not None:
@@ -298,7 +498,47 @@ class HubApplication:
                                 ciphertext_length=0,
                             ),
                         )
-                    except Exception:
+                    except Exception:  # noqa: BLE001, S110
+                        pass
+
+    async def relay_resource_client(self, websocket: WebSocket) -> None:
+        await websocket.accept()
+        session_id = ""
+        node_id = ""
+        try:
+            first = await websocket.receive_json()
+            ticket = self.service.verify_resource_ticket(str(first.get("ticket", "")))
+            session_id = str(ticket["ticket_id"])
+            node_id = str(ticket["target_node_id"])
+            await self.relay.register_client(session_id, node_id, websocket)
+            await websocket.send_json({"ready": True, "session_id": session_id})
+            while True:
+                raw = await websocket.receive_json()
+                frame = RelayFrame.model_validate(raw.get("frame"))
+                frame.validate_bounds()
+                if frame.session_id != session_id:
+                    raise ValueError("Relay session ID mismatch")
+                await self.relay.send_to_node(node_id, frame)
+        except LookupError:
+            await websocket.close(code=4404, reason="node offline")
+        except (WebSocketDisconnect, ValidationError, PermissionError, ValueError):
+            pass
+        finally:
+            if session_id:
+                await self.relay.unregister_client(session_id)
+                if node_id:
+                    try:
+                        await self.relay.send_to_node(
+                            node_id,
+                            RelayFrame(
+                                session_id=session_id,
+                                stream_id=0,
+                                frame_type="reset",
+                                sequence=0,
+                                ciphertext_length=0,
+                            ),
+                        )
+                    except Exception:  # noqa: BLE001, S110
                         pass
 
     def _owner(self, request: Request) -> JSONResponse | None:

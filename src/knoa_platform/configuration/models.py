@@ -26,11 +26,19 @@ class ConfigurationModel(BaseModel):
 
 
 class ManagedProviderConfig(ConfigurationModel):
-    driver: Literal["llamacpp", "openai", "openai_compatible", "anthropic"]
+    driver: Literal[
+        "llamacpp",
+        "openai",
+        "openai_compatible",
+        "anthropic",
+        "workspace_remote",
+    ]
     server_url: str = ""
     api_base: str = ""
     api_key_ref: str = ""
     api_key_env: str = ""
+    remote_deployment_id: str = ""
+    direct_gateway_url: str = ""
     secret_version: int = Field(default=0, ge=0)
     requires_api_key: bool | None = None
     timeout_seconds: float = Field(default=120.0, gt=0.0, le=3600.0)
@@ -43,6 +51,15 @@ class ManagedProviderConfig(ConfigurationModel):
             self.api_key_ref or self.api_key_env
         ):
             raise ValueError("Provider requires an API key reference")
+        if self.driver == "workspace_remote":
+            if not self.remote_deployment_id:
+                raise ValueError("Workspace remote Provider requires a deployment ID")
+            if self.api_key_ref or self.api_key_env:
+                raise ValueError("Workspace remote Provider cannot bind an API key")
+            if self.server_url or self.api_base:
+                raise ValueError("Workspace remote Provider cannot bind a local endpoint")
+        elif self.remote_deployment_id or self.direct_gateway_url:
+            raise ValueError("Only Workspace remote Provider accepts remote routing fields")
         return self
 
 
@@ -52,6 +69,15 @@ class ManagedModelConfig(ConfigurationModel):
     supports_vision: bool | None = None
     context_window: int | None = Field(default=None, ge=512, le=10_000_000)
     thinking: Literal["enabled", "disabled", "auto"] | None = None
+
+
+class ManagedModelDeploymentConfig(ConfigurationModel):
+    model_alias: SafeId
+    resource_id: SafeId
+    display_name: str = ""
+    enabled: bool = True
+    share_enabled: bool = False
+    max_remote_concurrency: int = Field(default=1, ge=1, le=64)
 
 
 class ManagedSkillConfig(ConfigurationModel):
@@ -160,6 +186,9 @@ class ManagedConfig(ConfigurationModel):
     schema_version: Literal[1] = 1
     providers: dict[SafeId, ManagedProviderConfig]
     models: dict[SafeId, ManagedModelConfig]
+    model_deployments: dict[SafeId, ManagedModelDeploymentConfig] = Field(
+        default_factory=dict
+    )
     default_model: SafeId
     fallback_model: str = ""
     fallback_enabled: bool = True
@@ -185,6 +214,16 @@ class ManagedConfig(ConfigurationModel):
         for alias, model in self.models.items():
             if model.provider not in self.providers:
                 raise ValueError(f"Model '{alias}' references an unknown provider")
+        for deployment_id, deployment in self.model_deployments.items():
+            if deployment.model_alias not in self.models:
+                raise ValueError(
+                    f"Model deployment '{deployment_id}' references an unknown model"
+                )
+            provider_id = self.models[deployment.model_alias].provider
+            if self.providers[provider_id].driver == "workspace_remote":
+                raise ValueError(
+                    f"Model deployment '{deployment_id}' must use a Node-local Provider"
+                )
         for runtime_id, runtime in self.agent_system.runtime_specs.items():
             binding = runtime.model_binding
             if binding.ownership == "platform" and binding.model not in self.models:

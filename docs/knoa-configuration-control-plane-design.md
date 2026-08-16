@@ -8,6 +8,8 @@
 >
 > 关系：为 `docs/knoa-agent-profile-delegation-design.md` 中的 RuntimeSpec、Profile、Agent Definition、Model Binding、Skill 和治理策略提供统一管理面
 
+> 多节点演进：本文描述当前 Node-local `ManagedConfig` 基线。Workspace 共享模型进入实施后，配置按 `knoa-workspace-resource-fabric-design.md` 拆为 `WorkspaceDefinitionRevision + NodeOverlayRevision + MaterializedConfigCandidate`；同一字段不得同时由 Workspace 与 Node Draft 写入
+
 > 落地范围：SQLite Config Registry、immutable Revision、optimistic Draft、validate/preflight/publish/rollback、desired/applied 状态、Core/Gateway typed API、移动端独立配置页面、Agent Runtime generation swap/interrupt/drain、Skill digest 冻结、Skill/MCP 最小影响 reload，以及执行 generation 发布屏障已实现。YAML 仅在首次启动导入，之后不覆盖 Registry。
 
 ## 1. 决策

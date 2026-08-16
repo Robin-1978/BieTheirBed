@@ -11,6 +11,7 @@ from knoa_platform.agent_runtime.contracts import (
     RuntimeStatus,
     ToolListResult,
 )
+from knoa_platform.agent_runtime.model_step import ProviderCallRequest, ProviderChunk
 from knoa_platform.agents.definitions import ResolvedInvocationPolicy
 from knoa_platform.artifacts import ArtifactRef
 from knoa_platform.configuration import (
@@ -322,6 +323,23 @@ class NodeHubStatusResponse(BaseModel):
     hub: NodeHubDescriptorResponse | None = None
     relay_connected: bool
     last_error: str = ""
+
+
+class ResourceInvocationRequest(GatewayRequest):
+    ticket: str = Field(min_length=100, max_length=8192)
+    request: ProviderCallRequest
+
+
+class ResourceInvocationCancelRequest(GatewayRequest):
+    ticket: str = Field(min_length=100, max_length=8192)
+
+
+class ResourceInvocationResponse(BaseModel):
+    chunks: tuple[ProviderChunk, ...]
+
+
+class ResourceInvocationCancelResponse(BaseModel):
+    cancel_requested: bool
 
 
 class NodeHubEnrollmentResponse(BaseModel):
