@@ -49,6 +49,10 @@ from knoa_platform.gateway.protocol import (
     InvocationPolicyPreviewResponse,
     MCPResourceCatalogResponse,
     NodeDescriptorResponse,
+    NodeHubEnrollmentRequest,
+    NodeHubEnrollmentResponse,
+    NodeHubRemovedResponse,
+    NodeHubStatusResponse,
     PairChallengeRequest,
     PairCompleteRequest,
     PairCompleteResponse,
@@ -56,6 +60,7 @@ from knoa_platform.gateway.protocol import (
     PreviewInvocationPolicyRequest,
     ProductTaskExecutionListResponse,
     ProductTaskExecutionResponse,
+    PrincipalTaskEventListResponse,
     ProductTaskListResponse,
     ProductTaskResponse,
     PublishConfigDraftRequest,
@@ -81,6 +86,10 @@ _MODELS: tuple[type[BaseModel], ...] = (
     ErrorResponse,
     HealthResponse,
     NodeDescriptorResponse,
+    NodeHubEnrollmentRequest,
+    NodeHubEnrollmentResponse,
+    NodeHubRemovedResponse,
+    NodeHubStatusResponse,
     ExtensionPackageListResponse,
     ExtensionImportResponse,
     SecretStatusResponse,
@@ -119,6 +128,7 @@ _MODELS: tuple[type[BaseModel], ...] = (
     PauseTaskRequest,
     ResumeTaskRequest,
     TaskEventListResponse,
+    PrincipalTaskEventListResponse,
     ResolveApprovalRequest,
     ResolveHumanInteractionRequest,
     ApprovalResolvedResponse,
@@ -270,6 +280,35 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     "responses": {
                         "200": _json_response("Pinned Node identity", NodeDescriptorResponse),
                         **_errors("401", "429"),
+                    },
+                }
+            },
+            "/v1/hub": {
+                "get": {
+                    "operationId": "getNodeHubStatus",
+                    "security": bearer,
+                    "responses": {
+                        "200": _json_response("Node Hub and Relay status", NodeHubStatusResponse),
+                        **_errors("401", "429"),
+                    },
+                },
+                "delete": {
+                    "operationId": "removeNodeHub",
+                    "security": bearer,
+                    "responses": {
+                        "200": _json_response("Node removed from Hub", NodeHubRemovedResponse),
+                        **_errors("401", "429"),
+                    },
+                },
+            },
+            "/v1/hub/enroll": {
+                "post": {
+                    "operationId": "enrollNodeHub",
+                    "security": bearer,
+                    "requestBody": _json_body(NodeHubEnrollmentRequest),
+                    "responses": {
+                        "201": _json_response("Node enrolled into Hub", NodeHubEnrollmentResponse),
+                        **_errors("400", "401", "415", "429", "503"),
                     },
                 }
             },
@@ -967,6 +1006,20 @@ def gateway_openapi_schema() -> dict[str, Any]:
                             },
                         },
                         **_errors("400", "401", "429"),
+                    },
+                }
+            },
+            "/v1/events/poll": {
+                "get": {
+                    "operationId": "pollTaskEvents",
+                    "security": bearer,
+                    "parameters": [
+                        _query("after_id", {"type": "integer", "minimum": 0}),
+                        _query("limit", {"type": "integer", "minimum": 1, "maximum": 200}),
+                    ],
+                    "responses": {
+                        "200": _json_response("Finite principal Task event page", PrincipalTaskEventListResponse),
+                        **_errors("400", "401", "429", "503"),
                     },
                 }
             },

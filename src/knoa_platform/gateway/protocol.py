@@ -33,6 +33,7 @@ from knoa_platform.service.core_api import (
 )
 from knoa_platform.tasks import (
     ApprovalState,
+    PrincipalTaskEvent,
     TaskDefinitionState,
     TaskEvent,
     TaskLaunchPolicy,
@@ -69,6 +70,16 @@ class AuthCompleteRequest(AuthChallengeRequest):
     challenge_id: str = Field(min_length=1, max_length=128)
     nonce: str = Field(min_length=32, max_length=256)
     signature: str = Field(min_length=80, max_length=128)
+
+
+class NodeHubEnrollmentRequest(GatewayRequest):
+    hub_url: str = Field(min_length=8, max_length=2048)
+    hub_id: str = Field(min_length=1, max_length=128)
+    hub_signing_public_key: str = Field(min_length=40, max_length=64)
+    grant_id: str = Field(min_length=1, max_length=128)
+    grant_secret: str = Field(min_length=32, max_length=256)
+    challenge: str = Field(min_length=16, max_length=256)
+    display_name: str = Field(default="Knoa Node", min_length=1, max_length=80)
 
 
 class CreateTaskRequest(GatewayRequest):
@@ -236,6 +247,10 @@ class EventQuery(GatewayQuery):
     after_id: int = Field(default=0, ge=0, le=9_223_372_036_854_775_807)
 
 
+class EventPollQuery(EventQuery):
+    limit: int = Field(default=100, ge=1, le=200)
+
+
 class TaskEventQuery(GatewayQuery):
     after_seq: int = Field(default=0, ge=0)
 
@@ -293,6 +308,29 @@ class NodeDescriptorResponse(BaseModel):
     configuration_public_key: str
     configuration_key_version: int
     created_at: float
+
+
+class NodeHubDescriptorResponse(BaseModel):
+    hub_url: str
+    hub_id: str
+    hub_signing_public_key: str
+    enrolled_at: float
+
+
+class NodeHubStatusResponse(BaseModel):
+    enrolled: bool
+    hub: NodeHubDescriptorResponse | None = None
+    relay_connected: bool
+    last_error: str = ""
+
+
+class NodeHubEnrollmentResponse(BaseModel):
+    enrollment: NodeHubDescriptorResponse
+    relay_connected: bool
+
+
+class NodeHubRemovedResponse(BaseModel):
+    removed: bool
 
 
 class ChallengeResponse(BaseModel):
@@ -432,6 +470,10 @@ class TaskListResponse(BaseModel):
 
 class TaskEventListResponse(BaseModel):
     events: tuple[TaskEvent, ...]
+
+
+class PrincipalTaskEventListResponse(BaseModel):
+    events: tuple[PrincipalTaskEvent, ...]
 
 
 class ProductTaskResponse(BaseModel):

@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { GatewayClient, GatewayError } from "@/api/gatewayClient";
+import { ConnectionResolverTransport } from "@/api/gatewayTransport";
 import type { AgentSummary, AndroidRelease, PrincipalTaskEvent } from "@/api/models";
 import { isPresentationTaskEvent, subscribeTaskEvents, type TaskEventSubscription } from "@/api/taskEvents";
 import { authenticateDevice, pairDevice } from "@/security/pairing";
@@ -9,7 +10,6 @@ import {
   clearConnectionIdentity,
   loadConnectionIdentity,
   loadCoreSession,
-  loadDevice,
   loadSessionToken,
   listNodeBindings,
   selectNode,
@@ -112,7 +112,11 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       let token = await loadSessionToken();
       let client: GatewayClient;
       if (token) {
-        client = new GatewayClient(device.gatewayUrl, token);
+        client = new GatewayClient(
+          device.gatewayUrl,
+          token,
+          new ConnectionResolverTransport(identity),
+        );
         try {
           await client.gatewaySession();
         } catch (error) {
@@ -122,6 +126,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
           client = await authenticateDevice({
             gateway_url: device.gatewayUrl,
             deviceId: device.deviceId,
+            binding: identity,
           });
           token = await loadSessionToken();
         }
@@ -129,6 +134,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         client = await authenticateDevice({
           gateway_url: device.gatewayUrl,
           deviceId: device.deviceId,
+          binding: identity,
         });
         token = await loadSessionToken();
       }
@@ -144,7 +150,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         }
       }
       if (generation !== connectionGenerationRef.current) return;
-      connectionRef.current = { gatewayUrl: device.gatewayUrl, token };
+      connectionRef.current = { gatewayUrl: identity.gatewayUrl, token };
       commit({
         status: "ready",
         client,
@@ -193,20 +199,21 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       return authenticationRef.current.promise;
     }
     const pending = (async () => {
-      const device = await loadDevice();
-      if (!device) throw new Error("设备尚未配对");
+      const identity = await loadConnectionIdentity();
+      if (!identity) throw new Error("设备尚未配对");
       const client = await authenticateDevice({
-        gateway_url: device.gatewayUrl,
-        deviceId: device.deviceId,
+        gateway_url: identity.gatewayUrl,
+        deviceId: identity.deviceId,
+        binding: identity,
       });
       const token = await loadSessionToken();
       if (!token) throw new Error("未能恢复安全会话");
       if (generation !== connectionGenerationRef.current) throw new Error("Node 连接已切换");
-      connectionRef.current = { gatewayUrl: device.gatewayUrl, token };
+      connectionRef.current = { gatewayUrl: identity.gatewayUrl, token };
       commit({
         status: "ready",
         client,
-        gatewayUrl: device.gatewayUrl,
+        gatewayUrl: identity.gatewayUrl,
         sessionToken: token,
         error: "",
       });
@@ -269,8 +276,9 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
   useEffect(() => {
     let subscription: TaskEventSubscription | null = null;
     let cancelled = false;
-    if (state.status === "ready") {
+    if (state.status === "ready" && state.client) {
       void subscribeTaskEvents({
+        client: state.client,
         gatewayUrl: state.gatewayUrl,
         token: state.sessionToken,
         onEvent: (event) => {

@@ -10,6 +10,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 
 from knoa_platform.gateway.protocol import (
+    EventPollQuery,
     EventQuery,
     TaskEventQuery,
 )
@@ -20,6 +21,37 @@ _MAX_BODY_BYTES = 16 * 1024
 
 
 class GatewayStreaming:
+
+    async def _events_poll(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=120)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        try:
+            query = EventPollQuery.model_validate(dict(request.query_params))
+        except ValidationError:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        iterator = self._core.principal_task_events(
+            authenticated.device.principal_id,
+            after_id=query.after_id,
+        ).__aiter__()
+        events = []
+        try:
+            while len(events) < query.limit:
+                try:
+                    event = await asyncio.wait_for(
+                        anext(iterator),
+                        timeout=0.25 if not events else 0.01,
+                    )
+                except (TimeoutError, StopAsyncIteration):
+                    break
+                events.append(event.model_dump(mode="json"))
+        except Exception as exc:
+            return self._core_error(exc)
+        finally:
+            close = getattr(iterator, "aclose", None)
+            if close is not None:
+                await close()
+        return JSONResponse({"events": events})
 
     async def _chat_turn_stream(
         self,

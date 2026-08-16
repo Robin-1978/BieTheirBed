@@ -923,6 +923,27 @@ async def test_gateway_adapter_streams_resumable_standard_task_events(tmp_path) 
 
 
 @pytest.mark.asyncio
+async def test_gateway_adapter_polls_a_finite_event_page_for_relay(tmp_path) -> None:
+    core = _Core()
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=_Authentication(),
+        core=core,
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
+    async with httpx.AsyncClient(transport=transport, base_url="http://gateway.local") as http:
+        response = await http.get(
+            "/v1/events/poll?after_id=41&limit=10",
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    assert response.json()["events"][0]["feed_event_id"] == 42
+    assert core.calls == [("principal_task_events", "personal:owner", 41)]
+
+
+@pytest.mark.asyncio
 async def test_gateway_event_stream_stops_when_device_session_is_revoked(tmp_path) -> None:
     class _RevokedAuthentication(_Authentication):
         def __init__(self) -> None:

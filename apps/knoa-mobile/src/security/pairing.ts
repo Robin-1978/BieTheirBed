@@ -1,4 +1,5 @@
 import { GatewayClient, parsePairingPayload } from "@/api/gatewayClient";
+import { ConnectionResolverTransport } from "@/api/gatewayTransport";
 import type { PairingPayload } from "@/api/models";
 import {
   loadOrCreatePrivateKey,
@@ -6,6 +7,7 @@ import {
   sign,
   replaceConnectionIdentity,
   storeSession,
+  type NodeDeviceBinding,
 } from "./deviceIdentity";
 import { authenticationProof, pairingProof } from "./proof";
 
@@ -53,9 +55,16 @@ export async function pairDevice(
 }
 
 export async function authenticateDevice(
-  payload: Pick<PairingPayload, "gateway_url"> & { deviceId: string },
+  payload: Pick<PairingPayload, "gateway_url"> & {
+    deviceId: string;
+    binding?: NodeDeviceBinding;
+  },
 ): Promise<GatewayClient> {
-  const client = new GatewayClient(payload.gateway_url);
+  const client = new GatewayClient(
+    payload.gateway_url,
+    null,
+    payload.binding ? new ConnectionResolverTransport(payload.binding) : undefined,
+  );
   const privateKey = await loadOrCreatePrivateKey();
   const challenge = await client.authChallenge(payload.deviceId);
   const signature = sign(

@@ -73,9 +73,23 @@ class RelayBroker:
         return connection
 
     async def unregister_node(self, node_id: str, connection: NodeRelayConnection) -> None:
+        clients: list[ClientRelayConnection] = []
         async with self._lock:
             if self._nodes.get(node_id) is connection:
                 self._nodes.pop(node_id, None)
+                session_ids = [
+                    session_id
+                    for session_id, client in self._clients.items()
+                    if client.node_id == node_id
+                ]
+                clients = [self._clients.pop(session_id) for session_id in session_ids]
+        await asyncio.gather(
+            *(
+                client.websocket.close(code=4404, reason="node offline")
+                for client in clients
+            ),
+            return_exceptions=True,
+        )
 
     async def register_client(
         self,

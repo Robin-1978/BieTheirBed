@@ -175,8 +175,10 @@ knoa-hub
 └── RelayBroker
 ```
 
-当前 Node 与 App 尚未消费 Relay business transport；主服务部署仍是 direct Gateway。Hub/Relay
-服务端存在不等于多节点远程数据面已经闭环。
+Node 侧 `NodeHubService + NodeRelayManager` 保存单 Hub enrollment，并从 Secure Gateway 生命周期
+启动 outbound Relay connector；App 侧 `GatewayTransport` 统一 direct fetch 与 Relay encrypted
+transport。Relay ciphertext 内承载现有 Gateway HTTP typed contract，Node 通过 ASGI 调用同一个
+`SecureGatewayAdapter.app`，因此不存在第二套业务控制器或 Relay 专用 Core API。
 
 ## 5. 源码模块地图
 
@@ -244,6 +246,8 @@ knoa-hub
 | Node identity | 用途隔离的 Ed25519/X25519 Node keys | `src/knoa_platform/node_identity.py` |
 | Fleet candidate | sealed candidate 校验与 Node-local publish | `src/knoa_platform/fleet.py` |
 | Personal Hub | Account、Node directory、presence、ticket、opaque Relay | `src/knoa_platform/hub/` |
+| Node Hub/Relay edge | Hub enrollment、presence、outbound connector、E2E tunnel dispatch | `src/knoa_platform/node_hub.py`、`relay_protocol.py` |
+| App transport | direct 优先、Relay fallback、Node session crypto、有限事件轮询 | `apps/knoa-mobile/src/api/gatewayTransport*.ts`、`relayCrypto.ts` |
 
 ## 6. Agent 领域模型
 

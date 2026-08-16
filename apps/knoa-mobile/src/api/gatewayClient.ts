@@ -20,12 +20,14 @@ import type {
   ExtensionPackage,
   ExtensionImportResult,
   PairingPayload,
+  PrincipalTaskEvent,
   Task,
   TaskDefinitionState,
   TaskExecution,
   TaskEvent,
   TaskLaunchPolicy,
 } from "./models";
+import { DirectFetchTransport, type GatewayTransport } from "./gatewayTransportBase";
 
 type Json = Record<string, unknown>;
 
@@ -55,10 +57,19 @@ export class GatewayClient {
   constructor(
     readonly baseUrl: string,
     private readonly token: string | null = null,
+    private readonly transport: GatewayTransport = new DirectFetchTransport(),
   ) {}
 
   authenticated(token: string): GatewayClient {
-    return new GatewayClient(this.baseUrl, token);
+    return new GatewayClient(this.baseUrl, token, this.transport);
+  }
+
+  transportMode(): "direct" | "relay" {
+    return this.transport.mode();
+  }
+
+  close(): void {
+    this.transport.close?.();
   }
 
   async pairChallenge(grantId: string): Promise<Challenge> {
@@ -79,6 +90,31 @@ export class GatewayClient {
 
   async nodeDescriptor(): Promise<NodeDescriptor> {
     return this.json("/v1/node");
+  }
+
+  async hubStatus(): Promise<{
+    enrolled: boolean;
+    relay_connected: boolean;
+    last_error: string;
+    hub: null | { hub_url: string; hub_id: string; hub_signing_public_key: string; enrolled_at: number };
+  }> {
+    return this.json("/v1/hub");
+  }
+
+  async enrollHub(input: {
+    hub_url: string;
+    hub_id: string;
+    hub_signing_public_key: string;
+    grant_id: string;
+    grant_secret: string;
+    challenge: string;
+    display_name: string;
+  }): Promise<{ enrollment: Record<string, unknown>; relay_connected: boolean }> {
+    return this.json("/v1/hub/enroll", { method: "POST", body: input });
+  }
+
+  async removeHub(): Promise<void> {
+    await this.json("/v1/hub", { method: "DELETE" });
   }
 
   async listExtensionPackages(): Promise<ExtensionPackage[]> {
@@ -611,6 +647,13 @@ export class GatewayClient {
     return this.json(`/v1/device/audit?after_id=${afterId}&limit=100`);
   }
 
+  async pollEvents(afterId = 0, limit = 100): Promise<PrincipalTaskEvent[]> {
+    const response = await this.json<{ events: PrincipalTaskEvent[] }>(
+      `/v1/events/poll?after_id=${afterId}&limit=${limit}`,
+    );
+    return response.events;
+  }
+
   async latestAndroidRelease(): Promise<AndroidRelease> {
     return this.json("/v1/mobile/releases/android/latest");
   }
@@ -651,7 +694,7 @@ export class GatewayClient {
       if (!this.token) throw new GatewayError(401, "missing_session");
       headers.set("Authorization", `Bearer ${this.token}`);
     }
-    const response = await fetch(`${this.baseUrl.replace(/\/$/, "")}${path}`, {
+    const response = await this.transport.request(this.baseUrl, path, {
       ...init,
       headers,
     });
