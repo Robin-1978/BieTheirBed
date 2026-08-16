@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.applications import Starlette
@@ -32,8 +33,11 @@ class EnrollmentGrantRequest(_Request):
 
 
 class NodeEnrollmentRequest(_Request):
+    audience: Literal["knoa-node-enrollment-v1"]
+    hub_id: str = Field(min_length=1, max_length=128)
     grant_id: str = Field(min_length=1, max_length=128)
     grant_secret: str = Field(min_length=32, max_length=256)
+    challenge: str = Field(min_length=16, max_length=256)
     node_id: str = Field(min_length=1, max_length=128)
     display_name: str = Field(min_length=1, max_length=80)
     signing_public_key: str = Field(min_length=40, max_length=64)
@@ -141,8 +145,14 @@ class InvocationObservationRequest(_Request):
 
 
 class HubApplication:
-    def __init__(self, service: HubService) -> None:
+    def __init__(
+        self,
+        service: HubService,
+        *,
+        deployment_mode: str = "self_hosted",
+    ) -> None:
         self.service = service
+        self.deployment_mode = deployment_mode
         self.relay = RelayBroker()
         self.app = Starlette(
             routes=[
@@ -185,7 +195,7 @@ class HubApplication:
                 "hub_id": self.service.hub_id,
                 "workspace_id": self.service.workspace_id,
                 "identity_issuer_id": self.service.hub_id,
-                "deployment_mode": "self_hosted",
+                "deployment_mode": self.deployment_mode,
                 "signing_public_key": self.service.signing_public_key,
             }
         )

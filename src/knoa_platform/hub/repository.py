@@ -177,8 +177,15 @@ class HubRepository:
     def _connect(self) -> sqlite3.Connection:
         return connect_sqlite(self.path, foreign_keys=True)
 
-    def initialize_owner(self, subject_id: str, login_identity: str) -> None:
+    def initialize_owner(
+        self,
+        subject_id: str,
+        login_identity: str,
+        *,
+        identity_issuer_id: str | None = None,
+    ) -> None:
         now = self._clock()
+        issuer_id = identity_issuer_id or self.hub_id
         with self._connect() as db:
             db.execute(
                 "INSERT OR IGNORE INTO account_subjects VALUES (?, ?, 'active', ?)",
@@ -190,12 +197,12 @@ class HubRepository:
             )
             db.execute(
                 "INSERT OR IGNORE INTO workspaces VALUES (?, ?, ?, 'personal', 'active', ?)",
-                (self.hub_id, self.hub_id, "Personal Workspace", now),
+                (self.hub_id, issuer_id, "Personal Workspace", now),
             )
             db.execute(
                 """INSERT OR IGNORE INTO workspace_memberships
                    VALUES (?, ?, ?, 'owner', 'active', ?)""",
-                (self.hub_id, self.hub_id, subject_id, now),
+                (self.hub_id, issuer_id, subject_id, now),
             )
 
     def register_installation(

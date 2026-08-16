@@ -8,6 +8,7 @@ import json
 import os
 import secrets
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from cryptography.exceptions import InvalidSignature
@@ -38,19 +39,30 @@ class HubService:
         repository: HubRepository,
         identity_path: str | Path,
         *,
-        owner_token: str,
+        owner_token: str = "",
         owner_subject_id: str = "subject_owner",
+        owner_authenticator: Callable[[str], str] | None = None,
+        hub_id: str = "",
         clock=time.time,
     ) -> None:
-        if len(owner_token) < 32:
+        if owner_authenticator is None and len(owner_token) < 32:
             raise ValueError("Hub owner token must contain at least 32 characters")
         self.repository = repository
-        self.hub_id = repository.hub_id
+        self.hub_id = hub_id or repository.hub_id
         self.owner_subject_id = owner_subject_id
-        self._owner_token_hash = hashlib.sha256(owner_token.encode()).digest()
+        self._owner_token_hash = (
+            hashlib.sha256(owner_token.encode()).digest()
+            if owner_authenticator is None
+            else b""
+        )
+        self._owner_authenticator = owner_authenticator
         self._clock = clock
         self._signing_key = self._load_or_create_key(Path(identity_path))
-        repository.initialize_owner(owner_subject_id, "bootstrap-owner")
+        repository.initialize_owner(
+            owner_subject_id,
+            "bootstrap-owner",
+            identity_issuer_id=self.hub_id,
+        )
 
     @property
     def signing_public_key(self) -> str:
@@ -65,6 +77,8 @@ class HubService:
         return self.repository.workspace()["workspace_id"]
 
     def authenticate_owner(self, token: str) -> str:
+        if self._owner_authenticator is not None:
+            return self._owner_authenticator(token)
         supplied = hashlib.sha256(token.encode()).digest()
         if not secrets.compare_digest(supplied, self._owner_token_hash):
             raise PermissionError("Hub account authentication rejected")
@@ -72,6 +86,8 @@ class HubService:
 
     def enroll_node(self, request: dict) -> dict:
         grant = self.repository.enrollment(str(request["grant_id"]), str(request["grant_secret"]))
+        if not secrets.compare_digest(str(request["challenge"]), str(grant["challenge"])):
+            raise PermissionError("Node enrollment challenge rejected")
         transcript = {
             "audience": "knoa-node-enrollment-v1",
             "hub_id": self.hub_id,
