@@ -22,6 +22,14 @@ export type HubConnection = {
   workspaceId: string;
   identityIssuerId: string;
   signingPublicKey: string;
+  deploymentMode: "self_hosted" | "hosted_simulation" | "hosted";
+};
+
+export type HostedSimulationAccount = {
+  subjectId: string;
+  loginIdentity: string;
+  expiresAt: number;
+  connection: HubConnection;
 };
 
 export type WorkspaceModelResource = {
@@ -84,6 +92,7 @@ export async function connectHub(url: string, token: string, displayName: string
     workspace_id: string;
     identity_issuer_id: string;
     signing_public_key: string;
+    deployment_mode: "self_hosted" | "hosted_simulation" | "hosted";
   }>(normalized, token, "/v1/hub");
   const privateKey = await loadOrCreatePrivateKey();
   await request(normalized, token, "/v1/installations", {
@@ -101,6 +110,7 @@ export async function connectHub(url: string, token: string, displayName: string
     workspaceId: hub.workspace_id,
     identityIssuerId: hub.identity_issuer_id,
     signingPublicKey: hub.signing_public_key,
+    deploymentMode: hub.deployment_mode,
   };
   await SecureStore.setItemAsync(HUB_CONNECTION, JSON.stringify(connection));
   return connection;
@@ -116,10 +126,48 @@ export async function loadHubConnection(): Promise<HubConnection | null> {
       ...parsed,
       workspaceId: parsed.workspaceId || parsed.hubId,
       identityIssuerId: parsed.identityIssuerId || parsed.hubId,
+      deploymentMode: parsed.deploymentMode || "self_hosted",
     };
   } catch {
     return null;
   }
+}
+
+export async function createHostedSimulationAccount(
+  url: string,
+  bootstrapToken: string,
+  loginIdentity: string,
+  displayName: string,
+): Promise<HostedSimulationAccount> {
+  const normalized = url.trim().replace(/\/$/, "");
+  if (!/^https?:\/\//.test(normalized) || bootstrapToken.length < 32) {
+    throw new Error("Hosted Hub 地址或注册令牌无效");
+  }
+  const account = await request<{
+    subject_id: string;
+    login_identity: string;
+    workspace_id: string;
+    workspace_path: string;
+    access_token: string;
+    expires_at: number;
+  }>(normalized, bootstrapToken, "/v1/hosted/accounts", {
+    method: "POST",
+    body: {
+      login_identity: loginIdentity.trim(),
+      display_name: displayName.trim() || "Knoa User",
+    },
+  });
+  const connection = await connectHub(
+    `${normalized}${account.workspace_path}`,
+    account.access_token,
+    "Knoa Mobile",
+  );
+  return {
+    subjectId: account.subject_id,
+    loginIdentity: account.login_identity,
+    expiresAt: account.expires_at,
+    connection,
+  };
 }
 
 export async function listHubNodes(): Promise<HubNode[]> {

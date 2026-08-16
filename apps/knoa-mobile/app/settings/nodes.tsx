@@ -6,6 +6,7 @@ import { AppPressable } from "@/components/AppPressable";
 import { useGateway } from "@/state/GatewayProvider";
 import {
   connectHub,
+  createHostedSimulationAccount,
   createNodeEnrollmentGrant,
   listHubNodes,
   loadHubConnection,
@@ -19,6 +20,8 @@ export default function NodeCenterScreen() {
   const [hubToken, setHubToken] = useState("");
   const [hubId, setHubId] = useState("");
   const [workspaceId, setWorkspaceId] = useState("");
+  const [deploymentMode, setDeploymentMode] = useState("");
+  const [hostedLogin, setHostedLogin] = useState("");
   const [hubNodes, setHubNodes] = useState<HubNode[]>([]);
   const [message, setMessage] = useState("");
   const [nodeHub, setNodeHub] = useState<{ enrolled: boolean; relay_connected: boolean; last_error: string } | null>(null);
@@ -29,6 +32,7 @@ export default function NodeCenterScreen() {
       setHubUrl(connection.url);
       setHubId(connection.hubId);
       setWorkspaceId(connection.workspaceId);
+      setDeploymentMode(connection.deploymentMode);
       setHubNodes(await listHubNodes());
     }).catch(() => undefined);
   }, []);
@@ -45,11 +49,32 @@ export default function NodeCenterScreen() {
       const connection = await connectHub(hubUrl, hubToken, "Knoa Mobile");
       setHubId(connection.hubId);
       setWorkspaceId(connection.workspaceId);
+      setDeploymentMode(connection.deploymentMode);
       setHubToken("");
       setHubNodes(await listHubNodes());
       setMessage("Hub 已连接，帐号令牌已写入安全存储");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Hub 连接失败");
+    }
+  }
+
+  async function createHostedAccount() {
+    try {
+      const account = await createHostedSimulationAccount(
+        hubUrl,
+        hubToken,
+        hostedLogin,
+        hostedLogin.split("@")[0] || "Knoa User",
+      );
+      setHubUrl(account.connection.url);
+      setHubId(account.connection.hubId);
+      setWorkspaceId(account.connection.workspaceId);
+      setDeploymentMode(account.connection.deploymentMode);
+      setHubToken("");
+      setHubNodes([]);
+      setMessage(`Hosted 仿真帐号已创建：${account.loginIdentity}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Hosted 仿真帐号创建失败");
     }
   }
 
@@ -105,7 +130,10 @@ export default function NodeCenterScreen() {
         <TextInput value={hubUrl} onChangeText={setHubUrl} placeholder="https://hub.example.com" placeholderTextColor={colors.muted} autoCapitalize="none" style={styles.input} />
         <TextInput value={hubToken} onChangeText={setHubToken} placeholder="帐号令牌" placeholderTextColor={colors.muted} secureTextEntry autoCapitalize="none" style={styles.input} />
         <AppPressable style={styles.primary} onPress={() => void saveHub()}><Text style={styles.primaryText}>{hubId ? "更新 Hub 连接" : "连接 Hub"}</Text></AppPressable>
-        {hubId ? <Text style={styles.key}>Workspace · {workspaceId || hubId}{"\n"}HubService · {hubId}</Text> : null}
+        <Text style={styles.hint}>Hosted 仿真首次注册：填写 Hosted 根地址、注册令牌和登录标识。注册令牌仅用于创建帐号，返回的帐号令牌会写入安全存储。</Text>
+        <TextInput value={hostedLogin} onChangeText={setHostedLogin} placeholder="登录标识，例如 owner@example.com" placeholderTextColor={colors.muted} autoCapitalize="none" style={styles.input} />
+        <AppPressable style={styles.secondary} onPress={() => void createHostedAccount()}><Text style={styles.secondaryText}>创建 Hosted 仿真帐号</Text></AppPressable>
+        {hubId ? <Text style={styles.key}>Workspace · {workspaceId || hubId}{"\n"}HubService · {hubId}{"\n"}Mode · {deploymentMode || "self_hosted"}</Text> : null}
         {hubId && gateway.nodeId ? (
           <AppPressable style={styles.primary} onPress={() => void enrollCurrentNode()}>
             <Text style={styles.primaryText}>{nodeHub?.enrolled ? "重新登记当前 Node" : "将当前 Node 加入 Hub"}</Text>
@@ -142,5 +170,7 @@ const styles = StyleSheet.create({
   switchLabel: { color: colors.ink, fontWeight: "700" },
   primary: { backgroundColor: colors.accent, borderRadius: 13, padding: 14, alignItems: "center" },
   primaryText: { color: "#fff", fontWeight: "800" },
+  secondary: { backgroundColor: colors.surface, borderRadius: 13, padding: 14, alignItems: "center", borderWidth: 1, borderColor: colors.accent },
+  secondaryText: { color: colors.accent, fontWeight: "800" },
   input: { backgroundColor: colors.background, color: colors.ink, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 12, borderWidth: 1, borderColor: colors.line },
 });

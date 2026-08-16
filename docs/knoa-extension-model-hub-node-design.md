@@ -1228,7 +1228,8 @@ Revision 未应用”或“Revision 引用丢失 package”的状态。
 - Node key pinning 和 Client-to-Node Trust Protocol；
 - versioned Relay frame/Node Protocol；
 - direct 优先、relay fallback；
-- 容器化部署和备份。
+- 独立 `knoa-hub` 进程入口；标准容器/systemd 制品与备份恢复仍属于生产化缺口，见
+  `knoa-deployment-architecture.md`。
 
 验收：N 个家庭/私有 Node 不配置独立域名即可从外网访问；Relay 无法解码业务 payload，伪造
 ticket、替换 Node key、replay handshake 和跨 Node 使用 ticket 均被拒绝。
@@ -1236,7 +1237,8 @@ ticket、替换 Node key、replay handshake 和跨 Node 使用 ticket 均被拒�
 当前首轮已达到该验收的架构闭环：Hub account、Node directory、enrollment、presence、single-use
 ticket、opaque Fleet storage、Relay server、Node outbound connector、App consumer、端到端握手、
 Gateway business tunnel、Artifact chunk 与事件有限轮询已接通。正式 Hosted 上线前仍需补齐容量压测、
-显式 flow-control、Account recovery、key rotation、abuse control 与多租户隔离验证。
+显式 flow-control、Account recovery、key rotation 与 abuse control；Self-hosted 的生产 Docker、TLS
+proxy、备份恢复和单 worker 启动约束也尚未形成完整标准部署制品。
 
 ### Phase 4：Knoa Hosted Hub
 
@@ -1247,6 +1249,12 @@ Gateway business tunnel、Artifact chunk 与事件有限轮询已接通。正式
 - metadata 隐私和数据保留策略。
 
 验收：普通用户登录后可 enrollment 多台 Node，无需理解网络和 TLS。
+
+当前已完成 Phase 4 的 `hosted_simulation` 垂直切片：Hosted 根账户库只保存 token digest 和 Personal
+Workspace 映射；每个 Workspace 使用隔离的 Hub SQLite 与 RelayBroker；全部 tenant 共享 Hosted
+issuer/signing identity；HTTP、Node enrollment/directory、跨 tenant token 拒绝、重启持久化和 App
+账户创建流程已有自动化验证。该切片验证架构形状，不包含生产 login/recovery、Relay fleet、限流、
+HA、计费与运维 SLO，因此不得标记为 Phase 4 生产完成。
 
 ### Phase 5：Catalog、Marketplace 与 Fleet Config
 
