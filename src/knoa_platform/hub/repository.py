@@ -210,6 +210,13 @@ class HubRepository:
     ) -> dict:
         now = self._clock()
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            existing = db.execute(
+                "SELECT subject_id FROM app_installations WHERE installation_id=?",
+                (installation_id,),
+            ).fetchone()
+            if existing is not None and existing["subject_id"] != subject_id:
+                raise PermissionError("App installation belongs to another account")
             db.execute(
                 """INSERT INTO app_installations VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
                    ON CONFLICT(installation_id) DO UPDATE SET

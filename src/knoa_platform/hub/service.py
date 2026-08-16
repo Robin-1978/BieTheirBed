@@ -42,6 +42,7 @@ class HubService:
         owner_token: str = "",
         owner_subject_id: str = "subject_owner",
         owner_authenticator: Callable[[str], str] | None = None,
+        member_authenticator: Callable[[str], str] | None = None,
         hub_id: str = "",
         clock=time.time,
     ) -> None:
@@ -56,6 +57,7 @@ class HubService:
             else b""
         )
         self._owner_authenticator = owner_authenticator
+        self._member_authenticator = member_authenticator or owner_authenticator
         self._clock = clock
         self._signing_key = self._load_or_create_key(Path(identity_path))
         repository.initialize_owner(
@@ -83,6 +85,11 @@ class HubService:
         if not secrets.compare_digest(supplied, self._owner_token_hash):
             raise PermissionError("Hub account authentication rejected")
         return self.owner_subject_id
+
+    def authenticate_member(self, token: str) -> str:
+        if self._member_authenticator is not None:
+            return self._member_authenticator(token)
+        return self.authenticate_owner(token)
 
     def enroll_node(self, request: dict) -> dict:
         grant = self.repository.enrollment(str(request["grant_id"]), str(request["grant_secret"]))
@@ -127,8 +134,17 @@ class HubService:
             raise PermissionError("Node presence signature rejected") from exc
         return self.repository.record_presence(node["node_id"], str(request["nonce"]))
 
-    def issue_ticket(self, installation_id: str, node_id: str, transport: str) -> str:
+    def issue_ticket(
+        self,
+        installation_id: str,
+        node_id: str,
+        transport: str,
+        *,
+        subject_id: str | None = None,
+    ) -> str:
         installation = self.repository.installation(installation_id)
+        if subject_id is not None and installation["subject_id"] != subject_id:
+            raise PermissionError("App installation does not belong to account")
         self.repository.node(node_id)
         if transport not in {"direct", "relay"}:
             raise ValueError("Connection transport is invalid")

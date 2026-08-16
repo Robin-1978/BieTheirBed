@@ -208,11 +208,12 @@ Node A               Node B               Node C
 - Node-to-Node 共享 LLM 同样 direct 优先、Relay fallback，并复用同一 invocation ID；
 - Hub/Relay 单实例部署，不启用多 worker。
 
-### 6.3 Knoa Hosted Hub（形态 3 仿真实现，非生产交付）
+### 6.3 Knoa Hosted Hub Single-Node（形态 3 单节点 MVP）
 
 ```text
-Knoa Hosted Simulation :9540
-├── Hosted Account bootstrap / token digest
+Knoa Hosted Hub :9529
+├── Account / LoginIdentity / PasswordCredential / Session
+├── Workspace / Membership / one-time recovery grant
 ├── shared Hosted Hub identity
 └── /workspaces/{workspace_id}
     ├── isolated Workspace SQLite
@@ -222,24 +223,27 @@ Knoa Hosted Simulation :9540
 
 Hosted 形态不是给每个用户启动一套物理 Hub 进程，而是共享基础设施中的逻辑 Workspace 隔离。
 
-当前已交付 `hosted_simulation` composition，用真实 HTTP 路由、账户 token、独立 tenant database 和
-RelayBroker 验证形态 3 的关键边界：
+当前已交付 `hosted_single_node` composition，用真实 HTTP 路由、密码登录、Session、独立 tenant
+database 和 RelayBroker 形成形态 3 的单节点闭环：
 
-- Hosted 根服务拥有 Account、token 摘要和 Personal Workspace 映射；
+- Hosted 根服务拥有 Account、LoginIdentity、scrypt 密码凭证、Session、Workspace 与 Membership；
+- Bootstrap Secret 只签发一次性 Account/密码恢复 grant，不进入 App；
 - 同一 Hosted Hub 的 Workspace 共享 `hub_id` 与 signing identity；
 - 每个 Workspace 使用独立 `HubApplication`、SQLite 和 Relay 连接表；
-- Account token 只能进入自己的 `/workspaces/{workspace_id}`；
+- Account Session 只能进入具有 active Membership 的 `/workspaces/{workspace_id}`；
+- member 可读和使用 Workspace，owner/admin 才能修改资源或签发 Node enrollment grant；
 - Node enrollment、directory、资源授权和 Relay 状态不能跨 Workspace；
-- App 可创建仿真账户并自动切换到返回的 Workspace URL。
+- App 可创建/登录/恢复帐号、管理 Workspace 和 owner-managed shared membership；
+- 提供一致性备份、完整性校验和仅向空目录恢复的运维入口。
 
-该实现用于验证架构、协议与 App 流程，不等同于生产 Hosted。生产仍未完成：
+该实现可作为个人和受控小规模部署的单节点 Hosted MVP，不等同于 HA 公有云 Hosted。后续生产化仍需：
 
-- Account recovery 与 step-up authentication；
+- MFA/step-up、外部验证渠道与自助恢复投递；
 - 生产多租户数据库、Relay 跨实例路由与容量治理；
 - abuse control、计费、SLO 和数据保留；
-- Hosted Secret/Key 管理与完整运维体系。
+- 托管 KMS/HSM、自动备份保留和演练 SLO。
 
-因此当前代码只能以“Hosted Hub Simulation”名义部署。
+因此当前代码应明确标记为“Hosted Hub Single-Node”，不能标记为多区域或高可用 Hosted 服务。
 
 ## 7. Node 进程拓扑
 
@@ -364,8 +368,9 @@ Node A 是执行结果权威。Hub 只保存授权、票据元数据和非权威
 如果 Node 与 Hub 在同一机器运行，Node Capability MCP Host 和 Hub 默认端口都会使用 `9530`，必须
 修改其中一个监听端口。生产环境更推荐将 Hub 作为独立服务账户、容器或主机部署。
 
-形态 3 仿真部署固定建议使用 `127.0.0.1:9540`，避免与 Node Capability MCP Host 和 Self-hosted
-Hub 的默认端口冲突。公网入口仍应由独立 TLS ingress 提供，不直接暴露 Uvicorn listener。
+形态 3 单节点 Hosted 部署使用 `127.0.0.1:9529` 承接唯一公网 Hub 域名。若同机 Node 原来占用
+`9529`，应先把 Node Secure Gateway 移到另一个 loopback 端口（当前部署使用 `9531`）并清空其
+public URL，再由 Hosted Hub 接管 `9529`。公网入口仍由 TLS ingress 提供，不直接暴露 Uvicorn。
 
 ### 10.3 TLS 原则
 
@@ -420,25 +425,26 @@ Hub signing key 与数据库必须作为同一恢复单元治理。只恢复数�
 对 Hub identity 的固定；只恢复 signing key 而丢失数据库也无法恢复 membership、Node directory 和
 未过期授权事实。
 
-Hosted Simulation Root 建议为 `~/.local/share/knoa/hosted-hub`：
+Hosted Single-Node Root 建议为 `~/.local/share/knoa/hosted-hub`：
 
 ```text
 hosted-hub/
-├── accounts.db
+├── control.db
 ├── hub-signing.key
 └── tenants/<workspace_id>/hub.db
 ```
 
-`accounts.db` 只保存 access token 的 SHA-256 摘要，不保存 token 明文。账户库、共享 signing key 与
-全部 tenant database 是一个恢复单元；缺失其中任一部分都不能宣称完成 Hosted 恢复。
+`control.db` 保存 Account、登录身份、scrypt 密码摘要、Session digest、Workspace、Membership 和
+一次性 grant digest，不保存 Session/grant 明文。控制库、共享 signing key 与全部 tenant database
+是一个恢复单元；缺失其中任一部分都不能宣称完成 Hosted 恢复。
 
 ## 12. 备份、恢复与升级
 
 ### 12.1 当前事实
 
-仓库当前已有 Node 服务脚本、Cloudflare 示例和 Hosted Simulation user systemd unit；仍未提供生产级
-Hub Dockerfile、Docker Compose、自动备份与恢复制品。因此当前是“仿真部署可重复”，不是“生产
-Hosted 部署包已经交付”。
+仓库当前已有 Node 服务脚本、Cloudflare 示例、Hosted Single-Node user systemd unit，以及使用
+SQLite backup API 的 Hosted 一致性备份/恢复命令。仍未提供多实例容器编排、自动异地复制和
+SLO-backed 灾备，因此当前是“单节点 Hosted MVP 可部署”，不是“HA Hosted 平台已经交付”。
 
 ### 12.2 最低备份要求
 
@@ -552,7 +558,7 @@ Relay 仍不能获得 Workspace 明文、Node Secret、模型 Prompt、模型响
 - 把已验证的 per-Workspace 隔离迁移到生产多租户存储与完整隔离测试矩阵；
 - Relay 多实例和跨实例路由；
 - rate limit、abuse control、容量压测和 SLO；
-- Account recovery、step-up 和 key rotation；
+- 外部验证渠道、自助 Account recovery、MFA/step-up 和 key rotation；
 - metadata 隐私、数据保留与删除；
 - 灾难恢复、区域故障与审计合规。
 
@@ -563,8 +569,8 @@ Relay 仍不能获得 Workspace 明文、Node Secret、模型 Prompt、模型响
 ```text
 普通单机用户：No-Hub direct
 个人多 Node 用户：单实例 Self-hosted HubService + Relay
-架构/产品联调：Hosted Hub Simulation，单进程 `127.0.0.1:9540`
-公网 Hosted 服务：暂不宣称生产可用
+个人/受控 Hosted：Hosted Hub Single-Node，单进程 `127.0.0.1:9529`
+公网 HA Hosted：暂不宣称生产可用
 Node：一个 ApplicationDaemon 进程
 Hub/Relay：一个 knoa-hub 进程、一个 worker
 LLM/MCP/Codex：按实际运行需求使用独立外部进程
@@ -574,4 +580,5 @@ Agent/Skill/Tool：保持 Node 内逻辑边界，不拆微服务
 这满足当前 Personal Workspace + N Node 的真实需求，同时为未来 Hosted Hub 与 Relay 水平扩展保留
 清晰边界，而不提前承担分布式系统复杂度。
 
-形态 3 仿真的安装、环境变量、systemd unit 和 API 入口见 `deploy/hosted-hub/README.md`。
+形态 3 单节点 Hosted 的安装、帐号、Workspace、备份、systemd 和 API 入口见
+`deploy/hosted-hub/README.md`。

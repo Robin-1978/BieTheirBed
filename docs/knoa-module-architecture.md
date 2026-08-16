@@ -181,11 +181,13 @@ knoa-hub
 └── RelayBroker
 ```
 
-形态 3 仿真复用同一个 `knoa-hub` 入口，但使用独立 Hosted composition：
+形态 3 单节点 Hosted 复用同一个 `knoa-hub` 入口，但使用独立 Hosted composition：
 
 ```text
-knoa-hub --deployment-mode hosted_simulation
-├── HostedAccountRepository
+knoa-hub --deployment-mode hosted_single_node
+├── HostedControlRepository
+│   ├── Account / LoginIdentity / PasswordCredential / Session
+│   └── Workspace / Membership / one-time enrollment and reset grants
 ├── shared Hub signing identity
 └── HostedTenantDispatcher
     └── isolated HubApplication per Workspace
@@ -193,7 +195,9 @@ knoa-hub --deployment-mode hosted_simulation
         └── RelayBroker
 ```
 
-它验证逻辑多租户边界，不把 tenant 包装成独立物理进程，也不改变 Self-hosted 或 No-Hub composition。
+它是个人和受控小规模使用的单节点 Hosted MVP：帐号控制面位于 `control.db`，每个 Workspace 业务
+状态位于独立 tenant `hub.db`，二者与 signing key 形成一个恢复单元。它不把 tenant 包装成独立物理
+进程，也不改变 Self-hosted 或 No-Hub composition。
 
 Node 侧的 `Node Hub Edge Adapter`（当前由 `NodeHubService + NodeRelayManager` 构成）保存单 Hub
 enrollment，并从 Secure Gateway 生命周期
@@ -267,7 +271,8 @@ transport。Relay ciphertext 内承载现有 Gateway HTTP typed contract，Node 
 | Node identity | 用途隔离的 Ed25519/X25519 Node keys | `src/knoa_platform/node_identity.py` |
 | Fleet candidate | sealed candidate 校验与 Node-local publish | `src/knoa_platform/fleet.py` |
 | Self-hosted Hub composition | 单 Workspace Account、directory、ticket、opaque Relay | `src/knoa_platform/hub/app.py`、`service.py`、`repository.py` |
-| Hosted Hub simulation composition | Hosted Account/token、Workspace 路由、隔离 tenant Hub/Relay | `src/knoa_platform/hub/hosted.py` |
+| Hosted Hub single-node composition | Hosted Account/Session、Workspace/Membership、隔离 tenant Hub/Relay | `src/knoa_platform/hub/hosted.py` |
+| Hosted Hub administration | 一次性注册/恢复 QR、本地 Node enrollment、一致性备份/恢复 | `src/knoa_platform/hub/admin.py` |
 | Node Hub Edge Adapter | Hub enrollment、identity pin、outbound connector、E2E tunnel dispatch | `src/knoa_platform/node_hub.py`、`relay_protocol.py` |
 | App transport | direct 优先、Relay fallback、Node session crypto、有限事件轮询 | `apps/knoa-mobile/src/api/gatewayTransport*.ts`、`relayCrypto.ts` |
 

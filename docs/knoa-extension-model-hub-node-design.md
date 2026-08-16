@@ -1250,11 +1250,13 @@ proxy、备份恢复和单 worker 启动约束也尚未形成完整标准部署�
 
 验收：普通用户登录后可 enrollment 多台 Node，无需理解网络和 TLS。
 
-当前已完成 Phase 4 的 `hosted_simulation` 垂直切片：Hosted 根账户库只保存 token digest 和 Personal
-Workspace 映射；每个 Workspace 使用隔离的 Hub SQLite 与 RelayBroker；全部 tenant 共享 Hosted
-issuer/signing identity；HTTP、Node enrollment/directory、跨 tenant token 拒绝、重启持久化和 App
-账户创建流程已有自动化验证。该切片验证架构形状，不包含生产 login/recovery、Relay fleet、限流、
-HA、计费与运维 SLO，因此不得标记为 Phase 4 生产完成。
+当前已完成 Phase 4 的 `hosted_single_node` MVP：Hosted 控制面保存 Account、LoginIdentity、scrypt
+PasswordCredential、Session digest、Workspace、Membership 与一次性 Account/密码恢复 grant；每个
+Workspace 使用隔离的 Hub SQLite 与 RelayBroker；全部 tenant 共享 Hosted issuer/signing identity；
+member 与 owner/admin 权限分离；HTTP、Node enrollment/directory、跨 Workspace Session 拒绝、重启
+持久化、App 帐号/Workspace 流程和一致性备份恢复已有自动化验证。该实现可供个人和受控小规模部署，
+但不包含 MFA/step-up、Relay fleet、多实例路由、自动异地灾备、计费与运维 SLO，因此不得标记为
+Phase 4 HA 公有云生产完成。
 
 ### Phase 5：Catalog、Marketplace 与 Fleet Config
 

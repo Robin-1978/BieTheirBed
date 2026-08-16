@@ -15,6 +15,7 @@ from knoa_agent_contracts import (
     TurnFinished,
 )
 from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
+from knoa_platform.agent_runtime.tool_step import ProposedToolCall
 from knoa_platform.conversation import (
     ChatTurnState,
     ConversationRepository,
@@ -119,6 +120,32 @@ class ArtifactRuntime(ChunkRuntime):
             status="completed",
             output={"artifact": {"artifact_id": "invalid"}},
         )
+        yield TurnFinished(
+            **_base(request),
+            status="completed",
+            final_output="done",
+        )
+
+
+class ApprovalRuntime(ChunkRuntime):
+    def __init__(self) -> None:
+        super().__init__(chunks=0)
+        self.tool_executed = False
+
+    async def execute_turn(self, request):
+        self.started.set()
+        approved = await request.confirmation.confirm(
+            request.scope,
+            request.turn_id,
+            ProposedToolCall(
+                call_id="call-a",
+                name="write_file",
+                arguments={"path": "out.txt"},
+            ),
+            "local_write:medium",
+        )
+        if approved:
+            self.tool_executed = True
         yield TurnFinished(
             **_base(request),
             status="completed",
@@ -241,3 +268,41 @@ async def test_stop_marks_live_turn_cancelled(tmp_path: Path) -> None:
     assert stored.state is ChatTurnState.CANCELLED
     assert stored.cancel_requested is True
     assert stored.finished_at is not None
+
+
+@pytest.mark.asyncio
+async def test_cancel_expires_waiting_approval_and_never_executes_tool(
+    tmp_path: Path,
+) -> None:
+    runtime = ApprovalRuntime()
+    _database, scope, repository, service = _service(tmp_path, runtime)
+    await service.start()
+    turn = await service.create_turn(
+        scope,
+        client_request_id="request-a",
+        user_input="write a file",
+    )
+
+    async with asyncio.timeout(2):
+        while True:
+            waiting = repository.get(scope.principal_id, turn.turn_id)
+            if waiting.state is ChatTurnState.WAITING_APPROVAL:
+                break
+            await asyncio.sleep(0.01)
+
+    await service.cancel(scope.principal_id, turn.turn_id)
+
+    async with asyncio.timeout(2):
+        while True:
+            stored = repository.get(scope.principal_id, turn.turn_id)
+            if stored.state is ChatTurnState.CANCELLED:
+                break
+            await asyncio.sleep(0.01)
+
+    assert stored.cancel_requested is True
+    assert stored.finished_at is not None
+    assert len(stored.approvals) == 1
+    assert stored.approvals[0].state == "expired"
+    assert stored.approvals[0].resolved_by == "turn_cancelled"
+    assert runtime.tool_executed is False
+    await service.stop()

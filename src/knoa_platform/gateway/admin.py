@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from knoa_platform.config import load_config
 from knoa_platform.gateway.audit import GatewayAuditRepository
@@ -84,7 +84,7 @@ def run_gateway_admin(
 
 
 def _timestamp(value: float) -> str:
-    return datetime.fromtimestamp(value, UTC).isoformat()
+    return datetime.fromtimestamp(value, timezone.utc).isoformat()
 
 
 def _print_qr(payload: str) -> None:

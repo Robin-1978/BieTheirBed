@@ -13,7 +13,7 @@ from knoa_platform.agent_runtime.tool_step import (
     ToolStep,
     ToolStepContext,
 )
-from knoa_platform.context.memory_db import SQLiteMemoryRepository, ScopedUserMemory
+from knoa_platform.context.memory_db import ScopedUserMemory, SQLiteMemoryRepository
 from knoa_platform.context.scope import current_memory_scope
 from knoa_platform.tools.base import (
     ToolBase,
@@ -22,8 +22,8 @@ from knoa_platform.tools.base import (
     ToolPolicy,
     ToolRisk,
 )
-from knoa_platform.tools.registry import ToolRegistry
 from knoa_platform.tools.memory_tool import MemoryTool
+from knoa_platform.tools.registry import ToolRegistry
 
 
 class RecordingTool(ToolBase):
@@ -290,6 +290,41 @@ async def test_unknown_policy_and_cancellation_never_commit(tmp_path: Path) -> N
     assert unknown.code == "capability_denied"
     assert cancelled.status == "not_executed"
     assert cancelled.code == "cancelled"
+    assert tool.calls == []
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_confirmation_never_executes_tool(
+    tmp_path: Path,
+) -> None:
+    tool = RecordingTool()
+    cancellation = asyncio.Event()
+
+    class CancellingConfirmation:
+        async def confirm(self, scope, run_id, call, reason: str) -> bool:
+            del scope, run_id, call, reason
+            cancellation.set()
+            return True
+
+    context = ToolStepContext(
+        scope=RuntimeScope(principal_id="local", session_handle="session-a"),
+        run_id="run-a",
+        client_request_id="request-a",
+        capabilities=frozenset({ToolCapability.HOST_WRITE}),
+        cancellation=cancellation,
+        confirmation=CancellingConfirmation(),
+    )
+    result = await _step(tmp_path, tool).execute(
+        context,
+        ProposedToolCall(
+            call_id="call-a",
+            name="record",
+            arguments={"path": "out.txt", "options": {"enabled": True}},
+        ),
+    )
+
+    assert result.status == "not_executed"
+    assert result.code == "cancelled"
     assert tool.calls == []
 
 

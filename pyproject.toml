@@ -47,6 +47,7 @@ dev = [
 [project.scripts]
 knoa = "knoa_platform:main"
 knoa-hub = "knoa_platform.hub.__main__:main"
+knoa-hub-admin = "knoa_platform.hub.admin:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/knoa_platform", "src/knoa_agent", "src/knoa_agent_contracts", "src/knoa_codex_agent"]

@@ -32,6 +32,7 @@ from knoa_platform.approvals import (
     ApprovalReviewer,
     ApprovalReviewMode,
     ApprovalReviewRequest,
+    ApprovalReviewResult,
 )
 from knoa_platform.artifacts import ArtifactRef, artifact_refs_from_tool_output
 from knoa_platform.conversation.models import (
@@ -158,19 +159,29 @@ class ConversationApprovalService:
             if approval.approval_id in self._waiters:
                 raise RuntimeError("Approval already has a live waiter")
             self._waiters[approval.approval_id] = future
+        review: ApprovalReviewResult | None = None
+        review_task: asyncio.Task[ApprovalReviewResult] | None = None
         try:
+            current = await asyncio.to_thread(
+                self._repository.get_approval,
+                scope.principal_id,
+                approval.approval_id,
+            )
+            if current.state != "pending" and not future.done():
+                future.set_result(current.state == "approved")
             if (
                 _created
                 and self._reviewer is not None
                 and self._review_mode is not ApprovalReviewMode.OFF
+                and not future.done()
             ):
                 turn = await asyncio.to_thread(
                     self._repository.get,
                     scope.principal_id,
                     run_id,
                 )
-                review = await self._reviewer.review(
-                    ApprovalReviewRequest(
+                review_task = asyncio.create_task(
+                    self._reviewer.review(ApprovalReviewRequest(
                         principal_id=scope.principal_id,
                         run_id=run_id,
                         human_instruction=turn.user_input,
@@ -181,8 +192,17 @@ class ConversationApprovalService:
                             "risk": reason.partition(":")[2] or "high",
                             "reason": reason,
                         },
-                    )
+                    ))
                 )
+                done, _pending = await asyncio.wait(
+                    {review_task, future},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if future in done:
+                    review_task.cancel()
+                    await asyncio.gather(review_task, return_exceptions=True)
+                    return await future
+                review = await review_task
                 rules = ",".join(review.rule_ids)
                 approval = await asyncio.to_thread(
                     self._repository.annotate_approval_review,
@@ -199,6 +219,7 @@ class ConversationApprovalService:
                 _created
                 and self._reviewer is not None
                 and self._review_mode is ApprovalReviewMode.AUTO
+                and review is not None
                 and self._may_auto_resolve(review.decision, reason)
             ):
                 resolved, _changed = await self.resolve(
@@ -210,6 +231,9 @@ class ConversationApprovalService:
                 return resolved.state == "approved"
             return await future
         finally:
+            if review_task is not None and not review_task.done():
+                review_task.cancel()
+                await asyncio.gather(review_task, return_exceptions=True)
             async with self._lock:
                 if self._waiters.get(approval.approval_id) is future:
                     self._waiters.pop(approval.approval_id, None)
@@ -248,6 +272,19 @@ class ConversationApprovalService:
                 waiter.set_result(approved)
         await self._notify(turn_id)
         return approval, changed
+
+    async def cancel_turn(self, principal_id: str, turn_id: str) -> None:
+        approval_ids = await asyncio.to_thread(
+            self._repository.expire_pending_approvals,
+            principal_id,
+            turn_id,
+            resolved_by="turn_cancelled",
+        )
+        async with self._lock:
+            for approval_id in approval_ids:
+                waiter = self._waiters.get(approval_id)
+                if waiter is not None and not waiter.done():
+                    waiter.set_result(False)
 
     async def close(self) -> None:
         async with self._lock:
@@ -541,15 +578,15 @@ class ConversationService:
             await self._hub.unsubscribe(turn_id, subscription)
 
     async def cancel(self, principal_id: str, turn_id: str) -> ChatTurn:
+        turn = await asyncio.to_thread(
+            self._repository.request_cancel,
+            principal_id,
+            turn_id,
+        )
         live = self._live.get(turn_id)
         if live is not None:
             live.cancellation.set()
-        turn = await asyncio.to_thread(
-            self._repository.checkpoint,
-            principal_id,
-            turn_id,
-            cancel_requested=True,
-        )
+        await self._approvals.cancel_turn(principal_id, turn_id)
         await self._notify(turn_id)
         return turn
 

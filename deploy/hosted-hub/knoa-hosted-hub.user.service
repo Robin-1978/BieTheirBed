@@ -1,12 +1,12 @@
 [Unit]
-Description=Knoa Hosted Hub Simulation
+Description=Knoa Hosted Hub Single-Node
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 EnvironmentFile=%h/.config/knoa/hosted-hub.env
-ExecStart=%h/.local/share/knoa/hosted-hub-venv/bin/knoa-hub --deployment-mode hosted_simulation --host 127.0.0.1 --port 9540 --root %h/.local/share/knoa/hosted-hub --hub-id hub_hosted_sim
+ExecStart=%h/.local/share/knoa/hosted-hub-venv/bin/knoa-hub --deployment-mode hosted_single_node --host 127.0.0.1 --port 9529 --root %h/.local/share/knoa/hosted-hub --hub-id hub_knoa_hosted
 Restart=on-failure
 RestartSec=5
 UMask=0077

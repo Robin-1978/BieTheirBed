@@ -1,3 +1,4 @@
+import { CameraView, useCameraPermissions } from "expo-camera";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
@@ -5,12 +6,22 @@ import { ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { AppPressable } from "@/components/AppPressable";
 import { useGateway } from "@/state/GatewayProvider";
 import {
+  addHostedWorkspaceMember,
   connectHub,
-  createHostedSimulationAccount,
+  createHostedWorkspace,
   createNodeEnrollmentGrant,
+  listHostedWorkspaceMembers,
+  listHostedWorkspaces,
   listHubNodes,
+  loginHostedAccount,
   loadHubConnection,
+  registerHostedAccount,
+  removeHostedWorkspaceMember,
+  resetHostedPassword,
+  selectHostedWorkspace,
   type HubNode,
+  type HostedWorkspace,
+  type HostedWorkspaceMember,
 } from "@/hub/hubClient";
 import { colors } from "@/theme";
 
@@ -22,6 +33,16 @@ export default function NodeCenterScreen() {
   const [workspaceId, setWorkspaceId] = useState("");
   const [deploymentMode, setDeploymentMode] = useState("");
   const [hostedLogin, setHostedLogin] = useState("");
+  const [hostedDisplayName, setHostedDisplayName] = useState("");
+  const [hostedPassword, setHostedPassword] = useState("");
+  const [hostedSetup, setHostedSetup] = useState("");
+  const [hostedRecovery, setHostedRecovery] = useState("");
+  const [hostedWorkspaces, setHostedWorkspaces] = useState<HostedWorkspace[]>([]);
+  const [hostedMembers, setHostedMembers] = useState<HostedWorkspaceMember[]>([]);
+  const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const [newMemberLogin, setNewMemberLogin] = useState("");
+  const [scanningHostedSetup, setScanningHostedSetup] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [hubNodes, setHubNodes] = useState<HubNode[]>([]);
   const [message, setMessage] = useState("");
   const [nodeHub, setNodeHub] = useState<{ enrolled: boolean; relay_connected: boolean; last_error: string } | null>(null);
@@ -29,11 +50,17 @@ export default function NodeCenterScreen() {
   useEffect(() => {
     void loadHubConnection().then(async (connection) => {
       if (!connection) return;
-      setHubUrl(connection.url);
+      setHubUrl(connection.rootUrl);
       setHubId(connection.hubId);
       setWorkspaceId(connection.workspaceId);
       setDeploymentMode(connection.deploymentMode);
       setHubNodes(await listHubNodes());
+      const workspaces = await listHostedWorkspaces();
+      setHostedWorkspaces(workspaces);
+      const current = workspaces.find((item) => item.workspaceId === connection.workspaceId);
+      if (current && current.role !== "member") {
+        setHostedMembers(await listHostedWorkspaceMembers(current.workspaceId));
+      }
     }).catch(() => undefined);
   }, []);
 
@@ -58,23 +85,104 @@ export default function NodeCenterScreen() {
     }
   }
 
-  async function createHostedAccount() {
+  async function registerHosted() {
     try {
-      const account = await createHostedSimulationAccount(
-        hubUrl,
-        hubToken,
+      const account = await registerHostedAccount(
+        hostedSetup,
         hostedLogin,
-        hostedLogin.split("@")[0] || "Knoa User",
+        hostedDisplayName || hostedLogin.split("@")[0] || "Knoa User",
+        hostedPassword,
       );
-      setHubUrl(account.connection.url);
-      setHubId(account.connection.hubId);
-      setWorkspaceId(account.connection.workspaceId);
-      setDeploymentMode(account.connection.deploymentMode);
-      setHubToken("");
+      applyHostedAccount(account.connection, account.workspaces);
+      setHostedSetup("");
+      setHostedPassword("");
       setHubNodes([]);
-      setMessage(`Hosted 仿真帐号已创建：${account.loginIdentity}`);
+      setMessage(`Hosted Account 已创建：${account.loginIdentity}`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Hosted 仿真帐号创建失败");
+      setMessage(error instanceof Error ? error.message : "Hosted Account 创建失败");
+    }
+  }
+
+  async function loginHosted() {
+    try {
+      const account = await loginHostedAccount(hubUrl, hostedLogin, hostedPassword);
+      applyHostedAccount(account.connection, account.workspaces);
+      setHostedPassword("");
+      setHubNodes(await listHubNodes());
+      setMessage(`Hosted Account 已登录：${account.loginIdentity}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Hosted Account 登录失败");
+    }
+  }
+
+  async function recoverHosted() {
+    try {
+      const account = await resetHostedPassword(hostedRecovery, hostedPassword);
+      applyHostedAccount(account.connection, account.workspaces);
+      setHostedRecovery("");
+      setHostedPassword("");
+      setHubNodes(await listHubNodes());
+      setMessage(`Hosted Account 密码已恢复：${account.loginIdentity}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Hosted Account 密码恢复失败");
+    }
+  }
+
+  function applyHostedAccount(connection: Awaited<ReturnType<typeof loadHubConnection>> & {}, workspaces: HostedWorkspace[]) {
+    setHubUrl(connection.rootUrl);
+    setHubId(connection.hubId);
+    setWorkspaceId(connection.workspaceId);
+    setDeploymentMode(connection.deploymentMode);
+    setHostedWorkspaces(workspaces);
+  }
+
+  async function addWorkspace() {
+    try {
+      const workspace = await createHostedWorkspace(newWorkspaceName);
+      setHostedWorkspaces(await listHostedWorkspaces());
+      setNewWorkspaceName("");
+      setMessage(`Workspace 已创建：${workspace.displayName}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Workspace 创建失败");
+    }
+  }
+
+  async function switchWorkspace(workspace: HostedWorkspace) {
+    try {
+      const connection = await selectHostedWorkspace(workspace);
+      setWorkspaceId(connection.workspaceId);
+      setHubNodes(await listHubNodes());
+      setHostedMembers(
+        workspace.role === "member"
+          ? []
+          : await listHostedWorkspaceMembers(workspace.workspaceId),
+      );
+      setMessage(`已切换 Workspace：${workspace.displayName}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Workspace 切换失败");
+    }
+  }
+
+  async function addMember() {
+    try {
+      const workspace = hostedWorkspaces.find((item) => item.workspaceId === workspaceId);
+      if (!workspace || workspace.kind !== "shared") throw new Error("请先选择 Shared Workspace");
+      await addHostedWorkspaceMember(workspace.workspaceId, newMemberLogin, "member");
+      setHostedMembers(await listHostedWorkspaceMembers(workspace.workspaceId));
+      setNewMemberLogin("");
+      setMessage(`Workspace 成员已加入：${newMemberLogin}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Workspace 成员添加失败");
+    }
+  }
+
+  async function removeMember(member: HostedWorkspaceMember) {
+    try {
+      await removeHostedWorkspaceMember(workspaceId, member.accountId);
+      setHostedMembers(await listHostedWorkspaceMembers(workspaceId));
+      setMessage(`Workspace 成员已移除：${member.loginIdentity}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Workspace 成员移除失败");
     }
   }
 
@@ -100,6 +208,32 @@ export default function NodeCenterScreen() {
       setMessage(error instanceof Error ? error.message : "Node Hub enrollment 失败");
     }
   }
+  if (scanningHostedSetup && cameraPermission?.granted) {
+    return (
+      <View style={styles.scanner}>
+        <CameraView
+          style={StyleSheet.absoluteFill}
+          barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+          onBarcodeScanned={({ data }) => {
+            try {
+              const version = (JSON.parse(data) as { version?: string }).version;
+              if (version === "knoa-hosted-password-reset-v1") setHostedRecovery(data);
+              else setHostedSetup(data);
+            } catch {
+              setHostedSetup(data);
+            }
+            setScanningHostedSetup(false);
+          }}
+        />
+        <View style={styles.scanFrame} />
+        <Text style={styles.scanHint}>扫描 knoa-hub-admin 生成的注册或密码恢复二维码</Text>
+        <AppPressable style={styles.cancelScan} onPress={() => setScanningHostedSetup(false)}>
+          <Text style={styles.primaryText}>取消</Text>
+        </AppPressable>
+      </View>
+    );
+  }
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.section}>
@@ -130,10 +264,64 @@ export default function NodeCenterScreen() {
         <TextInput value={hubUrl} onChangeText={setHubUrl} placeholder="https://hub.example.com" placeholderTextColor={colors.muted} autoCapitalize="none" style={styles.input} />
         <TextInput value={hubToken} onChangeText={setHubToken} placeholder="帐号令牌" placeholderTextColor={colors.muted} secureTextEntry autoCapitalize="none" style={styles.input} />
         <AppPressable style={styles.primary} onPress={() => void saveHub()}><Text style={styles.primaryText}>{hubId ? "更新 Hub 连接" : "连接 Hub"}</Text></AppPressable>
-        <Text style={styles.hint}>Hosted 仿真首次注册：填写 Hosted 根地址、注册令牌和登录标识。注册令牌仅用于创建帐号，返回的帐号令牌会写入安全存储。</Text>
+        <Text style={styles.title}>Hosted Account</Text>
+        <Text style={styles.hint}>Bootstrap Secret 只保留在服务器。App 使用一次性二维码创建帐号或恢复密码，也可使用帐号和密码重新登录。</Text>
+        <AppPressable style={styles.secondary} onPress={async () => {
+          if (!cameraPermission?.granted) {
+            const permission = await requestCameraPermission();
+            if (!permission.granted) {
+              setMessage("需要相机权限才能扫描 Hosted Account 注册二维码");
+              return;
+            }
+          }
+          setScanningHostedSetup(true);
+        }}><Text style={styles.secondaryText}>扫描帐号注册 / 密码恢复二维码</Text></AppPressable>
+        <TextInput value={hostedSetup} onChangeText={setHostedSetup} placeholder="或粘贴 hosted_setup_json" placeholderTextColor={colors.muted} autoCapitalize="none" multiline style={[styles.input, styles.payload]} />
+        <TextInput value={hostedRecovery} onChangeText={setHostedRecovery} placeholder="或粘贴密码恢复 hosted_setup_json" placeholderTextColor={colors.muted} autoCapitalize="none" multiline style={[styles.input, styles.payload]} />
         <TextInput value={hostedLogin} onChangeText={setHostedLogin} placeholder="登录标识，例如 owner@example.com" placeholderTextColor={colors.muted} autoCapitalize="none" style={styles.input} />
-        <AppPressable style={styles.secondary} onPress={() => void createHostedAccount()}><Text style={styles.secondaryText}>创建 Hosted 仿真帐号</Text></AppPressable>
+        <TextInput value={hostedDisplayName} onChangeText={setHostedDisplayName} placeholder="帐号显示名称" placeholderTextColor={colors.muted} style={styles.input} />
+        <TextInput value={hostedPassword} onChangeText={setHostedPassword} placeholder="帐号密码（至少 12 位）" placeholderTextColor={colors.muted} secureTextEntry autoCapitalize="none" style={styles.input} />
+        <View style={styles.buttonRow}>
+          <AppPressable style={[styles.secondary, styles.flex]} onPress={() => void registerHosted()}><Text style={styles.secondaryText}>创建帐号</Text></AppPressable>
+          <AppPressable style={[styles.secondary, styles.flex]} onPress={() => void recoverHosted()}><Text style={styles.secondaryText}>恢复密码</Text></AppPressable>
+          <AppPressable style={[styles.primary, styles.flex]} onPress={() => void loginHosted()}><Text style={styles.primaryText}>登录帐号</Text></AppPressable>
+        </View>
         {hubId ? <Text style={styles.key}>Workspace · {workspaceId || hubId}{"\n"}HubService · {hubId}{"\n"}Mode · {deploymentMode || "self_hosted"}</Text> : null}
+        {hostedWorkspaces.map((workspace) => (
+          <AppPressable key={workspace.workspaceId} style={[styles.node, workspace.workspaceId === workspaceId && styles.active]} disabled={workspace.workspaceId === workspaceId} onPress={() => void switchWorkspace(workspace)}>
+            <View style={styles.row}><Text style={styles.nodeTitle}>{workspace.displayName}</Text><Text style={styles.meta}>{workspace.kind} · {workspace.role}</Text></View>
+            <Text style={styles.meta}>{workspace.workspaceId}</Text>
+          </AppPressable>
+        ))}
+        {hostedWorkspaces.length ? (
+          <View style={styles.buttonRow}>
+            <TextInput value={newWorkspaceName} onChangeText={setNewWorkspaceName} placeholder="新 Workspace 名称" placeholderTextColor={colors.muted} style={[styles.input, styles.flex]} />
+            <AppPressable style={styles.secondary} onPress={() => void addWorkspace()}><Text style={styles.secondaryText}>创建</Text></AppPressable>
+          </View>
+        ) : null}
+        {hostedWorkspaces.find((item) => item.workspaceId === workspaceId)?.kind === "shared"
+          && hostedWorkspaces.find((item) => item.workspaceId === workspaceId)?.role === "owner" ? (
+          <View style={styles.memberSection}>
+            <Text style={styles.title}>Workspace Members</Text>
+            <Text style={styles.hint}>成员可读取目录、连接 Node 和使用已授权资源；只有 owner/admin 可修改 Workspace 资源与登记 Node。</Text>
+            <View style={styles.buttonRow}>
+              <TextInput value={newMemberLogin} onChangeText={setNewMemberLogin} placeholder="成员登录标识" placeholderTextColor={colors.muted} autoCapitalize="none" style={[styles.input, styles.flex]} />
+              <AppPressable style={styles.secondary} onPress={() => void addMember()}><Text style={styles.secondaryText}>添加</Text></AppPressable>
+            </View>
+            {hostedMembers.map((member) => (
+              <View key={member.accountId} style={styles.node}>
+                <View style={styles.row}>
+                  <Text style={styles.nodeTitle}>{member.displayName}</Text>
+                  <Text style={styles.meta}>{member.role}</Text>
+                </View>
+                <Text style={styles.meta}>{member.loginIdentity}</Text>
+                {member.role !== "owner" ? (
+                  <AppPressable style={styles.secondary} onPress={() => void removeMember(member)}><Text style={styles.secondaryText}>移除成员</Text></AppPressable>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        ) : null}
         {hubId && gateway.nodeId ? (
           <AppPressable style={styles.primary} onPress={() => void enrollCurrentNode()}>
             <Text style={styles.primaryText}>{nodeHub?.enrolled ? "重新登记当前 Node" : "将当前 Node 加入 Hub"}</Text>
@@ -173,4 +361,12 @@ const styles = StyleSheet.create({
   secondary: { backgroundColor: colors.surface, borderRadius: 13, padding: 14, alignItems: "center", borderWidth: 1, borderColor: colors.accent },
   secondaryText: { color: colors.accent, fontWeight: "800" },
   input: { backgroundColor: colors.background, color: colors.ink, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 12, borderWidth: 1, borderColor: colors.line },
+  payload: { minHeight: 96, textAlignVertical: "top" },
+  buttonRow: { flexDirection: "row", gap: 10, alignItems: "center" },
+  flex: { flex: 1 },
+  memberSection: { gap: 10 },
+  scanner: { flex: 1, alignItems: "center", justifyContent: "center" },
+  scanFrame: { width: 260, height: 260, borderWidth: 2, borderColor: "white", borderRadius: 24 },
+  scanHint: { position: "absolute", bottom: 116, color: "white", backgroundColor: "rgba(0,0,0,0.58)", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16 },
+  cancelScan: { position: "absolute", bottom: 56, backgroundColor: "rgba(0,0,0,0.65)", paddingHorizontal: 20, paddingVertical: 12, borderRadius: 20 },
 });

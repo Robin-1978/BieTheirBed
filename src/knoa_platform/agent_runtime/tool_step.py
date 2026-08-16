@@ -4,8 +4,8 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
-from contextvars import ContextVar, Token
 from collections.abc import Callable
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -259,6 +259,14 @@ class ToolStep:
                 call.model_copy(update={"name": tool_name, "arguments": arguments}),
                 f"{policy.effect.value}:{policy.risk.value}",
             )
+            if context.cancellation.is_set():
+                return self._result(
+                    call,
+                    "not_executed",
+                    tool_name=tool_name,
+                    code="cancelled",
+                    message="Run cancelled while waiting for confirmation",
+                )
             if not approved:
                 return self._result(
                     call,
