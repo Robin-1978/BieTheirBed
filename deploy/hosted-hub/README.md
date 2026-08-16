@@ -14,6 +14,10 @@ Hosted root
 │   ├── Workspace / Membership
 │   └── one-time account and password-reset grants
 ├── hub-signing.key                 shared Hosted issuer identity
+├── mobile-releases/android/
+│   ├── latest.json                 current Hosted Android release
+│   ├── <version_code>.json         immutable release metadata
+│   └── knoa-<version_code>.apk     immutable signed APK
 └── tenants/<workspace_id>/
     └── hub.db                      isolated Workspace directory/resource state
 ```
@@ -24,8 +28,9 @@ is created with every Account. Shared Workspaces support owner-managed members;
 members may read and use Workspace resources, while owner/admin authorization is
 required for resource mutation and Node enrollment.
 
-`control.db`, `hub-signing.key` and every `tenants/*/hub.db` form one recovery
-unit. Never restore only one tenant database or replace the signing key alone.
+`control.db`, `hub-signing.key`, `mobile-releases/android` and every
+`tenants/*/hub.db` form one recovery unit. Never restore only one tenant
+database, APK tree, or signing key.
 Each Workspace owns an isolated in-process Relay broker, so this deployment must
 run as one process with one Uvicorn worker.
 
@@ -96,6 +101,31 @@ knoa-hub-admin node-enroll \
 Restart the Node after the command writes `data/node-hub.json`. The Node then
 opens its outbound encrypted Relay connection to the Workspace URL.
 
+## Publish the Android App
+
+Hosted Account installations use the Hub's platform release channel. Publish a
+signed APK after installing the new platform wheel:
+
+```bash
+knoa-hub-admin mobile-publish /secure/builds/knoa.apk \
+  --root ~/.local/share/knoa/hosted-hub \
+  --min-version-code 1 \
+  --notes "Hosted Hub update channel"
+```
+
+Inspect the active release with `knoa-hub-admin mobile-latest --root ...`.
+Authenticated Apps query `/v1/mobile/releases/android/latest`; immutable APKs
+are served from their version-and-digest URL. The stable public installation
+link is:
+
+```text
+https://hub.example.com/downloads/android/latest.apk
+```
+
+No-Hub and Self-hosted Hub installations continue to use the selected Node's
+local release channel. Hosted Apps do not silently fall back to a Node release
+when the Hosted update service fails.
+
 ## Backup and restore
 
 Create a WAL-consistent snapshot while the service is running:
@@ -106,9 +136,9 @@ knoa-hub-admin backup \
   --output /secure/backups/knoa-hosted-$(date +%Y%m%d-%H%M%S)
 ```
 
-The command uses SQLite's backup API, verifies every database, copies the Hub
-identity, and writes a digest manifest. Restore only while the Hosted service is
-stopped, into a new empty root:
+The command uses SQLite's backup API, verifies every database and Android
+release, copies the Hub identity and APK tree, and writes a digest manifest.
+Restore only while the Hosted service is stopped, into a new empty root:
 
 ```bash
 knoa-hub-admin restore \

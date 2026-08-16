@@ -1,4 +1,4 @@
-"""Private Android release storage owned by the Secure Gateway deployment."""
+"""Shared Android release domain for Hosted Hub and local Node channels."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import stat
+import subprocess
 import tempfile
 import time
 import zipfile
@@ -17,6 +19,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 _MAX_APK_BYTES = 1024 * 1024 * 1024
 _VERSION_NAME = re.compile(r"[0-9A-Za-z][0-9A-Za-z._+-]{0,31}")
+_PACKAGE_METADATA = re.compile(
+    r"^package: name='(?P<package>[^']+)' versionCode='(?P<code>[0-9]+)' "
+    r"versionName='(?P<name>[^']+)'"
+)
+_KNOA_ANDROID_PACKAGE = "dev.knoa.mobile"
 
 
 class AndroidRelease(BaseModel):
@@ -205,3 +212,67 @@ class AndroidReleaseRepository:
         path = Path(value)
         path.unlink()
         return path
+
+
+def android_release_payload(
+    release: AndroidRelease,
+    *,
+    channel: str,
+    download_path: str,
+) -> dict[str, object]:
+    """Build the stable wire representation shared by Hub and Node APIs."""
+    if channel not in {"hosted", "personal"}:
+        raise ValueError("Android release channel is invalid")
+    return {
+        "platform": "android",
+        "channel": channel,
+        "version_name": release.version_name,
+        "version_code": release.version_code,
+        "min_supported_version_code": release.min_supported_version_code,
+        "size_bytes": release.size_bytes,
+        "sha256": release.sha256,
+        "published_at": release.published_at,
+        "release_notes": release.release_notes,
+        "download_path": download_path,
+    }
+
+
+def read_apk_version(apk_path: Path) -> tuple[str, int]:
+    """Read and validate Knoa package metadata from a compiled APK manifest."""
+    try:
+        result = subprocess.run(
+            [str(_android_aapt()), "dump", "badging", str(apk_path)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError("Unable to read Android APK manifest metadata") from exc
+    first_line = result.stdout.splitlines()[0] if result.stdout else ""
+    match = _PACKAGE_METADATA.match(first_line)
+    if match is None:
+        raise ValueError("Android APK manifest does not contain version metadata")
+    if match.group("package") != _KNOA_ANDROID_PACKAGE:
+        raise ValueError("Android APK package is not dev.knoa.mobile")
+    return match.group("name"), int(match.group("code"))
+
+
+def _android_aapt() -> Path:
+    direct = shutil.which("aapt")
+    if direct:
+        return Path(direct)
+    sdk_roots = tuple(
+        Path(value)
+        for value in (
+            os.environ.get("ANDROID_HOME", ""),
+            os.environ.get("ANDROID_SDK_ROOT", ""),
+            "/disk/dev/android-sdk",
+        )
+        if value
+    )
+    for sdk_root in sdk_roots:
+        candidates = sorted((sdk_root / "build-tools").glob("*/aapt"), reverse=True)
+        if candidates:
+            return candidates[0]
+    raise ValueError("Android aapt is unavailable; load /disk/dev/env.sh first")

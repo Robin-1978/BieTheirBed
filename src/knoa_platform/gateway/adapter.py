@@ -26,7 +26,7 @@ from knoa_platform.gateway.http import GatewayHttp
 from knoa_platform.gateway.identity import (
     GatewayIdentityRepository,
 )
-from knoa_platform.gateway.releases import AndroidReleaseRepository
+from knoa_platform.mobile_releases import AndroidReleaseRepository
 from knoa_platform.gateway.routes import (
     ArtifactRoutes,
     ConfigurationRoutes,

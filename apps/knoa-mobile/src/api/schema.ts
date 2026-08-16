@@ -1171,9 +1171,9 @@ export interface components {
             /**
              * Channel
              * @default personal
-             * @constant
+             * @enum {string}
              */
-            channel: "personal";
+            channel: "personal" | "hosted";
             /** Version Name */
             version_name: string;
             /** Version Code */

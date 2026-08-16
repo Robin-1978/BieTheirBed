@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import sqlite3
+import zipfile
 from pathlib import Path
 
-from knoa_platform.hub.admin import _backup, _restore
+from knoa_platform.hub.admin import _backup, _mobile_latest, _mobile_publish, _restore
 from knoa_platform.hub.hosted import HostedHubApplication
+from knoa_platform.mobile_releases import AndroidReleaseRepository
+
+
+def _apk(path: Path, payload: bytes = b"classes") -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("AndroidManifest.xml", b"manifest")
+        archive.writestr("classes.dex", payload)
 
 
 def test_hosted_backup_and_restore_include_control_identity_and_all_workspaces(
@@ -30,6 +38,10 @@ def test_hosted_backup_and_restore_include_control_identity_and_all_workspaces(
     )
     application.tenants.application(first["default_workspace_id"])
     application.tenants.application(shared["workspace_id"])
+    apk = tmp_path / "knoa.apk"
+    _apk(apk)
+    releases = AndroidReleaseRepository(root / "mobile-releases" / "android")
+    published = releases.publish(apk, version_name="0.2.46", version_code=57)
 
     backup = tmp_path / "backup"
     restored = tmp_path / "restored"
@@ -46,6 +58,34 @@ def test_hosted_backup_and_restore_include_control_identity_and_all_workspaces(
     assert {
         path.parent.name for path in (restored / "tenants").glob("*/hub.db")
     } == {first["default_workspace_id"], shared["workspace_id"]}
+    restored_releases = AndroidReleaseRepository(
+        restored / "mobile-releases" / "android"
+    )
+    assert restored_releases.latest() == published
+    assert restored_releases.package_path(published).read_bytes() == apk.read_bytes()
+
+
+def test_hosted_mobile_publish_reads_apk_metadata_and_enforces_monotonic_versions(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    root = tmp_path / "hosted"
+    apk = tmp_path / "knoa.apk"
+    _apk(apk)
+    monkeypatch.setattr(
+        "knoa_platform.hub.admin.read_apk_version",
+        lambda _path: ("0.2.46", 57),
+    )
+
+    assert _mobile_publish(root, apk, min_version_code=1, notes="Hosted update") == 0
+    assert _mobile_latest(root) == 0
+    assert _mobile_publish(root, apk, min_version_code=1, notes="duplicate") == 2
+
+    output = capsys.readouterr()
+    assert "version_code=57" in output.out
+    assert "download_path=/downloads/android/latest.apk" in output.out
+    assert "increase monotonically" in output.err
 
 
 def test_hosted_restore_refuses_non_empty_root(tmp_path: Path) -> None:

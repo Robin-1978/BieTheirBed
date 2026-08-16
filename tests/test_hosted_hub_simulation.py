@@ -1,16 +1,25 @@
 from __future__ import annotations
 
+import hashlib
+import zipfile
 from pathlib import Path
 
 import httpx
 import pytest
 
-from knoa_platform.hub.hosted import create_hosted_hub_app
+from knoa_platform.hub.hosted import HostedHubApplication, create_hosted_hub_app
 from knoa_platform.node_identity import NodeIdentityStore
 from knoa_platform.relay_protocol import canonical_json
 
 BOOTSTRAP_TOKEN = "bootstrap-" + "b" * 40
 PASSWORD = "correct horse battery staple"
+
+
+def _apk(path: Path, payload: bytes) -> bytes:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("AndroidManifest.xml", b"manifest")
+        archive.writestr("classes.dex", payload)
+    return path.read_bytes()
 
 
 async def _grant(client: httpx.AsyncClient) -> dict:
@@ -41,6 +50,60 @@ async def _create_account(
     )
     assert response.status_code == 201
     return response.json()
+
+
+@pytest.mark.asyncio
+async def test_hosted_android_release_is_account_scoped_metadata_and_public_bytes(
+    tmp_path: Path,
+) -> None:
+    application = HostedHubApplication(
+        tmp_path / "hosted",
+        hub_id="hub_hosted",
+        bootstrap_token=BOOTSTRAP_TOKEN,
+    )
+    apk = tmp_path / "knoa.apk"
+    payload = _apk(apk, bytes(range(256)) * 8)
+    release = application.mobile_releases.publish(
+        apk,
+        version_name="0.2.46",
+        version_code=57,
+        release_notes="Hosted platform update",
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application.app),
+        base_url="http://hub",
+    ) as client:
+        account = await _create_account(client, "owner@example.com", "Owner")
+        headers = {"Authorization": f"Bearer {account['access_token']}"}
+        unauthorized = await client.get("/v1/mobile/releases/android/latest")
+        latest = await client.get(
+            "/v1/mobile/releases/android/latest",
+            headers=headers,
+        )
+        immutable = await client.get(
+            latest.json()["download_path"],
+            headers={"Range": "bytes=100-299"},
+        )
+        stable = await client.get(
+            "/downloads/android/latest.apk",
+            headers={"Range": "bytes=0-99"},
+        )
+        wrong_digest = await client.get(
+            f"/releases/android/57/{'0' * 64}/knoa.apk"
+        )
+
+    assert unauthorized.status_code == 401
+    assert latest.status_code == 200
+    assert latest.json()["channel"] == "hosted"
+    assert latest.json()["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert immutable.status_code == 206
+    assert immutable.content == payload[100:300]
+    assert immutable.headers["etag"] == f'"{release.sha256}"'
+    assert immutable.headers["cache-control"].endswith("immutable")
+    assert stable.status_code == 206
+    assert stable.content == payload[:100]
+    assert stable.headers["cache-control"] == "public, max-age=60, must-revalidate"
+    assert wrong_digest.status_code == 404
 
 
 @pytest.mark.asyncio

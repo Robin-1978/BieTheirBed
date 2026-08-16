@@ -1,5 +1,6 @@
 import * as SecureStore from "expo-secure-store";
 
+import type { AndroidRelease } from "@/api/models";
 import { loadOrCreateInstallationId, loadOrCreatePrivateKey, publicKey } from "@/security/deviceIdentity";
 
 const HUB_CONNECTION = "knoa.hub.connection.v1";
@@ -175,6 +176,26 @@ export async function loadHubConnection(): Promise<HubConnection | null> {
   } catch {
     return null;
   }
+}
+
+export async function resolveAndroidRelease(
+  nodeRelease: () => Promise<AndroidRelease>,
+): Promise<AndroidRelease | null> {
+  const connection = await loadHubConnection();
+  if (!connection?.accountId) return nodeRelease();
+  const response = await fetch(
+    `${connection.rootUrl}/v1/mobile/releases/android/latest`,
+    { headers: { Authorization: `Bearer ${connection.token}` } },
+  );
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(response.status === 401 ? "Hub 帐号认证失败" : "Hub App 更新检查失败");
+  }
+  const release = await response.json() as AndroidRelease;
+  return {
+    ...release,
+    download_path: new URL(release.download_path, `${connection.rootUrl}/`).toString(),
+  };
 }
 
 export async function registerHostedAccount(

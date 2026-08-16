@@ -189,6 +189,7 @@ knoa-hub --deployment-mode hosted_single_node
 │   ├── Account / LoginIdentity / PasswordCredential / Session
 │   └── Workspace / Membership / one-time enrollment and reset grants
 ├── shared Hub signing identity
+├── Hosted Android Release Repository
 └── HostedTenantDispatcher
     └── isolated HubApplication per Workspace
         ├── HubRepository
@@ -196,8 +197,9 @@ knoa-hub --deployment-mode hosted_single_node
 ```
 
 它是个人和受控小规模使用的单节点 Hosted MVP：帐号控制面位于 `control.db`，每个 Workspace 业务
-状态位于独立 tenant `hub.db`，二者与 signing key 形成一个恢复单元。它不把 tenant 包装成独立物理
-进程，也不改变 Self-hosted 或 No-Hub composition。
+状态位于独立 tenant `hub.db`；Hosted Android APK 位于根级共享 release repository，不归属某个
+Workspace 或 Node。控制库、tenant DB、release repository 与 signing key 形成一个恢复单元。它不把
+tenant 包装成独立物理进程，也不改变 Self-hosted 或 No-Hub composition。
 
 Node 侧的 `Node Hub Edge Adapter`（当前由 `NodeHubService + NodeRelayManager` 构成）保存单 Hub
 enrollment，并从 Secure Gateway 生命周期
@@ -215,6 +217,8 @@ transport。Relay ciphertext 内承载现有 Gateway HTTP typed contract，Node 
 | Service lifecycle | Core/Application/Channel 生命周期 | `src/knoa_platform/service/` |
 | Core API | typed command/query 边界 | `src/knoa_platform/service/core_api.py`、`core_*_commands.py` |
 | Secure Gateway | 认证、路由、协议、流式事件、发布管理 | `src/knoa_platform/gateway/` |
+| Mobile Release Domain | APK 校验、不可变 manifest/repository 与共享 wire payload | `src/knoa_platform/mobile_releases.py` |
+| Hosted Hub | Account/Workspace/Relay 与 Hosted Android release HTTP/管理边界 | `src/knoa_platform/hub/` |
 | CLI/TUI | 本地管理与交互适配 | `src/knoa_platform/cli_*.py`、`src/knoa_platform/ui/` |
 | Channels | 飞书等 Channel adapter | `src/knoa_platform/channels/` |
 

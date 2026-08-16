@@ -490,7 +490,7 @@ export type UserFacingError = {
 
 export type AndroidRelease = {
   platform: "android";
-  channel: "personal";
+  channel: "personal" | "hosted";
   version_name: string;
   version_code: number;
   min_supported_version_code: number;

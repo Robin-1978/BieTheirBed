@@ -23,6 +23,7 @@ from knoa_platform.gateway.protocol import (
     PairCompleteRequest,
     RuntimeQuery,
 )
+from knoa_platform.mobile_releases import android_release_payload
 
 logger = logging.getLogger(__name__)
 _MAX_BODY_BYTES = 16 * 1024
@@ -218,21 +219,14 @@ class DeviceRoutes:
             return JSONResponse({"error": "not_found"}, status_code=404)
         assert release is not None
         return JSONResponse(
-            {
-                "platform": "android",
-                "channel": "personal",
-                "version_name": release.version_name,
-                "version_code": release.version_code,
-                "min_supported_version_code": release.min_supported_version_code,
-                "size_bytes": release.size_bytes,
-                "sha256": release.sha256,
-                "published_at": release.published_at,
-                "release_notes": release.release_notes,
-                "download_path": (
+            android_release_payload(
+                release,
+                channel="personal",
+                download_path=(
                     f"/releases/android/{release.version_code}/"
                     f"{release.sha256}/knoa.apk"
                 ),
-            }
+            )
         )
 
     async def _download_android_release(

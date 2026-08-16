@@ -11,8 +11,8 @@ import {
   View,
 } from "react-native";
 
-import { GatewayError } from "@/api/gatewayClient";
 import type { AndroidRelease } from "@/api/models";
+import { resolveAndroidRelease } from "@/hub/hubClient";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 import { useI18n } from "@/i18n";
@@ -47,13 +47,9 @@ export default function UpdateScreen() {
   useEffect(() => {
     if (!gateway.client) return;
     setChecking(true);
-    gateway.runAuthenticated((client) => client.latestAndroidRelease())
+    gateway.runAuthenticated((client) => resolveAndroidRelease(() => client.latestAndroidRelease()))
       .then(setRelease)
-      .catch((error: unknown) => {
-        if (!(error instanceof GatewayError && error.status === 404)) {
-          setMessage(t("update.checkFailed"));
-        }
-      })
+      .catch(() => setMessage(t("update.checkFailed")))
       .finally(() => setChecking(false));
   }, [gateway.client, gateway.runAuthenticated, t]);
 
