@@ -183,7 +183,7 @@ class ManagedOperationalConfig(ConfigurationModel):
 
 
 class ManagedConfig(ConfigurationModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     providers: dict[SafeId, ManagedProviderConfig]
     models: dict[SafeId, ManagedModelConfig]
     model_deployments: dict[SafeId, ManagedModelDeploymentConfig] = Field(

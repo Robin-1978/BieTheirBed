@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import sqlite3
+
 import pytest
 
 from knoa_platform.agents.definitions import (
@@ -103,6 +106,37 @@ def test_registry_rejects_stale_draft_updates(tmp_path) -> None:
             expected_version=2,
             actor="owner",
         )
+
+
+def test_registry_reinitializes_only_configuration_data_on_schema_change(
+    tmp_path,
+) -> None:
+    database = tmp_path / "config.db"
+    ids = iter(("revision-old", "draft-old", "revision-v2"))
+    registry = ConfigRegistry(database, id_factory=lambda: next(ids))
+    registry.initialize(_managed(), actor="owner")
+    registry.create_draft(actor="owner")
+    with sqlite3.connect(database) as db:
+        row = db.execute(
+            "SELECT document_json FROM config_revisions WHERE revision_id='revision-old'"
+        ).fetchone()
+        assert row is not None
+        stored = json.loads(str(row[0]))
+        stored["schema_version"] = 1
+        db.execute(
+            "UPDATE config_revisions SET document_json=? WHERE revision_id='revision-old'",
+            (json.dumps(stored),),
+        )
+
+    revision = registry.initialize(_managed(), actor="owner")
+
+    assert revision.revision_id == "revision-v2"
+    assert revision.document.schema_version == 2
+    assert revision.change_summary == "Initialize configuration schema v2"
+    assert registry.state().applied_revision_id == "revision-v2"
+    assert [item.revision_id for item in registry.history()] == ["revision-v2"]
+    with pytest.raises(LookupError):
+        registry.draft("draft-old")
 
 
 @pytest.mark.asyncio

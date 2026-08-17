@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import secrets
 import sqlite3
 import time
@@ -71,15 +72,28 @@ class ConfigRegistry:
     def initialize(self, document: ManagedConfig, *, actor: str) -> ConfigRevision:
         with self._connect() as db:
             row = db.execute(
-                "SELECT applied_revision_id FROM config_control_state WHERE singleton=1"
+                """SELECT revisions.*
+                   FROM config_control_state AS state
+                   JOIN config_revisions AS revisions
+                     ON revisions.revision_id=state.applied_revision_id
+                   WHERE state.singleton=1"""
             ).fetchone()
             if row is not None:
-                return self.revision(str(row["applied_revision_id"]))
+                stored = json.loads(str(row["document_json"]))
+                if stored.get("schema_version") == document.schema_version:
+                    return self._revision(row)
             revision = self._new_revision(
-                document, parent="", actor=actor, summary="Initial configuration"
+                document,
+                parent="",
+                actor=actor,
+                summary=f"Initialize configuration schema v{document.schema_version}",
             )
             now = self._clock()
             db.execute("BEGIN IMMEDIATE")
+            if row is not None:
+                db.execute("DELETE FROM config_drafts")
+                db.execute("DELETE FROM config_control_state")
+                db.execute("DELETE FROM config_revisions")
             self._insert_revision(db, revision)
             db.execute(
                 """INSERT INTO config_control_state(
