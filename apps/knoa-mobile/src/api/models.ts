@@ -112,7 +112,7 @@ export type ManagedOperationalConfig = {
 };
 
 export type ManagedConfig = {
-  schema_version: 1;
+  schema_version: 2;
   providers: Record<string, {
     driver: "llamacpp" | "openai" | "openai_compatible" | "anthropic" | "workspace_remote";
     server_url: string;

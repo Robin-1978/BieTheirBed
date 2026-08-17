@@ -1970,10 +1970,10 @@ export interface components {
         ManagedConfig: {
             /**
              * Schema Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            schema_version: 1;
+            schema_version: 2;
             /** Providers */
             providers: {
                 [key: string]: components["schemas"]["ManagedProviderConfig"];
