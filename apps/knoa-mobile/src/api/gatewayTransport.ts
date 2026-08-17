@@ -24,6 +24,7 @@ import {
   packetAad,
   packetNonce,
 } from "./relayCrypto";
+import { bindingUsesHubEndpoint } from "./gatewayRouting";
 
 export { DirectFetchTransport, type GatewayTransport } from "./gatewayTransportBase";
 
@@ -36,6 +37,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
   private relay: RelayTransport | null = null;
   private active: "direct" | "relay" = "direct";
   private relayPreferredUntil = 0;
+  private hubEndpointBinding: Promise<boolean> | null = null;
 
   constructor(private readonly binding: NodeDeviceBinding) {}
 
@@ -44,6 +46,13 @@ export class ConnectionResolverTransport implements GatewayTransport {
   }
 
   async request(baseUrl: string, path: string, init: RequestInit): Promise<Response> {
+    if (await this.bindingPointsAtCurrentHub()) {
+      try {
+        return await this.relayRequest(baseUrl, path, init);
+      } catch (relayError) {
+        throw new Error(`Node Relay 不可用：${errorText(relayError)}`);
+      }
+    }
     if (Date.now() < this.relayPreferredUntil) {
       try {
         return await this.relayRequest(baseUrl, path, init);
@@ -83,6 +92,15 @@ export class ConnectionResolverTransport implements GatewayTransport {
     const response = await this.relay.request(baseUrl, path, init);
     this.active = "relay";
     return response;
+  }
+
+  private bindingPointsAtCurrentHub(): Promise<boolean> {
+    if (!this.hubEndpointBinding) {
+      this.hubEndpointBinding = loadHubConnection()
+        .then((hub) => Boolean(hub && bindingUsesHubEndpoint(this.binding, hub)))
+        .catch(() => false);
+    }
+    return this.hubEndpointBinding;
   }
 }
 

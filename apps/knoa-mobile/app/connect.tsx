@@ -1,3 +1,4 @@
+import { CameraView, useCameraPermissions } from "expo-camera";
 import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
@@ -8,6 +9,8 @@ import {
   listHubNodes,
   loadHubConnection,
   loginHostedAccount,
+  registerHostedAccount,
+  resetHostedPassword,
   selectHostedWorkspace,
   type HubConnection,
   type HubNode,
@@ -17,6 +20,7 @@ import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
 type HubState = "loading" | "disconnected" | "ready" | "error";
+type AccountMode = "login" | "register" | "recover";
 
 export default function ConnectScreen() {
   const gateway = useGateway();
@@ -25,8 +29,13 @@ export default function ConnectScreen() {
   const [nodes, setNodes] = useState<HubNode[]>([]);
   const [workspaces, setWorkspaces] = useState<HostedWorkspace[]>([]);
   const [hubUrl, setHubUrl] = useState("https://knoa.tinydotdot.com");
+  const [accountMode, setAccountMode] = useState<AccountMode>("login");
   const [loginIdentity, setLoginIdentity] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
+  const [setupPayload, setSetupPayload] = useState("");
+  const [scanningSetup, setScanningSetup] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [message, setMessage] = useState("");
   const [working, setWorking] = useState(false);
 
@@ -79,6 +88,52 @@ export default function ConnectScreen() {
     }
   }
 
+  async function register() {
+    setWorking(true);
+    setMessage("");
+    try {
+      await registerHostedAccount(
+        setupPayload,
+        loginIdentity,
+        displayName || loginIdentity.split("@")[0] || "Knoa User",
+        password,
+      );
+      setPassword("");
+      setSetupPayload("");
+      await refreshHub();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Hosted Account 创建失败");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function recover() {
+    setWorking(true);
+    setMessage("");
+    try {
+      await resetHostedPassword(setupPayload, password);
+      setPassword("");
+      setSetupPayload("");
+      await refreshHub();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Hosted Account 密码恢复失败");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function openSetupScanner() {
+    if (!cameraPermission?.granted) {
+      const permission = await requestCameraPermission();
+      if (!permission.granted) {
+        setMessage("需要相机权限才能扫描 Hub 帐号凭据");
+        return;
+      }
+    }
+    setScanningSetup(true);
+  }
+
   async function switchWorkspace(workspace: HostedWorkspace) {
     setWorking(true);
     setMessage("");
@@ -123,6 +178,33 @@ export default function ConnectScreen() {
     }
   }
 
+  if (scanningSetup && cameraPermission?.granted) {
+    return (
+      <View style={styles.scanner}>
+        <CameraView
+          style={StyleSheet.absoluteFill}
+          barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+          onBarcodeScanned={({ data }) => {
+            try {
+              const version = (JSON.parse(data) as { version?: string }).version;
+              setAccountMode(version === "knoa-hosted-password-reset-v1" ? "recover" : "register");
+            } catch {
+              setAccountMode("register");
+            }
+            setSetupPayload(data);
+            setScanningSetup(false);
+            setMessage("");
+          }}
+        />
+        <View style={styles.scanFrame} />
+        <Text style={styles.scanHint}>扫描 Hub 发出的帐号注册或密码恢复二维码</Text>
+        <AppPressable style={styles.cancelScan} onPress={() => setScanningSetup(false)}>
+          <Text style={styles.primaryText}>取消</Text>
+        </AppPressable>
+      </View>
+    );
+  }
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.hero}>
@@ -136,16 +218,50 @@ export default function ConnectScreen() {
       {hubState !== "ready" ? (
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Hosted Account</Text>
+          <Text style={styles.hint}>新用户先在 Hub 建立帐号和个人 Workspace，再安装或加入 Node。帐号流程不依赖任何 Node。</Text>
           <TextInput value={hubUrl} onChangeText={setHubUrl} placeholder="https://hub.example.com" placeholderTextColor={colors.muted} autoCapitalize="none" style={styles.input} />
-          <TextInput value={loginIdentity} onChangeText={setLoginIdentity} placeholder="登录标识" placeholderTextColor={colors.muted} autoCapitalize="none" style={styles.input} />
-          <TextInput value={password} onChangeText={setPassword} placeholder="帐号密码" placeholderTextColor={colors.muted} secureTextEntry style={styles.input} />
-          <AppPressable style={styles.primary} disabled={working} onPress={() => void login()}>
-            {working ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>登录 Hub</Text>}
+          <View style={styles.modeRow}>
+            {(["login", "register", "recover"] as const).map((mode) => (
+              <AppPressable
+                key={mode}
+                style={[styles.mode, accountMode === mode && styles.modeActive]}
+                disabled={working}
+                onPress={() => {
+                  setAccountMode(mode);
+                  setMessage("");
+                }}
+              >
+                <Text style={accountMode === mode ? styles.primaryText : styles.secondaryText}>
+                  {mode === "login" ? "登录" : mode === "register" ? "创建帐号" : "恢复密码"}
+                </Text>
+              </AppPressable>
+            ))}
+          </View>
+          {accountMode !== "login" ? (
+            <>
+              <AppPressable style={styles.secondary} disabled={working} onPress={() => void openSetupScanner()}>
+                <Text style={styles.secondaryText}>扫描 Hub 一次性二维码</Text>
+              </AppPressable>
+              <TextInput value={setupPayload} onChangeText={setSetupPayload} placeholder="或粘贴 Hub 一次性凭据" placeholderTextColor={colors.muted} autoCapitalize="none" multiline style={[styles.input, styles.payload]} />
+            </>
+          ) : null}
+          {accountMode !== "recover" ? (
+            <TextInput value={loginIdentity} onChangeText={setLoginIdentity} placeholder="登录标识" placeholderTextColor={colors.muted} autoCapitalize="none" style={styles.input} />
+          ) : null}
+          {accountMode === "register" ? (
+            <TextInput value={displayName} onChangeText={setDisplayName} placeholder="显示名称" placeholderTextColor={colors.muted} style={styles.input} />
+          ) : null}
+          <TextInput value={password} onChangeText={setPassword} placeholder={accountMode === "recover" ? "设置新密码（至少 12 位）" : "帐号密码（至少 12 位）"} placeholderTextColor={colors.muted} secureTextEntry style={styles.input} />
+          <AppPressable
+            style={styles.primary}
+            disabled={working}
+            onPress={() => void (accountMode === "login" ? login() : accountMode === "register" ? register() : recover())}
+          >
+            {working ? <ActivityIndicator color="#fff" /> : (
+              <Text style={styles.primaryText}>{accountMode === "login" ? "登录 Hub" : accountMode === "register" ? "创建并登录" : "恢复并登录"}</Text>
+            )}
           </AppPressable>
-          <Text style={styles.hint}>首次创建帐号或恢复密码，请进入 Node Center 扫描管理员生成的一次性二维码。</Text>
-          <AppPressable style={styles.secondary} onPress={() => router.push("/settings/nodes")}>
-            <Text style={styles.secondaryText}>帐号注册与恢复</Text>
-          </AppPressable>
+          {accountMode === "register" ? <Text style={styles.hint}>注册二维码由 Hosted Hub 或组织管理员发放，不由 Node 生成。</Text> : null}
         </View>
       ) : (
         <>
@@ -174,7 +290,14 @@ export default function ConnectScreen() {
 
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>选择 Node</Text>
-            {!nodes.length ? <Text style={styles.hint}>当前 Workspace 尚无 Node。Hub 仍然可用，你可以稍后再添加或等待 Node 上线。</Text> : null}
+            {!nodes.length ? (
+              <>
+                <Text style={styles.hint}>帐号和个人 Workspace 已就绪。下一步在电脑安装 Knoa Node，再扫描该 Node 的配对二维码；Node 不在线时 Hub 仍然可用。</Text>
+                <AppPressable style={styles.secondary} onPress={() => router.push("/pair")}>
+                  <Text style={styles.secondaryText}>我已安装 Node，开始配对</Text>
+                </AppPressable>
+              </>
+            ) : null}
             {nodes.map((node) => {
               const bound = gateway.nodes.some((item) => item.nodeId === node.node_id);
               return (
@@ -246,4 +369,12 @@ const styles = StyleSheet.create({
   online: { color: colors.accent, fontWeight: "800" },
   offline: { color: colors.muted, fontWeight: "700" },
   error: { color: colors.danger, textAlign: "center" },
+  modeRow: { flexDirection: "row", gap: 8 },
+  mode: { flex: 1, borderWidth: 1, borderColor: colors.accent, borderRadius: 12, paddingVertical: 10, alignItems: "center" },
+  modeActive: { backgroundColor: colors.accent },
+  payload: { minHeight: 76, textAlignVertical: "top" },
+  scanner: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#000" },
+  scanFrame: { width: 260, height: 260, borderWidth: 3, borderColor: "#fff", borderRadius: 22 },
+  scanHint: { color: "#fff", marginTop: 22, paddingHorizontal: 30, textAlign: "center", fontWeight: "700" },
+  cancelScan: { position: "absolute", bottom: 48, backgroundColor: colors.accent, borderRadius: 14, paddingHorizontal: 24, paddingVertical: 13 },
 });
