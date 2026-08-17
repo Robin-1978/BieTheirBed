@@ -189,27 +189,28 @@ class AgentProfile(AgentDefinitionModel):
     instructions: Annotated[str, StringConstraints(max_length=200_000)] = ""
     instructions_ref: Annotated[str, StringConstraints(max_length=4096)] = ""
     instructions_required: bool = True
-    default_skills: frozenset[ResourceId] = frozenset()
+    default_skill_refs: frozenset[ResourceId] = frozenset()
+    allowed_skill_refs: frozenset[ResourceId] = frozenset()
     allowed_platform_tools: frozenset[str] = frozenset()
     platform_capability_ceiling: frozenset[str] = frozenset()
     runtime_native_capability_ceiling: frozenset[NativeCapability] = frozenset()
     runtime_limits: RuntimeProfileLimits = Field(default_factory=RuntimeProfileLimits)
     delegation: DelegationPolicy = Field(default_factory=DelegationPolicy)
-    visibility: Visibility = "delegate"
     callable_by: frozenset[str] = frozenset()
 
     @model_validator(mode="after")
     def validate_profile(self) -> AgentProfile:
         if bool(self.instructions) == bool(self.instructions_ref):
             raise ValueError("Profile requires exactly one instructions source")
-        if self.visibility == "system" and not self.callable_by:
-            raise ValueError("System Profile requires an explicit caller allowlist")
+        if not self.default_skill_refs <= self.allowed_skill_refs:
+            raise ValueError("Default Skill refs must be allowed by the Profile")
         return self
 
 
 class AgentDefinition(AgentDefinitionModel):
     runtime_spec_id: ResourceId
     profile_id: ResourceId
+    visibility: Visibility = "delegate"
     enabled: bool = True
 
 
@@ -270,6 +271,10 @@ class AgentSystemConfig(AgentDefinitionModel):
                 )
             if profile is None:
                 raise ValueError(f"Agent '{agent_id}' references an unknown Profile")
+            if definition.visibility == "system" and not profile.callable_by:
+                raise ValueError(
+                    f"System Agent '{agent_id}' requires a Profile caller allowlist"
+                )
             if (
                 profile.instructions_required
                 and runtime.instruction_authority == "none"
@@ -336,11 +341,7 @@ class AgentDefinitionResolver:
         definition, _, profile = self._parts(agent_id)
         if not definition.enabled:
             raise AgentNotCallableError(f"Agent '{agent_id}' is disabled")
-        allowed = (
-            (invocation_kind == "user" and profile.visibility == "user")
-            or (invocation_kind == "delegate" and profile.visibility == "delegate")
-            or (invocation_kind == "system" and profile.visibility == "system")
-        )
+        allowed = invocation_kind == definition.visibility
         if not allowed:
             raise AgentNotCallableError(
                 f"Agent '{agent_id}' is not callable as {invocation_kind}"
@@ -382,14 +383,14 @@ class AgentDefinitionResolver:
             if "*" in profile.allowed_platform_tools
             else available_tools & profile.allowed_platform_tools
         )
-        skills = installed_skills & profile.default_skills
+        skills = installed_skills & profile.default_skill_refs
         native = runtime.native_capabilities & profile.runtime_native_capability_ceiling
         if requested_capabilities is not None:
             capabilities &= requested_capabilities
         if requested_tools is not None:
             tools &= requested_tools
         if requested_skills is not None:
-            skills &= requested_skills
+            skills = installed_skills & profile.allowed_skill_refs & requested_skills
         if requested_native_capabilities is not None:
             native &= requested_native_capabilities
         if parent is not None:
@@ -465,6 +466,9 @@ class AgentDefinitionResolver:
 
     def runtime_spec(self, agent_id: str) -> RuntimeSpec:
         return self._parts(agent_id)[1]
+
+    def definition(self, agent_id: str) -> AgentDefinition:
+        return self._parts(agent_id)[0]
 
     def profile(self, agent_id: str) -> AgentProfile:
         return self._parts(agent_id)[2]

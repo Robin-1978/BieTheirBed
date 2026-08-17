@@ -125,7 +125,7 @@ agent_id
 - 统一定义 Runtime、模型、Profile、Agent、Invocation 与 Subagent 的语义。
 - 正确表达 Native Runtime 和 Codex Runtime 不同的模型所有权。
 - 支持一个 Runtime implementation 的多个独立 RuntimeSpec。
-- 支持 Prompt、Skill、工具上限和委派策略组成专业 Profile。
+- 支持 Prompt、Workspace Skill refs、工具上限和委派策略组成专业 Profile。
 - 把 Profile、principal 和 delegation 约束解析为可持久化、可重放的 ResolvedInvocationPolicy。
 - 支持主 Agent 将有界工作委派给另一个 Agent Definition。
 - 复用现有 Task、Session、Artifact、Approval、Interaction、Trace 与 Capability 设施。
@@ -205,15 +205,20 @@ Agent Profile 是可信、版本化、不可在运行中自行修改的角色定
 Profile 包含：
 
 - system/developer instructions；
-- default Skills 和 Skill activation policy；
+- Workspace Skill references、默认激活集合和 Skill activation policy；
 - Platform Tool allowlist；
 - Platform capability ceiling；
 - Runtime-native capability ceiling；
 - Runtime/Profile 固定上限；
 - delegation policy；
-- visibility 与调用者策略。
+- 调用者 allowlist ceiling。
 
 Profile 不直接包含 API key、模型 endpoint、Runtime command 或主机凭据。
+
+Profile 不拥有 Skill package 或长期 Skill instance。Skill 是 Workspace 共享 data-only resource；Profile
+只引用稳定 Skill ID/digest 并声明 activation policy。同一个 Skill 可以被多个 Profile 引用，删除引用
+不删除 Skill。Agent generation 解析 Workspace grant 后冻结 Skill digest，目标 Node 按需下载/校验；
+每次 Invocation 的 Skill activation 是临时执行事实。Skill 不能因为被 Profile 引用而获得 Tool 权限。
 
 ### 4.5 Agent Definition
 
@@ -225,11 +230,15 @@ AgentDefinition
   |- runtime_spec_id
   |- profile_id
   |- enabled
-  |- max_concurrency
+  |- visibility
   `- config_digest
 ```
 
-`agent_id` 仍是 Session binding、Task、审计和 UI 使用的稳定身份，但它不再等同于 Runtime implementation。可见性和调用者策略来自已解析 Profile；Agent Definition 不能放宽 Profile 的限制。
+`agent_id` 仍是 Session binding、Task、审计和 UI 使用的稳定身份，但它不再等同于 Runtime
+implementation。AgentDefinition 是唯一组合根，必须引用且只引用一个 RuntimeSpec 和一个 Profile；
+它不能覆盖 RuntimeSpec 的模型/sandbox/command/并发，也不能覆盖 Profile 的 instructions、Skill、
+Tool 或 delegation ceiling。Definition `visibility` 只负责产品目录发现；调用资格来自已解析 Profile、
+principal 和父 Invocation 约束。
 
 ### 4.6 ResolvedInvocationPolicy
 
@@ -373,7 +382,7 @@ Profile 是紧凑的角色与能力上限配置：
 ```text
 Profile
   = Instructions
-  + Skills
+  + Workspace Skill References / Activation Policy
   + Platform Tool Allowlist
   + Platform Capability Ceiling
   + Runtime-native Capability Ceiling
@@ -393,14 +402,14 @@ class AgentProfile:
     version: str
     display_name: str
     instructions_ref: str
-    default_skills: tuple[str, ...]
+    default_skill_refs: tuple[str, ...]
+    allowed_skill_refs: tuple[str, ...]
     skill_activation: str
     allowed_platform_tools: frozenset[str]
     platform_capability_ceiling: frozenset[str]
     runtime_native_capability_ceiling: frozenset[str]
     runtime_limits: RuntimeLimitsOverride | None
     delegation: DelegationPolicy
-    visibility: str
     callable_by: frozenset[str]
 ```
 
@@ -438,7 +447,8 @@ Composition 在启动时验证 RuntimeSpec 是否满足要求。不满足时该 
 
 ### 7.1 建议配置结构
 
-以下 YAML 用于表达 typed configuration contract，也可作为导入/导出格式；它不是配置页面直接编辑的 live source of truth。初始化后的 canonical 配置由 Config Registry 中的 versioned ManagedConfig revision 管理。
+以下 YAML 用于表达 typed configuration contract，也可作为导入/导出格式；它不是配置页面直接编辑的
+live source of truth。初始化后的 canonical 配置由 Config Registry 中的 Published Spec generation 管理。
 
 ```yaml
 runtime_specs:
@@ -474,11 +484,10 @@ runtime_specs:
 agent_profiles:
   assistant:
     instructions: prompts/assistant.md
-    default_skills: [general]
+    default_skill_refs: [general]
     allowed_platform_tools: ["*"]
     platform_capability_ceiling: ["*"]
     runtime_native_capability_ceiling: []
-    visibility: user
     delegation:
       allowed: true
       max_depth: 1
@@ -486,11 +495,10 @@ agent_profiles:
 
   approval_reviewer:
     instructions: prompts/approval-reviewer.md
-    default_skills: []
+    default_skill_refs: []
     allowed_platform_tools: []
     platform_capability_ceiling: []
     runtime_native_capability_ceiling: []
-    visibility: system
     callable_by: [approval_service]
     runtime_limits:
       max_iterations: 1
@@ -500,11 +508,10 @@ agent_profiles:
 
   coder:
     instructions: prompts/coder.md
-    default_skills: [coding, repository]
+    default_skill_refs: [coding, repository]
     allowed_platform_tools: [read_file, write_file, shell]
     platform_capability_ceiling: [host_read, host_write, shell]
     runtime_native_capability_ceiling: [workspace_read, command_execution]
-    visibility: delegate
     delegation:
       allowed: false
 
@@ -513,16 +520,19 @@ agents:
     runtime: native_main
     profile: assistant
     enabled: true
+    visibility: user
 
   reviewer_agent:
     runtime: native_approval_reviewer
     profile: approval_reviewer
     enabled: true
+    visibility: system
 
   codex:
     runtime: codex_default
     profile: coder
     enabled: true
+    visibility: delegate
 
 default_agent: knoa
 ```
@@ -545,13 +555,16 @@ RuntimeSpec、Profile、Agent Definition、Model Binding 和 Skill 引用必须�
 typed draft
   -> full validation/reference check
   -> Runtime/policy preflight
-  -> immutable Config Revision
+  -> Published Spec generation + digest
   -> build affected Agent generation
   -> atomic switch
   -> bounded drain old generation
 ```
 
-配置页面以 Agent Definition 为主要入口，同时提供 Models & Runtimes、Profiles、Skills & Tools、effective policy preview、revision diff、发布影响和 rollback。Secret 只通过 write-only Secret Store slot 管理，不进入 Profile、Revision diff 或普通导出。
+配置页面以 Agent Definition 为主要入口，在一个编辑流程中选择 RuntimeSpec、编辑/选择 Profile、查看
+effective policy 和发布影响。高级入口可以管理共享 RuntimeSpec/Profile，但不提供 Definition 级字段
+override、Profile 继承或 rollback。Secret 只通过 write-only Secret Store slot 管理，不进入 Profile、
+diff 或普通导出。
 
 完整的数据模型、API、页面信息架构和 apply class 见 `docs/knoa-configuration-control-plane-design.md`。
 
@@ -802,7 +815,7 @@ Parent Invocation
   -> DelegationService
        |- authenticate parent resolved handle/policy
        |- resolve target Agent Definition for invocation_kind=delegate
-       |- verify visibility/callable_by
+       |- verify Definition visibility + Profile callable_by ceiling
        |- enforce max depth/fan-out
        |- derive ResolvedInvocationPolicy subset
        |- create target-agent detached Session
@@ -941,7 +954,7 @@ DelegationLink
 
 Task 是 Child Run 生命周期的唯一事实权威。API 和 UI 通过 `child_task_id` 关联查询 Child Task 并派生当前状态；不得在 Delegation 表复制第二套 authoritative state。若未来为了查询性能增加 projection，它必须明确是可重建的非权威缓存，而不是新的状态机。
 
-## 13. Session 与配置版本
+## 13. Session 与配置 Generation
 
 ### 13.1 Binding
 
@@ -955,12 +968,14 @@ Product Session 继续绑定稳定 `agent_id`，同时持久化：
 
 ### 13.2 配置更新
 
-Agent Definition 在自己的 generation 内完全不可变，但 Config Revision 可以在线发布新的 generation。热生效采用 build/validate/swap/drain，不修改 live Runtime 对象，也不把新 Prompt、模型或权限注入正在执行的 Invocation。
+Agent Definition 在自己的 generation 内完全不可变，但 ConfigurationService 可以在线发布新的 Desired
+Generation。热生效采用 build/validate/swap/drain，不修改 live Runtime 对象，也不把新 Prompt、模型
+或权限注入正在执行的 Invocation。
 
 发布与恢复规则：
 
-1. 每个 Config Revision 一次性解析全部 RuntimeSpec、Profile、Skill 内容和 Agent Definition digest。
-2. 受影响的新 generation 先完整构建并校验 instruction authority、native capability/sandbox、引用和健康状态；任一关键 preflight 失败都不切换 applied revision。
+1. 每个 Desired Generation 一次性解析全部 RuntimeSpec、Profile、Skill 内容和 Agent Definition digest。
+2. 受影响的新 generation 先完整构建并校验 instruction authority、native capability/sandbox、引用和健康状态；任一关键 preflight 失败都不推进 Applied Generation。
 3. 通过预检后原子切换 active generation；新 Invocation 只使用新 definition，旧 active Invocation 继续使用创建时 generation 和 ResolvedInvocationPolicy。
 4. 每个 Agent Definition 最多保留一个 bounded draining generation；它不接受新 Invocation，deadline 后中断 active Turn，并在 lease 归零后销毁。MVP 不提供历史 generation 路由或长期池化。
 5. Child spawn 时立即固定 definition digest；Child Task 先以 `delegation_staged` 创建，Executor 不能 claim，只有 policy snapshot 与 DelegationLink 完成后才激活。该 staged protocol 避免为多个 repository 引入通用 UnitOfWork，同时关闭“未授权 Child 抢跑”的竞态。

@@ -114,10 +114,10 @@ agent_profiles:
   assistant:
     display_name: Knoa
     instructions_ref: "builtin://assistant"
-    default_skills: [research_report]
+    default_skill_refs: [research_report]
+    allowed_skill_refs: [research_report]
     allowed_platform_tools: ["*"]
     platform_capability_ceiling: ["*"]
-    visibility: user
     delegation:
       allowed: true
       targets: [codex]
@@ -133,26 +133,27 @@ agent_profiles:
     runtime_native_capability_ceiling: []
     runtime_limits:
       max_iterations: 1
-    visibility: system
     callable_by: [approval_service]
   coder:
     display_name: Codex
     instructions_ref: "builtin://coder"
     runtime_native_capability_ceiling: [workspace_read, command_execution]
-    visibility: delegate
 
 agent_definitions:
   knoa:
     runtime_spec_id: native-main
     profile_id: assistant
+    visibility: user
     enabled: true
   reviewer_agent:
     runtime_spec_id: native-approval-reviewer
     profile_id: approval-reviewer
+    visibility: system
     enabled: false
   codex:
     runtime_spec_id: codex-default
     profile_id: coder
+    visibility: delegate
     enabled: false
 
 approval_review:

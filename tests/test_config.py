@@ -48,7 +48,6 @@ class TestAppConfig:
                 "researcher": {
                     "display_name": "Researcher",
                     "instructions": "Research carefully",
-                    "visibility": "delegate",
                 },
             },
             agent_definitions={
@@ -56,6 +55,7 @@ class TestAppConfig:
                 "researcher": {
                     "runtime_spec_id": "native-main",
                     "profile_id": "researcher",
+                    "visibility": "delegate",
                     "enabled": True,
                 },
             },

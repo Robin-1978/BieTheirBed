@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -66,6 +67,19 @@ class NodeHubEnrollment:
     hub_id: str
     hub_signing_public_key: str
     enrolled_at: float
+
+    @property
+    def workspace_id(self) -> str:
+        """Return the Workspace authority scoped by the canonical Hub URL."""
+
+        segments = tuple(
+            segment
+            for segment in urlsplit(self.hub_url).path.split("/")
+            if segment
+        )
+        if len(segments) >= 2 and segments[-2] == "workspaces":
+            return _identifier(segments[-1], "Workspace ID")
+        return self.hub_id
 
 
 class NodeHubStore:
@@ -246,6 +260,7 @@ class NodeRelayManager:
         identity: NodeIdentity,
         identities: GatewayIdentityRepository,
         app: Any,
+        core: Any | None = None,
         remote_models: Any | None = None,
         clock=time.time,
     ) -> None:
@@ -253,6 +268,7 @@ class NodeRelayManager:
         self._identity = identity
         self._identities = identities
         self._app = app
+        self._core = core
         self._remote_models = remote_models
         self._clock = clock
         self._task: asyncio.Task[None] | None = None
@@ -363,6 +379,7 @@ class NodeRelayManager:
                     hello,
                     session_id=frame.session_id,
                     hub_id=enrollment.hub_id,
+                    workspace_id=enrollment.workspace_id,
                     hub_signing_public_key=enrollment.hub_signing_public_key,
                     node_identity=self._identity,
                     clock=self._clock,
@@ -462,39 +479,138 @@ class NodeRelayManager:
         self,
         enrollment: NodeHubEnrollment,
     ) -> None:
-        if self._remote_models is None:
-            return
         while True:
             try:
-                observations = await self._remote_models.observations()
                 async with httpx.AsyncClient(timeout=15.0) as client:
-                    for item in observations:
-                        observed_at = float(self._clock())
-                        payload = {
-                            "node_id": self._identity.node_id,
-                            **item,
-                            "health_epoch": max(1, int(observed_at)),
-                            "observed_at": observed_at,
-                            "expires_at": observed_at + 90,
-                        }
-                        transcript = {
-                            "audience": "knoa-deployment-observation-v1",
-                            "workspace_id": enrollment.hub_id,
-                            **payload,
-                        }
-                        payload["signature"] = self._identity.sign(
-                            canonical_json(transcript)
-                        )
-                        response = await client.post(
-                            f"{enrollment.hub_url}/v1/deployment-observations",
-                            json=payload,
-                        )
-                        response.raise_for_status()
+                    if self._remote_models is not None:
+                        observations = await self._remote_models.observations()
+                        for item in observations:
+                            observed_at = float(self._clock())
+                            payload = {
+                                "node_id": self._identity.node_id,
+                                **item,
+                                "health_epoch": max(1, int(observed_at)),
+                                "observed_at": observed_at,
+                                "expires_at": observed_at + 90,
+                            }
+                            transcript = {
+                                "audience": "knoa-deployment-observation-v1",
+                                "workspace_id": enrollment.workspace_id,
+                                **payload,
+                            }
+                            payload["signature"] = self._identity.sign(
+                                canonical_json(transcript)
+                            )
+                            response = await client.post(
+                                f"{enrollment.hub_url}/v1/deployment-observations",
+                                json=payload,
+                            )
+                            response.raise_for_status()
+                    await self._publish_work_projections(client, enrollment)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Deployment observation publish failed: %s", exc)
             await asyncio.sleep(30)
+
+    async def _publish_work_projections(
+        self,
+        client: httpx.AsyncClient,
+        enrollment: NodeHubEnrollment,
+    ) -> None:
+        if self._core is None:
+            return
+        for principal_id in self._identities.principal_ids():
+            sessions, _cursor = await self._core.list_conversation_sessions(
+                principal_id,
+                include_archived=True,
+                limit=200,
+            )
+            tasks = await self._core.list_product_tasks(
+                principal_id,
+                include_archived=True,
+                limit=200,
+            )
+            projections = [
+                {
+                    "entity_kind": "conversation",
+                    "entity_id": session.session_handle,
+                    "principal_id": principal_id,
+                    "title": session.title,
+                    "state": session.state.value,
+                    "progress": None,
+                    "summary": "",
+                    "approval_summary": "",
+                    "artifact_refs": [],
+                    "source_generation": session.revision,
+                    "projection_seq": session.revision,
+                    "source_created_at": session.created_at,
+                    "source_updated_at": session.updated_at,
+                    "payload": {
+                        "agent_id": session.agent_id,
+                        "turn_count": session.turn_count,
+                        "last_turn_at": session.last_turn_at,
+                    },
+                }
+                for session in sessions
+            ]
+            projections.extend(
+                {
+                    "entity_kind": "task",
+                    "entity_id": task.task_id,
+                    "principal_id": principal_id,
+                    "title": task.title,
+                    "state": (
+                        task.latest_execution_state.value
+                        if task.latest_execution_state is not None
+                        else task.state.value
+                    ),
+                    "progress": None,
+                    "summary": task.latest_execution_summary,
+                    "approval_summary": (
+                        f"{task.pending_approval_count} approval(s) pending"
+                        if task.pending_approval_count
+                        else ""
+                    ),
+                    "artifact_refs": [],
+                    "source_generation": task.revision,
+                    "projection_seq": max(
+                        1,
+                        int((task.latest_execution_updated_at or task.updated_at) * 1_000_000),
+                    ),
+                    "source_created_at": task.created_at,
+                    "source_updated_at": task.latest_execution_updated_at or task.updated_at,
+                    "payload": {
+                        "agent_id": task.agent_id,
+                        "launch_kind": task.launch_policy.kind.value,
+                        "latest_execution_id": task.latest_execution_id,
+                        "execution_count": task.execution_count,
+                        "latest_execution_phase": task.latest_execution_phase,
+                        "latest_execution_failure_code": task.latest_execution_failure_code,
+                    },
+                }
+                for task in tasks
+            )
+            for projection in projections:
+                material = canonical_json(projection)
+                observed_at = float(self._clock())
+                payload = {
+                    "node_id": self._identity.node_id,
+                    **projection,
+                    "source_digest": hashlib.sha256(material).hexdigest(),
+                    "observed_at": observed_at,
+                }
+                transcript = {
+                    "audience": "knoa-work-projection-v1",
+                    "workspace_id": enrollment.workspace_id,
+                    **payload,
+                }
+                payload["signature"] = self._identity.sign(canonical_json(transcript))
+                response = await client.post(
+                    f"{enrollment.hub_url}/v1/work-projections",
+                    json=payload,
+                )
+                response.raise_for_status()
 
     @staticmethod
     def _request_body(

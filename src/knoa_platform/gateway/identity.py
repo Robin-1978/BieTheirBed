@@ -317,6 +317,15 @@ class GatewayIdentityRepository:
             ).fetchall()
         return tuple(self._device(row) for row in rows)
 
+    def principal_ids(self) -> tuple[str, ...]:
+        """Return principals that have owned this Node through a paired App."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT DISTINCT principal_id FROM gateway_devices
+                   WHERE state='active' ORDER BY principal_id"""
+            ).fetchall()
+        return tuple(str(row["principal_id"]) for row in rows)
+
     def active_device(self, principal_id: str, device_id: str) -> GatewayDevice:
         principal = self._principal(principal_id)
         normalized_device = self._identifier(device_id, "Device ID")

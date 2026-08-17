@@ -2,7 +2,7 @@
 
 > 状态：与 Mobile App 权威架构对齐的目标 UI
 > 更新日期：2026-08-17
-> 原则：Account -> Workspace -> Node -> Conversation/Task；层级固定，默认落点可配置，任何页面都有明确上行路径。
+> 原则：Account -> Workspace -> Resources/Work/Nodes；Workspace 可脱离 Node 浏览和配置；Conversation 创建时绑定 Node，Task 启用前部署到 Node；任何页面都有明确上行路径。
 
 架构、状态所有权和实施顺序见
 [knoa-mobile-app-design.md](./knoa-mobile-app-design.md)。本文只定义用户看到的导航、页面和行为。
@@ -14,11 +14,10 @@ App 不是五个并列功能的集合，而是三个逐层进入的工作范围�
 ```text
 Account
   -> Workspace
-    -> Node
-      -> 对话
-      -> 任务
-      -> 能力与配置
-      -> Node 状态
+    -> Resources: Agent / LLM / Skill / MCP
+    -> Work: Conversation / Task
+         -> required binding/deployment Node for content and execution
+    -> Nodes: configuration / deployment / status
 ```
 
 每一层拥有自己的页面和设置：
@@ -26,8 +25,8 @@ Account
 | 层级 | 核心页面 | 设置作用域 |
 | --- | --- | --- |
 | Account | Workspace 列表、最近使用 | 帐号安全、Hub、App 外观/语言/更新 |
-| Workspace | 概览、Node、资源、成员 | Workspace 名称、成员、授权、审计 |
-| Node | 对话、任务、能力、状态 | Agent/LLM/Skill/MCP/Tool、Node 连接与诊断 |
+| Workspace | 概览、Conversation、Task、Agent、LLM、Skill/MCP、Node、成员 | Work、共享资源、Node Desired State、成员、授权、审计 |
+| Execution context | 当前 Invocation/Attempt、能力状态、诊断 | placement Node 的连接和运行状态 |
 
 “随时管理”通过顶部 breadcrumb、Account 头像和明确的返回 Workspace 实现，不把不同层级做成并列
 Tab。App 不使用持久底部导航；对话输入框必须独占底部区域。
@@ -82,17 +81,17 @@ Tab。App 不使用持久底部导航；对话输入框必须独占底部区域�
 
 Workspace 首页使用 overview + drill-down，不使用底部或常驻局部 Tab：
 
-- Node 卡片/入口：目录、presence、绑定、配对和进入 Node；
-- 资源入口：Workspace resource metadata、grant、deployment observation；
+- Agent/LLM/Skill/MCP 入口：共享资源 Published Spec、grant 和使用情况；
+- Node 卡片/入口：目录、presence、绑定、配对、Desired State、Deployment、rollout 和进入执行上下文；
 - 成员入口：成员、角色和邀请；
 - 设置入口：Workspace 属性、授权和审计。
 
 顶部 `‹ Robin / Personal Workspace` 可返回 Account 或切换 Workspace。没有 Node 时仍可完整使用这些
 页面。
 
-## 4. Node Shell
+## 4. Work Execution Shell
 
-选择并连接 Node 后进入 Node scope：
+打开 Conversation/Task 后进入 Workspace Work 页面；读取 Node 内容或继续执行时连接其绑定/部署 Node：
 
 ```text
 ┌────────────────────────────────────┐
@@ -106,18 +105,22 @@ Workspace 首页使用 overview + drill-down，不使用底部或常驻局部 Ta
 └────────────────────────────────────┘
 ```
 
-Node scope 只把两个最高频子资源放在顶部紧凑切换器：
+Work 页面只把两个最高频对象放在顶部紧凑切换器：
 
 - 对话：Conversation、附件、语音、Approval、Interaction；
 - 任务：Task、Execution、Automation、结果和确认；
 
-顶部 `⋯` Node 菜单进入低频管理页面：
+顶部 `⋯` 执行上下文菜单进入低频页面：
 
-- 能力与配置：Agent、LLM、Skill、MCP、Tool 和配置发布；
-- Node 状态：连接、版本、Relay/direct、诊断和审计；
-- 切换 Node、退出 Node。
+- 查看 Workspace Node 详情：Deployment、能力状态、配置同步和诊断；
+- Node 状态：连接、版本、Relay/direct 和当前执行会话；
+- 断开当前 Node；在另一 Node 新建 Conversation，或修改 Task 的未来 Deployment。
 
-顶部第一行始终提供返回 Workspace；Account 头像保持可达。Node 页面不能成为没有父级的 App 根。
+共享 Agent、LLM、Skill、MCP 和 Node Desired State 的编辑入口属于 Workspace。Node 菜单只能
+deep-link 到所属 Workspace 的 Node detail，不能再提供一份并行的共享资源编辑器。
+
+顶部第一行始终提供返回 Workspace；Account 头像保持可达。V1 Conversation binding 在会话内不变；
+Task 改变 Deployment 只影响未来 Execution，不更换 Task ID 或父级。
 
 ## 4.1 为什么没有底部导航
 
@@ -147,14 +150,14 @@ Chat 是 Knoa 的高频主界面，底部同时承担：
 ```text
 Robin
   -> Personal Workspace
-    -> Robin Desktop
-      -> 对话
+    -> 对话
+      -> placement: Robin Desktop
 ```
 
 即使视觉上直接显示对话，导航栈仍必须包含 Workspace 和 Account。用户点击返回时按以下顺序上行：
 
 ```text
-Conversation detail -> Node Chat -> Workspace -> Account -> exit App
+Conversation detail -> Workspace Work -> Workspace -> Account -> exit App
 ```
 
 恢复失败按最接近的有效父级降级：
@@ -213,18 +216,20 @@ Workspace Node 列表：
 
 - 用户消息立即出现；Agent 正文在同一回复区域流式更新。
 - 图片、文件和语音属于 Conversation/Artifact，不创建隐式 Task。
+- Conversation 目录属于 Workspace；Robin Desktop 是该 Conversation 的固定内容与执行 Node。
 - Approval 与 HumanInteraction 嵌入原始回复，可恢复且只能解决一次。
 - 当前 Workspace/Node 始终可见，避免操作目标混淆。
-- Node 中断时保留草稿和历史，提供重连、切换 Node 和返回 Workspace。
+- Node 中断时保留本地草稿和 Workspace 最后投影，提供重连或返回 Workspace；不能在原会话中隐式换 Node。
 
 ## 8. 任务
 
-任务是 Node 的子资源。V1 每个 Task 和 Execution 都有明确 owning Node。
+Task Definition 是 Workspace Work。V1 已发布或启用的 Task 必须部署到一个 Node，每个
+TaskExecution/Attempt 固定在该 Node。修改 Deployment 只影响未来 Execution。
 
 ```text
 ┌────────────────────────────────────┐
 │ ‹ Personal Workspace               │
-│ Robin Desktop / 任务            ＋  │
+│ Workspace / 任务     Node: Robin  ＋ │
 │ [ 对话 ]  [ 任务 ]              ⋯  │
 ├────────────────────────────────────┤
 │ 待处理  进行中  最近  未开始         │
@@ -237,23 +242,31 @@ Workspace Node 列表：
 └────────────────────────────────────┘
 ```
 
-- 列表、详情、审批、暂停和继续都路由到 owning Node。
-- 切换 Node 后先清空旧 projection，再加载新 Node 数据，不能短暂串线。
-- Workspace 未来可以提供跨 Node 非敏感摘要，但任务事实不复制到 Hub。
-- Node 离线时只能显示本地缓存/Hub 摘要，不假装可以执行控制动作。
+- Workspace 任务列表跨 Node 展示，可以按部署 Node 过滤。
+- 详情、审批、暂停和继续先读取 Workspace Work，再连接实际执行 Node 完成 live control。
+- 切换过滤 Node 不改变 Task ID、TaskExecution 历史或 Workspace 归属。
+- Node 离线时仍展示稳定定义和已同步历史；live control 明确显示等待重连或不可用。
+- Hosted Hub 是否保存明文是部署选择，不能反向改变 Task 的 Workspace 产品归属。
 
-## 9. 能力与配置
+## 9. Workspace 资源与 Node 配置
 
-Node 能力页只管理当前 Node applied state：
+Workspace 资源页管理：
 
-- Agent、Profile、Runtime；
-- LLM provider、model binding 和 Node Secret status；
-- Skill、MCP、Tool inventory；
-- Draft、validate、preflight、publish、rollback；
-- active/draining generation。
+- Agent、Profile、共享 Model、Skill、MCP 和 Tool Policy；
+- Published Spec generation、grant 和默认选择；
+- Workspace Draft、validate、impact 和 publish；不提供版本树或 rollback 页面。
 
-Workspace 资源页管理逻辑资源、grant 和 deployment intent。UI 必须同时显示“逻辑归属”和“部署
-位置”，不能把 Workspace resource 与 Node deployment 合并成一份可双写配置。
+Workspace Node detail 管理：
+
+- Node 名称、标签、Workspace 目录和 Deployment intent；
+- Node Desired/Applied Generation 与 rollout；
+- Secret requirement status、Tool inventory 和本地模型发现；
+- active/draining generation、运行状态和诊断；
+- 热应用、重启受影响组件和高级 Node service restart。Workspace 本身没有 restart 操作。
+
+UI 必须同时显示“逻辑归属”和“部署位置”，不能把 Workspace resource 与 Node deployment 合并成
+一份可双写配置。Node 离线时允许保存和发布 Desired State，并显示“等待 Node 上线”；需要本机
+Secret 或 OS 权限的步骤显示为待用户在目标 Node 完成。
 
 ## 10. Account、Workspace、Node 设置分层
 
@@ -262,8 +275,10 @@ Workspace 资源页管理逻辑资源、grant 和 deployment intent。UI 必须�
 | 主题、语言、通知、更新 | Account / App 设置 | 当前 App installation |
 | 密码、Account session、Hub | Account | 当前 Account/issuer |
 | 成员、资源授权、审计 | Workspace 设置 | 当前 Workspace |
-| Agent/LLM/Skill/MCP/Tool | Node / 能力 | 当前 Node |
-| Relay、版本、设备信任 | Node / 状态 | 当前 Node 或当前 App binding |
+| Agent/LLM/Skill/MCP/Tool Policy | Workspace / 资源 | 当前 Workspace |
+| Node 目录与本机偏好 | Workspace / Nodes / Node detail | 当前 WorkspaceNodeEnrollment |
+| Resource/Task Deployment、远程共享策略 | Workspace / Resources/Work/Nodes | Workspace Desired State |
+| Relay、版本、设备信任、OS 权限 | Node detail / 本机操作 | 当前 Node 或当前 App binding |
 
 每个写操作的标题和确认文案都必须显示实际作用域。
 
@@ -281,8 +296,9 @@ Hub 地址
 [使用本地 No-Hub 模式]
 ```
 
-登录成功后进入 Personal Workspace。若没有 Node，Workspace Node 页显示“添加第一台 Node”，但不
-阻塞成员、资源、Workspace 设置或 Account 设置。
+登录成功后进入 Personal Workspace。若没有 Node，App 启动可恢复的 Setup Wizard：添加第一台
+Node、发现本地能力、选择本地/云模型、启用默认 Agent、验证并发布，直到第一次真实对话成功。
+Workspace 管理和 Account 设置不因向导未完成而被锁住。
 
 ## 12. 错误与降级
 
@@ -329,8 +345,8 @@ Hub 地址
 ## 15. UI 验收场景
 
 1. 新用户登录后没有 Node，仍能管理 Account 和 Workspace。
-2. 用户可从 `Account -> Workspace -> Robin Desktop -> 对话/任务` 正常进入。
-3. App 可默认直接恢复 Robin Desktop 对话，但返回路径仍是 Workspace -> Account。
+2. 用户可从 `Account -> Workspace -> 对话/任务` 正常进入，并看到当前 placement Node。
+3. App 可默认直接恢复由 Robin Desktop 执行的对话，但返回路径仍是 Workspace -> Account。
 4. 用户退出 Robin Desktop 后回到 Workspace，重新进入无需配对。
 5. Robin Desktop 离线时 App 回退 Workspace，而不是卡死或回登录。
 6. 两个 Workspace 的 Node、Task、Conversation 和配置不会串线。

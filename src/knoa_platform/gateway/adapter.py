@@ -26,7 +26,6 @@ from knoa_platform.gateway.http import GatewayHttp
 from knoa_platform.gateway.identity import (
     GatewayIdentityRepository,
 )
-from knoa_platform.mobile_releases import AndroidReleaseRepository
 from knoa_platform.gateway.routes import (
     ArtifactRoutes,
     ConfigurationRoutes,
@@ -39,6 +38,7 @@ from knoa_platform.gateway.routes import (
     TaskRoutes,
 )
 from knoa_platform.gateway.streaming import GatewayStreaming
+from knoa_platform.mobile_releases import AndroidReleaseRepository
 from knoa_platform.network_tls import is_loopback_host
 from knoa_platform.node_hub import (
     NodeHubRoutes,
@@ -201,12 +201,6 @@ class SecureGatewayAdapter(
                 Route("/v1/fleet/candidates/apply", self._fleet_apply, methods=["POST"]),
                 Route("/v1/secrets/{reference:str}", self._secret, methods=["GET", "PUT"]),
                 Route("/v1/config/current", self._config_current, methods=["GET"]),
-                Route("/v1/config/history", self._config_history, methods=["GET"]),
-                Route(
-                    "/v1/config/revisions/{revision_id:str}",
-                    self._config_revision,
-                    methods=["GET"],
-                ),
                 Route("/v1/config/drafts", self._config_drafts, methods=["POST"]),
                 Route(
                     "/v1/config/drafts/{draft_id:str}",
@@ -228,7 +222,6 @@ class SecureGatewayAdapter(
                     self._config_publish,
                     methods=["POST"],
                 ),
-                Route("/v1/config/rollback", self._config_rollback, methods=["POST"]),
                 Route("/v1/config/diff", self._config_diff, methods=["GET"]),
                 Route(
                     "/v1/config/policy-preview",
@@ -406,6 +399,7 @@ class SecureGatewayAdapter(
             identity=self._node_identity,
             identities=identities,
             app=self.app,
+            core=self._core,
             remote_models=self._remote_models,
         )
 

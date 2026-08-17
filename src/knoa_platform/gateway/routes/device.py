@@ -69,7 +69,7 @@ class DeviceRoutes:
                 }
                 for agent_id, definition in system.agents.items()
                 if definition.enabled
-                and system.profiles[definition.profile_id].visibility == "user"
+                and definition.visibility == "user"
             ],
         })
 

@@ -2,7 +2,8 @@
 
 > 状态：当前实现架构
 > 更新日期：2026-08-14
-> 权威顺序：运行代码与测试 > 本文 > 历史设计文档
+> 权威顺序：当前实现事实以运行代码与测试为准；产品对象、Workspace/Node 归属和目标语义以
+> `knoa-product-domain-architecture.md` 为准；本文只概览现有 Core 领域能力
 
 ## 1. 核心定位
 
@@ -151,6 +152,7 @@ Conversation 是实时交互记录：
 
 ```text
 Conversation Session
+  -> bound WorkspaceNode
   -> ChatTurn
   -> Agent Turn
   -> live progress / approval / interaction
@@ -159,6 +161,9 @@ Conversation Session
 
 Conversation 可以跨 Client 查看和重试，但当前不承诺跨 Core 重启继续同一个 Turn。
 重启后遗留的运行中 Turn 会进入明确失败状态。
+
+目标产品中 Conversation 目录属于 Workspace，V1 Session 创建时固定绑定一个 WorkspaceNode；正文、
+ChatTurn 和 AgentInvocation 由该 Node 持有并向 Workspace 同步管理投影。
 
 ### 4.2 Task
 
@@ -171,18 +176,20 @@ Task Definition
 ├── Capability policy
 ├── launch_policy
 ├── notification_policy
-└── Executions
-    └── Execution
-        ├── Attempt
-        ├── ToolStep
-        ├── Approval
-        ├── HumanInteraction
-        ├── Trace
-        └── Artifact
+└── Deployment(kind=task) -> WorkspaceNode
+    └── Executions
+        └── Execution
+            ├── Attempt
+            ├── ToolStep
+            ├── Approval
+            ├── HumanInteraction
+            ├── Trace
+            └── Artifact
 ```
 
 Task Definition 不是一次执行。Schedule、Event、手动执行和 rerun 都在同一个 Task
-下创建新的 Execution。
+下创建新的 Execution。Task Definition/Deployment 属于 Workspace；目标 Node materialize 本地
+启动器并创建 TaskExecution，Hub/Workspace 不运行第二套 scheduler。
 
 ## 5. Task 启动方式
 

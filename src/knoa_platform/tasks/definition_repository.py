@@ -153,7 +153,9 @@ class TaskDefinitionRepositoryMixin:
                             )
                         return self._definition_record(existing), False
                     task_id = self._normalize_identifier(
-                        self._definition_id_factory(),
+                        request_id
+                        if self._definition_id_factory is None
+                        else self._definition_id_factory(),
                         label="task_id",
                         limit=128,
                     )

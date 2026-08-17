@@ -18,6 +18,8 @@ import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 import { useI18n } from "@/i18n";
 import { AppPressable } from "@/components/AppPressable";
+import * as Crypto from "expo-crypto";
+import { loadHubConnection, putWorkspaceDeployment, putWorkspaceResource } from "@/hub/hubClient";
 
 export default function EditTaskScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -62,7 +64,7 @@ export default function EditTaskScreen() {
     setSaving(true);
     setError("");
     try {
-      await gateway.runAuthenticated((client) => client.updateTask(task.task_id, {
+      const updated = await gateway.runAuthenticated((client) => client.updateTask(task.task_id, {
         title: title.trim(),
         goal: goal.trim(),
         notificationPolicy: {
@@ -74,6 +76,41 @@ export default function EditTaskScreen() {
         launchPolicy,
         expectedRevision: task.revision,
       }));
+      if (await loadHubConnection()) {
+        if (!gateway.nodeId) throw new Error("Task 缺少目标 Node");
+        const spec = {
+          task_id: updated.task_id,
+          title: updated.title,
+          goal: updated.goal,
+          agent_id: updated.agent_id,
+          launch_policy: updated.launch_policy,
+          notification_policy: updated.notification_policy,
+        };
+        const digest = await Crypto.digestStringAsync(
+          Crypto.CryptoDigestAlgorithm.SHA256,
+          JSON.stringify(spec),
+        );
+        await putWorkspaceResource({
+          resource_id: updated.task_id,
+          kind: "task",
+          generation: updated.revision,
+          canonical_digest: digest,
+          display_name: updated.title,
+          spec,
+          enabled: updated.state !== "archived",
+        });
+        await putWorkspaceDeployment({
+          deployment_id: `task-${updated.task_id}`,
+          kind: "task",
+          resource_id: updated.task_id,
+          resource_generation: updated.revision,
+          resource_digest: digest,
+          target_node_id: gateway.nodeId,
+          desired_generation: updated.revision,
+          spec: { launch_policy: updated.launch_policy },
+          enabled: updated.state === "active",
+        });
+      }
       router.back();
     } catch {
       setError(t("taskEdit.saveFailed"));

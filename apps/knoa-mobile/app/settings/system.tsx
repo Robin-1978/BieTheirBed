@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useLocalSearchParams } from "expo-router";
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -35,9 +34,8 @@ type Current = {
 export default function SystemConfigurationScreen() {
   const params = useLocalSearchParams<{ draftId?: string }>();
   const gateway = useGateway();
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const [current, setCurrent] = useState<Current | null>(null);
-  const [history, setHistory] = useState<ConfigRevision[]>([]);
   const [draft, setDraft] = useState<ConfigDraft | null>(null);
   const [validation, setValidation] = useState<ConfigValidationResult | null>(null);
   const [changes, setChanges] = useState<ConfigChange[]>([]);
@@ -50,13 +48,11 @@ export default function SystemConfigurationScreen() {
     setWorking("load");
     setMessage("");
     try {
-      const [next, revisions, importedDraft] = await gateway.runAuthenticated((client) => Promise.all([
+      const [next, importedDraft] = await gateway.runAuthenticated((client) => Promise.all([
         client.getConfigCurrent(),
-        client.getConfigHistory(30),
         params.draftId ? client.getConfigDraft(params.draftId) : Promise.resolve(null),
       ]));
       setCurrent(next);
-      setHistory(revisions);
       if (importedDraft) setDraft(importedDraft);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : t("config.loadFailed"));
@@ -159,31 +155,6 @@ export default function SystemConfigurationScreen() {
     }
   }
 
-  function confirmRollback(revision: ConfigRevision) {
-    Alert.alert(t("config.rollbackTitle"), t("config.rollbackBody", { id: shortId(revision.revision_id) }), [
-      { text: t("common.cancel"), style: "cancel" },
-      { text: t("config.rollback"), style: "destructive", onPress: () => void rollback(revision) },
-    ]);
-  }
-
-  async function rollback(revision: ConfigRevision) {
-    setWorking("rollback");
-    try {
-      const result = await gateway.runAuthenticated((client) => client.rollbackConfig(
-        revision.revision_id,
-        t("config.rollbackSummary", { id: shortId(revision.revision_id) }),
-      ));
-      setMessage(result.state.apply_status === "failed"
-        ? t("config.applyFailed", { code: result.state.apply_error_code })
-        : t("config.rolledBack"));
-      await load();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : t("config.operationFailed"));
-    } finally {
-      setWorking("");
-    }
-  }
-
   if (!current && working === "load") {
     return <View style={styles.center}><ActivityIndicator color={colors.accent} /></View>;
   }
@@ -222,7 +193,7 @@ export default function SystemConfigurationScreen() {
                   <View style={styles.row}>
                     <View style={styles.flex}>
                       <Text style={styles.itemTitle}>{profile?.display_name ?? agentId}</Text>
-                      <Text style={styles.meta}>{agentId} · {runtime?.implementation} · {agent.runtime_spec_id}</Text>
+                      <Text style={styles.meta}>{agentId} · {agent.visibility} · {runtime?.implementation} · {agent.runtime_spec_id}</Text>
                     </View>
                     <Switch
                       disabled={!draft || isDefault}
@@ -283,7 +254,7 @@ export default function SystemConfigurationScreen() {
             {Object.entries(document.agent_system.profiles).map(([profileId, profile]) => (
               <View key={profileId} style={styles.item}>
                 <Text style={styles.itemTitle}>{profile.display_name}</Text>
-                <Text style={styles.meta}>{profileId} · {profile.visibility} · {t("config.toolsCount", { count: profile.allowed_platform_tools.length })}</Text>
+                <Text style={styles.meta}>{profileId} · Skill refs {profile.default_skill_refs.length}/{profile.allowed_skill_refs.length} · {t("config.toolsCount", { count: profile.allowed_platform_tools.length })}</Text>
                 <TextInput
                   editable={Boolean(draft)}
                   multiline
@@ -366,21 +337,8 @@ export default function SystemConfigurationScreen() {
         </Section>
       ) : null}
 
-      <Section title={t("config.history")}>
-        {history.map((revision) => {
-          const applied = revision.revision_id === current?.state.applied_revision_id;
-          return (
-            <View key={revision.revision_id} style={styles.item}>
-              <View style={styles.row}>
-                <View style={styles.flex}>
-                  <Text style={styles.itemTitle}>{shortId(revision.revision_id)}{applied ? ` · ${t("config.applied")}` : ""}</Text>
-                  <Text style={styles.meta}>{revision.change_summary || t("config.noSummary")} · {new Date(revision.created_at * 1000).toLocaleString(locale, { hour12: false })}</Text>
-                </View>
-                {!applied ? <Pressable disabled={Boolean(working)} onPress={() => confirmRollback(revision)}><Text style={styles.rollback}>{t("config.rollback")}</Text></Pressable> : null}
-              </View>
-            </View>
-          );
-        })}
+      <Section title="生效语义">
+        <Text style={styles.meta}>产品只呈现 Draft → Published → Applied。发布失败时 Node 保留上一份 Active Generation；历史版本与回滚不是普通配置流程。</Text>
       </Section>
     </ScrollView>
   );
@@ -442,7 +400,6 @@ const styles = StyleSheet.create({
   actionTextPrimary: { color: colors.white },
   cancel: { color: colors.muted, textAlign: "center", padding: 8 },
   diff: { color: colors.ink, fontFamily: "monospace", fontSize: 12 },
-  rollback: { color: colors.danger, fontWeight: "700", padding: 8 },
   fieldGrid: { gap: 8 },
   numericField: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   numericInput: { minWidth: 100, borderRadius: 10, borderWidth: 1, borderColor: colors.line, color: colors.ink, paddingHorizontal: 10, paddingVertical: 7, textAlign: "right" },

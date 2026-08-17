@@ -63,37 +63,48 @@ def _enroll(
 
 def _resource_ticket(
     tmp_path: Path,
+    *,
+    hub_id: str = "workspace-1",
+    workspace_id: str = "workspace-1",
 ) -> tuple[HubService, NodeIdentity, NodeIdentity, str]:
     now = time.time()
-    repository = HubRepository(tmp_path / "hub.db", hub_id="workspace-1")
+    repository = HubRepository(tmp_path / "hub.db", hub_id=workspace_id)
     hub = HubService(
         repository,
         tmp_path / "hub.key",
         owner_token="o" * 43,
+        hub_id=hub_id,
     )
     target = NodeIdentityStore(tmp_path / "target.json").load_or_create()
     caller = NodeIdentityStore(tmp_path / "caller.json").load_or_create()
     _enroll(repository, hub, target, "Target")
     _enroll(repository, hub, caller, "Caller")
-    repository.put_model_resource(
+    repository.put_workspace_resource(
         {
             "resource_id": "personal_model",
-            "revision": 1,
+            "kind": "model",
+            "generation": 1,
             "canonical_digest": "a" * 64,
             "display_name": "Qwen 3.5 4B",
-            "provider_protocol": "openai_compatible",
-            "model_identity": "qwen3.5-4b",
-            "declared_capabilities": {"streaming": True},
+            "spec": {
+                "provider_protocol": "openai_compatible",
+                "model_identity": "qwen3.5-4b",
+                "declared_capabilities": {"streaming": True},
+            },
+            "enabled": True,
         },
         created_by="subject_owner",
     )
-    repository.put_model_deployment(
+    repository.put_deployment(
         {
             "deployment_id": "qwen_local",
+            "kind": "model",
             "resource_id": "personal_model",
-            "resource_revision": 1,
+            "resource_generation": 1,
+            "resource_digest": "a" * 64,
             "target_node_id": target.node_id,
-            "desired_revision": 1,
+            "desired_generation": 1,
+            "spec": {"max_remote_concurrency": 1},
             "enabled": True,
         }
     )
@@ -119,7 +130,7 @@ def _resource_ticket(
     }
     observation_transcript = {
         "audience": "knoa-deployment-observation-v1",
-        "workspace_id": "workspace-1",
+        "workspace_id": workspace_id,
         **observation,
     }
     hub.publish_deployment_observation(
@@ -138,7 +149,7 @@ def _resource_ticket(
     }
     request_transcript = {
         "audience": "knoa-resource-ticket-request-v1",
-        "workspace_id": "workspace-1",
+        "workspace_id": workspace_id,
         **request,
     }
     ticket = hub.issue_resource_ticket(
@@ -148,6 +159,136 @@ def _resource_ticket(
         }
     )
     return hub, target, caller, ticket
+
+
+def test_workspace_resources_share_one_deployment_envelope_and_mcp_grant(
+    tmp_path: Path,
+) -> None:
+    now = time.time()
+    repository = HubRepository(tmp_path / "hub.db", hub_id="workspace-1")
+    hub = HubService(repository, tmp_path / "hub.key", owner_token="o" * 43)
+    target = NodeIdentityStore(tmp_path / "target.json").load_or_create()
+    caller = NodeIdentityStore(tmp_path / "caller.json").load_or_create()
+    _enroll(repository, hub, target, "MCP Target")
+    _enroll(repository, hub, caller, "Task Node")
+    resource = repository.put_workspace_resource(
+        {
+            "resource_id": "jira",
+            "kind": "mcp",
+            "generation": 3,
+            "canonical_digest": "c" * 64,
+            "display_name": "Jira MCP",
+            "spec": {"transport": "stdio", "secret_refs": ["jira-token"]},
+            "enabled": True,
+        },
+        created_by="subject_owner",
+    )
+    deployment = repository.put_deployment(
+        {
+            "deployment_id": "jira-on-target",
+            "kind": "mcp",
+            "resource_id": "jira",
+            "resource_generation": 3,
+            "resource_digest": "c" * 64,
+            "target_node_id": target.node_id,
+            "desired_generation": 7,
+            "spec": {"restart_policy": "on_failure"},
+            "enabled": True,
+        }
+    )
+    grant = repository.put_resource_grant(
+        {
+            "grant_id": "task-node-can-call-jira",
+            "caller_node_id": caller.node_id,
+            "target_deployment_id": deployment["deployment_id"],
+            "capability": "mcp_invoke",
+            "max_request_deadline": 60,
+            "expires_at": now + 3600,
+        }
+    )
+
+    assert resource["spec"]["secret_refs"] == ["jira-token"]
+    assert deployment["kind"] == "mcp"
+    assert deployment["target_node_id"] == target.node_id
+    assert grant["capability"] == "mcp_invoke"
+    assert repository.active_resource_grant(
+        caller.node_id,
+        deployment["deployment_id"],
+        capability="mcp_invoke",
+    )["grant_id"] == grant["grant_id"]
+
+
+def test_node_signed_work_projection_is_monotonic_and_workspace_readable(
+    tmp_path: Path,
+) -> None:
+    now = time.time()
+    repository = HubRepository(tmp_path / "hub.db", hub_id="workspace-1")
+    hub = HubService(repository, tmp_path / "hub.key", owner_token="o" * 43)
+    node = NodeIdentityStore(tmp_path / "node.json").load_or_create()
+    _enroll(repository, hub, node, "Task Node")
+    projection = {
+        "node_id": node.node_id,
+        "entity_kind": "task",
+        "entity_id": "task-1",
+        "principal_id": "owner",
+        "title": "Sync Jira",
+        "state": "running",
+        "progress": 0.5,
+        "summary": "Reading issues",
+        "approval_summary": "",
+        "artifact_refs": [],
+        "source_generation": 2,
+        "source_digest": "d" * 64,
+        "projection_seq": 10,
+        "source_created_at": now - 10,
+        "source_updated_at": now,
+        "payload": {"latest_execution_id": "execution-1"},
+        "observed_at": now,
+    }
+    transcript = {
+        "audience": "knoa-work-projection-v1",
+        "workspace_id": "workspace-1",
+        **projection,
+    }
+    first = hub.publish_work_projection(
+        {**projection, "signature": node.sign(canonical_json(transcript))}
+    )
+    stale = {**projection, "state": "queued", "projection_seq": 9}
+    stale_transcript = {
+        "audience": "knoa-work-projection-v1",
+        "workspace_id": "workspace-1",
+        **stale,
+    }
+    second = hub.publish_work_projection(
+        {**stale, "signature": node.sign(canonical_json(stale_transcript))}
+    )
+
+    assert first["node_id"] == node.node_id
+    assert second["state"] == "running"
+    assert repository.list_work_projections(entity_kind="task")[0]["payload"] == {
+        "latest_execution_id": "execution-1"
+    }
+
+
+def test_hosted_hub_resource_ticket_distinguishes_hub_and_workspace_ids(
+    tmp_path: Path,
+) -> None:
+    hub, target, _caller, ticket = _resource_ticket(
+        tmp_path,
+        hub_id="hub-hosted",
+        workspace_id="workspace-1",
+    )
+
+    claims = verify_resource_ticket(
+        ticket,
+        hub.signing_public_key,
+        expected_hub_id="hub-hosted",
+        expected_workspace_id="workspace-1",
+        expected_target_node_id=target.node_id,
+    )
+
+    assert claims.hub_id == "hub-hosted"
+    assert claims.workspace_id == "workspace-1"
 
 
 def test_resource_ticket_binds_workspace_grant_deployment_and_live_observation(

@@ -208,13 +208,6 @@ export class GatewayClient {
     return this.json("/v1/config/current");
   }
 
-  async getConfigHistory(limit = 50): Promise<ConfigRevision[]> {
-    const response = await this.json<{ revisions: ConfigRevision[] }>(
-      `/v1/config/history?limit=${limit}`,
-    );
-    return response.revisions;
-  }
-
   async createConfigDraft(): Promise<ConfigDraft> {
     const response = await this.json<{ draft: ConfigDraft }>("/v1/config/drafts", {
       method: "POST",
@@ -264,14 +257,6 @@ export class GatewayClient {
     const response = await this.json<{ result: ConfigPublishResult }>(
       `/v1/config/drafts/${encodeURIComponent(draftId)}/publish`,
       { method: "POST", body: { expected_version: expectedVersion, summary } },
-    );
-    return response.result;
-  }
-
-  async rollbackConfig(revisionId: string, summary: string): Promise<ConfigPublishResult> {
-    const response = await this.json<{ result: ConfigPublishResult }>(
-      "/v1/config/rollback",
-      { method: "POST", body: { revision_id: revisionId, summary } },
     );
     return response.result;
   }

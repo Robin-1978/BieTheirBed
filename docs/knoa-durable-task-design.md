@@ -3,7 +3,11 @@
 > Historical implementation design. The old document used public `Task` as an
 > execution aggregate. The forward product model now separates stable `Task`
 > definitions from `TaskExecution`; implementation must follow
-> [knoa-product-forward-blueprint.md](./knoa-product-forward-blueprint.md).
+> [knoa-product-forward-blueprint.md](./knoa-product-forward-blueprint.md) and
+> [knoa-product-domain-architecture.md](./knoa-product-domain-architecture.md). In the target
+> multi-Node model, the Task Definition and Deployment belong to Workspace;
+> scheduler/trigger state is materialized on the target Node and creates
+> TaskExecution, not another Task Definition.
 
 > Status: active forward design; B1-B5 complete
 >
@@ -447,7 +451,7 @@ outside INFO logs.
 - one-time, interval and Cron schedules;
 - authenticated webhook/business trigger port;
 - bounded retry/backoff and proactive notification;
-- create Tasks through TaskService rather than invoke AgentRuntime directly.
+- create TaskExecution through the target Node TaskService rather than invoke AgentRuntime directly.
 
 > In progress: the shared recurrence kernel now validates typed one-time,
 > interval and five-field Cron specifications with explicit IANA timezones.

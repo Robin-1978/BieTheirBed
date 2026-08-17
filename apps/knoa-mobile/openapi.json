@@ -1441,183 +1441,6 @@
         }
       }
     },
-    "/v1/config/history": {
-      "get": {
-        "operationId": "getConfigHistory",
-        "security": [
-          {
-            "gatewaySession": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 200
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Configuration history",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConfigHistoryResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/config/revisions/{revision_id}": {
-      "get": {
-        "operationId": "getConfigRevision",
-        "security": [
-          {
-            "gatewaySession": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "revision_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "maxLength": 128
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Configuration revision",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConfigRevisionResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/config/drafts": {
       "post": {
         "operationId": "createConfigDraft",
@@ -2128,118 +1951,6 @@
             }
           },
           "409": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/config/rollback": {
-      "post": {
-        "operationId": "rollbackConfig",
-        "security": [
-          {
-            "gatewaySession": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RollbackConfigRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Rolled back configuration",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConfigPublishResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
             "description": "Request rejected",
             "content": {
               "application/json": {
@@ -6483,6 +6194,16 @@
             "title": "Profile Id",
             "type": "string"
           },
+          "visibility": {
+            "default": "delegate",
+            "enum": [
+              "user",
+              "delegate",
+              "system"
+            ],
+            "title": "Visibility",
+            "type": "string"
+          },
           "enabled": {
             "default": true,
             "title": "Enabled",
@@ -6543,7 +6264,7 @@
             "title": "Instructions Required",
             "type": "boolean"
           },
-          "default_skills": {
+          "default_skill_refs": {
             "default": [],
             "items": {
               "maxLength": 128,
@@ -6551,7 +6272,19 @@
               "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
               "type": "string"
             },
-            "title": "Default Skills",
+            "title": "Default Skill Refs",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "allowed_skill_refs": {
+            "default": [],
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+              "type": "string"
+            },
+            "title": "Allowed Skill Refs",
             "type": "array",
             "uniqueItems": true
           },
@@ -6593,16 +6326,6 @@
           },
           "delegation": {
             "$ref": "#/components/schemas/DelegationPolicy"
-          },
-          "visibility": {
-            "default": "delegate",
-            "enum": [
-              "user",
-              "delegate",
-              "system"
-            ],
-            "title": "Visibility",
-            "type": "string"
           },
           "callable_by": {
             "default": [],
@@ -7694,22 +7417,6 @@
         "title": "ConfigDraftResponse",
         "type": "object"
       },
-      "ConfigHistoryResponse": {
-        "properties": {
-          "revisions": {
-            "items": {
-              "$ref": "#/components/schemas/ConfigRevision"
-            },
-            "title": "Revisions",
-            "type": "array"
-          }
-        },
-        "required": [
-          "revisions"
-        ],
-        "title": "ConfigHistoryResponse",
-        "type": "object"
-      },
       "ConfigPublishResponse": {
         "properties": {
           "result": {
@@ -7784,18 +7491,6 @@
           "created_at"
         ],
         "title": "ConfigRevision",
-        "type": "object"
-      },
-      "ConfigRevisionResponse": {
-        "properties": {
-          "revision": {
-            "$ref": "#/components/schemas/ConfigRevision"
-          }
-        },
-        "required": [
-          "revision"
-        ],
-        "title": "ConfigRevisionResponse",
         "type": "object"
       },
       "ConfigValidationIssue": {
@@ -10436,28 +10131,6 @@
           }
         },
         "title": "ResumeTaskRequest",
-        "type": "object"
-      },
-      "RollbackConfigRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "revision_id": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Revision Id",
-            "type": "string"
-          },
-          "summary": {
-            "default": "",
-            "maxLength": 2000,
-            "title": "Summary",
-            "type": "string"
-          }
-        },
-        "required": [
-          "revision_id"
-        ],
-        "title": "RollbackConfigRequest",
         "type": "object"
       },
       "RuntimeProfileLimits": {

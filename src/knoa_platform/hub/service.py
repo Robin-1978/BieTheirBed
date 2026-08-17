@@ -227,6 +227,36 @@ class HubService:
             str(request["node_id"]), request
         )
 
+    def publish_work_projection(self, request: dict) -> dict:
+        observed_at = float(request["observed_at"])
+        if abs(observed_at - self._clock()) > 120:
+            raise PermissionError("Work projection timestamp rejected")
+        transcript = {
+            "audience": "knoa-work-projection-v1",
+            "workspace_id": self.workspace_id,
+            "node_id": request["node_id"],
+            "entity_kind": request["entity_kind"],
+            "entity_id": request["entity_id"],
+            "principal_id": request.get("principal_id", ""),
+            "title": request.get("title", ""),
+            "state": request["state"],
+            "progress": request.get("progress"),
+            "summary": request.get("summary", ""),
+            "approval_summary": request.get("approval_summary", ""),
+            "artifact_refs": request.get("artifact_refs", []),
+            "source_generation": request.get("source_generation", 1),
+            "source_digest": request["source_digest"],
+            "projection_seq": request["projection_seq"],
+            "source_created_at": request["source_created_at"],
+            "source_updated_at": request["source_updated_at"],
+            "payload": request.get("payload", {}),
+            "observed_at": observed_at,
+        }
+        self.verify_node_signed_request(
+            str(request["node_id"]), transcript, str(request["signature"])
+        )
+        return self.repository.put_work_projection(str(request["node_id"]), request)
+
     def issue_resource_ticket(self, request: dict) -> str:
         timestamp = float(request["timestamp"])
         if abs(self._clock() - timestamp) > 120:
@@ -244,9 +274,16 @@ class HubService:
         caller = self.verify_node_signed_request(
             str(request["caller_node_id"]), transcript, str(request["signature"])
         )
-        deployment = self.repository.model_deployment(
-            str(request["target_deployment_id"])
-        )
+        try:
+            deployment = self.repository.deployment(
+                str(request["target_deployment_id"])
+            )
+            if deployment["kind"] != "model":
+                raise PermissionError("Resource ticket requires a Model Deployment")
+        except LookupError:
+            deployment = self.repository.model_deployment(
+                str(request["target_deployment_id"])
+            )
         if not deployment["enabled"]:
             raise PermissionError("Remote model deployment disabled")
         grant = self.repository.active_resource_grant(

@@ -7,8 +7,8 @@ import type { ManagedConfig } from "@/api/models";
 import { AppPressable } from "@/components/AppPressable";
 import {
   loadWorkspaceResourceState,
-  putWorkspaceModelDeployment,
-  putWorkspaceModelResource,
+  putWorkspaceDeployment,
+  putWorkspaceResource,
   putWorkspaceResourceGrant,
   type WorkspaceResourceState,
 } from "@/hub/hubClient";
@@ -108,7 +108,6 @@ export default function ModelCenterScreen() {
     try {
       const material = JSON.stringify({
         resource_id: resourceId.trim(),
-        revision: 1,
         driver,
         model_identity: modelId.trim(),
       });
@@ -116,21 +115,31 @@ export default function ModelCenterScreen() {
         Crypto.CryptoDigestAlgorithm.SHA256,
         material,
       );
-      await putWorkspaceModelResource({
+      const currentResource = workspaceState?.workspaceResources.find((item) => item.resource_id === resourceId.trim());
+      const generation = (currentResource?.generation ?? 0) + 1;
+      await putWorkspaceResource({
         resource_id: resourceId.trim(),
-        revision: 1,
+        kind: "model",
+        generation,
         canonical_digest: digest,
         display_name: modelId.trim(),
-        provider_protocol: driver === "anthropic" ? "anthropic" : "openai_compatible",
-        model_identity: modelId.trim(),
-        declared_capabilities: { streaming: true, tools: true },
+        spec: {
+          provider_protocol: driver === "anthropic" ? "anthropic" : "openai_compatible",
+          model_identity: modelId.trim(),
+          declared_capabilities: { streaming: true, tools: true },
+        },
+        enabled: true,
       });
-      await putWorkspaceModelDeployment({
+      const currentDeployment = workspaceState?.workspaceDeployments.find((item) => item.deployment_id === deploymentId.trim());
+      await putWorkspaceDeployment({
         deployment_id: deploymentId.trim(),
+        kind: "model",
         resource_id: resourceId.trim(),
-        resource_revision: 1,
+        resource_generation: generation,
+        resource_digest: digest,
         target_node_id: gateway.nodeId,
-        desired_revision: 1,
+        desired_generation: (currentDeployment?.desired_generation ?? 0) + 1,
+        spec: { max_remote_concurrency: 1 },
         enabled: true,
       });
       if (callerNodeId.trim()) {
@@ -138,6 +147,7 @@ export default function ModelCenterScreen() {
           grant_id: `grant_${callerNodeId.trim().slice(-16)}_${deploymentId.trim().slice(-16)}`,
           caller_node_id: callerNodeId.trim(),
           target_deployment_id: deploymentId.trim(),
+          capability: "model_inference",
           max_request_deadline: 600,
           expires_at: Date.now() / 1000 + 30 * 24 * 60 * 60,
         });

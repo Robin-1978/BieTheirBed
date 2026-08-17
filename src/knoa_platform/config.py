@@ -212,10 +212,10 @@ class AppConfig(BaseModel):
             "assistant": AgentProfile(
                 display_name="Knoa",
                 instructions_ref="builtin://assistant",
-                default_skills=frozenset({"research_report"}),
+                default_skill_refs=frozenset({"research_report"}),
+                allowed_skill_refs=frozenset({"research_report"}),
                 allowed_platform_tools=frozenset({"*"}),
                 platform_capability_ceiling=frozenset({"*"}),
-                visibility="user",
                 delegation=DelegationPolicy(
                     allowed=True,
                     targets=frozenset({"codex"}),
@@ -232,7 +232,6 @@ class AppConfig(BaseModel):
                 platform_capability_ceiling=frozenset(),
                 runtime_native_capability_ceiling=frozenset(),
                 runtime_limits=RuntimeProfileLimits(max_iterations=1),
-                visibility="system",
                 callable_by=frozenset({"approval_service"}),
             ),
             "coder": AgentProfile(
@@ -241,7 +240,6 @@ class AppConfig(BaseModel):
                 runtime_native_capability_ceiling=frozenset(
                     {"workspace_read", "command_execution"}
                 ),
-                visibility="delegate",
             ),
         }
     )
@@ -250,16 +248,19 @@ class AppConfig(BaseModel):
             "knoa": AgentDefinition(
                 runtime_spec_id="native-main",
                 profile_id="assistant",
+                visibility="user",
                 enabled=True,
             ),
             "reviewer_agent": AgentDefinition(
                 runtime_spec_id="native-approval-reviewer",
                 profile_id="approval-reviewer",
+                visibility="system",
                 enabled=False,
             ),
             "codex": AgentDefinition(
                 runtime_spec_id="codex-default",
                 profile_id="coder",
+                visibility="delegate",
                 enabled=False,
             ),
         }
