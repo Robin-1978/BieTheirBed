@@ -13,6 +13,7 @@ export type NodeDeviceBinding = {
   displayName: string;
   deviceId: string;
   gatewayUrl: string;
+  directGatewayUrl: string;
   nodeSigningPublicKey: string;
   nodeConfigurationPublicKey: string;
   sessionToken: string;
@@ -62,6 +63,7 @@ export async function replaceConnectionIdentity(input: {
   displayName?: string;
   deviceId: string;
   gatewayUrl: string;
+  directGatewayUrl?: string;
   nodeSigningPublicKey: string;
   nodeConfigurationPublicKey: string;
 }): Promise<void> {
@@ -73,6 +75,7 @@ export async function replaceConnectionIdentity(input: {
       displayName: input.displayName?.trim() || current?.displayName || input.nodeId,
       deviceId: input.deviceId,
       gatewayUrl: input.gatewayUrl.replace(/\/$/, ""),
+      directGatewayUrl: input.directGatewayUrl?.replace(/\/$/, "") || current?.directGatewayUrl || "",
       nodeSigningPublicKey: input.nodeSigningPublicKey,
       nodeConfigurationPublicKey: input.nodeConfigurationPublicKey,
       sessionToken: "",
@@ -104,6 +107,23 @@ export async function selectNode(nodeId: string): Promise<void> {
     const vault = await loadVault();
     if (!vault.nodes[nodeId]) throw new Error("节点尚未配对");
     vault.activeNodeId = nodeId;
+    await saveVault(vault);
+  });
+}
+
+export async function updateNodeDirectGatewayUrl(
+  nodeId: string,
+  directGatewayUrl: string,
+): Promise<void> {
+  const normalized = directGatewayUrl.trim().replace(/\/$/, "");
+  if (normalized && !/^https?:\/\//.test(normalized)) {
+    throw new Error("Node 直连地址无效");
+  }
+  await queueIdentityMutation(async () => {
+    const vault = await loadVault();
+    const current = vault.nodes[nodeId];
+    if (!current || current.directGatewayUrl === normalized) return;
+    vault.nodes[nodeId] = { ...current, directGatewayUrl: normalized };
     await saveVault(vault);
   });
 }
@@ -197,7 +217,12 @@ async function loadVault(): Promise<ConnectionVault> {
     const nodes: Record<string, NodeDeviceBinding> = {};
     for (const [nodeId, candidate] of Object.entries(parsed.nodes)) {
       if (!validBinding(candidate, nodeId)) continue;
-      nodes[nodeId] = candidate;
+      nodes[nodeId] = {
+        ...candidate,
+        directGatewayUrl: typeof candidate.directGatewayUrl === "string"
+          ? candidate.directGatewayUrl
+          : "",
+      };
     }
     const activeNodeId = typeof parsed.activeNodeId === "string"
       && (parsed.activeNodeId === "" || Boolean(nodes[parsed.activeNodeId]))

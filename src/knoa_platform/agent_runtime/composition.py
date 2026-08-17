@@ -47,12 +47,12 @@ from knoa_platform.agent_runtime.transcription_service import (
     ArtifactTranscriptionService,
 )
 from knoa_platform.agents import (
-    AgentDefinitionResolver,
     AgentExecutionService,
     AgentManager,
     AgentSessionBindingRepository,
     ExecuteAgentTurn,
     InvocationPolicyRepository,
+    NodeAgentResolver,
 )
 from knoa_platform.agents.delegation import DelegationRepository, DelegationService
 from knoa_platform.approvals import (
@@ -267,53 +267,36 @@ def capabilities_for_scope(scope: RuntimeScope) -> frozenset[ToolCapability]:
     return REMOTE_SCOPED_CAPABILITIES
 
 
-def _profile_instructions(profile) -> str:
-    if profile.instructions:
-        return profile.instructions
+def _agent_instructions(agent) -> str:
+    if agent.instructions:
+        return agent.instructions
     builtins = {
         "builtin://assistant": build_system_prompt(),
         "builtin://approval-reviewer": APPROVAL_REVIEWER_SYSTEM_PROMPT,
         "builtin://coder": CODER_PROFILE_PROMPT,
     }
     try:
-        return builtins[profile.instructions_ref]
+        return builtins[agent.instructions_ref]
     except KeyError as exc:
         raise ValueError(
-            f"Unsupported Profile instructions reference: {profile.instructions_ref}"
+            f"Unsupported NodeAgent instructions reference: {agent.instructions_ref}"
         ) from exc
 
 
 def _managed_model_alias(config: ManagedConfig, agent_id: str) -> str:
-    definition = config.agent_system.agents[agent_id]
-    runtime = config.agent_system.runtime_specs[definition.runtime_spec_id]
-    binding = runtime.model_binding
+    binding = config.agents.agents[agent_id].model_binding
     if binding.ownership != "platform":
         raise ValueError(f"Agent '{agent_id}' does not use a Platform model")
     return binding.model
 
 
 def _agent_generation_id(managed: ManagedConfig, agent_id: str) -> str:
-    definition = managed.agent_system.agents[agent_id]
-    runtime = managed.agent_system.runtime_specs[definition.runtime_spec_id]
-    profile = managed.agent_system.profiles[definition.profile_id]
-    runtime_material = runtime.model_dump(
-        mode="json",
-        exclude={"native_capabilities", "instruction_authority"},
-    )
+    agent = managed.agents.agents[agent_id]
     payload: dict[str, object] = {
         "agent_id": agent_id,
-        "runtime_spec_id": definition.runtime_spec_id,
-        "runtime": runtime_material,
-        "profile": {
-            "display_name": profile.display_name,
-            "instructions": profile.instructions,
-            "instructions_ref": profile.instructions_ref,
-            "runtime_limits": profile.runtime_limits.model_dump(mode="json"),
-            "tool_inventory_enabled": bool(profile.allowed_platform_tools),
-            "visibility": definition.visibility,
-        },
+        "agent": agent.model_dump(mode="json"),
     }
-    if runtime.implementation == "native":
+    if agent.kind == "knoa":
         model_alias = _managed_model_alias(managed, agent_id)
         model = managed.models[model_alias]
         payload.update(
@@ -330,7 +313,7 @@ def _agent_generation_id(managed: ManagedConfig, agent_id: str) -> str:
                 },
             }
         )
-        if agent_id == managed.agent_system.default_agent:
+        if agent_id == managed.agents.default_agent:
             payload["fallback"] = {
                 "enabled": managed.fallback_enabled,
                 "model": managed.fallback_model,
@@ -441,26 +424,22 @@ def _build_agent_runtime_set(
         bootstrap,
     )
     reviewer_model_alias = ""
-    for agent_id, definition in managed.agent_system.agents.items():
-        if not definition.enabled:
+    for agent_id, agent in managed.agents.agents.items():
+        if not agent.enabled:
             continue
-        runtime_spec = managed.agent_system.runtime_specs[
-            definition.runtime_spec_id
-        ]
-        profile = managed.agent_system.profiles[definition.profile_id]
-        instructions = _profile_instructions(profile)
+        instructions = _agent_instructions(agent)
         state_root = paths.resolve(
             f"agents/{agent_id}",
             default_parent=paths.root,
         )
-        if runtime_spec.implementation == "native":
+        if agent.kind == "knoa":
             model_alias = _managed_model_alias(managed, agent_id)
             model_config = _resolve_managed_model(managed, model_alias, bootstrap)
             selected_primary = provider_factory(model_config)
             runtime_provider: ModelProviderPort = selected_primary
             selected_fallback: RuntimeModelProvider | None = None
             if (
-                agent_id == managed.agent_system.default_agent
+                agent_id == managed.agents.default_agent
                 and managed.fallback_enabled
                 and managed.fallback_model
             ):
@@ -497,8 +476,8 @@ def _build_agent_runtime_set(
                     detail="No configured model is available",
                 )
 
-            profile_iterations = profile.runtime_limits.max_iterations
-            profile_output_tokens = profile.runtime_limits.max_output_tokens
+            agent_iterations = agent.runtime_limits.max_iterations
+            agent_output_tokens = agent.runtime_limits.max_output_tokens
             runtimes[agent_id] = KnoaAgentRuntime(
                 runtime_provider,
                 ContextCheckpointRepository(state_root / "context.db"),
@@ -506,15 +485,15 @@ def _build_agent_runtime_set(
                 system_prompt=instructions,
                 health_probe=native_health_probe,
                 max_iterations=(
-                    profile_iterations or managed.operational.max_iterations
+                    agent_iterations or managed.operational.max_iterations
                 ),
                 max_tool_calls=max(1, managed.operational.max_total_tool_calls),
                 max_output_tokens=(
-                    profile_output_tokens or managed.operational.max_output_tokens
+                    agent_output_tokens or managed.operational.max_output_tokens
                 ),
                 temperature=(
                     0.0
-                    if managed.agent_system.agents[agent_id].visibility == "system"
+                    if agent.visibility == "system"
                     else managed.operational.llm_temperature
                 ),
                 context_window=max(
@@ -523,14 +502,14 @@ def _build_agent_runtime_set(
                     or managed.operational.context_window_budget,
                 ),
                 agent_id=agent_id,
-                display_name=profile.display_name,
+                display_name=agent.display_name,
                 tool_inventory=(
                     ToolInventory(semantic_selector=DisabledToolSelector())
-                    if not profile.allowed_platform_tools
+                    if not agent.allowed_platform_tools
                     else None
                 ),
             )
-            if agent_id == managed.agent_system.default_agent:
+            if agent_id == managed.agents.default_agent:
                 default_primary = selected_primary
                 default_model_config = model_config
             if agent_id == managed.approval_review.agent_id:
@@ -538,30 +517,30 @@ def _build_agent_runtime_set(
             continue
 
         workspace = (
-            paths.resolve(runtime_spec.cwd, default_parent=paths.root)
-            if runtime_spec.cwd
+            paths.resolve(agent.cwd, default_parent=paths.root)
+            if agent.cwd
             else state_root / "workspace"
         )
         workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
         runtime_home = (
-            paths.resolve(runtime_spec.home, default_parent=paths.root)
-            if runtime_spec.home
+            paths.resolve(agent.home, default_parent=paths.root)
+            if agent.home
             else None
         )
         runtimes[agent_id] = CodexAgentRuntime(
             CodexSessionRepository(state_root / "sessions.db"),
             agent_id=agent_id,
-            display_name=profile.display_name,
+            display_name=agent.display_name,
             instructions=instructions,
-            command=runtime_spec.command,
+            command=agent.command,
             home=runtime_home,
             cwd=workspace,
-            model=runtime_spec.model_binding.hint,
-            approval_policy=runtime_spec.approval_policy,
-            sandbox=runtime_spec.sandbox,
-            request_timeout_seconds=runtime_spec.request_timeout_seconds,
-            max_line_bytes=runtime_spec.max_line_bytes,
-            max_event_queue=runtime_spec.max_event_queue,
+            model=agent.model_binding.hint,
+            approval_policy=agent.approval_policy,
+            sandbox=agent.sandbox,
+            request_timeout_seconds=agent.request_timeout_seconds,
+            max_line_bytes=agent.max_line_bytes,
+            max_event_queue=agent.max_event_queue,
         )
     if default_primary is None:
         raise ValueError("Default Agent must use a Platform-managed model")
@@ -799,8 +778,8 @@ def build_core_runtime(
         summary="Freeze managed Skill package content",
     )
     managed = applied_config.document
-    agent_resolver = AgentDefinitionResolver(
-        managed.agent_system,
+    agent_resolver = NodeAgentResolver(
+        managed.agents,
         config_revision_id=applied_config.revision_id,
     )
     resolver_holder = {"current": agent_resolver}
@@ -986,19 +965,19 @@ def build_core_runtime(
     model_holder["current"] = configured_model
     agent_manager = AgentManager(
         runtimes,
-        default_agent=managed.agent_system.default_agent,
+        default_agent=managed.agents.default_agent,
         enabled={
-            agent_id: managed.agent_system.agents[agent_id].enabled
+            agent_id: managed.agents.agents[agent_id].enabled
             for agent_id in runtimes
         },
         max_concurrency={
-            agent_id: agent_resolver.runtime_spec(agent_id).max_concurrency
+            agent_id: agent_resolver.agent(agent_id).max_concurrency
             for agent_id in runtimes
         },
         system_agents=frozenset(
             agent_id
             for agent_id in runtimes
-            if agent_resolver.definition(agent_id).visibility == "system"
+            if agent_resolver.agent(agent_id).visibility == "system"
         ),
         generation_ids={
             agent_id: _agent_generation_id(managed, agent_id)
@@ -1192,8 +1171,8 @@ def build_core_runtime(
                     provider_factory=provider_factory,
                 )
             )
-            next_resolver = AgentDefinitionResolver(
-                candidate.agent_system,
+            next_resolver = NodeAgentResolver(
+                candidate.agents,
                 config_revision_id=revision.revision_id,
             )
             extensions_changed = _extension_generation_id(
@@ -1240,19 +1219,19 @@ def build_core_runtime(
                 extension_swapped = True
             await agent_manager.replace_generations(
                 candidate_runtimes,
-                default_agent=candidate.agent_system.default_agent,
+                default_agent=candidate.agents.default_agent,
                 enabled={
-                    agent_id: candidate.agent_system.agents[agent_id].enabled
+                    agent_id: candidate.agents.agents[agent_id].enabled
                     for agent_id in candidate_runtimes
                 },
                 max_concurrency={
-                    agent_id: next_resolver.runtime_spec(agent_id).max_concurrency
+                    agent_id: next_resolver.agent(agent_id).max_concurrency
                     for agent_id in candidate_runtimes
                 },
                 system_agents=frozenset(
                     agent_id
                     for agent_id in candidate_runtimes
-                    if next_resolver.definition(agent_id).visibility == "system"
+                    if next_resolver.agent(agent_id).visibility == "system"
                 ),
                 generation_ids={
                     agent_id: _agent_generation_id(candidate, agent_id)

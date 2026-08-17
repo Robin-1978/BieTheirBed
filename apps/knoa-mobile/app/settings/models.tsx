@@ -84,8 +84,8 @@ export default function ModelCenterScreen() {
             max_remote_concurrency: 1,
           };
         }
-        for (const runtime of Object.values(document.agent_system.runtime_specs)) {
-          if (runtime.implementation === "native" && runtime.model_binding.ownership === "platform") runtime.model_binding.model = modelAlias.trim();
+        for (const agent of Object.values(document.agents.agents)) {
+          if (agent.kind === "knoa" && agent.model_binding.ownership === "platform") agent.model_binding.model = modelAlias.trim();
         }
         return client.replaceConfigDraft(created.draft_id, document, created.draft_version);
       });
@@ -165,7 +165,7 @@ export default function ModelCenterScreen() {
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <View style={styles.section}>
         <Text style={styles.title}>Model Center</Text>
-        <Text style={styles.hint}>Provider 管协议与凭据，Model 管模型 ID，Runtime 只绑定模型别名。Secret 写入后不可回显。</Text>
+        <Text style={styles.hint}>Provider 管协议与凭据，Model 管模型 ID，NodeAgent 只绑定模型别名。Secret 写入后不可回显。</Text>
         <Text style={styles.label}>Provider driver</Text>
         <View style={styles.choices}>
           {(["openai_compatible", "openai", "anthropic", "llamacpp", "workspace_remote"] as Driver[]).map((value) => (
@@ -200,7 +200,7 @@ export default function ModelCenterScreen() {
         <AppPressable style={styles.primary} disabled={working || driver === "workspace_remote"} onPress={() => void syncWorkspaceResource()}>
           <Text style={styles.primaryText}>同步本机部署到 Workspace</Text>
         </AppPressable>
-        {workspaceState?.deployments.map((deployment) => {
+        {workspaceState?.workspaceDeployments.map((deployment) => {
           const observation = workspaceState.observations.find((item) => item.deployment_id === deployment.deployment_id);
           const grants = workspaceState.grants.filter((item) => item.target_deployment_id === deployment.deployment_id).length;
           return (

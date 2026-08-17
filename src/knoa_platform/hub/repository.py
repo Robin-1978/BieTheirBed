@@ -99,18 +99,6 @@ class HubRepository:
                     created_at REAL NOT NULL,
                     PRIMARY KEY(workspace_id, identity_issuer_id, subject_id)
                 );
-                CREATE TABLE IF NOT EXISTS model_resources(
-                    resource_id TEXT PRIMARY KEY,
-                    workspace_id TEXT NOT NULL,
-                    revision INTEGER NOT NULL,
-                    canonical_digest TEXT NOT NULL,
-                    display_name TEXT NOT NULL,
-                    provider_protocol TEXT NOT NULL,
-                    model_identity TEXT NOT NULL,
-                    declared_capabilities TEXT NOT NULL,
-                    created_by TEXT NOT NULL,
-                    created_at REAL NOT NULL
-                );
                 CREATE TABLE IF NOT EXISTS workspace_resources(
                     resource_id TEXT NOT NULL,
                     workspace_id TEXT NOT NULL,
@@ -164,16 +152,6 @@ class HubRepository:
                 );
                 CREATE INDEX IF NOT EXISTS work_projections_by_workspace
                     ON work_projections(workspace_id, entity_kind, source_updated_at DESC);
-                CREATE TABLE IF NOT EXISTS model_deployments(
-                    deployment_id TEXT PRIMARY KEY,
-                    workspace_id TEXT NOT NULL,
-                    resource_id TEXT NOT NULL,
-                    resource_revision INTEGER NOT NULL,
-                    target_node_id TEXT NOT NULL,
-                    desired_revision INTEGER NOT NULL,
-                    enabled INTEGER NOT NULL,
-                    created_at REAL NOT NULL
-                );
                 CREATE TABLE IF NOT EXISTS resource_grants(
                     grant_id TEXT PRIMARY KEY,
                     workspace_id TEXT NOT NULL,
@@ -226,6 +204,10 @@ class HubRepository:
             if "workspace_id" not in columns:
                 db.execute("ALTER TABLE nodes ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''")
                 db.execute("UPDATE nodes SET workspace_id=hub_id WHERE workspace_id='' ")
+            if "direct_gateway_url" not in columns:
+                db.execute(
+                    "ALTER TABLE nodes ADD COLUMN direct_gateway_url TEXT NOT NULL DEFAULT ''"
+                )
 
     def _connect(self) -> sqlite3.Connection:
         return connect_sqlite(self.path, foreign_keys=True)
@@ -370,14 +352,20 @@ class HubRepository:
             ).fetchall()
         return tuple(dict(row) for row in rows)
 
-    def record_presence(self, node_id: str, nonce: str) -> dict:
+    def record_presence(
+        self, node_id: str, nonce: str, *, direct_gateway_url: str = ""
+    ) -> dict:
         now = self._clock()
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute(
                 "INSERT INTO presence_nonces VALUES (?, ?, ?)", (node_id, nonce, now)
             )
-            db.execute("UPDATE nodes SET last_seen=? WHERE node_id=? AND state='active'", (now, node_id))
+            db.execute(
+                """UPDATE nodes SET last_seen=?, direct_gateway_url=?
+                   WHERE node_id=? AND state='active'""",
+                (now, direct_gateway_url, node_id),
+            )
             db.execute("DELETE FROM presence_nonces WHERE observed_at<?", (now - 600,))
         return self.node(node_id)
 
@@ -450,59 +438,9 @@ class HubRepository:
             raise LookupError("Workspace not found")
         return dict(row)
 
-    def put_model_resource(self, item: dict, *, created_by: str) -> dict:
-        now = self._clock()
-        with self._connect() as db:
-            db.execute(
-                """INSERT INTO model_resources VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(resource_id) DO UPDATE SET
-                     revision=excluded.revision,
-                     canonical_digest=excluded.canonical_digest,
-                     display_name=excluded.display_name,
-                     provider_protocol=excluded.provider_protocol,
-                     model_identity=excluded.model_identity,
-                     declared_capabilities=excluded.declared_capabilities,
-                     created_by=excluded.created_by,
-                     created_at=excluded.created_at""",
-                (
-                    item["resource_id"], self.hub_id, item["revision"],
-                    item["canonical_digest"], item["display_name"],
-                    item["provider_protocol"], item["model_identity"],
-                    json.dumps(item.get("declared_capabilities", {}), sort_keys=True),
-                    created_by, now,
-                ),
-            )
-        return self.model_resource(str(item["resource_id"]))
-
-    def model_resource(self, resource_id: str) -> dict:
-        with self._connect() as db:
-            row = db.execute(
-                "SELECT * FROM model_resources WHERE resource_id=? AND workspace_id=?",
-                (resource_id, self.hub_id),
-            ).fetchone()
-        if row is None:
-            raise LookupError("Model resource not found")
-        item = dict(row)
-        item["declared_capabilities"] = json.loads(item["declared_capabilities"])
-        return item
-
-    def list_model_resources(self) -> tuple[dict, ...]:
-        with self._connect() as db:
-            rows = db.execute(
-                """SELECT * FROM model_resources WHERE workspace_id=?
-                   ORDER BY display_name, resource_id""",
-                (self.hub_id,),
-            ).fetchall()
-        items = []
-        for row in rows:
-            item = dict(row)
-            item["declared_capabilities"] = json.loads(item["declared_capabilities"])
-            items.append(item)
-        return tuple(items)
-
     def put_workspace_resource(self, item: dict, *, created_by: str) -> dict:
         kind = str(item["kind"])
-        if kind not in {"agent", "runtime", "model", "skill", "mcp", "policy", "task"}:
+        if kind not in {"model", "mcp"}:
             raise ValueError("Workspace resource kind is invalid")
         resource_id = str(item["resource_id"])
         generation = int(item["generation"])
@@ -593,10 +531,10 @@ class HubRepository:
 
     def put_deployment(self, item: dict) -> dict:
         kind = str(item["kind"])
-        if kind not in {"model", "mcp", "agent", "task"}:
+        if kind not in {"model", "mcp"}:
             raise ValueError("Deployment kind is invalid")
         resource = self.workspace_resource(str(item["resource_id"]))
-        if resource["kind"] != kind and not (kind == "agent" and resource["kind"] == "runtime"):
+        if resource["kind"] != kind:
             raise ValueError("Deployment resource kind mismatch")
         if int(item["resource_generation"]) != int(resource["generation"]):
             raise ValueError("Deployment resource generation mismatch")
@@ -785,61 +723,13 @@ class HubRepository:
         item["payload"] = json.loads(item.pop("payload_json"))
         return item
 
-    def put_model_deployment(self, item: dict) -> dict:
-        resource = self.model_resource(str(item["resource_id"]))
-        self.node(str(item["target_node_id"]))
-        if int(item["resource_revision"]) != int(resource["revision"]):
-            raise ValueError("Model resource revision mismatch")
-        now = self._clock()
-        with self._connect() as db:
-            db.execute(
-                """INSERT INTO model_deployments VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(deployment_id) DO UPDATE SET
-                     resource_id=excluded.resource_id,
-                     resource_revision=excluded.resource_revision,
-                     target_node_id=excluded.target_node_id,
-                     desired_revision=excluded.desired_revision,
-                     enabled=excluded.enabled""",
-                (
-                    item["deployment_id"], self.hub_id, item["resource_id"],
-                    item["resource_revision"], item["target_node_id"],
-                    item["desired_revision"], int(bool(item.get("enabled", True))), now,
-                ),
-            )
-        return self.model_deployment(str(item["deployment_id"]))
-
-    def model_deployment(self, deployment_id: str) -> dict:
-        with self._connect() as db:
-            row = db.execute(
-                """SELECT * FROM model_deployments
-                   WHERE deployment_id=? AND workspace_id=?""",
-                (deployment_id, self.hub_id),
-            ).fetchone()
-        if row is None:
-            raise LookupError("Model deployment not found")
-        item = dict(row)
-        item["enabled"] = bool(item["enabled"])
-        return item
-
-    def list_model_deployments(self) -> tuple[dict, ...]:
-        with self._connect() as db:
-            rows = db.execute(
-                """SELECT * FROM model_deployments WHERE workspace_id=?
-                   ORDER BY deployment_id""",
-                (self.hub_id,),
-            ).fetchall()
-        return tuple({**dict(row), "enabled": bool(row["enabled"])} for row in rows)
-
     def put_resource_grant(self, item: dict) -> dict:
         caller = self.node(str(item["caller_node_id"]))
         capability = str(item.get("capability", "model_inference"))
         if capability == "model_inference":
-            try:
-                deployment = self.deployment(str(item["target_deployment_id"]))
-                if deployment["kind"] != "model":
-                    raise ValueError("Model grant requires a Model Deployment")
-            except LookupError:
-                deployment = self.model_deployment(str(item["target_deployment_id"]))
+            deployment = self.deployment(str(item["target_deployment_id"]))
+            if deployment["kind"] != "model":
+                raise ValueError("Model grant requires a Model Deployment")
         elif capability == "mcp_invoke":
             deployment = self.deployment(str(item["target_deployment_id"]))
             if deployment["kind"] != "mcp":
@@ -912,10 +802,7 @@ class HubRepository:
         return tuple(dict(row) for row in rows)
 
     def put_deployment_observation(self, node_id: str, item: dict) -> dict:
-        try:
-            deployment = self.deployment(str(item["deployment_id"]))
-        except LookupError:
-            deployment = self.model_deployment(str(item["deployment_id"]))
+        deployment = self.deployment(str(item["deployment_id"]))
         if deployment["target_node_id"] != node_id:
             raise PermissionError("Deployment observation Node mismatch")
         with self._connect() as db:
@@ -959,10 +846,8 @@ class HubRepository:
                 """SELECT o.* FROM deployment_observations o
                    WHERE o.deployment_id IN (
                        SELECT deployment_id FROM deployments WHERE workspace_id=?
-                       UNION
-                       SELECT deployment_id FROM model_deployments WHERE workspace_id=?
                    ) ORDER BY o.deployment_id""",
-                (self.hub_id, self.hub_id),
+                (self.hub_id,),
             ).fetchall()
         items = []
         for row in rows:

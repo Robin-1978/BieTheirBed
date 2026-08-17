@@ -57,23 +57,21 @@ export type AgentSummary = {
   display_name: string;
 };
 
-export type ManagedAgentDefinition = {
-  runtime_spec_id: string;
-  profile_id: string;
-  visibility: "user" | "delegate" | "system";
-  enabled: boolean;
-};
-
-export type ManagedAgentProfile = {
+export type ManagedNodeAgent = {
+  kind: "knoa" | "codex";
   display_name: string;
   instructions: string;
   instructions_ref: string;
   instructions_required: boolean;
+  visibility: "user" | "delegate" | "system";
+  enabled: boolean;
+  model_binding: { ownership: "platform" | "runtime"; model: string; hint: string };
+  max_concurrency: number;
   default_skill_refs: string[];
   allowed_skill_refs: string[];
   allowed_platform_tools: string[];
   platform_capability_ceiling: string[];
-  runtime_native_capability_ceiling: string[];
+  native_capability_ceiling: string[];
   runtime_limits: { max_iterations: number | null; max_output_tokens: number | null };
   delegation: {
     allowed: boolean;
@@ -84,17 +82,11 @@ export type ManagedAgentProfile = {
     max_deadline_seconds: number;
   };
   callable_by: string[];
-};
-
-export type ManagedRuntimeSpec = {
-  implementation: "native" | "codex";
-  model_binding: { ownership: "platform" | "runtime"; model: string; hint: string };
-  max_concurrency: number;
   command: string[];
+  home: string;
+  cwd: string;
   sandbox: string;
   approval_policy: string;
-  native_capabilities: string[];
-  instruction_authority: string;
   request_timeout_seconds?: number;
   max_line_bytes?: number;
   max_event_queue?: number;
@@ -145,10 +137,8 @@ export type ManagedConfig = {
   default_model: string;
   fallback_model: string;
   fallback_enabled: boolean;
-  agent_system: {
-    runtime_specs: Record<string, ManagedRuntimeSpec>;
-    profiles: Record<string, ManagedAgentProfile>;
-    agents: Record<string, ManagedAgentDefinition>;
+  agents: {
+    agents: Record<string, ManagedNodeAgent>;
     default_agent: string;
   };
   approval_review: ManagedApprovalReviewConfig;

@@ -77,43 +77,20 @@ mcp_servers: {}
 # Additional roots containing Skill package directories. Knoa also loads its
 # packaged built-in Skills and ~/.knoa/skills.
 skill_directories: []
-# Agent execution configuration, role profiles and stable identities are
-# separate typed domains. The YAML is an initialization/import document; after
-# first startup the versioned Config Registry is the managed source of truth.
+# Agents are complete Node-owned configurations. The YAML is an
+# initialization/import document; after first startup the versioned Config
+# Registry is the managed source of truth for this Node.
 default_agent: knoa
-runtime_specs:
-  native-main:
-    implementation: native
+node_agents:
+  knoa:
+    kind: knoa
+    display_name: "Knoa Agent"
+    instructions_ref: "builtin://assistant"
+    visibility: user
     model_binding:
       ownership: platform
       model: "@default"
     max_concurrency: 4
-  native-approval-reviewer:
-    implementation: native
-    model_binding:
-      ownership: platform
-      model: "@reviewer"
-    max_concurrency: 1
-  codex-default:
-    implementation: codex
-    model_binding:
-      ownership: runtime
-    max_concurrency: 1
-    command: ["codex", "app-server"]
-    home: "agents/codex/home"
-    cwd: "agents/codex/workspace"
-    approval_policy: "never"
-    sandbox: "read-only"
-    native_capabilities: [workspace_read, command_execution]
-    instruction_authority: required
-    request_timeout_seconds: 120
-    max_line_bytes: 4194304
-    max_event_queue: 1024
-
-agent_profiles:
-  assistant:
-    display_name: Knoa
-    instructions_ref: "builtin://assistant"
     default_skill_refs: [research_report]
     allowed_skill_refs: [research_report]
     allowed_platform_tools: ["*"]
@@ -125,36 +102,39 @@ agent_profiles:
       max_children: 3
       max_parallel_children: 3
       max_deadline_seconds: 1800
-  approval-reviewer:
-    display_name: Knoa Reviewer
+
+  reviewer_agent:
+    kind: knoa
+    display_name: "Knoa Reviewer"
     instructions_ref: "builtin://approval-reviewer"
-    allowed_platform_tools: []
-    platform_capability_ceiling: []
-    runtime_native_capability_ceiling: []
+    visibility: system
+    enabled: false
+    model_binding:
+      ownership: platform
+      model: "@reviewer"
+    max_concurrency: 1
     runtime_limits:
       max_iterations: 1
     callable_by: [approval_service]
-  coder:
-    display_name: Codex
-    instructions_ref: "builtin://coder"
-    runtime_native_capability_ceiling: [workspace_read, command_execution]
 
-agent_definitions:
-  knoa:
-    runtime_spec_id: native-main
-    profile_id: assistant
-    visibility: user
-    enabled: true
-  reviewer_agent:
-    runtime_spec_id: native-approval-reviewer
-    profile_id: approval-reviewer
-    visibility: system
-    enabled: false
   codex:
-    runtime_spec_id: codex-default
-    profile_id: coder
+    kind: codex
+    display_name: "Codex Agent"
+    instructions_ref: "builtin://coder"
     visibility: delegate
     enabled: false
+    model_binding:
+      ownership: runtime
+    max_concurrency: 1
+    command: ["codex", "app-server"]
+    home: "agents/codex/home"
+    cwd: "agents/codex/workspace"
+    approval_policy: "never"
+    sandbox: "read-only"
+    native_capability_ceiling: [workspace_read, command_execution]
+    request_timeout_seconds: 120
+    max_line_bytes: 4194304
+    max_event_queue: 1024
 
 approval_review:
   mode: "off" # off | suggest | auto

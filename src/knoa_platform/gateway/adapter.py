@@ -401,6 +401,7 @@ class SecureGatewayAdapter(
             app=self.app,
             core=self._core,
             remote_models=self._remote_models,
+            direct_gateway_url=config.gateway_public_url,
         )
 
     @property

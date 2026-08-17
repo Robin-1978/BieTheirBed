@@ -8,7 +8,6 @@ import {
   listHostedWorkspaceMembers,
   listHostedWorkspaces,
   listHubNodes,
-  listWorkspaceWork,
   loadHubConnection,
   loadWorkspaceResourceState,
   selectHostedWorkspace,
@@ -17,6 +16,7 @@ import {
 } from "@/hub/hubClient";
 import { rememberNodePage, rememberWorkspace } from "@/navigation/navigationPreference";
 import { useGateway } from "@/state/GatewayProvider";
+import { updateNodeDirectGatewayUrl } from "@/security/deviceIdentity";
 import { colors } from "@/theme";
 
 export default function WorkspaceScreen() {
@@ -29,7 +29,6 @@ export default function WorkspaceScreen() {
   const [memberCount, setMemberCount] = useState(0);
   const [resourceCount, setResourceCount] = useState(0);
   const [deploymentCount, setDeploymentCount] = useState(0);
-  const [workCount, setWorkCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState("");
   const [error, setError] = useState("");
@@ -57,17 +56,15 @@ export default function WorkspaceScreen() {
       }
       setWorkspace(target);
       await rememberWorkspace(target.workspaceId, target.displayName);
-      const [directory, members, resources, work] = await Promise.all([
+      const [directory, members, resources] = await Promise.all([
         listHubNodes(),
         connection.accountId ? listHostedWorkspaceMembers(target.workspaceId).catch(() => []) : Promise.resolve([]),
         loadWorkspaceResourceState().catch(() => null),
-        listWorkspaceWork().catch(() => []),
       ]);
       setNodes(directory);
       setMemberCount(members.length);
-      setResourceCount((resources?.workspaceResources.length ?? 0) + (resources?.resources.length ?? 0));
-      setDeploymentCount((resources?.workspaceDeployments.length ?? 0) + (resources?.deployments.length ?? 0));
-      setWorkCount(work.length);
+      setResourceCount(resources?.workspaceResources.length ?? 0);
+      setDeploymentCount(resources?.workspaceDeployments.length ?? 0);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Workspace 加载失败");
     } finally {
@@ -90,10 +87,11 @@ export default function WorkspaceScreen() {
     setWorking(node.node_id);
     setError("");
     try {
+      await updateNodeDirectGatewayUrl(node.node_id, node.direct_gateway_url || "");
       await gateway.switchNode(node.node_id);
       const workspaceName = workspace?.displayName || fallbackName;
       await rememberNodePage({ workspaceId, workspaceName, nodeId: node.node_id, nodePage: "chat" });
-      router.push({ pathname: "/chat", params: { workspaceId, workspaceName, nodeId: node.node_id } });
+      router.push({ pathname: "/node", params: { workspaceId, workspaceName, nodeId: node.node_id } });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Node 连接失败");
     } finally {
@@ -118,7 +116,7 @@ export default function WorkspaceScreen() {
         </View>
 
         <View style={styles.metrics}>
-          <Metric value={workCount} label="工作" />
+          <Metric value={memberCount} label="成员" />
           <Metric value={resourceCount} label="资源" />
           <Metric value={deploymentCount} label="部署" />
           <Metric value={nodes.length} label="Node" />
@@ -161,9 +159,8 @@ export default function WorkspaceScreen() {
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Workspace 管理</Text>
-          <WorkspaceRow icon="chat" title="工作" detail={`${workCount} 个会话或任务投影`} onPress={() => router.push({ pathname: "/workspaces/[workspaceId]/work", params: { workspaceId, workspaceName: displayName } })} />
-          <WorkspaceRow icon="agent" title="资源与部署" detail={`${resourceCount} 个资源 · ${deploymentCount} 个部署`} onPress={() => router.push({ pathname: "/workspaces/[workspaceId]/resources", params: { workspaceId, workspaceName: displayName } })} />
-          <WorkspaceRow icon="node" title="Node 管理" detail={`${nodes.length} 个 Node · 配置与部署目标`} onPress={() => router.push({ pathname: "/workspaces/[workspaceId]/nodes", params: { workspaceId, workspaceName: displayName } })} />
+          <WorkspaceRow icon="agent" title="共享服务" detail={`${resourceCount} 个 LLM/MCP 资源 · ${deploymentCount} 个 Endpoint`} onPress={() => router.push({ pathname: "/workspaces/[workspaceId]/resources", params: { workspaceId, workspaceName: displayName } })} />
+          <WorkspaceRow icon="node" title="Node 管理" detail={`${nodes.length} 个 Node · 工作与配置均归属具体 Node`} onPress={() => router.push({ pathname: "/workspaces/[workspaceId]/nodes", params: { workspaceId, workspaceName: displayName } })} />
           <WorkspaceRow icon="workspace" title="成员与权限" detail={`${memberCount} 个成员`} onPress={() => router.push("/account")} />
         </View>
         {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -176,7 +173,7 @@ function Metric({ value, label }: { value: number; label: string }) {
   return <View style={styles.metric}><Text style={styles.metricValue}>{value}</Text><Text style={styles.meta}>{label}</Text></View>;
 }
 
-function WorkspaceRow({ icon, title, detail, onPress }: { icon: "workspace" | "agent" | "chat" | "node"; title: string; detail: string; onPress(): void }) {
+function WorkspaceRow({ icon, title, detail, onPress }: { icon: "workspace" | "agent" | "node"; title: string; detail: string; onPress(): void }) {
   return (
     <AppPressable style={styles.row} onPress={onPress}>
       <AppIcon name={icon} color={colors.accent} size={21} />

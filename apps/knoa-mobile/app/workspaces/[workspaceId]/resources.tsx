@@ -19,25 +19,25 @@ export default function WorkspaceResourcesScreen() {
     finally { setLoading(false); }
   }, []);
   useFocusEffect(useCallback(() => { void refresh(); }, [refresh]));
+  const sharedResources = state?.workspaceResources.filter((resource) => resource.kind === "model" || resource.kind === "mcp") ?? [];
+  const sharedDeployments = state?.workspaceDeployments.filter((deployment) => deployment.kind === "model" || deployment.kind === "mcp") ?? [];
   return (
     <>
-      <Stack.Screen options={{ title: "资源与部署" }} />
+      <Stack.Screen options={{ title: "共享服务" }} />
       <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.header}><View style={styles.icon}><AppIcon name="agent" color={colors.accent} size={27} /></View><View style={styles.flex}><Text style={styles.title}>Workspace 共享资源</Text><Text style={styles.meta}>Agent、Runtime、Model、Skill、MCP 与 Policy 在 Workspace 定义，再部署到目标 Node。</Text></View><AppPressable onPress={() => void refresh()} style={styles.iconButton}><AppIcon name="refresh" color={colors.muted} size={20} /></AppPressable></View>
+        <View style={styles.header}><View style={styles.icon}><AppIcon name="agent" color={colors.accent} size={27} /></View><View style={styles.flex}><Text style={styles.title}>跨 Node 共享服务</Text><Text style={styles.meta}>这里只管理明确发布的 LLM 与 MCP Endpoint；Agent、Conversation、Task、Tool 和 Secret 均属于具体 Node。</Text></View><AppPressable onPress={() => void refresh()} style={styles.iconButton}><AppIcon name="refresh" color={colors.muted} size={20} /></AppPressable></View>
         {loading ? <ActivityIndicator color={colors.accent} /> : null}
-        <Section title="资源定义">
-          {state?.workspaceResources.map((resource) => <Row key={resource.resource_id} title={resource.display_name} detail={`${resource.kind} · Generation ${resource.generation} · ${resource.enabled ? "已发布" : "已停用"}`} />)}
-          {state?.resources.map((resource) => <Row key={`model:${resource.resource_id}`} title={resource.display_name} detail={`model · ${resource.provider_protocol} · ${resource.model_identity}`} />)}
-          {!loading && !(state?.workspaceResources.length || state?.resources.length) ? <Text style={styles.meta}>还没有 Workspace 资源。</Text> : null}
+        <Section title="服务目录">
+          {sharedResources.map((resource) => <Row key={resource.resource_id} title={resource.display_name} detail={`${resource.kind.toUpperCase()} · Generation ${resource.generation} · ${resource.enabled ? "已发布" : "已停用"}`} />)}
+          {!loading && !sharedResources.length ? <Text style={styles.meta}>还没有共享 LLM/MCP 服务。</Text> : null}
         </Section>
-        <Section title="部署">
-          {state?.workspaceDeployments.map((deployment) => <Row key={deployment.deployment_id} title={deployment.deployment_id} detail={`${deployment.kind} → ${deployment.target_node_id} · Desired ${deployment.desired_generation}`} />)}
-          {state?.deployments.map((deployment) => <Row key={`legacy:${deployment.deployment_id}`} title={deployment.deployment_id} detail={`model → ${deployment.target_node_id} · Desired ${deployment.desired_revision}`} />)}
-          {!loading && !(state?.workspaceDeployments.length || state?.deployments.length) ? <Text style={styles.meta}>还没有部署。Task 在启用、定时或执行前也必须部署到一个 Node。</Text> : null}
+        <Section title="Endpoint">
+          {sharedDeployments.map((deployment) => <Row key={deployment.deployment_id} title={deployment.deployment_id} detail={`${deployment.kind.toUpperCase()} → ${deployment.target_node_id} · Desired ${deployment.desired_generation}`} />)}
+          {!loading && !sharedDeployments.length ? <Text style={styles.meta}>还没有发布 Endpoint。请先在资源所在 Node 配置 Model 或 MCP。</Text> : null}
         </Section>
         <Section title="远程授权">
           {state?.grants.map((grant) => <Row key={grant.grant_id} title={grant.grant_id} detail={`${grant.caller_node_id} → ${grant.target_deployment_id}`} />)}
-          {!loading && !state?.grants.length ? <Text style={styles.meta}>跨 Node 调用必须显式授权；Secret 始终保留在资源所在 Node。</Text> : null}
+          {!loading && !state?.grants.length ? <Text style={styles.meta}>跨 Node LLM/MCP 调用必须显式授权；MCP 默认不共享，Secret 始终保留在资源所在 Node。</Text> : null}
         </Section>
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </ScrollView>

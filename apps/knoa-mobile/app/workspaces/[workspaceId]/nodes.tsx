@@ -6,6 +6,7 @@ import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { listHubNodes, loadWorkspaceResourceState, type HubNode, type WorkspaceDeployment } from "@/hub/hubClient";
 import { useGateway } from "@/state/GatewayProvider";
+import { updateNodeDirectGatewayUrl } from "@/security/deviceIdentity";
 import { colors } from "@/theme";
 
 export default function WorkspaceNodesScreen() {
@@ -24,10 +25,14 @@ export default function WorkspaceNodesScreen() {
   }, []);
   useFocusEffect(useCallback(() => { void refresh(); }, [refresh]));
   async function enter(node: HubNode) {
-    if (!node.online) { setError("Node 当前离线，仍可在 Workspace 修改 Desired State"); return; }
+    if (!node.online) { setError("Node 当前离线；这里只能查看最后同步状态，Agent、Conversation 和 Task 需要 Node 在线后管理"); return; }
     if (!gateway.nodes.some((item) => item.nodeId === node.node_id)) { router.push({ pathname: "/pair", params }); return; }
     setWorking(node.node_id);
-    try { await gateway.switchNode(node.node_id); router.push({ pathname: "/node", params: { ...params, nodeId: node.node_id } }); }
+    try {
+      await updateNodeDirectGatewayUrl(node.node_id, node.direct_gateway_url || "");
+      await gateway.switchNode(node.node_id);
+      router.push({ pathname: "/node", params: { ...params, nodeId: node.node_id } });
+    }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Node 连接失败"); }
     finally { setWorking(""); }
   }
@@ -35,7 +40,7 @@ export default function WorkspaceNodesScreen() {
     <>
       <Stack.Screen options={{ title: "Node 管理" }} />
       <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.header}><View style={styles.icon}><AppIcon name="node" color={colors.accent} size={27} /></View><View style={styles.flex}><Text style={styles.title}>Workspace Node</Text><Text style={styles.meta}>Node 是执行容器和数据权威；Workspace 管理 Enrollment、Deployment、Grant、Desired/Observed State。</Text></View><AppPressable onPress={() => void refresh()} style={styles.iconButton}><AppIcon name="refresh" color={colors.muted} size={20} /></AppPressable></View>
+        <View style={styles.header}><View style={styles.icon}><AppIcon name="node" color={colors.accent} size={27} /></View><View style={styles.flex}><Text style={styles.title}>Workspace Node</Text><Text style={styles.meta}>Agent、Conversation、Task、Tool 与 Secret 都属于具体 Node；Workspace 只管理 Enrollment、目录、共享 LLM/MCP 和状态投影。</Text></View><AppPressable onPress={() => void refresh()} style={styles.iconButton}><AppIcon name="refresh" color={colors.muted} size={20} /></AppPressable></View>
         {loading ? <ActivityIndicator color={colors.accent} /> : null}
         {nodes.map((node) => {
           const bound = gateway.nodes.some((item) => item.nodeId === node.node_id);

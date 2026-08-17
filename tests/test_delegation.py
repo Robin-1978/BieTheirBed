@@ -10,7 +10,7 @@ from knoa_platform.agent_runtime.composition import (
     build_core_runtime,
 )
 from knoa_platform.agent_runtime.contracts import HealthStatus
-from knoa_platform.agents import AgentDefinitionResolver
+from knoa_platform.agents import NodeAgentResolver
 from knoa_platform.config import AppConfig
 
 
@@ -38,28 +38,19 @@ def _delegation_config(tmp_path: Path) -> AppConfig:
         working_directory=str(tmp_path),
         service_port=0,
     )
-    definitions = dict(base.agent_definitions)
-    definitions["codex"] = definitions["codex"].model_copy(update={"enabled": True})
-    runtime_specs = dict(base.runtime_specs)
-    runtime_specs["codex-default"] = runtime_specs["codex-default"].model_copy(
-        update={"cwd": str(tmp_path)}
+    agents = dict(base.node_agents)
+    agents["codex"] = agents["codex"].model_copy(
+        update={"enabled": True, "cwd": str(tmp_path)}
     )
-    profiles = dict(base.agent_profiles)
-    assistant = profiles["assistant"]
-    profiles["assistant"] = assistant.model_copy(
+    assistant = agents["knoa"]
+    agents["knoa"] = assistant.model_copy(
         update={
             "delegation": assistant.delegation.model_copy(
                 update={"max_parallel_children": 1}
             )
         }
     )
-    return base.model_copy(
-        update={
-            "agent_definitions": definitions,
-            "runtime_specs": runtime_specs,
-            "agent_profiles": profiles,
-        }
-    )
+    return base.model_copy(update={"node_agents": agents})
 
 
 @pytest.mark.asyncio
@@ -82,8 +73,8 @@ async def test_delegation_creates_one_governed_child_task_and_enforces_paralleli
         defer_start=True,
     )
     managed = composition.configuration.current().document
-    resolver = AgentDefinitionResolver(
-        managed.agent_system,
+    resolver = NodeAgentResolver(
+        managed.agents,
         config_revision_id=composition.configuration.current().revision_id,
     )
     parent_policy = resolver.resolve_policy(

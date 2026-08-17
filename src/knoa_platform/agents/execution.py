@@ -33,7 +33,7 @@ from knoa_platform.agents.bindings import (
     AgentSessionBindingRepository,
 )
 from knoa_platform.agents.definitions import (
-    AgentDefinitionResolver,
+    NodeAgentResolver,
     ResolvedInvocationPolicy,
 )
 from knoa_platform.agents.manager import AgentManager
@@ -90,7 +90,7 @@ class AgentExecutionService:
         gateway: CapabilityGateway,
         artifacts: ArtifactStore,
         *,
-        resolver_for: Callable[[], AgentDefinitionResolver],
+        resolver_for: Callable[[], NodeAgentResolver],
         capabilities_for: Callable[[RuntimeScope], frozenset[ToolCapability]],
         installed_skills: Callable[[], frozenset[str]] = lambda: frozenset(),
         policy_snapshot_for: Callable[
@@ -237,7 +237,7 @@ class AgentExecutionService:
                     },
                 )
                 external = (
-                    resolver.runtime_spec(binding.agent_id).implementation == "codex"
+                    resolver.agent(binding.agent_id).kind == "codex"
                 )
                 if external and self._external_mcp_endpoint is None:
                     raise RuntimeError("External Agent requires the capability MCP host")
@@ -371,10 +371,10 @@ class AgentExecutionService:
             raise PermissionError("missing_delegation_policy")
         if (
             policy_snapshot is not None
-            and resolver.definition_digest(policy_snapshot.agent_id)
-            != policy_snapshot.agent_definition_digest
+            and resolver.agent_digest(policy_snapshot.agent_id)
+            != policy_snapshot.node_agent_digest
         ):
-            raise RuntimeError("agent_definition_changed")
+            raise RuntimeError("node_agent_changed")
         principal_capabilities = self._capabilities_for(request.scope)
         available_tools = self._gateway.available_tool_names(
             principal_capabilities
@@ -444,7 +444,7 @@ class AgentExecutionService:
         binding = await self._ensure_binding(
             request.scope,
             policy.agent_id,
-            policy.agent_definition_digest,
+            policy.node_agent_digest,
         )
         return (
             resolver,

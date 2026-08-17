@@ -134,9 +134,9 @@ async def test_tui_can_select_agent_and_resolve_interaction() -> None:
     base = AppConfig()
     config = AppConfig(
         default_agent="codex",
-        agent_definitions={
-            **base.agent_definitions,
-            "codex": base.agent_definitions["codex"].model_copy(
+        node_agents={
+            **base.node_agents,
+            "codex": base.node_agents["codex"].model_copy(
                 update={"enabled": True}
             ),
         },

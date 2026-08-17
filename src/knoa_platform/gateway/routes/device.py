@@ -57,19 +57,16 @@ class DeviceRoutes:
             )
         except Exception as exc:
             return self._core_error(exc)
-        system = revision.document.agent_system
+        system = revision.document.agents
         return JSONResponse({
             "default_agent": system.default_agent,
             "agents": [
                 {
                     "agent_id": agent_id,
-                    "display_name": system.profiles[
-                        definition.profile_id
-                    ].display_name,
+                    "display_name": agent.display_name,
                 }
-                for agent_id, definition in system.agents.items()
-                if definition.enabled
-                and definition.visibility == "user"
+                for agent_id, agent in system.agents.items()
+                if agent.enabled and agent.visibility == "user"
             ],
         })
 

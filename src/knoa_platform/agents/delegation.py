@@ -15,8 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from knoa_platform.agent_runtime.contracts import ArtifactAttachment, RuntimeScope
 from knoa_platform.agents.definitions import (
-    AgentDefinitionResolver,
     InvocationLimits,
+    NodeAgentResolver,
     ResolvedInvocationPolicy,
 )
 from knoa_platform.agents.policies import InvocationPolicyRepository
@@ -115,9 +115,9 @@ class DelegationRepository:
             parent_kind=parent_kind,
             parent_id=parent_id,
             parent_agent_id=parent_policy.agent_id,
-            parent_agent_digest=parent_policy.agent_definition_digest,
+            parent_agent_digest=parent_policy.node_agent_digest,
             child_agent_id=child_policy.agent_id,
-            child_agent_digest=child_policy.agent_definition_digest,
+            child_agent_digest=child_policy.node_agent_digest,
             child_session_handle=child_session_handle,
             child_task_id=child_task_id,
             mode=mode,
@@ -267,7 +267,7 @@ class DelegationService:
         gateway: CapabilityGateway,
         artifacts: ArtifactStore,
         *,
-        resolver_for: Callable[[], AgentDefinitionResolver],
+        resolver_for: Callable[[], NodeAgentResolver],
         capabilities_for: Callable[[RuntimeScope], frozenset[ToolCapability]],
         installed_skills: Callable[[], frozenset[str]],
     ) -> None:
@@ -386,7 +386,7 @@ class DelegationService:
             raise PermissionError("Delegation deadline exceeds parent policy")
 
         resolver = self._resolver_for()
-        child_delegation = resolver.profile(target_agent_id).delegation
+        child_delegation = resolver.agent(target_agent_id).delegation
         principal_capabilities = self._capabilities_for(scope)
         available_tools = self._gateway.available_tool_names(principal_capabilities)
         child_policy = resolver.resolve_policy(

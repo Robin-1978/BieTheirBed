@@ -6177,46 +6177,6 @@
       }
     },
     "schemas": {
-      "AgentDefinition": {
-        "additionalProperties": false,
-        "properties": {
-          "runtime_spec_id": {
-            "maxLength": 128,
-            "minLength": 1,
-            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
-            "title": "Runtime Spec Id",
-            "type": "string"
-          },
-          "profile_id": {
-            "maxLength": 128,
-            "minLength": 1,
-            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
-            "title": "Profile Id",
-            "type": "string"
-          },
-          "visibility": {
-            "default": "delegate",
-            "enum": [
-              "user",
-              "delegate",
-              "system"
-            ],
-            "title": "Visibility",
-            "type": "string"
-          },
-          "enabled": {
-            "default": true,
-            "title": "Enabled",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "runtime_spec_id",
-          "profile_id"
-        ],
-        "title": "AgentDefinition",
-        "type": "object"
-      },
       "AgentListResponse": {
         "properties": {
           "default_agent": {
@@ -6238,109 +6198,39 @@
         "title": "AgentListResponse",
         "type": "object"
       },
-      "AgentProfile": {
+      "AgentRuntimeLimits": {
         "additionalProperties": false,
         "properties": {
-          "display_name": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Display Name",
-            "type": "string"
+          "max_iterations": {
+            "anyOf": [
+              {
+                "maximum": 128,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Iterations"
           },
-          "instructions": {
-            "default": "",
-            "maxLength": 200000,
-            "title": "Instructions",
-            "type": "string"
-          },
-          "instructions_ref": {
-            "default": "",
-            "maxLength": 4096,
-            "title": "Instructions Ref",
-            "type": "string"
-          },
-          "instructions_required": {
-            "default": true,
-            "title": "Instructions Required",
-            "type": "boolean"
-          },
-          "default_skill_refs": {
-            "default": [],
-            "items": {
-              "maxLength": 128,
-              "minLength": 1,
-              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
-              "type": "string"
-            },
-            "title": "Default Skill Refs",
-            "type": "array",
-            "uniqueItems": true
-          },
-          "allowed_skill_refs": {
-            "default": [],
-            "items": {
-              "maxLength": 128,
-              "minLength": 1,
-              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
-              "type": "string"
-            },
-            "title": "Allowed Skill Refs",
-            "type": "array",
-            "uniqueItems": true
-          },
-          "allowed_platform_tools": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Allowed Platform Tools",
-            "type": "array",
-            "uniqueItems": true
-          },
-          "platform_capability_ceiling": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Platform Capability Ceiling",
-            "type": "array",
-            "uniqueItems": true
-          },
-          "runtime_native_capability_ceiling": {
-            "default": [],
-            "items": {
-              "enum": [
-                "workspace_read",
-                "workspace_write",
-                "command_execution",
-                "native_file_edit"
-              ],
-              "type": "string"
-            },
-            "title": "Runtime Native Capability Ceiling",
-            "type": "array",
-            "uniqueItems": true
-          },
-          "runtime_limits": {
-            "$ref": "#/components/schemas/RuntimeProfileLimits"
-          },
-          "delegation": {
-            "$ref": "#/components/schemas/DelegationPolicy"
-          },
-          "callable_by": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Callable By",
-            "type": "array",
-            "uniqueItems": true
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "maximum": 131072,
+                "minimum": 64,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Output Tokens"
           }
         },
-        "required": [
-          "display_name"
-        ],
-        "title": "AgentProfile",
+        "title": "AgentRuntimeLimits",
         "type": "object"
       },
       "AgentSummary": {
@@ -6359,65 +6249,6 @@
           "display_name"
         ],
         "title": "AgentSummary",
-        "type": "object"
-      },
-      "AgentSystemConfig": {
-        "additionalProperties": false,
-        "properties": {
-          "runtime_specs": {
-            "patternProperties": {
-              "^[A-Za-z][A-Za-z0-9_.-]{0,127}$": {
-                "$ref": "#/components/schemas/RuntimeSpec"
-              }
-            },
-            "propertyNames": {
-              "maxLength": 128,
-              "minLength": 1
-            },
-            "title": "Runtime Specs",
-            "type": "object"
-          },
-          "profiles": {
-            "patternProperties": {
-              "^[A-Za-z][A-Za-z0-9_.-]{0,127}$": {
-                "$ref": "#/components/schemas/AgentProfile"
-              }
-            },
-            "propertyNames": {
-              "maxLength": 128,
-              "minLength": 1
-            },
-            "title": "Profiles",
-            "type": "object"
-          },
-          "agents": {
-            "patternProperties": {
-              "^[a-z][a-z0-9_-]{0,63}$": {
-                "$ref": "#/components/schemas/AgentDefinition"
-              }
-            },
-            "propertyNames": {
-              "maxLength": 64,
-              "minLength": 1
-            },
-            "title": "Agents",
-            "type": "object"
-          },
-          "default_agent": {
-            "maxLength": 64,
-            "minLength": 1,
-            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
-            "title": "Default Agent",
-            "type": "string"
-          }
-        },
-        "required": [
-          "runtime_specs",
-          "profiles",
-          "agents",
-          "default_agent"
-        ],
-        "title": "AgentSystemConfig",
         "type": "object"
       },
       "AndroidReleaseResponse": {
@@ -8443,8 +8274,8 @@
             "title": "Fallback Enabled",
             "type": "boolean"
           },
-          "agent_system": {
-            "$ref": "#/components/schemas/AgentSystemConfig"
+          "agents": {
+            "$ref": "#/components/schemas/NodeAgentCatalog"
           },
           "approval_review": {
             "$ref": "#/components/schemas/ManagedApprovalReviewConfig"
@@ -8483,7 +8314,7 @@
           "providers",
           "models",
           "default_model",
-          "agent_system"
+          "agents"
         ],
         "title": "ManagedConfig",
         "type": "object"
@@ -8932,6 +8763,235 @@
           "ownership"
         ],
         "title": "ModelBindingSpec",
+        "type": "object"
+      },
+      "NodeAgent": {
+        "additionalProperties": false,
+        "description": "One complete Agent owned and executed by this Knoa Node.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "knoa",
+              "codex"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "display_name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "instructions": {
+            "default": "",
+            "maxLength": 200000,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "instructions_ref": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Instructions Ref",
+            "type": "string"
+          },
+          "instructions_required": {
+            "default": true,
+            "title": "Instructions Required",
+            "type": "boolean"
+          },
+          "visibility": {
+            "default": "delegate",
+            "enum": [
+              "user",
+              "delegate",
+              "system"
+            ],
+            "title": "Visibility",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "model_binding": {
+            "$ref": "#/components/schemas/ModelBindingSpec"
+          },
+          "max_concurrency": {
+            "default": 1,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Max Concurrency",
+            "type": "integer"
+          },
+          "default_skill_refs": {
+            "default": [],
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+              "type": "string"
+            },
+            "title": "Default Skill Refs",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "allowed_skill_refs": {
+            "default": [],
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+              "type": "string"
+            },
+            "title": "Allowed Skill Refs",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "allowed_platform_tools": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Platform Tools",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "platform_capability_ceiling": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Platform Capability Ceiling",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "native_capability_ceiling": {
+            "default": [],
+            "items": {
+              "enum": [
+                "workspace_read",
+                "workspace_write",
+                "command_execution",
+                "native_file_edit"
+              ],
+              "type": "string"
+            },
+            "title": "Native Capability Ceiling",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "runtime_limits": {
+            "$ref": "#/components/schemas/AgentRuntimeLimits"
+          },
+          "delegation": {
+            "$ref": "#/components/schemas/DelegationPolicy"
+          },
+          "callable_by": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Callable By",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "command": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Command",
+            "type": "array"
+          },
+          "home": {
+            "default": "",
+            "title": "Home",
+            "type": "string"
+          },
+          "cwd": {
+            "default": "",
+            "title": "Cwd",
+            "type": "string"
+          },
+          "sandbox": {
+            "default": "read-only",
+            "enum": [
+              "read-only",
+              "workspace-write"
+            ],
+            "title": "Sandbox",
+            "type": "string"
+          },
+          "approval_policy": {
+            "default": "never",
+            "enum": [
+              "untrusted",
+              "on-request",
+              "never"
+            ],
+            "title": "Approval Policy",
+            "type": "string"
+          },
+          "request_timeout_seconds": {
+            "default": 120.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 3600.0,
+            "title": "Request Timeout Seconds",
+            "type": "number"
+          },
+          "max_line_bytes": {
+            "default": 4194304,
+            "minimum": 4096,
+            "title": "Max Line Bytes",
+            "type": "integer"
+          },
+          "max_event_queue": {
+            "default": 1024,
+            "maximum": 16384,
+            "minimum": 16,
+            "title": "Max Event Queue",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "display_name",
+          "model_binding"
+        ],
+        "title": "NodeAgent",
+        "type": "object"
+      },
+      "NodeAgentCatalog": {
+        "additionalProperties": false,
+        "properties": {
+          "agents": {
+            "patternProperties": {
+              "^[a-z][a-z0-9_-]{0,63}$": {
+                "$ref": "#/components/schemas/NodeAgent"
+              }
+            },
+            "propertyNames": {
+              "maxLength": 64,
+              "minLength": 1
+            },
+            "title": "Agents",
+            "type": "object"
+          },
+          "default_agent": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "title": "Default Agent",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agents",
+          "default_agent"
+        ],
+        "title": "NodeAgentCatalog",
         "type": "object"
       },
       "NodeDescriptorResponse": {
@@ -9928,16 +9988,8 @@
             "title": "Agent Id",
             "type": "string"
           },
-          "agent_definition_digest": {
-            "title": "Agent Definition Digest",
-            "type": "string"
-          },
-          "runtime_spec_digest": {
-            "title": "Runtime Spec Digest",
-            "type": "string"
-          },
-          "profile_digest": {
-            "title": "Profile Digest",
+          "node_agent_digest": {
+            "title": "Node Agent Digest",
             "type": "string"
           },
           "invocation_kind": {
@@ -10037,9 +10089,7 @@
         },
         "required": [
           "agent_id",
-          "agent_definition_digest",
-          "runtime_spec_digest",
-          "profile_digest",
+          "node_agent_digest",
           "invocation_kind",
           "caller_id",
           "platform_capabilities",
@@ -10131,152 +10181,6 @@
           }
         },
         "title": "ResumeTaskRequest",
-        "type": "object"
-      },
-      "RuntimeProfileLimits": {
-        "additionalProperties": false,
-        "properties": {
-          "max_iterations": {
-            "anyOf": [
-              {
-                "maximum": 128,
-                "minimum": 1,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Max Iterations"
-          },
-          "max_output_tokens": {
-            "anyOf": [
-              {
-                "maximum": 131072,
-                "minimum": 64,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Max Output Tokens"
-          }
-        },
-        "title": "RuntimeProfileLimits",
-        "type": "object"
-      },
-      "RuntimeSpec": {
-        "additionalProperties": false,
-        "properties": {
-          "implementation": {
-            "enum": [
-              "native",
-              "codex"
-            ],
-            "title": "Implementation",
-            "type": "string"
-          },
-          "model_binding": {
-            "$ref": "#/components/schemas/ModelBindingSpec"
-          },
-          "max_concurrency": {
-            "default": 1,
-            "maximum": 32,
-            "minimum": 1,
-            "title": "Max Concurrency",
-            "type": "integer"
-          },
-          "command": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Command",
-            "type": "array"
-          },
-          "home": {
-            "default": "",
-            "title": "Home",
-            "type": "string"
-          },
-          "cwd": {
-            "default": "",
-            "title": "Cwd",
-            "type": "string"
-          },
-          "sandbox": {
-            "default": "read-only",
-            "enum": [
-              "read-only",
-              "workspace-write"
-            ],
-            "title": "Sandbox",
-            "type": "string"
-          },
-          "approval_policy": {
-            "default": "never",
-            "enum": [
-              "untrusted",
-              "on-request",
-              "never"
-            ],
-            "title": "Approval Policy",
-            "type": "string"
-          },
-          "native_capabilities": {
-            "default": [],
-            "items": {
-              "enum": [
-                "workspace_read",
-                "workspace_write",
-                "command_execution",
-                "native_file_edit"
-              ],
-              "type": "string"
-            },
-            "title": "Native Capabilities",
-            "type": "array",
-            "uniqueItems": true
-          },
-          "instruction_authority": {
-            "default": "supported",
-            "enum": [
-              "required",
-              "supported",
-              "none"
-            ],
-            "title": "Instruction Authority",
-            "type": "string"
-          },
-          "request_timeout_seconds": {
-            "default": 120.0,
-            "exclusiveMinimum": 0.0,
-            "maximum": 3600.0,
-            "title": "Request Timeout Seconds",
-            "type": "number"
-          },
-          "max_line_bytes": {
-            "default": 4194304,
-            "minimum": 4096,
-            "title": "Max Line Bytes",
-            "type": "integer"
-          },
-          "max_event_queue": {
-            "default": 1024,
-            "maximum": 16384,
-            "minimum": 16,
-            "title": "Max Event Queue",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "implementation",
-          "model_binding"
-        ],
-        "title": "RuntimeSpec",
         "type": "object"
       },
       "RuntimeStatus": {

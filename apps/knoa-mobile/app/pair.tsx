@@ -41,7 +41,7 @@ export default function PairScreen() {
       await gateway.pair(encoded.trim(), displayName.trim());
       const identity = await loadConnectionIdentity();
       router.replace({
-        pathname: "/chat",
+        pathname: "/node",
         params: {
           workspaceId: stringParam(params.workspaceId),
           workspaceName: stringParam(params.workspaceName),

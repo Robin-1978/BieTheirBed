@@ -1,4 +1,4 @@
-"""Typed Agent definitions and invocation policy resolution."""
+"""Node-owned Agent configuration and invocation policy resolution."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ ResourceId = Annotated[
 ]
 InvocationKind = Literal["user", "delegate", "system"]
 Visibility = Literal["user", "delegate", "system"]
-RuntimeImplementation = Literal["native", "codex"]
+AgentKind = Literal["knoa", "codex"]
 NativeCapability = Literal[
     "workspace_read",
     "workspace_write",
@@ -78,7 +78,7 @@ def _canonical_value(value):
     return value
 
 
-class AgentDefinitionModel(BaseModel):
+class AgentConfigModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     def digest(self) -> str:
@@ -91,7 +91,7 @@ class AgentDefinitionModel(BaseModel):
         return hashlib.sha256(payload).hexdigest()
 
 
-class ModelBindingSpec(AgentDefinitionModel):
+class ModelBindingSpec(AgentConfigModel):
     ownership: Literal["platform", "runtime"]
     model: str = ""
     hint: str = ""
@@ -107,51 +107,12 @@ class ModelBindingSpec(AgentDefinitionModel):
         return self
 
 
-class RuntimeSpec(AgentDefinitionModel):
-    implementation: RuntimeImplementation
-    model_binding: ModelBindingSpec
-    max_concurrency: int = Field(default=1, ge=1, le=32)
-    command: tuple[str, ...] = ()
-    home: str = ""
-    cwd: str = ""
-    sandbox: Literal["read-only", "workspace-write"] = "read-only"
-    approval_policy: Literal["untrusted", "on-request", "never"] = "never"
-    native_capabilities: frozenset[NativeCapability] = frozenset()
-    instruction_authority: Literal["required", "supported", "none"] = "supported"
-    request_timeout_seconds: float = Field(default=120.0, gt=0.0, le=3600.0)
-    max_line_bytes: int = Field(default=4 * 1024 * 1024, ge=4096)
-    max_event_queue: int = Field(default=1024, ge=16, le=16_384)
-
-    @model_validator(mode="after")
-    def validate_runtime(self) -> RuntimeSpec:
-        if self.implementation == "codex" and not self.command:
-            raise ValueError("Codex RuntimeSpec requires a command")
-        if (
-            self.implementation == "native"
-            and self.model_binding.ownership != "platform"
-        ):
-            raise ValueError("Native RuntimeSpec requires a platform-managed model")
-        if self.implementation == "codex" and self.model_binding.ownership != "runtime":
-            raise ValueError("Codex RuntimeSpec requires a runtime-managed model")
-        if self.implementation == "codex":
-            expected = (
-                CODEX_READ_ONLY_CAPABILITIES
-                if self.sandbox == "read-only"
-                else CODEX_WORKSPACE_WRITE_CAPABILITIES
-            )
-            if self.native_capabilities != expected:
-                raise ValueError(
-                    "Codex RuntimeSpec native capabilities must match its sandbox bundle"
-                )
-        return self
-
-
-class RuntimeProfileLimits(AgentDefinitionModel):
+class AgentRuntimeLimits(AgentConfigModel):
     max_iterations: int | None = Field(default=None, ge=1, le=128)
     max_output_tokens: int | None = Field(default=None, ge=64, le=131_072)
 
 
-class DelegationPolicy(AgentDefinitionModel):
+class DelegationPolicy(AgentConfigModel):
     allowed: bool = False
     targets: frozenset[AgentId] = frozenset()
     max_depth: int = Field(default=0, ge=0, le=8)
@@ -184,37 +145,73 @@ class DelegationPolicy(AgentDefinitionModel):
         return self
 
 
-class AgentProfile(AgentDefinitionModel):
+class NodeAgent(AgentConfigModel):
+    """One complete Agent owned and executed by this Knoa Node."""
+
+    kind: AgentKind
     display_name: Annotated[str, StringConstraints(min_length=1, max_length=128)]
     instructions: Annotated[str, StringConstraints(max_length=200_000)] = ""
     instructions_ref: Annotated[str, StringConstraints(max_length=4096)] = ""
     instructions_required: bool = True
+    visibility: Visibility = "delegate"
+    enabled: bool = True
+
+    model_binding: ModelBindingSpec
+    max_concurrency: int = Field(default=1, ge=1, le=32)
+
     default_skill_refs: frozenset[ResourceId] = frozenset()
     allowed_skill_refs: frozenset[ResourceId] = frozenset()
     allowed_platform_tools: frozenset[str] = frozenset()
     platform_capability_ceiling: frozenset[str] = frozenset()
-    runtime_native_capability_ceiling: frozenset[NativeCapability] = frozenset()
-    runtime_limits: RuntimeProfileLimits = Field(default_factory=RuntimeProfileLimits)
+    native_capability_ceiling: frozenset[NativeCapability] = frozenset()
+    runtime_limits: AgentRuntimeLimits = Field(default_factory=AgentRuntimeLimits)
     delegation: DelegationPolicy = Field(default_factory=DelegationPolicy)
     callable_by: frozenset[str] = frozenset()
 
+    command: tuple[str, ...] = ()
+    home: str = ""
+    cwd: str = ""
+    sandbox: Literal["read-only", "workspace-write"] = "read-only"
+    approval_policy: Literal["untrusted", "on-request", "never"] = "never"
+    request_timeout_seconds: float = Field(default=120.0, gt=0.0, le=3600.0)
+    max_line_bytes: int = Field(default=4 * 1024 * 1024, ge=4096)
+    max_event_queue: int = Field(default=1024, ge=16, le=16_384)
+
     @model_validator(mode="after")
-    def validate_profile(self) -> AgentProfile:
+    def validate_agent(self) -> NodeAgent:
         if bool(self.instructions) == bool(self.instructions_ref):
-            raise ValueError("Profile requires exactly one instructions source")
+            raise ValueError("NodeAgent requires exactly one instructions source")
         if not self.default_skill_refs <= self.allowed_skill_refs:
-            raise ValueError("Default Skill refs must be allowed by the Profile")
+            raise ValueError("Default Skill refs must be allowed by the NodeAgent")
+        if self.visibility == "system" and not self.callable_by:
+            raise ValueError("System NodeAgent requires a caller allowlist")
+        if self.kind == "knoa":
+            if self.model_binding.ownership != "platform":
+                raise ValueError("Knoa Agent requires a platform-managed model")
+            if self.command or self.home or self.cwd:
+                raise ValueError("Knoa Agent cannot configure an external command")
+            if self.native_capability_ceiling:
+                raise ValueError(
+                    "Knoa Agent cannot request external runtime capabilities"
+                )
+        else:
+            if not self.command:
+                raise ValueError("Codex Agent requires a command")
+            if self.model_binding.ownership != "runtime":
+                raise ValueError("Codex Agent requires a runtime-managed model")
+            expected = (
+                CODEX_READ_ONLY_CAPABILITIES
+                if self.sandbox == "read-only"
+                else CODEX_WORKSPACE_WRITE_CAPABILITIES
+            )
+            if self.native_capability_ceiling != expected:
+                raise ValueError(
+                    "Codex Agent capabilities must match its sandbox bundle"
+                )
         return self
 
 
-class AgentDefinition(AgentDefinitionModel):
-    runtime_spec_id: ResourceId
-    profile_id: ResourceId
-    visibility: Visibility = "delegate"
-    enabled: bool = True
-
-
-class InvocationLimits(AgentDefinitionModel):
+class InvocationLimits(AgentConfigModel):
     deadline_seconds: float = Field(default=120.0, gt=0.0, le=86_400.0)
     max_gateway_tool_calls: int = Field(default=50, ge=0, le=10_000)
     max_artifact_bytes: int = Field(default=32 * 1024 * 1024, ge=0)
@@ -222,11 +219,9 @@ class InvocationLimits(AgentDefinitionModel):
     max_parallel_children: int = Field(default=0, ge=0, le=32)
 
 
-class ResolvedInvocationPolicy(AgentDefinitionModel):
+class ResolvedInvocationPolicy(AgentConfigModel):
     agent_id: AgentId
-    agent_definition_digest: str
-    runtime_spec_digest: str
-    profile_digest: str
+    node_agent_digest: str
     invocation_kind: InvocationKind
     caller_id: str
     platform_capabilities: frozenset[str]
@@ -249,50 +244,22 @@ class ResolvedInvocationPolicy(AgentDefinitionModel):
         return self.digest()
 
 
-class AgentSystemConfig(AgentDefinitionModel):
-    runtime_specs: dict[ResourceId, RuntimeSpec]
-    profiles: dict[ResourceId, AgentProfile]
-    agents: dict[AgentId, AgentDefinition]
+class NodeAgentCatalog(AgentConfigModel):
+    agents: dict[AgentId, NodeAgent]
     default_agent: AgentId
 
     @model_validator(mode="after")
-    def validate_references(self) -> AgentSystemConfig:
+    def validate_agents(self) -> NodeAgentCatalog:
         if (
             self.default_agent not in self.agents
             or not self.agents[self.default_agent].enabled
         ):
-            raise ValueError("default_agent must reference an enabled Agent")
-        for agent_id, definition in self.agents.items():
-            runtime = self.runtime_specs.get(definition.runtime_spec_id)
-            profile = self.profiles.get(definition.profile_id)
-            if runtime is None:
-                raise ValueError(
-                    f"Agent '{agent_id}' references an unknown RuntimeSpec"
-                )
-            if profile is None:
-                raise ValueError(f"Agent '{agent_id}' references an unknown Profile")
-            if definition.visibility == "system" and not profile.callable_by:
-                raise ValueError(
-                    f"System Agent '{agent_id}' requires a Profile caller allowlist"
-                )
-            if (
-                profile.instructions_required
-                and runtime.instruction_authority == "none"
-            ):
-                raise ValueError(
-                    f"Agent '{agent_id}' requires authoritative Profile instructions"
-                )
-            if (
-                not profile.runtime_native_capability_ceiling
-                <= runtime.native_capabilities
-            ):
-                raise ValueError(
-                    f"Agent '{agent_id}' Profile requests unsupported native capabilities"
-                )
-            unknown_targets = profile.delegation.targets - self.agents.keys()
+            raise ValueError("default_agent must reference an enabled NodeAgent")
+        for agent_id, agent in self.agents.items():
+            unknown_targets = agent.delegation.targets - self.agents.keys()
             if unknown_targets:
                 raise ValueError(
-                    f"Agent '{agent_id}' delegation references unknown targets"
+                    f"NodeAgent '{agent_id}' delegation references unknown targets"
                 )
         return self
 
@@ -301,34 +268,21 @@ class AgentNotCallableError(PermissionError):
     pass
 
 
-class AgentDefinitionResolver:
-    """Resolve one immutable Agent definition and invocation authorization snapshot."""
+class NodeAgentResolver:
+    """Resolve one Node-owned Agent into an immutable invocation snapshot."""
 
     def __init__(
-        self, config: AgentSystemConfig, *, config_revision_id: str = ""
+        self, config: NodeAgentCatalog, *, config_revision_id: str = ""
     ) -> None:
         self._config = config
         self._config_revision_id = config_revision_id
 
     @property
-    def config(self) -> AgentSystemConfig:
+    def config(self) -> NodeAgentCatalog:
         return self._config
 
-    def definition_digest(self, agent_id: str) -> str:
-        definition, runtime, profile = self._parts(agent_id)
-        payload = {
-            "agent_id": agent_id,
-            "definition": definition.model_dump(mode="python"),
-            "runtime": runtime.model_dump(mode="python"),
-            "profile": profile.model_dump(mode="python"),
-        }
-        encoded = json.dumps(
-            _canonical_value(payload),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        return hashlib.sha256(encoded).hexdigest()
+    def agent_digest(self, agent_id: str) -> str:
+        return self.agent(agent_id).digest()
 
     def resolve_agent_id(
         self,
@@ -338,16 +292,17 @@ class AgentDefinitionResolver:
         caller_id: str,
     ) -> str:
         agent_id = (requested or self._config.default_agent).strip()
-        definition, _, profile = self._parts(agent_id)
-        if not definition.enabled:
-            raise AgentNotCallableError(f"Agent '{agent_id}' is disabled")
-        allowed = invocation_kind == definition.visibility
-        if not allowed:
+        agent = self.agent(agent_id)
+        if not agent.enabled:
+            raise AgentNotCallableError(f"NodeAgent '{agent_id}' is disabled")
+        if invocation_kind != agent.visibility:
             raise AgentNotCallableError(
-                f"Agent '{agent_id}' is not callable as {invocation_kind}"
+                f"NodeAgent '{agent_id}' is not callable as {invocation_kind}"
             )
-        if profile.callable_by and caller_id not in profile.callable_by:
-            raise AgentNotCallableError(f"Caller cannot invoke Agent '{agent_id}'")
+        if agent.callable_by and caller_id not in agent.callable_by:
+            raise AgentNotCallableError(
+                f"Caller cannot invoke NodeAgent '{agent_id}'"
+            )
         return agent_id
 
     def resolve_policy(
@@ -372,25 +327,25 @@ class AgentDefinitionResolver:
             invocation_kind=invocation_kind,
             caller_id=caller_id,
         )
-        _, runtime, profile = self._parts(agent_id)
+        agent = self.agent(agent_id)
         capabilities = (
             principal_capabilities
-            if "*" in profile.platform_capability_ceiling
-            else principal_capabilities & profile.platform_capability_ceiling
+            if "*" in agent.platform_capability_ceiling
+            else principal_capabilities & agent.platform_capability_ceiling
         )
         tools = (
             available_tools
-            if "*" in profile.allowed_platform_tools
-            else available_tools & profile.allowed_platform_tools
+            if "*" in agent.allowed_platform_tools
+            else available_tools & agent.allowed_platform_tools
         )
-        skills = installed_skills & profile.default_skill_refs
-        native = runtime.native_capabilities & profile.runtime_native_capability_ceiling
+        skills = installed_skills & agent.default_skill_refs
+        native = agent.native_capability_ceiling
         if requested_capabilities is not None:
             capabilities &= requested_capabilities
         if requested_tools is not None:
             tools &= requested_tools
         if requested_skills is not None:
-            skills = installed_skills & profile.allowed_skill_refs & requested_skills
+            skills = installed_skills & agent.allowed_skill_refs & requested_skills
         if requested_native_capabilities is not None:
             native &= requested_native_capabilities
         if parent is not None:
@@ -400,8 +355,8 @@ class AgentDefinitionResolver:
             native &= _delegable_native_capabilities(parent.platform_capabilities)
             artifact_ids &= parent.artifact_ids
         resolved_limits = limits or InvocationLimits(
-            max_children=profile.delegation.max_children,
-            max_parallel_children=profile.delegation.max_parallel_children,
+            max_children=agent.delegation.max_children,
+            max_parallel_children=agent.delegation.max_parallel_children,
         )
         if parent is not None:
             resolved_limits = InvocationLimits(
@@ -426,15 +381,15 @@ class AgentDefinitionResolver:
                     parent.limits.max_parallel_children,
                 ),
             )
-        if runtime.implementation == "codex" and native not in {
+        if agent.kind == "codex" and native not in {
             CODEX_READ_ONLY_CAPABILITIES,
             CODEX_WORKSPACE_WRITE_CAPABILITIES,
         }:
             raise AgentNotCallableError(
                 "Codex invocation requires one supported native capability bundle"
             )
-        delegation_max_depth = profile.delegation.max_depth
-        delegation_max_deadline_seconds = profile.delegation.max_deadline_seconds
+        delegation_max_depth = agent.delegation.max_depth
+        delegation_max_deadline_seconds = agent.delegation.max_deadline_seconds
         if parent is not None:
             delegation_max_depth = min(
                 delegation_max_depth,
@@ -447,16 +402,14 @@ class AgentDefinitionResolver:
                 )
         return ResolvedInvocationPolicy(
             agent_id=agent_id,
-            agent_definition_digest=self.definition_digest(agent_id),
-            runtime_spec_digest=runtime.digest(),
-            profile_digest=profile.digest(),
+            node_agent_digest=self.agent_digest(agent_id),
             invocation_kind=invocation_kind,
             caller_id=caller_id,
             platform_capabilities=frozenset(capabilities),
             allowed_platform_tools=frozenset(tools),
             allowed_skills=frozenset(skills),
             runtime_native_capabilities=frozenset(native),
-            delegation_targets=profile.delegation.targets,
+            delegation_targets=agent.delegation.targets,
             delegation_max_depth=delegation_max_depth,
             delegation_max_deadline_seconds=delegation_max_deadline_seconds,
             artifact_ids=artifact_ids,
@@ -464,25 +417,10 @@ class AgentDefinitionResolver:
             config_revision_id=self._config_revision_id,
         )
 
-    def runtime_spec(self, agent_id: str) -> RuntimeSpec:
-        return self._parts(agent_id)[1]
-
-    def definition(self, agent_id: str) -> AgentDefinition:
-        return self._parts(agent_id)[0]
-
-    def profile(self, agent_id: str) -> AgentProfile:
-        return self._parts(agent_id)[2]
-
-    def _parts(
-        self, agent_id: str
-    ) -> tuple[AgentDefinition, RuntimeSpec, AgentProfile]:
+    def agent(self, agent_id: str) -> NodeAgent:
         if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", agent_id):
             raise LookupError("Invalid Agent ID")
-        definition = self._config.agents.get(agent_id)
-        if definition is None:
-            raise LookupError(f"Unknown Agent '{agent_id}'")
-        return (
-            definition,
-            self._config.runtime_specs[definition.runtime_spec_id],
-            self._config.profiles[definition.profile_id],
-        )
+        try:
+            return self._config.agents[agent_id]
+        except KeyError as exc:
+            raise LookupError(f"Unknown NodeAgent '{agent_id}'") from exc

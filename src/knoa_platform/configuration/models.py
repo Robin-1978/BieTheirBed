@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-from knoa_platform.agents.definitions import AgentSystemConfig
+from knoa_platform.agents.definitions import NodeAgentCatalog
 
 SafeId = Annotated[
     str,
@@ -192,7 +192,7 @@ class ManagedConfig(ConfigurationModel):
     default_model: SafeId
     fallback_model: str = ""
     fallback_enabled: bool = True
-    agent_system: AgentSystemConfig
+    agents: NodeAgentCatalog
     approval_review: ManagedApprovalReviewConfig = Field(
         default_factory=ManagedApprovalReviewConfig
     )
@@ -224,13 +224,13 @@ class ManagedConfig(ConfigurationModel):
                 raise ValueError(
                     f"Model deployment '{deployment_id}' must use a Node-local Provider"
                 )
-        for runtime_id, runtime in self.agent_system.runtime_specs.items():
-            binding = runtime.model_binding
+        for agent_id, agent in self.agents.agents.items():
+            binding = agent.model_binding
             if binding.ownership == "platform" and binding.model not in self.models:
                 raise ValueError(
-                    f"RuntimeSpec '{runtime_id}' references an unknown model"
+                    f"NodeAgent '{agent_id}' references an unknown model"
                 )
-        reviewer = self.agent_system.agents.get(self.approval_review.agent_id)
+        reviewer = self.agents.agents.get(self.approval_review.agent_id)
         if self.approval_review.mode != "off" and (
             reviewer is None or not reviewer.enabled
         ):
