@@ -60,6 +60,7 @@ export type AgentSummary = {
 export type ManagedAgentDefinition = {
   runtime_spec_id: string;
   profile_id: string;
+  visibility: "user" | "delegate" | "system";
   enabled: boolean;
 };
 
@@ -68,7 +69,8 @@ export type ManagedAgentProfile = {
   instructions: string;
   instructions_ref: string;
   instructions_required: boolean;
-  default_skills: string[];
+  default_skill_refs: string[];
+  allowed_skill_refs: string[];
   allowed_platform_tools: string[];
   platform_capability_ceiling: string[];
   runtime_native_capability_ceiling: string[];
@@ -81,7 +83,6 @@ export type ManagedAgentProfile = {
     max_parallel_children: number;
     max_deadline_seconds: number;
   };
-  visibility: "user" | "delegate" | "system";
   callable_by: string[];
 };
 

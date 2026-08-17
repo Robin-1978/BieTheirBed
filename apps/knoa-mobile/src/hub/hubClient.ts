@@ -95,10 +95,63 @@ export type WorkspaceModelDeployment = {
   enabled: boolean;
 };
 
+export type WorkspaceResourceKind = "agent" | "runtime" | "model" | "skill" | "mcp" | "policy" | "task";
+
+export type WorkspaceResource = {
+  resource_id: string;
+  workspace_id: string;
+  kind: WorkspaceResourceKind;
+  generation: number;
+  canonical_digest: string;
+  display_name: string;
+  spec: Record<string, unknown>;
+  enabled: boolean;
+  created_by: string;
+  created_at: number;
+  updated_at: number;
+};
+
+export type WorkspaceDeployment = {
+  deployment_id: string;
+  workspace_id: string;
+  kind: "model" | "mcp" | "agent" | "task";
+  resource_id: string;
+  resource_generation: number;
+  resource_digest: string;
+  target_node_id: string;
+  desired_generation: number;
+  spec: Record<string, unknown>;
+  enabled: boolean;
+  created_at: number;
+  updated_at: number;
+};
+
+export type WorkspaceWorkProjection = {
+  workspace_id: string;
+  entity_kind: "conversation" | "task";
+  entity_id: string;
+  node_id: string;
+  principal_id: string;
+  title: string;
+  state: string;
+  progress: number | null;
+  summary: string;
+  approval_summary: string;
+  artifact_refs: Array<Record<string, unknown>>;
+  source_generation: number;
+  source_digest: string;
+  projection_seq: number;
+  source_created_at: number;
+  source_updated_at: number;
+  projected_at: number;
+  payload: Record<string, unknown>;
+};
+
 export type WorkspaceResourceGrant = {
   grant_id: string;
   caller_node_id: string;
   target_deployment_id: string;
+  capability: "model_inference" | "mcp_invoke";
   max_request_deadline: number;
   expires_at: number;
   revoked_at: number | null;
@@ -117,6 +170,8 @@ export type DeploymentObservation = {
 export type WorkspaceResourceState = {
   resources: WorkspaceModelResource[];
   deployments: WorkspaceModelDeployment[];
+  workspaceResources: WorkspaceResource[];
+  workspaceDeployments: WorkspaceDeployment[];
   grants: WorkspaceResourceGrant[];
   observations: DeploymentObservation[];
 };
@@ -402,18 +457,39 @@ export async function createNodeEnrollmentGrant(): Promise<NodeEnrollmentGrant> 
 
 export async function loadWorkspaceResourceState(): Promise<WorkspaceResourceState> {
   const connection = await requiredHubConnection();
-  const [resources, deployments, grants, observations] = await Promise.all([
+  const [resources, deployments, workspaceResources, workspaceDeployments, grants, observations] = await Promise.all([
     request<{ resources: WorkspaceModelResource[] }>(connection.url, connection.token, "/v1/model-resources"),
     request<{ deployments: WorkspaceModelDeployment[] }>(connection.url, connection.token, "/v1/model-deployments"),
+    request<{ resources: WorkspaceResource[] }>(connection.url, connection.token, "/v1/workspace-resources"),
+    request<{ deployments: WorkspaceDeployment[] }>(connection.url, connection.token, "/v1/deployments"),
     request<{ grants: WorkspaceResourceGrant[] }>(connection.url, connection.token, "/v1/resource-grants"),
     request<{ observations: DeploymentObservation[] }>(connection.url, connection.token, "/v1/deployment-observations"),
   ]);
   return {
     resources: resources.resources,
     deployments: deployments.deployments,
+    workspaceResources: workspaceResources.resources,
+    workspaceDeployments: workspaceDeployments.deployments,
     grants: grants.grants,
     observations: observations.observations,
   };
+}
+
+export async function listWorkspaceWork(
+  kind: "" | "conversation" | "task" = "",
+  nodeId = "",
+): Promise<WorkspaceWorkProjection[]> {
+  const connection = await requiredHubConnection();
+  const query = new URLSearchParams();
+  if (kind) query.set("kind", kind);
+  if (nodeId) query.set("node_id", nodeId);
+  query.set("limit", "300");
+  const result = await request<{ items: WorkspaceWorkProjection[] }>(
+    connection.url,
+    connection.token,
+    `/v1/work-projections?${query.toString()}`,
+  );
+  return result.items;
 }
 
 export async function putWorkspaceModelResource(
@@ -425,6 +501,42 @@ export async function putWorkspaceModelResource(
     body: resource,
   });
   return result.resource;
+}
+
+export async function putWorkspaceResource(resource: {
+  resource_id: string;
+  kind: WorkspaceResourceKind;
+  generation: number;
+  canonical_digest: string;
+  display_name: string;
+  spec: Record<string, unknown>;
+  enabled: boolean;
+}): Promise<WorkspaceResource> {
+  const connection = await requiredHubConnection();
+  const result = await request<{ resource: WorkspaceResource }>(connection.url, connection.token, "/v1/workspace-resources", {
+    method: "POST",
+    body: resource,
+  });
+  return result.resource;
+}
+
+export async function putWorkspaceDeployment(deployment: {
+  deployment_id: string;
+  kind: "model" | "mcp" | "agent" | "task";
+  resource_id: string;
+  resource_generation: number;
+  resource_digest: string;
+  target_node_id: string;
+  desired_generation: number;
+  spec: Record<string, unknown>;
+  enabled: boolean;
+}): Promise<WorkspaceDeployment> {
+  const connection = await requiredHubConnection();
+  const result = await request<{ deployment: WorkspaceDeployment }>(connection.url, connection.token, "/v1/deployments", {
+    method: "POST",
+    body: deployment,
+  });
+  return result.deployment;
 }
 
 export async function putWorkspaceModelDeployment(

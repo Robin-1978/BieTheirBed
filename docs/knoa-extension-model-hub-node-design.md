@@ -6,7 +6,7 @@
 >
 > 范围：Skill、MCP、第三方 Tool、LLM Provider、扩展中心、模型中心、Account、Workspace、HubService、Relay、Node、多电脑配置与自托管
 >
-> 关系：建立在 `knoa-module-architecture.md`、`knoa-configuration-control-plane-design.md`、`knoa-secure-gateway-design.md` 和 `knoa-capability-extension-design.md` 之上
+> 关系：产品对象和配置归属以 `knoa-product-domain-architecture.md` 为准；本文建立在 `knoa-module-architecture.md`、`knoa-configuration-control-plane-design.md`、`knoa-secure-gateway-design.md` 和 `knoa-capability-extension-design.md` 之上
 >
 > 后续演进：Workspace 共享资产、ModelDeployment/DeploymentObservation、跨 Node 本地 LLM 调用、Virtual Node 与跨 Workspace 共享以 `knoa-workspace-resource-fabric-design.md` 为准；本文继续作为扩展导入、现有 Hub/Relay 实现、Node-local 配置和安全连接的权威设计。本文历史段落中的“逻辑 Hub”在目标术语中等同 Workspace；运行服务称 HubService
 >
@@ -30,8 +30,8 @@ Knoa 需要同时解决两个产品问题：
                                   `- optional Relay -> N 个 WorkspaceNode
 ```
 
-Workspace 是唯一逻辑租户。Knoa WorkspaceNode 始终是执行、Secret、Task、Conversation、Artifact
-和本地权限的权威所有者。HubService 是可选身份、目录、密文投递与 Relay 控制面，不是第二个
+Workspace 是唯一逻辑租户，拥有共享资源和 Conversation/Task 等 Work。Knoa WorkspaceNode 是
+AgentInvocation、ExecutionAttempt、Secret、Artifact bytes 和本地权限的执行事实权威。HubService 是可选身份、目录、密文投递与 Relay 控制面，不是第二个
 资源租户。普通用户可以使用 Knoa 托管 HubService；高级用户可以自托管；单机和完全离线用户
 可以由 owner Node 承担本地 Workspace Registry，不使用 HubService。
 
@@ -48,7 +48,7 @@ Node 上的 ConfigurationService、Runtime sandbox 和 Capability Gateway。
 - 将不同生态的 data-only Skill 归一化为 Knoa canonical SkillPackage；
 - 为扩展提供来源、版本、digest、权限、Secret requirements、更新和卸载记录；
 - 为 OpenAI、Anthropic、OpenAI-compatible 和本地模型提供可用的配置页面；
-- 所有普通模型、Agent、Skill、MCP 和运行参数通过 Config Revision 热发布；
+- 所有普通模型、Agent、Skill、MCP 和运行参数通过 Desired Generation 热发布；
 - App 可以管理一个用户的多个 Knoa Node；
 - 普通用户不配置域名即可远程访问 Node；
 - 支持 Knoa 托管 Hub、自托管 Hub 和无 Hub 三种部署形态；
@@ -75,8 +75,8 @@ Node 上的 ConfigurationService、Runtime sandbox 和 Capability Gateway。
 | 本地 MCP package | content-addressed immutable PackageStore；Config Draft 激活 | App 文件上传、Archive/Git/HTTPS source adapter |
 | Skill | data-only 校验、不可变导入、digest、Extension Center Draft | 外部生态 adapter、Archive/Git/Catalog、更新 UI |
 | 第三方 Tool | MCP Tool 经 Capability Gateway；移除 Core 内直接部署入口 | 包装与发布指引、Catalog metadata |
-| LLM Provider | Model Center；四类 driver；write-only Node Secret；Revision 热发布 | Provider 连接测试、模型能力探测、Secret 管理详情页 |
-| 配置页面 | Draft/validate/preflight/publish/rollback；Extension/Model/Node Center | 更细的 diff、批量模板与运行状态诊断 |
+| LLM Provider | Model Center；四类 driver；write-only Node Secret；generation 热发布 | Provider 连接测试、模型能力探测、Secret 管理详情页 |
+| 配置页面 | Draft/validate/preflight/publish；Extension/Model/Node Center；现有 rollback 为待删除旧能力 | 更细的 diff、批量模板、Node reload/restart 与运行状态诊断 |
 | 远程身份 | 独立 Node signing/configuration keys；QR key pinning；Hub enrollment | key rotation/recovery 与正式 Hosted Account |
 | 多电脑 | AppInstallationIdentity + N 个 NodeDeviceBinding；Node selector；Hub directory；direct 优先/Relay fallback | endpoint discovery、连接诊断与 Hosted Account UX |
 | Hub/Fleet | self-hosted single-owner Hub、presence、ticket、opaque Fleet envelope、Node apply | App Fleet rollout UI、Node 主动拉取/回报、Hosted Hub |
@@ -113,8 +113,10 @@ HubService 承载多个 Workspace；自托管形态通常只承载一个 Persona
 
 ### 4.3 Node
 
-安装了 Knoa Core 的执行电脑。Node 拥有本地 Runtime、MCP、Skill、Secret、Task、Conversation、
-Artifact、Config Registry 和最终授权判断。
+安装了 Knoa Core 的执行电脑。Node 拥有本地 Runtime、MCP deployment、Skill package、Secret、
+Conversation 正文/ChatTurn、TaskExecution、AgentInvocation、ExecutionAttempt、Artifact bytes、Config
+Registry 和最终授权判断。Conversation 目录和 Task Definition/Deployment 的产品归属属于 Workspace；
+V1 与执行事实同库存储只是部署简化。
 
 `NodeIdentity` 至少包含两把用途隔离的长期密钥：
 
@@ -207,7 +209,8 @@ Extension Center
 | Node online presence、relay connection | Presence/Relay |
 | AppInstallationIdentity 私钥 | Client Device 本地安全存储 |
 | NodeDeviceBinding、Node-local revoke | 对应 Node Gateway identity repository |
-| Node Principal、Task、Conversation、Artifact | 对应 Node Core |
+| Workspace Conversation/Task 稳定定义与目录 | WorkspaceRegistry |
+| Node Principal、AgentInvocation、ExecutionAttempt、Artifact bytes | 对应 Node Core |
 | Node ManagedConfig/Revision | 对应 Node ConfigurationService |
 | API Key、MCP Secret | 对应 Node Secret Store |
 | Installed package bytes | 对应 Node managed extension store |
@@ -418,7 +421,7 @@ Config Revision 是“是否 active”的唯一逻辑真相；PackageStore 只�
 - PackageStore 采用 mark-and-sweep，不建设通用 refcount 服务；保留集合来自 open Draft、保留的
   Config Revision、active/draining provider generation；
 - 只有 Revision retention 明确删除历史版本，且 package 不再属于上述保留集合时才允许 GC；
-- rollback 先验证目标 Revision 的全部 package 仍存在，否则返回稳定错误而不是部分应用。
+- V1 不提供 rollback；新 generation 预检必须确认全部 package 存在，失败时不切换并保留旧 provider。
 
 ### 7.6 Provenance 与更新
 
@@ -642,8 +645,9 @@ Node 详情展示：
 - revoke、rename、re-enroll；
 - 打开该 Node 的 Extension/Model/Agent 配置。
 
-App 的每次 Conversation、Task 或配置动作必须绑定明确 target Node；禁止把多个 Node 的本地
-Session 混成一个隐式全局 Session。
+App 的每次 AgentInvocation、ExecutionAttempt、Node-local 配置或 live control 必须绑定明确 target
+WorkspaceNode；Conversation/Task 本身按 Workspace ID 寻址。禁止把多个 Node 的本地 Runtime Session
+混成一个隐式全局 Session。
 
 ## 10. Hub、Relay 与多节点
 
@@ -865,10 +869,10 @@ identity 或 TLS termination 不能替代 Knoa 的 Node/Client Device authentica
 ### 10.9 离线与降级
 
 - Hub 不可用时，已知 LAN/private direct endpoint 仍可连接；
-- Node 离线时，Hub 只报告 offline，不假装 Task 已投递；
+- Node 离线时，Workspace Task/Conversation 仍可见，但 Hub 不假装新的 Invocation/Attempt 已投递；
 - 第一阶段不在 Hub 持久化离线业务命令；
-- Durable Task 仍由目标 Node 持久化后才算创建成功；
-- Relay 断线不取消 Node 上已经运行的 Task；
+- V1 TaskExecution 只有在目标 Node admission 并持久化首个 Attempt 后才进入活动执行状态；
+- Relay 断线不取消 Node 上已经运行的 TaskExecution；
 - App 恢复连接后从 Node event cursor 继续。
 
 ## 11. 多节点配置
@@ -1152,8 +1156,8 @@ Relay transport 到达目标 Node。
 | Hub 读取 Fleet 配置 | 逐 Node configuration-encryption-key sealed candidate；Hub 只保存 opaque envelope 和 digest |
 | Account takeover | step-up、Node/Client revoke、短期 ticket/session、审计 |
 | Node theft | Node key revoke、本地系统磁盘保护、Secret Store、Session 过期 |
-| 跨 Node 数据混淆 | 每次操作显式 target Node；opaque ID 必须 Node-scoped |
-| Fleet 错误扩散 | expected base digest、完整候选、逐 Node preflight、失败停止、独立 rollback |
+| 跨 Node 数据混淆 | Work ID 使用 Workspace scope；Invocation/Attempt 显式 placement Node；Node-local opaque ID 保持 Node-scoped |
+| Fleet 错误扩散 | expected base digest、完整候选、逐 Node preflight；失败时不切换并保留旧 active generation |
 
 ## 16. 模块边界
 
@@ -1165,7 +1169,7 @@ Relay transport 到达目标 Node。
 | ExtensionImportService | staging、格式适配、inspect、provenance | 直接写 live Registry/Runtime |
 | PackageStore | immutable package snapshot 和 metadata | 决定 Agent policy |
 | SecretStore | write-only Secret 生命周期 | 普通配置 diff |
-| ConfigurationService | Draft/validate/preflight/publish/rollback | 下载任意包 |
+| ConfigurationService | Draft/validate/preflight/publish、desired/applied generation（现有 rollback 非目标产品能力） | 下载任意包 |
 | ExtensionManager | active provider lifecycle | 用户身份和权限决策 |
 | CapabilityGateway | invocation grant 与 Tool enforcement | Marketplace/安装 |
 | ProviderService | Provider connection/preflight | Agent 角色语义 |
@@ -1217,7 +1221,7 @@ Revision 未应用”或“Revision 引用丢失 package”的状态。
 - QR direct pairing；
 - LAN/private/custom endpoint resolver；
 - Node selector；
-- 所有 Session/Task/Config 操作显式 target Node。
+- 所有 Invocation/Attempt/Node-local Config 操作显式 target Node；Conversation/Task 按 Workspace 寻址。
 
 验收：一个 App 可管理至少三台独立 Node，无 Hub 也可工作。
 
@@ -1268,7 +1272,7 @@ Phase 4 HA 公有云生产完成。
 - source provenance、license、可选签名；
 - Client-local reusable template 和显式 target Node；
 - 每 Node 完整候选、expected base digest 和 sealed rollout envelope；
-- 分批发布、失败停止、每 Node rollback；
+- 分批发布、失败停止；每个 Node 新 generation 失败时保留旧 active generation；
 - Marketplace entitlement。
 
 验收：Catalog compromise 不会自动扩大权限；Hub 不能解密 Fleet candidate；base revision

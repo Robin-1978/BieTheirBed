@@ -1,5 +1,7 @@
 # 小诺 Conversation 正向设计
 
+> 产品归属：Conversation 目录属于 Workspace Work；V1 Conversation 创建时固定绑定一个 WorkspaceNode，正文、ChatTurn 和 AgentInvocation 由该 Node 持有，并向 Workspace 同步管理投影。顶层对象和归属以 `knoa-product-domain-architecture.md` 为准。
+
 ## 1. 设计目标
 
 小诺的聊天是多轮 Conversation，不是 Task。一次用户提问和最终回答组成一个
@@ -19,6 +21,8 @@
 
 ```text
 ConversationSession
+├── workspace_id
+├── workspace_node_id            # V1 必填且会话内不可变
 ├── principal_id
 ├── rolling_summary
 ├── summarized_through_turn
@@ -28,7 +32,9 @@ ConversationSession
     ├── state
     ├── tool_steps
     ├── approvals
-    └── artifacts
+    ├── artifacts
+    └── AgentInvocation[]
+        └── runs_on -> WorkspaceNode
 
 Task
 └── TaskExecution
@@ -48,6 +54,10 @@ AgentRuntime
 
 `ChatTurn` 和 `TaskExecution` 复用 AgentRuntime，但不共享产品生命周期或持久化
 策略。ChatTurn 不出现在任务列表；TaskExecution 不污染当前聊天 Session。
+
+Conversation 不是 Node 配置子资源。其稳定 ID、目录、访问控制和产品生命周期属于 Workspace；创建时
+必须绑定一个 Node，完整正文、Turn 顺序和运行事实由该 Node 持有。V1 后续 Turn 全部在绑定 Node
+执行。Node 离线不能导致 Conversation 从 Workspace 目录消失，但正文和继续对话会暂不可用。
 
 ### 2.1 与 AgentRuntime 的关系
 
@@ -113,11 +123,12 @@ Gateway、App 或飞书模块。
 ConversationService
   1. load ConversationSession summary + recent Turns
   2. create ChatTurn(running)
-  3. call AgentRuntime.run(...)
-  4. merge transient RunSignal into current Turn presentation
-  5. persist tool/approval state when required
-  6. commit final user/assistant messages
-  7. compact Session if token threshold is reached
+  3. validate immutable Conversation.workspace_node_id and create AgentInvocation snapshot
+  4. call bound WorkspaceNode AgentRuntime.run(...)
+  5. merge transient RunSignal into current Turn presentation
+  6. persist tool/approval state when required
+  7. commit final user/assistant messages
+  8. compact Session if token threshold is reached
 ```
 
 ### 2.3 Task 调用时序
@@ -143,7 +154,22 @@ Session 是唯一的多轮上下文边界。它拥有：
 - 较旧对话的持久化滚动摘要；
 - 摘要覆盖到的最后 Turn 序号；
 - 最近若干轮完整原文；
-- principal 所有权和并发串行化约束。
+- principal 所有权和并发串行化约束；
+- Workspace 归属和不可变 Node binding。
+
+V1 不自动跨 Node 搬迁 Runtime 私有 Session、未完成 Turn 或 Node-local Artifact，也不允许在原
+Conversation 内切换 Node。用户要使用另一 Node 时显式新建 Conversation；跨 Node 上下文导出或
+分叉在出现真实需求后单独设计，不能伪装成同一 Session 的透明继续。
+
+### 3.1 Workspace 管理投影
+
+绑定 Node 向 Workspace Registry 同步版本化目录投影：Conversation ID、绑定 Node、标题、最后活动
+时间、Turn 数量、最新 Turn 状态、待审批摘要和 Artifact 引用。完整消息正文、Tool/MCP 原始载荷、
+Artifact bytes、Runtime 私有 Session 和 Secret 不进入普通投影。
+
+投影是最终一致的读取模型。发送、Stop、审批和重试命令必须路由到绑定 Node；Hub 不能只修改投影
+来伪造成功。Node 离线时 App 展示最后同步状态并标记不可继续，不阻塞 Workspace、Node 管理或其他
+Conversation。
 
 一次模型调用的上下文固定组装为：
 
@@ -157,7 +183,7 @@ System Prompt
 
 完整原始 Turn 继续归档。压缩只改变下一次模型请求使用的上下文，不删除历史。
 
-### 3.1 持久化压缩
+### 3.2 持久化压缩
 
 压缩按 token 预算触发，不按每轮固定调用：
 

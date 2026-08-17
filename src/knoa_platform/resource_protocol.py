@@ -84,6 +84,7 @@ def verify_resource_ticket(
     hub_signing_public_key: str,
     *,
     expected_hub_id: str,
+    expected_workspace_id: str | None = None,
     expected_target_node_id: str | None = None,
     clock=time.time,
 ) -> ResourceTicketClaims:
@@ -101,7 +102,7 @@ def verify_resource_ticket(
         payload.get("aud") != "knoa-resource-invocation-v1"
         or payload.get("protocol_version") != 1
         or payload.get("hub_id") != expected_hub_id
-        or payload.get("workspace_id") != expected_hub_id
+        or payload.get("workspace_id") != (expected_workspace_id or expected_hub_id)
         or payload.get("capability") != "model_inference"
         or not {"direct", "relay"}.issubset(
             set(payload.get("allowed_transports", ()))
@@ -145,12 +146,14 @@ def create_resource_client_hello(
     hub_signing_public_key: str,
     *,
     expected_hub_id: str,
+    expected_workspace_id: str | None = None,
     clock=time.time,
 ) -> PendingResourceClient:
     claims = verify_resource_ticket(
         ticket,
         hub_signing_public_key,
         expected_hub_id=expected_hub_id,
+        expected_workspace_id=expected_workspace_id,
         clock=clock,
     )
     if (
@@ -183,6 +186,7 @@ def accept_resource_client_hello(
     *,
     session_id: str,
     hub_id: str,
+    workspace_id: str | None = None,
     hub_signing_public_key: str,
     node_identity: NodeIdentity,
     clock=time.time,
@@ -191,6 +195,7 @@ def accept_resource_client_hello(
         hello.ticket,
         hub_signing_public_key,
         expected_hub_id=hub_id,
+        expected_workspace_id=workspace_id,
         expected_target_node_id=node_identity.node_id,
         clock=clock,
     )

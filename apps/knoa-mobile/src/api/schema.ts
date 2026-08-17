@@ -292,38 +292,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/config/history": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["getConfigHistory"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/config/revisions/{revision_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["getConfigRevision"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/config/drafts": {
         parameters: {
             query?: never;
@@ -398,22 +366,6 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["publishConfigDraft"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/config/rollback": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["rollbackConfig"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1071,6 +1023,12 @@ export interface components {
             /** Profile Id */
             profile_id: string;
             /**
+             * Visibility
+             * @default delegate
+             * @enum {string}
+             */
+            visibility: "user" | "delegate" | "system";
+            /**
              * Enabled
              * @default true
              */
@@ -1103,10 +1061,15 @@ export interface components {
              */
             instructions_required: boolean;
             /**
-             * Default Skills
+             * Default Skill Refs
              * @default []
              */
-            default_skills: string[];
+            default_skill_refs: string[];
+            /**
+             * Allowed Skill Refs
+             * @default []
+             */
+            allowed_skill_refs: string[];
             /**
              * Allowed Platform Tools
              * @default []
@@ -1124,12 +1087,6 @@ export interface components {
             runtime_native_capability_ceiling: ("workspace_read" | "workspace_write" | "command_execution" | "native_file_edit")[];
             runtime_limits?: components["schemas"]["RuntimeProfileLimits"];
             delegation?: components["schemas"]["DelegationPolicy"];
-            /**
-             * Visibility
-             * @default delegate
-             * @enum {string}
-             */
-            visibility: "user" | "delegate" | "system";
             /**
              * Callable By
              * @default []
@@ -1614,11 +1571,6 @@ export interface components {
         ConfigDraftResponse: {
             draft: components["schemas"]["ConfigDraft"];
         };
-        /** ConfigHistoryResponse */
-        ConfigHistoryResponse: {
-            /** Revisions */
-            revisions: components["schemas"]["ConfigRevision"][];
-        };
         /** ConfigPublishResponse */
         ConfigPublishResponse: {
             result: components["schemas"]["ConfigPublishResult"];
@@ -1649,10 +1601,6 @@ export interface components {
             created_by: string;
             /** Created At */
             created_at: number;
-        };
-        /** ConfigRevisionResponse */
-        ConfigRevisionResponse: {
-            revision: components["schemas"]["ConfigRevision"];
         };
         /** ConfigValidationIssue */
         ConfigValidationIssue: {
@@ -2905,16 +2853,6 @@ export interface components {
              * @default false
              */
             acknowledge_outcome_unknown: boolean;
-        };
-        /** RollbackConfigRequest */
-        RollbackConfigRequest: {
-            /** Revision Id */
-            revision_id: string;
-            /**
-             * Summary
-             * @default
-             */
-            summary: string;
         };
         /** RuntimeProfileLimits */
         RuntimeProfileLimits: {
@@ -4674,149 +4612,6 @@ export interface operations {
             };
         };
     };
-    getConfigHistory: {
-        parameters: {
-            query?: {
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Configuration history */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConfigHistoryResponse"];
-                };
-            };
-            /** @description Request rejected */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Request rejected */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Request rejected */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Request rejected */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Request rejected */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    getConfigRevision: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                revision_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Configuration revision */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConfigRevisionResponse"];
-                };
-            };
-            /** @description Request rejected */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Request rejected */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Request rejected */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Request rejected */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Request rejected */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Request rejected */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
     createConfigDraft: {
         parameters: {
             query?: never;
@@ -5255,102 +5050,6 @@ export interface operations {
             };
             /** @description Request rejected */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Request rejected */
-            415: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Request rejected */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Request rejected */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Request rejected */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    rollbackConfig: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RollbackConfigRequest"];
-            };
-        };
-        responses: {
-            /** @description Rolled back configuration */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConfigPublishResponse"];
-                };
-            };
-            /** @description Request rejected */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Request rejected */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Request rejected */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Request rejected */
-            404: {
                 headers: {
                     [name: string]: unknown;
                 };

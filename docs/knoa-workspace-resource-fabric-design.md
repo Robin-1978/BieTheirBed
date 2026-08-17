@@ -6,7 +6,7 @@
 >
 > 范围：Account、Workspace、HubService、NodeHost、WorkspaceNode、本地 LLM 共享、配置权威、远程调用、Secret 与后续资源共享
 >
-> 关系：建立在 `knoa-agent-runtime-design.md`、`knoa-configuration-control-plane-design.md`、`knoa-extension-model-hub-node-design.md` 和 `knoa-module-architecture.md` 之上；涉及 Hub/Workspace 术语、共享资源归属、跨 Node 模型调用和 Workspace/Node 配置所有权时，以本文为准
+> 关系：产品对象、配置入口与归属以 `knoa-product-domain-architecture.md` 为准；本文建立在 `knoa-agent-runtime-design.md`、`knoa-configuration-control-plane-design.md`、`knoa-extension-model-hub-node-design.md` 和 `knoa-module-architecture.md` 之上，细化跨 Node 模型调用与资源织网
 >
 > 设计取向：正向设计；高内聚、低耦合；local-first、Hub-assisted、self-hostable；KISS、YAGNI；不保留与目标模型冲突的旧配置兼容层
 
@@ -18,7 +18,7 @@
 Critic 指出的以下问题成立，本文已经修正：
 
 1. 无 Hub 模式下 Workspace 缺少权威所有者；
-2. Workspace Revision 与 Node ManagedConfig 对相同字段形成双写；
+2. Workspace Published Spec 与 Node ManagedConfig 对相同字段形成双写；
 3. 现有“逻辑 Hub”与新增 Workspace 是重复租户聚合；
 4. Hosted Hub 能否读取 Agent Prompt、Skill 和 MCP 定义没有明确决定；
 5. Hub 被要求校验 Node-local Principal，形成双重权限权威；
@@ -47,6 +47,7 @@ Workspace            唯一逻辑租户、共享资产与授权边界
 HubService           可选的身份、目录、Relay 和密文投递服务
 WorkspaceNode        单 Workspace 的逻辑执行租户
 NodeHost              安装 Knoa 的物理机器/安装实例
+WorkspaceNodeEnrollment  Workspace 使用 NodeHost 的授权与配置关系
 WorkspaceRegistry    明文共享定义的唯一写入权威
 ```
 
@@ -55,7 +56,7 @@ WorkspaceRegistry    明文共享定义的唯一写入权威
 1. `HubService` 是服务部署，不再是第二个资源租户；原文档中的“逻辑 Hub”迁移为 Workspace；
 2. Account 与 Workspace 通过 Membership 建立多对多关系；
 3. Account identity 必须带 issuer，V1 不做跨 Hub 身份联邦；
-4. V1 一个 NodeHost 只运行一个 WorkspaceNode；
+4. 产品模型区分 NodeHost、WorkspaceNodeEnrollment 与 WorkspaceNode；V1 运行时可以保持一个 NodeHost 只运行一个 WorkspaceNode；
 5. Workspace-managed 字段与 Node-local 字段按 schema 分区，不允许双写；
 6. Hosted Hub V1 不读取 Workspace 明文配置，只保存 metadata、digest、密文候选和观察状态；
 7. Node A 是模型执行事实权威，Hub 不是模型 Invocation 状态权威；
@@ -65,7 +66,7 @@ WorkspaceRegistry    明文共享定义的唯一写入权威
 
 一句话定义：
 
-> Workspace 逻辑拥有共享资源与授权；WorkspaceRegistry 拥有明文定义写权；WorkspaceNode 拥有部署、Secret、本地数据和执行权威；HubService 只提供可选的身份、目录、密文投递与安全连接。
+> Workspace 逻辑拥有共享资源、Node enrollment 和 Desired State；WorkspaceRegistry 拥有共享定义写权；WorkspaceNode 拥有 Secret、本地数据、Observed State 和执行权威；HubService 只提供可选的身份、目录、rollout 协调与安全连接。
 
 ## 3. Account、Workspace 与 HubService
 
@@ -93,10 +94,12 @@ Workspace 是唯一逻辑租户，拥有：
 
 - Workspace ID 与名称；
 - Membership 和 owner 不变量；
-- 共享资源的逻辑 ID、Revision digest 和授权关系；
+- 共享资源的逻辑 ID、Published Spec generation/digest 和授权关系；
 - WorkspaceNode enrollment；
+- WorkspaceNodeConfig generation、独立 Deployment intent 与 rollout 状态；
 - ResourceGrant；
 - deployment intent 和非敏感目录 metadata；
+- Conversation 目录/binding、Task Definition/Deployment 和 Work management projection；
 - 审计与配置发布记录。
 
 普通用户首次使用时自动创建 Personal Workspace。产品体验可以仍然是“一账户一个个人中心”，但
@@ -162,24 +165,40 @@ export signed workspace manifest
 
 ### 4.1 NodeHost
 
-NodeHost 是物理机器或 Knoa 安装实例，拥有：
+NodeHost 是物理机器或 Knoa 安装实例，对应产品领域中的 `NodeInstallation`，拥有：
 
 - 安装与升级状态；
 - OS、CPU/GPU、存储和网络设备能力；
 - host-level service supervisor；
 - 本地安全存储能力。
 
-### 4.2 WorkspaceNode
+产品层由 AccountSubject 管理 NodeHost installation；Workspace 通过 WorkspaceNodeEnrollment 获得对
+它的业务使用权。普通 Node 配置入口位于 `Workspace -> Nodes -> Node detail`，不要求先建立执行
+会话。
+
+### 4.2 WorkspaceNodeEnrollment
+
+WorkspaceNodeEnrollment 是 Workspace 与 NodeHost 的授权关系，拥有 Workspace 内显示名称、工作目录
+映射、默认执行/共享偏好、Node Config Desired Generation 和 rollout 状态，并聚合指向该 Node 的
+Deployment projection。Deployment 与 ResourceGrant 本身仍是 Workspace 级边对象，
+不由 Enrollment 独占。Enrollment 不拥有设备私钥、CPU/GPU 事实、OS 权限或 Secret value。
+
+### 4.3 WorkspaceNode
 
 WorkspaceNode 是一个 Workspace 内的逻辑执行租户，拥有：
 
 - WorkspaceNode identity private keys；
-- NodeOverlayRevision；
+- NodeOverlayGeneration；
 - NodeSecret Store；
 - Model/Agent/MCP deployment process；
 - Runtime generation 和本地 capability policy；
-- Conversation、Task、Approval、Artifact；
+- 绑定本 Node 的 Conversation 正文/ChatTurn、部署到本 Node 的 TaskExecution、Approval、Artifact；
 - 对远程 Invocation 的最终拒绝权。
+
+Conversation 目录和 Task Definition/Deployment 在产品上属于 Workspace；WorkspaceNode 拥有绑定到
+本机的 Conversation 正文/ChatTurn，以及部署到本机的 TaskExecution、AgentInvocation、
+ExecutionAttempt、ToolStep、Approval 处理和 Artifact bytes。Node 向 Workspace 同步版本化管理投影，
+但投影不成为内容或执行写权威。
 
 V1 保持简单：
 
@@ -194,25 +213,35 @@ V1 保持简单：
 Secret、配置和数据作用域。是否共享底层 GPU/model daemon 需要通过显式 Service Grant，而不是让
 多个 Workspace 直接共享一个 Core 数据库或 Secret Store。
 
+### 4.4 Work Management Projection
+
+每个 WorkspaceNode 向 Workspace Registry 同步其 Work 管理投影：Conversation/Task ID、binding 或
+deployment Node、最新状态、进度、时间戳、待审批摘要、结果摘要、Artifact 引用和所用 generation/
+digest。Workspace 由此提供跨 Node 目录和筛选。
+
+完整 Conversation 正文、Task Trace、Tool/MCP 原始载荷、Artifact bytes 与 Secret 保留在权威 Node。
+投影最终一致且只读；Stop、审批、暂停、恢复和重试必须路由到权威 Node 并由它确认。Node 离线时
+Workspace 保留最后投影并标记 stale/offline，不能将 Hub projection 写成 completed 来伪造成功。
+
 ## 5. V1 最小资源模型
 
 V1 不实现十种通用 Asset Kind 和统一 Binding 框架，只实现远程本地模型所需对象。
 
-### 5.1 ModelResourceRevision
+### 5.1 ModelResource Published Spec
 
-ModelResourceRevision 表示 Workspace 中稳定、不可变的逻辑模型定义：
+ModelResource Published Spec 表示 Workspace 中当前发布的逻辑模型定义：
 
 ```text
 resource_id
 workspace_id
-revision
+published_generation
 canonical_digest
 display_name
 provider_protocol = openai_compatible | llamacpp
 model_identity
 declared_capabilities
-created_by
-created_at
+updated_by
+updated_at
 ```
 
 它不包含：
@@ -223,25 +252,26 @@ created_at
 - PID、GPU allocation 或进程状态；
 - 可变健康和容量。
 
-Qwen 3.5 4B 是一个 ModelResourceRevision；Node A 上正在运行的 llama.cpp/OpenAI-compatible 服务
-是它的 ModelDeployment。
+Qwen 3.5 4B 是一个 ModelResource Published Spec；Node A 上正在运行的 llama.cpp/OpenAI-compatible
+服务是一个 `Deployment(kind=model)` 的 applied instance。
 
-### 5.2 ModelDeploymentSpec
+### 5.2 Deployment(kind=model)
 
-ModelDeploymentSpec 表示“希望在哪个 WorkspaceNode 提供该模型”：
+所有资源和 Task 共用 Deployment envelope；`ModelDeploymentSpec` 只是 model kind 的 typed payload，
+表示“希望在哪个 WorkspaceNode 提供该模型”：
 
 ```text
 deployment_id
 workspace_id
-model_resource_revision_id
+source_ref(kind=model, resource_id, generation, digest)
 target_workspace_node_id
 enabled
 workspace_grant_policy
-desired_revision
+desired_generation
 ```
 
 endpoint、model path、Secret、并发和本地进程参数不进入 Workspace 定义，它们属于目标 Node 的
-NodeOverlayRevision。
+NodeOverlayGeneration。
 
 ### 5.3 NodeSecretBinding
 
@@ -325,18 +355,18 @@ Connection Resolver，避免向 Hub 目录或其他成员泄漏私网地址。
 配置必须按字段所有权拆分：
 
 ```text
-WorkspaceDefinitionRevision
+WorkspacePublishedSpecGeneration
   V1: ModelResource、ModelDeployment intent、WorkspaceNode Grant
 
-NodeOverlayRevision
+NodeOverlayGeneration
   endpoint、local model path、NodeSecretRef、进程参数、并发、local deny
 
 MaterializedConfigCandidate
   对一个明确 WorkspaceNode 的只读组合结果
 ```
 
-V1 中 Agent/Profile/Skill/MCP 仍属于 NodeOverlayRevision；等其进入共享阶段时，再把对应字段一次性
-提升到 WorkspaceDefinitionRevision，并从 NodeOverlay schema 删除。禁止同一个字段同时存在于两边。
+V1 中 Agent/Profile/Skill/MCP 仍属于 NodeOverlayGeneration；等其进入共享阶段时，再把对应字段一次性
+提升到 WorkspacePublishedSpecGeneration，并从 NodeOverlay schema 删除。禁止同一个字段同时存在于两边。
 
 ### 6.2 AppliedReceipt
 
@@ -361,14 +391,14 @@ Hub 只能展示此回执，不能自行把 desired 标为 applied。
 ```text
 Owner App connects to WorkspaceRegistry Node
   -> edits WorkspaceDefinition Draft
-  -> registry validates and creates immutable Revision
+  -> registry validates and publishes generation + digest
   -> registry reads target Node public configuration key
   -> produces one complete materialization candidate per target Node
   -> signs candidate digest + target Node + base digests
   -> seals candidate to target WorkspaceNode
   -> Hub stores opaque envelope and delivery metadata
   -> target Node decrypts and verifies
-  -> target Node combines with current NodeOverlayRevision
+  -> target Node combines with current NodeOverlayGeneration
   -> preflight
   -> generation swap / reload
   -> target Node emits AppliedReceipt
@@ -379,13 +409,13 @@ Hosted Hub V1 看不到明文 Model/Agent/Profile/Prompt/MCP 配置。
 #### No-Hub
 
 本地 WorkspaceRegistry 与 WorkspaceNode 同进程时，不需要 Relay 或 sealed envelope，但仍使用同一
-Revision、digest、preflight 和 AppliedReceipt 语义，不能绕过 ConfigurationService 直接修改 live
+generation、digest、preflight 和 AppliedReceipt 语义，不能绕过 ConfigurationService 直接修改 live
 Runtime。
 
 ### 6.4 Workspace-managed 字段只读
 
-MaterializedConfigCandidate 中来自 WorkspaceDefinitionRevision 的字段在 Node 管理 UI 中只读，UI
-应显示来源 Revision 和“转到 Workspace 设置修改”。Node 页面只能编辑 NodeOverlayRevision。
+MaterializedConfigCandidate 中来自 WorkspacePublishedSpecGeneration 的字段在 Node 管理 UI 中只读，UI
+应显示来源 generation 和“转到 Workspace 设置修改”。Node 页面只能编辑 NodeOverlayGeneration。
 
 这消除了 Workspace Draft 与 Node Draft 对相同字段的双写。
 
@@ -408,7 +438,7 @@ MaterializedConfigCandidate 中来自 WorkspaceDefinitionRevision 的字段在 N
 V1 每个 Personal Workspace 有一个 `WorkspaceRegistry Node`，通常是最先创建 Workspace 的 owner
 Node。它是以下明文内容的唯一写入权威：
 
-- WorkspaceDefinition Draft/Revision；
+- Workspace Definition Draft/Published Generation；
 - canonical document 和 dependency digest；
 - 发布历史；
 - per-Node materialization source。
@@ -419,7 +449,7 @@ WorkspaceRegistry Node 离线时：
 
 - 已应用 Node 继续运行；
 - 已签发且未过期的本地配置继续有效；
-- 不允许创建新的 Workspace Revision；
+- 不允许发布新的 Workspace Generation；
 - Hub 不能代替 Registry 修改明文配置。
 
 ### 7.2 Hub 可见内容
@@ -428,7 +458,7 @@ Hosted Hub V1 只能看到：
 
 - Workspace、Membership、WorkspaceNode 和 public keys；
 - resource/deployment opaque ID 和用户允许公开的 display metadata；
-- Revision/candidate digest；
+- generation/candidate digest；
 - sealed candidate；
 - DeploymentObservation；
 - ticket issuance、连接时间、流量大小和 audit observation。
@@ -581,7 +611,7 @@ UI 只显示：
 - 最后轮换时间；
 - 受影响 Deployment。
 
-Secret value 不进入 Workspace Revision、sealed candidate、Hub audit 或普通配置 diff。
+Secret value 不进入 Workspace Published Spec、sealed candidate、Hub audit 或普通配置 diff。
 
 ### 9.2 Workspace Vault 延后
 
@@ -601,7 +631,7 @@ V1 不建立通用 Asset/Binding 表，但保留未来一致模式：
 
 ```text
 Stable Resource ID
-  -> immutable Resource Revision
+  -> Published Spec generation + digest
   -> dependency lock/digest
   -> target-specific Deployment/Materialization
   -> Node-local Secret/endpoint/process
@@ -609,12 +639,12 @@ Stable Resource ID
 
 ### 10.1 Agent
 
-Agent 进入 Workspace 共享时，首个共享单元应是 `AgentPackageRevision`，固定：
+Agent 进入 Workspace 共享时，首个共享单元应是 `AgentPackage Published Spec`，固定：
 
 - AgentDefinition；
 - AgentProfile；
 - RuntimeSpec；
-- Prompt/Skill dependency revision digests；
+- Prompt/Skill dependency digests；
 - ModelRequirement；
 - policy ceiling。
 
@@ -631,10 +661,25 @@ Skill 继续是 data-only immutable package。Workspace 可用不等于所有 No
 MCP Definition 与 Node Deployment 分离；第三方 Tool 仍只通过 MCP 和 Capability Gateway 进入平台。
 MCP inventory drift 继续 fail closed。网络下载内容不能注册进程内 Tool implementation。
 
-### 10.4 何时提取通用 ResourceRevision
+MCP Deployment 可以作为 Workspace 内的远程共享资源。例如 Jira MCP 部署在 Node A、Task 部署在
+Node B 时，Task publish/preflight 必须解析并固化：
+
+```text
+Task Spec dependency
+  -> MCP Definition digest
+  -> MCP Deployment on Node A
+  -> ResourceGrant(Node B -> Node A deployment)
+  -> remote capability ticket
+```
+
+Node B 不获得 Jira Secret；Node A 通过自己的 Secret Store 执行 MCP 调用。Node A 离线或 deployment
+digest 不匹配时，Node B 按 Task 显式策略等待或失败。V1 不自动迁移 MCP、不静默选择其他 Deployment，
+也不建设通用 service mesh；Workspace 可以禁止跨 Node MCP，只允许依赖随 Task 部署到同一 Node。
+
+### 10.4 何时提取通用 ResourcePublishedSpec
 
 只有 ModelResource、AgentPackage 和 MCPPackage 至少两个领域出现稳定的相同查询与发布流程后，才从
-真实消费者提取通用 `ResourceRevision` 基础结构。禁止 Phase 0 先建设十种空 Asset Kind、通用
+真实消费者提取通用 `ResourcePublishedSpec` 基础结构。禁止 Phase 0 先建设十种空 Asset Kind、通用
 Binding service 或任意 selector DSL。
 
 ## 11. Workspace 内与跨 Workspace 共享
@@ -706,8 +751,8 @@ V1 模型向导：
   -> 选择 openai-compatible / llama.cpp
   -> Node 页面配置 endpoint/model path
   -> connection test
-  -> 创建 ModelResourceRevision
-  -> 创建 ModelDeploymentSpec
+  -> 创建 ModelResource Published Spec
+  -> 创建 Deployment(kind=model)
   -> 设置允许调用的 WorkspaceNode
   -> publish / preflight / apply
 ```
@@ -742,16 +787,17 @@ workspace_node(
   registry_role, platform, version, status, last_seen_at
 )
 
-model_resource_revision(
-  id, workspace_id, resource_id, revision, canonical_digest,
+model_resource(
+  id, workspace_id, resource_id, published_generation, canonical_digest,
   display_metadata, provider_protocol, model_identity,
-  declared_capabilities, created_by, created_at
+  declared_capabilities, updated_by, updated_at
 )
 
-model_deployment_spec(
-  id, workspace_id, model_resource_revision_id,
-  target_workspace_node_id, desired_revision,
-  enabled, created_at
+deployment(
+  id, workspace_id,
+  source_kind, source_resource_id, source_generation, source_digest,
+  target_workspace_node_id, typed_spec_json,
+  desired_generation, desired_state, created_at, updated_at
 )
 
 resource_grant(
@@ -794,7 +840,7 @@ invocation_audit_observation(
 )
 ```
 
-NodeSecret、NodeOverlayRevision 和 authoritative Invocation state 只存在于对应 WorkspaceNode，不进入
+NodeSecret、NodeOverlayGeneration 和 authoritative Invocation state 只存在于对应 WorkspaceNode，不进入
 Hub 数据库。
 
 ## 15. V1 API 与协议
@@ -813,16 +859,15 @@ POST       /v1/resource-invocation-tickets
 GET        /v1/resource-invocations/{id}/observations
 ```
 
-明文 Workspace Revision CRUD 终止在 WorkspaceRegistry Node，不经过 opaque Hosted Hub。
+明文 Workspace Published Spec CRUD 终止在 WorkspaceRegistry Node，不经过 opaque Hosted Hub。
 
 ### 15.2 WorkspaceRegistry Node API
 
 ```text
 GET/POST   /v1/workspace-registry/model-resources
-GET/POST   /v1/workspace-registry/model-resources/{id}/revisions
-GET/POST   /v1/workspace-registry/model-deployments
-POST       /v1/workspace-registry/publish
-GET        /v1/workspace-registry/history
+GET/PUT    /v1/workspace-registry/model-resources/{id}/draft
+POST       /v1/workspace-registry/model-resources/{id}/publish
+GET/POST   /v1/workspace-registry/deployments
 ```
 
 ### 15.3 WorkspaceNode Deployment Contract
@@ -866,12 +911,12 @@ HubService
 └── audit_observation     non-authoritative receipts / usage
 
 WorkspaceRegistry Node
-├── workspace_registry    plaintext ModelResource Revision
+├── workspace_registry    plaintext ModelResource Published Spec
 ├── materializer          per-Node immutable candidate
 └── publish_service       signing / sealing / history
 
 WorkspaceNode
-├── node_overlay          local config revision
+├── node_overlay          local config generation
 ├── deployment_manager    model process / generation
 ├── model_endpoint        inbound remote inference
 ├── model_invoker         outbound remote inference
@@ -900,10 +945,10 @@ WorkspaceNode
 - 当前 Node 作为一个 WorkspaceNode；
 - V1 不创建 NodeHost 表、不做身份 federation。
 
-### Phase 1：单模型资源与部署观察
+### Phase 1：单模型资源与统一 Deployment 观察
 
-- ModelResourceRevision；
-- ModelDeploymentSpec；
+- ModelResource Published Spec generation/digest；
+- `Deployment(kind=model)` envelope + Model typed spec；
 - NodeOverlay 中的 endpoint、path、Secret 和 capacity；
 - DeploymentObservation；
 - App Workspace Header、Nodes、Models、Deployment Detail。
@@ -919,18 +964,19 @@ WorkspaceNode
 
 ### Phase 3：配置字段分区与密文发布
 
-- WorkspaceDefinitionRevision；
-- NodeOverlayRevision；
+- WorkspacePublishedSpecGeneration；
+- NodeOverlayGeneration；
 - per-Node MaterializedConfigCandidate；
 - Workspace-managed 字段 Node 只读；
 - AppliedReceipt；
 - 保持 Hosted Hub opaque。
 
-### Phase 4：第二类资源验证通用抽象
+### Phase 4：第二类 Resource 验证通用 Registry 抽象
 
-- 优先 AgentPackageRevision 或 MCPPackageRevision；
+- 优先 AgentPackage Published Spec 或 MCPPackage Published Spec；
 - 固定 dependency closure digest；
-- 从两个真实消费者提取最小 ResourceRevision；
+- Deployment 已因 Model/MCP/Task 的相同 Desired/Applied 生命周期统一；Resource Registry 仍只在两个
+  真实 Resource consumer 拥有相同查询/发布需求后提取；
 - 不做通用 Binding service 或 selector DSL。
 
 ### Phase 5：Virtual Node 与 Vault
@@ -954,8 +1000,8 @@ V1 实现：
 - Personal Workspace；
 - HubService 可选；
 - 一个 NodeHost 对应一个 WorkspaceNode；
-- ModelResourceRevision；
-- ModelDeploymentSpec；
+- ModelResource Published Spec；
+- `Deployment(kind=model)` + Model typed spec；
 - NodeSecretBinding；
 - 精确 ModelRequirement；
 - WorkspaceNode ResourceGrant；
@@ -1012,9 +1058,9 @@ V1 不实现：
 远程 Invocation 终态属于执行 Node
 ```
 
-本地 Qwen 3.5 4B 不是某个 Agent 私有的 endpoint 配置，而是 Workspace 中的 ModelResourceRevision
-在 Node A 上的一个 ModelDeployment。Node B 的 Agent 只声明精确 ModelRequirement；HubService 签发
+本地 Qwen 3.5 4B 不是某个 Agent 私有的 endpoint 配置，而是 Workspace 中的 ModelResource Published
+Spec 在 Node A 上的一个 `Deployment(kind=model)`。Node B 的 Agent 只声明精确 ModelRequirement；HubService 签发
 有界 ticket 并协调连接；Node A 完成 admission、推理、流式输出、cancel、reconcile 和终态持久化。
 
 这是当前最小且正向的资源共享架构。它验证成功后，再用真实的 AgentPackage/MCPPackage 消费者
-提炼通用 ResourceRevision，而不是先建设一套没有消费者的资源平台。
+提炼通用 ResourcePublishedSpec，而不是先建设一套没有消费者的资源平台。

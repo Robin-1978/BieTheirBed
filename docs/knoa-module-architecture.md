@@ -4,7 +4,7 @@
 >
 > 更新日期：2026-08-17
 >
-> 权威顺序：运行代码与测试 > 本文 > 专题设计文档 > 历史方案文档
+> 权威顺序：产品语义以 `knoa-product-domain-architecture.md` 为准；实现事实以运行代码与测试为准；模块边界以本文为准；专题设计文档补充细节
 >
 > 设计取向：正向设计；高内聚、低耦合；KISS、YAGNI；不保留旧配置模型兼容层
 
@@ -19,6 +19,7 @@
 
 本文不重复所有专题细节。以下文档仍是对应领域的详细设计：
 
+- `docs/knoa-product-domain-architecture.md`：Account、Workspace、Node、资源、配置入口和生命周期的产品权威；
 - `docs/architecture.md`：Conversation、Task、Capability、Approval 等平台概念概览；
 - `docs/knoa-agent-profile-delegation-design.md`：Agent Runtime、Profile、Invocation Policy 与 Subagent；
 - `docs/knoa-configuration-control-plane-design.md`：配置 Registry、管理页面、发布与热生效；
@@ -38,16 +39,23 @@
 
 | 状态 | 唯一写入边界 |
 | --- | --- |
-| Conversation / ChatTurn | `ConversationService` |
-| Task Definition / Execution | `TaskService` 与 Task execution lifecycle |
+| Workspace Conversation 目录投影 | `WorkspaceRegistry` |
+| Conversation 正文 / ChatTurn 生命周期 | 绑定 Node 的 `ConversationService` |
+| Workspace Task Definition / Deployment | `WorkspaceRegistry` / Workspace control plane |
+| TaskExecution / Attempt 生命周期 | 目标 Node 的 `TaskService` |
+| AgentInvocation / ExecutionAttempt placement 与运行事实 | 执行 `WorkspaceNode` |
 | Approval / HumanInteraction | 对应 Core service |
 | Agent Session binding | `AgentExecutionService` / binding repository |
 | Invocation policy snapshot | Agent policy repository |
 | Delegation relationship | `DelegationService` |
-| NodeOverlay 与 Node-local Managed configuration | `ConfigurationService` |
-| Workspace 明文共享定义（规划） | owner `WorkspaceRegistry Node` |
+| Workspace Agent/Model/Skill/MCP 定义与 Published Spec | `WorkspaceRegistry` |
+| WorkspaceNode enrollment 与 Node config Desired State | Workspace control plane |
+| Resource/Task Deployment intent | Workspace control plane 的独立边对象 |
+| NodeOverlay、Node Secret 与 materialized runtime configuration | 目标 `WorkspaceNode` 的 `ConfigurationService` |
+| Node hardware/runtime Observation | 目标 `WorkspaceNode` |
 | Tool authorization and execution | `CapabilityGateway` |
-| Artifact metadata and bytes | `ArtifactStore` |
+| Artifact 目录 metadata/reference | Workspace projection |
+| Artifact 权威 metadata and bytes | 产生 Artifact 的 Node `ArtifactStore` |
 | Node signing/configuration identity | `NodeIdentityStore` |
 | Immutable extension package bytes | `PackageStore` |
 | Provider credentials | Node-local `SecretStore` |
@@ -83,7 +91,7 @@ Profile、Skill、Agent 和 Reviewer 都不能创造权限。
 
 ### 2.4 控制面与执行面分离
 
-- 控制面负责配置编辑、校验、预检、发布、回滚和 generation 状态；
+- 控制面负责配置编辑、校验、预检、发布和 desired/applied generation 状态；
 - 执行面只消费已发布配置和本次不可变 policy snapshot；
 - 配置发布不原地修改正在执行的 Runtime 对象。
 
@@ -269,7 +277,7 @@ transport。Relay ciphertext 内承载现有 Gateway HTTP typed contract，Node 
 | --- | --- | --- |
 | Config models | ManagedConfig、Draft、Revision、ControlState | `src/knoa_platform/configuration/models.py` |
 | Config registry | SQLite revision/draft/state 持久化 | `src/knoa_platform/configuration/repository.py` |
-| Config service | 唯一写入口、validate/preflight/publish/rollback | `src/knoa_platform/configuration/service.py` |
+| Config service | 唯一写入口、validate/preflight/publish；现有 rollback 为待移除旧接口 | `src/knoa_platform/configuration/service.py` |
 | Config API | Core typed commands 与 owner-only Gateway routes | `src/knoa_platform/service/core_configuration_commands.py`、`gateway/routes/configuration.py` |
 | Mobile App | Chat、Task、Approval、Artifact、配置与发布 | `apps/knoa-mobile/` |
 | Node identity | 用途隔离的 Ed25519/X25519 Node keys | `src/knoa_platform/node_identity.py` |
@@ -287,13 +295,13 @@ Identity state
   issuer -> Account session
 
 Workspace control state
-  memberships -> active Workspace -> resource metadata / grants
+  memberships -> active Workspace -> Work / resources / grants
 
 Node directory state
   Hub directory + presence <-> local pinned trust bindings
 
 Optional Node execution state
-  selected Node? -> direct/Relay transport -> Node authentication -> Conversation/Task/Config
+  selected Node? -> direct/Relay transport -> Node authentication -> Invocation/Attempt/live control
 ```
 
 Identity client 拥有 Hosted Account session；Workspace client 拥有 membership 与 active Workspace；
@@ -303,9 +311,10 @@ Node directory projection 聚合 Hub directory/presence 和本机 SecureStore bi
 退出当前 Node 或连接其他 Node。No-Hub 模式使用本地 identity + local Workspace 进入相同 Shell，
 不维护第二套 UI。
 
-Mobile 的权威详细架构和路由以 `docs/knoa-mobile-app-design.md` 为准。产品层级固定为
-`Account -> Workspace -> Node -> Conversation/Task`；启动时可以默认恢复上次 Workspace、Node 和
-Node 子页面，但必须重建完整父级导航。Node 是可选执行上下文，不是 Account 或 App 根状态。
+Mobile 的权威详细架构和路由以 `docs/knoa-mobile-app-design.md` 为准。Conversation 目录、Task
+Definition/Deployment 与资源都在 Workspace scope；Conversation 必须绑定 Node，已启用 Task 必须部署
+到 Node。启动时可以恢复上次 Work 和目标 Node，但必须重建完整 Account/Workspace 父级。Node 是
+内容与执行权威，不是 Work Definition 的产品所有者，也不是 Account 或 App 根状态。
 
 ## 6. Agent 领域模型
 
@@ -355,12 +364,12 @@ RuntimeSpec 描述怎样执行：
 Profile 描述以什么角色和边界执行：
 
 - system/developer instructions；
-- 默认 Skill；
+- Workspace Skill references、默认激活集合与 activation policy；
 - Platform Tool 与 capability ceiling；
 - Runtime-native capability ceiling；
 - 迭代和输出限制；
 - delegation policy；
-- visibility 与 caller allowlist。
+- caller allowlist ceiling。
 
 Profile 是可信、版本化数据，不含模型 endpoint、API key 或 Runtime command。
 
@@ -374,11 +383,17 @@ AgentDefinition
 ├── runtime_spec_id
 ├── profile_id
 ├── enabled
+├── visibility
 └── config digest
 ```
 
 同一种 Runtime implementation 可以承载多个专业 Agent；同一个 Profile 也可以在满足
 instruction/capability 要求的不同 RuntimeSpec 上复用。
+
+AgentDefinition 是唯一组合根，不得覆盖 RuntimeSpec 的模型/sandbox/command/并发，也不得覆盖 Profile
+的 instructions/Skill refs/Tool/delegation ceiling。Profile 不拥有 Skill package 或 Skill instance；
+`visibility` 只控制 Agent 在产品目录中的发现范围；
+真正的调用资格仍由 Profile caller ceiling、principal policy 和 ResolvedInvocationPolicy 共同收窄。
 
 ### 6.5 Invocation 与 policy snapshot
 
@@ -485,17 +500,21 @@ Parent Invocation
 
 ## 10. Conversation 与 Durable Task
 
-Conversation 和 Task 共用 Agent 执行设施，但拥有不同产品语义。
+Conversation 目录和 Task Definition 属于 Workspace Work，共用 Agent 执行设施，但拥有不同产品
+语义。V1 Conversation 固定绑定一个 WorkspaceNode，Task 通过 `Deployment(kind=task)` 固定一个目标 Node；
+Invocation/Attempt 再记录 `runs_on -> WorkspaceNode`，不增加通用 NodeExecution 状态机。
 
 ### 10.1 Conversation
 
 ```text
 Conversation Session
+├── bound WorkspaceNode
 └── ChatTurn
     ├── input / attachments
     ├── Agent events and progress
     ├── ToolStep / Approval / Interaction
     ├── output / Artifact
+    ├── AgentInvocation[] -> WorkspaceNode
     └── completed / failed / cancelled
 ```
 
@@ -509,16 +528,20 @@ Task Definition
 ├── instructions / agent_id
 ├── launch_policy
 ├── capability and notification policy
-└── Task Execution
+└── Deployment(kind=task) -> WorkspaceNode
+    └── Node-local LaunchBinding
+        └── Task Execution
     └── Attempt
+        ├── AgentInvocation -> WorkspaceNode
         ├── Invocation policy snapshot
         ├── ToolStep / Approval / Interaction
         ├── Trace / Artifact
         └── result
 ```
 
-Task 是持久工作。手动、定时、Webhook、MCP event 和 delegation 都创建新的 Execution，
-不复制新的执行状态机。
+Task 是持久工作。Task Definition/Deployment 由 Workspace 管理，手动、定时、Webhook、MCP event
+和 delegation 在目标 Node 创建新的 Execution。定时器 materialize 在目标 Node，Hub 不运行第二套
+调度状态机。
 
 ## 11. Capability Gateway 与两个权限平面
 
@@ -620,19 +643,19 @@ Create Draft
   -> schema validate
   -> dependency/health preflight
   -> inspect diff
-  -> publish immutable Revision
+  -> publish desired Generation + digest
   -> apply
-  -> desired_revision == applied_revision
+  -> desired_generation == applied_generation
 ```
 
 失败时保留：
 
-- 已发布 Revision 和审计信息；
-- `desired_revision_id`；
-- 上一个仍在服务的 `applied_revision_id`；
+- 当前 Published Spec、generation/digest 和审计信息；
+- `desired_generation`；
+- 上一个仍在服务的 `applied_generation`；
 - 稳定错误码和 `apply_status=failed`。
 
-Rollback 不是删除历史，而是基于目标历史 Revision 发布一个新的 Revision。
+V1 不提供版本树或 rollback。新 generation 未通过健康检查时不切换，旧 active generation 继续服务。
 
 ### 13.3 热生效分类
 
@@ -642,7 +665,8 @@ Rollback 不是删除历史，而是基于目标历史 Revision 发布一个新�
 | 模型执行参数、Prompt、RuntimeSpec、Codex sandbox/home | 构建受影响 Agent generation、health check、切换、旧 generation bounded drain |
 | Skill/MCP set 未变化 | 不重载 Extension |
 | Skill/MCP set 变化 | 预检后在发布屏障内替换；旧 grant 绑定 Tool fingerprint，变化时 fail closed |
-| Task repository capacity、Bootstrap、监听地址、TLS、runtime root | restart-required；不伪装为热生效 |
+| 不支持 reload 的 Node 组件、监听地址、TLS | 目标 Node drain 后重启受影响服务；不伪装为热生效 |
+| runtime root、根密钥、process identity、设备 reboot | 目标 Node 的 host action，需要本机管理员确认 |
 
 每个 AgentDefinition 最多一个 active generation 和一个短期 draining generation，不维护
 任意历史 Runtime pool。
@@ -651,7 +675,7 @@ Rollback 不是删除历史，而是基于目标历史 Revision 发布一个新�
 
 移动端 `app/settings/system.tsx` 是当前配置控制面 UI，主要区域包括：
 
-- Overview：desired/applied revision、apply status、generation health；
+- Overview：desired/applied generation、apply status、generation health；
 - Agents：启停、默认 Agent、Runtime/Profile 组合；
 - Models & Runtimes：模型绑定、模型所有权、并发和 Codex capability bundle；
 - Profiles：instructions 与 delegation limits；
@@ -659,7 +683,7 @@ Rollback 不是删除历史，而是基于目标历史 Revision 发布一个新�
 - Operational：迭代、Tool call、输出、上下文和 generation drain limits；
 - Skills & MCP：安装/启用状态和 MCP 配置；
 - Draft/Publish：编辑、validate、preflight、diff、summary、publish；
-- History/Rollback：Revision 历史和基于历史版本回滚。
+- Apply actions：hot apply、重启受影响 Node 组件和高级 Node service restart；Workspace 本身不可重启。
 
 App 不直接操作 SQLite 或 Runtime。所有写入均经过：
 
@@ -693,8 +717,9 @@ CLI、TUI 和 Feishu 最终消费相同的 Core 语义，不各自实现 Agent �
 Expo Router hierarchical shells
 ├── Auth stack: login / register / recovery / local mode
 ├── Account shell: Workspaces / Account / Hub / App settings
-├── Workspace shell: Overview / Nodes / Resources / Members / Settings
-└── Node shell: top Chat/Tasks switcher + stacked Capabilities / Configuration / Status
+├── Workspace shell: Overview / Agents / Models / Skills & MCP / Nodes / Members / Settings
+│     └── Node detail: Desired State / Deployments / Capabilities / Rollout / Diagnostics
+└── Work execution shell: top Chat/Tasks switcher + selected placement Node + execution status
         │
         v
 Domain state providers
@@ -717,20 +742,22 @@ Typed API / transport / security / storage
 
 App 的状态分为四类：
 
-- Hub 权威状态：Account session、Workspace membership、Node directory/presence、共享资源 metadata；
-- Node 权威状态：Conversation、Task、Approval、Agent、Node-local Config Revision；
+- Workspace Registry 权威状态：Conversation 目录投影、Task Definition/Deployment、共享资源 Published Spec 与稳定目录；
+- Hub 权威状态：Account session、Workspace membership、Node directory/presence 和允许保存的 projection；
+- Node 权威状态：Conversation 正文/ChatTurn、TaskExecution、AgentInvocation、ExecutionAttempt、Approval 执行、Artifact bytes、Node-local Config 与 Observation；
 - 本地安全状态：App installation identity、Node pinned binding、Account/Node session token；
 - 本地体验状态：active Workspace、optional selected Node、草稿、缓存、主题、提醒游标。
 
 `ActiveContext = Account + Workspace + optional Node` 是状态表达，不代表三个层级在 UI 中并列。
-Node 为空时停留在 Account/Workspace scope；Chat/Task 只存在于具体 Node child route。退出 Node
-只关闭 transport、订阅和短期 Node session，并导航回所属 Workspace，不退出 Hub、不删除 binding。
+Node 为空时仍可进入 Workspace Work 目录和已同步管理投影；读取正文、新建 Conversation、发布 Task、
+执行或 live control 要求有效目标 Node。退出当前连接只关闭 transport、订阅和短期 Node session，
+不删除 Conversation/Task、不退出 Hub、不删除持久 binding/deployment。
 所有 Node 服务端缓存必须至少按
 `issuer/account/workspace/node` 分区，本地缓存不能覆盖服务端 revision。
 
 Mobile 不使用持久底部导航。Chat composer、附件/语音控制、键盘和 safe area 独占底部；Account 与
-Workspace 使用 Stack drill-down，Node 只在顶部提供 Chat/Task 高频切换，其他管理页从 Node 菜单
-进入。导航表现不得反向改变领域归属。
+Workspace 使用 Stack drill-down；Conversation/Task 顶部可以提供高频切换并显示 binding/deployment Node，
+Node detail 管理 Desired/Applied/Observed。导航表现不得反向改变领域归属。
 
 Relay transport 在交付领域层前必须按 `Content-Type` 区分文本和二进制。JSON、SSE、NDJSON 和
 `text/*` 显式使用 UTF-8 `TextDecoder`；Artifact/APK 保持原始 bytes。禁止依赖 React Native
@@ -850,7 +877,7 @@ Composition root 可以依赖所有具体实现，但具体实现不能反向依
 - invocation deadline、Gateway Tool call/Artifact input budget；
 - Tool definition/origin fingerprint 与旧 grant fail-closed；
 - Skill 内容 digest 冻结、Skill/MCP 受控扩展和热替换；
-- SQLite Config Registry、Draft、Revision、validate、preflight、publish、rollback；
+- SQLite Config Registry、Draft、Revision、validate、preflight、publish（现有 history/rollback 非目标产品能力）；
 - active + bounded draining Runtime generation；
 - drain deadline 后 Runtime interrupt，且 lease 归零前不丢失 draining generation；
 - Mobile 配置页面（Agent/Runtime/Profile/Reviewer/Operational/Skill/MCP）与 owner-only Gateway API；

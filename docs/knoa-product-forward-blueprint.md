@@ -1,6 +1,6 @@
 # 小诺产品正向设计蓝图
 
-> 状态：本轮产品与领域重构的唯一总纲
+> 状态：Conversation、Task 与用户闭环的正向设计总纲
 > 日期：2026-08-10
 > 适用范围：Core、Secure Gateway、CLI/TUI、Android/iOS App、飞书等 Channel
 > 前提：项目仍处于正向开发阶段，不兼容错误的旧 Task 产品语义。
@@ -9,15 +9,20 @@
 > 已由《Task 产品设计》和《Conversation 边界设计》确定；本蓝图的作用是统一产品闭环、
 > 纠正当前实现偏离，并将既有正向设计落实到领域模型、持久化、API 和 App。
 
+> Account、Workspace、Node、Agent、LLM、Skill、MCP、配置归属和 App 管理入口以
+> [Knoa 产品领域架构](./knoa-product-domain-architecture.md) 为准。
+
 相关文档：
 
+- 产品领域与资源归属：[knoa-product-domain-architecture.md](./knoa-product-domain-architecture.md)
 - 用户问题与优先级：[knoa-user-experience-audit.md](./knoa-user-experience-audit.md)
 - Task 产品细节：[knoa-task-product-design.md](./knoa-task-product-design.md)
 - Conversation 边界：[knoa-conversation-design.md](./knoa-conversation-design.md)
 - Mobile 视觉与交互：[knoa-mobile-ui-design.md](./knoa-mobile-ui-design.md)
 - 实施顺序：[knoa-product-forward-implementation-plan.md](./knoa-product-forward-implementation-plan.md)
 
-如其他历史文档与本蓝图冲突，以本蓝图为准。
+Conversation、Task 与用户闭环如与历史文档冲突，以本蓝图为准；顶层产品对象和配置归属以产品
+领域架构为准。
 
 ## 1. 产品原则
 
@@ -48,7 +53,7 @@
 
 ### 1.3 历史记录不可被当前配置改写
 
-Task、ConversationSession 等定义可以修改；已经发生的 ChatTurn 和 TaskExecution
+Task Definition、Conversation metadata 等可以修改；已经发生的 ChatTurn 和 TaskExecution
 保存当时快照。修改只影响未来行为，不能让旧结果看起来像由新配置生成。
 
 ### 1.4 Channel 只负责展示和输入
@@ -63,17 +68,18 @@ ChatTurn 快照，但不经过 Secure Gateway，也不承担外部身份映射�
 ## 2. 顶层领域模型
 
 ```text
-Principal
-├── ConnectionIdentity
-├── ConversationSession[]
+Workspace
+├── ConversationSession[] --bound_to--> WorkspaceNode
 │    └── ChatTurn[]
-├── Task[]
+├── TaskDefinition[]
 │    ├── TaskLaunchPolicy
-│    └── TaskExecution[]
-│         └── ExecutionAttempt[]
-├── Artifact[]
-├── NotificationPreference
-└── AppReleasePolicy
+│    └── Deployment(kind=task) -> WorkspaceNode
+│         └── TaskExecution[]
+│              └── ExecutionAttempt[]
+├── Artifact directory[]
+└── NotificationPreference
+
+Principal -> WorkspaceMembership / Work ownership and authorization
 ```
 
 ### 2.1 Conversation 与 Task 的边界
@@ -93,15 +99,17 @@ Task 是稳定的用户对象，表示“小诺要做什么，以及什么时候
 ```text
 Task
 ├── task_id
-├── principal_id
+├── workspace_id
+├── created_by_principal_id
 ├── title
 ├── goal
 ├── attachments[]
-├── tools_enabled
+├── agent_definition_id
+├── invocation_policy_ref?       # 只能进一步收窄 Agent/Profile 权限
 ├── launch_policy
 ├── notification_policy
 ├── state: active | paused | archived
-├── revision
+├── published_generation + digest
 ├── created_at / updated_at
 └── latest_execution_id?
 ```
@@ -111,7 +119,9 @@ Task
 - `title` 用于列表，用户可编辑；创建时可由 goal 的首句生成；
 - `goal` 是完整、自包含目标；
 - `attachments` 是未来执行使用的稳定 Artifact 引用；
-- `revision` 每次修改定义递增；
+- `agent_definition_id` 选择 Workspace AgentDefinition；Task policy 只能收窄其 ResolvedInvocationPolicy；
+- `published_generation` 是内部并发/执行快照机制，UI 不展示版本树；
+- 草稿可以不选择 Node；发布、启用或立即执行前必须创建 `Deployment(kind=task)` 指向一个 Node；
 - `state=paused` 只停止未来自动启动；
 - `state=archived` 从默认列表隐藏，但不删除历史；
 - Task 本身没有 running/completed/failed 状态，这些属于执行记录。
@@ -144,7 +154,8 @@ TaskExecution 是某一次实际执行，是用户可见且不可编辑的历史
 TaskExecution
 ├── execution_id
 ├── task_id
-├── task_revision
+├── task_spec_digest
+├── workspace_node_id
 ├── launch_reason: created | manual | scheduled | event | rerun
 ├── goal_snapshot
 ├── attachment_snapshots[]
@@ -214,7 +225,7 @@ TaskExecution：
 - 终态 Execution 可以从二级菜单单独删除，Task 和其他执行不受影响；
 - 活动 Execution 不允许直接删除。
 
-Task 页面上的“立即执行”使用 Task 当前 revision；Execution 页的“按本次配置再次执行”
+Task 页面上的“立即执行”使用 Task 当前 Published Spec 和 Deployment；Execution 页的“按本次配置再次执行”
 使用该 Execution 保存的快照。两者语义必须清楚区分。
 
 ## 4. Conversation 正向体验
@@ -222,10 +233,11 @@ Task 页面上的“立即执行”使用 Task 当前 revision；Execution 页�
 ### 4.1 ConversationSession
 
 - App 默认进入最近活动会话；
-- “新话题”创建新 Session；
+- “新话题”选择默认或显式 Node 后创建新 Session，并在 V1 固定该 `workspace_node_id`；
 - 历史会话可以按时间查看、重命名、归档和删除；
 - 新建/切换前如果有文字、附件或录音草稿，默认保存草稿，不静默丢失；
-- 每个 Channel 维护自己的活动 Session，不共享短期聊天上下文。
+- 每个 Channel 维护自己的活动 Session，不共享短期聊天上下文；
+- Node 离线时 Workspace 保留目录和最后投影，但正文与继续对话不可用；V1 不在原 Session 中换 Node。
 
 ### 4.2 ChatTurn
 
@@ -425,17 +437,17 @@ Token、模型调用数、原始工具清单、effect/risk、extension ID 和审
 ### 12.1 Task
 
 ```text
-GET    /v1/tasks
-POST   /v1/tasks
-GET    /v1/tasks/{task_id}
-PATCH  /v1/tasks/{task_id}
-DELETE /v1/tasks/{task_id}
-POST   /v1/tasks/{task_id}/pause
-POST   /v1/tasks/{task_id}/resume
-POST   /v1/tasks/{task_id}/archive
-POST   /v1/tasks/{task_id}/restore
-POST   /v1/tasks/{task_id}/execute
-GET    /v1/tasks/{task_id}/executions
+GET    /v1/workspaces/{workspace_id}/tasks
+POST   /v1/workspaces/{workspace_id}/tasks
+GET    /v1/workspaces/{workspace_id}/tasks/{task_id}
+PATCH  /v1/workspaces/{workspace_id}/tasks/{task_id}
+DELETE /v1/workspaces/{workspace_id}/tasks/{task_id}
+POST   /v1/workspaces/{workspace_id}/tasks/{task_id}/pause
+POST   /v1/workspaces/{workspace_id}/tasks/{task_id}/resume
+POST   /v1/workspaces/{workspace_id}/tasks/{task_id}/archive
+POST   /v1/workspaces/{workspace_id}/tasks/{task_id}/restore
+POST   /v1/workspaces/{workspace_id}/tasks/{task_id}/execute
+GET    /v1/workspaces/{workspace_id}/tasks/{task_id}/executions
 ```
 
 ### 12.2 TaskExecution
@@ -453,12 +465,12 @@ POST   /v1/task-executions/{execution_id}/rerun
 ### 12.3 Conversation
 
 ```text
-GET    /v1/conversations/sessions
-POST   /v1/conversations/sessions
-PATCH  /v1/conversations/sessions/{session_id}
-DELETE /v1/conversations/sessions/{session_id}
-GET    /v1/conversations/sessions/{session_id}/turns
-POST   /v1/conversations/sessions/{session_id}/turns
+GET    /v1/workspaces/{workspace_id}/conversations
+POST   /v1/workspaces/{workspace_id}/conversations
+PATCH  /v1/workspaces/{workspace_id}/conversations/{session_id}
+DELETE /v1/workspaces/{workspace_id}/conversations/{session_id}
+GET    /v1/workspaces/{workspace_id}/conversations/{session_id}/turns
+POST   /v1/workspaces/{workspace_id}/conversations/{session_id}/turns
 GET    /v1/conversations/turns/{turn_id}
 GET    /v1/conversations/turns/{turn_id}/stream
 POST   /v1/conversations/turns/{turn_id}/cancel

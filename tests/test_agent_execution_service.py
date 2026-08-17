@@ -88,7 +88,6 @@ def resolver() -> AgentDefinitionResolver:
                 "assistant": AgentProfile(
                     display_name="Knoa",
                     instructions="system",
-                    visibility="user",
                     allowed_platform_tools=frozenset({"*"}),
                     platform_capability_ceiling=frozenset({"*"}),
                 )
@@ -97,6 +96,7 @@ def resolver() -> AgentDefinitionResolver:
                 "knoa": AgentDefinition(
                     runtime_spec_id="native-main",
                     profile_id="assistant",
+                    visibility="user",
                 )
             },
             default_agent="knoa",

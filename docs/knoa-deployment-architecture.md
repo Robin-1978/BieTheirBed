@@ -6,7 +6,7 @@
 >
 > 范围：Mobile App、Node、HubService、Relay、Agent Runtime、LLM、Skill、Tool、MCP、网络、安全、存储、故障与运维拓扑
 >
-> 权威关系：模块职责以 `knoa-module-architecture.md` 为准；Workspace 资源归属与跨 Node 调用以 `knoa-workspace-resource-fabric-design.md` 为准；本文是进程、网络和运维部署的权威入口
+> 权威关系：产品对象和配置归属以 `knoa-product-domain-architecture.md` 为准；模块职责以 `knoa-module-architecture.md` 为准；跨 Node 调用以 `knoa-workspace-resource-fabric-design.md` 为准；本文是进程、网络和运维部署的权威入口
 >
 > 设计取向：local-first、Hub-assisted、self-hostable；高内聚、低耦合；KISS、YAGNI；当前能力与目标能力必须明确区分
 
@@ -44,14 +44,15 @@ Node 是执行服务器。HubService 是可选共享控制面。Relay 是无业�
 App Installation
   -> restore/login Hub Account
   -> select Workspace
-  -> list/select Node
+  -> open Workspace Work or Resources
+  -> resolve Conversation binding or Task Deployment when content/execution is needed
   -> establish direct or Relay Node session
-  -> enter Conversation/Task execution UI
 ```
 
-Hub Account、Workspace 和 Node directory 属于 App 可独立访问的控制面。被选中 Node 的连接、
-认证、Conversation 与 Task 属于执行会话；Node 离线、认证失败或 Relay 暂时不可用只能使该会话
-失败，不能阻断帐号登录、Workspace 切换、Node directory 或选择另一个 Node。
+Hub Account、Workspace、Work directory、management projection 和 Node directory 属于 App 可独立访问
+的控制面。Conversation 正文/ChatTurn、TaskExecution、AgentInvocation、ExecutionAttempt 和 live
+control 属于绑定或部署 Node；Node 离线、认证失败或 Relay 暂时不可用只能使该 Work 内容/执行不可用，
+不能阻断帐号登录、Workspace 切换、查看最后投影、Node directory 或管理其他 Node。
 
 No-Hub 形态没有 Hub 控制面，但遵循同一故障隔离原则：App 先展示本地 pinned Node bindings，
 用户选择后才建立 Node 会话。App 不在启动时自动连接历史 active Node。
@@ -251,6 +252,10 @@ database 和 RelayBroker 形成形态 3 的单节点闭环：
 - Hosted 根服务拥有 Account、LoginIdentity、scrypt 密码凭证、Session、Workspace 与 Membership；
 - Bootstrap Secret 只签发一次性 Account/密码恢复 grant，不进入 App；
 - 同一 Hosted Hub 的 Workspace 共享 `hub_id` 与 signing identity；
+- `hub_id` 标识 Hosted issuer/签名信任域，`workspace_id` 标识资源、授权和执行租户边界；
+- Node presence、Relay ticket 绑定 `hub_id`，Workspace Resource、Deployment、Projection 和 ResourceGrant
+  的签名 transcript 必须绑定 `workspace_id`；协议不能假设二者相等；
+- Self-hosted 单 Workspace 可让 `hub_id == workspace_id`，Hosted 多 Workspace 则必须保持二者分离；
 - 每个 Workspace 使用独立 `HubApplication`、SQLite 和 Relay 连接表；
 - Account Session 只能进入具有 active Membership 的 `/workspaces/{workspace_id}`；
 - member 可读和使用 Workspace，owner/admin 才能修改资源或签发 Node enrollment grant；
@@ -276,6 +281,9 @@ Knoa Node process
 ├── CoreDaemon
 │   ├── CoreHost / CoreServer
 │   ├── Conversation / Task / Automation / Artifact
+│   │   ├── Conversation content for locally bound sessions
+│   │   ├── TaskExecution for locally deployed Tasks
+│   │   └── Node-local Schedule/Trigger dispatcher
 │   ├── Agent Orchestration / Runtime generations
 │   ├── Capability Gateway
 │   ├── ExtensionManager
@@ -295,6 +303,10 @@ Knoa Node process
 
 V1 不把 Conversation、Task、Agent、Tool 和 Configuration 拆成分布式微服务。它们需要共享清晰的
 本地事务、调用快照和故障恢复语义，单 Node 内拆分只会增加网络失败与一致性成本。
+
+Workspace 只发布 Task Definition/Deployment 和 Node Desired State；定时启动器运行在目标 Node。
+Workspace/Hub 不运行第二套 Task scheduler。Node 将 Work 管理投影同步给 Workspace Registry，但保留
+Conversation 正文、完整 Trace、Tool/MCP 原始载荷、Artifact bytes 和 Secret 的权威。
 
 ## 8. Hub 进程拓扑
 
@@ -513,11 +525,12 @@ Node 升级不能自动重放 `outcome_unknown` 的 Tool 或远程模型副作�
 | --- | --- | --- | --- |
 | Hub 离线 | Node 本地执行、已有 direct pairing | 新 enrollment、ticket、directory、Relay | Node 删除本地数据或停止 Core |
 | Relay 断开 | Node 本地执行、direct 路径 | Relay fallback | 降级为 Hub 可读明文代理 |
-| 某 Node 离线 | 其他 Node、本地 Agent | 该 Node 的模型/Tool/Artifact | Hub 伪造成功结果 |
+| 某 Node 离线 | 其他 Node、本地 Agent、Workspace 最后投影 | 该 Node 的 Conversation、Task、模型/Tool/Artifact | Hub 伪造成功结果或隐式换 Node |
+| 远程 MCP Node 离线 | Task Definition 与其他资源 | 依赖该 MCP Deployment 的执行 | 静默选择另一 MCP 或复制 Secret |
 | 本地 LLM 不可用 | Node Core、其他 Provider | 绑定该 Deployment 的调用 | Hub 接管 Secret 或模型执行 |
 | Hub DB 损坏 | Node 本地事实 | Hub control plane | 静默新建同 ID Hub 并替换 key |
 | Node 崩溃于远程调用中 | 持久 invocation reconciliation | 未确认结果 | 使用新 invocation ID 自动重放 |
-| App 离线 | Node Task 继续运行 | 实时交互 | 将 App 当作 Task 状态权威 |
+| App 离线 | 已 placement 的 Node TaskExecution 继续运行 | 实时交互 | 将 App 当作 Task 状态权威 |
 
 ## 14. 观测与健康检查
 
@@ -526,7 +539,7 @@ Node 升级不能自动重放 `outcome_unknown` 的 Tool 或远程模型副作�
 最低观测项：
 
 - Core、Gateway、Channel、MCP、Agent Runtime 和 Provider health；
-- active/applied Config Revision；
+- active/applied Config Generation；
 - Hub enrollment、Relay connection、last error 和 reconnect generation；
 - ModelDeployment health、capacity、queue depth 和 observation epoch；
 - Remote Invocation 状态、latency、transport 和 outcome_unknown；

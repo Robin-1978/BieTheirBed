@@ -310,7 +310,7 @@ def _agent_generation_id(managed: ManagedConfig, agent_id: str) -> str:
             "instructions_ref": profile.instructions_ref,
             "runtime_limits": profile.runtime_limits.model_dump(mode="json"),
             "tool_inventory_enabled": bool(profile.allowed_platform_tools),
-            "visibility": profile.visibility,
+            "visibility": definition.visibility,
         },
     }
     if runtime.implementation == "native":
@@ -514,7 +514,7 @@ def _build_agent_runtime_set(
                 ),
                 temperature=(
                     0.0
-                    if profile.visibility == "system"
+                    if managed.agent_system.agents[agent_id].visibility == "system"
                     else managed.operational.llm_temperature
                 ),
                 context_window=max(
@@ -998,7 +998,7 @@ def build_core_runtime(
         system_agents=frozenset(
             agent_id
             for agent_id in runtimes
-            if agent_resolver.profile(agent_id).visibility == "system"
+            if agent_resolver.definition(agent_id).visibility == "system"
         ),
         generation_ids={
             agent_id: _agent_generation_id(managed, agent_id)
@@ -1252,7 +1252,7 @@ def build_core_runtime(
                 system_agents=frozenset(
                     agent_id
                     for agent_id in candidate_runtimes
-                    if next_resolver.profile(agent_id).visibility == "system"
+                    if next_resolver.definition(agent_id).visibility == "system"
                 ),
                 generation_ids={
                     agent_id: _agent_generation_id(candidate, agent_id)

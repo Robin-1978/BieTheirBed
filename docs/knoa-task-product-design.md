@@ -1,5 +1,7 @@
 # 小诺 Task 产品设计
 
+> 产品归属：Task Definition 与 Deployment 属于 Workspace Work；TaskExecution、ExecutionAttempt 和 AgentInvocation 在目标 WorkspaceNode 上执行，并向 Workspace 同步管理投影。顶层对象和归属以 `knoa-product-domain-architecture.md` 为准。
+
 ## 1. 唯一产品概念
 
 用户只需要理解一个核心概念：**任务（Task）**。
@@ -12,12 +14,14 @@ Conversation、ChatTurn、Session 上下文和 Channel 绑定见
 
 ```text
 Task
+  ├── Workspace 归属
   ├── 目标与附件
   ├── 启动方式
   │    ├── 立即执行
   │    ├── 定时执行
   │    └── 事件启动
-  └── 执行记录
+  ├── 目标 Node
+  └── 执行记录投影
        ├── 第一次执行
        ├── 第二次执行
        └── ...
@@ -30,6 +34,8 @@ Task
 ```text
 Task                 任务定义
 TaskLaunchPolicy     启动方式
+Deployment(kind=task) Task Published Spec 到目标 Node 的发布关系
+NodeLaunchBinding    Node 应用后的本地启动器，仅内部使用
 TaskLaunch           某一次启动事件，仅内部使用
 TaskExecution        某一次执行
 ExecutionAttempt     执行恢复尝试，仅内部使用
@@ -37,6 +43,10 @@ ExecutionAttempt     执行恢复尝试，仅内部使用
 
 `TaskExecution` 使用独立 Agent Session，断开 Channel 后仍继续。第一版一个
 TaskExecution 只由一个 Agent 执行，不实现 Subagent。
+
+Task Definition 不是 Node 子资源。Task 的稳定 ID、目标、启动策略和执行目录属于 Workspace；Task
+类型 Deployment 将具体 Published Spec 发布到目标 Node。V1 中草稿可以不选 Node，但已发布、启用或立即执行
+的 Task 必须有且只有一个目标 Node，所有 TaskExecution/Attempt 都在该 Node 上运行。
 
 ### 2.1 TaskLaunchPolicy
 
@@ -53,13 +63,15 @@ event
   └── file_change
 ```
 
-Schedule 不再是独立产品实体；它是 Task 的一种启动方式。原 Trigger 术语从产品
-和公共领域模型中删除，事件启动只是另一种 `TaskLaunchPolicy`。
+Schedule 不再是独立产品实体；它是 Task Published Spec 的一种启动方式。原 Trigger 术语从产品和公共
+领域模型中删除，事件启动只是另一种 `TaskLaunchPolicy`。发布 Task 时，LaunchPolicy 随
+Deployment 下发到目标 Node，并 materialize 为 Node-local `NodeLaunchBinding`。
 
 ### 2.2 TaskLaunch
 
-立即点击、时间到点、外部事件到达都会生成类型化 `TaskLaunch`。它负责持久去重、
-claim、lease 和有界重试。只有统一的启动分发器可以创建 `TaskExecution`。
+立即点击、时间到点、外部事件到达都会在目标 Node 生成类型化 `TaskLaunch`。Node-local 启动器负责
+持久去重、claim、lease 和有界重试，并创建 `TaskExecution`。Hub/Workspace 控制面只发布 Desired
+State、转发手动命令和接收状态投影，不运行第二套定时器。
 
 ### 2.3 TaskExecution
 
@@ -85,13 +97,45 @@ stateDiagram-v2
 “再次执行”生成新的 TaskExecution；同一次执行内部因进程恢复产生的技术尝试记录为
 ExecutionAttempt，不向用户暴露。
 
+### 2.4 ExecutionAttempt 与 placement
+
+```text
+TaskDefinition
+  └── Deployment(kind=task) -> WorkspaceNode
+      └── TaskExecution
+          └── ExecutionAttempt[]
+              └── AgentInvocation
+                  └── runs_on -> WorkspaceNode
+```
+
+`ExecutionAttempt` 记录实际 lease、恢复尝试和执行 Node。`ExecutionPlacement` 是 Attempt/Invocation
+上的 typed value，不创建新的通用 `NodeExecution` 状态机。V1 不实现自动跨 Node recovery，也不在
+同一 TaskExecution 内改 Node；改变部署目标只影响之后创建的 Execution。
+
+### 2.5 Resource Dependency
+
+Task Published Spec 显式引用一个 AgentDefinition，并可声明 task-specific `required_resource_refs` 和
+只收窄权限的 invocation policy。RuntimeSpec、Model、Profile、Skill 和通用 Tool Policy 由
+AgentDefinition dependency closure 解析，Task 不再平行配置一套。资源可以部署在同一 Node，也可以
+通过 Workspace `ResourceGrant` 调用另一 Node 上的共享服务。例如 Task 在 Node B 执行而 Jira MCP
+部署在 Node A 时，发布校验至少确认：
+
+- Node B 获准调用指定 `MCPDeployment`；
+- Node A 允许远程服务且当前可达；
+- Secret 仍保留在 Node A，不复制给 Node B 或 Hub；
+- TaskExecution 固化实际使用的 MCP Deployment generation/digest；
+- Node A 不可用时按明确策略等待或失败，不静默切换实现。
+
+V1 不建设通用服务网格或自动依赖迁移。安全优先的 Workspace 可以限制 Task 只能使用同 Node 资源。
+
 ## 3. 创建闭环
 
 ### 3.0 Agent 工具面
 
 Agent 只注入两个紧凑的 Task 工具，内部 Schedule 记录不进入提示词：
 
-- `create_task(title, goal, launch)`：按显式 launch policy 创建 Task；
+- `create_task(title, goal, launch, target_node?)`：按显式 launch policy 创建 Task；当前 Conversation
+  的绑定 Node 可作为默认值，没有默认 Node 时必须要求用户选择；
 - `task(action, task_id/execution_id)`：统一 list/get/update/pause/resume/archive/
   restore/delete/execute，以及 Execution 的暂停、恢复、取消、rerun 和删除。
 
@@ -119,12 +163,17 @@ Agent 只有在目标完整、可以独立推进且不会扩大权限时才能�
 
 ### 3.2 任务页创建
 
-任务页支持输入目标、照片、文件和启动方式。创建 immediate Task 后立即生成第一条
-执行记录；scheduled/event Task 保存为启用状态，并允许“立即执行”。
+任务页支持输入目标、照片、文件、启动方式和目标 Node。创建 immediate Task 后，先发布到目标 Node
+再生成第一条执行记录；scheduled/event Task 必须在 Node 应用 LaunchBinding 后才能显示为“已启用”，
+并允许“立即执行”。
 
 ### 3.3 执行与交付
 
 ```text
+Deployment(kind=task)
+   ↓
+目标 Node 应用 LaunchBinding
+   ↓
 TaskLaunch
    ↓
 TaskExecution
@@ -154,7 +203,8 @@ App 和飞书最终调用相同的 Core 命令，不在 Channel 中实现状态�
 
 ## 5. 查询和筛选
 
-任务列表筛选的是 Task 及其最新执行状态：
+Workspace 任务列表筛选的是 Task 及其最新执行状态，可以按部署 Node 过滤，但不能以 Node
+作为 Task 所有权边界：
 
 - 进行中：最新执行为 queued/running/paused；
 - 待确认：最新执行为 waiting_approval；
@@ -163,6 +213,15 @@ App 和飞书最终调用相同的 Core 命令，不在 Channel 中实现状态�
 - 已计划：启动方式为 scheduled/event 且 Task 启用。
 
 筛选必须由服务端在分页之前执行，不能先取一页内部执行记录再由客户端猜测。
+
+### 5.1 Workspace 状态投影
+
+目标 Node 是 TaskExecution 的写入权威，并向 Workspace Registry 同步单调序列化管理投影：Execution ID、
+目标 Node、状态、进度、时间戳、待审批摘要、结果摘要、Artifact 引用和所用 generation/digest。完整 Trace、
+Tool/MCP 原始载荷、Artifact bytes 与 Secret 不进入普通 Workspace 投影。
+
+投影是最终一致的读取模型。暂停、恢复、取消、审批和再次执行命令必须路由到目标 Node；Hub 不能只改
+投影来伪造操作成功。Node 离线时保留最后状态并明确标记 `stale/offline`。
 
 ## 6. 结果展示
 

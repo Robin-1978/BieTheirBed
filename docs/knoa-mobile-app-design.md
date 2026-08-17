@@ -3,12 +3,13 @@
 > 状态：Mobile App 权威目标架构
 > 更新日期：2026-08-17
 > 适用范围：Hosted Hub、Self-hosted Hub、No-Hub、Android/iOS App
-> 设计取向：账户级移动控制台；Hub 控制面常驻；Node 执行上下文可选；高内聚、低耦合；KISS、YAGNI；不保留与目标模型冲突的旧导航兼容层
+> 设计取向：账户级移动控制台；Hub 控制面常驻；浏览和配置 Workspace 不要求连接 Node；Conversation binding、Task Deployment 和执行必须指向 Node；高内聚、低耦合；KISS、YAGNI；不保留与目标模型冲突的旧导航兼容层
 
 配套视觉与交互见 [knoa-mobile-ui-design.md](./knoa-mobile-ui-design.md)。跨模块状态所有权以
 [knoa-module-architecture.md](./knoa-module-architecture.md) 为准；Workspace、共享资源和 Node
 执行权威以 [knoa-workspace-resource-fabric-design.md](./knoa-workspace-resource-fabric-design.md)
-为准。
+为准；产品对象、配置归属和新老用户流程以
+[knoa-product-domain-architecture.md](./knoa-product-domain-architecture.md) 为准。
 
 ## 1. 架构修订结论
 
@@ -27,8 +28,10 @@
 目标产品定义调整为：
 
 > Knoa App 是账户级移动控制台。Hub Account 与 Workspace 构成常驻控制面；Node 是当前
-> Workspace 下可选择、可退出、可失败的执行上下文。Conversation、Task 和 Node-local 配置
-> 需要执行 Node；账户、Workspace、成员、Node 目录和 App 设置不需要当前 Node。
+> Workspace 下可选择、可退出、可失败的执行上下文。Conversation 目录和 Task Definition 属于
+> Workspace Work；Conversation 创建时绑定 Node，Task 启用前部署到 Node；
+> Workspace 资源与 Node Desired State 的管理不需要先连接 Node，Node-local Secret、OS 权限和
+> 实际执行仍由目标 Node 掌握。
 
 这不是增加一个返回按钮，而是重新定义 App 根状态和模块边界。
 
@@ -38,11 +41,11 @@
 Identity Issuer / Hub Service
   └── Account
       ├── Membership ──> Workspace A
-      │                    ├── Node directory
-      │                    ├── shared resource metadata / grants
-      │                    └── selected Node? ──> Conversation / Task / Config
+      │                    ├── Resources / Work / Nodes
+      │                    ├── Deployment / Grant
+      │                    └── selected Node? ──> live Invocation / Attempt
       └── Membership ──> Workspace B
-                           └── selected Node? ──> Conversation / Task / Config
+                           └── Resources / Work / Nodes
 ```
 
 ### 2.1 Account
@@ -73,24 +76,27 @@ Node 有三种彼此独立的状态：
 App 的活动上下文是：
 
 ```text
-ActiveContext = Account + Workspace + optional SelectedNode
+ActiveContext = Account + Workspace + optional ConnectedNode
 ```
 
 Node 必须是可空字段。所有代码、路由和 UI 都不得用“没有 Node”表示“没有 App”。
 
 ## 3. 分层信息架构
 
-Account、Workspace、Node、Conversation/Task 不是并列模块，而是严格父子层级：
+Account、Workspace、Work 与 Node execution context 不是并列 Tab。产品归属与执行 placement 必须分开：
 
 ```text
 Account
   ├── Account / App settings
   └── Workspace
-      ├── members / shared resources / grants / workspace settings
-      └── Node
-          ├── Conversation
-          ├── Task / Execution / Approval / Artifact
-          └── Node capability / deployment / configuration / diagnostics
+      ├── Work
+      │   ├── Conversation / ChatTurn
+      │   └── Task / TaskExecution
+      ├── Agent / Model / Skill / MCP / members / workspace settings
+      ├── Nodes / Node Desired State / rollout
+      └── selected Node?
+          ├── AgentInvocation / ExecutionAttempt placement
+          └── Node capability status / diagnostics
 ```
 
 登录后先进入 Account scope；选择 Workspace 后进入 Workspace scope；选择 Node 后进入 Node scope。
@@ -99,8 +105,8 @@ Account
 | Scope | 主页面 | 子页面 |
 | --- | --- | --- |
 | Account | Workspace 列表、最近上下文 | Account 安全、Hub、App 设置、更新、诊断 |
-| Workspace | 概览、Node 目录、资源 | 成员、授权、Workspace 设置、审计 |
-| Node | 对话、任务 | 能力、配置、部署、Node 状态与诊断 |
+| Workspace | 概览、Conversation、Task、Agent、Model、Skill/MCP、Node | 成员、授权、Node Desired State、Workspace 设置、审计 |
+| Selected Node | 当前 Invocation/Attempt | 能力状态、运行诊断、当前执行上下文 |
 
 “随时可管理”通过稳定的上行导航实现，而不是把所有层级拍平成五个 Tab。Node 页面顶部必须明确
 显示：
@@ -118,11 +124,12 @@ Robin / Personal Workspace / Robin Desktop
 
 - 进入 Account 首页；
 - 进入上次 Workspace；
-- 推荐：恢复上次 `Account -> Workspace -> Node -> Chat/Task`。
+- 推荐：恢复上次 `Account -> Workspace -> Conversation/Task`，并后台重连其绑定或部署 Node。
 
-直接恢复 Node 页面时必须重建完整父级导航和 breadcrumb，不能让 Node 页面成为无父节点的应用根。
-若默认 Node 离线、已移除或认证失败，回退到所属 Workspace 的 Node 页面；若 Workspace 不再可访问，
-再回退到 Account 首页。任何失败都不能回到登录页，除非 Account session 本身失效。
+直接恢复 Work 页面时必须重建完整 Account/Workspace breadcrumb。若目标 Node 离线，仍展示 Workspace
+目录和最后管理投影，并提供等待或重连；V1 不能在原 Conversation/TaskExecution 中临时换 Node。
+用户可在另一 Node 新建 Conversation，或修改 Task 的未来 Deployment。若 Workspace 不再可访问，再
+回退到 Account 首页。任何 Node 失败都不能回到登录页，除非 Account session 本身失效。
 
 ## 4. 路由架构
 
@@ -143,17 +150,19 @@ app/
 ├── workspaces/[workspaceId]/
 │   ├── _layout.tsx                # Workspace stack + account access
 │   ├── index.tsx                  # Workspace overview
+│   ├── conversations/
+│   │   ├── index.tsx
+│   │   └── [conversationId].tsx   # selected placement shown in header
+│   ├── tasks/
+│   │   ├── index.tsx
+│   │   ├── [taskId].tsx
+│   │   └── executions/[executionId].tsx
 │   ├── nodes.tsx
 │   ├── resources.tsx
 │   ├── members.tsx
 │   ├── settings.tsx
 │   └── nodes/[nodeId]/
-│       ├── _layout.tsx            # Node stack + breadcrumb + top Chat/Task switcher
-│       ├── chat.tsx
-│       ├── conversations/...
-│       ├── tasks.tsx
-│       ├── tasks/...
-│       ├── executions/...
+│       ├── _layout.tsx            # Workspace Node detail
 │       ├── capabilities.tsx
 │       ├── configuration.tsx
 │       └── status.tsx
@@ -168,11 +177,11 @@ app/
 路由规则：
 
 1. 未登录 Hub 时，只能进入 Auth stack；No-Hub 使用显式本地 Account/Workspace 进入同一层级。
-2. Account、Workspace、Node route 必须携带稳定 ID，不能只依赖全局 active singleton。
-3. Node-scoped route 若失去 Node，展示局部 unavailable state，并允许返回 Workspace、切换或重试。
-4. Android Back 按 `Node detail -> Node home -> Workspace -> Account -> exit App` 上行，不隐式删除状态。
-5. Workspace 切换先关闭旧 Node session，再进入目标 Workspace；默认 Node 恢复是可选偏好。
-6. Deep link 到 Conversation/Task 必须验证 Account membership、Workspace 和 owning Node 后再进入。
+2. Account、Workspace、Work 和 Node detail route 必须携带稳定 ID，不能只依赖全局 active singleton。
+3. Work route 在 Node 失联时仍展示稳定记录；只有 live control 显示局部 unavailable state。
+4. Android Back 按 `Work/Node detail -> Workspace -> Account -> exit App` 上行，不隐式删除状态。
+5. Workspace 切换先关闭旧 Node session，再进入目标 Workspace；默认连接 Node 是可选偏好。
+6. Deep link 到 Conversation/Task 必须验证 Account membership 和 Workspace；读取正文或执行控制再验证绑定/部署 Node。
 
 ### 4.1 导航位置约束
 
@@ -180,9 +189,9 @@ App 不使用持久底部导航。对话输入框、附件预览、语音控制�
 任何导航条都不能放在 composer 下方或与 composer 同层争夺高度。
 
 - Account 使用普通 Stack 页面：Workspace 列表和 Account/App 设置入口；
-- Workspace 使用 overview + drill-down：Node、资源、成员、设置都是子页面，不常驻 Tab；
-- Node 顶部只保留高频“对话/任务”紧凑切换；
-- Node 能力、配置、状态和退出从顶部 Node 菜单进入独立 Stack 页面；
+- Workspace 使用 overview + drill-down：Conversation、Task、Node、资源、成员、设置都是子页面，不常驻 Tab；
+- Conversation/Task 顶部可保留高频紧凑切换，并明确显示绑定或部署 Node；
+- Node 能力、配置和状态位于 Workspace Node detail；
 - breadcrumb/back 始终位于顶部；Android Back 沿同一父级语义返回。
 
 这样 Chat 页面底部永远只有 composer，键盘弹出时不需要同时协调 bottom tabs、输入框和 safe area。
@@ -196,13 +205,13 @@ AppRoot
 ├── IdentityProvider
 │   └── issuer sessions / active account / login / logout / recovery
 ├── WorkspaceProvider
-│   └── memberships / active workspace / role / workspace switch
+│   └── memberships / active workspace / role / workspace switch / Work directory
 ├── NodeDirectoryProvider
 │   └── Hub directory / presence / local trust bindings / pairing
 ├── NodeSessionProvider
 │   └── optional selected Node / direct-or-Relay transport / Node auth / reconnect
 ├── ServerStateCache
-│   └── Node-scoped Conversation / Task / Agent / Config queries
+│   └── Workspace-scoped Work/Resource queries + Node-scoped execution/observation queries
 ├── TaskReminderProvider
 └── PreferenceProvider
     └── theme / locale / last context / auto-connect preference
@@ -273,7 +282,7 @@ issuer_id / account_id / workspace_id / node_id / resource_kind / resource_id
 ```
 
 禁止仅以 `task_id`、`session_handle` 或全局 singleton 保存数据，避免切换 Workspace/Node 后串数据。
-缓存是体验状态，不覆盖服务端 revision。
+缓存是体验状态，不覆盖服务端 generation/sequence。
 
 ## 6. 启动与恢复
 
@@ -359,7 +368,8 @@ close current Node session
 
 - Workspace 名称、类型、成员和角色；
 - Node directory/presence；
-- Workspace resource metadata、revision digest、grant 和 deployment observation；
+- Agent、Model、Skill、MCP 和 Tool Policy 的 Workspace Published Spec；
+- WorkspaceNodeEnrollment、Node Desired State、独立 Deployment/grant 和 rollout observation；
 - 邀请、owner 管理及审计。
 
 Hosted Hub V1 不保存 Agent Prompt、Skill/MCP 明文或 Node Secret。若一个编辑动作需要 WorkspaceRegistry
@@ -369,14 +379,18 @@ Hosted Hub V1 不保存 Agent Prompt、Skill/MCP 明文或 Node Secret。若一�
 
 需要 Node session：
 
-- Conversation 和 Task；
-- Agent/Profile/Runtime 的 Node applied state；
-- Node-local model endpoint、Secret、MCP process 和 Tool inventory；
-- 配置 Draft/validate/preflight/publish；
+- 绑定 Node 上的 Conversation 正文/ChatTurn 与目标 Node 上的 TaskExecution；
+- Agent/Profile/Runtime 的 Node applied/observed state；
+- Node-local model endpoint、Secret requirement、本机 MCP process 和 Tool inventory；
+- 需要本机交互的 Secret 写入、OS 权限和 host action；
 - Runtime diagnostics、Artifact 和 execution history。
 
-未来 Workspace 共享资产接入后，App 仍显示“逻辑归属在 Workspace、实际部署在 Node”，不复制两套
-资源定义。
+共享定义和 Node Desired State 从 Workspace 页面编辑；Node 执行面只展示实际状态并执行必要的本机
+步骤。App 始终显示“逻辑归属在 Workspace、实际部署在 Node”，不复制两套资源定义。
+
+Node 配置发布后的动作必须指向具体 Node：优先 hot apply；不支持热加载或组件异常时可 drain 后重启
+受影响组件；Node service restart 属于高级操作；设备 reboot 必须在目标设备确认。App 不提供
+“restart Workspace”，因为 Workspace 只有配置和 Desired State，没有运行进程。
 
 ## 9. Relay 与 UTF-8 协议边界
 
@@ -429,11 +443,12 @@ Transport contract tests 必须覆盖：
 | 登录后进入 Account/Workspace 层级 | `index` 按 Gateway status 重定向 | 移除 Node-based root redirect |
 | Hub/Workspace 独立状态 | `connect.tsx` 局部 state | 提升为 Identity/Workspace providers |
 | Node 可空、可退出 | active binding 总会选第一个 | 增加 explicit null selection 与 `disconnectNode()` |
-| Account -> Workspace -> Node 层级 | Chat/Task 与管理入口被拍平 | 分层 routes、breadcrumb、顶部 Chat/Task switcher |
+| Account -> Workspace -> Resources/Work/Nodes | Chat/Task 被误作 Node 配置对象 | Workspace Work routes、binding/deployment Node header、顶部 Chat/Task switcher |
 | 登录/注册与节点管理分离 | 全部混在 `connect.tsx` | 拆 Auth、Workspace、Node、Pairing 页面 |
 | Node 错误局部化 | `GatewayProvider.status=error` 驱动根跳转 | NodeSession error boundary |
 | UTF-8 Relay 正确解码 | `Response(ArrayBuffer)` | content-type aware explicit UTF-8 decode |
 | cache 完整隔离 | 多处 singleton/active session | 引入 context-scoped keys |
+| Conversation/Task 的 Workspace 目录 | 当前路由和 API 以 active Node 为根 | 增加 Workspace Work directory；Conversation 固定 binding，Task 固定 Deployment |
 
 ## 12. 实施顺序
 
@@ -454,13 +469,15 @@ Transport contract tests 必须覆盖：
 
 - 独立 Auth、Workspace、Node、Account 页面；
 - Workspace 成员与 Node directory；
-- Node 配对、信任、诊断和 Workspace 移除动作分离；
+- Workspace Node detail、配对、信任、Desired State、诊断和 Workspace 移除动作分离；
+- 新用户 Setup Wizard 闭环到第一次真实对话；
 - 无 Node/离线/认证失败的局部空状态。
 
 ### Phase 3：资源与配置呈现
 
-- Workspace resource metadata/grants/deployment observations；
-- Node-local Agent/LLM/Skill/MCP/Tool/config applied state；
+- Workspace Agent/Model/Skill/MCP/Tool Policy 的 Definition、Published Spec 和 grant；
+- WorkspaceNodeConfig、Deployment intent、Desired/Applied/Observed 状态；
+- Node-local Secret requirement、Tool inventory 和 runtime applied state；
 - 清晰呈现逻辑归属、部署位置和发布状态。
 
 不在本轮为了“通用”引入 Redux、事件总线、微前端或动态页面插件。React Context + 小型领域 hooks
@@ -473,7 +490,8 @@ Transport contract tests 必须覆盖：
 3. 用户可以随时退出当前 Node，且 binding 与 Hub session 保留。
 4. App 可默认恢复上次 Workspace/Node/页面，但父级层级仍完整，恢复失败按 Node -> Workspace -> Account 回退。
 5. Chat/Task 永远明确显示当前 Workspace 和 Node。
-6. 切换上下文后不会展示旧 Node 的 Conversation、Task、Approval 或 Config。
+6. 切换 Workspace 后不会串入旧 Workspace 数据；切换连接 Node 后仍可展示 Workspace Work 目录，
+   但正文、Approval、live execution 和 Node Config 必须来自对象实际绑定/部署的 Node。
 7. 中文、Emoji 和二进制 Artifact 经 direct 与 Relay 得到字节等价结果。
 8. Account logout、Node disconnect、Node unbind、Workspace remove 是四个不同动作。
 9. Hosted virtual Node 出现时复用现有 Node 选择和执行模型。

@@ -8,6 +8,7 @@ import {
   listHostedWorkspaceMembers,
   listHostedWorkspaces,
   listHubNodes,
+  listWorkspaceWork,
   loadHubConnection,
   loadWorkspaceResourceState,
   selectHostedWorkspace,
@@ -28,6 +29,7 @@ export default function WorkspaceScreen() {
   const [memberCount, setMemberCount] = useState(0);
   const [resourceCount, setResourceCount] = useState(0);
   const [deploymentCount, setDeploymentCount] = useState(0);
+  const [workCount, setWorkCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState("");
   const [error, setError] = useState("");
@@ -55,15 +57,17 @@ export default function WorkspaceScreen() {
       }
       setWorkspace(target);
       await rememberWorkspace(target.workspaceId, target.displayName);
-      const [directory, members, resources] = await Promise.all([
+      const [directory, members, resources, work] = await Promise.all([
         listHubNodes(),
         connection.accountId ? listHostedWorkspaceMembers(target.workspaceId).catch(() => []) : Promise.resolve([]),
         loadWorkspaceResourceState().catch(() => null),
+        listWorkspaceWork().catch(() => []),
       ]);
       setNodes(directory);
       setMemberCount(members.length);
-      setResourceCount(resources?.resources.length ?? 0);
-      setDeploymentCount(resources?.deployments.length ?? 0);
+      setResourceCount((resources?.workspaceResources.length ?? 0) + (resources?.resources.length ?? 0));
+      setDeploymentCount((resources?.workspaceDeployments.length ?? 0) + (resources?.deployments.length ?? 0));
+      setWorkCount(work.length);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Workspace 加载失败");
     } finally {
@@ -114,10 +118,10 @@ export default function WorkspaceScreen() {
         </View>
 
         <View style={styles.metrics}>
-          <Metric value={nodes.length} label="Node" />
-          <Metric value={memberCount} label="成员" />
+          <Metric value={workCount} label="工作" />
           <Metric value={resourceCount} label="资源" />
           <Metric value={deploymentCount} label="部署" />
+          <Metric value={nodes.length} label="Node" />
         </View>
 
         <View style={styles.sectionHeader}>
@@ -156,10 +160,11 @@ export default function WorkspaceScreen() {
         })}
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Workspace 概览</Text>
-          <WorkspaceRow icon="workspace" title="成员与权限" detail={`${memberCount} 个成员`} />
-          <WorkspaceRow icon="agent" title="资源与部署" detail={`${resourceCount} 个资源 · ${deploymentCount} 个部署`} />
-          <WorkspaceRow icon="settings" title="Workspace 设置" detail="名称、授权与审计" />
+          <Text style={styles.cardTitle}>Workspace 管理</Text>
+          <WorkspaceRow icon="chat" title="工作" detail={`${workCount} 个会话或任务投影`} onPress={() => router.push({ pathname: "/workspaces/[workspaceId]/work", params: { workspaceId, workspaceName: displayName } })} />
+          <WorkspaceRow icon="agent" title="资源与部署" detail={`${resourceCount} 个资源 · ${deploymentCount} 个部署`} onPress={() => router.push({ pathname: "/workspaces/[workspaceId]/resources", params: { workspaceId, workspaceName: displayName } })} />
+          <WorkspaceRow icon="node" title="Node 管理" detail={`${nodes.length} 个 Node · 配置与部署目标`} onPress={() => router.push({ pathname: "/workspaces/[workspaceId]/nodes", params: { workspaceId, workspaceName: displayName } })} />
+          <WorkspaceRow icon="workspace" title="成员与权限" detail={`${memberCount} 个成员`} onPress={() => router.push("/account")} />
         </View>
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </ScrollView>
@@ -171,12 +176,13 @@ function Metric({ value, label }: { value: number; label: string }) {
   return <View style={styles.metric}><Text style={styles.metricValue}>{value}</Text><Text style={styles.meta}>{label}</Text></View>;
 }
 
-function WorkspaceRow({ icon, title, detail }: { icon: "workspace" | "agent" | "settings"; title: string; detail: string }) {
+function WorkspaceRow({ icon, title, detail, onPress }: { icon: "workspace" | "agent" | "chat" | "node"; title: string; detail: string; onPress(): void }) {
   return (
-    <View style={styles.row}>
+    <AppPressable style={styles.row} onPress={onPress}>
       <AppIcon name={icon} color={colors.accent} size={21} />
       <View style={styles.flex}><Text style={styles.rowTitle}>{title}</Text><Text style={styles.meta}>{detail}</Text></View>
-    </View>
+      <AppIcon name="chevron-right" color={colors.muted} size={18} />
+    </AppPressable>
   );
 }
 

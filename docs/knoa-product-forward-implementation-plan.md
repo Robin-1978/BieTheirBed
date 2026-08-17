@@ -1,5 +1,11 @@
 # 小诺产品正向实施计划
 
+> 2026-08-17 架构补充：本文原阶段计划描述单 Node Core 内的 Task/Conversation 落地。后续实现必须以
+> [Knoa 产品领域架构](./knoa-product-domain-architecture.md) 为准：Conversation 创建时固定绑定
+> WorkspaceNode；Task Definition 属于 Workspace，发布/启用前通过 `Deployment(kind=task)` 指向 Node；
+> Node-local 启动器创建 TaskExecution 并向 Workspace 同步管理投影。本文中的 Task revision 仅对应
+> 内部 Published Generation/digest，不建设用户可见版本树或 rollback。
+
 > 依据：[knoa-product-forward-blueprint.md](./knoa-product-forward-blueprint.md)
 > 用户问题来源：[knoa-user-experience-audit.md](./knoa-user-experience-audit.md)
 > 执行原则：每个阶段先完成领域/API，再完成 App，最后以新鲜测试证据验收。

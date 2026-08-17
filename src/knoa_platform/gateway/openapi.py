@@ -27,9 +27,7 @@ from knoa_platform.gateway.protocol import (
     ConfigCurrentResponse,
     ConfigDiffResponse,
     ConfigDraftResponse,
-    ConfigHistoryResponse,
     ConfigPublishResponse,
-    ConfigRevisionResponse,
     ConfigValidationResponse,
     ContinueProductTaskRequest,
     ConversationSessionListResponse,
@@ -72,7 +70,6 @@ from knoa_platform.gateway.protocol import (
     ResourceInvocationRequest,
     ResourceInvocationResponse,
     ResumeTaskRequest,
-    RollbackConfigRequest,
     RuntimeStatusResponse,
     SecretStatusResponse,
     SessionCreatedResponse,
@@ -144,8 +141,6 @@ _MODELS: tuple[type[BaseModel], ...] = (
     ToolListResponse,
     MCPResourceCatalogResponse,
     ConfigCurrentResponse,
-    ConfigHistoryResponse,
-    ConfigRevisionResponse,
     ConfigDraftResponse,
     ConfigValidationResponse,
     ConfigPublishResponse,
@@ -153,7 +148,6 @@ _MODELS: tuple[type[BaseModel], ...] = (
     InvocationPolicyPreviewResponse,
     ReplaceConfigDraftRequest,
     PublishConfigDraftRequest,
-    RollbackConfigRequest,
     PreviewInvocationPolicyRequest,
     ResourceInvocationRequest,
     ResourceInvocationCancelRequest,
@@ -426,22 +420,6 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     "responses": {"200": _json_response("Current configuration", ConfigCurrentResponse), **_errors("401", "403", "429", "503")},
                 }
             },
-            "/v1/config/history": {
-                "get": {
-                    "operationId": "getConfigHistory",
-                    "security": bearer,
-                    "parameters": [_query("limit", {"type": "integer", "minimum": 1, "maximum": 200})],
-                    "responses": {"200": _json_response("Configuration history", ConfigHistoryResponse), **_errors("400", "401", "403", "429", "503")},
-                }
-            },
-            "/v1/config/revisions/{revision_id}": {
-                "get": {
-                    "operationId": "getConfigRevision",
-                    "security": bearer,
-                    "parameters": [{"name": "revision_id", "in": "path", "required": True, "schema": {"type": "string", "maxLength": 128}}],
-                    "responses": {"200": _json_response("Configuration revision", ConfigRevisionResponse), **_errors("400", "401", "403", "404", "429", "503")},
-                }
-            },
             "/v1/config/drafts": {
                 "post": {
                     "operationId": "createConfigDraft",
@@ -484,14 +462,6 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     "security": bearer,
                     "requestBody": _json_body(PublishConfigDraftRequest),
                     "responses": {"200": _json_response("Published configuration", ConfigPublishResponse), **_errors("400", "401", "403", "404", "409", "415", "422", "429", "503")},
-                }
-            },
-            "/v1/config/rollback": {
-                "post": {
-                    "operationId": "rollbackConfig",
-                    "security": bearer,
-                    "requestBody": _json_body(RollbackConfigRequest),
-                    "responses": {"200": _json_response("Rolled back configuration", ConfigPublishResponse), **_errors("400", "401", "403", "404", "415", "422", "429", "503")},
                 }
             },
             "/v1/config/diff": {

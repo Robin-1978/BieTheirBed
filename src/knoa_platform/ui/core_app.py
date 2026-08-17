@@ -445,7 +445,7 @@ class CoreChatApp(App):
                 f"| `{agent_id}` | {'selected' if agent_id == self._agent_id else ''} |"
                 for agent_id, agent in system.agents.items()
                 if agent.enabled
-                and system.profiles[agent.profile_id].visibility == "user"
+                and agent.visibility == "user"
             )
             await log.mount(CommandOutput(f"| Agent | State |\n|---|---|\n{rows}"))
         elif cmd.startswith("/agent "):
@@ -455,7 +455,7 @@ class CoreChatApp(App):
             if (
                 agent is None
                 or not agent.enabled
-                or system.profiles[agent.profile_id].visibility != "user"
+                or agent.visibility != "user"
             ):
                 await log.mount(CommandOutput(f"{ICON_WARN} Agent is not enabled: `{agent_id}`"))
             else:

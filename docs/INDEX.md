@@ -5,6 +5,7 @@
 ## Architecture
 
 - [Knoa Architecture](architecture.md)
+- [Knoa 产品领域架构](knoa-product-domain-architecture.md)
 - [Knoa 完整模块架构](knoa-module-architecture.md)
 - [Knoa 部署架构](knoa-deployment-architecture.md)
 - [Knoa 实现反推架构审计](knoa-implementation-architecture-audit.md)

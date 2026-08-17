@@ -424,6 +424,7 @@ class RemoteModelEndpoint:
             ticket,
             enrollment.hub_signing_public_key,
             expected_hub_id=enrollment.hub_id,
+            expected_workspace_id=enrollment.workspace_id,
             expected_target_node_id=self._identity.node_id,
         )
         if claims.invocation_id != invocation_id:
@@ -522,7 +523,7 @@ class RemoteModelProvider(ModelProviderPort):
         nonce = secrets.token_urlsafe(24)
         transcript = {
             "audience": "knoa-resource-ticket-request-v1",
-            "workspace_id": enrollment.hub_id,
+            "workspace_id": enrollment.workspace_id,
             "invocation_id": invocation_id,
             "caller_node_id": identity.node_id,
             "target_deployment_id": self._model.remote_deployment_id,
@@ -545,6 +546,7 @@ class RemoteModelProvider(ModelProviderPort):
             ticket,
             enrollment.hub_signing_public_key,
             expected_hub_id=enrollment.hub_id,
+            expected_workspace_id=enrollment.workspace_id,
         )
         if claims.invocation_id != invocation_id:
             raise PermissionError("Hub returned a mismatched invocation ticket")
@@ -575,6 +577,7 @@ class RemoteModelProvider(ModelProviderPort):
             ticket,
             enrollment.hub_signing_public_key,
             expected_hub_id=enrollment.hub_id,
+            expected_workspace_id=enrollment.workspace_id,
             clock=self._clock,
         )
         websocket_url = _websocket_url(

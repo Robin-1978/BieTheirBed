@@ -50,13 +50,13 @@ def _managed() -> ManagedConfig:
                 "assistant": AgentProfile(
                     display_name="Knoa",
                     instructions="You are Knoa.",
-                    visibility="user",
                 )
             },
             agents={
                 "knoa": AgentDefinition(
                     runtime_spec_id="native-main",
                     profile_id="assistant",
+                    visibility="user",
                 )
             },
             default_agent="knoa",

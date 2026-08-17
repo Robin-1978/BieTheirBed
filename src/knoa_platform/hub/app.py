@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.applications import Starlette
@@ -91,6 +91,49 @@ class ModelResourceRequest(_Request):
     declared_capabilities: dict = Field(default_factory=dict)
 
 
+class WorkspaceResourceRequest(_Request):
+    resource_id: str = Field(min_length=1, max_length=128)
+    kind: Literal["agent", "runtime", "model", "skill", "mcp", "policy", "task"]
+    generation: int = Field(ge=1)
+    canonical_digest: str = Field(min_length=64, max_length=64)
+    display_name: str = Field(min_length=1, max_length=120)
+    spec: dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = True
+
+
+class DeploymentRequest(_Request):
+    deployment_id: str = Field(min_length=1, max_length=128)
+    kind: Literal["model", "mcp", "agent", "task"]
+    resource_id: str = Field(min_length=1, max_length=128)
+    resource_generation: int = Field(ge=1)
+    resource_digest: str = Field(min_length=64, max_length=64)
+    target_node_id: str = Field(min_length=1, max_length=128)
+    desired_generation: int = Field(ge=1)
+    spec: dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = True
+
+
+class WorkProjectionRequest(_Request):
+    node_id: str = Field(min_length=1, max_length=128)
+    entity_kind: Literal["conversation", "task"]
+    entity_id: str = Field(min_length=1, max_length=256)
+    principal_id: str = Field(default="", max_length=256)
+    title: str = Field(default="", max_length=200)
+    state: str = Field(min_length=1, max_length=64)
+    progress: float | None = Field(default=None, ge=0, le=1)
+    summary: str = Field(default="", max_length=4000)
+    approval_summary: str = Field(default="", max_length=2000)
+    artifact_refs: tuple[dict[str, Any], ...] = Field(default=(), max_length=100)
+    source_generation: int = Field(default=1, ge=1)
+    source_digest: str = Field(min_length=64, max_length=64)
+    projection_seq: int = Field(ge=1)
+    source_created_at: float = Field(ge=0)
+    source_updated_at: float = Field(ge=0)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    observed_at: float = Field(ge=0)
+    signature: str = Field(min_length=80, max_length=128)
+
+
 class ModelDeploymentRequest(_Request):
     deployment_id: str = Field(min_length=1, max_length=128)
     resource_id: str = Field(min_length=1, max_length=128)
@@ -104,6 +147,7 @@ class ResourceGrantRequest(_Request):
     grant_id: str = Field(min_length=1, max_length=128)
     caller_node_id: str = Field(min_length=1, max_length=128)
     target_deployment_id: str = Field(min_length=1, max_length=128)
+    capability: Literal["model_inference", "mcp_invoke"] = "model_inference"
     max_request_deadline: float = Field(gt=0, le=3600)
     expires_at: float
 
@@ -164,6 +208,9 @@ class HubApplication:
                 Route("/v1/nodes/enroll", self.enroll, methods=["POST"]),
                 Route("/v1/nodes/presence", self.presence, methods=["POST"]),
                 Route("/v1/workspace", self.workspace, methods=["GET"]),
+                Route("/v1/workspace-resources", self.workspace_resources, methods=["GET", "POST"]),
+                Route("/v1/deployments", self.deployments, methods=["GET", "POST"]),
+                Route("/v1/work-projections", self.work_projections, methods=["GET", "POST"]),
                 Route("/v1/model-resources", self.model_resources, methods=["GET", "POST"]),
                 Route("/v1/model-deployments", self.model_deployments, methods=["GET", "POST"]),
                 Route("/v1/resource-grants", self.resource_grants, methods=["GET", "POST"]),
@@ -306,6 +353,73 @@ class HubApplication:
         except (LookupError, ValueError):
             return JSONResponse({"error": "rejected"}, status_code=422)
         return JSONResponse({"resource": item}, status_code=201)
+
+    async def workspace_resources(self, request: Request) -> JSONResponse:
+        authenticated = self._authenticate(request, admin=request.method != "GET")
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        if request.method == "GET":
+            kind = request.query_params.get("kind", "")
+            try:
+                resources = self.service.repository.list_workspace_resources(kind=kind)
+            except ValueError:
+                return JSONResponse({"error": "invalid_request"}, status_code=400)
+            return JSONResponse({"resources": list(resources)})
+        parsed = await self._parse(request, WorkspaceResourceRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            item = self.service.repository.put_workspace_resource(
+                parsed.model_dump(mode="json"), created_by=authenticated
+            )
+        except (LookupError, PermissionError, ValueError):
+            return JSONResponse({"error": "rejected"}, status_code=422)
+        return JSONResponse({"resource": item}, status_code=201)
+
+    async def deployments(self, request: Request) -> JSONResponse:
+        authenticated = self._authenticate(request, admin=request.method != "GET")
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        if request.method == "GET":
+            try:
+                deployments = self.service.repository.list_deployments(
+                    kind=request.query_params.get("kind", ""),
+                    node_id=request.query_params.get("node_id", ""),
+                )
+            except ValueError:
+                return JSONResponse({"error": "invalid_request"}, status_code=400)
+            return JSONResponse({"deployments": list(deployments)})
+        parsed = await self._parse(request, DeploymentRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            item = self.service.repository.put_deployment(parsed.model_dump(mode="json"))
+        except (LookupError, PermissionError, ValueError):
+            return JSONResponse({"error": "rejected"}, status_code=422)
+        return JSONResponse({"deployment": item}, status_code=201)
+
+    async def work_projections(self, request: Request) -> JSONResponse:
+        if request.method == "GET":
+            authenticated = self._member(request)
+            if isinstance(authenticated, JSONResponse):
+                return authenticated
+            try:
+                items = self.service.repository.list_work_projections(
+                    entity_kind=request.query_params.get("kind", ""),
+                    node_id=request.query_params.get("node_id", ""),
+                    limit=int(request.query_params.get("limit", "200")),
+                )
+            except (TypeError, ValueError):
+                return JSONResponse({"error": "invalid_request"}, status_code=400)
+            return JSONResponse({"items": list(items)})
+        parsed = await self._parse(request, WorkProjectionRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            item = self.service.publish_work_projection(parsed.model_dump(mode="json"))
+        except (LookupError, PermissionError, ValueError):
+            return JSONResponse({"error": "rejected"}, status_code=401)
+        return JSONResponse({"item": item}, status_code=201)
 
     async def model_deployments(self, request: Request) -> JSONResponse:
         authenticated = self._authenticate(

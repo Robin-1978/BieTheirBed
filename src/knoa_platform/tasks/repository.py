@@ -113,9 +113,9 @@ class TaskRepository(
         self._task_id_factory = task_id_factory or (
             lambda: secrets.token_urlsafe(18)
         )
-        self._definition_id_factory = definition_id_factory or (
-            lambda: secrets.token_urlsafe(18)
-        )
+        # Product Task identity is client-allocated by default so the Workspace
+        # can publish its Definition and Deployment before the Node admits it.
+        self._definition_id_factory = definition_id_factory
         self._approval_id_factory = approval_id_factory or (
             lambda: secrets.token_urlsafe(18)
         )

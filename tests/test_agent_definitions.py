@@ -42,7 +42,6 @@ def _config() -> AgentSystemConfig:
                 platform_capability_ceiling=frozenset(
                     {"host_read", "network", "shell"}
                 ),
-                visibility="user",
                 delegation=DelegationPolicy(
                     allowed=True,
                     targets=frozenset({"codex"}),
@@ -58,7 +57,6 @@ def _config() -> AgentSystemConfig:
                 runtime_native_capability_ceiling=frozenset(
                     {"workspace_read", "command_execution"}
                 ),
-                visibility="delegate",
                 delegation=DelegationPolicy(
                     allowed=True,
                     targets=frozenset({"codex"}),
@@ -73,10 +71,12 @@ def _config() -> AgentSystemConfig:
             "knoa": AgentDefinition(
                 runtime_spec_id="native-main",
                 profile_id="assistant",
+                visibility="user",
             ),
             "codex": AgentDefinition(
                 runtime_spec_id="codex-default",
                 profile_id="coder",
+                visibility="delegate",
             ),
         },
         default_agent="knoa",
