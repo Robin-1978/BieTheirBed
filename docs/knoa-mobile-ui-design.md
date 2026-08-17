@@ -1,233 +1,338 @@
-# 小诺 Mobile UI 设计
+# Knoa Mobile UI 与交互设计
 
-> 状态：产品线框稿，供实现与评审使用  
-> 原则：聊天优先、Task 独立、内部执行模型不泄露、简洁就是美。
+> 状态：与 Mobile App 权威架构对齐的目标 UI
+> 更新日期：2026-08-17
+> 原则：Account -> Workspace -> Node -> Conversation/Task；层级固定，默认落点可配置，任何页面都有明确上行路径。
 
-## 1. 信息架构
+架构、状态所有权和实施顺序见
+[knoa-mobile-app-design.md](./knoa-mobile-app-design.md)。本文只定义用户看到的导航、页面和行为。
 
-```mermaid
-flowchart TD
-    Home[对话] --> Camera[拍照]
-    Home --> Files[文件选择]
-    Home --> Voice[语音转写]
-    Home --> Approval[对话内权限确认]
-    Home --> Sessions[历史会话]
+## 1. 产品导航模型
 
-    Tasks[任务] --> Immediate[立即执行]
-    Tasks --> Scheduled[定时执行]
-    Tasks --> Event[事件启动]
-    Immediate --> Executions[执行记录]
-    Scheduled --> Executions
-    Event --> Executions
-
-    Status[状态] --> Runtime[Agent 状态]
-    Status --> Capabilities[Skill / MCP / Tool]
-    Status --> Devices[连接设备]
-    Status --> Updates[App 更新]
-```
-
-一级入口只有两个：
-
-1. **对话**：默认首页，承载文字、照片、文件、语音和确认。
-2. **任务**：管理目标、启动方式及每次执行记录。
-
-状态、能力、设备和更新属于二级入口，不占用主导航。
-
-## 2. 对话首页
+App 不是五个并列功能的集合，而是三个逐层进入的工作范围：
 
 ```text
-┌──────────────────────────────────┐
-│  小诺                新话题  任务  状态 │
-│  随时告诉我你想做什么               │
-├──────────────────────────────────┤
-│                                  │
-│                    ┌───────────┐ │
-│                    │ 你好       │ │
-│                    └───────────┘ │
-│                                  │
-│  ┌────────────────────────────┐  │
-│  │ 你好。今天想让我帮你做什么？ │  │
-│  └────────────────────────────┘  │
-│                                  │
-│  · 正在思考…                     │
-│                                  │
-├──────────────────────────────────┤
-│  ＋ │ 🎙 和小诺说点什么…          │发送│
-└──────────────────────────────────┘
+Account
+  -> Workspace
+    -> Node
+      -> 对话
+      -> 任务
+      -> 能力与配置
+      -> Node 状态
 ```
 
-行为：
+每一层拥有自己的页面和设置：
 
-- 用户消息立即出现，不等待服务端完成。
-- Agent 的正文按流式增量追加到同一个回复区域。
-- Markdown 使用完整可用宽度，不为每个增量创建独立渲染器。
-- 思考、工具调用使用灰色紧凑状态；最终正文不加“正式回复”等标签。
-- Core Task/Run ID、事件序号、内部阶段默认不显示。
-- 连续消息共享同一个会话上下文，可以自然追问和修正要求。
-- “新话题”创建新的 App Core Session，立即获得空白对话上下文；不会
-  删除旧 Session、长期记忆或仍在后台执行的自动化工作。
-- App 与飞书分别维护自己的活动 Session，不共享短期对话历史。
-- 输入框内的麦克风/键盘图标由用户明确切换文字或 STT 模式。
-- 文字模式下右侧主按钮为“发送”；STT 模式下同一按钮为录音/停止。
-- 每段转写追加到输入框后仍保持 STT 模式，可以连续录多段；用户切回
-  文字模式后可以编辑并发送，系统不根据是否已有文字擅自切换模式。
+| 层级 | 核心页面 | 设置作用域 |
+| --- | --- | --- |
+| Account | Workspace 列表、最近使用 | 帐号安全、Hub、App 外观/语言/更新 |
+| Workspace | 概览、Node、资源、成员 | Workspace 名称、成员、授权、审计 |
+| Node | 对话、任务、能力、状态 | Agent/LLM/Skill/MCP/Tool、Node 连接与诊断 |
 
-## 3. 照片与文件
+“随时管理”通过顶部 breadcrumb、Account 头像和明确的返回 Workspace 实现，不把不同层级做成并列
+Tab。App 不使用持久底部导航；对话输入框必须独占底部区域。
+
+## 2. Account 首页
+
+登录成功后最稳定的根页面是 Account 首页：
 
 ```text
-┌──────────────────────────────────┐
-│  小诺                              │
-├──────────────────────────────────┤
-│                                  │
-│       ┌──────────────────────┐   │
-│       │  [照片缩略图]     ×   │   │
-│       │  camera-001.jpg      │   │
-│       └──────────────────────┘   │
-├──────────────────────────────────┤
-│  ＋ │ 🎙 看看怎么接线             │发送│
-└──────────────────────────────────┘
+┌────────────────────────────────────┐
+│ Knoa                         Robin ●│
+├────────────────────────────────────┤
+│ Workspace                           │
+│                                    │
+│ ┌────────────────────────────────┐ │
+│ │ Personal Workspace       Owner │ │
+│ │ 1 个 Node 在线 · 最近使用       │ │
+│ └────────────────────────────────┘ │
+│                                    │
+│ ┌────────────────────────────────┐ │
+│ │ Work Workspace           Member│ │
+│ │ 2 个 Node · 1 个在线            │ │
+│ └────────────────────────────────┘ │
+│                                    │
+│ + 创建或加入 Workspace              │
+├────────────────────────────────────┤
+│ 帐号安全 · Hub · App 设置 · 更新     │
+└────────────────────────────────────┘
 ```
 
-交互顺序：
+- Account 首页不需要 Node。
+- Account 头像/菜单从 Workspace 和 Node 页面也始终可达。
+- 退出帐号、切换 issuer 和密码恢复都只在 Account scope 出现。
 
-```mermaid
-sequenceDiagram
-    actor Owner as 用户
-    participant Camera as 相机页
-    participant Chat as 对话页
-    participant Gateway as Gateway
-    participant Agent as Agent
+## 3. Workspace Shell
 
-    Owner->>Camera: 点击拍照
-    Camera-->>Chat: 返回本地照片 URI
-    Chat-->>Owner: 立即显示缩略图
-    Owner->>Chat: 输入问题并发送
-    Chat->>Gateway: 上传附件（显示局部进度）
-    Chat->>Agent: 发送文字 + Artifact 引用
-    Agent-->>Chat: 流式回复
-```
-
-- 相机页只负责拍照，不上传、不创建后台任务。
-- 拍完立即回到聊天，避免用户停留在无反馈的相机界面。
-- 上传状态只显示在附件附近。
-- 上传失败保留原消息和附件，允许精确重试。
-
-## 4. 对话内权限确认
+选择 Workspace 后进入 Workspace scope：
 
 ```text
-┌──────────────────────────────────┐
-│  我需要修改系统代理配置。          │
-│                                  │
-│  这会影响当前电脑的网络连接。       │
-│  工具：write_file                 │
-│                                  │
-│  ┌────────────┐  ┌────────────┐ │
-│  │    取消     │  │    确认     │ │
-│  └────────────┘  └────────────┘ │
-└──────────────────────────────────┘
+┌────────────────────────────────────┐
+│ ‹ Robin / Personal Workspace   ●   │
+├────────────────────────────────────┤
+│ 3 个 Node · 2 个成员 · 4 个资源      │
+│                                    │
+│ Robin Desktop            在线      │
+│ 当前 App 已绑定             [进入]  │
+│                                    │
+│ Office PC               离线       │
+│ 当前 App 已绑定             [详情]  │
+└────────────────────────────────────┘
 ```
 
-- 确认嵌入产生请求的 Agent 回复，不新建游离卡片。
-- 同一审批只能解决一次；操作后按钮变为只读结果。
-- 审批期间允许用户查看完整上下文和工具理由。
-- App 重启后从标准事件流恢复待确认状态。
+Workspace 首页使用 overview + drill-down，不使用底部或常驻局部 Tab：
 
-## 5. 任务首页
+- Node 卡片/入口：目录、presence、绑定、配对和进入 Node；
+- 资源入口：Workspace resource metadata、grant、deployment observation；
+- 成员入口：成员、角色和邀请；
+- 设置入口：Workspace 属性、授权和审计。
+
+顶部 `‹ Robin / Personal Workspace` 可返回 Account 或切换 Workspace。没有 Node 时仍可完整使用这些
+页面。
+
+## 4. Node Shell
+
+选择并连接 Node 后进入 Node scope：
 
 ```text
-┌──────────────────────────────────┐
-│  任务                      返回对话 │
-│  独立执行，完成后主动通知            │
-├──────────────────────────────────┤
-│  全部  进行中  待确认  已完成         │
-│                                  │
-│  ┌────────────────────────────┐  │
-│  │ 审查所有仓库          运行中 │  │
-│  │ 立即执行 · 第 1 次执行        │  │
-│  └────────────────────────────┘  │
-│                                  │
-│  ┌────────────────────────────┐  │
-│  │ Jira 工单发生变化       已启用 │  │
-│  │ 事件启动 · 已执行 5 次        │  │
-│  └────────────────────────────┘  │
-│                                  │
-│  ┌────────────────────────────┐  │
-│  │ 每天 09:00 工作摘要     已启用 │  │
-│  │ 定时执行 · 已执行 12 次       │  │
-│  └────────────────────────────┘  │
-└──────────────────────────────────┘
+┌────────────────────────────────────┐
+│ ‹ Personal Workspace               │
+│ Robin Desktop · 在线 · Relay    ●   │
+│ [ 对话 ]  [ 任务 ]              ⋯  │
+├────────────────────────────────────┤
+│                                    │
+│             当前 Node 页面          │
+│                                    │
+└────────────────────────────────────┘
 ```
 
-定义：
+Node scope 只把两个最高频子资源放在顶部紧凑切换器：
 
-- **立即执行**：创建后马上产生第一条执行记录。
-- **定时执行**：一次性、固定周期或 Cron 到点后产生执行记录。
-- **事件启动**：Jira、GitLab、Webhook、文件变化等事件产生执行记录。
-- Agent 可以在权限允许时创建 Task，但必须说明目标和启动方式。
+- 对话：Conversation、附件、语音、Approval、Interaction；
+- 任务：Task、Execution、Automation、结果和确认；
 
-事件启动沿用 Task 的 `launch_policy`，不增加独立的“绑定”页面。创建或编辑任务
-时，用户选择 `Webhook` 或 `MCP Resource`；选择 MCP Resource 后只填写 MCP Server
-标识和 Resource URI 前缀。UI 展示业务可读的来源和匹配范围，不展示内部 Trigger ID。
+顶部 `⋯` Node 菜单进入低频管理页面：
 
-当 MCP Server 已连接时，Task 编辑器优先从 Resource Catalog 下拉选择 Server 和
-Resource；用户仍可切换到手工 URI 输入。所有文案由 App 的 locale 字典提供，Core
-只返回 `server_id`、URI、名称、描述和匹配选项等结构化字段。
+- 能力与配置：Agent、LLM、Skill、MCP、Tool 和配置发布；
+- Node 状态：连接、版本、Relay/direct、诊断和审计；
+- 切换 Node、退出 Node。
 
-Agent 可以根据用户自然语言生成同一份启动策略草稿，用户确认后保存；事件到达后由
-Core 按已保存策略确定性匹配，不在每次事件到达时再次请求 Agent 判断是否触发。
+顶部第一行始终提供返回 Workspace；Account 头像保持可达。Node 页面不能成为没有父级的 App 根。
 
-普通聊天回合不进入任务列表。任务执行结果可以主动投递回来源 Channel。
+## 4.1 为什么没有底部导航
 
-CLI 和 Textual TUI 使用同一 Core API：CLI 提供 `mcp-resources`、
-`task-create-event`、`task-set-event`，TUI 提供对应命令和交互式列表；它们不维护
-另一套 Task 或 Trigger 状态机。
+Chat 是 Knoa 的高频主界面，底部同时承担：
 
-## 6. 执行详情
+- 多行输入框；
+- 添加附件、拍照和文件；
+- 语音录制/停止；
+- 发送按钮；
+- pending attachment 与上传进度；
+- 键盘和系统 safe area。
+
+在 composer 下方再放导航会减少对话可见高度、造成键盘动画抖动，并增加发送附近误触。因此底部
+永远只属于 composer；页面导航放在顶部，管理入口放入层级页面和 Node 菜单。
+
+## 5. 默认进入位置
+
+层级固定，但用户可以选择启动偏好：
+
+- Account 首页；
+- 上次 Workspace；
+- 上次 Node 的对话；
+- 上次 Node 的任务。
+
+推荐默认恢复上次上下文：
 
 ```text
-┌──────────────────────────────────┐
-│  Jira 每日汇总             进行中 │
-├──────────────────────────────────┤
-│  09:00  Trigger 已触发             │
-│  09:00  正在读取 Jira              │
-│  09:01  ✓ 获取 12 条工单           │
-│  09:01  正在生成摘要                │
-│                                  │
-│  [暂停]                   [停止]   │
-└──────────────────────────────────┘
+Robin
+  -> Personal Workspace
+    -> Robin Desktop
+      -> 对话
 ```
 
-- 这里才展示持久执行进度、工具摘要、产物、重试和错误。
-- 默认显示人能理解的事件，不直接倾倒底层日志。
-- 完成后将结果投递到指定对话，并保留后台运行记录。
+即使视觉上直接显示对话，导航栈仍必须包含 Workspace 和 Account。用户点击返回时按以下顺序上行：
 
-## 7. 视觉规范
+```text
+Conversation detail -> Node Chat -> Workspace -> Account -> exit App
+```
 
-| 用途 | 颜色 |
-|---|---|
-| 页面背景 | `#F4F0E8` |
-| 卡片背景 | `#FFFCF6` |
-| 正文 | `#232823` |
-| 思考/辅助文字 | `#747B73` |
-| 主操作 | `#2F6658` |
-| 主操作浅色背景 | `#DCEAE4` |
-| 分割线 | `#D9D5CC` |
+恢复失败按最接近的有效父级降级：
 
-- 使用温和的纸张色和玉石绿，延续小诺头像的中国风气质。
-- 正文优先，不使用大面积渐变、霓虹或“AI 科技蓝紫”。
-- 状态图标克制；工具成功使用简单文字钩 `✓`，不使用绿色 Emoji。
-- 圆角与阴影保持轻量，不让每条内容都像独立卡片。
-- 正文、代码块、表格均必须占据合理宽度并支持长内容滚动。
+```text
+Node 失败 -> Workspace / Nodes
+Workspace 无权限 -> Account / Workspaces
+Account session 失效 -> Login
+```
 
-## 8. 产品与 Core 的映射
+## 6. 进入、切换和退出 Node
 
-| 用户看到的概念 | Core 实现 |
-|---|---|
-| 一次聊天回复 | 同一 Session 下的一次持久 Run/Task |
-| 连续对话 | 共享 Session conversation |
-| 权限确认 | Approval 标准事件与原子解决命令 |
-| Task 启动方式 | immediate / scheduled / event policy |
-| 执行记录 | 独立 Session 下的持久 TaskExecution |
-| 任务结果通知 | principal 标准事件流 + Channel 展示策略 |
+Workspace Node 列表：
 
-这个映射只存在于实现层。UI 不把每次聊天回复命名为“任务”。
+```text
+┌────────────────────────────────────┐
+│ Personal Workspace / 节点           │
+├────────────────────────────────────┤
+│ Robin Desktop       在线 · 已绑定   │
+│                     [进入 Node]     │
+│ Office PC           离线 · 已绑定   │
+│                     [查看详情]      │
+│ Cloud Runner        在线 · 未绑定   │
+│                     [开始配对]      │
+│                                    │
+│ + 扫描二维码添加 Node                │
+└────────────────────────────────────┘
+```
+
+- 切换 Node：返回 Workspace Node 列表，或从 Node header 打开同级 Node switcher。
+- 连接失败：停留在 Workspace/Node 上下文，允许重试或选择其他 Node。
+- 退出当前 Node：关闭 App 到 Node 的执行会话并返回 Workspace，不删除绑定。
+- 移除此 App 的信任：删除本机 binding，属于 Node 详情中的危险动作。
+- 从 Workspace 移除 Node：影响所有成员，只对 owner/admin 展示。
+
+“退出”“解绑”“从 Workspace 移除”必须使用不同文案和确认强度。
+
+## 7. 对话
+
+```text
+┌────────────────────────────────────┐
+│ ‹ Personal Workspace               │
+│ Robin Desktop · 在线       新话题   │
+│ [ 对话 ]  [ 任务 ]              ⋯  │
+├────────────────────────────────────┤
+│                    ┌─────────────┐ │
+│                    │ 帮我检查日志 │ │
+│                    └─────────────┘ │
+│  正在读取日志…                      │
+│  找到两个需要处理的问题：……          │
+│                                    │
+├────────────────────────────────────┤
+│ ＋ │ 🎙 和小诺说点什么…        发送 │
+└────────────────────────────────────┘
+```
+
+- 用户消息立即出现；Agent 正文在同一回复区域流式更新。
+- 图片、文件和语音属于 Conversation/Artifact，不创建隐式 Task。
+- Approval 与 HumanInteraction 嵌入原始回复，可恢复且只能解决一次。
+- 当前 Workspace/Node 始终可见，避免操作目标混淆。
+- Node 中断时保留草稿和历史，提供重连、切换 Node 和返回 Workspace。
+
+## 8. 任务
+
+任务是 Node 的子资源。V1 每个 Task 和 Execution 都有明确 owning Node。
+
+```text
+┌────────────────────────────────────┐
+│ ‹ Personal Workspace               │
+│ Robin Desktop / 任务            ＋  │
+│ [ 对话 ]  [ 任务 ]              ⋯  │
+├────────────────────────────────────┤
+│ 待处理  进行中  最近  未开始         │
+│                                    │
+│ 分析 Jira 新分配工单        待确认   │
+│ 已生成建议，需要你的授权             │
+│                                    │
+│ 检查失败 Pipeline          已完成   │
+│ 发现 2 个失败 Job                   │
+└────────────────────────────────────┘
+```
+
+- 列表、详情、审批、暂停和继续都路由到 owning Node。
+- 切换 Node 后先清空旧 projection，再加载新 Node 数据，不能短暂串线。
+- Workspace 未来可以提供跨 Node 非敏感摘要，但任务事实不复制到 Hub。
+- Node 离线时只能显示本地缓存/Hub 摘要，不假装可以执行控制动作。
+
+## 9. 能力与配置
+
+Node 能力页只管理当前 Node applied state：
+
+- Agent、Profile、Runtime；
+- LLM provider、model binding 和 Node Secret status；
+- Skill、MCP、Tool inventory；
+- Draft、validate、preflight、publish、rollback；
+- active/draining generation。
+
+Workspace 资源页管理逻辑资源、grant 和 deployment intent。UI 必须同时显示“逻辑归属”和“部署
+位置”，不能把 Workspace resource 与 Node deployment 合并成一份可双写配置。
+
+## 10. Account、Workspace、Node 设置分层
+
+| 设置 | 页面位置 | 作用域 |
+| --- | --- | --- |
+| 主题、语言、通知、更新 | Account / App 设置 | 当前 App installation |
+| 密码、Account session、Hub | Account | 当前 Account/issuer |
+| 成员、资源授权、审计 | Workspace 设置 | 当前 Workspace |
+| Agent/LLM/Skill/MCP/Tool | Node / 能力 | 当前 Node |
+| Relay、版本、设备信任 | Node / 状态 | 当前 Node 或当前 App binding |
+
+每个写操作的标题和确认文案都必须显示实际作用域。
+
+## 11. 登录、注册与新用户引导
+
+Auth 页面只处理 Account：
+
+```text
+Hub 地址
+登录标识
+密码
+[登录]
+
+[扫描注册二维码] [恢复密码]
+[使用本地 No-Hub 模式]
+```
+
+登录成功后进入 Personal Workspace。若没有 Node，Workspace Node 页显示“添加第一台 Node”，但不
+阻塞成员、资源、Workspace 设置或 Account 设置。
+
+## 12. 错误与降级
+
+### Hub 失联
+
+- 保留当前层级和缓存；
+- 已建立的 direct Node session 可以继续 Node-local 操作；
+- Workspace 管理写操作禁用并允许重试。
+
+### Node 离线
+
+- 只影响 Node 子页面；
+- 用户可返回 Workspace、选择其他 Node 或管理帐号；
+- 不自动退出 Account，不进入登录页。
+
+### Node 认证失效
+
+- 在 Node scope 内重新认证；
+- 失败后提供重新绑定、切换 Node、退出到 Workspace；
+- 不映射为 Hub Account 认证失败。
+
+### Relay 中断
+
+- 显示 direct/Relay 和可执行恢复动作；
+- 不丢草稿，不产生根路由重定向循环。
+
+## 13. Unicode 与内容呈现
+
+- JSON、SSE、NDJSON 和文本 Artifact 显式按 UTF-8 解码一次。
+- UI 不修复 `ä¸­æ–‡` 等 mojibake；transport 必须交付正确 Unicode。
+- 中文、Emoji、组合字符和跨 chunk 多字节字符进入自动测试。
+- 二进制 Artifact 不经过字符串转换。
+- 日期、数字和状态文案由 locale 层格式化。
+
+## 14. 可访问性与返回行为
+
+- breadcrumb、顶部 Chat/Task switcher、Node presence 和连接状态都有 accessibility label/state；
+- 颜色不是在线/失败/待确认的唯一表达；
+- 触控目标至少 44dp；
+- Android Back 严格沿页面父级上行；
+- 退出 Node 无需危险确认，解绑和移除 Workspace Node 必须确认；
+- Reduce Motion 下关闭非必要启动动画。
+
+## 15. UI 验收场景
+
+1. 新用户登录后没有 Node，仍能管理 Account 和 Workspace。
+2. 用户可从 `Account -> Workspace -> Robin Desktop -> 对话/任务` 正常进入。
+3. App 可默认直接恢复 Robin Desktop 对话，但返回路径仍是 Workspace -> Account。
+4. 用户退出 Robin Desktop 后回到 Workspace，重新进入无需配对。
+5. Robin Desktop 离线时 App 回退 Workspace，而不是卡死或回登录。
+6. 两个 Workspace 的 Node、Task、Conversation 和配置不会串线。
+7. Hub Account 过期与 Node session 过期显示不同错误。
+8. Task 和 Conversation 中文、Emoji 经 Relay 显示正确。

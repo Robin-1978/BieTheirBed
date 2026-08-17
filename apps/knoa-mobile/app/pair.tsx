@@ -1,6 +1,6 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Linking from "expo-linking";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import {
   ActivityIndicator,
@@ -16,11 +16,13 @@ import {
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { useI18n } from "@/i18n";
+import { loadConnectionIdentity } from "@/security/deviceIdentity";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
 export default function PairScreen() {
   const gateway = useGateway();
+  const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string }>();
   const { t } = useI18n();
   const [permission, requestPermission] = useCameraPermissions();
   const [displayName, setDisplayName] = useState(() => t("pair.defaultDevice"));
@@ -37,7 +39,15 @@ export default function PairScreen() {
     setError("");
     try {
       await gateway.pair(encoded.trim(), displayName.trim());
-      router.replace("/chat");
+      const identity = await loadConnectionIdentity();
+      router.replace({
+        pathname: "/chat",
+        params: {
+          workspaceId: stringParam(params.workspaceId),
+          workspaceName: stringParam(params.workspaceName),
+          nodeId: identity?.nodeId || "",
+        },
+      });
     } catch (caught) {
       const detail = caught instanceof Error ? caught.message : "";
       setError(/expired|consumed|失效|过期/i.test(detail) ? t("pair.expired") : t("pair.failed"));
@@ -144,6 +154,10 @@ export default function PairScreen() {
       ) : null}
     </KeyboardAvoidingView>
   );
+}
+
+function stringParam(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
 }
 
 const styles = StyleSheet.create({

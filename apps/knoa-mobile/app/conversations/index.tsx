@@ -1,4 +1,4 @@
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -21,6 +21,7 @@ import { useI18n } from "@/i18n";
 
 export default function ConversationHistoryScreen() {
   const gateway = useGateway();
+  const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string; nodeId?: string }>();
   const { t, locale } = useI18n();
   const [sessions, setSessions] = useState<ConversationSession[]>([]);
   const [nextCursor, setNextCursor] = useState("");
@@ -120,7 +121,7 @@ export default function ConversationHistoryScreen() {
     setWorking(session.session_handle);
     try {
       await gateway.openConversation(session.session_handle);
-      router.replace("/chat");
+      router.replace({ pathname: "/chat", params: nodeRouteParams(params) });
     } catch (caught) {
       setError(t("conversations.openFailed"));
     } finally {
@@ -137,7 +138,7 @@ export default function ConversationHistoryScreen() {
       ListHeaderComponent={(
         <>
           <View style={styles.headerActions}>
-            <AppPressable accessibilityLabel={t("conversations.new")} style={styles.primary} onPress={() => void gateway.newConversation().then(() => router.replace("/chat"))}>
+            <AppPressable accessibilityLabel={t("conversations.new")} style={styles.primary} onPress={() => void gateway.newConversation().then(() => router.replace({ pathname: "/chat", params: nodeRouteParams(params) }))}>
               <AppIcon name="new-topic" color={colors.white} size={21} />
             </AppPressable>
             <AppPressable style={styles.filter} onPress={() => setShowArchived((value) => !value)}>
@@ -201,6 +202,14 @@ export default function ConversationHistoryScreen() {
       ) : null}
     />
   );
+}
+
+function nodeRouteParams(params: { workspaceId?: string; workspaceName?: string; nodeId?: string }) {
+  return {
+    workspaceId: params.workspaceId ?? "",
+    workspaceName: params.workspaceName ?? "",
+    nodeId: params.nodeId ?? "",
+  };
 }
 
 function IconAction({ label, icon, danger = false, disabled = false, onPress }: { label: string; icon: "archive" | "check" | "edit" | "restore" | "trash" | "x"; danger?: boolean; disabled?: boolean; onPress(): void }) {

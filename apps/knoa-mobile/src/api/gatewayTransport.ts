@@ -25,6 +25,7 @@ import {
   packetNonce,
 } from "./relayCrypto";
 import { bindingUsesHubEndpoint } from "./gatewayRouting";
+import { relayResponseBody } from "./relayResponse";
 
 export { DirectFetchTransport, type GatewayTransport } from "./gatewayTransportBase";
 
@@ -349,7 +350,7 @@ class RelayTransport implements GatewayTransport {
       }
       this.pending.delete(streamId);
       const bytes = joinBytes(pending.chunks, pending.receivedLength);
-      pending.resolve(new Response(bytes.buffer as ArrayBuffer, {
+      pending.resolve(new Response(relayResponseBody(bytes, pending.headers), {
         status: pending.status,
         headers: pending.headers,
       }));

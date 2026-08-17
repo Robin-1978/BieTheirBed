@@ -70,10 +70,7 @@ export class AndroidUpdateDownload {
       resumeData = String(checkpoint.downloaded);
       input.onProgress({ downloaded: checkpoint.downloaded, total: checkpoint.total });
     }
-    const downloadUrl = new URL(
-      input.release.download_path,
-      `${input.gatewayUrl.replace(/\/$/, "")}/`,
-    ).toString();
+    const downloadUrl = resolveAndroidDownloadUrl(input.release.download_path, input.gatewayUrl);
     const task = FileSystem.createDownloadResumable(
       downloadUrl,
       fileUri,
@@ -162,6 +159,15 @@ export class AndroidUpdateDownload {
       total: this.release.size_bytes,
     };
   }
+}
+
+export function resolveAndroidDownloadUrl(downloadPath: string, gatewayUrl: string): string {
+  if (/^https?:\/\//i.test(downloadPath)) return new URL(downloadPath).toString();
+  const normalizedGateway = gatewayUrl.trim().replace(/\/$/, "");
+  if (!/^https?:\/\//i.test(normalizedGateway)) {
+    throw new Error("当前更新地址需要连接 Node");
+  }
+  return new URL(downloadPath, `${normalizedGateway}/`).toString();
 }
 
 export async function loadAndroidUpdateCheckpoint(

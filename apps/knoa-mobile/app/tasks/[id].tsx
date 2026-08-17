@@ -103,7 +103,7 @@ export default function TaskDetailScreen() {
     setWorking("delete");
     try {
       await gateway.runAuthenticated((client) => client.deleteTask(task.task_id));
-      router.replace("/tasks");
+      router.back();
     } catch {
       setError(t("taskDetail.deleteFailed"));
       setWorking("");
