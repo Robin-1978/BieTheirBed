@@ -249,19 +249,15 @@ async def test_managed_skill_publish_is_hot_and_preserves_agent_generation(
         encoding="utf-8",
     )
     (package / "skill.yaml").write_text(
-        "\n".join(
-            (
-                "id: hot_skill",
-                "version: 1.0.0",
-                "name: Hot Skill",
-                "description: Hot-loaded test skill",
-                "instructions: instructions.md",
-                "triggers: [hot reload]",
-                "required_tools: []",
-                "required_capabilities: []",
-            )
-        )
-        + "\n",
+        """id: hot_skill
+version: 1.0.0
+name: Hot Skill
+description: Hot-loaded test skill
+instructions: instructions.md
+triggers: [hot reload]
+required_tools: []
+required_capabilities: []
+""",
         encoding="utf-8",
     )
     composition = build_core_runtime(
@@ -370,16 +366,10 @@ def test_codex_uses_private_neutral_workspace_when_cwd_is_empty(
     composition = build_core_runtime(
         base.model_copy(
             update={
-                "agent_definitions": {
-                    **base.agent_definitions,
-                    "codex": base.agent_definitions["codex"].model_copy(
-                        update={"enabled": True}
-                    ),
-                },
-                "runtime_specs": {
-                    **base.runtime_specs,
-                    "codex-default": base.runtime_specs["codex-default"].model_copy(
-                        update={"cwd": ""}
+                "node_agents": {
+                    **base.node_agents,
+                    "codex": base.node_agents["codex"].model_copy(
+                        update={"enabled": True, "cwd": ""}
                     ),
                 },
             },

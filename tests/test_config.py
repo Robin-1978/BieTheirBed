@@ -18,7 +18,7 @@ class TestAppConfig:
         assert cfg.owner_principal_aliases == ("local",)
         assert cfg.gateway_artifact_max_bytes == 32 * 1024 * 1024
         assert cfg.default_agent == "knoa"
-        system = cfg.agent_system_config()
+        system = cfg.node_agent_catalog()
         assert system.agents["knoa"].enabled is True
         assert system.agents["codex"].enabled is False
         assert system.agents["reviewer_agent"].enabled is False
@@ -30,9 +30,9 @@ class TestAppConfig:
         base = AppConfig()
         cfg = AppConfig(
             default_agent="codex",
-            agent_definitions={
-                **base.agent_definitions,
-                "codex": base.agent_definitions["codex"].model_copy(
+            node_agents={
+                **base.node_agents,
+                "codex": base.node_agents["codex"].model_copy(
                     update={"enabled": True}
                 ),
             },
@@ -40,28 +40,26 @@ class TestAppConfig:
 
         assert cfg.default_agent == "codex"
 
-    def test_agent_configuration_supports_new_composed_agent_roles(self):
+    def test_node_agent_configuration_supports_new_roles(self):
         base = AppConfig()
         cfg = AppConfig(
-            agent_profiles={
-                **base.agent_profiles,
+            node_agents={
+                **base.node_agents,
                 "researcher": {
+                    "kind": "knoa",
                     "display_name": "Researcher",
                     "instructions": "Research carefully",
-                },
-            },
-            agent_definitions={
-                **base.agent_definitions,
-                "researcher": {
-                    "runtime_spec_id": "native-main",
-                    "profile_id": "researcher",
+                    "model_binding": {
+                        "ownership": "platform",
+                        "model": "@default",
+                    },
                     "visibility": "delegate",
                     "enabled": True,
                 },
             },
         )
 
-        assert cfg.agent_system_config().agents["researcher"].profile_id == "researcher"
+        assert cfg.node_agent_catalog().agents["researcher"].display_name == "Researcher"
 
     def test_reviewer_agent_is_configured_as_a_restricted_system_agent(self):
         base = AppConfig()
@@ -74,9 +72,9 @@ class TestAppConfig:
             },
             models={"reviewer": {"provider": "local", "model": "qwen3.5-4b"}},
             default_model="reviewer",
-            agent_definitions={
-                **base.agent_definitions,
-                "reviewer_agent": base.agent_definitions["reviewer_agent"].model_copy(
+            node_agents={
+                **base.node_agents,
+                "reviewer_agent": base.node_agents["reviewer_agent"].model_copy(
                     update={"enabled": True}
                 ),
             },
@@ -84,8 +82,8 @@ class TestAppConfig:
         )
 
         assert cfg.approval_review.mode == "suggest"
-        assert cfg.agent_system_config().runtime_specs[
-            "native-approval-reviewer"
+        assert cfg.node_agent_catalog().agents[
+            "reviewer_agent"
         ].model_binding.model == "reviewer"
 
     def test_enabled_review_requires_enabled_reviewer_agent(self):
@@ -96,9 +94,9 @@ class TestAppConfig:
         base = AppConfig()
         with pytest.raises(ValueError, match="Enabled approval review requires a reviewer model"):
             AppConfig(
-                agent_definitions={
-                    **base.agent_definitions,
-                    "reviewer_agent": base.agent_definitions["reviewer_agent"].model_copy(
+                node_agents={
+                    **base.node_agents,
+                    "reviewer_agent": base.node_agents["reviewer_agent"].model_copy(
                         update={"enabled": True}
                     ),
                 },

@@ -402,25 +402,32 @@ async def test_remote_endpoint_executes_same_invocation_only_once(tmp_path: Path
             }
         }
     )
-    repository.put_model_resource(
+    repository.put_workspace_resource(
         {
             "resource_id": "personal_model",
-            "revision": 1,
+            "kind": "model",
+            "generation": 1,
             "canonical_digest": "a" * 64,
             "display_name": "Qwen",
-            "provider_protocol": "openai_compatible",
-            "model_identity": "qwen",
-            "declared_capabilities": {},
+            "spec": {
+                "provider_protocol": "openai_compatible",
+                "model_identity": "qwen",
+                "declared_capabilities": {},
+            },
+            "enabled": True,
         },
         created_by="subject_owner",
     )
-    repository.put_model_deployment(
+    repository.put_deployment(
         {
             "deployment_id": "qwen_local",
+            "kind": "model",
             "resource_id": "personal_model",
-            "resource_revision": 1,
+            "resource_generation": 1,
+            "resource_digest": "a" * 64,
             "target_node_id": target.node_id,
-            "desired_revision": 1,
+            "desired_generation": 1,
+            "spec": {"max_remote_concurrency": 1},
             "enabled": True,
         }
     )

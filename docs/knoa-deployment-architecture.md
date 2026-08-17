@@ -44,12 +44,12 @@ Node 是执行服务器。HubService 是可选共享控制面。Relay 是无业�
 App Installation
   -> restore/login Hub Account
   -> select Workspace
-  -> open Workspace Work or Resources
-  -> resolve Conversation binding or Task Deployment when content/execution is needed
+  -> open Workspace Node directory, shared services or activity projections
+  -> select the authoritative Node when Conversation/Task content is needed
   -> establish direct or Relay Node session
 ```
 
-Hub Account、Workspace、Work directory、management projection 和 Node directory 属于 App 可独立访问
+Hub Account、Workspace、management projection 和 Node directory 属于 App 可独立访问
 的控制面。Conversation 正文/ChatTurn、TaskExecution、AgentInvocation、ExecutionAttempt 和 live
 control 属于绑定或部署 Node；Node 离线、认证失败或 Relay 暂时不可用只能使该 Work 内容/执行不可用，
 不能阻断帐号登录、Workspace 切换、查看最后投影、Node directory 或管理其他 Node。
@@ -88,7 +88,7 @@ No-Hub 形态没有 Hub 控制面，但遵循同一故障隔离原则：App 先�
 
 Agent、LLM、Skill、Tool 和 MCP 不是与 Hub、Relay、Node 平级的中心服务：
 
-- Agent 是 Node 内的稳定逻辑身份，由 RuntimeSpec 与 Profile 组合；
+- Agent 是 Node 内的 `NodeAgent` 配置与 Runtime 实现，不是 Workspace 共享服务；
 - LLM 是模型部署或 Provider，可以在本机、云端或另一个 Node；
 - Skill 是 Node 安装并由配置发布的数据包，不自行执行；
 - Tool 经 Node 的 Capability Gateway 授权后执行；
@@ -163,7 +163,7 @@ Relay decrypted request ─────┘
 | Local LLM Server | llama.cpp/Ollama/OpenAI-compatible server | 是 | 独立进程或外部服务；Secret、模型路径和执行仍归目标 Node |
 | MCP Server | stdio 或 streamable HTTP | 可选 | 可由 Node 管理本地进程，也可远程独立部署 |
 | Codex App Server | Codex Runtime 自有入口 | 是 | 受信 Runtime adapter 使用，不进入 Knoa 原生模型 Provider |
-| Agent/Profile/Skill/Tool | 无独立进程入口 | 否 | Node 内逻辑配置或扩展，不为追求“微服务化”单独部署 |
+| NodeAgent/Skill/Tool | 无独立进程入口 | 否 | Node 内逻辑配置或内容，不为追求“微服务化”单独部署 |
 
 ### 5.1 当前 Hub/Relay 的硬限制
 
@@ -226,9 +226,12 @@ Node A               Node B               Node C
 - 用户只配置一个 Hub 域名；
 - Hub 对外只暴露 TLS 保护的 HTTPS/WSS；
 - N 个 Node 主动发起出站连接，不需要 N 个公网域名；
-- direct endpoint 可作为优化，但不能成为多 Node 的部署前置条件；
-- App 先访问 Hub 选择 Node 和获取短期 ticket，再 direct 优先、Relay fallback；
-- Node-to-Node 共享 LLM 同样 direct 优先、Relay fallback，并复用同一 invocation ID；
+- 默认 transport policy 是 `p2p_preferred`：依次尝试 LAN/direct、Internet P2P/NAT traversal，再使用
+  Relay fallback；
+- 用户不需要为每个 Node 配置域名；显式公网 direct endpoint 只是 P2P candidate 之一，不是部署前置；
+- App 先访问 Hub 选择 Node、获取短期 ticket 和交换连接 candidate，再进行有界 P2P 建连；
+- Node-to-Node 共享 LLM/MCP 同样 P2P 优先、Relay fallback，并复用安全连接和同一 invocation ID；
+- Relay 不承担默认 LLM streaming、MCP 或 Artifact 数据面，只在 P2P 失败时兜底；
 - Hub/Relay 单实例部署，不启用多 worker。
 
 ### 6.3 Knoa Hosted Hub Single-Node（形态 3 单节点 MVP）
@@ -282,7 +285,7 @@ Knoa Node process
 │   ├── CoreHost / CoreServer
 │   ├── Conversation / Task / Automation / Artifact
 │   │   ├── Conversation content for locally bound sessions
-│   │   ├── TaskExecution for locally deployed Tasks
+│   │   ├── NodeTask / TaskExecution
 │   │   └── Node-local Schedule/Trigger dispatcher
 │   ├── Agent Orchestration / Runtime generations
 │   ├── Capability Gateway
@@ -304,7 +307,7 @@ Knoa Node process
 V1 不把 Conversation、Task、Agent、Tool 和 Configuration 拆成分布式微服务。它们需要共享清晰的
 本地事务、调用快照和故障恢复语义，单 Node 内拆分只会增加网络失败与一致性成本。
 
-Workspace 只发布 Task Definition/Deployment 和 Node Desired State；定时启动器运行在目标 Node。
+Task 定义、trigger 与执行都保存在创建它的 Node；定时启动器运行在该 Node。
 Workspace/Hub 不运行第二套 Task scheduler。Node 将 Work 管理投影同步给 Workspace Registry，但保留
 Conversation 正文、完整 Trace、Tool/MCP 原始载荷、Artifact bytes 和 Secret 的权威。
 
@@ -375,8 +378,9 @@ Hub 控制面状态。
 Agent on Node B
   -> workspace_remote Model Provider
   -> Hub ResourceGrant + Invocation Ticket
-  -> direct Node A when available
-  -> otherwise opaque Relay with same invocation_id
+  -> exchange LAN/direct/NAT traversal candidates
+  -> establish and reuse E2E P2P session when possible
+  -> otherwise use opaque Relay with same invocation_id
   -> Node A admission + persistent idempotency record
   -> local ModelDeployment
   -> encrypted response to Node B
@@ -384,6 +388,23 @@ Agent on Node B
 
 Node A 是执行结果权威。Hub 只保存授权、票据元数据和非权威 observation，不保存或解密 Prompt、
 模型响应、API Key 或模型文件。
+
+P2P 与 Relay 只改变 transport，不改变 ResourceGrant、Node admission、Invocation identity 或执行
+位置。一次 Invocation admission 后发生网络切换时必须 attach/reconcile，禁止因切换路径重复推理。
+
+### 9.4 Node B 调用 Node A 的 MCP
+
+```text
+Task/Agent on Node B
+  -> granted MCPDeployment on Node A
+  -> same P2P-first secure connector
+  -> Node A validates capability and local policy
+  -> Node A MCP uses Node-local Secret
+  -> structured result returns to Node B
+```
+
+MCP 默认不跨 Node 共享，只有显式 `mcp_invoke` ResourceGrant 才允许该路径。Agent、Skill、Built-in
+Tool 和 Secret 不使用此远程资源路径。
 
 ## 10. 网络、端口、域名与 TLS
 

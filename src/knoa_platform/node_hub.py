@@ -262,6 +262,7 @@ class NodeRelayManager:
         app: Any,
         core: Any | None = None,
         remote_models: Any | None = None,
+        direct_gateway_url: str = "",
         clock=time.time,
     ) -> None:
         self._store = store
@@ -270,6 +271,7 @@ class NodeRelayManager:
         self._app = app
         self._core = core
         self._remote_models = remote_models
+        self._direct_gateway_url = direct_gateway_url.strip().rstrip("/")
         self._clock = clock
         self._task: asyncio.Task[None] | None = None
         self._generation = 0
@@ -337,7 +339,16 @@ class NodeRelayManager:
             ping_timeout=20,
             max_size=2 * 1024 * 1024,
         ) as websocket:
-            await websocket.send(json.dumps(_presence(self._identity, enrollment, self._clock)))
+            await websocket.send(
+                json.dumps(
+                    _presence(
+                        self._identity,
+                        enrollment,
+                        self._clock,
+                        direct_gateway_url=self._direct_gateway_url,
+                    )
+                )
+            )
             ready = json.loads(await websocket.recv())
             if ready.get("ready") is not True or ready.get("node_id") != self._identity.node_id:
                 raise PermissionError("Relay rejected Node presence")
@@ -733,7 +744,11 @@ async def _send_plaintext(
 
 
 def _presence(
-    identity: NodeIdentity, enrollment: NodeHubEnrollment, clock: Any
+    identity: NodeIdentity,
+    enrollment: NodeHubEnrollment,
+    clock: Any,
+    *,
+    direct_gateway_url: str = "",
 ) -> dict[str, Any]:
     timestamp = float(clock())
     nonce = secrets.token_urlsafe(24)
@@ -743,11 +758,13 @@ def _presence(
         "node_id": identity.node_id,
         "timestamp": timestamp,
         "nonce": nonce,
+        "direct_gateway_url": direct_gateway_url,
     }
     return {
         "node_id": identity.node_id,
         "timestamp": timestamp,
         "nonce": nonce,
+        "direct_gateway_url": direct_gateway_url,
         "signature": identity.sign(canonical_json(transcript)),
     }
 

@@ -10,13 +10,11 @@ import yaml
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
 from knoa_platform.agents.definitions import (
-    AgentDefinition,
-    AgentProfile,
-    AgentSystemConfig,
+    AgentRuntimeLimits,
     DelegationPolicy,
     ModelBindingSpec,
-    RuntimeProfileLimits,
-    RuntimeSpec,
+    NodeAgent,
+    NodeAgentCatalog,
 )
 from knoa_platform.configuration.models import (
     ManagedApprovalReviewConfig,
@@ -178,40 +176,18 @@ class ApprovalReviewConfig(BaseModel):
 
 class AppConfig(BaseModel):
     default_agent: str = "knoa"
-    runtime_specs: dict[str, RuntimeSpec] = Field(
+    node_agents: dict[str, NodeAgent] = Field(
         default_factory=lambda: {
-            "native-main": RuntimeSpec(
-                implementation="native",
+            "knoa": NodeAgent(
+                kind="knoa",
+                display_name="Knoa Agent",
+                instructions_ref="builtin://assistant",
+                visibility="user",
                 model_binding=ModelBindingSpec(
                     ownership="platform",
                     model="@default",
                 ),
                 max_concurrency=4,
-            ),
-            "native-approval-reviewer": RuntimeSpec(
-                implementation="native",
-                model_binding=ModelBindingSpec(
-                    ownership="platform",
-                    model="@reviewer",
-                ),
-                max_concurrency=1,
-            ),
-            "codex-default": RuntimeSpec(
-                implementation="codex",
-                model_binding=ModelBindingSpec(ownership="runtime"),
-                command=("codex", "app-server"),
-                native_capabilities=frozenset(
-                    {"workspace_read", "command_execution"}
-                ),
-                instruction_authority="required",
-            ),
-        }
-    )
-    agent_profiles: dict[str, AgentProfile] = Field(
-        default_factory=lambda: {
-            "assistant": AgentProfile(
-                display_name="Knoa",
-                instructions_ref="builtin://assistant",
                 default_skill_refs=frozenset({"research_report"}),
                 allowed_skill_refs=frozenset({"research_report"}),
                 allowed_platform_tools=frozenset({"*"}),
@@ -225,43 +201,33 @@ class AppConfig(BaseModel):
                     max_deadline_seconds=1800,
                 ),
             ),
-            "approval-reviewer": AgentProfile(
+            "reviewer_agent": NodeAgent(
+                kind="knoa",
                 display_name="Knoa Reviewer",
                 instructions_ref="builtin://approval-reviewer",
-                allowed_platform_tools=frozenset(),
-                platform_capability_ceiling=frozenset(),
-                runtime_native_capability_ceiling=frozenset(),
-                runtime_limits=RuntimeProfileLimits(max_iterations=1),
-                callable_by=frozenset({"approval_service"}),
-            ),
-            "coder": AgentProfile(
-                display_name="Codex",
-                instructions_ref="builtin://coder",
-                runtime_native_capability_ceiling=frozenset(
-                    {"workspace_read", "command_execution"}
-                ),
-            ),
-        }
-    )
-    agent_definitions: dict[str, AgentDefinition] = Field(
-        default_factory=lambda: {
-            "knoa": AgentDefinition(
-                runtime_spec_id="native-main",
-                profile_id="assistant",
-                visibility="user",
-                enabled=True,
-            ),
-            "reviewer_agent": AgentDefinition(
-                runtime_spec_id="native-approval-reviewer",
-                profile_id="approval-reviewer",
                 visibility="system",
                 enabled=False,
+                model_binding=ModelBindingSpec(
+                    ownership="platform",
+                    model="@reviewer",
+                ),
+                max_concurrency=1,
+                runtime_limits=AgentRuntimeLimits(max_iterations=1),
+                callable_by=frozenset({"approval_service"}),
             ),
-            "codex": AgentDefinition(
-                runtime_spec_id="codex-default",
-                profile_id="coder",
+            "codex": NodeAgent(
+                kind="codex",
+                display_name="Codex Agent",
+                instructions_ref="builtin://coder",
                 visibility="delegate",
                 enabled=False,
+                model_binding=ModelBindingSpec(ownership="runtime"),
+                command=("codex", "app-server"),
+                native_capability_ceiling=frozenset(
+                    {"workspace_read", "command_execution"}
+                ),
+                home="agents/codex/home",
+                cwd="agents/codex/workspace",
             ),
         }
     )
@@ -340,8 +306,8 @@ class AppConfig(BaseModel):
     def _validate_provider(self) -> AppConfig:
         if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", self.default_agent):
             raise ValueError("default_agent must be a stable safe Agent ID")
-        system = self.agent_system_config()
-        reviewer = system.agents.get("reviewer_agent")
+        catalog = self.node_agent_catalog()
+        reviewer = catalog.agents.get("reviewer_agent")
         if self.approval_review.mode != "off":
             if self.approval_review.agent != "reviewer_agent":
                 raise ValueError("approval_review agent must be reviewer_agent")
@@ -457,12 +423,12 @@ class AppConfig(BaseModel):
             )
         return self
 
-    def agent_system_config(self) -> AgentSystemConfig:
-        runtimes: dict[str, RuntimeSpec] = {}
+    def node_agent_catalog(self) -> NodeAgentCatalog:
+        agents: dict[str, NodeAgent] = {}
         default_model = self.default_model or "bootstrap_default"
         reviewer_model = self.approval_review.model or default_model
-        for runtime_id, spec in self.runtime_specs.items():
-            binding = spec.model_binding
+        for agent_id, agent in self.node_agents.items():
+            binding = agent.model_binding
             if binding.ownership == "platform" and binding.model in {
                 "@default",
                 "@reviewer",
@@ -477,12 +443,10 @@ class AppConfig(BaseModel):
                         )
                     }
                 )
-                spec = spec.model_copy(update={"model_binding": binding})
-            runtimes[runtime_id] = spec
-        return AgentSystemConfig(
-            runtime_specs=runtimes,
-            profiles=self.agent_profiles,
-            agents=self.agent_definitions,
+                agent = agent.model_copy(update={"model_binding": binding})
+            agents[agent_id] = agent
+        return NodeAgentCatalog(
+            agents=agents,
             default_agent=self.default_agent,
         )
 
@@ -544,7 +508,7 @@ class AppConfig(BaseModel):
             default_model=default_model,
             fallback_model=self.fallback_model if self.models else "",
             fallback_enabled=self.fallback_enabled,
-            agent_system=self.agent_system_config(),
+            agents=self.node_agent_catalog(),
             approval_review=ManagedApprovalReviewConfig(
                 mode=self.approval_review.mode,
                 agent_id=self.approval_review.agent,

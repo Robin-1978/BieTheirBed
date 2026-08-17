@@ -3,11 +3,9 @@ from __future__ import annotations
 import pytest
 
 from knoa_platform.agents.definitions import (
-    AgentDefinition,
-    AgentProfile,
-    AgentSystemConfig,
     ModelBindingSpec,
-    RuntimeSpec,
+    NodeAgent,
+    NodeAgentCatalog,
 )
 from knoa_platform.configuration import (
     ConfigApplyError,
@@ -36,27 +34,17 @@ def _managed() -> ManagedConfig:
             )
         },
         default_model="primary",
-        agent_system=AgentSystemConfig(
-            runtime_specs={
-                "native-main": RuntimeSpec(
-                    implementation="native",
+        agents=NodeAgentCatalog(
+            agents={
+                "knoa": NodeAgent(
+                    kind="knoa",
+                    display_name="Knoa Agent",
+                    instructions="You are Knoa.",
+                    visibility="user",
                     model_binding=ModelBindingSpec(
                         ownership="platform",
                         model="primary",
                     ),
-                )
-            },
-            profiles={
-                "assistant": AgentProfile(
-                    display_name="Knoa",
-                    instructions="You are Knoa.",
-                )
-            },
-            agents={
-                "knoa": AgentDefinition(
-                    runtime_spec_id="native-main",
-                    profile_id="assistant",
-                    visibility="user",
                 )
             },
             default_agent="knoa",

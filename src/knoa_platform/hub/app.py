@@ -53,6 +53,7 @@ class PresenceRequest(_Request):
     node_id: str = Field(min_length=1, max_length=128)
     timestamp: float
     nonce: str = Field(min_length=16, max_length=256)
+    direct_gateway_url: str = Field(default="", max_length=2048)
     signature: str = Field(min_length=80, max_length=128)
 
 
@@ -81,19 +82,9 @@ class FleetReportRequest(PresenceRequest):
     result_code: str = Field(default="", max_length=128)
 
 
-class ModelResourceRequest(_Request):
-    resource_id: str = Field(min_length=1, max_length=128)
-    revision: int = Field(ge=1)
-    canonical_digest: str = Field(min_length=64, max_length=64)
-    display_name: str = Field(min_length=1, max_length=120)
-    provider_protocol: str = Field(pattern=r"^(openai_compatible|anthropic)$")
-    model_identity: str = Field(min_length=1, max_length=256)
-    declared_capabilities: dict = Field(default_factory=dict)
-
-
 class WorkspaceResourceRequest(_Request):
     resource_id: str = Field(min_length=1, max_length=128)
-    kind: Literal["agent", "runtime", "model", "skill", "mcp", "policy", "task"]
+    kind: Literal["model", "mcp"]
     generation: int = Field(ge=1)
     canonical_digest: str = Field(min_length=64, max_length=64)
     display_name: str = Field(min_length=1, max_length=120)
@@ -103,7 +94,7 @@ class WorkspaceResourceRequest(_Request):
 
 class DeploymentRequest(_Request):
     deployment_id: str = Field(min_length=1, max_length=128)
-    kind: Literal["model", "mcp", "agent", "task"]
+    kind: Literal["model", "mcp"]
     resource_id: str = Field(min_length=1, max_length=128)
     resource_generation: int = Field(ge=1)
     resource_digest: str = Field(min_length=64, max_length=64)
@@ -132,15 +123,6 @@ class WorkProjectionRequest(_Request):
     payload: dict[str, Any] = Field(default_factory=dict)
     observed_at: float = Field(ge=0)
     signature: str = Field(min_length=80, max_length=128)
-
-
-class ModelDeploymentRequest(_Request):
-    deployment_id: str = Field(min_length=1, max_length=128)
-    resource_id: str = Field(min_length=1, max_length=128)
-    resource_revision: int = Field(ge=1)
-    target_node_id: str = Field(min_length=1, max_length=128)
-    desired_revision: int = Field(ge=1)
-    enabled: bool = True
 
 
 class ResourceGrantRequest(_Request):
@@ -211,8 +193,6 @@ class HubApplication:
                 Route("/v1/workspace-resources", self.workspace_resources, methods=["GET", "POST"]),
                 Route("/v1/deployments", self.deployments, methods=["GET", "POST"]),
                 Route("/v1/work-projections", self.work_projections, methods=["GET", "POST"]),
-                Route("/v1/model-resources", self.model_resources, methods=["GET", "POST"]),
-                Route("/v1/model-deployments", self.model_deployments, methods=["GET", "POST"]),
                 Route("/v1/resource-grants", self.resource_grants, methods=["GET", "POST"]),
                 Route("/v1/deployment-observations", self.deployment_observations, methods=["GET", "POST"]),
                 Route("/v1/resource-invocation-tickets", self.resource_invocation_tickets, methods=["POST"]),
@@ -331,29 +311,6 @@ class HubApplication:
             return authenticated
         return JSONResponse({"workspace": self.service.repository.workspace()})
 
-    async def model_resources(self, request: Request) -> JSONResponse:
-        authenticated = self._authenticate(
-            request,
-            admin=request.method != "GET",
-        )
-        if isinstance(authenticated, JSONResponse):
-            return authenticated
-        if request.method == "GET":
-            return JSONResponse(
-                {"resources": list(self.service.repository.list_model_resources())}
-            )
-        parsed = await self._parse(request, ModelResourceRequest)
-        if isinstance(parsed, JSONResponse):
-            return parsed
-        try:
-            item = self.service.repository.put_model_resource(
-                parsed.model_dump(mode="json"),
-                created_by=authenticated,
-            )
-        except (LookupError, ValueError):
-            return JSONResponse({"error": "rejected"}, status_code=422)
-        return JSONResponse({"resource": item}, status_code=201)
-
     async def workspace_resources(self, request: Request) -> JSONResponse:
         authenticated = self._authenticate(request, admin=request.method != "GET")
         if isinstance(authenticated, JSONResponse):
@@ -420,28 +377,6 @@ class HubApplication:
         except (LookupError, PermissionError, ValueError):
             return JSONResponse({"error": "rejected"}, status_code=401)
         return JSONResponse({"item": item}, status_code=201)
-
-    async def model_deployments(self, request: Request) -> JSONResponse:
-        authenticated = self._authenticate(
-            request,
-            admin=request.method != "GET",
-        )
-        if isinstance(authenticated, JSONResponse):
-            return authenticated
-        if request.method == "GET":
-            return JSONResponse(
-                {"deployments": list(self.service.repository.list_model_deployments())}
-            )
-        parsed = await self._parse(request, ModelDeploymentRequest)
-        if isinstance(parsed, JSONResponse):
-            return parsed
-        try:
-            item = self.service.repository.put_model_deployment(
-                parsed.model_dump(mode="json")
-            )
-        except (LookupError, PermissionError, ValueError):
-            return JSONResponse({"error": "rejected"}, status_code=422)
-        return JSONResponse({"deployment": item}, status_code=201)
 
     async def resource_grants(self, request: Request) -> JSONResponse:
         authenticated = self._authenticate(

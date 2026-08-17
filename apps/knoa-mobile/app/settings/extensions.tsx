@@ -1,32 +1,19 @@
 import { router } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 
-import type { ExtensionPackage } from "@/api/models";
 import { AppPressable } from "@/components/AppPressable";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
 export default function ExtensionCenterScreen() {
   const gateway = useGateway();
-  const [packages, setPackages] = useState<ExtensionPackage[]>([]);
   const [kind, setKind] = useState<"skill" | "local_mcp" | "remote_mcp">("remote_mcp");
   const [source, setSource] = useState("");
   const [serverId, setServerId] = useState("");
   const [allowPrivate, setAllowPrivate] = useState(false);
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState("");
-
-  const load = useCallback(async () => {
-    if (!gateway.client) return;
-    try {
-      setPackages(await gateway.runAuthenticated((client) => client.listExtensionPackages()));
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "扩展包读取失败");
-    }
-  }, [gateway.client, gateway.runAuthenticated]);
-
-  useEffect(() => { void load(); }, [load]);
 
   async function inspectAndCreateDraft() {
     if (!source.trim() || (kind !== "skill" && !serverId.trim())) return;
@@ -49,13 +36,13 @@ export default function ExtensionCenterScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <View style={styles.section}>
-        <Text style={styles.title}>导入扩展</Text>
-        <Text style={styles.hint}>Skill 只作为数据包；第三方可执行能力统一通过 MCP。检查完成后仍需在配置草稿中预检并发布。</Text>
+        <Text style={styles.title}>Node 能力</Text>
+        <Text style={styles.hint}>Skill 是同步到当前 Node 的内容；MCP 是当前 Node 执行的服务。检查完成后仍需在配置草稿中预检并发布。</Text>
         <View style={styles.choices}>
           {(["remote_mcp", "local_mcp", "skill"] as const).map((value) => (
             <AppPressable key={value} style={[styles.choice, kind === value && styles.selected]} onPress={() => setKind(value)}>
               <Text style={kind === value ? styles.selectedText : styles.choiceText}>
-                {value === "remote_mcp" ? "远程 MCP" : value === "local_mcp" ? "本地 MCP 包" : "Skill 包"}
+                {value === "remote_mcp" ? "远程 MCP 服务" : value === "local_mcp" ? "本地 MCP 服务" : "Skill 内容"}
               </Text>
             </AppPressable>
           ))}
@@ -66,7 +53,7 @@ export default function ExtensionCenterScreen() {
         <TextInput
           value={source}
           onChangeText={setSource}
-          placeholder={kind === "remote_mcp" ? "https://mcp.example.com/mcp" : "Node 上的包目录绝对路径"}
+          placeholder={kind === "remote_mcp" ? "https://mcp.example.com/mcp" : "Node 上的内容目录绝对路径"}
           placeholderTextColor={colors.muted}
           style={styles.input}
           autoCapitalize="none"
@@ -78,17 +65,6 @@ export default function ExtensionCenterScreen() {
           {working ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>检查权限并创建草稿</Text>}
         </AppPressable>
         {message ? <Text style={styles.error}>{message}</Text> : null}
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.title}>不可变 PackageStore · {packages.length}</Text>
-        {packages.map((item) => (
-          <View key={item.package_id} style={styles.package}>
-            <Text style={styles.packageTitle}>{item.kind.toUpperCase()} · {item.package_id.slice(0, 22)}</Text>
-            <Text style={styles.hint}>{item.file_count} 个文件 · {(item.size_bytes / 1024).toFixed(1)} KB · {item.content_digest.slice(0, 16)}</Text>
-          </View>
-        ))}
-        {!packages.length ? <Text style={styles.hint}>尚未导入内容寻址包。</Text> : null}
       </View>
     </ScrollView>
   );
@@ -110,6 +86,4 @@ const styles = StyleSheet.create({
   primary: { minHeight: 46, backgroundColor: colors.accent, borderRadius: 13, alignItems: "center", justifyContent: "center" },
   primaryText: { color: "#fff", fontWeight: "800" },
   error: { color: colors.danger, fontSize: 13 },
-  package: { paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, gap: 4 },
-  packageTitle: { color: colors.ink, fontWeight: "700" },
 });

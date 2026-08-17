@@ -11,16 +11,14 @@ from knoa_platform.agent_runtime.model_step import ProviderChunk
 from knoa_platform.agent_runtime.session_store import RuntimeSessionRepository
 from knoa_platform.agent_runtime.tool_step import ToolArgumentPolicy, ToolStep
 from knoa_platform.agents import (
-    AgentDefinition,
-    AgentDefinitionResolver,
-    AgentProfile,
-    AgentSystemConfig,
     AgentExecutionService,
     AgentManager,
     AgentSessionBindingRepository,
     ExecuteAgentTurn,
     ModelBindingSpec,
-    RuntimeSpec,
+    NodeAgent,
+    NodeAgentCatalog,
+    NodeAgentResolver,
 )
 from knoa_platform.artifacts import ArtifactStore
 from knoa_platform.capabilities import CapabilityGateway, GatewayMCPConnector
@@ -72,31 +70,21 @@ async def healthy():
     return type("Health", (), {"healthy": True, "detail": "ok"})()
 
 
-def resolver() -> AgentDefinitionResolver:
-    return AgentDefinitionResolver(
-        AgentSystemConfig(
-            runtime_specs={
-                "native-main": RuntimeSpec(
-                    implementation="native",
+def resolver() -> NodeAgentResolver:
+    return NodeAgentResolver(
+        NodeAgentCatalog(
+            agents={
+                "knoa": NodeAgent(
+                    kind="knoa",
+                    display_name="Knoa Agent",
+                    instructions="system",
+                    visibility="user",
                     model_binding=ModelBindingSpec(
                         ownership="platform",
                         model="main",
                     ),
-                )
-            },
-            profiles={
-                "assistant": AgentProfile(
-                    display_name="Knoa",
-                    instructions="system",
                     allowed_platform_tools=frozenset({"*"}),
                     platform_capability_ceiling=frozenset({"*"}),
-                )
-            },
-            agents={
-                "knoa": AgentDefinition(
-                    runtime_spec_id="native-main",
-                    profile_id="assistant",
-                    visibility="user",
                 )
             },
             default_agent="knoa",

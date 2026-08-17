@@ -12,6 +12,7 @@ export type HubNode = {
   configuration_public_key: string;
   platform: string;
   version: string;
+  direct_gateway_url: string;
   online: boolean;
   last_seen: number | null;
 };
@@ -76,26 +77,7 @@ type HostedAccountResponse = {
   }>;
 };
 
-export type WorkspaceModelResource = {
-  resource_id: string;
-  revision: number;
-  canonical_digest: string;
-  display_name: string;
-  provider_protocol: "openai_compatible" | "anthropic";
-  model_identity: string;
-  declared_capabilities: Record<string, unknown>;
-};
-
-export type WorkspaceModelDeployment = {
-  deployment_id: string;
-  resource_id: string;
-  resource_revision: number;
-  target_node_id: string;
-  desired_revision: number;
-  enabled: boolean;
-};
-
-export type WorkspaceResourceKind = "agent" | "runtime" | "model" | "skill" | "mcp" | "policy" | "task";
+export type WorkspaceResourceKind = "model" | "mcp";
 
 export type WorkspaceResource = {
   resource_id: string;
@@ -114,7 +96,7 @@ export type WorkspaceResource = {
 export type WorkspaceDeployment = {
   deployment_id: string;
   workspace_id: string;
-  kind: "model" | "mcp" | "agent" | "task";
+  kind: "model" | "mcp";
   resource_id: string;
   resource_generation: number;
   resource_digest: string;
@@ -168,8 +150,6 @@ export type DeploymentObservation = {
 };
 
 export type WorkspaceResourceState = {
-  resources: WorkspaceModelResource[];
-  deployments: WorkspaceModelDeployment[];
   workspaceResources: WorkspaceResource[];
   workspaceDeployments: WorkspaceDeployment[];
   grants: WorkspaceResourceGrant[];
@@ -457,17 +437,13 @@ export async function createNodeEnrollmentGrant(): Promise<NodeEnrollmentGrant> 
 
 export async function loadWorkspaceResourceState(): Promise<WorkspaceResourceState> {
   const connection = await requiredHubConnection();
-  const [resources, deployments, workspaceResources, workspaceDeployments, grants, observations] = await Promise.all([
-    request<{ resources: WorkspaceModelResource[] }>(connection.url, connection.token, "/v1/model-resources"),
-    request<{ deployments: WorkspaceModelDeployment[] }>(connection.url, connection.token, "/v1/model-deployments"),
+  const [workspaceResources, workspaceDeployments, grants, observations] = await Promise.all([
     request<{ resources: WorkspaceResource[] }>(connection.url, connection.token, "/v1/workspace-resources"),
     request<{ deployments: WorkspaceDeployment[] }>(connection.url, connection.token, "/v1/deployments"),
     request<{ grants: WorkspaceResourceGrant[] }>(connection.url, connection.token, "/v1/resource-grants"),
     request<{ observations: DeploymentObservation[] }>(connection.url, connection.token, "/v1/deployment-observations"),
   ]);
   return {
-    resources: resources.resources,
-    deployments: deployments.deployments,
     workspaceResources: workspaceResources.resources,
     workspaceDeployments: workspaceDeployments.deployments,
     grants: grants.grants,
@@ -492,17 +468,6 @@ export async function listWorkspaceWork(
   return result.items;
 }
 
-export async function putWorkspaceModelResource(
-  resource: WorkspaceModelResource,
-): Promise<WorkspaceModelResource> {
-  const connection = await requiredHubConnection();
-  const result = await request<{ resource: WorkspaceModelResource }>(connection.url, connection.token, "/v1/model-resources", {
-    method: "POST",
-    body: resource,
-  });
-  return result.resource;
-}
-
 export async function putWorkspaceResource(resource: {
   resource_id: string;
   kind: WorkspaceResourceKind;
@@ -522,7 +487,7 @@ export async function putWorkspaceResource(resource: {
 
 export async function putWorkspaceDeployment(deployment: {
   deployment_id: string;
-  kind: "model" | "mcp" | "agent" | "task";
+  kind: "model" | "mcp";
   resource_id: string;
   resource_generation: number;
   resource_digest: string;
@@ -533,17 +498,6 @@ export async function putWorkspaceDeployment(deployment: {
 }): Promise<WorkspaceDeployment> {
   const connection = await requiredHubConnection();
   const result = await request<{ deployment: WorkspaceDeployment }>(connection.url, connection.token, "/v1/deployments", {
-    method: "POST",
-    body: deployment,
-  });
-  return result.deployment;
-}
-
-export async function putWorkspaceModelDeployment(
-  deployment: WorkspaceModelDeployment,
-): Promise<WorkspaceModelDeployment> {
-  const connection = await requiredHubConnection();
-  const result = await request<{ deployment: WorkspaceModelDeployment }>(connection.url, connection.token, "/v1/model-deployments", {
     method: "POST",
     body: deployment,
   });

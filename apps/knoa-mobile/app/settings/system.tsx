@@ -166,7 +166,7 @@ export default function SystemConfigurationScreen() {
         <Metric label={t("config.appliedRevision")} value={shortId(current?.state.applied_revision_id ?? "")} />
         <Metric label={t("config.desiredRevision")} value={shortId(current?.state.desired_revision_id ?? "")} />
         <Metric label={t("config.applyStatus")} value={current?.state.apply_status ?? "—"} danger={current?.state.apply_status === "failed"} />
-        <Metric label={t("config.defaultAgent")} value={document?.agent_system.default_agent ?? "—"} />
+        <Metric label={t("config.defaultAgent")} value={document?.agents.default_agent ?? "—"} />
         <View style={styles.generationGrid}>
           {current?.generations.map((generation) => (
             <View key={generation.agent_id} style={styles.generation}>
@@ -184,35 +184,72 @@ export default function SystemConfigurationScreen() {
       {document ? (
         <>
           <Section title={t("config.agents")}>
-            {Object.entries(document.agent_system.agents).map(([agentId, agent]) => {
-              const profile = document.agent_system.profiles[agent.profile_id];
-              const runtime = document.agent_system.runtime_specs[agent.runtime_spec_id];
-              const isDefault = document.agent_system.default_agent === agentId;
+            {Object.entries(document.agents.agents).map(([agentId, agent]) => {
+              const isDefault = document.agents.default_agent === agentId;
               return (
                 <View key={agentId} style={styles.item}>
                   <View style={styles.row}>
                     <View style={styles.flex}>
-                      <Text style={styles.itemTitle}>{profile?.display_name ?? agentId}</Text>
-                      <Text style={styles.meta}>{agentId} · {agent.visibility} · {runtime?.implementation} · {agent.runtime_spec_id}</Text>
+                      <Text style={styles.itemTitle}>{agent.display_name}</Text>
+                      <Text style={styles.meta}>{agentId} · {agent.kind === "knoa" ? "Knoa Agent" : "Codex Agent"} · {agent.visibility}</Text>
                     </View>
                     <Switch
                       disabled={!draft || isDefault}
                       value={agent.enabled}
                       onValueChange={(enabled) => updateDocument((next) => {
-                        const target = next.agent_system.agents[agentId];
+                        const target = next.agents.agents[agentId];
                         if (target) target.enabled = enabled;
                       })}
                     />
                   </View>
                   <Pressable
                     disabled={!draft || isDefault || !agent.enabled}
-                    onPress={() => updateDocument((next) => { next.agent_system.default_agent = agentId; })}
+                    onPress={() => updateDocument((next) => { next.agents.default_agent = agentId; })}
                     style={[styles.inlineButton, isDefault && styles.inlineButtonSelected]}
                   >
                     <Text style={[styles.inlineButtonText, isDefault && styles.inlineButtonTextSelected]}>
                       {isDefault ? t("config.currentDefault") : t("config.makeDefault")}
                     </Text>
                   </Pressable>
+                  <TextInput
+                    editable={Boolean(draft)}
+                    multiline
+                    placeholder={agent.instructions_ref || t("config.instructions")}
+                    placeholderTextColor={colors.muted}
+                    style={styles.instructions}
+                    value={agent.instructions}
+                    onChangeText={(instructions) => updateDocument((next) => {
+                      const target = next.agents.agents[agentId];
+                      if (target) {
+                        target.instructions = instructions;
+                        target.instructions_ref = instructions ? "" : agent.instructions_ref;
+                      }
+                    })}
+                  />
+                  <NumericField label={t("config.maxConcurrency")} value={agent.max_concurrency} disabled={!draft} onCommit={(value) => updateDocument((next) => { const target = next.agents.agents[agentId]; if (target) target.max_concurrency = value; })} />
+                  {agent.kind === "codex" ? (
+                    <ChoiceRow
+                      label={t("config.sandboxBundle")}
+                      value={agent.sandbox}
+                      disabled={!draft}
+                      choices={[["read-only", t("config.readOnly")], ["workspace-write", t("config.workspaceWrite")]]}
+                      onChange={(sandbox) => updateDocument((next) => {
+                        const target = next.agents.agents[agentId];
+                        if (!target) return;
+                        target.sandbox = sandbox;
+                        target.native_capability_ceiling = sandbox === "workspace-write"
+                          ? ["workspace_read", "workspace_write", "command_execution", "native_file_edit"]
+                          : ["workspace_read", "command_execution"];
+                      })}
+                    />
+                  ) : null}
+                  {agent.delegation.allowed ? (
+                    <View style={styles.fieldGrid}>
+                      <NumericField label={t("config.maxChildren")} value={agent.delegation.max_children} disabled={!draft} onCommit={(value) => updateDocument((next) => { const target = next.agents.agents[agentId]; if (target) target.delegation.max_children = value; })} />
+                      <NumericField label={t("config.maxParallelChildren")} value={agent.delegation.max_parallel_children} disabled={!draft} onCommit={(value) => updateDocument((next) => { const target = next.agents.agents[agentId]; if (target) target.delegation.max_parallel_children = value; })} />
+                      <NumericField label={t("config.childDeadline")} value={agent.delegation.max_deadline_seconds} disabled={!draft} onCommit={(value) => updateDocument((next) => { const target = next.agents.agents[agentId]; if (target) target.delegation.max_deadline_seconds = value; })} />
+                    </View>
+                  ) : null}
                 </View>
               );
             })}
@@ -225,64 +262,10 @@ export default function SystemConfigurationScreen() {
                 <Text style={styles.meta}>{model.provider} · {model.model || t("config.providerDefaultModel")}</Text>
               </View>
             ))}
-            {Object.entries(document.agent_system.runtime_specs).map(([id, runtime]) => (
-              <View key={id} style={styles.item}>
-                <Text style={styles.itemTitle}>{id}</Text>
-                <Text style={styles.meta}>{runtime.implementation} · {runtime.model_binding.ownership === "runtime" ? t("config.runtimeManagedModel") : runtime.model_binding.model} · ×{runtime.max_concurrency}</Text>
-                <NumericField label={t("config.maxConcurrency")} value={runtime.max_concurrency} disabled={!draft} onCommit={(value) => updateDocument((next) => { const target = next.agent_system.runtime_specs[id]; if (target) target.max_concurrency = value; })} />
-                {runtime.implementation === "codex" ? (
-                  <ChoiceRow
-                    label={t("config.sandboxBundle")}
-                    value={runtime.sandbox}
-                    disabled={!draft}
-                    choices={[["read-only", t("config.readOnly")], ["workspace-write", t("config.workspaceWrite")]]}
-                    onChange={(sandbox) => updateDocument((next) => {
-                      const target = next.agent_system.runtime_specs[id];
-                      if (!target) return;
-                      target.sandbox = sandbox;
-                      target.native_capabilities = sandbox === "workspace-write"
-                        ? ["workspace_read", "workspace_write", "command_execution", "native_file_edit"]
-                        : ["workspace_read", "command_execution"];
-                    })}
-                  />
-                ) : null}
-              </View>
-            ))}
-          </Section>
-
-          <Section title={t("config.profiles")}>
-            {Object.entries(document.agent_system.profiles).map(([profileId, profile]) => (
-              <View key={profileId} style={styles.item}>
-                <Text style={styles.itemTitle}>{profile.display_name}</Text>
-                <Text style={styles.meta}>{profileId} · Skill refs {profile.default_skill_refs.length}/{profile.allowed_skill_refs.length} · {t("config.toolsCount", { count: profile.allowed_platform_tools.length })}</Text>
-                <TextInput
-                  editable={Boolean(draft)}
-                  multiline
-                  placeholder={profile.instructions_ref || t("config.instructions")}
-                  placeholderTextColor={colors.muted}
-                  style={styles.instructions}
-                  value={profile.instructions}
-                  onChangeText={(instructions) => updateDocument((next) => {
-                    const target = next.agent_system.profiles[profileId];
-                    if (target) {
-                      target.instructions = instructions;
-                      target.instructions_ref = instructions ? "" : profile.instructions_ref;
-                    }
-                  })}
-                />
-                {profile.delegation.allowed ? (
-                  <View style={styles.fieldGrid}>
-                    <NumericField label={t("config.maxChildren")} value={profile.delegation.max_children} disabled={!draft} onCommit={(value) => updateDocument((next) => { const target = next.agent_system.profiles[profileId]; if (target) target.delegation.max_children = value; })} />
-                    <NumericField label={t("config.maxParallelChildren")} value={profile.delegation.max_parallel_children} disabled={!draft} onCommit={(value) => updateDocument((next) => { const target = next.agent_system.profiles[profileId]; if (target) target.delegation.max_parallel_children = value; })} />
-                    <NumericField label={t("config.childDeadline")} value={profile.delegation.max_deadline_seconds} disabled={!draft} onCommit={(value) => updateDocument((next) => { const target = next.agent_system.profiles[profileId]; if (target) target.delegation.max_deadline_seconds = value; })} />
-                  </View>
-                ) : null}
-              </View>
-            ))}
           </Section>
 
           <Section title={t("config.approvalReview")}>
-            <ChoiceRow label={t("config.reviewMode")} value={document.approval_review.mode} disabled={!draft} choices={[["off", t("config.reviewOff")], ["suggest", t("config.reviewSuggest")], ["auto", t("config.reviewAuto")]]} onChange={(value) => updateDocument((next) => { next.approval_review.mode = value as "off" | "suggest" | "auto"; const reviewer = next.agent_system.agents[next.approval_review.agent_id]; if (reviewer && value !== "off") reviewer.enabled = true; })} />
+            <ChoiceRow label={t("config.reviewMode")} value={document.approval_review.mode} disabled={!draft} choices={[["off", t("config.reviewOff")], ["suggest", t("config.reviewSuggest")], ["auto", t("config.reviewAuto")]]} onChange={(value) => updateDocument((next) => { next.approval_review.mode = value as "off" | "suggest" | "auto"; const reviewer = next.agents.agents[next.approval_review.agent_id]; if (reviewer && value !== "off") reviewer.enabled = true; })} />
             <Metric label={t("config.reviewerAgent")} value={document.approval_review.agent_id} />
             <NumericField label={t("config.reviewTimeout")} value={document.approval_review.timeout_seconds} disabled={!draft} onCommit={(value) => updateDocument((next) => { next.approval_review.timeout_seconds = value; })} />
             <ChoiceRow label={t("config.autoMaxRisk")} value={document.approval_review.auto_max_risk} disabled={!draft} choices={[["low", t("config.riskLow")], ["medium", t("config.riskMedium")]]} onChange={(value) => updateDocument((next) => { next.approval_review.auto_max_risk = value as "low" | "medium"; })} />

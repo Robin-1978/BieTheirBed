@@ -440,7 +440,7 @@ class CoreChatApp(App):
             ) or "| — | — | No discovered Resources |"
             await log.mount(CommandOutput("| Server | URI | Name |\n|---|---|---|\n" + rows))
         elif cmd == "/agents":
-            system = self._config.agent_system_config()
+            system = self._config.node_agent_catalog()
             rows = "\n".join(
                 f"| `{agent_id}` | {'selected' if agent_id == self._agent_id else ''} |"
                 for agent_id, agent in system.agents.items()
@@ -450,7 +450,7 @@ class CoreChatApp(App):
             await log.mount(CommandOutput(f"| Agent | State |\n|---|---|\n{rows}"))
         elif cmd.startswith("/agent "):
             agent_id = command.split(None, 1)[1].strip()
-            system = self._config.agent_system_config()
+            system = self._config.node_agent_catalog()
             agent = system.agents.get(agent_id)
             if (
                 agent is None

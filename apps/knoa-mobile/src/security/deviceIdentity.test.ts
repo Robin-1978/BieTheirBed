@@ -19,6 +19,7 @@ import {
   loadConnectionIdentity,
   replaceConnectionIdentity,
   storeSession,
+  updateNodeDirectGatewayUrl,
 } from "./deviceIdentity";
 
 beforeEach(() => native.cache.clear());
@@ -34,12 +35,18 @@ describe("Node binding selection", () => {
       nodeConfigurationPublicKey: "c".repeat(40),
     });
     await storeSession("session", Date.now() / 1000 + 3600);
+    await updateNodeDirectGatewayUrl("node_1", "https://direct.node.example/");
 
     await deselectNode();
 
     await expect(loadConnectionIdentity()).resolves.toBeNull();
     await expect(listNodeBindings()).resolves.toEqual([
-      expect.objectContaining({ nodeId: "node_1", displayName: "Robin Desktop", sessionToken: "" }),
+      expect.objectContaining({
+        nodeId: "node_1",
+        displayName: "Robin Desktop",
+        directGatewayUrl: "https://direct.node.example",
+        sessionToken: "",
+      }),
     ]);
   });
 });

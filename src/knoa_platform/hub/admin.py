@@ -381,7 +381,7 @@ def _restore(backup: Path, root: Path) -> int:
             files.append((source / "tenants" / workspace / "hub.db", str(item["sha256"])))
         mobile_release_files = manifest["mobile_release_files"]
         if not isinstance(mobile_release_files, list):
-            raise ValueError("Hosted backup mobile release manifest is invalid")
+            raise TypeError("Hosted backup mobile release manifest is invalid")
         seen_release_files: set[str] = set()
         for item in mobile_release_files:
             name = str(item["name"])

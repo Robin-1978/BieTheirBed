@@ -1016,24 +1016,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** AgentDefinition */
-        AgentDefinition: {
-            /** Runtime Spec Id */
-            runtime_spec_id: string;
-            /** Profile Id */
-            profile_id: string;
-            /**
-             * Visibility
-             * @default delegate
-             * @enum {string}
-             */
-            visibility: "user" | "delegate" | "system";
-            /**
-             * Enabled
-             * @default true
-             */
-            enabled: boolean;
-        };
         /** AgentListResponse */
         AgentListResponse: {
             /** Default Agent */
@@ -1041,57 +1023,18 @@ export interface components {
             /** Agents */
             agents: components["schemas"]["AgentSummary"][];
         };
-        /** AgentProfile */
-        AgentProfile: {
-            /** Display Name */
-            display_name: string;
+        /** AgentRuntimeLimits */
+        AgentRuntimeLimits: {
             /**
-             * Instructions
-             * @default
+             * Max Iterations
+             * @default null
              */
-            instructions: string;
+            max_iterations: number | null;
             /**
-             * Instructions Ref
-             * @default
+             * Max Output Tokens
+             * @default null
              */
-            instructions_ref: string;
-            /**
-             * Instructions Required
-             * @default true
-             */
-            instructions_required: boolean;
-            /**
-             * Default Skill Refs
-             * @default []
-             */
-            default_skill_refs: string[];
-            /**
-             * Allowed Skill Refs
-             * @default []
-             */
-            allowed_skill_refs: string[];
-            /**
-             * Allowed Platform Tools
-             * @default []
-             */
-            allowed_platform_tools: string[];
-            /**
-             * Platform Capability Ceiling
-             * @default []
-             */
-            platform_capability_ceiling: string[];
-            /**
-             * Runtime Native Capability Ceiling
-             * @default []
-             */
-            runtime_native_capability_ceiling: ("workspace_read" | "workspace_write" | "command_execution" | "native_file_edit")[];
-            runtime_limits?: components["schemas"]["RuntimeProfileLimits"];
-            delegation?: components["schemas"]["DelegationPolicy"];
-            /**
-             * Callable By
-             * @default []
-             */
-            callable_by: string[];
+            max_output_tokens: number | null;
         };
         /** AgentSummary */
         AgentSummary: {
@@ -1099,23 +1042,6 @@ export interface components {
             agent_id: string;
             /** Display Name */
             display_name: string;
-        };
-        /** AgentSystemConfig */
-        AgentSystemConfig: {
-            /** Runtime Specs */
-            runtime_specs: {
-                [key: string]: components["schemas"]["RuntimeSpec"];
-            };
-            /** Profiles */
-            profiles: {
-                [key: string]: components["schemas"]["AgentProfile"];
-            };
-            /** Agents */
-            agents: {
-                [key: string]: components["schemas"]["AgentDefinition"];
-            };
-            /** Default Agent */
-            default_agent: string;
         };
         /** AndroidReleaseResponse */
         AndroidReleaseResponse: {
@@ -2072,7 +1998,7 @@ export interface components {
              * @default true
              */
             fallback_enabled: boolean;
-            agent_system: components["schemas"]["AgentSystemConfig"];
+            agents: components["schemas"]["NodeAgentCatalog"];
             approval_review?: components["schemas"]["ManagedApprovalReviewConfig"];
             /** Skills */
             skills?: {
@@ -2348,6 +2274,134 @@ export interface components {
              * @default
              */
             hint: string;
+        };
+        /**
+         * NodeAgent
+         * @description One complete Agent owned and executed by this Knoa Node.
+         */
+        NodeAgent: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "knoa" | "codex";
+            /** Display Name */
+            display_name: string;
+            /**
+             * Instructions
+             * @default
+             */
+            instructions: string;
+            /**
+             * Instructions Ref
+             * @default
+             */
+            instructions_ref: string;
+            /**
+             * Instructions Required
+             * @default true
+             */
+            instructions_required: boolean;
+            /**
+             * Visibility
+             * @default delegate
+             * @enum {string}
+             */
+            visibility: "user" | "delegate" | "system";
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            model_binding: components["schemas"]["ModelBindingSpec"];
+            /**
+             * Max Concurrency
+             * @default 1
+             */
+            max_concurrency: number;
+            /**
+             * Default Skill Refs
+             * @default []
+             */
+            default_skill_refs: string[];
+            /**
+             * Allowed Skill Refs
+             * @default []
+             */
+            allowed_skill_refs: string[];
+            /**
+             * Allowed Platform Tools
+             * @default []
+             */
+            allowed_platform_tools: string[];
+            /**
+             * Platform Capability Ceiling
+             * @default []
+             */
+            platform_capability_ceiling: string[];
+            /**
+             * Native Capability Ceiling
+             * @default []
+             */
+            native_capability_ceiling: ("workspace_read" | "workspace_write" | "command_execution" | "native_file_edit")[];
+            runtime_limits?: components["schemas"]["AgentRuntimeLimits"];
+            delegation?: components["schemas"]["DelegationPolicy"];
+            /**
+             * Callable By
+             * @default []
+             */
+            callable_by: string[];
+            /**
+             * Command
+             * @default []
+             */
+            command: string[];
+            /**
+             * Home
+             * @default
+             */
+            home: string;
+            /**
+             * Cwd
+             * @default
+             */
+            cwd: string;
+            /**
+             * Sandbox
+             * @default read-only
+             * @enum {string}
+             */
+            sandbox: "read-only" | "workspace-write";
+            /**
+             * Approval Policy
+             * @default never
+             * @enum {string}
+             */
+            approval_policy: "untrusted" | "on-request" | "never";
+            /**
+             * Request Timeout Seconds
+             * @default 120
+             */
+            request_timeout_seconds: number;
+            /**
+             * Max Line Bytes
+             * @default 4194304
+             */
+            max_line_bytes: number;
+            /**
+             * Max Event Queue
+             * @default 1024
+             */
+            max_event_queue: number;
+        };
+        /** NodeAgentCatalog */
+        NodeAgentCatalog: {
+            /** Agents */
+            agents: {
+                [key: string]: components["schemas"]["NodeAgent"];
+            };
+            /** Default Agent */
+            default_agent: string;
         };
         /** NodeDescriptorResponse */
         NodeDescriptorResponse: {
@@ -2772,12 +2826,8 @@ export interface components {
         ResolvedInvocationPolicy: {
             /** Agent Id */
             agent_id: string;
-            /** Agent Definition Digest */
-            agent_definition_digest: string;
-            /** Runtime Spec Digest */
-            runtime_spec_digest: string;
-            /** Profile Digest */
-            profile_digest: string;
+            /** Node Agent Digest */
+            node_agent_digest: string;
             /**
              * Invocation Kind
              * @enum {string}
@@ -2853,86 +2903,6 @@ export interface components {
              * @default false
              */
             acknowledge_outcome_unknown: boolean;
-        };
-        /** RuntimeProfileLimits */
-        RuntimeProfileLimits: {
-            /**
-             * Max Iterations
-             * @default null
-             */
-            max_iterations: number | null;
-            /**
-             * Max Output Tokens
-             * @default null
-             */
-            max_output_tokens: number | null;
-        };
-        /** RuntimeSpec */
-        RuntimeSpec: {
-            /**
-             * Implementation
-             * @enum {string}
-             */
-            implementation: "native" | "codex";
-            model_binding: components["schemas"]["ModelBindingSpec"];
-            /**
-             * Max Concurrency
-             * @default 1
-             */
-            max_concurrency: number;
-            /**
-             * Command
-             * @default []
-             */
-            command: string[];
-            /**
-             * Home
-             * @default
-             */
-            home: string;
-            /**
-             * Cwd
-             * @default
-             */
-            cwd: string;
-            /**
-             * Sandbox
-             * @default read-only
-             * @enum {string}
-             */
-            sandbox: "read-only" | "workspace-write";
-            /**
-             * Approval Policy
-             * @default never
-             * @enum {string}
-             */
-            approval_policy: "untrusted" | "on-request" | "never";
-            /**
-             * Native Capabilities
-             * @default []
-             */
-            native_capabilities: ("workspace_read" | "workspace_write" | "command_execution" | "native_file_edit")[];
-            /**
-             * Instruction Authority
-             * @default supported
-             * @enum {string}
-             */
-            instruction_authority: "required" | "supported" | "none";
-            /**
-             * Request Timeout Seconds
-             * @default 120
-             */
-            request_timeout_seconds: number;
-            /**
-             * Max Line Bytes
-             * @default 4194304
-             */
-            max_line_bytes: number;
-            /**
-             * Max Event Queue
-             * @default 1024
-             */
-            max_event_queue: number;
         };
         /** RuntimeStatus */
         RuntimeStatus: {

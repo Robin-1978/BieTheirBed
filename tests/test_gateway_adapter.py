@@ -547,15 +547,15 @@ async def test_gateway_adapter_exposes_bounded_authentication_flow(tmp_path) -> 
 @pytest.mark.asyncio
 async def test_gateway_adapter_lists_only_enabled_agents(tmp_path) -> None:
     base = _config(tmp_path)
-    definitions = {
-        **base.agent_definitions,
-        "codex": base.agent_definitions["codex"].model_copy(
+    agents = {
+        **base.node_agents,
+        "codex": base.node_agents["codex"].model_copy(
             update={"enabled": True}
         ),
     }
     config = AppConfig(**{
         **base.model_dump(),
-        "agent_definitions": definitions,
+        "node_agents": agents,
     })
     adapter = SecureGatewayAdapter(
         config,
@@ -572,7 +572,7 @@ async def test_gateway_adapter_lists_only_enabled_agents(tmp_path) -> None:
     assert response.json() == {
         "default_agent": "knoa",
         "agents": [
-            {"agent_id": "knoa", "display_name": "Knoa"},
+            {"agent_id": "knoa", "display_name": "Knoa Agent"},
         ],
     }
 
@@ -594,7 +594,7 @@ async def test_gateway_adapter_exposes_owner_configuration_current(tmp_path) -> 
 
     assert response.status_code == 200
     assert response.json()["state"]["applied_revision_id"] == "revision-a"
-    assert response.json()["revision"]["document"]["agent_system"]["default_agent"] == "knoa"
+    assert response.json()["revision"]["document"]["agents"]["default_agent"] == "knoa"
 
 
 @pytest.mark.asyncio

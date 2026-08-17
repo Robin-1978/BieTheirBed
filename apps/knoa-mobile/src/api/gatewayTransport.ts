@@ -47,7 +47,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
   }
 
   async request(baseUrl: string, path: string, init: RequestInit): Promise<Response> {
-    if (await this.bindingPointsAtCurrentHub()) {
+    if (!this.binding.directGatewayUrl && await this.bindingPointsAtCurrentHub()) {
       try {
         return await this.relayRequest(baseUrl, path, init);
       } catch (relayError) {
@@ -65,7 +65,11 @@ export class ConnectionResolverTransport implements GatewayTransport {
     }
     try {
       const response = await withConnectTimeout(
-        (signal) => this.direct.request(baseUrl, path, { ...init, signal }),
+        (signal) => this.direct.request(
+          this.binding.directGatewayUrl || baseUrl,
+          path,
+          { ...init, signal },
+        ),
         4500,
       );
       this.active = "direct";
@@ -73,7 +77,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
     } catch (directError) {
       try {
         const response = await this.relayRequest(baseUrl, path, init);
-        this.relayPreferredUntil = Date.now() + 60_000;
+        this.relayPreferredUntil = Date.now() + 10_000;
         return response;
       } catch (relayError) {
         throw new Error(

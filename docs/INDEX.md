@@ -1,5 +1,8 @@
 # Documentation Index
 
+当前产品架构以“产品领域架构、完整模块架构、部署架构、Node/Agent 与共享资源架构”四份文档为准；
+历史 campaign、audit 和 implementation plan 只记录当时背景，不得覆盖当前领域所有权。
+
 - [服务器巨量源码文件治理](server-source-modularization.md)
 
 ## Architecture
@@ -18,10 +21,11 @@
 - [Knoa Capability Extension Design](knoa-capability-extension-design.md)
 - [Knoa Standard MCP Host Design](knoa-standard-mcp-host-design.md)
 - [Knoa Unified Agent Runtime Design](knoa-agent-runtime-design.md)
-- [Knoa Agent Runtime、Profile 与 Subagent 架构设计](knoa-agent-profile-delegation-design.md)
+- [Knoa NodeAgent、Runtime 与委派设计](knoa-agent-profile-delegation-design.md)
 - [Knoa 配置控制面与管理页面架构设计](knoa-configuration-control-plane-design.md)
 - [Knoa 扩展生态、模型接入与多节点 Hub 架构设计](knoa-extension-model-hub-node-design.md)
 - [Knoa Workspace 资源织网与共享执行架构设计](knoa-workspace-resource-fabric-design.md)
+- [Knoa Node、Agent 与共享资源架构](knoa-node-package-resource-instance-architecture.md)
 - [Knoa Durable Task Design](knoa-durable-task-design.md)
 - [Knoa Task Product Design](knoa-task-product-design.md)
 - [Knoa Conversation Forward Design](knoa-conversation-design.md)

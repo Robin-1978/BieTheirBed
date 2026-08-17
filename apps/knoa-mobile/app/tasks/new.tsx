@@ -20,7 +20,6 @@ import { AgentSelector } from "@/components/AgentSelector";
 import type { MCPResourceCatalogItem, TaskLaunchPolicy } from "@/api/models";
 import { useI18n } from "@/i18n";
 import { AppPressable } from "@/components/AppPressable";
-import { loadHubConnection, putWorkspaceDeployment, putWorkspaceResource } from "@/hub/hubClient";
 
 export default function NewTaskScreen() {
   const gateway = useGateway();
@@ -71,43 +70,6 @@ export default function NewTaskScreen() {
           fingerprint,
           requestId: Crypto.randomUUID(),
         };
-      }
-      const taskId = requestIdentity.current!.requestId;
-      const hub = await loadHubConnection();
-      if (hub) {
-        if (!gateway.nodeId) throw new Error("请先选择 Task 的目标 Node");
-        const spec = {
-          task_id: taskId,
-          title: input.title,
-          goal: input.goal,
-          agent_id: input.agentId,
-          launch_policy: input.launchPolicy,
-          notification_policy: input.notificationPolicy,
-        };
-        const digest = await Crypto.digestStringAsync(
-          Crypto.CryptoDigestAlgorithm.SHA256,
-          JSON.stringify(spec),
-        );
-        await putWorkspaceResource({
-          resource_id: taskId,
-          kind: "task",
-          generation: 1,
-          canonical_digest: digest,
-          display_name: input.title || input.goal.slice(0, 80),
-          spec,
-          enabled: true,
-        });
-        await putWorkspaceDeployment({
-          deployment_id: `task-${taskId}`,
-          kind: "task",
-          resource_id: taskId,
-          resource_generation: 1,
-          resource_digest: digest,
-          target_node_id: gateway.nodeId,
-          desired_generation: 1,
-          spec: { launch_policy: input.launchPolicy },
-          enabled: true,
-        });
       }
       const result = await gateway.runAuthenticated((client) => client.createTask({
         ...input,

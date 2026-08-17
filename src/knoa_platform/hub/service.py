@@ -125,6 +125,7 @@ class HubService:
             "node_id": node["node_id"],
             "timestamp": timestamp,
             "nonce": request["nonce"],
+            "direct_gateway_url": str(request.get("direct_gateway_url", "")),
         }
         try:
             Ed25519PublicKey.from_public_bytes(_decode(node["signing_public_key"])).verify(
@@ -132,7 +133,11 @@ class HubService:
             )
         except (InvalidSignature, ValueError) as exc:
             raise PermissionError("Node presence signature rejected") from exc
-        return self.repository.record_presence(node["node_id"], str(request["nonce"]))
+        return self.repository.record_presence(
+            node["node_id"],
+            str(request["nonce"]),
+            direct_gateway_url=str(request.get("direct_gateway_url", "")),
+        )
 
     def issue_ticket(
         self,
@@ -274,16 +279,11 @@ class HubService:
         caller = self.verify_node_signed_request(
             str(request["caller_node_id"]), transcript, str(request["signature"])
         )
-        try:
-            deployment = self.repository.deployment(
-                str(request["target_deployment_id"])
-            )
-            if deployment["kind"] != "model":
-                raise PermissionError("Resource ticket requires a Model Deployment")
-        except LookupError:
-            deployment = self.repository.model_deployment(
-                str(request["target_deployment_id"])
-            )
+        deployment = self.repository.deployment(
+            str(request["target_deployment_id"])
+        )
+        if deployment["kind"] != "model":
+            raise PermissionError("Resource ticket requires a Model Deployment")
         if not deployment["enabled"]:
             raise PermissionError("Remote model deployment disabled")
         grant = self.repository.active_resource_grant(
