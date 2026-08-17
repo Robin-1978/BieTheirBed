@@ -280,20 +280,32 @@ transport。Relay ciphertext 内承载现有 Gateway HTTP typed contract，Node 
 | Node Hub Edge Adapter | Hub enrollment、identity pin、outbound connector、E2E tunnel dispatch | `src/knoa_platform/node_hub.py`、`relay_protocol.py` |
 | App transport | direct 优先、Relay fallback、Node session crypto、有限事件轮询 | `apps/knoa-mobile/src/api/gatewayTransport*.ts`、`relayCrypto.ts` |
 
-Mobile App 内部拆分为两个状态边界：
+Mobile App 是账户级移动控制台，不是单 Node 的远程终端。内部拆分为四个状态边界：
 
 ```text
-Hub control state
-  Account session -> Workspace -> Node directory
+Identity state
+  issuer -> Account session
 
-Selected Node execution state
-  local binding -> direct/Relay transport -> Node authentication -> Conversation/Task
+Workspace control state
+  memberships -> active Workspace -> resource metadata / grants
+
+Node directory state
+  Hub directory + presence <-> local pinned trust bindings
+
+Optional Node execution state
+  selected Node? -> direct/Relay transport -> Node authentication -> Conversation/Task/Config
 ```
 
-Hub client 拥有 Hosted Account、Workspace 与 Node directory 的客户端状态；`GatewayProvider` 只拥有
-当前被选中 Node 的执行连接。App 启动时先恢复 Hub 控制面并加载本地 Node bindings，由用户选择
-Node 后才建立执行会话。单个 Node 的 offline/error 是局部状态，不能阻塞登录 Hub、切换 Workspace、
-查看目录或连接其他 Node。No-Hub 模式从本地 pinned bindings 中选择 Node，遵守相同边界。
+Identity client 拥有 Hosted Account session；Workspace client 拥有 membership 与 active Workspace；
+Node directory projection 聚合 Hub directory/presence 和本机 SecureStore binding，但不混淆两种权威；
+`NodeSessionProvider` 只拥有可空的 selected Node 及其执行连接。App Shell 在 Account 登录后立即可用，
+不等待 Node。单个 Node 的 offline/error 是局部状态，不能阻塞切换 Workspace、管理帐号、查看目录、
+退出当前 Node 或连接其他 Node。No-Hub 模式使用本地 identity + local Workspace 进入相同 Shell，
+不维护第二套 UI。
+
+Mobile 的权威详细架构和路由以 `docs/knoa-mobile-app-design.md` 为准。产品层级固定为
+`Account -> Workspace -> Node -> Conversation/Task`；启动时可以默认恢复上次 Workspace、Node 和
+Node 子页面，但必须重建完整父级导航。Node 是可选执行上下文，不是 Account 或 App 根状态。
 
 ## 6. Agent 领域模型
 
@@ -678,36 +690,51 @@ CLI、TUI 和 Feishu 最终消费相同的 Core 语义，不各自实现 Agent �
 ## 16. Mobile App 模块
 
 ```text
-Expo Router screens
-├── Chat / Conversation
-├── Task list/detail/editor/execution
-├── Approval / Interaction / Artifact
-├── Agent selector
-├── Capture / Capability / Update
-└── System Configuration
+Expo Router hierarchical shells
+├── Auth stack: login / register / recovery / local mode
+├── Account shell: Workspaces / Account / Hub / App settings
+├── Workspace shell: Overview / Nodes / Resources / Members / Settings
+└── Node shell: top Chat/Tasks switcher + stacked Capabilities / Configuration / Status
         │
         v
-State providers
-├── GatewayProvider
+Domain state providers
+├── IdentityProvider
+├── WorkspaceProvider
+├── NodeDirectoryProvider
+├── NodeSessionProvider
 ├── TaskReminderProvider
-└── ThemeProvider
+└── PreferenceProvider
         │
         v
-Typed API / security / storage
-├── GatewayClient and generated-compatible models
+Typed API / transport / security / storage
+├── Hub identity/workspace clients
+├── GatewayClient + direct/Relay transport
 ├── device identity / pairing / proof
-├── conversation cache and drafts
-├── task event cursor and timeline
+├── context-scoped server-state cache
+├── conversation drafts / task event cursor
 └── Android updater
 ```
 
-App 的状态只分三类：
+App 的状态分为四类：
 
-- 服务端权威状态：Conversation、Task、Approval、Agent、Config Revision；
-- 本地安全状态：设备私钥/身份、session token；
-- 本地体验状态：草稿、缓存、主题、提醒游标。
+- Hub 权威状态：Account session、Workspace membership、Node directory/presence、共享资源 metadata；
+- Node 权威状态：Conversation、Task、Approval、Agent、Node-local Config Revision；
+- 本地安全状态：App installation identity、Node pinned binding、Account/Node session token；
+- 本地体验状态：active Workspace、optional selected Node、草稿、缓存、主题、提醒游标。
 
-本地缓存不能覆盖服务端 revision；认证失效通过统一 reauthentication 恢复。
+`ActiveContext = Account + Workspace + optional Node` 是状态表达，不代表三个层级在 UI 中并列。
+Node 为空时停留在 Account/Workspace scope；Chat/Task 只存在于具体 Node child route。退出 Node
+只关闭 transport、订阅和短期 Node session，并导航回所属 Workspace，不退出 Hub、不删除 binding。
+所有 Node 服务端缓存必须至少按
+`issuer/account/workspace/node` 分区，本地缓存不能覆盖服务端 revision。
+
+Mobile 不使用持久底部导航。Chat composer、附件/语音控制、键盘和 safe area 独占底部；Account 与
+Workspace 使用 Stack drill-down，Node 只在顶部提供 Chat/Task 高频切换，其他管理页从 Node 菜单
+进入。导航表现不得反向改变领域归属。
+
+Relay transport 在交付领域层前必须按 `Content-Type` 区分文本和二进制。JSON、SSE、NDJSON 和
+`text/*` 显式使用 UTF-8 `TextDecoder`；Artifact/APK 保持原始 bytes。禁止依赖 React Native
+`Response(ArrayBuffer)` 的隐式文本解释，也禁止在 UI 层修复 mojibake。
 
 ## 17. SQLite 持久化归属
 

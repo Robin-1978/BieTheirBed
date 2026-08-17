@@ -8,6 +8,7 @@ import { authenticateDevice, pairDevice } from "@/security/pairing";
 import {
   clearSession,
   clearConnectionIdentity,
+  deselectNode,
   loadConnectionIdentity,
   loadCoreSession,
   loadSessionToken,
@@ -46,6 +47,7 @@ type GatewayState = {
   reconnect(): Promise<void>;
   reauthenticate(): Promise<void>;
   removeConnection(): Promise<void>;
+  disconnectNode(): Promise<void>;
   switchNode(nodeId: string): Promise<void>;
   newConversation(): Promise<void>;
   ensureConversation(): Promise<string>;
@@ -59,7 +61,7 @@ type GatewayState = {
 const Context = createContext<GatewayState | null>(null);
 
 export function GatewayProvider({ children }: React.PropsWithChildren) {
-  type StoredState = Omit<GatewayState, "pair" | "reconnect" | "reauthenticate" | "removeConnection" | "switchNode" | "newConversation" | "ensureConversation" | "commitConversation" | "openConversation" | "connection" | "runAuthenticated" | "subscribeEvents" | "selectAgent">;
+  type StoredState = Omit<GatewayState, "pair" | "reconnect" | "reauthenticate" | "removeConnection" | "disconnectNode" | "switchNode" | "newConversation" | "ensureConversation" | "commitConversation" | "openConversation" | "connection" | "runAuthenticated" | "subscribeEvents" | "selectAgent">;
   const initialState: StoredState = {
     status: "booting",
     client: null,
@@ -106,7 +108,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       if (generation !== connectionGenerationRef.current) return;
       if (!identity) {
         connectionRef.current = null;
-        commit({ status: "unpaired", client: null, gatewayUrl: "", sessionToken: "", sessionHandle: "", deviceId: "", nodeId: "", nodes, lastConnectedAt: 0, requiredUpdate: null, availableUpdate: null, agents: [], activeAgentId: "", selectedAgentId: "knoa" });
+        commit({ status: nodes.length ? "selecting" : "unpaired", client: null, gatewayUrl: "", sessionToken: "", sessionHandle: "", deviceId: "", nodeId: "", nodes, lastConnectedAt: 0, requiredUpdate: null, availableUpdate: null, agents: [], activeAgentId: "", selectedAgentId: "knoa" });
         return;
       }
       const device = { deviceId: identity.deviceId, gatewayUrl: identity.gatewayUrl };
@@ -362,6 +364,33 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     await connect();
   }, [commit, connect]);
 
+  const disconnectNode = useCallback(async () => {
+    connectionGenerationRef.current += 1;
+    provisionalConversationRef.current = null;
+    stateRef.current.client?.close();
+    await deselectNode();
+    const nodes = await listNodeBindings();
+    connectionRef.current = null;
+    commit({
+      status: nodes.length ? "selecting" : "unpaired",
+      client: null,
+      sessionHandle: "",
+      sessionToken: "",
+      latestEvent: null,
+      gatewayUrl: "",
+      deviceId: "",
+      nodeId: "",
+      nodes,
+      lastConnectedAt: 0,
+      error: "",
+      requiredUpdate: null,
+      availableUpdate: null,
+      agents: [],
+      activeAgentId: "",
+      selectedAgentId: "knoa",
+    });
+  }, [commit]);
+
   const switchNode = useCallback(async (nodeId: string) => {
     if (nodeId === stateRef.current.nodeId && stateRef.current.status === "ready") return;
     connectionGenerationRef.current += 1;
@@ -428,6 +457,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       reconnect: connect,
       reauthenticate,
       removeConnection,
+      disconnectNode,
       switchNode,
       newConversation,
       ensureConversation,
@@ -438,7 +468,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       subscribeEvents,
       selectAgent,
     }),
-    [commitConversation, connect, connection, ensureConversation, newConversation, openConversation, pair, reauthenticate, removeConnection, runAuthenticated, selectAgent, state, subscribeEvents, switchNode],
+    [commitConversation, connect, connection, disconnectNode, ensureConversation, newConversation, openConversation, pair, reauthenticate, removeConnection, runAuthenticated, selectAgent, state, subscribeEvents, switchNode],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

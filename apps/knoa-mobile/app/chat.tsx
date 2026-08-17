@@ -91,7 +91,13 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const gatewayRef = useRef(gateway);
   gatewayRef.current = gateway;
-  const params = useLocalSearchParams<{ capturedUri?: string; capturedName?: string }>();
+  const params = useLocalSearchParams<{
+    capturedUri?: string;
+    capturedName?: string;
+    workspaceId?: string;
+    workspaceName?: string;
+    nodeId?: string;
+  }>();
   const list = useRef<FlatList<ChatListItem>>(null);
   const followLatest = useRef(true);
   const userDragging = useRef(false);
@@ -679,7 +685,7 @@ export default function ChatScreen() {
           </AppPressable>
           <AppPressable
             accessibilityLabel={t("chat.history")}
-            onPress={() => router.push("/conversations")}
+            onPress={() => router.push({ pathname: "/conversations", params: nodeRouteParams(params) })}
             style={styles.topAction}
           >
             <AppIcon name="history" color={colors.accent} size={21} />
@@ -998,7 +1004,7 @@ export default function ChatScreen() {
                 label={t("chat.camera")}
                 onPress={() => {
                   setActionsOpen(false);
-                  router.push("/capture");
+                  router.push({ pathname: "/capture", params: nodeRouteParams(params) });
                 }}
               />
               <MediaAction
@@ -1025,6 +1031,14 @@ function MediaAction({ icon, label, onPress }: { icon: AppIconName; label: strin
       <Text style={styles.mediaLabel}>{label}</Text>
     </Pressable>
   );
+}
+
+function nodeRouteParams(params: { workspaceId?: string; workspaceName?: string; nodeId?: string }) {
+  return {
+    workspaceId: params.workspaceId ?? "",
+    workspaceName: params.workspaceName ?? "",
+    nodeId: params.nodeId ?? "",
+  };
 }
 
 const ChatTurn = memo(function ChatTurn({

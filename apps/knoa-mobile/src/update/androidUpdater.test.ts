@@ -68,6 +68,7 @@ vi.mock("react-native", () => ({ Platform: { OS: "android" } }));
 import {
   AndroidUpdateDownload,
   loadAndroidUpdateCheckpoint,
+  resolveAndroidDownloadUrl,
   resumableByteCount,
 } from "./androidUpdater";
 
@@ -173,5 +174,19 @@ describe("Android update checkpoints", () => {
     expect(resumableByteCount(2048, 1024)).toBe(0);
     expect(resumableByteCount(12.5, 1024)).toBe(0);
     expect(resumableByteCount(384, 1024)).toBe(384);
+  });
+
+  it("uses an absolute Hosted Hub release URL without requiring a Node", () => {
+    expect(resolveAndroidDownloadUrl(
+      "https://hub.example.com/releases/android/60/digest/knoa.apk",
+      "",
+    )).toBe("https://hub.example.com/releases/android/60/digest/knoa.apk");
+  });
+
+  it("requires a Node base URL only for relative release paths", () => {
+    expect(resolveAndroidDownloadUrl("/releases/android/60/digest/knoa.apk", "https://node.example.com"))
+      .toBe("https://node.example.com/releases/android/60/digest/knoa.apk");
+    expect(() => resolveAndroidDownloadUrl("/releases/android/60/digest/knoa.apk", ""))
+      .toThrow("当前更新地址需要连接 Node");
   });
 });

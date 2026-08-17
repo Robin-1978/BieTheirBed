@@ -45,13 +45,12 @@ export default function UpdateScreen() {
   const currentVersionCode = installedAndroidVersionCode();
 
   useEffect(() => {
-    if (!gateway.client) return;
     setChecking(true);
-    gateway.runAuthenticated((client) => resolveAndroidRelease(() => client.latestAndroidRelease()))
+    resolveAndroidRelease(() => gateway.runAuthenticated((client) => client.latestAndroidRelease()))
       .then(setRelease)
       .catch(() => setMessage(t("update.checkFailed")))
       .finally(() => setChecking(false));
-  }, [gateway.client, gateway.runAuthenticated, t]);
+  }, [gateway.runAuthenticated, t]);
 
   useEffect(() => {
     if (!release || !isAndroidUpdateAvailable(release, currentVersionCode)) return;

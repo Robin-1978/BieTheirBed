@@ -108,6 +108,22 @@ export async function selectNode(nodeId: string): Promise<void> {
   });
 }
 
+export async function deselectNode(): Promise<void> {
+  await queueIdentityMutation(async () => {
+    const vault = await loadVault();
+    const current = vault.nodes[vault.activeNodeId];
+    if (current) {
+      vault.nodes[vault.activeNodeId] = {
+        ...current,
+        sessionToken: "",
+        sessionExpiresAt: 0,
+      };
+    }
+    vault.activeNodeId = "";
+    await saveVault(vault);
+  });
+}
+
 export async function loadDevice(): Promise<StoredDevice | null> {
   const identity = await loadConnectionIdentity();
   return identity
@@ -155,7 +171,7 @@ export async function clearConnectionIdentity(): Promise<void> {
   await queueIdentityMutation(async () => {
     const vault = await loadVault();
     delete vault.nodes[vault.activeNodeId];
-    vault.activeNodeId = Object.keys(vault.nodes)[0] ?? "";
+    vault.activeNodeId = "";
     await saveVault(vault);
   });
 }
@@ -183,9 +199,10 @@ async function loadVault(): Promise<ConnectionVault> {
       if (!validBinding(candidate, nodeId)) continue;
       nodes[nodeId] = candidate;
     }
-    const activeNodeId = typeof parsed.activeNodeId === "string" && nodes[parsed.activeNodeId]
+    const activeNodeId = typeof parsed.activeNodeId === "string"
+      && (parsed.activeNodeId === "" || Boolean(nodes[parsed.activeNodeId]))
       ? parsed.activeNodeId
-      : Object.keys(nodes)[0] ?? "";
+      : "";
     return { version: 3, activeNodeId, nodes };
   } catch {
     return { version: 3, activeNodeId: "", nodes: {} };

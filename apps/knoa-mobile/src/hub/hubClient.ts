@@ -52,6 +52,14 @@ export type HostedAccountSession = {
   connection: HubConnection;
 };
 
+export type HostedAccountProfile = {
+  accountId: string;
+  loginIdentity: string;
+  displayName: string;
+  expiresAt: number;
+  workspaces: HostedWorkspace[];
+};
+
 type HostedAccountResponse = {
   account_id: string;
   login_identity: string;
@@ -175,6 +183,36 @@ export async function loadHubConnection(): Promise<HubConnection | null> {
     };
   } catch {
     return null;
+  }
+}
+
+export async function loadHostedAccount(): Promise<HostedAccountProfile | null> {
+  const connection = await requiredHubConnection();
+  if (!connection.accountId) return null;
+  const account = await request<{
+    account_id: string;
+    login_identity: string;
+    display_name: string;
+    expires_at: number;
+    workspaces: HostedAccountResponse["workspaces"];
+  }>(connection.rootUrl, connection.token, "/v1/hosted/account");
+  return {
+    accountId: account.account_id,
+    loginIdentity: account.login_identity,
+    displayName: account.display_name,
+    expiresAt: account.expires_at,
+    workspaces: account.workspaces.map(hostedWorkspace),
+  };
+}
+
+export async function logoutHostedAccount(): Promise<void> {
+  const connection = await loadHubConnection();
+  try {
+    if (connection?.accountId) {
+      await request(connection.rootUrl, connection.token, "/v1/hosted/session", { method: "DELETE" });
+    }
+  } finally {
+    await SecureStore.deleteItemAsync(HUB_CONNECTION);
   }
 }
 

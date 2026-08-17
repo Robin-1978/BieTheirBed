@@ -11,6 +11,7 @@ export type AppIconName =
   | "chat"
   | "check"
   | "chevron-down"
+  | "chevron-left"
   | "chevron-right"
   | "clock"
   | "edit"
@@ -18,7 +19,9 @@ export type AppIconName =
   | "history"
   | "keyboard"
   | "mic"
+  | "more"
   | "new-topic"
+  | "node"
   | "pause"
   | "play"
   | "plus"
@@ -31,6 +34,8 @@ export type AppIconName =
   | "stop"
   | "tasks"
   | "trash"
+  | "user"
+  | "workspace"
   | "x";
 
 const glyphs: Record<AppIconName, React.ComponentProps<typeof Ionicons>["name"]> = {
@@ -42,6 +47,7 @@ const glyphs: Record<AppIconName, React.ComponentProps<typeof Ionicons>["name"]>
   chat: "chatbubble-ellipses-outline",
   check: "checkmark",
   "chevron-down": "chevron-down",
+  "chevron-left": "chevron-back",
   "chevron-right": "chevron-forward",
   clock: "time-outline",
   edit: "create-outline",
@@ -49,7 +55,9 @@ const glyphs: Record<AppIconName, React.ComponentProps<typeof Ionicons>["name"]>
   history: "albums-outline",
   keyboard: "chatbox-outline",
   mic: "mic-outline",
+  more: "ellipsis-horizontal",
   "new-topic": "chatbubble-outline",
+  node: "desktop-outline",
   pause: "pause",
   play: "play",
   plus: "add",
@@ -62,6 +70,8 @@ const glyphs: Record<AppIconName, React.ComponentProps<typeof Ionicons>["name"]>
   stop: "stop",
   tasks: "checkbox-outline",
   trash: "trash-outline",
+  user: "person-circle-outline",
+  workspace: "grid-outline",
   x: "close",
 };
 

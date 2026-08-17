@@ -1,6 +1,6 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Linking from "expo-linking";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -15,6 +15,7 @@ import { colors } from "@/theme";
 import { useI18n } from "@/i18n";
 
 export default function CaptureScreen() {
+  const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string; nodeId?: string }>();
   const camera = useRef<CameraView>(null);
   const { t } = useI18n();
   const [permission, requestPermission] = useCameraPermissions();
@@ -40,6 +41,9 @@ export default function CaptureScreen() {
         params: {
           capturedUri: captured.uri,
           capturedName: captured.name,
+          workspaceId: stringParam(params.workspaceId),
+          workspaceName: stringParam(params.workspaceName),
+          nodeId: stringParam(params.nodeId),
         },
       });
   }
@@ -86,6 +90,10 @@ export default function CaptureScreen() {
       </View>
     </View>
   );
+}
+
+function stringParam(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
 }
 
 const styles = StyleSheet.create({
