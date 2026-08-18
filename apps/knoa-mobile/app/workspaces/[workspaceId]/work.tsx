@@ -74,10 +74,6 @@ export default function WorkspaceWorkScreen() {
           </View>
           <AppPressable accessibilityLabel="刷新" onPress={() => void refresh()} style={styles.iconButton}><AppIcon name="refresh" color={colors.muted} size={20} /></AppPressable>
         </View>
-        <View style={styles.actions}>
-          <AppPressable style={styles.primary} onPress={() => router.push({ pathname: "/conversations", params: { workspaceId: params.workspaceId, workspaceName: params.workspaceName ?? "" } })}><Text style={styles.primaryText}>当前 Node 会话</Text></AppPressable>
-          <AppPressable style={styles.secondary} onPress={() => router.push({ pathname: "/tasks", params: { workspaceId: params.workspaceId, workspaceName: params.workspaceName ?? "" } })}><Text style={styles.secondaryText}>当前 Node 任务</Text></AppPressable>
-        </View>
         {loading ? <ActivityIndicator color={colors.accent} /> : null}
         {!loading && !items.length ? <View style={styles.empty}><Text style={styles.itemTitle}>还没有同步的工作</Text><Text style={styles.meta}>连接 Node 并创建会话或部署任务后，状态会同步到这里；Node 离线不会阻塞 Workspace 管理。</Text></View> : null}
         {items.map((item) => {
@@ -111,11 +107,6 @@ const styles = StyleSheet.create({
   title: { color: colors.ink, fontSize: 19, fontWeight: "800" },
   meta: { color: colors.muted, fontSize: 12, lineHeight: 18 },
   iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center" },
-  actions: { flexDirection: "row", gap: 9 },
-  primary: { flex: 1, minHeight: 44, borderRadius: 13, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
-  primaryText: { color: colors.white, fontWeight: "800" },
-  secondary: { flex: 1, minHeight: 44, borderRadius: 13, borderWidth: 1, borderColor: colors.accent, alignItems: "center", justifyContent: "center" },
-  secondaryText: { color: colors.accent, fontWeight: "800" },
   empty: { padding: 18, gap: 7, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
   card: { padding: 15, gap: 9, borderRadius: 17, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
   row: { flexDirection: "row", alignItems: "center", gap: 11 },

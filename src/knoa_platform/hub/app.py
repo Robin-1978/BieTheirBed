@@ -194,6 +194,11 @@ class HubApplication:
                 Route("/v1/deployments", self.deployments, methods=["GET", "POST"]),
                 Route("/v1/work-projections", self.work_projections, methods=["GET", "POST"]),
                 Route("/v1/resource-grants", self.resource_grants, methods=["GET", "POST"]),
+                Route(
+                    "/v1/resource-grants/{grant_id:str}",
+                    self.resource_grant,
+                    methods=["DELETE"],
+                ),
                 Route("/v1/deployment-observations", self.deployment_observations, methods=["GET", "POST"]),
                 Route("/v1/resource-invocation-tickets", self.resource_invocation_tickets, methods=["POST"]),
                 Route(
@@ -401,6 +406,19 @@ class HubApplication:
         except (LookupError, PermissionError, ValueError):
             return JSONResponse({"error": "rejected"}, status_code=422)
         return JSONResponse({"grant": item}, status_code=201)
+
+    async def resource_grant(self, request: Request) -> JSONResponse:
+        authenticated = self._authenticate(request, admin=True)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        grant_id = str(request.path_params.get("grant_id", "")).strip()
+        if not grant_id:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            item = self.service.repository.revoke_resource_grant(grant_id)
+        except LookupError:
+            return JSONResponse({"error": "not_found"}, status_code=404)
+        return JSONResponse({"grant": item})
 
     async def deployment_observations(self, request: Request) -> JSONResponse:
         if request.method == "GET":

@@ -1,242 +1,380 @@
-import { router } from "expo-router";
 import * as Crypto from "expo-crypto";
-import { useEffect, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Stack } from "expo-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 
 import type { ManagedConfig } from "@/api/models";
+import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import {
+  listHubNodes,
   loadWorkspaceResourceState,
-  putWorkspaceDeployment,
-  putWorkspaceResource,
-  putWorkspaceResourceGrant,
+  type HubNode,
   type WorkspaceResourceState,
 } from "@/hub/hubClient";
+import {
+  deploymentForModel,
+  providerEndpoint,
+  setModelSharing,
+  upsertModel,
+  type ModelDriver,
+  type ModelEditorValue,
+} from "@/models/modelConfiguration";
+import { publishWorkspaceModelShare } from "@/models/workspaceModelSharing";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
-type Driver = ManagedConfig["providers"][string]["driver"];
+type Editor = ModelEditorValue & { secret: string; originalAlias: string };
 
-export default function ModelCenterScreen() {
+const emptyEditor = (): Editor => ({
+  alias: "",
+  originalAlias: "",
+  providerId: "",
+  driver: "openai_compatible",
+  endpoint: "",
+  modelId: "",
+  secretRef: "",
+  secretVersion: 0,
+  secret: "",
+  supportsVision: false,
+  setAsDefault: false,
+});
+
+export default function ModelsScreen() {
   const gateway = useGateway();
-  const [providerId, setProviderId] = useState("primary");
-  const [driver, setDriver] = useState<Driver>("openai_compatible");
-  const [endpoint, setEndpoint] = useState("");
-  const [secretRef, setSecretRef] = useState("primary_api_key");
-  const [secret, setSecret] = useState("");
-  const [modelAlias, setModelAlias] = useState("primary_model");
-  const [modelId, setModelId] = useState("");
-  const [resourceId, setResourceId] = useState("personal_model");
-  const [deploymentId, setDeploymentId] = useState("personal_model_deployment");
-  const [callerNodeId, setCallerNodeId] = useState("");
-  const [shareEnabled, setShareEnabled] = useState(false);
-  const [workspaceState, setWorkspaceState] = useState<WorkspaceResourceState | null>(null);
-  const [working, setWorking] = useState(false);
+  const [document, setDocument] = useState<ManagedConfig | null>(null);
+  const [workspace, setWorkspace] = useState<WorkspaceResourceState | null>(null);
+  const [nodes, setNodes] = useState<HubNode[]>([]);
+  const [editor, setEditor] = useState<Editor | null>(null);
+  const [sharingAlias, setSharingAlias] = useState("");
+  const [allowedNodeIds, setAllowedNodeIds] = useState<string[]>([]);
+  const [concurrency, setConcurrency] = useState(1);
+  const [working, setWorking] = useState("");
   const [message, setMessage] = useState("");
 
-  useEffect(() => {
-    void loadWorkspaceResourceState().then(setWorkspaceState).catch(() => undefined);
-  }, []);
-
-  async function createDraft() {
-    if (!providerId.trim() || !modelAlias.trim()) return;
-    setWorking(true);
+  const load = useCallback(async () => {
+    setWorking("load");
     setMessage("");
     try {
-      const draft = await gateway.runAuthenticated(async (client) => {
-        let nextSecretVersion = 0;
-        if (driver !== "workspace_remote" && secret.trim()) {
-          const status = await client.writeSecret(secretRef.trim(), secret);
-          nextSecretVersion = Math.ceil(status.rotated_at * 1000);
-        }
-        const created = await client.createConfigDraft();
-        const document = JSON.parse(JSON.stringify(created.document)) as ManagedConfig;
-        const existing = document.providers[providerId.trim()];
-        document.providers[providerId.trim()] = {
-          driver,
-          server_url: driver === "llamacpp" ? endpoint.trim() : "",
-          api_base: driver === "llamacpp" || driver === "workspace_remote" ? "" : endpoint.trim(),
-          api_key_ref: driver === "llamacpp" || driver === "workspace_remote" ? "" : secretRef.trim(),
-          api_key_env: "",
-          remote_deployment_id: driver === "workspace_remote" ? deploymentId.trim() : "",
-          direct_gateway_url: driver === "workspace_remote" ? endpoint.trim() : "",
-          secret_version: nextSecretVersion
-            ? Math.max(nextSecretVersion, (existing?.secret_version ?? 0) + 1)
-            : existing?.secret_version ?? 0,
-          requires_api_key: driver === "llamacpp" || driver === "workspace_remote" ? false : true,
-          timeout_seconds: 120,
-        };
-        document.models[modelAlias.trim()] = {
-          provider: providerId.trim(),
-          model: modelId.trim(),
-          supports_vision: null,
-          context_window: null,
-          thinking: null,
-        };
-        document.default_model = modelAlias.trim();
-        if (driver !== "workspace_remote" && deploymentId.trim() && resourceId.trim()) {
-          document.model_deployments[deploymentId.trim()] = {
-            model_alias: modelAlias.trim(),
-            resource_id: resourceId.trim(),
-            display_name: modelId.trim() || modelAlias.trim(),
-            enabled: true,
-            share_enabled: shareEnabled,
-            max_remote_concurrency: 1,
-          };
-        }
-        for (const agent of Object.values(document.agents.agents)) {
-          if (agent.kind === "knoa" && agent.model_binding.ownership === "platform") agent.model_binding.model = modelAlias.trim();
-        }
-        return client.replaceConfigDraft(created.draft_id, document, created.draft_version);
-      });
-      setSecret("");
-      router.push({ pathname: "/settings/system", params: { draftId: draft.draft_id } });
+      const [current, resourceState, directory] = await Promise.all([
+        gateway.runAuthenticated((client) => client.getConfigCurrent()),
+        loadWorkspaceResourceState().catch(() => null),
+        listHubNodes().catch(() => []),
+      ]);
+      setDocument(current.revision.document);
+      setWorkspace(resourceState);
+      setNodes(directory);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "模型配置创建失败");
+      setMessage(error instanceof Error ? error.message : "模型配置加载失败");
     } finally {
-      setWorking(false);
+      setWorking("");
+    }
+  }, [gateway.runAuthenticated]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const nodeName = useMemo(
+    () => nodes.find((node) => node.node_id === gateway.nodeId)?.display_name || "当前 Node",
+    [gateway.nodeId, nodes],
+  );
+
+  function beginCreate() {
+    const suffix = Crypto.randomUUID().replaceAll("-", "").slice(0, 10);
+    setEditor({
+      ...emptyEditor(),
+      alias: `model_${suffix}`,
+      providerId: `provider_${suffix}`,
+      secretRef: `provider_${suffix}_key`,
+    });
+    setSharingAlias("");
+  }
+
+  function beginEdit(alias: string) {
+    if (!document) return;
+    const model = document.models[alias];
+    if (!model) return;
+    const provider = document.providers[model.provider];
+    if (!provider) return;
+    setEditor({
+      alias,
+      originalAlias: alias,
+      providerId: model.provider,
+      driver: provider.driver,
+      endpoint: providerEndpoint(provider),
+      modelId: model.model,
+      secretRef: provider.api_key_ref,
+      secretVersion: provider.secret_version,
+      secret: "",
+      supportsVision: Boolean(model.supports_vision),
+      setAsDefault: document.default_model === alias,
+    });
+    setSharingAlias("");
+  }
+
+  async function applyDocument(next: ManagedConfig, summary: string) {
+    const created = await gateway.runAuthenticated((client) => client.createConfigDraft());
+    const replaced = await gateway.runAuthenticated((client) => client.replaceConfigDraft(
+      created.draft_id,
+      next,
+      created.draft_version,
+    ));
+    const validation = await gateway.runAuthenticated((client) => client.validateConfigDraft(replaced.draft_id, true));
+    if (!validation.valid) throw new Error(validation.issues[0]?.message || "配置检查失败");
+    const result = await gateway.runAuthenticated((client) => client.publishConfigDraft(
+      replaced.draft_id,
+      replaced.draft_version,
+      summary,
+    ));
+    if (result.state.apply_status === "failed") throw new Error(result.state.apply_error_code || "配置应用失败");
+    setDocument(result.revision.document);
+    return result.revision.document;
+  }
+
+  async function saveModel() {
+    if (!document || !editor?.alias.trim() || !editor.providerId.trim()) return;
+    setWorking("save");
+    setMessage("");
+    try {
+      let secretVersion = editor.secretVersion;
+      if (!["llamacpp", "workspace_remote"].includes(editor.driver) && editor.secret.trim()) {
+        const status = await gateway.runAuthenticated((client) => client.writeSecret(editor.secretRef, editor.secret));
+        secretVersion = Math.max(editor.secretVersion + 1, Math.ceil(status.rotated_at * 1000));
+      }
+      if (editor.originalAlias && editor.originalAlias !== editor.alias) {
+        throw new Error("模型内部名称创建后不可修改；可以修改显示模型 ID 和连接配置");
+      }
+      const next = upsertModel(document, { ...editor, secretVersion });
+      await applyDocument(next, editor.originalAlias ? "更新模型配置" : "添加模型配置");
+      setEditor(null);
+      setMessage("模型配置已检查并生效");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "模型保存失败");
+    } finally {
+      setWorking("");
     }
   }
 
-  async function syncWorkspaceResource() {
-    if (!gateway.nodeId || !resourceId.trim() || !deploymentId.trim() || !modelId.trim()) {
-      setMessage("需要当前 Node、Resource ID、Deployment ID 和模型 ID");
+  function beginShare(alias: string) {
+    if (!document) return;
+    if (!workspace) {
+      setMessage("当前 Workspace 控制面不可用，暂时不能修改共享设置");
       return;
     }
-    setWorking(true);
+    const deployment = deploymentForModel(document, alias)?.[1];
+    const deploymentId = deploymentForModel(document, alias)?.[0];
+    const activeGrants = workspace?.grants.filter(
+      (grant) => grant.target_deployment_id === deploymentId && grant.revoked_at === null,
+    ) ?? [];
+    setAllowedNodeIds(activeGrants.map((grant) => grant.caller_node_id));
+    setConcurrency(deployment?.max_remote_concurrency ?? 1);
+    setSharingAlias(alias);
+    setEditor(null);
+  }
+
+  async function saveSharing(enabled: boolean) {
+    if (!document || !workspace || !gateway.nodeId || !sharingAlias) return;
+    setWorking("share");
     setMessage("");
     try {
-      const material = JSON.stringify({
-        resource_id: resourceId.trim(),
-        driver,
-        model_identity: modelId.trim(),
+      const model = document.models[sharingAlias];
+      if (!model) throw new Error("模型不存在");
+      const provider = document.providers[model.provider];
+      if (!provider) throw new Error("模型 Provider 不存在");
+      const existing = deploymentForModel(document, sharingAlias);
+      const suffix = Crypto.randomUUID().replaceAll("-", "").slice(0, 18);
+      const deploymentId = existing?.[0] ?? `model_deployment_${suffix}`;
+      const resourceId = existing?.[1].resource_id ?? `model_resource_${suffix}`;
+      const displayName = model.model || sharingAlias;
+      const next = setModelSharing(document, sharingAlias, {
+        deploymentId,
+        resourceId,
+        displayName,
+        enabled,
+        maxRemoteConcurrency: concurrency,
       });
-      const digest = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        material,
-      );
-      const currentResource = workspaceState?.workspaceResources.find((item) => item.resource_id === resourceId.trim());
-      const generation = (currentResource?.generation ?? 0) + 1;
-      await putWorkspaceResource({
-        resource_id: resourceId.trim(),
-        kind: "model",
-        generation,
-        canonical_digest: digest,
-        display_name: modelId.trim(),
-        spec: {
-          provider_protocol: driver === "anthropic" ? "anthropic" : "openai_compatible",
-          model_identity: modelId.trim(),
-          declared_capabilities: { streaming: true, tools: true },
-        },
-        enabled: true,
+      const applied = await applyDocument(next, enabled ? "共享模型到 Workspace" : "停止共享模型");
+      const state = await publishWorkspaceModelShare({
+        state: workspace,
+        nodeId: gateway.nodeId,
+        resourceId,
+        deploymentId,
+        displayName,
+        modelIdentity: model.model || sharingAlias,
+        driver: provider.driver,
+        supportsVision: Boolean(model.supports_vision),
+        maxRemoteConcurrency: concurrency,
+        allowedNodeIds,
+        enabled,
       });
-      const currentDeployment = workspaceState?.workspaceDeployments.find((item) => item.deployment_id === deploymentId.trim());
-      await putWorkspaceDeployment({
-        deployment_id: deploymentId.trim(),
-        kind: "model",
-        resource_id: resourceId.trim(),
-        resource_generation: generation,
-        resource_digest: digest,
-        target_node_id: gateway.nodeId,
-        desired_generation: (currentDeployment?.desired_generation ?? 0) + 1,
-        spec: { max_remote_concurrency: 1 },
-        enabled: true,
-      });
-      if (callerNodeId.trim()) {
-        await putWorkspaceResourceGrant({
-          grant_id: `grant_${callerNodeId.trim().slice(-16)}_${deploymentId.trim().slice(-16)}`,
-          caller_node_id: callerNodeId.trim(),
-          target_deployment_id: deploymentId.trim(),
-          capability: "model_inference",
-          max_request_deadline: 600,
-          expires_at: Date.now() / 1000 + 30 * 24 * 60 * 60,
-        });
-      }
-      setWorkspaceState(await loadWorkspaceResourceState());
-      setMessage("Workspace 资源、部署和授权已热更新；目标 Node 将自动发布健康观察");
+      setDocument(applied);
+      setWorkspace(state);
+      setSharingAlias("");
+      setMessage(enabled ? "模型已共享到 Workspace" : "模型已停止共享");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Workspace 资源同步失败");
+      setMessage(error instanceof Error ? error.message : "共享设置失败");
     } finally {
-      setWorking(false);
+      setWorking("");
     }
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-      <View style={styles.section}>
-        <Text style={styles.title}>Model Center</Text>
-        <Text style={styles.hint}>Provider 管协议与凭据，Model 管模型 ID，NodeAgent 只绑定模型别名。Secret 写入后不可回显。</Text>
-        <Text style={styles.label}>Provider driver</Text>
-        <View style={styles.choices}>
-          {(["openai_compatible", "openai", "anthropic", "llamacpp", "workspace_remote"] as Driver[]).map((value) => (
-            <AppPressable key={value} style={[styles.choice, driver === value && styles.selected]} onPress={() => setDriver(value)}>
-              <Text style={driver === value ? styles.selectedText : styles.choiceText}>{value}</Text>
-            </AppPressable>
-          ))}
-        </View>
-        <Field value={providerId} onChange={setProviderId} placeholder="Provider ID" />
-        <Field value={endpoint} onChange={setEndpoint} placeholder={driver === "llamacpp" ? "http://127.0.0.1:8080" : driver === "workspace_remote" ? "可选 direct Gateway HTTPS URL" : "API Base URL"} />
-        {driver !== "llamacpp" && driver !== "workspace_remote" ? <><Field value={secretRef} onChange={setSecretRef} placeholder="Secret reference" /><Field value={secret} onChange={setSecret} placeholder="API Key（写入后清空）" secure /></> : null}
-        <Field value={modelAlias} onChange={setModelAlias} placeholder="Model alias" />
-        <Field value={modelId} onChange={setModelId} placeholder="Provider model ID，可留空使用默认" />
-        <Field value={resourceId} onChange={setResourceId} placeholder="Workspace Resource ID" />
-        <Field value={deploymentId} onChange={setDeploymentId} placeholder={driver === "workspace_remote" ? "远程 Deployment ID" : "本机 Deployment ID"} />
-        {driver !== "workspace_remote" ? (
-          <View style={styles.choices}>
-            <AppPressable style={[styles.choice, shareEnabled && styles.selected]} onPress={() => setShareEnabled(!shareEnabled)}>
-              <Text style={shareEnabled ? styles.selectedText : styles.choiceText}>{shareEnabled ? "允许 Workspace 调用" : "仅本机使用"}</Text>
-            </AppPressable>
+    <>
+      <Stack.Screen options={{ title: "模型" }} />
+      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        <View style={styles.hero}>
+          <View style={styles.heroIcon}><AppIcon name="agent" color={colors.accent} size={27} /></View>
+          <View style={styles.flex}>
+            <Text style={styles.title}>{nodeName} 的模型</Text>
+            <Text style={styles.hint}>模型默认只在当前 Node 使用。共享时，模型和密钥仍留在这里，Workspace 只管理授权。</Text>
           </View>
-        ) : null}
-        <AppPressable style={styles.primary} disabled={working} onPress={() => void createDraft()}>
-          {working ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>写入 Secret 并创建配置草稿</Text>}
-        </AppPressable>
-        {message ? <Text style={styles.error}>{message}</Text> : null}
-      </View>
-      <View style={styles.section}>
-        <Text style={styles.title}>Workspace Resource Fabric</Text>
-        <Text style={styles.hint}>共享定义与授权归 Workspace；模型凭据、数据和执行只留在目标 Node。填写 Caller Node 可同时授予该 Node 调用权。</Text>
-        <Field value={callerNodeId} onChange={setCallerNodeId} placeholder="Caller Node ID（可选）" />
-        <AppPressable style={styles.primary} disabled={working || driver === "workspace_remote"} onPress={() => void syncWorkspaceResource()}>
-          <Text style={styles.primaryText}>同步本机部署到 Workspace</Text>
-        </AppPressable>
-        {workspaceState?.workspaceDeployments.map((deployment) => {
-          const observation = workspaceState.observations.find((item) => item.deployment_id === deployment.deployment_id);
-          const grants = workspaceState.grants.filter((item) => item.target_deployment_id === deployment.deployment_id).length;
+          <AppPressable accessibilityLabel="刷新" onPress={() => void load()} style={styles.iconButton}><AppIcon name="refresh" color={colors.muted} size={20} /></AppPressable>
+        </View>
+
+        {working === "load" ? <ActivityIndicator color={colors.accent} /> : null}
+        {document ? Object.entries(document.models).map(([alias, model]) => {
+          const provider = document.providers[model.provider];
+          if (!provider) return null;
+          const deployment = deploymentForModel(document, alias);
+          const shared = Boolean(deployment?.[1].share_enabled);
+          const observation = workspace?.observations.find((item) => item.deployment_id === deployment?.[0]);
           return (
-            <View key={deployment.deployment_id} style={styles.resource}>
-              <Text style={styles.label}>{deployment.deployment_id}</Text>
-              <Text style={styles.hint}>{deployment.resource_id} · Node {deployment.target_node_id}</Text>
-              <Text style={observation?.health === "healthy" ? styles.healthy : styles.error}>
-                {observation ? `${observation.health} · capacity ${observation.available_capacity}` : "等待目标 Node 观察"} · {grants} grants
+            <View key={alias} style={styles.card}>
+              <View style={styles.row}>
+                <View style={[styles.modelIcon, shared && styles.modelIconShared]}><AppIcon name="agent" color={colors.accent} size={23} /></View>
+                <View style={styles.flex}>
+                  <Text style={styles.cardTitle}>{model.model || alias}</Text>
+                  <Text style={styles.meta}>{driverLabel(provider.driver)} · {providerEndpoint(provider) || "Workspace 远程服务"}</Text>
+                </View>
+                {document.default_model === alias ? <Text style={styles.badge}>默认</Text> : null}
+              </View>
+              <Text style={shared ? styles.healthy : styles.meta}>
+                {shared ? `已共享 · ${observation?.health === "healthy" ? "健康" : "等待 Node 状态"}` : "仅当前 Node 使用"}
               </Text>
+              <View style={styles.actions}>
+                <AppPressable style={styles.secondary} onPress={() => beginEdit(alias)}><Text style={styles.secondaryText}>编辑</Text></AppPressable>
+                {provider.driver !== "workspace_remote" ? <AppPressable style={styles.secondary} onPress={() => beginShare(alias)}><Text style={styles.secondaryText}>{shared ? "管理共享" : "共享"}</Text></AppPressable> : null}
+              </View>
             </View>
           );
-        })}
-      </View>
-    </ScrollView>
+        }) : null}
+
+        {!editor && !sharingAlias ? (
+          <AppPressable style={styles.primary} onPress={beginCreate}>
+            <AppIcon name="plus" color={colors.white} size={20} /><Text style={styles.primaryText}>添加模型</Text>
+          </AppPressable>
+        ) : null}
+
+        {editor ? <ModelEditor editor={editor} setEditor={setEditor} working={Boolean(working)} onSave={saveModel} onCancel={() => setEditor(null)} /> : null}
+        {sharingAlias && document ? (
+          <ShareEditor
+            alias={sharingAlias}
+            shared={Boolean(deploymentForModel(document, sharingAlias)?.[1].share_enabled)}
+            nodes={nodes.filter((node) => node.node_id !== gateway.nodeId)}
+            allowedNodeIds={allowedNodeIds}
+            setAllowedNodeIds={setAllowedNodeIds}
+            concurrency={concurrency}
+            setConcurrency={setConcurrency}
+            working={working === "share"}
+            onSave={() => void saveSharing(true)}
+            onStop={() => Alert.alert("停止共享", "其他 Node 将不能继续调用这个模型。", [
+              { text: "取消", style: "cancel" },
+              { text: "停止共享", style: "destructive", onPress: () => void saveSharing(false) },
+            ])}
+            onCancel={() => setSharingAlias("")}
+          />
+        ) : null}
+        {message ? <Text style={styles.message}>{message}</Text> : null}
+      </ScrollView>
+    </>
   );
 }
 
-function Field({ value, onChange, placeholder, secure = false }: { value: string; onChange(value: string): void; placeholder: string; secure?: boolean }) {
-  return <TextInput value={value} onChangeText={onChange} placeholder={placeholder} placeholderTextColor={colors.muted} secureTextEntry={secure} autoCapitalize="none" style={styles.input} />;
+function ModelEditor({ editor, setEditor, working, onSave, onCancel }: { editor: Editor; setEditor(value: Editor): void; working: boolean; onSave(): Promise<void>; onCancel(): void }) {
+  const needsSecret = !["llamacpp", "workspace_remote"].includes(editor.driver);
+  return (
+    <View style={styles.editor}>
+      <Text style={styles.title}>{editor.originalAlias ? "编辑模型" : "添加模型"}</Text>
+      <Text style={styles.label}>连接类型</Text>
+      <View style={styles.choices}>{(["llamacpp", "openai_compatible", "openai", "anthropic"] as ModelDriver[]).map((driver) => <AppPressable key={driver} style={[styles.choice, editor.driver === driver && styles.choiceSelected]} onPress={() => setEditor({ ...editor, driver })}><Text style={editor.driver === driver ? styles.choiceTextSelected : styles.choiceText}>{driverLabel(driver)}</Text></AppPressable>)}</View>
+      <Field label="模型名称" value={editor.modelId} onChange={(modelId) => setEditor({ ...editor, modelId })} placeholder="例如 Qwen 3.5 4B" />
+      <Field label={editor.driver === "llamacpp" ? "本地服务地址" : "API 地址"} value={editor.endpoint} onChange={(endpoint) => setEditor({ ...editor, endpoint })} placeholder={editor.driver === "llamacpp" ? "http://127.0.0.1:8192" : "https://api.example.com/v1"} />
+      {needsSecret ? <Field label="API Key" value={editor.secret} onChange={(secret) => setEditor({ ...editor, secret })} placeholder={editor.originalAlias ? "留空表示不修改" : "输入 API Key"} secure /> : null}
+      <Toggle label="支持图片" detail="模型能够接收图片输入" value={editor.supportsVision} onChange={(supportsVision) => setEditor({ ...editor, supportsVision })} />
+      <Toggle label="设为默认模型" detail="只影响之后的新调用，不修改 Agent 的显式绑定" value={editor.setAsDefault} onChange={(setAsDefault) => setEditor({ ...editor, setAsDefault })} />
+      <View style={styles.actions}><AppPressable style={styles.secondary} onPress={onCancel}><Text style={styles.secondaryText}>取消</Text></AppPressable><AppPressable disabled={working} style={styles.primarySmall} onPress={() => void onSave()}>{working ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>检查并保存</Text>}</AppPressable></View>
+    </View>
+  );
+}
+
+function ShareEditor({ alias, shared, nodes, allowedNodeIds, setAllowedNodeIds, concurrency, setConcurrency, working, onSave, onStop, onCancel }: { alias: string; shared: boolean; nodes: HubNode[]; allowedNodeIds: string[]; setAllowedNodeIds(value: string[]): void; concurrency: number; setConcurrency(value: number): void; working: boolean; onSave(): void; onStop(): void; onCancel(): void }) {
+  return (
+    <View style={styles.editor}>
+      <Text style={styles.title}>{shared ? "管理模型共享" : "共享模型到 Workspace"}</Text>
+      <Text style={styles.hint}>{alias} 仍在当前 Node 执行。请选择可以调用它的其他 Node。</Text>
+      {nodes.map((node) => <Toggle key={node.node_id} label={node.display_name} detail={node.online ? "在线" : "离线，授权会在上线后生效"} value={allowedNodeIds.includes(node.node_id)} onChange={(enabled) => setAllowedNodeIds(enabled ? [...allowedNodeIds, node.node_id] : allowedNodeIds.filter((id) => id !== node.node_id))} />)}
+      {!nodes.length ? <Text style={styles.meta}>Workspace 中还没有其他 Node。模型可以先发布，之后再补充授权。</Text> : null}
+      <Text style={styles.label}>最大远程并发</Text>
+      <View style={styles.choices}>{[1, 2, 4].map((value) => <AppPressable key={value} style={[styles.choice, concurrency === value && styles.choiceSelected]} onPress={() => setConcurrency(value)}><Text style={concurrency === value ? styles.choiceTextSelected : styles.choiceText}>{value}</Text></AppPressable>)}</View>
+      <View style={styles.actions}><AppPressable style={styles.secondary} onPress={onCancel}><Text style={styles.secondaryText}>取消</Text></AppPressable><AppPressable disabled={working} style={styles.primarySmall} onPress={onSave}>{working ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>保存共享</Text>}</AppPressable></View>
+      {shared ? <AppPressable disabled={working} style={styles.dangerButton} onPress={onStop}><Text style={styles.dangerText}>停止共享</Text></AppPressable> : null}
+    </View>
+  );
+}
+
+function Field({ label, value, onChange, placeholder, secure = false }: { label: string; value: string; onChange(value: string): void; placeholder: string; secure?: boolean }) {
+  return <View style={styles.field}><Text style={styles.label}>{label}</Text><TextInput value={value} onChangeText={onChange} placeholder={placeholder} placeholderTextColor={colors.muted} secureTextEntry={secure} autoCapitalize="none" style={styles.input} /></View>;
+}
+
+function Toggle({ label, detail, value, onChange }: { label: string; detail: string; value: boolean; onChange(value: boolean): void }) {
+  return <View style={styles.toggle}><View style={styles.flex}><Text style={styles.label}>{label}</Text><Text style={styles.meta}>{detail}</Text></View><Switch value={value} onValueChange={onChange} /></View>;
+}
+
+function driverLabel(driver: ModelDriver): string {
+  return ({ llamacpp: "本地 llama.cpp", openai_compatible: "OpenAI 兼容 API", openai: "OpenAI", anthropic: "Anthropic", workspace_remote: "Workspace 共享模型" })[driver];
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 18, gap: 16, backgroundColor: colors.background },
-  section: { backgroundColor: colors.surface, borderRadius: 18, padding: 16, gap: 12, borderWidth: 1, borderColor: colors.line },
+  container: { padding: 17, gap: 13, paddingBottom: 56 },
+  hero: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
+  heroIcon: { width: 48, height: 48, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
+  iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center" },
   title: { color: colors.ink, fontSize: 19, fontWeight: "800" },
   hint: { color: colors.muted, fontSize: 13, lineHeight: 19 },
+  flex: { flex: 1, minWidth: 0 },
+  card: { padding: 15, gap: 11, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
+  row: { flexDirection: "row", alignItems: "center", gap: 11 },
+  modelIcon: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceMuted },
+  modelIconShared: { backgroundColor: colors.accentSoft },
+  cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" },
+  meta: { color: colors.muted, fontSize: 12, lineHeight: 18 },
+  badge: { color: colors.accent, backgroundColor: colors.accentSoft, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5, fontSize: 11, fontWeight: "800" },
+  healthy: { color: colors.accent, fontSize: 12, fontWeight: "700" },
+  actions: { flexDirection: "row", gap: 9 },
+  primary: { minHeight: 48, flexDirection: "row", gap: 8, borderRadius: 13, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
+  primarySmall: { flex: 1, minHeight: 46, borderRadius: 12, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
+  primaryText: { color: colors.white, fontWeight: "800" },
+  secondary: { flex: 1, minHeight: 42, borderRadius: 12, borderWidth: 1, borderColor: colors.accent, alignItems: "center", justifyContent: "center" },
+  secondaryText: { color: colors.accent, fontWeight: "800" },
+  editor: { padding: 16, gap: 12, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.accent },
+  choices: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
+  choice: { paddingHorizontal: 11, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.line },
+  choiceSelected: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
+  choiceText: { color: colors.muted, fontSize: 12, fontWeight: "700" },
+  choiceTextSelected: { color: colors.accent, fontSize: 12, fontWeight: "800" },
+  field: { gap: 6 },
   label: { color: colors.ink, fontWeight: "700" },
-  choices: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  choice: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, backgroundColor: colors.background },
-  selected: { backgroundColor: colors.accent },
-  choiceText: { color: colors.ink, fontWeight: "600" },
-  selectedText: { color: "#fff", fontWeight: "800" },
-  input: { backgroundColor: colors.background, color: colors.ink, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 12, borderWidth: 1, borderColor: colors.line },
-  primary: { minHeight: 48, backgroundColor: colors.accent, borderRadius: 13, alignItems: "center", justifyContent: "center" },
-  primaryText: { color: "#fff", fontWeight: "800" },
-  error: { color: colors.danger, fontSize: 13 },
-  healthy: { color: colors.accent, fontSize: 13 },
-  resource: { padding: 12, gap: 4, borderRadius: 12, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.line },
+  input: { minHeight: 46, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.background, color: colors.ink, paddingHorizontal: 12, paddingVertical: 10 },
+  toggle: { minHeight: 54, flexDirection: "row", alignItems: "center", gap: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, paddingTop: 9 },
+  dangerButton: { minHeight: 44, alignItems: "center", justifyContent: "center" },
+  dangerText: { color: colors.danger, fontWeight: "800" },
+  message: { color: colors.ink, backgroundColor: colors.accentSoft, borderRadius: 13, padding: 13, lineHeight: 19 },
 });

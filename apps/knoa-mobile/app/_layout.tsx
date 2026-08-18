@@ -76,10 +76,11 @@ function AppNavigator() {
           <Stack.Screen name="task-executions/[id]" options={{ title: t("nav.executionDetails") }} />
           <Stack.Screen name="capabilities" options={{ title: t("nav.settings") }} />
           <Stack.Screen name="settings/app" options={{ title: "App 设置" }} />
+          <Stack.Screen name="settings/node" options={{ title: "Node 设置与诊断" }} />
+          <Stack.Screen name="settings/agents" options={{ title: "Agent" }} />
           <Stack.Screen name="settings/system" options={{ title: t("nav.systemConfiguration") }} />
           <Stack.Screen name="settings/extensions" options={{ title: "Extension Center" }} />
           <Stack.Screen name="settings/models" options={{ title: "Model Center" }} />
-          <Stack.Screen name="settings/nodes" options={{ title: "Node Center" }} />
           <Stack.Screen name="capture" options={{ title: t("nav.capture") }} />
           <Stack.Screen name="update" options={{ title: t("nav.update") }} />
         </Stack>

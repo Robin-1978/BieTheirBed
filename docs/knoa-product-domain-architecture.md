@@ -1,7 +1,7 @@
 # Knoa 产品领域架构
 
 > 状态：产品领域权威文档
-> 更新：2026-08-17
+> 更新：2026-08-18
 
 ## 1. 聚合与所有权
 
@@ -135,3 +135,39 @@ Agent、Conversation、Task、Skill、Built-in Tool 和 Secret 不进入 Resourc
 5. 跨 Node 能力必须是 typed capability 与显式 Grant；
 6. 共享可见性、管理权限和调用权限是三个独立维度；
 7. V1 不做自动 placement、跨账户共享和 Agent sharing。
+
+## 9. App 信息架构
+
+App 的可见层级必须与领域所有权一致：
+
+```text
+Account
+├── Workspace 列表
+├── 帐号安全
+└── App 设置 / 更新
+
+Workspace
+├── WorkProjection：跨 Node 工作目录
+├── Shared Services：共享 Model/MCP、健康与授权
+├── Nodes：目录、在线状态和 App 配对
+└── Members：成员与 Workspace 权限
+
+Node
+├── Conversation
+├── Task
+├── Resources
+│   ├── NodeAgent
+│   ├── Model
+│   ├── MCP
+│   ├── Skill
+│   └── Tool
+└── Settings / Diagnostics
+```
+
+App 设置不得出现在 Node 菜单；Hub 帐号、Workspace 成员和 Node Enrollment 不得聚合到一个通用
+“Node Center”。普通模型配置不显示 Provider ID、Resource ID、Deployment ID、revision、digest、generation
+或 Grant ID。这些字段由控制面生成并仅在高级技术详情中显示。
+
+本地 Model 默认私有。用户从 Node 的 Model 列表执行“共享到 Workspace”，选择允许调用的 Node 和并发上限。
+App 将该意图分别提交给 Node 配置权威和 Workspace 共享目录；模型文件、API Key 和真实执行仍留在承载 Node。
+新增 Model 不得隐式修改所有 NodeAgent 的模型绑定，设置默认模型和绑定指定 Agent 必须是独立显式操作。

@@ -1,6 +1,5 @@
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
@@ -14,28 +13,9 @@ export default function NodeMenuScreen() {
   const workspaceName = stringParam(params.workspaceName) || "Workspace";
   const nodeId = stringParam(params.nodeId) || gateway.nodeId;
   const node = gateway.nodes.find((item) => item.nodeId === nodeId);
-  const [working, setWorking] = useState(false);
-
-  function leaveNode() {
-    Alert.alert("退出当前 Node", "结束 App 与此 Node 的执行会话，并返回 Workspace。不会删除本地信任。", [
-      { text: "取消", style: "cancel" },
-      {
-        text: "退出 Node",
-        onPress: () => void (async () => {
-          setWorking(true);
-          try {
-            await gateway.disconnectNode();
-            if (workspaceId) {
-              router.replace({ pathname: "/workspaces/[workspaceId]", params: { workspaceId, workspaceName } });
-            } else {
-              router.replace("/account");
-            }
-          } finally {
-            setWorking(false);
-          }
-        })(),
-      },
-    ]);
+  function returnToWorkspace() {
+    if (workspaceId) router.replace({ pathname: "/workspaces/[workspaceId]", params: { workspaceId, workspaceName } });
+    else router.replace("/account");
   }
 
   return (
@@ -55,9 +35,8 @@ export default function NodeMenuScreen() {
         <View style={styles.card}>
           <MenuRow icon="chat" title="对话" detail="返回当前 Node 对话" onPress={() => router.replace({ pathname: "/chat", params: { workspaceId, workspaceName, nodeId } })} />
           <MenuRow icon="tasks" title="任务" detail="任务与执行记录" onPress={() => router.replace({ pathname: "/tasks", params: { workspaceId, workspaceName, nodeId } })} />
-          <MenuRow icon="agent" title="能力与配置" detail="Agent、LLM、Skill、MCP 与 Tool" onPress={() => router.push("/capabilities")} />
-          <MenuRow icon="settings" title="系统配置" detail="Draft、校验、发布与热生效" onPress={() => router.push("/settings/system")} />
-          <MenuRow icon="refresh" title="App 更新" detail="检查并安装新版本" onPress={() => router.push("/update")} />
+          <MenuRow icon="agent" title="Node 资源" detail="Agent、模型、MCP、Skill 与 Tool" onPress={() => router.push("/capabilities")} />
+          <MenuRow icon="settings" title="Node 设置与诊断" detail="连接、Runtime 状态与高级配置" onPress={() => router.push("/settings/node")} />
         </View>
 
         <View style={styles.card}>
@@ -66,13 +45,13 @@ export default function NodeMenuScreen() {
           <Text style={styles.mono} selectable>{nodeId || "—"}</Text>
           <Text style={styles.detail}>Gateway</Text>
           <Text style={styles.mono} selectable>{gateway.gatewayUrl || "—"}</Text>
-          <AppPressable disabled={working} onPress={() => void gateway.reconnect()} style={styles.secondary}>
+          <AppPressable onPress={() => void gateway.reconnect()} style={styles.secondary}>
             <Text style={styles.secondaryText}>重新连接</Text>
           </AppPressable>
         </View>
 
-        <AppPressable disabled={working} onPress={leaveNode} style={styles.leave}>
-          {working ? <ActivityIndicator color={colors.danger} /> : <Text style={styles.leaveText}>退出当前 Node</Text>}
+        <AppPressable onPress={returnToWorkspace} style={styles.leave}>
+          <Text style={styles.leaveText}>返回 Workspace</Text>
         </AppPressable>
       </ScrollView>
     </>
@@ -112,5 +91,5 @@ const styles = StyleSheet.create({
   secondary: { alignItems: "center", padding: 13, marginVertical: 12, borderRadius: 13, borderWidth: 1, borderColor: colors.accent },
   secondaryText: { color: colors.accent, fontWeight: "800" },
   leave: { alignItems: "center", padding: 14 },
-  leaveText: { color: colors.danger, fontWeight: "800" },
+  leaveText: { color: colors.accent, fontWeight: "800" },
 });

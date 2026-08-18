@@ -1,11 +1,12 @@
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import {
   listHostedWorkspaces,
+  createHostedWorkspace,
   loadHostedAccount,
   loadHubConnection,
   logoutHostedAccount,
@@ -32,6 +33,8 @@ export default function AccountHomeScreen() {
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState("");
   const [error, setError] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [workspaceName, setWorkspaceName] = useState("");
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -92,6 +95,23 @@ export default function AccountHomeScreen() {
     await setLandingPreference(value);
   }
 
+  async function createWorkspace() {
+    if (!workspaceName.trim()) return;
+    setWorking("create-workspace");
+    setError("");
+    try {
+      const workspace = await createHostedWorkspace(workspaceName.trim());
+      setWorkspaceName("");
+      setCreating(false);
+      await refresh();
+      await openWorkspace(workspace);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Workspace 创建失败");
+    } finally {
+      setWorking("");
+    }
+  }
+
   function confirmLogout() {
     Alert.alert("退出帐号", "退出 Hub 帐号，但保留本机已建立的 Node 信任。", [
       { text: "取消", style: "cancel" },
@@ -127,8 +147,12 @@ export default function AccountHomeScreen() {
 
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Workspace</Text>
-        <Text style={styles.meta}>{workspaces.length}</Text>
+        {profile ? <AppPressable onPress={() => setCreating((value) => !value)} style={styles.addButton}>
+          <AppIcon name={creating ? "x" : "plus"} color={colors.accent} size={19} />
+          <Text style={styles.addText}>{creating ? "取消" : "新建"}</Text>
+        </AppPressable> : <Text style={styles.meta}>{workspaces.length}</Text>}
       </View>
+      {creating ? <View style={styles.card}><Text style={styles.cardTitle}>新建 Workspace</Text><TextInput value={workspaceName} onChangeText={setWorkspaceName} placeholder="Workspace 名称" placeholderTextColor={colors.muted} style={styles.input} /><AppPressable disabled={working === "create-workspace"} onPress={() => void createWorkspace()} style={styles.primary}>{working === "create-workspace" ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>创建并进入</Text>}</AppPressable></View> : null}
       {loading ? <ActivityIndicator color={colors.accent} /> : null}
       {workspaces.map((workspace) => (
         <AppPressable key={workspace.workspaceId} disabled={Boolean(working)} onPress={() => void openWorkspace(workspace)} style={styles.workspaceCard}>
@@ -189,11 +213,16 @@ const styles = StyleSheet.create({
   iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center", borderRadius: 13 },
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 5 },
   sectionTitle: { color: colors.ink, fontSize: 20, fontWeight: "800" },
+  addButton: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, borderRadius: 12 },
+  addText: { color: colors.accent, fontWeight: "800" },
   workspaceCard: { flexDirection: "row", alignItems: "center", gap: 12, padding: 15, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
   workspaceIcon: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
   workspaceName: { color: colors.ink, fontSize: 16, fontWeight: "800" },
   card: { padding: 16, gap: 11, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
   cardTitle: { color: colors.ink, fontSize: 17, fontWeight: "800" },
+  input: { minHeight: 46, borderRadius: 12, borderWidth: 1, borderColor: colors.line, color: colors.ink, paddingHorizontal: 12 },
+  primary: { minHeight: 46, alignItems: "center", justifyContent: "center", borderRadius: 13, backgroundColor: colors.accent },
+  primaryText: { color: colors.white, fontWeight: "800" },
   hint: { color: colors.muted, fontSize: 13, lineHeight: 19 },
   choiceRow: { flexDirection: "row", gap: 7 },
   choice: { flex: 1, alignItems: "center", paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: colors.line },

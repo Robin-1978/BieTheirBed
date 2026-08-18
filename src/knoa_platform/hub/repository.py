@@ -801,6 +801,21 @@ class HubRepository:
             ).fetchall()
         return tuple(dict(row) for row in rows)
 
+    def revoke_resource_grant(self, grant_id: str) -> dict:
+        now = self._clock()
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT * FROM resource_grants WHERE grant_id=? AND workspace_id=?",
+                (grant_id, self.hub_id),
+            ).fetchone()
+            if row is None:
+                raise LookupError("Resource grant not found")
+            db.execute(
+                "UPDATE resource_grants SET revoked_at=? WHERE grant_id=? AND workspace_id=?",
+                (now, grant_id, self.hub_id),
+            )
+        return self.resource_grant(grant_id)
+
     def put_deployment_observation(self, node_id: str, item: dict) -> dict:
         deployment = self.deployment(str(item["deployment_id"]))
         if deployment["target_node_id"] != node_id:
