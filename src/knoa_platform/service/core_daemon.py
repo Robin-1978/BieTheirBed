@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import logging
 import os
-import signal
 import sys
 from pathlib import Path
 
@@ -16,15 +15,15 @@ from knoa_platform.agent_runtime.composition import (
 )
 from knoa_platform.branding import ASSISTANT_NAME
 from knoa_platform.config import AppConfig, load_config
+from knoa_platform.private_files import prepare_private_file
 from knoa_platform.runtime import RuntimePaths, load_service_environment
+from knoa_platform.service.shutdown import wait_for_shutdown
 
 logger = logging.getLogger(__name__)
 
 
 def _prepare_private_file(path: Path) -> None:
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    path.touch(exist_ok=True)
-    path.chmod(0o600)
+    prepare_private_file(path, label="Knoa service file")
 
 
 class CoreDaemon:
@@ -92,14 +91,7 @@ class CoreDaemon:
     async def serve_forever(self) -> None:
         if self._composition is None:
             raise RuntimeError("Core daemon is not started")
-        stop_event = asyncio.Event()
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            try:
-                loop.add_signal_handler(sig, stop_event.set)
-            except NotImplementedError:
-                pass
-        await stop_event.wait()
+        await wait_for_shutdown(self._composition.paths.stop_request)
         await self.stop()
 
     async def _cleanup_loop(self) -> None:
@@ -171,6 +163,11 @@ async def _serve(
 
 def daemonize(log_path: Path) -> None:
     _prepare_private_file(log_path)
+    if os.name == "nt":
+        raise RuntimeError(
+            "Windows does not support POSIX daemonization; run Knoa in the "
+            "foreground under Task Scheduler or use 'knoa --start'"
+        )
     if os.fork() > 0:
         raise SystemExit(0)
     os.setsid()

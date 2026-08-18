@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from knoa_platform.private_files import IS_WINDOWS, validate_private_file
+
 
 def default_runtime_root() -> Path:
     """Return the per-user application state directory."""
@@ -14,10 +16,21 @@ def default_runtime_root() -> Path:
     )
     if configured:
         return Path(configured).expanduser()
+    if IS_WINDOWS:
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            return Path(local_app_data) / "Knoa" / "Node"
     return Path.home() / ".knoa"
 
 
 def os_runtime_dir() -> Path:
+    configured = os.environ.get("KNOA_RUNTIME_DIR")
+    if configured:
+        return Path(configured).expanduser()
+    if IS_WINDOWS:
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            return Path(local_app_data) / "Knoa" / "Run"
     xdg = os.environ.get("XDG_RUNTIME_DIR")
     if xdg:
         return Path(xdg) / "knoa"
@@ -82,8 +95,21 @@ class RuntimePaths:
         return self.config / "service.env"
 
     @property
+    def process_runtime(self) -> Path:
+        configured = os.environ.get("KNOA_RUNTIME_DIR")
+        if configured:
+            return Path(configured).expanduser().resolve()
+        if IS_WINDOWS:
+            return self.root / "run"
+        return os_runtime_dir()
+
+    @property
     def pid(self) -> Path:
-        return os_runtime_dir() / "service.pid"
+        return self.process_runtime / "service.pid"
+
+    @property
+    def stop_request(self) -> Path:
+        return self.process_runtime / "service.stop"
 
     def resolve(self, value: str | Path, *, default_parent: Path | None = None) -> Path:
         path = Path(value).expanduser()
@@ -100,11 +126,12 @@ def load_service_environment(root: str | Path | None = None) -> None:
     path = RuntimePaths.from_root(root).service_env
     if not path.exists():
         return
-    if path.is_symlink() or not path.is_file():
-        raise ValueError("Knoa service environment must be a regular file")
-    metadata = path.stat()
-    if metadata.st_mode & 0o077:
-        raise PermissionError("Knoa service environment must use mode 0600")
+    try:
+        validate_private_file(path, label="Knoa service environment")
+    except RuntimeError as exc:
+        raise PermissionError(
+            f"Knoa service environment must use mode 0600 on POSIX: {exc}"
+        ) from exc
     for line_number, raw_line in enumerate(
         path.read_text(encoding="utf-8").splitlines(),
         start=1,

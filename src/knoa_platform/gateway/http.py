@@ -22,6 +22,7 @@ from knoa_platform.gateway.auth import (
 from knoa_platform.gateway.protocol import (
     GatewayRequest,
 )
+from knoa_platform.private_files import IS_WINDOWS
 from knoa_platform.service.core_client import (
     CoreConnectionLostError,
     CoreRequestError,
@@ -239,10 +240,11 @@ class GatewayHttp:
             raise ValueError(
                 f"Secure Gateway TLS {label} must be a regular non-symlink file"
             )
-        if metadata.st_uid != os.geteuid():
-            raise ValueError(f"Secure Gateway TLS {label} has the wrong owner")
-        if private and stat.S_IMODE(metadata.st_mode) & 0o077:
-            raise ValueError("Secure Gateway TLS private key must be owner-only")
+        if not IS_WINDOWS:
+            if metadata.st_uid != os.geteuid():
+                raise ValueError(f"Secure Gateway TLS {label} has the wrong owner")
+            if private and stat.S_IMODE(metadata.st_mode) & 0o077:
+                raise ValueError("Secure Gateway TLS private key must be owner-only")
         if metadata.st_size <= 0:
             raise ValueError(f"Secure Gateway TLS {label} is empty")
         return candidate.resolve()

@@ -20,25 +20,38 @@ The resulting public Gateway URL is `https://knoa.tinydotdot.com`.
 Do not enable "No TLS Verify": the origin is intentionally plain HTTP over the
 local connector. Device authentication remains enforced by the Gateway.
 
-## Local connector
+## Linux connectors
 
-Store the remotely managed Tunnel token outside the repository:
+The current Cloudflare account owns two independent Tunnels. Each Tunnel has
+its own Token, connector process and systemd user service:
+
+```text
+cloudflared-knoa.service -> ~/.knoa/config/cloudflare.token
+cloudflared-per.service  -> ~/.knoa/config/cloudflare-per.token
+```
+
+Store both remotely managed Tunnel tokens outside the repository:
 
 ```bash
 install -d -m 700 ~/.knoa/config
 install -m 600 deploy/cloudflared/cloudflare.token.example \
   ~/.knoa/config/cloudflare.token
+install -m 600 deploy/cloudflared/cloudflare.token.example \
+  ~/.knoa/config/cloudflare-per.token
 ```
 
-Replace the example content in `cloudflare.token` with only the remotely
-managed Tunnel token, then install the user service:
+Replace each example with only its matching remotely managed Tunnel Token,
+then install both user services:
 
 ```bash
 install -d -m 700 ~/.config/systemd/user
 install -m 600 deploy/cloudflared/cloudflared-knoa.user.service \
   ~/.config/systemd/user/cloudflared-knoa.service
+install -m 600 deploy/cloudflared/cloudflared-per.user.service \
+  ~/.config/systemd/user/cloudflared-per.service
 systemctl --user daemon-reload
 systemctl --user enable --now cloudflared-knoa.service
+systemctl --user enable --now cloudflared-per.service
 ```
 
 Verify both sides:
@@ -54,5 +67,9 @@ The expected response is:
 {"status":"ok","scope":"authentication"}
 ```
 
-This service is deliberately independent of `cloudflared-per.service`, so a
-restart or token rotation for either application cannot interrupt the other.
+The services are deliberately independent, so a restart or Token rotation for
+either application cannot interrupt the other. Both use `--token-file`; Tokens
+do not appear in process command lines or unit XML/text.
+
+Linux continues to use systemd. Windows uses two WinSW service instances for
+the same two-Tunnel topology; this difference is isolated to deployment.

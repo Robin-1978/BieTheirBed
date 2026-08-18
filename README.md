@@ -33,6 +33,9 @@ A personal computer agent with ReAct reasoning, multi-LLM support, tool calling,
 
 ## Quick Start
 
+原生 Windows 同机运行 Hosted Hub 与 Node（Python 3.14 + venv，无需 WSL）见
+[`deploy/windows/README.md`](deploy/windows/README.md)。
+
 ```bash
 # Install
 pip install -e .

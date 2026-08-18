@@ -11,6 +11,7 @@
 - [Knoa 产品领域架构](knoa-product-domain-architecture.md)
 - [Knoa 完整模块架构](knoa-module-architecture.md)
 - [Knoa 部署架构](knoa-deployment-architecture.md)
+- [Knoa 原生 Windows：Hosted Hub + Node](../deploy/windows/README.md)
 - [Knoa 实现反推架构审计](knoa-implementation-architecture-audit.md)
 - [Knoa Product Forward Blueprint](knoa-product-forward-blueprint.md)
 - [Knoa Product Forward Implementation Plan](knoa-product-forward-implementation-plan.md)

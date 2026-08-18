@@ -21,6 +21,7 @@ def test_runtime_layout_has_sibling_directories(tmp_path):
     assert paths.mcp.parent == paths.root
     assert paths.mcp_secrets == paths.root / "secrets" / "mcp"
     assert paths.service_env == paths.config / "service.env"
+    assert paths.stop_request.name == "service.stop"
     assert not hasattr(paths, "socket")
 
 

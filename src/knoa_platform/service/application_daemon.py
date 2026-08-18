@@ -4,13 +4,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import signal
 import sys
 from pathlib import Path
 
 from knoa_platform.config import AppConfig, load_config
 from knoa_platform.network_tls import ensure_default_ca_bundle
-from knoa_platform.runtime import load_service_environment
+from knoa_platform.runtime import RuntimePaths, load_service_environment
 from knoa_platform.service.channel_runtime import ChannelRuntime
 from knoa_platform.service.core_daemon import (
     CoreDaemon,
@@ -18,6 +17,7 @@ from knoa_platform.service.core_daemon import (
     daemonize,
     resolve_core_log,
 )
+from knoa_platform.service.shutdown import wait_for_shutdown
 
 
 logger = logging.getLogger(__name__)
@@ -27,6 +27,7 @@ class ApplicationDaemon:
     """Own service processes without allowing channels to enter Core."""
 
     def __init__(self, config: AppConfig, *, log_path: Path) -> None:
+        self._paths = RuntimePaths.from_root(config.runtime_root)
         self._core = CoreDaemon(config, log_path=log_path)
         self._channels = ChannelRuntime.from_config(config)
         self._webhooks = None
@@ -89,14 +90,7 @@ class ApplicationDaemon:
     async def serve_forever(self) -> None:
         if not self._started:
             raise RuntimeError("ApplicationDaemon is not started")
-        stop_event = asyncio.Event()
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            try:
-                loop.add_signal_handler(sig, stop_event.set)
-            except NotImplementedError:
-                pass
-        await stop_event.wait()
+        await wait_for_shutdown(self._paths.stop_request)
         await self.stop()
 
 

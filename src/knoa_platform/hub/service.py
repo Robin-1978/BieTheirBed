@@ -19,6 +19,12 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 
 from knoa_platform.hub.repository import HubRepository
+from knoa_platform.private_files import (
+    fsync_directory,
+    prepare_private_directory,
+    restrict_private_file,
+    validate_private_file,
+)
 
 
 def _encode(value: bytes) -> str:
@@ -374,13 +380,15 @@ class HubService:
     def _load_or_create_key(path: Path) -> Ed25519PrivateKey:
         path = path.expanduser().resolve()
         def load_existing() -> Ed25519PrivateKey:
-            if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077:
-                raise PermissionError("Hub identity must be a mode 0600 regular file")
+            try:
+                validate_private_file(path, label="Hub identity")
+            except RuntimeError as exc:
+                raise PermissionError(str(exc)) from exc
             return Ed25519PrivateKey.from_private_bytes(_decode(path.read_text().strip()))
 
         if path.exists():
             return load_existing()
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        prepare_private_directory(path.parent, label="Hub identity directory")
         key = Ed25519PrivateKey.generate()
         raw = key.private_bytes(
             serialization.Encoding.Raw, serialization.PrivateFormat.Raw,
@@ -394,11 +402,8 @@ class HubService:
             stream.write(_encode(raw))
             stream.flush()
             os.fsync(stream.fileno())
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        restrict_private_file(path)
+        fsync_directory(path.parent)
         return key
 
 

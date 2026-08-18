@@ -39,7 +39,7 @@ def _canonical(value: Any) -> bytes:
 
 
 def fleet_candidate_digest(document: ManagedConfig) -> str:
-    return hashlib.sha256(_canonical(document.model_dump(mode="json"))).hexdigest()
+    return document.digest
 
 
 def fleet_signature_payload(

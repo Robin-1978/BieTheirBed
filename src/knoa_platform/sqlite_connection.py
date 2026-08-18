@@ -5,6 +5,8 @@ import sqlite3
 from pathlib import Path
 from types import TracebackType
 
+from knoa_platform.private_files import restrict_private_file
+
 
 class ClosingConnection(sqlite3.Connection):
     """Commit or roll back a context-managed connection, then always close it."""
@@ -51,4 +53,4 @@ def initialize_wal(path: str | Path, *, timeout: float = 5.0) -> None:
     database = Path(path)
     with connect_sqlite(database, timeout=timeout, row_factory=False) as connection:
         connection.execute("PRAGMA journal_mode=WAL")
-    database.chmod(0o600)
+    restrict_private_file(database)

@@ -21,6 +21,27 @@ SafeId = Annotated[
 ]
 
 
+def _canonical_value(value):
+    if isinstance(value, dict):
+        return {
+            key: _canonical_value(item)
+            for key, item in sorted(value.items())
+        }
+    if isinstance(value, (set, frozenset)):
+        return sorted(
+            (_canonical_value(item) for item in value),
+            key=lambda item: json.dumps(
+                item,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+    if isinstance(value, (list, tuple)):
+        return [_canonical_value(item) for item in value]
+    return value
+
+
 class ConfigurationModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -242,7 +263,7 @@ class ManagedConfig(ConfigurationModel):
     @property
     def digest(self) -> str:
         payload = json.dumps(
-            self.model_dump(mode="json"),
+            _canonical_value(self.model_dump(mode="python")),
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
