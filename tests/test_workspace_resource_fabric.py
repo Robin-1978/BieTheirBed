@@ -218,6 +218,56 @@ def test_workspace_resources_share_one_deployment_envelope_and_mcp_grant(
     )["grant_id"] == grant["grant_id"]
 
 
+def test_workspace_resource_grant_can_be_revoked(tmp_path: Path) -> None:
+    repository = HubRepository(tmp_path / "hub.db", hub_id="workspace-1")
+    hub = HubService(repository, tmp_path / "hub.key", owner_token="o" * 43)
+    target = NodeIdentityStore(tmp_path / "target.json").load_or_create()
+    caller = NodeIdentityStore(tmp_path / "caller.json").load_or_create()
+    _enroll(repository, hub, target, "Target")
+    _enroll(repository, hub, caller, "Caller")
+    repository.put_workspace_resource(
+        {
+            "resource_id": "model",
+            "kind": "model",
+            "generation": 1,
+            "canonical_digest": "a" * 64,
+            "display_name": "Model",
+            "spec": {},
+            "enabled": True,
+        },
+        created_by="owner",
+    )
+    repository.put_deployment(
+        {
+            "deployment_id": "model-deployment",
+            "kind": "model",
+            "resource_id": "model",
+            "resource_generation": 1,
+            "resource_digest": "a" * 64,
+            "target_node_id": target.node_id,
+            "desired_generation": 1,
+            "spec": {},
+            "enabled": True,
+        }
+    )
+    repository.put_resource_grant(
+        {
+            "grant_id": "grant-model",
+            "caller_node_id": caller.node_id,
+            "target_deployment_id": "model-deployment",
+            "capability": "model_inference",
+            "max_request_deadline": 60,
+            "expires_at": time.time() + 3600,
+        }
+    )
+
+    revoked = repository.revoke_resource_grant("grant-model")
+
+    assert revoked["revoked_at"] is not None
+    with pytest.raises(PermissionError):
+        repository.active_resource_grant(caller.node_id, "model-deployment")
+
+
 def test_node_signed_work_projection_is_monotonic_and_workspace_readable(
     tmp_path: Path,
 ) -> None:

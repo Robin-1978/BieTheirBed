@@ -1,8 +1,9 @@
-import { router } from "expo-router";
-import { useState } from "react";
+import { router, Stack } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 
 import { AppPressable } from "@/components/AppPressable";
+import type { ManagedConfig } from "@/api/models";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
@@ -14,6 +15,18 @@ export default function ExtensionCenterScreen() {
   const [allowPrivate, setAllowPrivate] = useState(false);
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState("");
+  const [document, setDocument] = useState<ManagedConfig | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const current = await gateway.runAuthenticated((client) => client.getConfigCurrent());
+      setDocument(current.revision.document);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "能力加载失败");
+    }
+  }, [gateway.runAuthenticated]);
+
+  useEffect(() => { void load(); }, [load]);
 
   async function inspectAndCreateDraft() {
     if (!source.trim() || (kind !== "skill" && !serverId.trim())) return;
@@ -34,9 +47,17 @@ export default function ExtensionCenterScreen() {
   }
 
   return (
+    <>
+    <Stack.Screen options={{ title: "MCP 与 Skill" }} />
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <View style={styles.section}>
-        <Text style={styles.title}>Node 能力</Text>
+        <Text style={styles.title}>当前 Node</Text>
+        {Object.entries(document?.mcp_servers ?? {}).map(([id, server]) => <View key={`mcp:${id}`} style={styles.item}><View><Text style={styles.itemTitle}>{id}</Text><Text style={styles.hint}>MCP · {server.transport}</Text></View><Text style={server.enabled ? styles.enabled : styles.disabled}>{server.enabled ? "启用" : "停用"}</Text></View>)}
+        {Object.entries(document?.skills ?? {}).map(([id, skill]) => <View key={`skill:${id}`} style={styles.item}><View><Text style={styles.itemTitle}>{id}</Text><Text style={styles.hint}>Skill · {skill.source || "已安装内容"}</Text></View><Text style={skill.enabled ? styles.enabled : styles.disabled}>{skill.enabled ? "启用" : "停用"}</Text></View>)}
+        {!Object.keys(document?.mcp_servers ?? {}).length && !Object.keys(document?.skills ?? {}).length ? <Text style={styles.hint}>还没有安装 MCP 或 Skill。</Text> : null}
+      </View>
+      <View style={styles.section}>
+        <Text style={styles.title}>添加能力</Text>
         <Text style={styles.hint}>Skill 是同步到当前 Node 的内容；MCP 是当前 Node 执行的服务。检查完成后仍需在配置草稿中预检并发布。</Text>
         <View style={styles.choices}>
           {(["remote_mcp", "local_mcp", "skill"] as const).map((value) => (
@@ -67,6 +88,7 @@ export default function ExtensionCenterScreen() {
         {message ? <Text style={styles.error}>{message}</Text> : null}
       </View>
     </ScrollView>
+    </>
   );
 }
 
@@ -86,4 +108,8 @@ const styles = StyleSheet.create({
   primary: { minHeight: 46, backgroundColor: colors.accent, borderRadius: 13, alignItems: "center", justifyContent: "center" },
   primaryText: { color: "#fff", fontWeight: "800" },
   error: { color: colors.danger, fontSize: 13 },
+  item: { minHeight: 58, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
+  itemTitle: { color: colors.ink, fontWeight: "800" },
+  enabled: { color: colors.accent, fontSize: 12, fontWeight: "800" },
+  disabled: { color: colors.muted, fontSize: 12, fontWeight: "700" },
 });

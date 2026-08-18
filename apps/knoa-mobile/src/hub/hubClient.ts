@@ -515,6 +515,17 @@ export async function putWorkspaceResourceGrant(
   return result.grant;
 }
 
+export async function revokeWorkspaceResourceGrant(grantId: string): Promise<WorkspaceResourceGrant> {
+  const connection = await requiredHubConnection();
+  const result = await request<{ grant: WorkspaceResourceGrant }>(
+    connection.url,
+    connection.token,
+    `/v1/resource-grants/${encodeURIComponent(grantId)}`,
+    { method: "DELETE" },
+  );
+  return result.grant;
+}
+
 export async function issueConnectionTicket(
   nodeId: string,
   transport: "direct" | "relay",

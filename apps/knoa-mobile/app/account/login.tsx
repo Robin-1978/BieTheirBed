@@ -13,9 +13,10 @@ import {
 import { colors } from "@/theme";
 
 type AccountMode = "login" | "register" | "recover";
+const HOSTED_HUB_URL = "https://knoa.tinydotdot.com";
 
 export default function AccountLoginScreen() {
-  const [hubUrl, setHubUrl] = useState("https://knoa.tinydotdot.com");
+  const [hubUrl, setHubUrl] = useState(HOSTED_HUB_URL);
   const [mode, setMode] = useState<AccountMode>("login");
   const [loginIdentity, setLoginIdentity] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -25,6 +26,7 @@ export default function AccountLoginScreen() {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [message, setMessage] = useState("");
   const [working, setWorking] = useState(false);
+  const [selfHosted, setSelfHosted] = useState(false);
 
   useEffect(() => {
     void loadHubConnection().then((connection) => {
@@ -99,11 +101,11 @@ export default function AccountLoginScreen() {
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>KNOA ACCOUNT</Text>
-        <Text style={styles.title}>登录 Hub</Text>
-        <Text style={styles.hint}>先建立帐号与 Workspace。Node 是进入 Workspace 后选择的执行位置。</Text>
+        <Text style={styles.title}>{selfHosted ? "登录自建 Hub" : "登录 Knoa"}</Text>
+        <Text style={styles.hint}>登录后先进入 Workspace，再选择实际执行工作的 Node。</Text>
       </View>
       <View style={styles.card}>
-        <TextInput value={hubUrl} onChangeText={setHubUrl} placeholder="https://hub.example.com" placeholderTextColor={colors.muted} autoCapitalize="none" style={styles.input} />
+        {selfHosted ? <TextInput value={hubUrl} onChangeText={setHubUrl} placeholder="https://hub.example.com" placeholderTextColor={colors.muted} autoCapitalize="none" style={styles.input} /> : null}
         <View style={styles.modeRow}>
           {(["login", "register", "recover"] as const).map((item) => (
             <AppPressable key={item} disabled={working} onPress={() => { setMode(item); setMessage(""); }} style={[styles.mode, mode === item && styles.modeActive]}>
@@ -125,7 +127,10 @@ export default function AccountLoginScreen() {
         {mode === "register" ? <TextInput value={displayName} onChangeText={setDisplayName} placeholder="显示名称" placeholderTextColor={colors.muted} style={styles.input} /> : null}
         <TextInput value={password} onChangeText={setPassword} placeholder={mode === "recover" ? "设置新密码（至少 12 位）" : "帐号密码（至少 12 位）"} placeholderTextColor={colors.muted} secureTextEntry style={styles.input} />
         <AppPressable style={styles.primary} disabled={working} onPress={() => void submit()}>
-          {working ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>{mode === "login" ? "登录 Hub" : mode === "register" ? "创建并登录" : "恢复并登录"}</Text>}
+          {working ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>{mode === "login" ? "登录" : mode === "register" ? "创建并登录" : "恢复并登录"}</Text>}
+        </AppPressable>
+        <AppPressable disabled={working} onPress={() => { const next = !selfHosted; setSelfHosted(next); if (!next) setHubUrl(HOSTED_HUB_URL); }} style={styles.advanced}>
+          <Text style={styles.advancedText}>{selfHosted ? "使用 Knoa Hosted Hub" : "使用自建 Hub"}</Text>
         </AppPressable>
         {message ? <Text style={styles.error}>{message}</Text> : null}
       </View>
@@ -152,6 +157,8 @@ const styles = StyleSheet.create({
   secondary: { borderWidth: 1, borderColor: colors.accent, borderRadius: 13, padding: 13, alignItems: "center" },
   secondaryText: { color: colors.accent, fontWeight: "800" },
   error: { color: colors.danger, textAlign: "center" },
+  advanced: { minHeight: 42, alignItems: "center", justifyContent: "center" },
+  advancedText: { color: colors.muted, fontWeight: "700" },
   scanner: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#000" },
   scanFrame: { width: 260, height: 260, borderWidth: 3, borderColor: "#fff", borderRadius: 22 },
   scanHint: { color: "#fff", marginTop: 22, paddingHorizontal: 30, textAlign: "center", fontWeight: "700" },
