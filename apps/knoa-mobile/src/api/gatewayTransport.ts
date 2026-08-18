@@ -26,6 +26,7 @@ import {
 } from "./relayCrypto";
 import { bindingUsesHubEndpoint } from "./gatewayRouting";
 import { relayResponseBody } from "./relayResponse";
+import type { PairingPayload } from "./models";
 
 export { DirectFetchTransport, type GatewayTransport } from "./gatewayTransportBase";
 
@@ -93,7 +94,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
   }
 
   private async relayRequest(baseUrl: string, path: string, init: RequestInit): Promise<Response> {
-    if (!this.relay) this.relay = new RelayTransport(this.binding);
+    if (!this.relay) this.relay = new RelayTransport(this.binding, "session");
     const response = await this.relay.request(baseUrl, path, init);
     this.active = "relay";
     return response;
@@ -121,6 +122,35 @@ type ClientHello = {
   transport: "relay";
   signature: string;
 };
+
+type PairingClientHello = {
+  type: "pairing_client_hello";
+  version: 1;
+  ticket: string;
+  installation_id: string;
+  client_signing_public_key: string;
+  client_ephemeral_public_key: string;
+  client_nonce: string;
+  transport: "relay";
+  signature: string;
+};
+
+type RelayClientHello = ClientHello | PairingClientHello;
+
+type RelayBinding = Pick<
+  NodeDeviceBinding,
+  "nodeId" | "deviceId" | "nodeSigningPublicKey" | "nodeConfigurationPublicKey"
+>;
+
+export function pairingRelayTransport(payload: PairingPayload): GatewayTransport {
+  if (payload.transport !== "relay") throw new Error("二维码不是 Relay 配对信息");
+  return new RelayTransport({
+    nodeId: payload.node_id,
+    deviceId: "",
+    nodeSigningPublicKey: payload.node_signing_public_key,
+    nodeConfigurationPublicKey: payload.node_configuration_public_key,
+  }, "pairing");
+}
 
 type ServerHello = {
   type: "server_hello";
@@ -168,7 +198,10 @@ class RelayTransport implements GatewayTransport {
   private nextStreamId = 1;
   private pending = new Map<number, ResponseState>();
 
-  constructor(private readonly binding: NodeDeviceBinding) {}
+  constructor(
+    private readonly binding: RelayBinding,
+    private readonly scope: "session" | "pairing",
+  ) {}
 
   mode(): "relay" {
     return "relay";
@@ -236,7 +269,7 @@ class RelayTransport implements GatewayTransport {
 
   private async open(): Promise<void> {
     const hub = await requiredHubForNode(this.binding.nodeId);
-    const ticket = await issueConnectionTicket(this.binding.nodeId, "relay");
+    const ticket = await issueConnectionTicket(this.binding.nodeId, "relay", this.scope);
     const claims = verifyTicket(ticket, hub, this.binding.nodeId);
     const socket = new WebSocket(relayUrl(hub.url));
     this.socket = socket;
@@ -253,29 +286,27 @@ class RelayTransport implements GatewayTransport {
     const privateKey = await loadOrCreatePrivateKey();
     const ephemeralPrivate = await Crypto.getRandomBytesAsync(32);
     const clientNonce = toBase64Url(await Crypto.getRandomBytesAsync(24));
-    const unsigned = {
-      audience: "knoa-node-client-hello-v1",
-      version: 1,
-      ticket,
-      installation_id: await loadOrCreateInstallationId(),
-      device_id: this.binding.deviceId,
-      client_signing_public_key: publicKey(privateKey),
-      client_ephemeral_public_key: toBase64Url(x25519.getPublicKey(ephemeralPrivate)),
-      client_nonce: clientNonce,
-      transport: "relay",
-    } as const;
-    const hello: ClientHello = {
-      type: "client_hello",
-      version: 1,
-      ticket,
-      installation_id: unsigned.installation_id,
-      device_id: unsigned.device_id,
-      client_signing_public_key: unsigned.client_signing_public_key,
-      client_ephemeral_public_key: unsigned.client_ephemeral_public_key,
-      client_nonce: clientNonce,
-      transport: "relay",
-      signature: sign(privateKey, canonicalString(unsigned)),
-    };
+    const installationId = await loadOrCreateInstallationId();
+    const signingPublicKey = publicKey(privateKey);
+    const ephemeralPublicKey = toBase64Url(x25519.getPublicKey(ephemeralPrivate));
+    const hello = this.scope === "pairing"
+      ? pairingClientHello({
+        ticket,
+        installationId,
+        signingPublicKey,
+        ephemeralPublicKey,
+        clientNonce,
+        privateKey,
+      })
+      : sessionClientHello({
+        ticket,
+        installationId,
+        deviceId: this.binding.deviceId,
+        signingPublicKey,
+        ephemeralPublicKey,
+        clientNonce,
+        privateKey,
+      });
     const serverHelloPromise = waitForJson(socket);
     this.sendPlaintext(0, 0, encoder.encode(canonicalString(hello)));
     const wrapped = await withPromiseTimeout(serverHelloPromise, 15_000, "Node 握手超时");
@@ -431,9 +462,9 @@ function verifyTicket(ticket: string, hub: HubConnection, nodeId: string): Ticke
 
 function verifyServerHello(
   hello: ServerHello,
-  clientHello: ClientHello,
+  clientHello: RelayClientHello,
   sessionId: string,
-  binding: NodeDeviceBinding,
+  binding: RelayBinding,
 ): void {
   if (hello.type !== "server_hello" || hello.version !== 1 || hello.node_id !== binding.nodeId) {
     throw new Error("Node 握手身份无效");
@@ -451,6 +482,71 @@ function verifyServerHello(
     encoder.encode(canonicalString(transcript)),
     fromBase64Url(binding.nodeSigningPublicKey),
   )) throw new Error("Node 固定身份签名无效");
+}
+
+function sessionClientHello(input: {
+  ticket: string;
+  installationId: string;
+  deviceId: string;
+  signingPublicKey: string;
+  ephemeralPublicKey: string;
+  clientNonce: string;
+  privateKey: Uint8Array;
+}): ClientHello {
+  const unsigned = {
+    audience: "knoa-node-client-hello-v1",
+    version: 1,
+    ticket: input.ticket,
+    installation_id: input.installationId,
+    device_id: input.deviceId,
+    client_signing_public_key: input.signingPublicKey,
+    client_ephemeral_public_key: input.ephemeralPublicKey,
+    client_nonce: input.clientNonce,
+    transport: "relay",
+  } as const;
+  return {
+    type: "client_hello",
+    version: 1,
+    ticket: input.ticket,
+    installation_id: input.installationId,
+    device_id: input.deviceId,
+    client_signing_public_key: input.signingPublicKey,
+    client_ephemeral_public_key: input.ephemeralPublicKey,
+    client_nonce: input.clientNonce,
+    transport: "relay",
+    signature: sign(input.privateKey, canonicalString(unsigned)),
+  };
+}
+
+function pairingClientHello(input: {
+  ticket: string;
+  installationId: string;
+  signingPublicKey: string;
+  ephemeralPublicKey: string;
+  clientNonce: string;
+  privateKey: Uint8Array;
+}): PairingClientHello {
+  const unsigned = {
+    audience: "knoa-node-pairing-client-hello-v1",
+    version: 1,
+    ticket: input.ticket,
+    installation_id: input.installationId,
+    client_signing_public_key: input.signingPublicKey,
+    client_ephemeral_public_key: input.ephemeralPublicKey,
+    client_nonce: input.clientNonce,
+    transport: "relay",
+  } as const;
+  return {
+    type: "pairing_client_hello",
+    version: 1,
+    ticket: input.ticket,
+    installation_id: input.installationId,
+    client_signing_public_key: input.signingPublicKey,
+    client_ephemeral_public_key: input.ephemeralPublicKey,
+    client_nonce: input.clientNonce,
+    transport: "relay",
+    signature: sign(input.privateKey, canonicalString(unsigned)),
+  };
 }
 
 function parseRelayFrame(value: unknown): RelayFrame {

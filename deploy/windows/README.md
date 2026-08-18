@@ -1,179 +1,120 @@
 # Knoa Native Windows: Hosted Hub + Node
 
-This deployment runs Python natively on Windows 10/11 or Windows Server. It
-does not use WSL or Docker and does not require a PyInstaller executable.
+Knoa runs directly on Windows with standard CPython. WSL, Docker and a
+PyInstaller EXE are not required.
 
-## Process and port layout
+## Canonical process model
 
 ```text
 Windows
-├── Knoa Hosted Hub WinSW service (LocalSystem, automatic)
+├── KnoaHostedHub (WinSW / LocalSystem / Automatic)
 │   ├── Hub + Relay: 127.0.0.1:9529
-│   └── C:\ProgramData\Knoa\HostedHub
-├── Knoa Node (select one mode)
-│   ├── InteractiveTask: signed-in user Task Scheduler entry
-│   └── HeadlessService: LocalSystem WinSW service in Session 0
-│
-├── Node listeners
+│   └── state: C:\ProgramData\Knoa\HostedHub
+├── KnoaNode (WinSW / LocalSystem / Automatic)
 │   ├── Core: 127.0.0.1:9527
 │   ├── Capability MCP: 127.0.0.1:9530
 │   ├── Secure Gateway: 127.0.0.1:9531
-│   └── state: %LOCALAPPDATA%\Knoa\Node or C:\ProgramData\Knoa\Node
-└── two independent cloudflared WinSW services
-    ├── Cloudflared-knoa -> Knoa Tunnel Token
-    └── Cloudflared-per  -> PER Tunnel Token
+│   └── state: C:\ProgramData\Knoa\Node
+└── named cloudflared services when this host owns public Tunnels
 ```
 
-Hub runs as `LocalSystem` because it is a headless control-plane process that
-must survive logout. `InteractiveTask` is the default Node mode because desktop
-observation, notifications and input tools must remain inside the signed-in
-user's Session. `HeadlessService` supports Agent, Task, LLM, MCP and Relay but
-cannot access the user's desktop.
+Hub and Node Runtime always use WinSW. The installer deletes the obsolete
+`Knoa Hosted Hub` and `Knoa Node` scheduled tasks. A future desktop Companion
+may run in the signed-in user's Session, but desktop-session access is not a
+reason to move the Node Runtime itself out of Windows Service Control Manager.
 
 ## Prerequisites
 
-- Windows x64 with NTFS storage;
-- an elevated Windows PowerShell 5.1 or newer;
-- standard CPython 3.14 x64 installed with the `py` launcher, not `3.14t`;
-- a WinSW x64 executable supplied to the installer;
-- the Knoa wheel built by `python -m build`;
-- internet access to PyPI, or an offline wheelhouse containing all Knoa
-  dependencies;
-- `cloudflared-windows-amd64.exe` when the public Tunnel is hosted here.
+- Windows x64 with NTFS;
+- elevated Windows PowerShell 5.1 or newer;
+- standard CPython 3.14 x64 with the `py` launcher, not `3.14t`;
+- WinSW x64 for the first installation;
+- a Knoa wheel, or an existing source checkout and initialized venv;
+- Cloudflare only when this host owns the public Tunnel connector.
 
-Linux remains a first-class deployment platform. Linux Node and Hub continue
-to use their systemd deployment; these WinSW files are Windows-only process
-adapters around the same Python Hub and Node entry points.
+## First installation
 
-## Fresh install or Hosted Hub restore
-
-Run from an elevated PowerShell window:
+From an elevated PowerShell window:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
-
-.\deploy\windows\Install-Knoa.ps1 `
-  -WheelPath .\dist\knoa-0.2.26-py3-none-any.whl `
-  -WinSWExecutable C:\Tools\WinSW-x64.exe `
-  -HubPublicUrl https://knoa.tinydotdot.com
+cd C:\knoa
+.\deploy\windows\Install-Knoa.ps1 -SourcePath C:\knoa -WinSWExecutable C:\Tools\WinSW-x64.exe -HubPublicUrl https://knoa.tinydotdot.com
 ```
 
-To migrate the existing Hosted Hub, first create a consistent backup on the
-old host, copy that complete backup directory to Windows, then install with:
+For a restored Hosted Hub, also pass `-HostedBackupPath`. The restore target
+must be empty. Never replace a restored `hub-signing.key`.
+
+## Updating the existing C:\knoa deployment
+
+Stop any manually launched foreground Node with `Ctrl+C`, then run:
 
 ```powershell
-.\deploy\windows\Install-Knoa.ps1 `
-  -WheelPath .\dist\knoa-0.2.26-py3-none-any.whl `
-  -WinSWExecutable C:\Tools\WinSW-x64.exe `
-  -HostedBackupPath D:\KnoaMigration\hosted-backup `
-  -HubPublicUrl https://knoa.tinydotdot.com `
-  -HubId hub_knoa_hosted
+cd C:\knoa
+git pull
+.\deploy\windows\Install-Knoa.ps1 -SourcePath C:\knoa -HubPublicUrl https://knoa.tinydotdot.com
 ```
 
-The installer creates one Python 3.14 venv, restores or initializes Hub
-storage, applies an NTFS ACL for `SYSTEM`, local Administrators and the
-installing user, installs Hub through WinSW and registers the interactive Node
-Task. Re-running it stops the old launchers before replacing runtime files.
-Use `-RecreateVenv` only when replacing an existing venv with Python 3.14.
+On update, the installer:
 
-For a server-only Node with no desktop tools:
+1. preserves `C:\ProgramData\Knoa\HostedHub`;
+2. reuses the installed WinSW binary;
+3. deletes legacy Knoa scheduled tasks;
+4. copies an existing `%LOCALAPPDATA%\Knoa\Node` identity into
+   `C:\ProgramData\Knoa\Node` when the service root has no state;
+5. retains the old per-user Node directory as a rollback snapshot;
+6. installs and starts both `KnoaHostedHub` and `KnoaNode` services;
+7. prints a fresh App pairing QR when the copied Node is already enrolled.
 
-```powershell
-.\deploy\windows\Install-Knoa.ps1 `
-  -WheelPath .\dist\knoa-0.2.26-py3-none-any.whl `
-  -WinSWExecutable C:\Tools\WinSW-x64.exe `
-  -NodeMode HeadlessService
+## Node enrollment and App QR pairing
+
+Enrollment and App pairing are separate trust steps:
+
+```text
+Node enrollment -> Node joins Workspace and opens outbound Relay
+App QR pairing  -> App receives a Node-specific device identity through Relay
 ```
 
-The Hub backup retains `control.db`, every Workspace database, Android
-releases and `hub-signing.key`; never replace the restored signing key.
+After enrollment, `Enroll-KnoaNode.ps1` restarts `KnoaNode` and prints a QR.
+The App scans that QR. The QR names the Workspace Hub, not a public Node
+Gateway. The App obtains a short-lived pairing-only Relay ticket; the Node
+allows only `/v1/pair/challenge` and `/v1/pair/complete` until pairing finishes.
+No second Node domain, port-forward or Cloudflare Tunnel is required.
 
-Use `-WheelhousePath D:\KnoaWheelhouse` for an offline installation. Operational
-scripts are copied to `C:\ProgramData\Knoa\Scripts`. The offline wheelhouse
-must include a prebuilt Python 3.14 wheel for PyAutoGUI because its upstream
-release is source-only.
-
-## Verify the two local processes
+For an already enrolled Node, print a fresh five-minute QR with:
 
 ```powershell
-Get-Service KnoaHostedHub
-Get-ScheduledTask -TaskName "Knoa Node"
+C:\ProgramData\Knoa\Scripts\Show-KnoaPairingQr.cmd
+```
+
+## Verification and operations
+
+```powershell
+Get-Service KnoaHostedHub,KnoaNode
 curl.exe http://127.0.0.1:9529/health
 curl.exe http://127.0.0.1:9531/health
+Restart-Service KnoaHostedHub,KnoaNode
 ```
 
-Node Gateway health returns an authentication-scoped response. This confirms
-the listener without bypassing pairing.
+Both services must remain running after logout and reboot. Node desktop capture,
+clipboard, input, window and notification capabilities are intentionally absent
+from the Session 0 Runtime until the separate desktop Companion exists.
 
-## Enroll the new Windows Node
+## Cloudflare
 
-Save a current Hub Account token in an ACL-protected local file, then run:
+The canonical Knoa hostname targets `http://127.0.0.1:9529`. It exposes Hub and
+Relay only. Nodes connect outbound to Hub and do not need public hostnames.
 
-```powershell
-.\deploy\windows\Enroll-KnoaNode.ps1 `
-  -WorkspaceId ws_xxxxxxxxxxxx `
-  -AccountTokenFile C:\Secure\knoa-account.token `
-  -HubPublicUrl https://knoa.tinydotdot.com `
-  -DisplayName "Windows Desktop"
-```
+Two remotely managed Tunnels require two connector processes and two service
+IDs. `Install-Cloudflared.ps1` creates named WinSW services and stores each
+token in an ACL-protected token file. Do not use the fixed single-instance
+`cloudflared.exe service install` when running multiple Tunnels.
 
-This creates a new Node identity under `%LOCALAPPDATA%\Knoa\Node`; it does not
-replace the Linux Node already enrolled in the same Workspace.
-
-For `HeadlessService`, also pass
-`-NodeRoot C:\ProgramData\Knoa\Node` to the enrollment script.
-
-## Cloudflare Tunnel
-
-The current account has two independent remotely managed Tunnels, so Windows
-must run two independent connectors. Copy the two current Linux credentials
-into separate temporary files, then install both through WinSW:
-
-```powershell
-.\deploy\windows\Install-Cloudflared.ps1 `
-  -CloudflaredExecutable C:\Tools\cloudflared.exe `
-  -WinSWExecutable C:\Tools\WinSW-x64.exe `
-  -TunnelNames @("knoa", "per") `
-  -TunnelTokenFiles @("C:\Secure\knoa.token", "C:\Secure\per.token")
-```
-
-The installer copies the tokens to
-`C:\ProgramData\Cloudflared\Secrets`, writes only token-file paths into WinSW
-XML and creates `Cloudflared-knoa` and `Cloudflared-per`. Do not also run
-`cloudflared.exe service install`; its fixed native service supports only one
-Tunnel process.
-
-If the native service was installed earlier, remove it first:
-
-```powershell
-C:\Tools\cloudflared.exe service uninstall
-```
-
-Configure the Knoa Tunnel hostname to target `http://127.0.0.1:9529`.
-WebSocket upgrades are handled automatically. The PER Tunnel keeps its own
-hostname, origin and failure lifecycle.
-
-During migration, do not keep two independent Hosted Hub databases active
-behind replicas of the same Tunnel. Stop the old Hub, take the final backup,
-restore and verify Windows locally, stop the old connector, then start the
-Windows connector.
-
-## Operations
-
-```powershell
-Start-Service KnoaHostedHub
-Stop-Service KnoaHostedHub
-Start-ScheduledTask -TaskName "Knoa Node"
-Stop-ScheduledTask -TaskName "Knoa Node"
-Start-Service Cloudflared-knoa, Cloudflared-per
-Stop-Service Cloudflared-knoa, Cloudflared-per
-```
-
-Uninstall preserves data by default:
+## Uninstall
 
 ```powershell
 .\deploy\windows\Uninstall-Knoa.ps1
-.\deploy\windows\Uninstall-Cloudflared.ps1 -TunnelNames @("knoa", "per")
 ```
 
-`-PurgeData` is intentionally explicit and removes both Hub and Node state.
+Uninstall removes the two WinSW services and any legacy scheduled tasks. Data
+is preserved unless `-PurgeData` is explicitly supplied.

@@ -60,7 +60,8 @@ class PresenceRequest(_Request):
 class TicketRequest(_Request):
     installation_id: str = Field(min_length=1, max_length=128)
     node_id: str = Field(min_length=1, max_length=128)
-    transport: str = Field(pattern=r"^(direct|relay)$")
+    transport: Literal["direct", "relay"]
+    scope: Literal["session", "pairing"]
 
 
 class FleetEnvelopeRequest(_Request):
@@ -186,21 +187,43 @@ class HubApplication:
                 Route("/v1/hub", self.hub, methods=["GET"]),
                 Route("/v1/installations", self.installations, methods=["POST"]),
                 Route("/v1/nodes", self.nodes, methods=["GET"]),
-                Route("/v1/node-enrollment-grants", self.enrollment_grants, methods=["POST"]),
+                Route(
+                    "/v1/node-enrollment-grants",
+                    self.enrollment_grants,
+                    methods=["POST"],
+                ),
                 Route("/v1/nodes/enroll", self.enroll, methods=["POST"]),
                 Route("/v1/nodes/presence", self.presence, methods=["POST"]),
                 Route("/v1/workspace", self.workspace, methods=["GET"]),
-                Route("/v1/workspace-resources", self.workspace_resources, methods=["GET", "POST"]),
+                Route(
+                    "/v1/workspace-resources",
+                    self.workspace_resources,
+                    methods=["GET", "POST"],
+                ),
                 Route("/v1/deployments", self.deployments, methods=["GET", "POST"]),
-                Route("/v1/work-projections", self.work_projections, methods=["GET", "POST"]),
-                Route("/v1/resource-grants", self.resource_grants, methods=["GET", "POST"]),
+                Route(
+                    "/v1/work-projections",
+                    self.work_projections,
+                    methods=["GET", "POST"],
+                ),
+                Route(
+                    "/v1/resource-grants", self.resource_grants, methods=["GET", "POST"]
+                ),
                 Route(
                     "/v1/resource-grants/{grant_id:str}",
                     self.resource_grant,
                     methods=["DELETE"],
                 ),
-                Route("/v1/deployment-observations", self.deployment_observations, methods=["GET", "POST"]),
-                Route("/v1/resource-invocation-tickets", self.resource_invocation_tickets, methods=["POST"]),
+                Route(
+                    "/v1/deployment-observations",
+                    self.deployment_observations,
+                    methods=["GET", "POST"],
+                ),
+                Route(
+                    "/v1/resource-invocation-tickets",
+                    self.resource_invocation_tickets,
+                    methods=["POST"],
+                ),
                 Route(
                     "/v1/resource-invocations/{invocation_id:str}/observations",
                     self.invocation_observations,
@@ -208,8 +231,16 @@ class HubApplication:
                 ),
                 Route("/v1/connection-tickets", self.tickets, methods=["POST"]),
                 Route("/v1/fleet/rollouts", self.rollouts, methods=["POST"]),
-                Route("/v1/nodes/{node_id:str}/fleet/pull", self.fleet_pull, methods=["POST"]),
-                Route("/v1/fleet/rollouts/{rollout_id:str}/nodes/{node_id:str}/report", self.fleet_report, methods=["POST"]),
+                Route(
+                    "/v1/nodes/{node_id:str}/fleet/pull",
+                    self.fleet_pull,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/fleet/rollouts/{rollout_id:str}/nodes/{node_id:str}/report",
+                    self.fleet_report,
+                    methods=["POST"],
+                ),
                 WebSocketRoute("/v1/relay/node", self.relay_node),
                 WebSocketRoute("/v1/relay/client", self.relay_client),
                 WebSocketRoute("/v1/relay/resource-client", self.relay_resource_client),
@@ -308,7 +339,9 @@ class HubApplication:
             node = self.service.record_presence(parsed.model_dump(mode="json"))
         except (PermissionError, ValueError):
             return JSONResponse({"error": "rejected"}, status_code=401)
-        return JSONResponse({"node_id": node["node_id"], "observed_at": node["last_seen"]})
+        return JSONResponse(
+            {"node_id": node["node_id"], "observed_at": node["last_seen"]}
+        )
 
     async def workspace(self, request: Request) -> JSONResponse:
         authenticated = self._member(request)
@@ -355,7 +388,9 @@ class HubApplication:
         if isinstance(parsed, JSONResponse):
             return parsed
         try:
-            item = self.service.repository.put_deployment(parsed.model_dump(mode="json"))
+            item = self.service.repository.put_deployment(
+                parsed.model_dump(mode="json")
+            )
         except (LookupError, PermissionError, ValueError):
             return JSONResponse({"error": "rejected"}, status_code=422)
         return JSONResponse({"deployment": item}, status_code=201)
@@ -448,9 +483,7 @@ class HubApplication:
         if isinstance(parsed, JSONResponse):
             return parsed
         try:
-            ticket = self.service.issue_resource_ticket(
-                parsed.model_dump(mode="json")
-            )
+            ticket = self.service.issue_resource_ticket(parsed.model_dump(mode="json"))
         except (LookupError, PermissionError, ValueError):
             return JSONResponse({"error": "rejected"}, status_code=403)
         return JSONResponse({"ticket": ticket})
@@ -476,9 +509,7 @@ class HubApplication:
         if parsed.invocation_id != invocation_id:
             return JSONResponse({"error": "rejected"}, status_code=401)
         try:
-            self.service.record_invocation_observation(
-                parsed.model_dump(mode="json")
-            )
+            self.service.record_invocation_observation(parsed.model_dump(mode="json"))
         except (LookupError, PermissionError, ValueError):
             return JSONResponse({"error": "rejected"}, status_code=401)
         return JSONResponse({"accepted": True})
@@ -495,6 +526,7 @@ class HubApplication:
                 parsed.installation_id,
                 parsed.node_id,
                 parsed.transport,
+                scope=parsed.scope,
                 subject_id=authenticated,
             )
         except (LookupError, PermissionError, ValueError):
@@ -516,7 +548,9 @@ class HubApplication:
             )
         except (LookupError, ValueError):
             return JSONResponse({"error": "rejected"}, status_code=422)
-        return JSONResponse({"rollout_id": parsed.rollout_id, "state": "pending"}, status_code=201)
+        return JSONResponse(
+            {"rollout_id": parsed.rollout_id, "state": "pending"}, status_code=201
+        )
 
     async def fleet_pull(self, request: Request) -> JSONResponse:
         parsed = await self._parse(request, PresenceRequest)
@@ -539,9 +573,16 @@ class HubApplication:
         if parsed.node_id != node_id:
             return JSONResponse({"error": "rejected"}, status_code=401)
         try:
-            self.service.record_presence(parsed.model_dump(mode="json", include={"node_id", "timestamp", "nonce", "signature"}))
+            self.service.record_presence(
+                parsed.model_dump(
+                    mode="json", include={"node_id", "timestamp", "nonce", "signature"}
+                )
+            )
             self.service.repository.report_envelope(
-                str(request.path_params["rollout_id"]), node_id, parsed.state, parsed.result_code
+                str(request.path_params["rollout_id"]),
+                node_id,
+                parsed.state,
+                parsed.result_code,
             )
         except (PermissionError, LookupError, ValueError):
             return JSONResponse({"error": "rejected"}, status_code=422)
@@ -552,7 +593,9 @@ class HubApplication:
         connection = None
         node_id = ""
         try:
-            authentication = PresenceRequest.model_validate(await websocket.receive_json())
+            authentication = PresenceRequest.model_validate(
+                await websocket.receive_json()
+            )
             self.service.record_presence(authentication.model_dump(mode="json"))
             node_id = authentication.node_id
             connection = await self.relay.register_node(node_id, websocket)
@@ -574,7 +617,9 @@ class HubApplication:
         node_id = ""
         try:
             first = await websocket.receive_json()
-            ticket = self.service.verify_and_consume_ticket(str(first.get("ticket", "")))
+            ticket = self.service.verify_and_consume_ticket(
+                str(first.get("ticket", ""))
+            )
             if ticket["transport"] != "relay":
                 raise PermissionError("Relay ticket required")
             session_id = str(ticket["ticket_id"])

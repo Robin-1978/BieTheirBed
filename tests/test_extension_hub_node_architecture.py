@@ -111,7 +111,9 @@ class _DraftPort:
         return updated
 
 
-def test_package_store_is_content_addressed_and_rejects_mutation(tmp_path: Path) -> None:
+def test_package_store_is_content_addressed_and_rejects_mutation(
+    tmp_path: Path,
+) -> None:
     source = _write_skill(tmp_path / "source")
     store = PackageStore(tmp_path / "packages", clock=lambda: 10)
 
@@ -203,7 +205,9 @@ async def test_sealed_fleet_candidate_checks_owner_binding_and_base_revision(
         return ConfigValidationResult(valid=True)
 
     async def publish(_principal, draft_id, *, expected_version, summary=""):
-        return SimpleNamespace(draft_id=draft_id, version=expected_version, summary=summary)
+        return SimpleNamespace(
+            draft_id=draft_id, version=expected_version, summary=summary
+        )
 
     port.get_config_current = current  # type: ignore[attr-defined]
     port.validate_config_draft = validate  # type: ignore[attr-defined]
@@ -283,12 +287,16 @@ def test_hub_enrollment_ticket_and_presence_are_separate_trust_steps(
             "display_name": "Desktop",
             "platform": "linux",
             "version": "1",
-            "signature": node.sign(json.dumps(transcript, sort_keys=True, separators=(",", ":")).encode()),
+            "signature": node.sign(
+                json.dumps(transcript, sort_keys=True, separators=(",", ":")).encode()
+            ),
         }
     )
     app_key = Ed25519PrivateKey.generate()
-    repository.register_installation("subject_owner", "app-1", _public_key(app_key), "Phone")
-    ticket = service.issue_ticket("app-1", node.node_id, "relay")
+    repository.register_installation(
+        "subject_owner", "app-1", _public_key(app_key), "Phone"
+    )
+    ticket = service.issue_ticket("app-1", node.node_id, "relay", scope="session")
     presence = {
         "audience": "knoa-node-presence-v1",
         "hub_id": "hub-1",
@@ -299,7 +307,11 @@ def test_hub_enrollment_ticket_and_presence_are_separate_trust_steps(
     }
     observed = service.record_presence(
         {
-            **{key: value for key, value in presence.items() if key not in {"audience", "hub_id"}},
+            **{
+                key: value
+                for key, value in presence.items()
+                if key not in {"audience", "hub_id"}
+            },
             "signature": node.sign(canonical_json(presence)),
         }
     )
@@ -338,14 +350,16 @@ def test_relay_handshake_binds_hub_app_device_node_and_sequences(
         "configuration_public_key": node.configuration_public_key,
         "configuration_key_version": 1,
     }
-    hub.enroll_node({
-        **enrollment_transcript,
-        "grant_secret": grant.secret,
-        "display_name": "Desktop",
-        "platform": "linux",
-        "version": "1",
-        "signature": node.sign(canonical_json(enrollment_transcript)),
-    })
+    hub.enroll_node(
+        {
+            **enrollment_transcript,
+            "grant_secret": grant.secret,
+            "display_name": "Desktop",
+            "platform": "linux",
+            "version": "1",
+            "signature": node.sign(canonical_json(enrollment_transcript)),
+        }
+    )
     app_signing = Ed25519PrivateKey.generate()
     app_public = _public_key(app_signing)
     repository.register_installation("subject_owner", "app-1", app_public, "Phone")
@@ -357,7 +371,7 @@ def test_relay_handshake_binds_hub_app_device_node_and_sequences(
         display_name="Phone",
         public_key=app_public,
     )
-    ticket = hub.issue_ticket("app-1", node.node_id, "relay")
+    ticket = hub.issue_ticket("app-1", node.node_id, "relay", scope="session")
     claims = json.loads(decode_base64url(ticket.partition(".")[0]))
     client_ephemeral = X25519PrivateKey.generate()
     client_public = encode_base64url(
@@ -400,7 +414,9 @@ def test_relay_handshake_binds_hub_app_device_node_and_sequences(
         clock=lambda: 1000,
     )
     shared = client_ephemeral.exchange(
-        X25519PublicKey.from_public_bytes(decode_base64url(server.server_ephemeral_public_key))
+        X25519PublicKey.from_public_bytes(
+            decode_base64url(server.server_ephemeral_public_key)
+        )
     )
     client_to_node, node_to_client = derive_session_keys(
         shared,
@@ -412,28 +428,34 @@ def test_relay_handshake_binds_hub_app_device_node_and_sequences(
     ciphertext = ChaCha20Poly1305(client_to_node).encrypt(
         b"C2N1" + (0).to_bytes(8, "big"),
         canonical_json(request),
-        canonical_json({
-            "audience": "knoa-node-packet-v1",
-            "session_id": claims["ticket_id"],
-            "direction": "client_to_node",
-            "sequence": 0,
-        }),
+        canonical_json(
+            {
+                "audience": "knoa-node-packet-v1",
+                "session_id": claims["ticket_id"],
+                "direction": "client_to_node",
+                "sequence": 0,
+            }
+        ),
     )
 
     assert node_session.decrypt(0, ciphertext) == request
     with pytest.raises(PermissionError, match="sequence"):
         node_session.decrypt(0, ciphertext)
     sequence, response_ciphertext = node_session.encrypt({"type": "response_end"})
-    assert json.loads(ChaCha20Poly1305(node_to_client).decrypt(
-        b"N2C1" + sequence.to_bytes(8, "big"),
-        response_ciphertext,
-        canonical_json({
-            "audience": "knoa-node-packet-v1",
-            "session_id": claims["ticket_id"],
-            "direction": "node_to_client",
-            "sequence": sequence,
-        }),
-    )) == {"type": "response_end"}
+    assert json.loads(
+        ChaCha20Poly1305(node_to_client).decrypt(
+            b"N2C1" + sequence.to_bytes(8, "big"),
+            response_ciphertext,
+            canonical_json(
+                {
+                    "audience": "knoa-node-packet-v1",
+                    "session_id": claims["ticket_id"],
+                    "direction": "node_to_client",
+                    "sequence": sequence,
+                }
+            ),
+        )
+    ) == {"type": "response_end"}
 
 
 def test_secret_store_never_exposes_value_in_status(tmp_path: Path) -> None:

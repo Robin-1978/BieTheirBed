@@ -723,7 +723,8 @@ type AuthComplete = {
 export function parsePairingPayload(raw: string, now = Date.now() / 1000): PairingPayload {
   const parsed = JSON.parse(raw) as Partial<PairingPayload>;
   if (
-    parsed.version !== "v2" ||
+    parsed.version !== "v3" ||
+    (parsed.transport !== "direct" && parsed.transport !== "relay") ||
     typeof parsed.gateway_url !== "string" ||
     !/^https?:\/\//.test(parsed.gateway_url) ||
     typeof parsed.node_id !== "string" ||

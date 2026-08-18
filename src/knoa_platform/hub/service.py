@@ -98,8 +98,12 @@ class HubService:
         return self.authenticate_owner(token)
 
     def enroll_node(self, request: dict) -> dict:
-        grant = self.repository.enrollment(str(request["grant_id"]), str(request["grant_secret"]))
-        if not secrets.compare_digest(str(request["challenge"]), str(grant["challenge"])):
+        grant = self.repository.enrollment(
+            str(request["grant_id"]), str(request["grant_secret"])
+        )
+        if not secrets.compare_digest(
+            str(request["challenge"]), str(grant["challenge"])
+        ):
             raise PermissionError("Node enrollment challenge rejected")
         transcript = {
             "audience": "knoa-node-enrollment-v1",
@@ -113,9 +117,9 @@ class HubService:
             "configuration_key_version": request["configuration_key_version"],
         }
         try:
-            Ed25519PublicKey.from_public_bytes(_decode(str(request["signing_public_key"]))).verify(
-                _decode(str(request["signature"])), _canonical(transcript)
-            )
+            Ed25519PublicKey.from_public_bytes(
+                _decode(str(request["signing_public_key"]))
+            ).verify(_decode(str(request["signature"])), _canonical(transcript))
         except (InvalidSignature, ValueError, KeyError) as exc:
             raise PermissionError("Node enrollment signature rejected") from exc
         return self.repository.consume_enrollment(str(request["grant_id"]), request)
@@ -134,9 +138,9 @@ class HubService:
             "direct_gateway_url": str(request.get("direct_gateway_url", "")),
         }
         try:
-            Ed25519PublicKey.from_public_bytes(_decode(node["signing_public_key"])).verify(
-                _decode(str(request["signature"])), _canonical(transcript)
-            )
+            Ed25519PublicKey.from_public_bytes(
+                _decode(node["signing_public_key"])
+            ).verify(_decode(str(request["signature"])), _canonical(transcript))
         except (InvalidSignature, ValueError) as exc:
             raise PermissionError("Node presence signature rejected") from exc
         return self.repository.record_presence(
@@ -151,6 +155,7 @@ class HubService:
         node_id: str,
         transport: str,
         *,
+        scope: str,
         subject_id: str | None = None,
     ) -> str:
         installation = self.repository.installation(installation_id)
@@ -159,6 +164,10 @@ class HubService:
         self.repository.node(node_id)
         if transport not in {"direct", "relay"}:
             raise ValueError("Connection transport is invalid")
+        if scope not in {"session", "pairing"}:
+            raise ValueError("Connection scope is invalid")
+        if scope == "pairing" and transport != "relay":
+            raise ValueError("Pairing requires Relay transport")
         now = self._clock()
         payload = {
             "aud": "knoa-node-session-v1",
@@ -172,6 +181,7 @@ class HubService:
             "issued_at": now,
             "expires_at": now + 90,
             "transport": transport,
+            "scope": scope,
             "protocol_version": 1,
             "max_session_lifetime": 3600,
         }
@@ -191,10 +201,15 @@ class HubService:
             payload = json.loads(_decode(encoded))
         except (InvalidSignature, ValueError, json.JSONDecodeError) as exc:
             raise PermissionError("Connection ticket rejected") from exc
-        if payload.get("aud") != "knoa-node-session-v1" or payload.get("hub_id") != self.hub_id:
+        if (
+            payload.get("aud") != "knoa-node-session-v1"
+            or payload.get("hub_id") != self.hub_id
+        ):
             raise PermissionError("Connection ticket rejected")
         self.repository.consume_ticket(
-            str(payload["ticket_id"]), str(payload["node_id"]), str(payload["installation_id"])
+            str(payload["ticket_id"]),
+            str(payload["node_id"]),
+            str(payload["installation_id"]),
         )
         return payload
 
@@ -285,9 +300,7 @@ class HubService:
         caller = self.verify_node_signed_request(
             str(request["caller_node_id"]), transcript, str(request["signature"])
         )
-        deployment = self.repository.deployment(
-            str(request["target_deployment_id"])
-        )
+        deployment = self.repository.deployment(str(request["target_deployment_id"]))
         if deployment["kind"] != "model":
             raise PermissionError("Resource ticket requires a Model Deployment")
         if not deployment["enabled"]:
@@ -372,26 +385,28 @@ class HubService:
         self.verify_node_signed_request(
             str(request["node_id"]), transcript, str(request["signature"])
         )
-        self.repository.record_invocation_observation(
-            str(request["node_id"]), request
-        )
+        self.repository.record_invocation_observation(str(request["node_id"]), request)
 
     @staticmethod
     def _load_or_create_key(path: Path) -> Ed25519PrivateKey:
         path = path.expanduser().resolve()
+
         def load_existing() -> Ed25519PrivateKey:
             try:
                 validate_private_file(path, label="Hub identity")
             except RuntimeError as exc:
                 raise PermissionError(str(exc)) from exc
-            return Ed25519PrivateKey.from_private_bytes(_decode(path.read_text().strip()))
+            return Ed25519PrivateKey.from_private_bytes(
+                _decode(path.read_text().strip())
+            )
 
         if path.exists():
             return load_existing()
         prepare_private_directory(path.parent, label="Hub identity directory")
         key = Ed25519PrivateKey.generate()
         raw = key.private_bytes(
-            serialization.Encoding.Raw, serialization.PrivateFormat.Raw,
+            serialization.Encoding.Raw,
+            serialization.PrivateFormat.Raw,
             serialization.NoEncryption(),
         )
         try:
