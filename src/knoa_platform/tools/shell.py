@@ -273,6 +273,12 @@ class ShellTool(ToolBase):
             }
             if isolated_process_group:
                 process_kwargs["start_new_session"] = True
+            else:
+                process_kwargs["creationflags"] = getattr(
+                    subprocess,
+                    "CREATE_NEW_PROCESS_GROUP",
+                    0,
+                )
             proc = await asyncio.create_subprocess_exec(
                 shell_exe, *shell_args,
                 **process_kwargs,
@@ -307,10 +313,12 @@ class ShellTool(ToolBase):
                     except ProcessLookupError:
                         pass
                 else:
-                    try:
-                        proc.kill()
-                    except ProcessLookupError:
-                        pass
+                    subprocess.run(
+                        ["taskkill.exe", "/PID", str(proc.pid), "/T", "/F"],
+                        check=False,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
 
             stdout_task = asyncio.create_task(
                 read_limited(proc.stdout, stdout_buffer)

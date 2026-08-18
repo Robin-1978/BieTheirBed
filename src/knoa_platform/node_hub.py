@@ -25,6 +25,12 @@ from knoa_platform.gateway.identity import GatewayIdentityRepository
 from knoa_platform.gateway.protocol import NodeHubEnrollmentRequest
 from knoa_platform.hub.relay import RelayFrame
 from knoa_platform.node_identity import NodeIdentity
+from knoa_platform.private_files import (
+    fsync_directory,
+    prepare_private_directory,
+    restrict_private_file,
+    validate_private_file,
+)
 from knoa_platform.relay_protocol import (
     ClientHello,
     accept_client_hello,
@@ -90,10 +96,10 @@ class NodeHubStore:
     def load(self) -> NodeHubEnrollment | None:
         if not self._path.exists():
             return None
-        if self._path.is_symlink() or not self._path.is_file():
-            raise ValueError("Node Hub enrollment must be a regular file")
-        if self._path.stat().st_mode & 0o077:
-            raise PermissionError("Node Hub enrollment must use mode 0600")
+        try:
+            validate_private_file(self._path, label="Node Hub enrollment")
+        except RuntimeError as exc:
+            raise PermissionError(str(exc)) from exc
         raw = json.loads(self._path.read_text(encoding="utf-8"))
         return NodeHubEnrollment(
             hub_url=_hub_url(str(raw["hub_url"])),
@@ -115,7 +121,7 @@ class NodeHubStore:
             hub_signing_public_key=_public_key(hub_signing_public_key),
             enrolled_at=float(self._clock()),
         )
-        self._path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        prepare_private_directory(self._path.parent, label="Node Hub enrollment directory")
         temporary = self._path.with_name(f".{self._path.name}.{secrets.token_hex(8)}.tmp")
         descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
@@ -123,12 +129,9 @@ class NodeHubStore:
                 json.dump(asdict(enrollment), stream, sort_keys=True, separators=(",", ":"))
                 stream.flush()
                 os.fsync(stream.fileno())
+            restrict_private_file(temporary)
             os.replace(temporary, self._path)
-            directory = os.open(self._path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
+            fsync_directory(self._path.parent)
         finally:
             temporary.unlink(missing_ok=True)
         return enrollment

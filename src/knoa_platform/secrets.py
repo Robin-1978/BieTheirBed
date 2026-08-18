@@ -10,6 +10,13 @@ import secrets
 import time
 from pathlib import Path
 
+from knoa_platform.private_files import (
+    fsync_directory,
+    prepare_private_directory,
+    restrict_private_file,
+    validate_private_file,
+)
+
 _REFERENCE = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
 
 
@@ -22,7 +29,7 @@ class SecretStore:
         normalized = self._reference(reference)
         if not value or len(value.encode("utf-8")) > 64 * 1024 or "\x00" in value:
             raise ValueError("Secret must contain 1-65536 safe bytes")
-        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        prepare_private_directory(self.root, label="Secret store")
         payload_path = self.root / normalized
         metadata_path = self.root / f".{normalized}.json"
         temporary = self.root / f".{normalized}.{secrets.token_hex(8)}.tmp"
@@ -32,8 +39,9 @@ class SecretStore:
                 stream.write(value)
                 stream.flush()
                 os.fsync(stream.fileno())
+            restrict_private_file(temporary)
             temporary.replace(payload_path)
-            payload_path.chmod(0o600)
+            restrict_private_file(payload_path)
         finally:
             temporary.unlink(missing_ok=True)
         metadata = {
@@ -53,20 +61,19 @@ class SecretStore:
                 json.dump(metadata, stream, sort_keys=True, separators=(",", ":"))
                 stream.flush()
                 os.fsync(stream.fileno())
+            restrict_private_file(metadata_temporary)
             metadata_temporary.replace(metadata_path)
-            metadata_path.chmod(0o600)
+            restrict_private_file(metadata_path)
         finally:
             metadata_temporary.unlink(missing_ok=True)
-        directory = os.open(self.root, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        fsync_directory(self.root)
         return metadata
 
     def get(self, reference: str) -> str:
         path = self.root / self._reference(reference)
-        if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077:
+        try:
+            validate_private_file(path, label="Secret")
+        except (OSError, RuntimeError):
             raise LookupError("Secret is not configured")
         return path.read_text(encoding="utf-8")
 

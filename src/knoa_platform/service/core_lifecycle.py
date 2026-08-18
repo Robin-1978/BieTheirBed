@@ -68,8 +68,15 @@ def _start_core_daemon(config: AppConfig) -> None:
         sys.executable,
         "-m",
         "knoa_platform.service.core_daemon",
-        "--daemon",
     ]
+    creationflags = 0
+    if sys.platform == "win32":
+        creationflags = (
+            getattr(subprocess, "DETACHED_PROCESS", 0)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        )
+    else:
+        command.append("--daemon")
     if config.source_config_path:
         command.extend(["--config", config.source_config_path])
     try:
@@ -77,7 +84,8 @@ def _start_core_daemon(config: AppConfig) -> None:
             command,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            start_new_session=True,
+            start_new_session=sys.platform != "win32",
+            creationflags=creationflags,
         )
     except OSError as exc:
         raise ConnectionError("Core service could not be started") from exc

@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 import os
-import pwd
 import stat
 import subprocess
 import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+
+if sys.platform.startswith("linux"):
+    import pwd
+else:  # pragma: no cover - exercised by Windows CI
+    pwd = None
 
 
 DESKTOP_TOOL_NAMES = frozenset(
@@ -255,6 +259,7 @@ def _select_xauthority(environment: dict[str, str]) -> str:
             candidates.append(Path(runtime_value) / "gdm" / "Xauthority")
 
     try:
+        assert pwd is not None
         candidates.append(Path(pwd.getpwuid(uid).pw_dir) / ".Xauthority")
     except KeyError:
         pass

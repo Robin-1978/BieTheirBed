@@ -2,7 +2,7 @@
 
 > 状态：当前 V1 可部署架构与后续生产演进边界
 >
-> 更新日期：2026-08-17
+> 更新日期：2026-08-18
 >
 > 范围：Mobile App、Node、HubService、Relay、Agent Runtime、LLM、Skill、Tool、MCP、网络、安全、存储、故障与运维拓扑
 >
@@ -431,7 +431,47 @@ Tool 和 Secret 不使用此远程资源路径。
 `9529`，应先把 Node Secure Gateway 移到另一个 loopback 端口（当前部署使用 `9531`）并清空其
 public URL，再由 Hosted Hub 接管 `9529`。公网入口仍由 TLS ingress 提供，不直接暴露 Uvicorn。
 
-### 10.3 TLS 原则
+### 10.3 原生 Windows 同机 Hosted Hub + Node
+
+Windows 10/11 或 Windows Server 可以直接使用标准 CPython 3.14 x64、venv 和 Knoa wheel 运行，不要求 WSL，
+也不要求先封装为 PyInstaller EXE。当前标准同机拓扑是：
+
+```text
+Windows Host
+├── Knoa Hosted Hub WinSW service
+│   ├── identity: LocalSystem
+│   ├── start: Automatic
+│   ├── listener: 127.0.0.1:9529
+│   └── state: C:\ProgramData\Knoa\HostedHub
+├── Knoa Node
+│   ├── InteractiveTask: signed-in user, at logon, desktop capable
+│   ├── HeadlessService: optional WinSW/LocalSystem, Session 0
+│   ├── Core: 127.0.0.1:9527
+│   ├── Capability MCP: 127.0.0.1:9530
+│   ├── Secure Gateway: 127.0.0.1:9531
+│   └── state: %LOCALAPPDATA%\Knoa\Node
+└── independent cloudflared WinSW services
+    ├── Knoa Tunnel Token -> canonical Hub hostname -> 127.0.0.1:9529
+    └── PER Tunnel Token  -> PER hostname -> configured local origin
+```
+
+Hub 是无桌面控制面的常驻服务，因此由 WinSW 以 `LocalSystem` 自动启动。需要桌面能力的 Node 必须
+使用 `InteractiveTask` 留在用户交互 Session 中；`HeadlessService` 只用于 Agent、Task、LLM、MCP 和
+Relay，不提供截图、剪贴板、通知、键鼠或窗口能力。安装器使用 NTFS ACL 将 Knoa 根目录限制为
+`SYSTEM`、本机 Administrators 和安装用户；Python 运行时不把 POSIX `0600/0700` mode bits 错当成
+Windows ACL。
+
+当前实际配置是两个 remotely managed Cloudflare Tunnel，因此对应两个 Token 和两个 cloudflared
+进程。Windows 使用两个不同 Service ID 的 WinSW wrapper，Token 只保存在受 ACL 保护的文件中，XML
+只引用 `--token-file`。Knoa Hub 仍只有一个 canonical URL；另一个 Tunnel 不构成第二个 Hub。
+
+共享 Python 包和领域代码继续同时支持 Linux 与 Windows。Linux 保持 systemd 和 POSIX 权限模型；
+Windows 的 WinSW、Task Scheduler、NTFS ACL 与 Session 0 处理只属于部署和平台适配边界。
+
+原生安装、Node enrollment 和 cloudflared 命令见
+[`deploy/windows/README.md`](../deploy/windows/README.md)。
+
+### 10.4 TLS 原则
 
 - 公网 Hub 必须使用有效 TLS；
 - WebSocket upgrade 必须由 proxy 正确透传；
@@ -466,6 +506,10 @@ public URL，再由 Hosted Hub 接管 `9529`。公网入口仍由 TLS ingress �
 - `remote-model-invocations.db` 保存幂等执行和崩溃恢复事实；
 - 文件权限必须保持私有；
 - 不把整个 Runtime Root 无差别同步到 Hub。
+
+Windows 默认 Node Root 是 `%LOCALAPPDATA%\Knoa\Node`。PID 与 `service.stop` 位于该 Node Root 的
+`run` 子目录，因此多个配置不会共享一个全局停止文件。Node 配置、identity、Hub enrollment、Secret、
+Task、Conversation 和执行状态都属于这个新 Windows Node；现有 Linux Node 保持原 identity 和本地事实。
 
 ### 11.2 Hub
 
@@ -515,7 +559,23 @@ URL 下载 APK；`/downloads/android/latest.apk` 只提供稳定人工安装入�
 SQLite backup API 的 Hosted 一致性备份/恢复命令。仍未提供多实例容器编排、自动异地复制和
 SLO-backed 灾备，因此当前是“单节点 Hosted MVP 可部署”，不是“HA Hosted 平台已经交付”。
 
-### 12.2 最低备份要求
+### 12.2 Hosted Hub 从 Linux 迁移到 Windows
+
+迁移改变 Hub 的运行主机，不改变 Hub identity、Account、Workspace 或已有 Node identity。正确顺序是：
+
+1. 保持旧 Linux Node 运行，但停止旧 Hosted Hub 的写入入口；
+2. 在旧主机使用一致性备份命令导出 `control.db`、`hub-signing.key`、全部 tenant DB、Android release
+   tree 与 manifest；
+3. 将完整备份目录复制到 Windows，以 `Install-Knoa.ps1 -HostedBackupPath ...` 恢复到空 Hub Root；
+4. 先在 Windows 本机验证 `127.0.0.1:9529`，确认 Hub signing identity 与数据库完整；
+5. 停止旧主机 cloudflared connector，再启动 Windows 上的同一个 Tunnel connector；
+6. 验证 canonical Hub 域名、Account 登录、Workspace directory 和旧 Linux Node 重连；
+7. 使用新的 enrollment grant 将 Windows Node 加入目标 Workspace。
+
+禁止让旧、新两份 Hosted Hub 数据库同时通过同一 canonical 域名提供写服务。Windows Node 是新增的
+执行节点，不应复制 Linux Node 的 `node-identity.json`、Conversation/Task 数据库或本地 Secret。
+
+### 12.3 最低备份要求
 
 Self-hosted V1 至少分别备份：
 
@@ -526,7 +586,7 @@ Self-hosted V1 至少分别备份：
 - 备份必须在隔离临时目录验证可读取和完整性；
 - 恢复演练必须验证旧 Node 仍接受恢复后的 Hub identity。
 
-### 12.3 建议升级顺序
+### 12.4 建议升级顺序
 
 兼容升级：
 

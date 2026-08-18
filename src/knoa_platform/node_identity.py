@@ -14,6 +14,12 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
+from knoa_platform.private_files import (
+    prepare_private_directory,
+    publish_exclusive_file,
+    validate_private_file,
+)
+
 
 def _encode(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
@@ -79,7 +85,7 @@ class NodeIdentityStore:
     def load_or_create(self) -> NodeIdentity:
         if self._path.exists():
             return self._load()
-        self._path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        prepare_private_directory(self._path.parent, label="Node identity directory")
         identity = NodeIdentity(
             node_id=f"node_{secrets.token_urlsafe(18)}",
             signing_private_key=Ed25519PrivateKey.generate(),
@@ -103,23 +109,18 @@ class NodeIdentityStore:
                 stream.flush()
                 os.fsync(stream.fileno())
             try:
-                os.link(temporary, self._path)
+                publish_exclusive_file(temporary, self._path)
             except FileExistsError:
                 return self._load()
-            directory = os.open(self._path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
         finally:
             temporary.unlink(missing_ok=True)
         return identity
 
     def _load(self) -> NodeIdentity:
-        if self._path.is_symlink() or not self._path.is_file():
-            raise ValueError("Node identity must be a regular file")
-        if self._path.stat().st_mode & 0o077:
-            raise PermissionError("Node identity must use mode 0600")
+        try:
+            validate_private_file(self._path, label="Node identity")
+        except RuntimeError as exc:
+            raise PermissionError(str(exc)) from exc
         raw = json.loads(self._path.read_text(encoding="utf-8"))
         identity = NodeIdentity(
             node_id=str(raw["node_id"]),

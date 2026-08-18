@@ -71,6 +71,8 @@ include = [
     "/src/knoa_codex_agent",
     "/tests",
     "/config/default.yaml",
+    "/deploy",
+    "/docs/knoa-deployment-architecture.md",
     "/README.md",
     "/pyproject.toml",
 ]

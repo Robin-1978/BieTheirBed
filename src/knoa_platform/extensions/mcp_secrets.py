@@ -5,15 +5,19 @@ from collections.abc import Callable
 from pathlib import Path
 import re
 
+from knoa_platform.private_files import validate_private_file
+
 
 def load_mcp_private_environment(path: str | Path) -> dict[str, str]:
     resolved = Path(path).expanduser().resolve()
     if not resolved.exists():
         return {}
-    if resolved.is_symlink() or not resolved.is_file():
-        raise ValueError("MCP private environment must be a regular file")
-    if resolved.stat().st_mode & 0o077:
-        raise PermissionError("MCP private environment must use mode 0600")
+    try:
+        validate_private_file(resolved, label="MCP private environment")
+    except RuntimeError as exc:
+        raise PermissionError(
+            f"MCP private environment must use mode 0600 on POSIX: {exc}"
+        ) from exc
     environment: dict[str, str] = {}
     for line_number, raw_line in enumerate(
         resolved.read_text(encoding="utf-8").splitlines(),

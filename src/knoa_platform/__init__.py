@@ -8,7 +8,7 @@ from knoa_platform.branding import (
     ASSISTANT_NAME_EN,
 )
 
-__version__ = "0.2.25"
+__version__ = "0.2.26"
 
 
 def _gateway_ttl(value: str) -> int:
@@ -446,13 +446,13 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if args.status:
-        return _service_status()
+        return _service_status(config_path)
 
     if args.start:
         return _start_service(config_path, args.log_dir)
 
     if args.stop:
-        return _stop_service()
+        return _stop_service(config_path)
 
     if args.restart:
         return _restart_service(config_path, args.log_dir)
@@ -489,18 +489,23 @@ def main(argv: list[str] | None = None) -> int:
         return 130
 
 
-def _service_state() -> tuple[bool, int | None]:
+def _service_paths(config_path: str | None = None):
+    from knoa_platform.config import load_config
+    from knoa_platform.runtime import RuntimePaths
+
+    return RuntimePaths.from_root(load_config(config_path).runtime_root)
+
+
+def _service_state(config_path: str | None = None) -> tuple[bool, int | None]:
     """Return ``(running, pid)`` for the service daemon.
 
     Uses the PID file when valid; otherwise falls back to scanning the
     configured service TCP port so an orphaned daemon (no/ stale PID file)
     is still detected and can be stopped by ``--stop`` / ``--restart``.
     """
-    import os
+    from knoa_platform.service.processes import process_exists
 
-    from knoa_platform.runtime import RuntimePaths
-
-    pid_path = RuntimePaths.from_root().pid
+    pid_path = _service_paths(config_path).pid
 
     pid: int | None = None
     if pid_path.exists():
@@ -509,13 +514,11 @@ def _service_state() -> tuple[bool, int | None]:
         except (ValueError, IndexError, OSError):
             pid = None
     if pid is not None:
-        try:
-            os.kill(pid, 0)
+        if process_exists(pid) and _is_knoa_service_pid(pid):
             return True, pid
-        except OSError:
-            pid = None
+        pid = None
 
-    port = _service_port()
+    port = _service_port(config_path)
     if port > 0:
         owners = _pids_listening_on_port(port)
         service_owners = [owner for owner in owners if _is_knoa_service_pid(owner)]
@@ -532,7 +535,36 @@ def _service_state() -> tuple[bool, int | None]:
 
 def _is_knoa_service_pid(pid: int) -> bool:
     """Reject unrelated processes that happen to own Knoa's configured port."""
+    import os
+    import subprocess
     from pathlib import Path
+
+    if os.name == "nt":
+        query = (
+            f"(Get-CimInstance Win32_Process -Filter \"ProcessId = {int(pid)}\")"
+            ".CommandLine"
+        )
+        try:
+            result = subprocess.run(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    query,
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        command_line = result.stdout.lower()
+        return result.returncode == 0 and (
+            "knoa_platform.service" in command_line
+            or ("knoa_platform" in command_line and "--serve" in command_line)
+        )
 
     try:
         raw = (Path("/proc") / str(pid) / "cmdline").read_bytes()
@@ -554,12 +586,12 @@ def _is_knoa_service_pid(pid: int) -> bool:
     return False
 
 
-def _service_port() -> int:
+def _service_port(config_path: str | None = None) -> int:
     """The configured service TCP port (0 means TCP disabled)."""
     try:
         from knoa_platform.config import load_config
 
-        return int(load_config().service_port)
+        return int(load_config(config_path).service_port)
     except Exception:
         return 0
 
@@ -609,11 +641,9 @@ def _pids_listening_on_port(port: int) -> list[int]:
     return sorted(pids)
 
 
-def _service_log_path() -> str:
+def _service_log_path(config_path: str | None = None) -> str:
     """The log path recorded by the daemon (from the PID file), else the default."""
-    from knoa_platform.runtime import RuntimePaths
-
-    paths = RuntimePaths.from_root()
+    paths = _service_paths(config_path)
     if paths.pid.exists():
         try:
             lines = paths.pid.read_text().splitlines()
@@ -625,69 +655,75 @@ def _service_log_path() -> str:
 
 
 def _wait_for_stopped(pid: int | None, timeout: float = 15.0) -> bool:
-    import os
     import time
+
+    from knoa_platform.service.processes import process_exists
 
     if pid is None:
         return True
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        try:
-            os.kill(pid, 0)
-        except OSError:
+        if not process_exists(pid):
             return True
         time.sleep(1)
     return False
 
 
-def _wait_for_running(pid: int | None, timeout: float = 30.0) -> bool:
+def _wait_for_running(
+    pid: int | None,
+    timeout: float = 30.0,
+    config_path: str | None = None,
+) -> bool:
     import time
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        running, alive_pid = _service_state()
+        running, alive_pid = _service_state(config_path)
         if running and (pid is None or alive_pid == pid):
             return True
         time.sleep(1)
     return False
 
 
-def _service_status() -> int:
-    running, pid = _service_state()
+def _service_status(config_path: str | None = None) -> int:
+    running, pid = _service_state(config_path)
     if running:
         print(f"Service is running (pid {pid}).")
-        print(f"Log: {_service_log_path()}")
+        print(f"Log: {_service_log_path(config_path)}")
         return 0
     print("Service is not running.")
     return 1
 
 
-def _stop_service() -> int:
+def _stop_service(config_path: str | None = None) -> int:
     import os
     import signal
     import sys as _sys
 
-    from knoa_platform.runtime import RuntimePaths
+    from knoa_platform.service.processes import force_terminate_process_tree
 
-    pid_path = RuntimePaths.from_root().pid
+    paths = _service_paths(config_path)
+    pid_path = paths.pid
 
-    running, pid = _service_state()
+    running, pid = _service_state(config_path)
     if not running:
         print("Service is not running.")
         pid_path.unlink(missing_ok=True)
         return 0
 
     print(f"Stopping service (pid {pid})...")
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except OSError:
-        pass
-    if not _wait_for_stopped(pid):
-        print("Service did not stop gracefully; sending SIGKILL...", file=_sys.stderr)
+    if os.name == "nt":
+        pid_path.parent.mkdir(parents=True, exist_ok=True)
+        paths.stop_request.touch(exist_ok=True)
+    else:
         try:
-            os.kill(pid, signal.SIGKILL)
+            os.kill(pid, signal.SIGTERM)
         except OSError:
             pass
+    if not _wait_for_stopped(pid):
+        print("Service did not stop gracefully; forcing termination...", file=_sys.stderr)
+        if pid is not None:
+            force_terminate_process_tree(pid)
     try:
         pid_path.unlink(missing_ok=True)
     except OSError:
@@ -698,22 +734,32 @@ def _stop_service() -> int:
 
 def _start_service(config_path: str | None, log_dir: str | None) -> int:
     """Start the daemon and wait until it is ready."""
+    import os
     import subprocess
     import sys as _sys
     from pathlib import Path
 
     from knoa_platform.service.core_daemon import resolve_core_log
 
-    running, pid = _service_state()
+    running, pid = _service_state(config_path)
     if running:
         print(f"Service already running (pid {pid}).")
-        print(f"Log: {_service_log_path()}")
+        print(f"Log: {_service_log_path(config_path)}")
         return 0
 
     # Spawn the dedicated service module directly. This avoids recursively
     # entering the user-facing CLI and keeps restart working even before the
     # renamed `knoa` console script has been reinstalled.
-    cmd = [_sys.executable, "-m", "knoa_platform.service", "--daemon"]
+    cmd = [_sys.executable, "-m", "knoa_platform.service"]
+    creationflags = 0
+    if os.name == "nt":
+        creationflags = (
+            getattr(subprocess, "DETACHED_PROCESS", 0)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        )
+        _service_paths(config_path).stop_request.unlink(missing_ok=True)
+    else:
+        cmd.append("--daemon")
     if log_dir:
         cmd += [f"--log-dir={Path(log_dir).expanduser()}"]
     if config_path:
@@ -721,25 +767,32 @@ def _start_service(config_path: str | None, log_dir: str | None) -> int:
 
     print(f"Starting {ASSISTANT_NAME} service (daemon)...")
     try:
-        subprocess.Popen(cmd)  # daemon double-forks; parent process exits on its own
+        subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=os.name != "nt",
+            creationflags=creationflags,
+        )
     except Exception as e:
         print(f"Failed to start service: {e}", file=_sys.stderr)
         return 1
 
-    if not _wait_for_running(None):
+    if not _wait_for_running(None, config_path=config_path):
         print("ERROR: Service did not become ready in time.", file=_sys.stderr)
         print(f"Check log: {resolve_core_log(log_dir, config_path)}", file=_sys.stderr)
         return 1
 
-    _, new_pid = _service_state()
+    _, new_pid = _service_state(config_path)
     print(f"Service started (pid {new_pid}).")
-    print(f"Log: {_service_log_path()}")
+    print(f"Log: {_service_log_path(config_path)}")
     return 0
 
 
 def _restart_service(config_path: str | None, log_dir: str | None) -> int:
     print("--- restarting service ---")
-    rc = _stop_service()
+    rc = _stop_service(config_path)
     if rc != 0:
         return rc
     print("---")

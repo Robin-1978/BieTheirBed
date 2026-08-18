@@ -15,7 +15,11 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import (
 )
 
 from knoa_platform.config import AppConfig
-from knoa_platform.configuration.models import ConfigDraft, ConfigValidationResult
+from knoa_platform.configuration.models import (
+    ConfigDraft,
+    ConfigValidationResult,
+    ManagedConfig,
+)
 from knoa_platform.extensions.import_service import ExtensionImportService
 from knoa_platform.extensions.package_store import PackageStore
 from knoa_platform.fleet import (
@@ -239,6 +243,14 @@ async def test_sealed_fleet_candidate_checks_owner_binding_and_base_revision(
     applied = await service.apply("owner", rollout_id, envelope.as_dict())
 
     assert applied.summary == "Fleet rollout rollout-1"
+
+
+def test_managed_config_digest_is_stable_across_json_round_trip() -> None:
+    document = AppConfig(fallback_enabled=False).managed_config()
+    restored = ManagedConfig.model_validate_json(document.model_dump_json())
+
+    assert restored.digest == document.digest
+    assert fleet_candidate_digest(restored) == fleet_candidate_digest(document)
 
 
 def test_hub_enrollment_ticket_and_presence_are_separate_trust_steps(

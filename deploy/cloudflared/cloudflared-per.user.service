@@ -1,0 +1,14 @@
+[Unit]
+Description=Cloudflare Tunnel (PER)
+After=network-online.target etf-web.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/disk/dev/bin/cloudflared tunnel run --token-file /home/robin/.knoa/config/cloudflare-per.token
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+
