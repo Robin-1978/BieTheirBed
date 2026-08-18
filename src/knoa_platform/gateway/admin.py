@@ -1,4 +1,5 @@
 """Local owner administration for Secure Gateway pairing and devices."""
+
 from __future__ import annotations
 
 import sys
@@ -8,6 +9,7 @@ from knoa_platform.config import load_config
 from knoa_platform.gateway.audit import GatewayAuditRepository
 from knoa_platform.gateway.identity import GatewayIdentityRepository
 from knoa_platform.gateway.pairing import GatewayPairingPayload
+from knoa_platform.node_hub import NodeHubStore
 from knoa_platform.node_identity import NodeIdentityStore
 from knoa_platform.runtime import RuntimePaths
 
@@ -39,10 +41,17 @@ def run_gateway_admin(
             print(f"grant_id={grant.grant_id}")
             print(f"grant_secret={grant.secret}")
             print(f"expires_at={_timestamp(grant.expires_at)}")
-            if config.gateway_public_url:
+            enrollment = NodeHubStore(
+                RuntimePaths.from_root(config.runtime_root).data / "node-hub.json"
+            ).load()
+            pairing_url = config.gateway_public_url or (
+                enrollment.hub_url if enrollment is not None else ""
+            )
+            if pairing_url:
                 payload = GatewayPairingPayload.from_grant(
                     grant,
-                    config.gateway_public_url,
+                    pairing_url,
+                    transport="direct" if config.gateway_public_url else "relay",
                     node_id=node_identity.node_id,
                     node_signing_public_key=node_identity.signing_public_key,
                     node_configuration_public_key=node_identity.configuration_public_key,
@@ -57,8 +66,10 @@ def run_gateway_admin(
                 print("No paired devices.")
                 return 0
             for device in devices:
-                last_seen = "never" if device.last_seen_at is None else _timestamp(
-                    device.last_seen_at
+                last_seen = (
+                    "never"
+                    if device.last_seen_at is None
+                    else _timestamp(device.last_seen_at)
                 )
                 print(
                     f"{device.device_id}\t{device.state}\t{device.display_name}"

@@ -2,7 +2,7 @@
 param(
     [switch]$PurgeData,
     [string]$BaseRoot = "$env:ProgramData\Knoa",
-    [string]$NodeRoot = "$env:LOCALAPPDATA\Knoa\Node"
+    [string]$NodeRoot = "$env:ProgramData\Knoa\Node"
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,4 +22,4 @@ if ($PurgeData -and $PSCmdlet.ShouldProcess("$BaseRoot and $NodeRoot", "Delete K
     Remove-Item -LiteralPath $BaseRoot -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $NodeRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
-Write-Host "Knoa services and scheduled tasks removed. Data was preserved unless -PurgeData was supplied."
+Write-Host "Knoa WinSW services removed. Legacy scheduled tasks were also deleted. Data was preserved unless -PurgeData was supplied."

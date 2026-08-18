@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 os.environ.setdefault("CRYPTOGRAPHY_OPENSSL_NO_LEGACY", "1")
 
-from cryptography.exceptions import InvalidSignature  # noqa: E402
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives.asymmetric.x25519 import (
@@ -69,6 +69,32 @@ class ClientHello(BaseModel):
         }
 
 
+class PairingClientHello(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    type: Literal["pairing_client_hello"] = "pairing_client_hello"
+    version: Literal[1] = 1
+    ticket: str = Field(min_length=100, max_length=4096)
+    installation_id: str = Field(min_length=1, max_length=128)
+    client_signing_public_key: str = Field(min_length=40, max_length=64)
+    client_ephemeral_public_key: str = Field(min_length=40, max_length=64)
+    client_nonce: str = Field(min_length=22, max_length=128)
+    transport: Literal["relay"] = "relay"
+    signature: str = Field(min_length=80, max_length=128)
+
+    def transcript(self) -> dict[str, Any]:
+        return {
+            "audience": "knoa-node-pairing-client-hello-v1",
+            "version": self.version,
+            "ticket": self.ticket,
+            "installation_id": self.installation_id,
+            "client_signing_public_key": self.client_signing_public_key,
+            "client_ephemeral_public_key": self.client_ephemeral_public_key,
+            "client_nonce": self.client_nonce,
+            "transport": self.transport,
+        }
+
+
 class ServerHello(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -89,6 +115,7 @@ class TicketClaims:
     installation_key_digest: str
     expires_at: float
     max_session_lifetime: int
+    scope: str
 
 
 def verify_ticket(
@@ -127,6 +154,7 @@ def verify_ticket(
             installation_key_digest=str(payload["installation_key_digest"]),
             expires_at=float(payload["expires_at"]),
             max_session_lifetime=int(payload["max_session_lifetime"]),
+            scope=str(payload["scope"]),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise PermissionError("Relay ticket rejected") from exc
@@ -141,7 +169,7 @@ def accept_client_hello(
     node_identity: NodeIdentity,
     device: GatewayDevice,
     clock=time.time,
-) -> tuple[ServerHello, "NodeCipherSession"]:
+) -> tuple[ServerHello, NodeCipherSession]:
     claims = verify_ticket(
         hello.ticket,
         hub_signing_public_key,
@@ -150,7 +178,8 @@ def accept_client_hello(
         clock=clock,
     )
     if (
-        claims.ticket_id != session_id
+        claims.scope != "session"
+        or claims.ticket_id != session_id
         or claims.installation_id != hello.installation_id
         or hello.device_id != device.device_id
         or hello.client_signing_public_key != device.public_key
@@ -199,14 +228,89 @@ def accept_client_hello(
         session_id=session_id,
         decrypt_key=client_to_node,
         encrypt_key=node_to_client,
-        expires_at=min(claims.expires_at + claims.max_session_lifetime, float(clock()) + claims.max_session_lifetime),
+        expires_at=min(
+            claims.expires_at + claims.max_session_lifetime,
+            float(clock()) + claims.max_session_lifetime,
+        ),
+    )
+
+
+def accept_pairing_client_hello(
+    hello: PairingClientHello,
+    *,
+    session_id: str,
+    hub_id: str,
+    hub_signing_public_key: str,
+    node_identity: NodeIdentity,
+    clock=time.time,
+) -> tuple[ServerHello, NodeCipherSession]:
+    claims = verify_ticket(
+        hello.ticket,
+        hub_signing_public_key,
+        expected_hub_id=hub_id,
+        expected_node_id=node_identity.node_id,
+        clock=clock,
+    )
+    if (
+        claims.scope != "pairing"
+        or claims.ticket_id != session_id
+        or claims.installation_id != hello.installation_id
+        or claims.installation_key_digest
+        != hashlib.sha256(hello.client_signing_public_key.encode("utf-8")).hexdigest()
+    ):
+        raise PermissionError("Relay pairing identity rejected")
+    try:
+        Ed25519PublicKey.from_public_bytes(
+            decode_base64url(hello.client_signing_public_key)
+        ).verify(decode_base64url(hello.signature), canonical_json(hello.transcript()))
+        client_ephemeral = X25519PublicKey.from_public_bytes(
+            decode_base64url(hello.client_ephemeral_public_key)
+        )
+    except (InvalidSignature, ValueError) as exc:
+        raise PermissionError("Relay pairing proof rejected") from exc
+
+    server_private = X25519PrivateKey.generate()
+    server_public = encode_base64url(
+        server_private.public_key().public_bytes(
+            serialization.Encoding.Raw,
+            serialization.PublicFormat.Raw,
+        )
+    )
+    server_nonce = encode_base64url(__import__("secrets").token_bytes(24))
+    transcript = server_hello_transcript(
+        session_id=session_id,
+        client_hello=hello,
+        node_id=node_identity.node_id,
+        server_ephemeral_public_key=server_public,
+        server_nonce=server_nonce,
+    )
+    server_hello = ServerHello(
+        node_id=node_identity.node_id,
+        server_ephemeral_public_key=server_public,
+        server_nonce=server_nonce,
+        signature=node_identity.sign(canonical_json(transcript)),
+    )
+    client_to_node, node_to_client = derive_session_keys(
+        server_private.exchange(client_ephemeral),
+        ticket_id=claims.ticket_id,
+        client_nonce=hello.client_nonce,
+        server_nonce=server_nonce,
+    )
+    return server_hello, NodeCipherSession(
+        session_id=session_id,
+        decrypt_key=client_to_node,
+        encrypt_key=node_to_client,
+        expires_at=min(
+            claims.expires_at + claims.max_session_lifetime,
+            float(clock()) + claims.max_session_lifetime,
+        ),
     )
 
 
 def server_hello_transcript(
     *,
     session_id: str,
-    client_hello: ClientHello,
+    client_hello: ClientHello | PairingClientHello,
     node_id: str,
     server_ephemeral_public_key: str,
     server_nonce: str,
@@ -275,7 +379,7 @@ class NodeCipherSession:
         self._receive_sequence += 1
         value = json.loads(plaintext)
         if not isinstance(value, dict):
-            raise ValueError("Relay message must be an object")
+            raise TypeError("Relay message must be an object")
         return value
 
     def encrypt(self, value: dict[str, Any]) -> tuple[int, bytes]:
@@ -307,8 +411,10 @@ def _aad(session_id: str, direction: str, sequence: int) -> bytes:
 __all__ = [
     "ClientHello",
     "NodeCipherSession",
+    "PairingClientHello",
     "ServerHello",
     "accept_client_hello",
+    "accept_pairing_client_hello",
     "canonical_json",
     "decode_base64url",
     "derive_session_keys",

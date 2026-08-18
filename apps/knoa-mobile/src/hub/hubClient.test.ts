@@ -18,6 +18,7 @@ vi.mock("@/security/deviceIdentity", () => ({
 }));
 
 import {
+  issueConnectionTicket,
   loadHubConnection,
   registerHostedAccount,
   resetHostedPassword,
@@ -210,5 +211,33 @@ describe("Android release ownership", () => {
       download_path: `https://hosted.example/releases/android/57/${"b".repeat(64)}/knoa.apk`,
     });
     expect(nodeRelease).not.toHaveBeenCalled();
+  });
+});
+
+describe("Node Relay tickets", () => {
+  it("requests an explicitly pairing-scoped ticket", async () => {
+    native.cache.set("knoa.hub.connection.v1", JSON.stringify({
+      url: "https://hosted.example/workspaces/ws_personal_1",
+      rootUrl: "https://hosted.example",
+      token: `khs_${"a".repeat(48)}`,
+      accountId: "account-1",
+      hubId: "hub-hosted",
+      workspaceId: "ws_personal_1",
+      identityIssuerId: "hub-hosted",
+      signingPublicKey: "signing-key",
+      deploymentMode: "hosted_single_node",
+    }));
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ ticket: "ticket-a" }),
+    );
+
+    await expect(issueConnectionTicket("node-a", "relay", "pairing")).resolves.toBe("ticket-a");
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      installation_id: "installation-1",
+      node_id: "node-a",
+      transport: "relay",
+      scope: "pairing",
+    });
   });
 });

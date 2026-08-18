@@ -11,6 +11,7 @@ from knoa_platform.gateway.identity import (
     DeviceNotFoundError,
     GatewayIdentityRepository,
 )
+from knoa_platform.node_hub import NodeHubStore
 
 
 def test_gateway_admin_pairs_lists_and_revokes_device(
@@ -48,9 +49,9 @@ def test_gateway_admin_pairs_lists_and_revokes_device(
     assert "Robin Phone" in listed
     assert "active" in listed
 
-    assert main(
-        ["--config", str(config_path), "gateway", "revoke", device.device_id]
-    ) == 0
+    assert (
+        main(["--config", str(config_path), "gateway", "revoke", device.device_id]) == 0
+    )
     assert capsys.readouterr().out.strip() == f"revoked={device.device_id}"
     with pytest.raises(DeviceNotFoundError):
         repository.active_device("personal:robin", device.device_id)
@@ -89,13 +90,44 @@ def test_gateway_admin_emits_canonical_pairing_payload_when_url_is_configured(
         if line.startswith("pairing_json=")
     )
     payload = json.loads(encoded)
-    assert payload["version"] == "v2"
+    assert payload["version"] == "v3"
+    assert payload["transport"] == "direct"
     assert payload["gateway_url"] == "https://knoa.example.com"
     assert payload["grant_id"]
     assert len(payload["grant_secret"]) >= 32
     assert payload["node_id"].startswith("node_")
     assert len(payload["node_signing_public_key"]) >= 40
     assert len(payload["node_configuration_public_key"]) >= 40
+
+
+def test_gateway_admin_emits_relay_pairing_qr_for_enrolled_node(
+    tmp_path,
+    capsys,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("KNOA_RUNTIME_ROOT", raising=False)
+    monkeypatch.delenv("KNOA_HOME", raising=False)
+    runtime_root = tmp_path / "runtime"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(f"runtime_root: {runtime_root}\n", encoding="utf-8")
+    NodeHubStore(runtime_root / "data" / "node-hub.json").save(
+        hub_url="https://knoa.example.com/workspaces/ws-a",
+        hub_id="hub-a",
+        hub_signing_public_key=base64.urlsafe_b64encode(b"h" * 32).decode().rstrip("="),
+    )
+
+    assert main(["--config", str(config_path), "gateway", "pair", "--ttl", "60"]) == 0
+
+    output = capsys.readouterr().out
+    encoded = next(
+        line.removeprefix("pairing_json=")
+        for line in output.splitlines()
+        if line.startswith("pairing_json=")
+    )
+    payload = json.loads(encoded)
+    assert payload["version"] == "v3"
+    assert payload["transport"] == "relay"
+    assert payload["gateway_url"] == "https://knoa.example.com/workspaces/ws-a"
 
 
 def test_gateway_admin_publishes_and_inspects_private_android_release(

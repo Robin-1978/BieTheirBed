@@ -529,12 +529,13 @@ export async function revokeWorkspaceResourceGrant(grantId: string): Promise<Wor
 export async function issueConnectionTicket(
   nodeId: string,
   transport: "direct" | "relay",
+  scope: "session" | "pairing" = "session",
 ): Promise<string> {
   const connection = await requiredHubConnection();
   const installationId = await loadOrCreateInstallationId();
   const response = await request<{ ticket: string }>(connection.url, connection.token, "/v1/connection-tickets", {
     method: "POST",
-    body: { installation_id: installationId, node_id: nodeId, transport },
+    body: { installation_id: installationId, node_id: nodeId, transport, scope },
   });
   return response.ticket;
 }

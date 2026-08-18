@@ -1,18 +1,18 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][string]$WheelPath,
-    [Parameter(Mandatory = $true)][string]$WinSWExecutable,
+    [string]$WheelPath = "",
+    [string]$SourcePath = "",
+    [string]$WinSWExecutable = "",
     [string]$WheelhousePath = "",
     [string]$HubRoot = "$env:ProgramData\Knoa\HostedHub",
-    [string]$NodeRoot = "",
+    [string]$NodeRoot = "$env:ProgramData\Knoa\Node",
+    [string]$LegacyNodeRoot = "$env:LOCALAPPDATA\Knoa\Node",
     [string]$InstallRoot = "$env:ProgramData\Knoa\Runtime",
     [string]$HubPublicUrl = "https://knoa.tinydotdot.com",
     [string]$HubId = "hub_knoa_hosted",
     [string]$HostedBackupPath = "",
     [string]$BootstrapTokenSource = "",
     [string]$PythonVersion = "3.14",
-    [ValidateSet("InteractiveTask", "HeadlessService")]
-    [string]$NodeMode = "InteractiveTask",
     [switch]$RecreateVenv,
     [int]$HubPort = 9529,
     [int]$NodeCorePort = 9527,
@@ -82,7 +82,9 @@ function Install-WinSWService(
     $configuration = Join-Path $serviceDirectory "$ServiceId.xml"
     New-Item -ItemType Directory -Force -Path $serviceDirectory | Out-Null
     Remove-WinSWService $ServiceId $wrapper
-    Copy-Item -Force $SourceExecutable $wrapper
+    if ([IO.Path]::GetFullPath($SourceExecutable) -ne [IO.Path]::GetFullPath($wrapper)) {
+        Copy-Item -Force $SourceExecutable $wrapper
+    }
     Write-Utf8NoBom $configuration $Xml
     & $wrapper install
     if ($LASTEXITCODE -ne 0) { throw "Could not install WinSW service $ServiceId" }
@@ -91,14 +93,15 @@ function Install-WinSWService(
 }
 
 Assert-Administrator
-$resolvedWinSW = (Resolve-Path -LiteralPath $WinSWExecutable).Path
-if (-not $NodeRoot) {
-    if ($NodeMode -eq "HeadlessService") {
-        $NodeRoot = "$env:ProgramData\Knoa\Node"
+if (-not $WinSWExecutable) {
+    $existingWrapper = "$env:ProgramData\Knoa\Services\KnoaHostedHub\KnoaHostedHub.exe"
+    if (Test-Path -LiteralPath $existingWrapper) {
+        $WinSWExecutable = $existingWrapper
     } else {
-        $NodeRoot = "$env:LOCALAPPDATA\Knoa\Node"
+        throw "WinSWExecutable is required for the first installation"
     }
 }
+$resolvedWinSW = (Resolve-Path -LiteralPath $WinSWExecutable).Path
 $duplicatePorts = @($HubPort, $NodeCorePort, $NodeGatewayPort, $NodeMcpPort) |
     Group-Object |
     Where-Object { $_.Count -gt 1 }
@@ -106,7 +109,19 @@ if ($duplicatePorts) {
     throw "Hub, Node Core, Node Gateway and Node MCP ports must be distinct"
 }
 
-$resolvedWheel = (Resolve-Path -LiteralPath $WheelPath).Path
+if ($WheelPath -and $SourcePath) {
+    throw "Specify WheelPath or SourcePath, not both"
+}
+if ($WheelPath) {
+    $resolvedPackage = (Resolve-Path -LiteralPath $WheelPath).Path
+    $sourceInstall = $false
+} else {
+    if (-not $SourcePath) {
+        $SourcePath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
+    }
+    $resolvedPackage = (Resolve-Path -LiteralPath $SourcePath).Path
+    $sourceInstall = $true
+}
 $baseRoot = Split-Path -Parent $InstallRoot
 $configRoot = Join-Path $baseRoot "Config"
 $secretRoot = Join-Path $baseRoot "Secrets"
@@ -121,18 +136,33 @@ $nodeWrapper = Join-Path $serviceRoot "KnoaNode\KnoaNode.exe"
 
 foreach ($taskName in @("Knoa Hosted Hub", "Knoa Node")) {
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 }
-Unregister-ScheduledTask -TaskName "Knoa Hosted Hub" -Confirm:$false -ErrorAction SilentlyContinue
 Remove-WinSWService "KnoaHostedHub" $hubWrapper
 Remove-WinSWService "KnoaNode" $nodeWrapper
 
 Protect-KnoaPath $baseRoot
+if (
+    $LegacyNodeRoot
+    -and [IO.Path]::GetFullPath($LegacyNodeRoot) -ne [IO.Path]::GetFullPath($NodeRoot)
+    -and (Test-Path -LiteralPath $LegacyNodeRoot)
+) {
+    $targetHasState = (Test-Path -LiteralPath $NodeRoot) -and
+        [bool](Get-ChildItem -Force -LiteralPath $NodeRoot | Select-Object -First 1)
+    if (-not $targetHasState) {
+        New-Item -ItemType Directory -Force -Path $NodeRoot | Out-Null
+        Get-ChildItem -Force -LiteralPath $LegacyNodeRoot |
+            Copy-Item -Destination $NodeRoot -Recurse -Force
+        Write-Host "Copied the legacy per-user Node identity to $NodeRoot. The source is retained as a rollback snapshot."
+    }
+}
 Protect-KnoaPath $NodeRoot
 New-Item -ItemType Directory -Force -Path $configRoot, $secretRoot, $scriptRoot, $serviceRoot | Out-Null
 
 if ($RecreateVenv -and (Test-Path -LiteralPath $venvRoot)) {
     Remove-Item -LiteralPath $venvRoot -Recurse -Force
 }
+$existingEnvironment = Test-Path -LiteralPath $python
 if (-not (Test-Path -LiteralPath $python)) {
     & py "-$PythonVersion" -m venv $venvRoot
     if ($LASTEXITCODE -ne 0) { throw "Python $PythonVersion venv creation failed" }
@@ -143,15 +173,18 @@ if ($pythonIdentity -ne "${PythonVersion}:64:0") {
 }
 if ($WheelhousePath) {
     $wheelhouse = (Resolve-Path -LiteralPath $WheelhousePath).Path
-    & $python -m pip install --no-index --find-links $wheelhouse --force-reinstall $resolvedWheel
+    & $python -m pip install --no-index --find-links $wheelhouse --force-reinstall $resolvedPackage
+} elseif ($sourceInstall -and $existingEnvironment) {
+    & $python -m pip install --no-deps --force-reinstall $resolvedPackage
 } else {
-    & $python -m pip install --force-reinstall $resolvedWheel
+    & $python -m pip install --force-reinstall $resolvedPackage
 }
 if ($LASTEXITCODE -ne 0) { throw "Knoa wheel installation failed" }
 
 Copy-Item -Force (Join-Path $PSScriptRoot "Run-KnoaHub.ps1") $scriptRoot
 Copy-Item -Force (Join-Path $PSScriptRoot "Run-KnoaNode.ps1") $scriptRoot
 Copy-Item -Force (Join-Path $PSScriptRoot "Enroll-KnoaNode.ps1") $scriptRoot
+Copy-Item -Force (Join-Path $PSScriptRoot "Show-KnoaPairingQr.cmd") $scriptRoot
 Copy-Item -Force (Join-Path $PSScriptRoot "Install-Cloudflared.ps1") $scriptRoot
 Copy-Item -Force (Join-Path $PSScriptRoot "Uninstall-Cloudflared.ps1") $scriptRoot
 Copy-Item -Force (Join-Path $PSScriptRoot "Uninstall-Knoa.ps1") $scriptRoot
@@ -177,12 +210,8 @@ if ($HostedBackupPath) {
 }
 
 $nodeRootYaml = Quote-Yaml $NodeRoot
-if ($NodeMode -eq "HeadlessService") {
-    $workingDirectory = Join-Path $baseRoot "Workspace"
-    Protect-KnoaPath $workingDirectory
-} else {
-    $workingDirectory = $env:USERPROFILE
-}
+$workingDirectory = Join-Path $baseRoot "Workspace"
+Protect-KnoaPath $workingDirectory
 $workingDirectoryYaml = Quote-Yaml $workingDirectory
 $nodeConfigContent = @"
 runtime_root: $nodeRootYaml
@@ -232,12 +261,9 @@ $hubXml = @"
 "@
 Install-WinSWService "KnoaHostedHub" $hubXml $resolvedWinSW $serviceRoot
 
-if ($NodeMode -eq "HeadlessService") {
-    Stop-ScheduledTask -TaskName "Knoa Node" -ErrorAction SilentlyContinue
-    Unregister-ScheduledTask -TaskName "Knoa Node" -Confirm:$false -ErrorAction SilentlyContinue
-    $nodeXmlArguments = Escape-Xml $nodeArguments
-    $nodeLogPath = Escape-Xml (Join-Path $baseRoot "Logs\Node")
-    $nodeXml = @"
+$nodeXmlArguments = Escape-Xml $nodeArguments
+$nodeLogPath = Escape-Xml (Join-Path $baseRoot "Logs\Node")
+$nodeXml = @"
 <service>
   <id>KnoaNode</id>
   <name>Knoa Node Runtime</name>
@@ -256,27 +282,17 @@ if ($NodeMode -eq "HeadlessService") {
   </log>
 </service>
 "@
-    Install-WinSWService "KnoaNode" $nodeXml $resolvedWinSW $serviceRoot
-    Write-Warning "HeadlessService runs in Session 0; desktop capture, clipboard, input, windows and notifications are unavailable."
-} else {
-    Remove-WinSWService "KnoaNode" $nodeWrapper
-    $settings = New-ScheduledTaskSettingsSet `
-        -RestartCount 999 `
-        -RestartInterval (New-TimeSpan -Minutes 1) `
-        -StartWhenAvailable `
-        -ExecutionTimeLimit ([TimeSpan]::Zero)
-    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $nodeTask = New-ScheduledTask `
-        -Action (New-ScheduledTaskAction -Execute $powerShell -Argument $nodeArguments) `
-        -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $currentUser) `
-        -Principal (New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited) `
-        -Settings $settings
-    Register-ScheduledTask -TaskName "Knoa Node" -InputObject $nodeTask -Force | Out-Null
-    Start-ScheduledTask -TaskName "Knoa Node"
-}
+Install-WinSWService "KnoaNode" $nodeXml $resolvedWinSW $serviceRoot
 
 Write-Host "Knoa Hosted Hub: http://127.0.0.1:$HubPort"
 Write-Host "Knoa Node Gateway: http://127.0.0.1:$NodeGatewayPort"
 Write-Host "Canonical Hub URL: $HubPublicUrl"
-Write-Host "Node mode: $NodeMode"
-Write-Host "Use Enroll-KnoaNode.ps1 after the Windows Node has an Account token and Workspace ID."
+Write-Host "Knoa Node service: KnoaNode (WinSW)"
+$enrollmentFile = Join-Path $NodeRoot "data\node-hub.json"
+if (Test-Path -LiteralPath $enrollmentFile) {
+    Write-Host "Scan this QR in the Knoa App to bind the Windows Node:"
+    & $python -m knoa_platform --config $nodeConfig gateway pair --ttl 600
+    if ($LASTEXITCODE -ne 0) { throw "Could not create the App pairing QR" }
+} else {
+    Write-Host "Use Enroll-KnoaNode.ps1 after the Windows Node has an Account token and Workspace ID."
+}

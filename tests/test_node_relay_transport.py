@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 os.environ.setdefault("CRYPTOGRAPHY_OPENSSL_NO_LEGACY", "1")
 
 from cryptography.hazmat.primitives import serialization
@@ -28,6 +30,7 @@ from knoa_platform.node_hub import NodeHubEnrollment, NodeHubStore, NodeRelayMan
 from knoa_platform.node_identity import NodeIdentityStore
 from knoa_platform.relay_protocol import (
     ClientHello,
+    PairingClientHello,
     canonical_json,
     decode_base64url,
     derive_session_keys,
@@ -44,7 +47,9 @@ def _public_key(key: Ed25519PrivateKey) -> str:
     )
 
 
-def _frame(session_id: str, stream_id: int, sequence: int, payload: bytes) -> RelayFrame:
+def _frame(
+    session_id: str, stream_id: int, sequence: int, payload: bytes
+) -> RelayFrame:
     return RelayFrame(
         session_id=session_id,
         stream_id=stream_id,
@@ -56,12 +61,14 @@ def _frame(session_id: str, stream_id: int, sequence: int, payload: bytes) -> Re
 
 
 def _aad(session_id: str, direction: str, sequence: int) -> bytes:
-    return canonical_json({
-        "audience": "knoa-node-packet-v1",
-        "session_id": session_id,
-        "direction": direction,
-        "sequence": sequence,
-    })
+    return canonical_json(
+        {
+            "audience": "knoa-node-packet-v1",
+            "session_id": session_id,
+            "direction": direction,
+            "sequence": sequence,
+        }
+    )
 
 
 async def _echo(request: Request) -> Response:
@@ -114,14 +121,16 @@ async def test_node_relay_tunnel_dispatches_existing_gateway_asgi_surface(
         "configuration_public_key": node.configuration_public_key,
         "configuration_key_version": 1,
     }
-    hub.enroll_node({
-        **enrollment_transcript,
-        "grant_secret": enrollment_grant.secret,
-        "display_name": "Desktop",
-        "platform": "linux",
-        "version": "1",
-        "signature": node.sign(canonical_json(enrollment_transcript)),
-    })
+    hub.enroll_node(
+        {
+            **enrollment_transcript,
+            "grant_secret": enrollment_grant.secret,
+            "display_name": "Desktop",
+            "platform": "linux",
+            "version": "1",
+            "signature": node.sign(canonical_json(enrollment_transcript)),
+        }
+    )
 
     app_key = Ed25519PrivateKey.generate()
     app_public = _public_key(app_key)
@@ -134,7 +143,7 @@ async def test_node_relay_tunnel_dispatches_existing_gateway_asgi_surface(
         display_name="Phone",
         public_key=app_public,
     )
-    ticket = hub.issue_ticket("app-1", node.node_id, "relay")
+    ticket = hub.issue_ticket("app-1", node.node_id, "relay", scope="session")
     claims = json.loads(decode_base64url(ticket.partition(".")[0]))
     client_ephemeral = X25519PrivateKey.generate()
     client_nonce = encode_base64url(b"c" * 24)
@@ -181,7 +190,7 @@ async def test_node_relay_tunnel_dispatches_existing_gateway_asgi_surface(
     sessions = {}
     session_id = claims["ticket_id"]
 
-    await manager._receive_frame(  # noqa: SLF001 - protocol integration boundary
+    await manager._receive_frame(
         websocket,
         enrollment,
         sessions,
@@ -210,28 +219,44 @@ async def test_node_relay_tunnel_dispatches_existing_gateway_asgi_surface(
         )
 
     body = b"hello relay"
-    await manager._receive_frame(  # noqa: SLF001
+    await manager._receive_frame(
         websocket,
         enrollment,
         sessions,
-        _frame(session_id, 1, 0, encrypted(0, {
-            "type": "request_start",
-            "method": "POST",
-            "path": "/echo",
-            "headers": {"content-type": "text/plain"},
-            "body_length": len(body),
-        })),
+        _frame(
+            session_id,
+            1,
+            0,
+            encrypted(
+                0,
+                {
+                    "type": "request_start",
+                    "method": "POST",
+                    "path": "/echo",
+                    "headers": {"content-type": "text/plain"},
+                    "body_length": len(body),
+                },
+            ),
+        ),
     )
-    await manager._receive_frame(  # noqa: SLF001
+    await manager._receive_frame(
         websocket,
         enrollment,
         sessions,
-        _frame(session_id, 1, 1, encrypted(1, {
-            "type": "request_body",
-            "data": base64.urlsafe_b64encode(body).rstrip(b"=").decode(),
-        })),
+        _frame(
+            session_id,
+            1,
+            1,
+            encrypted(
+                1,
+                {
+                    "type": "request_body",
+                    "data": base64.urlsafe_b64encode(body).rstrip(b"=").decode(),
+                },
+            ),
+        ),
     )
-    await manager._receive_frame(  # noqa: SLF001
+    await manager._receive_frame(
         websocket,
         enrollment,
         sessions,
@@ -243,13 +268,131 @@ async def test_node_relay_tunnel_dispatches_existing_gateway_asgi_surface(
     responses = []
     for wrapped in websocket.messages[1:]:
         frame = RelayFrame.model_validate(wrapped["frame"])
-        responses.append(json.loads(decryptor.decrypt(
-            b"N2C1" + frame.sequence.to_bytes(8, "big"),
-            decode_base64url(frame.ciphertext),
-            _aad(session_id, "node_to_client", frame.sequence),
-        )))
+        responses.append(
+            json.loads(
+                decryptor.decrypt(
+                    b"N2C1" + frame.sequence.to_bytes(8, "big"),
+                    decode_base64url(frame.ciphertext),
+                    _aad(session_id, "node_to_client", frame.sequence),
+                )
+            )
+        )
 
     assert responses[0]["status"] == 201
     assert responses[0]["headers"]["x-knoa-sha256"] == "digest-a"
     assert decode_base64url(responses[1]["data"]) == body
     assert responses[2] == {"type": "response_end"}
+
+
+async def test_pairing_relay_bootstraps_without_device_and_is_path_scoped(
+    tmp_path: Path,
+) -> None:
+    def clock() -> float:
+        return 1000.0
+
+    repository = HubRepository(tmp_path / "hub.db", hub_id="hub-1", clock=clock)
+    hub = HubService(
+        repository, tmp_path / "hub.key", owner_token="o" * 43, clock=clock
+    )
+    node = NodeIdentityStore(tmp_path / "node.json", clock=clock).load_or_create()
+    enrollment_grant = repository.create_enrollment_grant()
+    enrollment_transcript = {
+        "audience": "knoa-node-enrollment-v1",
+        "hub_id": "hub-1",
+        "grant_id": enrollment_grant.grant_id,
+        "challenge": enrollment_grant.challenge,
+        "node_id": node.node_id,
+        "signing_public_key": node.signing_public_key,
+        "signing_key_version": 1,
+        "configuration_public_key": node.configuration_public_key,
+        "configuration_key_version": 1,
+    }
+    hub.enroll_node(
+        {
+            **enrollment_transcript,
+            "grant_secret": enrollment_grant.secret,
+            "display_name": "Desktop",
+            "platform": "windows",
+            "version": "1",
+            "signature": node.sign(canonical_json(enrollment_transcript)),
+        }
+    )
+
+    app_key = Ed25519PrivateKey.generate()
+    app_public = _public_key(app_key)
+    repository.register_installation("subject_owner", "app-1", app_public, "Phone")
+    ticket = hub.issue_ticket("app-1", node.node_id, "relay", scope="pairing")
+    claims = json.loads(decode_base64url(ticket.partition(".")[0]))
+    client_ephemeral = X25519PrivateKey.generate()
+    unsigned = {
+        "audience": "knoa-node-pairing-client-hello-v1",
+        "version": 1,
+        "ticket": ticket,
+        "installation_id": "app-1",
+        "client_signing_public_key": app_public,
+        "client_ephemeral_public_key": encode_base64url(
+            client_ephemeral.public_key().public_bytes(
+                serialization.Encoding.Raw,
+                serialization.PublicFormat.Raw,
+            )
+        ),
+        "client_nonce": encode_base64url(b"p" * 24),
+        "transport": "relay",
+    }
+    hello = PairingClientHello(
+        ticket=ticket,
+        installation_id="app-1",
+        client_signing_public_key=app_public,
+        client_ephemeral_public_key=unsigned["client_ephemeral_public_key"],
+        client_nonce=unsigned["client_nonce"],
+        signature=encode_base64url(app_key.sign(canonical_json(unsigned))),
+    )
+    manager = NodeRelayManager(
+        store=NodeHubStore(tmp_path / "node-hub.json"),
+        identity=node,
+        identities=GatewayIdentityRepository(tmp_path / "gateway.db", clock=clock),
+        app=Starlette(),
+        clock=clock,
+    )
+    enrollment = NodeHubEnrollment(
+        hub_url="https://hub.example.com",
+        hub_id="hub-1",
+        hub_signing_public_key=hub.signing_public_key,
+        enrolled_at=1000,
+    )
+    websocket = _WebSocket()
+    sessions = {}
+    session_id = claims["ticket_id"]
+
+    await manager._receive_frame(
+        websocket,
+        enrollment,
+        sessions,
+        _frame(session_id, 0, 0, hello.model_dump_json().encode()),
+    )
+
+    session = sessions[session_id]
+    assert session.kind == "pairing"
+    manager._request_start(
+        session,
+        1,
+        {
+            "type": "request_start",
+            "method": "POST",
+            "path": "/v1/pair/challenge",
+            "headers": {"content-type": "application/json"},
+            "body_length": 2,
+        },
+    )
+    with pytest.raises(ValueError, match="rejected"):
+        manager._request_start(
+            session,
+            2,
+            {
+                "type": "request_start",
+                "method": "GET",
+                "path": "/v1/runtime/status",
+                "headers": {},
+                "body_length": 0,
+            },
+        )

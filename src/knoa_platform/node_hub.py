@@ -33,7 +33,9 @@ from knoa_platform.private_files import (
 )
 from knoa_platform.relay_protocol import (
     ClientHello,
+    PairingClientHello,
     accept_client_hello,
+    accept_pairing_client_hello,
     canonical_json,
     decode_base64url,
     encode_base64url,
@@ -79,9 +81,7 @@ class NodeHubEnrollment:
         """Return the Workspace authority scoped by the canonical Hub URL."""
 
         segments = tuple(
-            segment
-            for segment in urlsplit(self.hub_url).path.split("/")
-            if segment
+            segment for segment in urlsplit(self.hub_url).path.split("/") if segment
         )
         if len(segments) >= 2 and segments[-2] == "workspaces":
             return _identifier(segments[-1], "Workspace ID")
@@ -121,12 +121,18 @@ class NodeHubStore:
             hub_signing_public_key=_public_key(hub_signing_public_key),
             enrolled_at=float(self._clock()),
         )
-        prepare_private_directory(self._path.parent, label="Node Hub enrollment directory")
-        temporary = self._path.with_name(f".{self._path.name}.{secrets.token_hex(8)}.tmp")
+        prepare_private_directory(
+            self._path.parent, label="Node Hub enrollment directory"
+        )
+        temporary = self._path.with_name(
+            f".{self._path.name}.{secrets.token_hex(8)}.tmp"
+        )
         descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-                json.dump(asdict(enrollment), stream, sort_keys=True, separators=(",", ":"))
+                json.dump(
+                    asdict(enrollment), stream, sort_keys=True, separators=(",", ":")
+                )
                 stream.flush()
                 os.fsync(stream.fileno())
             restrict_private_file(temporary)
@@ -353,7 +359,10 @@ class NodeRelayManager:
                 )
             )
             ready = json.loads(await websocket.recv())
-            if ready.get("ready") is not True or ready.get("node_id") != self._identity.node_id:
+            if (
+                ready.get("ready") is not True
+                or ready.get("node_id") != self._identity.node_id
+            ):
                 raise PermissionError("Relay rejected Node presence")
             self._connected = True
             self._last_error = ""
@@ -399,6 +408,17 @@ class NodeRelayManager:
                     clock=self._clock,
                 )
                 kind = "resource"
+            elif envelope.get("type") == "pairing_client_hello":
+                hello = PairingClientHello.model_validate(envelope)
+                server_hello, cipher = accept_pairing_client_hello(
+                    hello,
+                    session_id=frame.session_id,
+                    hub_id=enrollment.hub_id,
+                    hub_signing_public_key=enrollment.hub_signing_public_key,
+                    node_identity=self._identity,
+                    clock=self._clock,
+                )
+                kind = "pairing"
             else:
                 hello = ClientHello.model_validate(envelope)
                 device = self._identities.active_device_by_id(hello.device_id)
@@ -441,7 +461,9 @@ class NodeRelayManager:
             if stream is None or len(stream.body) != stream.expected_length:
                 raise ValueError("Relay request body length mismatch")
             asyncio.create_task(
-                self._dispatch(websocket, frame.session_id, frame.stream_id, session, stream),
+                self._dispatch(
+                    websocket, frame.session_id, frame.stream_id, session, stream
+                ),
                 name=f"knoa-relay-request-{frame.stream_id}",
             )
         elif kind == "reset":
@@ -458,6 +480,10 @@ class NodeRelayManager:
         length = int(message.get("body_length", -1))
         raw_headers = message.get("headers", {})
         resource_path = path.startswith("/v1/resource-invocations/")
+        pairing_path = (method, path) in {
+            ("POST", "/v1/pair/challenge"),
+            ("POST", "/v1/pair/complete"),
+        }
         if (
             stream_id <= 0
             or stream_id in session.streams
@@ -473,6 +499,7 @@ class NodeRelayManager:
                 session.kind == "resource"
                 and (method not in {"POST", "DELETE"} or not resource_path)
             )
+            or (session.kind == "pairing" and not pairing_path)
         ):
             raise ValueError("Relay request start rejected")
         headers = {
@@ -590,10 +617,14 @@ class NodeRelayManager:
                     "source_generation": task.revision,
                     "projection_seq": max(
                         1,
-                        int((task.latest_execution_updated_at or task.updated_at) * 1_000_000),
+                        int(
+                            (task.latest_execution_updated_at or task.updated_at)
+                            * 1_000_000
+                        ),
                     ),
                     "source_created_at": task.created_at,
-                    "source_updated_at": task.latest_execution_updated_at or task.updated_at,
+                    "source_updated_at": task.latest_execution_updated_at
+                    or task.updated_at,
                     "payload": {
                         "agent_id": task.agent_id,
                         "launch_kind": task.launch_policy.kind.value,
@@ -635,7 +666,10 @@ class NodeRelayManager:
             raise ValueError("Relay request stream is absent")
         chunk = decode_base64url(str(message.get("data", "")))
         stream.body.extend(chunk)
-        if len(stream.body) > stream.expected_length or len(stream.body) > _MAX_TUNNEL_BODY_BYTES:
+        if (
+            len(stream.body) > stream.expected_length
+            or len(stream.body) > _MAX_TUNNEL_BODY_BYTES
+        ):
             raise ValueError("Relay request body is too large")
 
     async def _dispatch(
@@ -775,7 +809,12 @@ def _presence(
 def _hub_url(value: str) -> str:
     normalized = value.strip().rstrip("/")
     parsed = urlsplit(normalized)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+    ):
         raise ValueError("Hub URL must be an absolute HTTP(S) URL")
     if parsed.query or parsed.fragment:
         raise ValueError("Hub URL must not contain query or fragment")
@@ -785,12 +824,18 @@ def _hub_url(value: str) -> str:
 def _websocket_url(base_url: str, path: str) -> str:
     parsed = urlsplit(base_url)
     scheme = "wss" if parsed.scheme == "https" else "ws"
-    return urlunsplit((scheme, parsed.netloc, f"{parsed.path.rstrip('/')}{path}", "", ""))
+    return urlunsplit(
+        (scheme, parsed.netloc, f"{parsed.path.rstrip('/')}{path}", "", "")
+    )
 
 
 def _identifier(value: str, label: str) -> str:
     normalized = value.strip()
-    if not normalized or len(normalized) > 128 or any(ord(char) < 33 for char in normalized):
+    if (
+        not normalized
+        or len(normalized) > 128
+        or any(ord(char) < 33 for char in normalized)
+    ):
         raise ValueError(f"{label} is invalid")
     return normalized
 

@@ -145,7 +145,8 @@ Relay decrypted request ─────┘
 ### 4.3 生命周期与故障边界
 
 - Node–Hub Edge 随 Secure Gateway 启动和停止；
-- 未 enrollment Hub 时保持禁用，不影响 Node 本地能力和 direct pairing；
+- 未 enrollment Hub 时保持禁用，不影响 Node 本地能力和 direct pairing；已 enrollment 的 Hosted Node
+  默认通过 pairing-scoped Relay ticket 完成 App 初始配对；
 - Hub 或 Relay 断开时进行有界重连，不能阻塞 Core 启动；
 - 删除 enrollment 时停止 Relay connector 并移除本地 Hub pin；
 - Hub identity 不匹配时 fail closed，不自动接受新 Hub key；
@@ -444,20 +445,19 @@ Windows Host
 │   ├── listener: 127.0.0.1:9529
 │   └── state: C:\ProgramData\Knoa\HostedHub
 ├── Knoa Node
-│   ├── InteractiveTask: signed-in user, at logon, desktop capable
-│   ├── HeadlessService: optional WinSW/LocalSystem, Session 0
+│   ├── service: KnoaNode / WinSW / LocalSystem / Automatic
 │   ├── Core: 127.0.0.1:9527
 │   ├── Capability MCP: 127.0.0.1:9530
 │   ├── Secure Gateway: 127.0.0.1:9531
-│   └── state: %LOCALAPPDATA%\Knoa\Node
+│   └── state: C:\ProgramData\Knoa\Node
 └── independent cloudflared WinSW services
     ├── Knoa Tunnel Token -> canonical Hub hostname -> 127.0.0.1:9529
     └── PER Tunnel Token  -> PER hostname -> configured local origin
 ```
 
-Hub 是无桌面控制面的常驻服务，因此由 WinSW 以 `LocalSystem` 自动启动。需要桌面能力的 Node 必须
-使用 `InteractiveTask` 留在用户交互 Session 中；`HeadlessService` 只用于 Agent、Task、LLM、MCP 和
-Relay，不提供截图、剪贴板、通知、键鼠或窗口能力。安装器使用 NTFS ACL 将 Knoa 根目录限制为
+Hub 和 Node Runtime 都是无桌面常驻服务，因此由 WinSW 以 `LocalSystem` 自动启动。截图、剪贴板、
+通知、键鼠和窗口等能力属于未来独立的登录用户 Desktop Companion；不能因此让整个 Node Runtime
+退回计划任务。安装器使用 NTFS ACL 将 Knoa 根目录限制为
 `SYSTEM`、本机 Administrators 和安装用户；Python 运行时不把 POSIX `0600/0700` mode bits 错当成
 Windows ACL。
 
@@ -466,7 +466,13 @@ Windows ACL。
 只引用 `--token-file`。Knoa Hub 仍只有一个 canonical URL；另一个 Tunnel 不构成第二个 Hub。
 
 共享 Python 包和领域代码继续同时支持 Linux 与 Windows。Linux 保持 systemd 和 POSIX 权限模型；
-Windows 的 WinSW、Task Scheduler、NTFS ACL 与 Session 0 处理只属于部署和平台适配边界。
+Windows 的 WinSW、NTFS ACL、Session 0 与未来 Desktop Companion 只属于部署和平台适配边界。
+
+Hosted App 初始配对使用 Node 本地产生的 v3 QR。QR 固定 Node public identity、一次性 Gateway grant、
+Workspace Hub URL 和 `transport=relay`。App 必须先登录该 Workspace，Hub 只签发短期
+`scope=pairing` Relay ticket；Node 在该会话中只接受 `/v1/pair/challenge` 与
+`/v1/pair/complete`。配对完成后的普通会话必须重新申请 `scope=session` ticket。由此不需要给每个
+Node 配置公网域名，Relay 也不能把“已登录 Hub”直接提升为“已配对 Node device”。
 
 原生安装、Node enrollment 和 cloudflared 命令见
 [`deploy/windows/README.md`](../deploy/windows/README.md)。
@@ -507,9 +513,10 @@ Windows 的 WinSW、Task Scheduler、NTFS ACL 与 Session 0 处理只属于部�
 - 文件权限必须保持私有；
 - 不把整个 Runtime Root 无差别同步到 Hub。
 
-Windows 默认 Node Root 是 `%LOCALAPPDATA%\Knoa\Node`。PID 与 `service.stop` 位于该 Node Root 的
-`run` 子目录，因此多个配置不会共享一个全局停止文件。Node 配置、identity、Hub enrollment、Secret、
-Task、Conversation 和执行状态都属于这个新 Windows Node；现有 Linux Node 保持原 identity 和本地事实。
+Windows 交互式 CLI 的平台默认 Root 仍可位于 `%LOCALAPPDATA%\Knoa\Node`，但标准 WinSW 部署显式使用
+`C:\ProgramData\Knoa\Node`。PID 与 `service.stop` 位于所选 Node Root 的 `run` 子目录，因此多个配置
+不会共享一个全局停止文件。Node 配置、identity、Hub enrollment、Secret、Task、Conversation 和执行
+状态都属于这个 Windows Node。
 
 ### 11.2 Hub
 

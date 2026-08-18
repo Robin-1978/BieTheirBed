@@ -1,5 +1,6 @@
 export type PairingPayload = {
-  version: "v2";
+  version: "v3";
+  transport: "direct" | "relay";
   gateway_url: string;
   node_id: string;
   node_signing_public_key: string;
