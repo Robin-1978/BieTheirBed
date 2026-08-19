@@ -9,7 +9,7 @@ Workspace 控制面只管理 Node enrollment、共享 Model/MCP 目录、Deploym
 管理 NodeAgent、Provider/Model、MCP、Skill、Tool policy、Secret binding 与 Node 网络配置。
 
 ```text
-App / CLI / YAML import
+Node Console / App / CLI / YAML import
   -> ConfigurationService
   -> Draft
   -> typed validation + secret redaction + preflight
@@ -18,7 +18,8 @@ App / CLI / YAML import
   -> component apply / Node restart
 ```
 
-配置页面是主要入口，YAML 只是导入导出格式。任何入口都不能绕开同一套校验、发布、审计和应用机制。
+配置页面是主要入口，YAML 只是导入导出格式。Node Console 承担 endpoint、API Key、MCP command、本地路径和
+深度诊断；App 承担日常选择、绑定、状态与快捷操作。任何入口都不能绕开同一套校验、发布、审计和应用机制。
 
 ## 2. ManagedConfig
 
@@ -33,7 +34,7 @@ ManagedConfig
 └── operational Node settings
 ```
 
-Secret value 不进入 ManagedConfig；只保存 secret reference 与 version。配置读取、diff、审计和 Hub rollout
+Secret value 不进入 ManagedConfig；只保存 secret reference 与 version。配置读取、diff、审计和 Node apply
 都必须 redacted。
 
 ## 3. 生效策略
@@ -45,8 +46,9 @@ Secret value 不进入 ManagedConfig；只保存 secret reference 与 version。
 | component restart | MCP command、本地模型引擎 | 只重启目标组件 |
 | node restart | Gateway bind/TLS、核心升级 | 明确提示并由用户确认 |
 
-Workspace 自身不“重启”。Node 离线时不能假装配置已经应用；可保存控制面 Desired State，Node 恢复后
-reconcile。Node-local 配置变更需要 Node 在线。
+Workspace 自身不“重启”。Workspace 可以在 Node 离线时保存 enrollment、共享 Model/MCP 与 Grant 的控制面
+Desired State；Node-local Agent/Provider/Secret 配置不能因此上传 Hub，修改它们需要 Node 在线。Node 恢复后
+只 reconcile 属于 Workspace 的控制面事实。
 
 ## 4. UI
 

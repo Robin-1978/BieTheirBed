@@ -1,6 +1,6 @@
 # Documentation Index
 
-当前产品架构以“产品领域架构、完整模块架构、部署架构、Node/Agent 与共享资源架构”四份文档为准；
+当前产品架构以“产品领域架构、完整模块架构、部署架构、跨平台 Runtime 演进架构、Node/Agent 与共享资源架构”为准；
 历史 campaign、audit 和 implementation plan 只记录当时背景，不得覆盖当前领域所有权。
 
 - [服务器巨量源码文件治理](server-source-modularization.md)
@@ -11,6 +11,8 @@
 - [Knoa 产品领域架构](knoa-product-domain-architecture.md)
 - [Knoa 完整模块架构](knoa-module-architecture.md)
 - [Knoa 部署架构](knoa-deployment-architecture.md)
+- [Knoa 跨平台 Runtime 演进架构](knoa-cross-platform-runtime-architecture.md)
+- [Knoa 跨平台 Runtime 重构实施计划](knoa-cross-platform-runtime-migration-plan.md)
 - [Knoa 原生 Windows：Hosted Hub + Node](../deploy/windows/README.md)
 - [Knoa Hosted Hub 迁移到 Windows 操作手册](knoa-hosted-hub-windows-migration-runbook.md)
 - [Knoa 实现反推架构审计](knoa-implementation-architecture-audit.md)

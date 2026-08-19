@@ -70,10 +70,14 @@ MCP 默认 Node-local。发布共享 MCPEndpoint 时，Secret 仍留在 Provider
 
 ## 6. Transport
 
-Node presence 上报签名 direct Gateway candidate。Hub 在每次短期 Resource Ticket 中返回当前目标 Node 的
-direct candidate；Caller 不把该地址长期写死在模型配置中。Caller 有界尝试 direct，失败后使用同一
-Invocation ID 和 Relay。
-本阶段不实现 ICE/STUN；Relay 后的后续请求会周期性重新尝试 direct。
+Node presence 上报签名连接 candidate。Hub 在每次短期 Resource Ticket 中返回当前目标 Node 的 candidate；
+Caller 不把该地址长期写死在模型配置中。Caller 使用同一 Invocation ID 在 transport 间转换，不得重复执行。
+
+当前已交付为显式 direct candidate + Relay fallback。目标以
+[跨平台 Runtime 演进架构](./knoa-cross-platform-runtime-architecture.md) 为准，并按
+[跨平台 Runtime 实施计划](./knoa-cross-platform-runtime-migration-plan.md) Phase 5 扩展为 host/server-reflexive
+ICE candidate + STUN P2P，失败后仍回落同一 E2E Relay。这只替换 transport，不改变 ResourceGrant、目标 Node
+最终授权和 Invocation 权威。
 
 ## 7. 不变量
 

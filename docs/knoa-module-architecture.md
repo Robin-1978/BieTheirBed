@@ -37,7 +37,7 @@ Hub 与 Relay 当前同进程部署，但模块边界独立。Node、Hub 和 App
 | `agents` | NodeAgent typed config、解析、Invocation policy | Account/Workspace |
 | `agent_runtime` | Runtime SPI、session binding、generation 与执行编排 | Product navigation |
 | `conversations` | NodeConversation、Turn、消息与 live control | Workspace 投影写入 |
-| `tasks` | NodeTask、trigger、execution、attempt、通知 | TaskDeployment |
+| `tasks` | NodeTask、trigger、execution、attempt、通知 | Workspace scheduler / deployment |
 | `configuration` | Draft、校验、impact、publish、apply | 独立业务配置真相 |
 | `models` / providers | 本地/云端/远程模型适配 | Agent 身份 |
 | `mcp` / extensions | Skill 内容、MCP host/proxy 与检查 | 任意原生代码信任 |
@@ -83,7 +83,8 @@ UI / CLI / YAML import
 ```
 
 所有入口共享一套 schema、校验、Secret redaction、publish 与审计。YAML 是导入/导出格式，不是唯一管理
-界面；App 是主要配置客户端。
+界面；Node Console 是 endpoint、API Key、MCP 命令和运行时诊断的主要配置客户端，App 保留日常选择、
+绑定、状态和快捷操作。
 
 ## 6. 网络路径
 

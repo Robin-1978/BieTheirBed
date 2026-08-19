@@ -59,7 +59,7 @@ Hub 登录成功不要求 Node 在线。没有 Node 时 App 仍可管理帐号�
 | Tasks | 当前 Node 任务 |
 | Agent/Capability | 当前 NodeAgent、Skill/MCP/Tool 状态 |
 | Model Center | 当前 Node 本机/云模型与可选 Workspace 共享 |
-| System Config | 当前 Node 草稿、校验、发布与生效状态 |
+| System Config | 当前 Node 的日常选择、绑定、状态、发布和 Node Console 快捷入口 |
 
 普通 UI 不出现 PackageStore、RuntimeSpec、AgentProfile 或 AgentDefinition。
 
@@ -73,16 +73,17 @@ Node 离线仅影响该 Node 的 Conversation、Task 和配置操作。Workspace
 
 ## 6. 配置体验
 
-配置不是 YAML 编辑器外壳。App 提供：
+配置不是 YAML 编辑器外壳。App 主要提供：
 
 - NodeAgent 编辑；
-- Model Provider / Model / Secret binding；
-- Skill 内容与 MCP 服务；
+- Model 选择、Agent 绑定与共享状态；
+- Skill/MCP 状态与常用开关；
 - Policy 与审批；
 - 校验结果、影响范围、是否需要组件/Node 重启；
 - 发布和应用状态。
 
-高级用户可导入/导出配置，但所有入口必须调用同一 ConfigurationService。
+LLM endpoint、API Key、MCP command、本地路径、批量导入/导出和深度诊断放在 Node Console，避免在手机上
+输入长 Secret 或复杂路径。两个客户端必须调用同一 ConfigurationService。
 
 ## 7. 中文与状态
 
