@@ -81,9 +81,12 @@ After installation, double-click:
 C:\ProgramData\Knoa\Scripts\Update-Knoa.cmd
 ```
 
-The updater requests administrator access, refuses to overwrite tracked local
-changes, runs `git pull --ff-only`, reinstalls the configured role, restarts the
-selected WinSW services and verifies that they are running. If installation
+The updater requests administrator access, detects the WinSW services actually
+installed on that computer, refuses to overwrite tracked local changes, runs
+`git pull --ff-only`, reinstalls only those roles, restarts the selected WinSW
+services and verifies that they are running. A Node-only computer therefore
+updates only `KnoaNode`; it never installs or updates Hub because of stale state.
+If installation
 fails after a service was stopped, it attempts to restore the existing service.
 Source updates also reconcile newly introduced Python dependencies; they never
 replace only the Knoa package with `--no-deps`. WebRTC P2P remains an optional
@@ -105,9 +108,11 @@ git pull
 .\deploy\windows\Install-Knoa.ps1 -Role all -SourcePath C:\knoa -HubPublicUrl https://knoa.tinydotdot.com
 ```
 
-On split hosts, the persisted role is `hub` on the Hub server and `node` on Node
-computers. On a host running both services, the installer persists `all` so both
-processes always move to the same Knoa release.
+On split hosts, the updater discovers `hub` on the Hub server and `node` on Node
+computers from Windows Service Control Manager. On a host running both services,
+it discovers `all` so both processes always move to the same Knoa release. The
+persisted installation state supplies paths and ports, but does not override the
+actual installed service topology.
 
 On update, the installer:
 
