@@ -22,6 +22,15 @@ export type ModelSharingValue = {
   maxRemoteConcurrency: number;
 };
 
+export type WorkspaceRemoteModelValue = {
+  providerId: string;
+  modelAlias: string;
+  deploymentId: string;
+  displayName: string;
+  modelIdentity: string;
+  supportsVision: boolean;
+};
+
 export function cloneManagedConfig(document: ManagedConfig): ManagedConfig {
   return JSON.parse(JSON.stringify(document)) as ManagedConfig;
 }
@@ -71,6 +80,42 @@ export function setModelSharing(
     max_remote_concurrency: value.maxRemoteConcurrency,
   };
   return document;
+}
+
+export function attachWorkspaceRemoteModel(
+  source: ManagedConfig,
+  value: WorkspaceRemoteModelValue,
+): ManagedConfig {
+  const document = cloneManagedConfig(source);
+  document.providers[value.providerId] = {
+    driver: "workspace_remote",
+    server_url: "",
+    api_base: "",
+    api_key_ref: "",
+    api_key_env: "",
+    remote_deployment_id: value.deploymentId,
+    direct_gateway_url: "",
+    secret_version: 0,
+    requires_api_key: false,
+    timeout_seconds: 600,
+  };
+  document.models[value.modelAlias] = {
+    provider: value.providerId,
+    model: value.modelIdentity || value.displayName,
+    supports_vision: value.supportsVision,
+  };
+  return document;
+}
+
+export function modelAliasForRemoteDeployment(
+  document: ManagedConfig,
+  deploymentId: string,
+): string {
+  const providerId = Object.entries(document.providers).find(
+    ([, provider]) => provider.driver === "workspace_remote" && provider.remote_deployment_id === deploymentId,
+  )?.[0];
+  if (!providerId) return "";
+  return Object.entries(document.models).find(([, model]) => model.provider === providerId)?.[0] ?? "";
 }
 
 export function deploymentForModel(document: ManagedConfig, modelAlias: string) {

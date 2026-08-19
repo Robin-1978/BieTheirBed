@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { ManagedConfig } from "@/api/models";
-import { setModelSharing, upsertModel } from "./modelConfiguration";
+import {
+  attachWorkspaceRemoteModel,
+  modelAliasForRemoteDeployment,
+  setModelSharing,
+  upsertModel,
+} from "./modelConfiguration";
 
 function config(): ManagedConfig {
   return {
@@ -101,5 +106,29 @@ describe("model configuration", () => {
       share_enabled: true,
       max_remote_concurrency: 2,
     });
+  });
+
+  it("attaches a granted Workspace model without changing Agent bindings", () => {
+    const next = attachWorkspaceRemoteModel(config(), {
+      providerId: "remote_provider_123",
+      modelAlias: "remote_model_123",
+      deploymentId: "deployment-remote",
+      displayName: "Company Qwen",
+      modelIdentity: "qwen3.5-4b",
+      supportsVision: false,
+    });
+
+    expect(next.providers.remote_provider_123).toMatchObject({
+      driver: "workspace_remote",
+      remote_deployment_id: "deployment-remote",
+      direct_gateway_url: "",
+      requires_api_key: false,
+    });
+    expect(next.models.remote_model_123).toMatchObject({
+      provider: "remote_provider_123",
+      model: "qwen3.5-4b",
+    });
+    expect(next.agents.agents.knoa?.model_binding.model).toBe("current");
+    expect(modelAliasForRemoteDeployment(next, "deployment-remote")).toBe("remote_model_123");
   });
 });

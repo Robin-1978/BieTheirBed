@@ -334,6 +334,7 @@ class HubService:
             "caller_signing_public_key": caller["signing_public_key"],
             "target_node_id": target["node_id"],
             "target_signing_public_key": target["signing_public_key"],
+            "target_direct_gateway_url": str(target.get("direct_gateway_url", "")),
             "target_deployment_id": deployment["deployment_id"],
             "target_materialized_digest": observation["applied_digest"],
             "capability": "model_inference",

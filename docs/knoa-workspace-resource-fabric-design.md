@@ -48,6 +48,19 @@ Grant 最少绑定 workspace、caller Node、target deployment、capability、ex
 Company Node 的 Qwen 3.5 4B 可发布为 ModelEndpoint，并显式授予 Home Node `model_inference`。权重、GPU、
 进程和日志不离开 Company Node。
 
+共享与使用是两个不同职责：提供方 Node 决定授权范围，调用方 Node 决定是否把获授权模型加入本地模型
+目录，以及绑定给哪个 Knoa Agent。提供方不得远程修改调用方的 Agent 配置。
+
+```text
+Provider Node: Share Model -> choose allowed Nodes
+Workspace: ModelResource + Deployment + ResourceGrant
+Caller Node: Add Workspace Model -> bind local Knoa Agent
+```
+
+App 在调用方 Node 的“模型”页只显示有效 `model_inference` Grant 对应的模型。用户点击“添加”后，Node
+创建只含 `remote_deployment_id` 的 `workspace_remote` Provider；Deployment ID、路由地址和 API Key 均不
+要求用户输入。Agent 绑定仍是调用方 Node-local 配置。
+
 云端 Provider 默认每个 Node 各持自己的 Key。共享云 ModelEndpoint 只用于集中凭据/出口等明确场景。
 
 ## 5. MCP
@@ -57,7 +70,9 @@ MCP 默认 Node-local。发布共享 MCPEndpoint 时，Secret 仍留在 Provider
 
 ## 6. Transport
 
-Node presence 上报签名 direct Gateway candidate。Caller 有界尝试 direct，失败后使用 Hub ticket 和 Relay。
+Node presence 上报签名 direct Gateway candidate。Hub 在每次短期 Resource Ticket 中返回当前目标 Node 的
+direct candidate；Caller 不把该地址长期写死在模型配置中。Caller 有界尝试 direct，失败后使用同一
+Invocation ID 和 Relay。
 本阶段不实现 ICE/STUN；Relay 后的后续请求会周期性重新尝试 direct。
 
 ## 7. 不变量

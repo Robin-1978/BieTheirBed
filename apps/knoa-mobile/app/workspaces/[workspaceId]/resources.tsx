@@ -45,6 +45,19 @@ export default function WorkspaceResourcesScreen() {
     finally { setWorking(""); }
   }
 
+  async function useModelOnNode(nodeId: string) {
+    const node = nodes.find((item) => item.node_id === nodeId);
+    if (!node?.online) { setError("使用模型的 Node 当前离线；上线后再添加模型配置"); return; }
+    if (!gateway.nodes.some((item) => item.nodeId === nodeId)) { setError("请先在 Nodes 页面将此 App 与使用模型的 Node 配对"); return; }
+    setWorking(nodeId); setError("");
+    try {
+      await updateNodeDirectGatewayUrl(nodeId, node.direct_gateway_url || "");
+      await gateway.switchNode(nodeId);
+      router.push("/settings/models");
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "无法连接使用模型的 Node"); }
+    finally { setWorking(""); }
+  }
+
   async function revoke(grantId: string) {
     setWorking(grantId); setError("");
     try { await revokeWorkspaceResourceGrant(grantId); await refresh(); }
@@ -65,7 +78,7 @@ export default function WorkspaceResourcesScreen() {
             const node = nodes.find((item) => item.node_id === deployment.target_node_id);
             const observation = state?.observations.find((item) => item.deployment_id === deployment.deployment_id);
             const grants = state?.grants.filter((grant) => grant.target_deployment_id === deployment.deployment_id && grant.revoked_at === null) ?? [];
-            return <View key={deployment.deployment_id} style={styles.endpoint}><Text style={styles.rowTitle}>{node?.display_name || "未知 Node"}</Text><Text style={observation?.health === "healthy" && node?.online ? styles.healthy : styles.warning}>{node?.online ? observation?.health === "healthy" ? `健康 · 可用容量 ${observation.available_capacity}` : "在线 · 等待服务状态" : "Node 离线"}</Text><Text style={styles.meta}>{grants.length ? `允许 ${grants.map((grant) => nodes.find((item) => item.node_id === grant.caller_node_id)?.display_name || "一个 Node").join("、")} 调用` : "尚未授权其他 Node"}</Text>{grants.map((grant) => <AppPressable key={grant.grant_id} disabled={Boolean(working)} style={styles.linkButton} onPress={() => void revoke(grant.grant_id)}><Text style={styles.linkText}>{working === grant.grant_id ? "正在取消…" : `取消 ${nodes.find((item) => item.node_id === grant.caller_node_id)?.display_name || "Node"} 的授权`}</Text></AppPressable>)}<AppPressable disabled={Boolean(working)} style={styles.secondary} onPress={() => void manageOnNode(deployment.target_node_id, resource.kind)}>{working === deployment.target_node_id ? <ActivityIndicator color={colors.accent} /> : <Text style={styles.secondaryText}>在承载 Node 管理</Text>}</AppPressable></View>;
+            return <View key={deployment.deployment_id} style={styles.endpoint}><Text style={styles.rowTitle}>{node?.display_name || "未知 Node"}</Text><Text style={observation?.health === "healthy" && node?.online ? styles.healthy : styles.warning}>{node?.online ? observation?.health === "healthy" ? `健康 · 可用容量 ${observation.available_capacity}` : "在线 · 等待服务状态" : "Node 离线"}</Text><Text style={styles.meta}>{grants.length ? `允许 ${grants.map((grant) => nodes.find((item) => item.node_id === grant.caller_node_id)?.display_name || "一个 Node").join("、")} 调用` : "尚未授权其他 Node"}</Text>{resource.kind === "model" ? grants.map((grant) => <AppPressable key={`use:${grant.grant_id}`} disabled={Boolean(working)} style={styles.secondary} onPress={() => void useModelOnNode(grant.caller_node_id)}>{working === grant.caller_node_id ? <ActivityIndicator color={colors.accent} /> : <Text style={styles.secondaryText}>在 {nodes.find((item) => item.node_id === grant.caller_node_id)?.display_name || "授权 Node"} 使用</Text>}</AppPressable>) : null}{grants.map((grant) => <AppPressable key={grant.grant_id} disabled={Boolean(working)} style={styles.linkButton} onPress={() => void revoke(grant.grant_id)}><Text style={styles.linkText}>{working === grant.grant_id ? "正在取消…" : `取消 ${nodes.find((item) => item.node_id === grant.caller_node_id)?.display_name || "Node"} 的授权`}</Text></AppPressable>)}<AppPressable disabled={Boolean(working)} style={styles.secondary} onPress={() => void manageOnNode(deployment.target_node_id, resource.kind)}>{working === deployment.target_node_id ? <ActivityIndicator color={colors.accent} /> : <Text style={styles.secondaryText}>在承载 Node 管理</Text>}</AppPressable></View>;
           })}</View>;
         })}
         {!loading && !resources.length ? <View style={styles.empty}><Text style={styles.cardTitle}>还没有共享资源</Text><Text style={styles.meta}>先选择一台 Node，在“Node 资源 → 模型”中配置本地 Qwen 或云端模型，然后选择“共享”。</Text><AppPressable style={styles.primary} onPress={() => router.push({ pathname: "/workspaces/[workspaceId]/nodes", params })}><Text style={styles.primaryText}>选择 Node</Text></AppPressable></View> : null}

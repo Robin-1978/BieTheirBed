@@ -53,8 +53,8 @@ def test_repository_product_versions_are_independent_and_consistent() -> None:
     platform, mobile, code = manager.check(root)
 
     assert platform == __version__
-    assert mobile == "0.2.53"
-    assert code == 64
+    assert mobile == "0.2.54"
+    assert code == 65
     assert platform != mobile
 
 

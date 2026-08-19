@@ -73,6 +73,7 @@ class ResourceTicketClaims:
     caller_signing_public_key: str
     target_node_id: str
     target_signing_public_key: str
+    target_direct_gateway_url: str
     target_deployment_id: str
     target_materialized_digest: str
     max_deadline: float
@@ -124,6 +125,7 @@ def verify_resource_ticket(
             caller_signing_public_key=str(payload["caller_signing_public_key"]),
             target_node_id=str(payload["target_node_id"]),
             target_signing_public_key=str(payload["target_signing_public_key"]),
+            target_direct_gateway_url=str(payload.get("target_direct_gateway_url", "")),
             target_deployment_id=str(payload["target_deployment_id"]),
             target_materialized_digest=str(payload["target_materialized_digest"]),
             max_deadline=float(payload["max_deadline"]),
