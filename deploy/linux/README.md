@@ -1,0 +1,81 @@
+# Knoa Linux deployment
+
+Linux uses the same three deployment roles as Windows:
+
+| Role | Processes installed | Typical host |
+| --- | --- | --- |
+| `hub` | Hosted Hub + Relay | public or always-on Hub server |
+| `node` | Node Runtime | workstation, GPU server or home computer |
+| `all` | Hub + Node | one-machine personal deployment |
+
+The installer creates native `systemd --user` services. Hub and Node remain
+separate processes and can be installed, updated, restarted and removed
+independently. The shared Python environment contains the same Knoa release;
+on a host running both roles, update with `--role all`.
+
+## Install or update
+
+From the source checkout:
+
+```bash
+git pull
+deploy/linux/install-knoa.sh --role all --source "$PWD" \
+  --hub-public-url https://hub.example.com
+```
+
+Hub-only server:
+
+```bash
+deploy/linux/install-knoa.sh --role hub --source "$PWD" \
+  --hub-public-url https://hub.example.com
+```
+
+Node-only computer:
+
+```bash
+deploy/linux/install-knoa.sh --role node --source "$PWD"
+```
+
+The default paths are:
+
+```text
+~/.local/share/knoa/runtime/venv       installed Knoa Python runtime
+~/.local/share/knoa/hosted-hub        Hosted Hub persistent data
+~/.knoa                               Node persistent data
+~/.local/share/knoa/workspace         Node working directory
+~/.config/knoa                        private configuration
+~/.config/systemd/user                service definitions
+```
+
+Enable boot-before-login once when this machine is intended to operate as an
+always-on server:
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+Verify the selected services:
+
+```bash
+systemctl --user status knoa-hosted-hub.service
+systemctl --user status knoa-node.service
+curl --fail http://127.0.0.1:9529/health
+curl --fail http://127.0.0.1:9531/health
+```
+
+## Publish the Android App to Hosted Hub
+
+Publishing copies one signed APK into the Hub-owned immutable release channel.
+It does not restart Hub or Node:
+
+```bash
+knoa-publish-app --apk /secure/builds/knoa.apk \
+  --hub-public-url https://hub.example.com \
+  --notes "Knoa update"
+```
+
+The stable installation URL is:
+
+```text
+https://hub.example.com/downloads/android/latest.apk
+```

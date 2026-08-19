@@ -36,6 +36,17 @@ run as one process with one Uvicorn worker.
 
 ## Install as a user service
 
+The canonical Linux installer supports Hub-only, Node-only and combined roles.
+For a Hub-only server, run from the Knoa checkout:
+
+```bash
+deploy/linux/install-knoa.sh --role hub --source "$PWD" \
+  --hub-public-url https://hub.example.com
+```
+
+The commands below document the compatible legacy manual installation with a
+dedicated Hub virtual environment.
+
 ```bash
 /usr/bin/python3 -m venv ~/.local/share/knoa/hosted-hub-venv
 ~/.local/share/knoa/hosted-hub-venv/bin/pip install .
@@ -107,9 +118,8 @@ Hosted Account installations use the Hub's platform release channel. Publish a
 signed APK after installing the new platform wheel:
 
 ```bash
-knoa-hub-admin mobile-publish /secure/builds/knoa.apk \
-  --root ~/.local/share/knoa/hosted-hub \
-  --min-version-code 1 \
+knoa-publish-app --apk /secure/builds/knoa.apk \
+  --hub-public-url https://hub.example.com \
   --notes "Hosted Hub update channel"
 ```
 
