@@ -42,7 +42,7 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-cov>=5.0",
-    "ruff>=0.6",
+    "ruff==0.16.2",
 ]
 [project.scripts]
 knoa = "knoa_platform:main"
@@ -70,6 +70,13 @@ include = [
     "/src/knoa_agent_contracts",
     "/src/knoa_codex_agent",
     "/tests",
+    "/protocol",
+    "/scripts/capture_runtime_baseline.py",
+    "/scripts/benchmark_relay.py",
+    "/scripts/build_release_bundle.py",
+    "/scripts/check_protocol_contracts.py",
+    "/scripts/check_release_manifest.py",
+    "/scripts/check_release_role.py",
     "/config/default.yaml",
     "/deploy",
     "/docs/knoa-deployment-architecture.md",
@@ -86,6 +93,12 @@ asyncio_mode = "auto"
 markers = [
     "live: tests requiring an explicitly enabled external LLM service",
 ]
+
+[tool.ruff.lint]
+# Ruff's default rule set is part of the repository quality contract.  Keep it
+# explicit so a future Ruff release cannot silently turn preview/style rules
+# into a blocking full-repository migration.
+select = ["E4", "E7", "E9", "F"]
 
 [tool.coverage.run]
 source = [

@@ -14,11 +14,11 @@
 
 Knoa 不进行一次性全量 Rust 重写。采用可持续运行的渐进替换：
 
-1. Rust 承担 Hub、Node Host、P2P/Relay、安装更新和 Console 后端等基础设施职责；
+1. Rust 承担 Hub、Node Host、P2P/Relay、安装更新和内置管理 UI 承载等基础设施职责；
 2. Python Agent Runtime 作为 Node Host 管理的本机 Worker，保留成熟的 Agent、LLM、MCP、Skill 与 Tool 生态；
 3. Windows 与 Linux 都完整支持 `hub`、`node`、`all` 三种角色；
 4. 用户当前选择的“Linux `all` + Windows `node`”只是部署实例，不能写入产品领域或协议；
-5. Hub Console 与 Node Console 是两个可独立部署的管理工具；
+5. Hub Console 与 Node Console 是分别内置于 Hub、Node Host 的管理界面，不是独立服务；
 6. Node 间和 App 到 Node 的数据面使用 ICE P2P 优先，现有端到端加密 Relay 仅兜底；
 7. 迁移期间一个事实始终只有一个写权威，禁止 Rust/Python 双写同一领域数据。
 
@@ -34,8 +34,8 @@ Knoa 不进行一次性全量 Rust 重写。采用可持续运行的渐进替换
 角色语义在两个系统上完全一致：
 
 ```text
-hub  = Hub + P2P Signaling + Relay fallback + Hub Console
-node = Node Host + Agent Runtime + Node Console
+hub  = Hub（内含 P2P Signaling、Relay fallback、Hub Console）
+node = Node Host（内含 Node Console）+ 受管 Agent Runtime Worker
 all  = 同机安装 hub 与 node，但仍是两个独立服务和数据边界
 ```
 
@@ -52,17 +52,17 @@ ARM64、macOS、移动端 Node、Kubernetes HA 不属于当前交付承诺，但
 ```text
 Linux 主机 / role=all
 ├── Knoa Hub
-├── P2P Signaling / Relay fallback
-├── Hub Console
+│   ├── P2P Signaling / Relay fallback
+│   └── built-in Hub Console
 ├── Knoa Node Host
-├── Python Agent Runtime
-├── Node Console
+│   ├── Python Agent Runtime Worker
+│   └── built-in Node Console
 └── Desktop Companion（存在桌面会话时，Phase 7）
 
 Windows 主机 / role=node
 ├── Knoa Node Host
-├── Python Agent Runtime
-├── Node Console
+│   ├── Python Agent Runtime Worker
+│   └── built-in Node Console
 ├── Qwen / llama.cpp
 └── Desktop Companion（Phase 7）
 ```
@@ -83,10 +83,8 @@ Knoa Hub
 ├── Resource Directory / Grant / Ticket
 ├── ICE Signaling
 ├── Relay fallback
+├── built-in Hub Console UI
 └── Android Release Channel
-
-Knoa Hub Console
-└── Hub-only administration client
 
 Knoa Node Host
 ├── Secure Gateway
@@ -95,6 +93,7 @@ Knoa Node Host
 ├── Conversation / Task authority
 ├── Configuration / Secret / Approval / Artifact
 ├── Capability Gateway
+├── built-in Node Console UI
 └── Agent Process Manager
        │ private local IPC
        v
@@ -105,16 +104,13 @@ Knoa Node Host
    ├── Skill composition
    └── MCP protocol adapters
 
-Knoa Node Console
-└── Node-only private administration client
-
 Desktop Companion
 └── signed-in user's desktop session
 ```
 
-Hub、Node Host、两个 Console 和 Desktop Companion 是独立生命周期单元；Agent Runtime Worker 是由
-Node Host 严格管理的子进程。Agent、Skill、Tool、Conversation 和 Task 仍是 Node 内领域对象，不为追求
-微服务化拆成服务器。
+Hub、Node Host 和 Desktop Companion 是独立生命周期单元；Agent Runtime Worker 是由 Node Host 严格管理的
+子进程。两个 Console 只是对应宿主服务内的 UI 模块和静态资产，没有独立进程、端口、数据库或生命周期。
+Agent、Skill、Tool、Conversation 和 Task 仍是 Node 内领域对象，不为追求微服务化拆成服务器。
 
 ## 4. 领域所有权不因 Rust 迁移改变
 
@@ -137,6 +133,18 @@ Rust 迁移不能成为把 Conversation、Task、Agent 或 Secret 上传到 Hub 
 
 ## 5. Node Host 与 Agent Runtime
 
+Agent Runtime 的定位必须同时从四个维度理解：
+
+| 维度 | 决策 |
+| --- | --- |
+| 产品与安全边界 | 属于一个明确 Node，不拥有独立 Hub enrollment、Node identity 或公网入口 |
+| 代码边界 | 是可替换的独立模块，通过稳定 Agent Runtime SPI 与 Host 协作 |
+| 进程边界 | 作为 Node Host 启动、监控和停止的 Worker 子进程运行 |
+| 部署与版本 | 包含在 Node Bundle 中，与兼容的 Node Host 一起安装和更新，不单独部署 |
+
+因此“独立模块”不等于“独立产品服务”。未来可以按 Agent kind 或 principal security domain 启动多个 Worker，
+但它们始终属于承载 Node，不能自行注册 Workspace、管理 Conversation/Task 或绕过 Node policy。
+
 ### 5.1 职责边界
 
 Node Host 是 Node 的长期权威进程：
@@ -148,7 +156,8 @@ Node Host 是 Node 的长期权威进程：
 - 持久化 Conversation、Task、Invocation 事件和 Artifact metadata；
 - Worker 崩溃时决定失败、恢复或人工确认，Worker 自己不得静默重放副作用。
 
-Agent Runtime Worker 是受信任但非权威的执行组件。它不是针对恶意 Agent 代码的安全沙箱：
+Agent Runtime Worker 是受信任但非权威的执行组件。内置 Knoa Worker 同时承载默认 Knoa Agent 与受限
+Knoa Reviewer；Codex 通过独立 Adapter 接入。它不是针对恶意 Agent 代码的安全沙箱：
 
 - 执行 Agent reasoning loop；
 - 组合 Prompt 与 Skill 内容；
@@ -156,6 +165,10 @@ Agent Runtime Worker 是受信任但非权威的执行组件。它不是针对�
 - 使用 Node Host 签发的 session-scoped Capability MCP Grant 调用获准 Tool/MCP；
 - 产生增量文本、Usage、Artifact 声明与完成事件；
 - 不监听公网、不注册 Workspace、不直接写 Hub。
+
+普通自定义 Agent 通过新增 NodeAgent 配置复用内置 Knoa Worker。第三方自定义执行循环使用签名 Runtime
+Extension Bundle，并由 Node Host 作为独立 out-of-process Worker 管理。Extension 不形成新的部署 role；
+`role=node` 仍只有一个 Node Host 服务，Worker 数量是其内部受管状态。
 
 ### 5.2 本机 IPC
 
@@ -245,7 +258,7 @@ Secret value 永不出现在 `ResolvedInvocation`、日志或配置 diff。Worke
 Invocation ID 的 `ProviderCredentialRequested` 获取当前调用所需凭据。该 lease 只存在于受信任 Worker 内存，
 IPC trace 必须强制 redaction。MCP 子进程、Skill 和 Tool 不能读取 Provider Key。
 
-## 6. Hub 与 Node Console
+## 6. Hub 与 Node 的内置 Console
 
 ### 6.1 Hub Console
 
@@ -272,19 +285,21 @@ Node Console 只管理目标 Node：
 - Node Hub enrollment、P2P/Relay 状态；
 - Runtime generation、日志和组件重启。
 
-Console 默认只监听 loopback。远程管理必须经过用户明确部署的 TLS/VPN/Cloudflare Access，不自动公开管理端口。
+Hub Console 由 Hub 在同一 HTTPS origin 下提供，复用 Hub Account Session、Membership 和 CSRF 防护。Node
+Console 由 Node Host 在现有管理 surface 下提供，默认只允许 loopback；远程 Node 管理必须经过用户明确部署的
+TLS/VPN/Cloudflare Access，不自动公开新的管理端口。
 
-### 6.3 独立部署
+### 6.3 部署归属
 
-| Role | 安装内容 |
-| --- | --- |
-| `hub` | Hub + Hub Console |
-| `node` | Node Host + Agent Runtime + Node Console |
-| `all` | 上述全部；Hub、Hub Console、Node Host、Node Console 不合并，Agent Worker 仍是 Host 子进程 |
+| Role | 长期服务 | 内置界面 |
+| --- | --- | --- |
+| `hub` | 一个 Hub 服务 | Hub Console |
+| `node` | 一个 Node Host 服务；Agent Worker 是受管子进程 | Node Console |
+| `all` | Hub 服务 + Node Host 服务 | 两个宿主各自内置对应 Console |
 
-Console 是可独立发布的管理客户端，不是新的领域后端。Hub Console 只通过 Hub API 写入，Node Console 只通过
-Node API 写入，两者都不直接打开 SQLite。它们可以复用视觉组件和错误语言，不复用越权的后端 repository。
-实现上可以由轻量 loopback 进程托管静态 UI，但不得复制 Hub/Node 业务逻辑。
+Console 不是新的领域后端。Hub Console 只调用同 origin Hub API，Node Console 只调用同 origin Node API，
+两者都不直接打开 SQLite。它们可以复用前端视觉组件和错误语言，但不能跨越宿主权限边界，也不能复制
+Hub/Node 业务逻辑。
 
 ## 7. NAT P2P 与 Relay
 
@@ -352,17 +367,16 @@ Node 确认 admission 后若链路断开，只允许使用同一 `application_se
 ```text
 knoa-hub-<version>-windows-x86_64.zip
 knoa-node-<version>-windows-x86_64.zip
-knoa-hub-console-<version>-windows-x86_64.zip
-knoa-node-console-<version>-windows-x86_64.zip
-knoa-hub-<version>-linux-x86_64.tar.zst
-knoa-node-<version>-linux-x86_64.tar.zst
-knoa-hub-console-<version>-linux-x86_64.tar.zst
-knoa-node-console-<version>-linux-x86_64.tar.zst
+knoa-hub-<version>-linux-x86_64.zip
+knoa-node-<version>-linux-x86_64.zip
 ```
 
+统一 ZIP 不是牺牲 Linux 语义：签名 Manifest 固定 executable 位，安全解包器在 Linux 恢复权限。单一格式减少
+重复的 path traversal、symlink、zip/tar bomb、原子 staging 和签名校验实现，符合 KISS。
+
 Node Bundle 在 Python Worker 仍存在期间内置受支持的 Python Runtime 和已安装依赖。用户不安装 Python、pip、
-venv 或 Git。Console Bundle 可独立安装/更新；一键安装 `hub/node/all` 时默认选中对应 Console，但允许高级部署
-显式不安装。Hub 和 Node Bundle 可以分别更新；`all` 主机由 updater 协调两个独立角色使用兼容版本。
+venv 或 Git。Hub Console 静态资产随 Hub Bundle 发布，Node Console 静态资产随 Node Bundle 发布，不建立
+单独版本线。Hub 和 Node Bundle 可以分别更新；`all` 主机由 updater 协调两个独立角色使用兼容版本。
 
 更新流程：
 
@@ -415,9 +429,7 @@ crates/
 ├── knoa-protocol
 ├── knoa-agent-ipc
 ├── knoa-node-host
-├── knoa-node-console
 ├── knoa-hub
-├── knoa-hub-console
 ├── knoa-p2p
 ├── knoa-relay
 ├── knoa-update
@@ -439,6 +451,8 @@ python/
 ```
 
 实际仓库迁移可逐步移动目录，但依赖方向必须从第一阶段开始遵守。
+Hub/Node Console 前端可以放在共享 UI workspace 中构建，但产物分别嵌入 `knoa-hub` 与 `knoa-node-host`，
+不生成独立服务器二进制。
 
 ## 12. 不变量
 
@@ -449,7 +463,7 @@ python/
 5. Agent Worker 不监听公网，不自行注册 Hub；
 6. Tool/MCP 副作用必须经过 Node Host capability admission；
 7. P2P 与 Relay 只改变 transport，不改变身份、授权或 Invocation ID；
-8. Hub Console 与 Node Console 独立部署且不越权；
+8. Hub Console 与 Node Console 分别内置于 Hub/Node，逻辑权限隔离且不形成新写权威；
 9. 用户安装和更新不依赖 Git、系统 Python、pip 或 venv；
 10. 每个迁移阶段必须保持可部署，并明确 binary rollback、data rollback 或 rollback cutoff，且具有新鲜跨平台测试证据。
 

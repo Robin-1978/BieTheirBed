@@ -13,6 +13,8 @@
 - [Knoa 部署架构](knoa-deployment-architecture.md)
 - [Knoa 跨平台 Runtime 演进架构](knoa-cross-platform-runtime-architecture.md)
 - [Knoa 跨平台 Runtime 重构实施计划](knoa-cross-platform-runtime-migration-plan.md)
+- [Knoa 跨平台 Runtime Phase 0 基线](knoa-cross-platform-runtime-baseline.md)
+- [Knoa 签名 Release Bundle 与更新设计](knoa-release-bundle-design.md)
 - [Knoa 原生 Windows：Hosted Hub + Node](../deploy/windows/README.md)
 - [Knoa Hosted Hub 迁移到 Windows 操作手册](knoa-hosted-hub-windows-migration-runbook.md)
 - [Knoa 实现反推架构审计](knoa-implementation-architecture-audit.md)

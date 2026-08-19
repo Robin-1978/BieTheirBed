@@ -1,0 +1,621 @@
+{
+  "contracts": {
+    "agent_runtime_schema_sha256": "07cc817459aacfec88e7245abec212409e8ae36777adb2eda7ce1529428e6102",
+    "gateway_openapi_sha256": "3d16ffd1ecab5143040faca81f4c66cedf1b95fa04c46bceb0543b34660b4995",
+    "managed_config_schema_sha256": "efd3141d88d5f412d788b44e5a74e05b614325d80414020de5e03b2f2ea9c0a0",
+    "relay_transcripts_sha256": "24af599688e7a3f8805d91e565fd9322c81b839246a1b527117b8d933da2cbf5"
+  },
+  "relay_transcripts": {
+    "app_pairing": {
+      "audience": "knoa-node-pairing-client-hello-v1",
+      "client_ephemeral_public_key": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "client_nonce": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+      "client_signing_public_key": "ppppppppppppppppppppppppppppppppppppppppppp",
+      "installation_id": "installation-fixture-1",
+      "ticket": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "transport": "relay",
+      "version": 1
+    },
+    "app_session": {
+      "audience": "knoa-node-client-hello-v1",
+      "client_ephemeral_public_key": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "client_nonce": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+      "client_signing_public_key": "ppppppppppppppppppppppppppppppppppppppppppp",
+      "device_id": "device-fixture-1",
+      "installation_id": "installation-fixture-1",
+      "ticket": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "transport": "relay",
+      "version": 1
+    },
+    "node_resource": {
+      "audience": "knoa-resource-client-hello-v1",
+      "caller_node_id": "node-caller-fixture-1",
+      "client_ephemeral_public_key": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "client_nonce": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+      "ticket": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "transport": "relay",
+      "version": 1
+    }
+  },
+  "schema_version": 1,
+  "sqlite_schema_sha256": {
+    "hosted_control": "193528417bbdaa866612f69ef9830bb2aab7529cb2cb609790490440f62fca67",
+    "node_authority": "304513acc639290099286c6a188ccd8d16f4ecb88bf6edf2cb335ccca27f6e76",
+    "node_gateway": "4d414f84fb6fae098ba0033a8997e3c752e7b4e6fe7450de84b0154d32ae128d",
+    "self_hosted_hub": "5af4792e84e955e5334e60fa4135462e60247bfdbb787ae1aaa3cd37404037cb"
+  },
+  "sqlite_schemas": {
+    "hosted_control": [
+      {
+        "name": "idx_hosted_memberships_account",
+        "sql": "CREATE INDEX idx_hosted_memberships_account ON hosted_workspace_memberships(account_id, state)",
+        "table": "hosted_workspace_memberships",
+        "type": "index"
+      },
+      {
+        "name": "idx_hosted_password_resets_account",
+        "sql": "CREATE INDEX idx_hosted_password_resets_account ON hosted_password_reset_grants(account_id, expires_at)",
+        "table": "hosted_password_reset_grants",
+        "type": "index"
+      },
+      {
+        "name": "idx_hosted_sessions_account",
+        "sql": "CREATE INDEX idx_hosted_sessions_account ON hosted_account_sessions(account_id, expires_at)",
+        "table": "hosted_account_sessions",
+        "type": "index"
+      },
+      {
+        "name": "hosted_account_enrollment_grants",
+        "sql": "CREATE TABLE hosted_account_enrollment_grants( grant_id TEXT PRIMARY KEY, secret_digest TEXT NOT NULL, created_at REAL NOT NULL, expires_at REAL NOT NULL, consumed_at REAL )",
+        "table": "hosted_account_enrollment_grants",
+        "type": "table"
+      },
+      {
+        "name": "hosted_account_sessions",
+        "sql": "CREATE TABLE hosted_account_sessions( session_digest TEXT PRIMARY KEY, session_id TEXT NOT NULL UNIQUE, account_id TEXT NOT NULL REFERENCES hosted_accounts(account_id), created_at REAL NOT NULL, expires_at REAL NOT NULL, revoked_at REAL )",
+        "table": "hosted_account_sessions",
+        "type": "table"
+      },
+      {
+        "name": "hosted_accounts",
+        "sql": "CREATE TABLE hosted_accounts( account_id TEXT PRIMARY KEY, display_name TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('active', 'disabled')), created_at REAL NOT NULL )",
+        "table": "hosted_accounts",
+        "type": "table"
+      },
+      {
+        "name": "hosted_login_identities",
+        "sql": "CREATE TABLE hosted_login_identities( identity_id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES hosted_accounts(account_id), login_identity TEXT NOT NULL UNIQUE, state TEXT NOT NULL CHECK(state IN ('active', 'disabled')), verified_at REAL NOT NULL, created_at REAL NOT NULL )",
+        "table": "hosted_login_identities",
+        "type": "table"
+      },
+      {
+        "name": "hosted_password_credentials",
+        "sql": "CREATE TABLE hosted_password_credentials( account_id TEXT PRIMARY KEY REFERENCES hosted_accounts(account_id), salt BLOB NOT NULL, password_hash BLOB NOT NULL, updated_at REAL NOT NULL )",
+        "table": "hosted_password_credentials",
+        "type": "table"
+      },
+      {
+        "name": "hosted_password_reset_grants",
+        "sql": "CREATE TABLE hosted_password_reset_grants( grant_id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES hosted_accounts(account_id), secret_digest TEXT NOT NULL, created_at REAL NOT NULL, expires_at REAL NOT NULL, consumed_at REAL )",
+        "table": "hosted_password_reset_grants",
+        "type": "table"
+      },
+      {
+        "name": "hosted_workspace_memberships",
+        "sql": "CREATE TABLE hosted_workspace_memberships( workspace_id TEXT NOT NULL REFERENCES hosted_workspaces(workspace_id), account_id TEXT NOT NULL REFERENCES hosted_accounts(account_id), role TEXT NOT NULL CHECK(role IN ('owner', 'admin', 'member')), state TEXT NOT NULL CHECK(state IN ('active', 'revoked')), created_at REAL NOT NULL, PRIMARY KEY(workspace_id, account_id) )",
+        "table": "hosted_workspace_memberships",
+        "type": "table"
+      },
+      {
+        "name": "hosted_workspaces",
+        "sql": "CREATE TABLE hosted_workspaces( workspace_id TEXT PRIMARY KEY, display_name TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('personal', 'shared')), state TEXT NOT NULL CHECK(state IN ('active', 'archived')), created_by_account_id TEXT NOT NULL REFERENCES hosted_accounts(account_id), created_at REAL NOT NULL )",
+        "table": "hosted_workspaces",
+        "type": "table"
+      }
+    ],
+    "node_authority": [
+      {
+        "name": "conversation_approvals_by_turn_state",
+        "sql": "CREATE INDEX conversation_approvals_by_turn_state ON conversation_approvals(turn_id, state, created_at)",
+        "table": "conversation_approvals",
+        "type": "index"
+      },
+      {
+        "name": "conversation_sessions_by_principal",
+        "sql": "CREATE INDEX conversation_sessions_by_principal ON conversation_sessions(principal_id, state, updated_at DESC)",
+        "table": "conversation_sessions",
+        "type": "index"
+      },
+      {
+        "name": "conversation_turns_by_session",
+        "sql": "CREATE INDEX conversation_turns_by_session ON conversation_turns(session_handle, created_at, turn_id)",
+        "table": "conversation_turns",
+        "type": "index"
+      },
+      {
+        "name": "episodes_lookup",
+        "sql": "CREATE INDEX episodes_lookup ON episodes(principal_id, session_id, created_at DESC)",
+        "table": "episodes",
+        "type": "index"
+      },
+      {
+        "name": "human_interactions_by_owner",
+        "sql": "CREATE INDEX human_interactions_by_owner ON human_interactions(owner_kind, owner_id, created_at)",
+        "table": "human_interactions",
+        "type": "index"
+      },
+      {
+        "name": "human_interactions_one_pending_owner",
+        "sql": "CREATE UNIQUE INDEX human_interactions_one_pending_owner ON human_interactions(owner_kind, owner_id) WHERE state='pending'",
+        "table": "human_interactions",
+        "type": "index"
+      },
+      {
+        "name": "idx_agent_delegations_parent",
+        "sql": "CREATE INDEX idx_agent_delegations_parent ON agent_delegations(principal_id, parent_kind, parent_id)",
+        "table": "agent_delegations",
+        "type": "index"
+      },
+      {
+        "name": "memories_lookup",
+        "sql": "CREATE INDEX memories_lookup ON memories(principal_id, importance, category, updated_at DESC)",
+        "table": "memories",
+        "type": "index"
+      },
+      {
+        "name": "runtime_principal_task_events_by_owner",
+        "sql": "CREATE INDEX runtime_principal_task_events_by_owner ON runtime_principal_task_events( principal_id, feed_event_id )",
+        "table": "runtime_principal_task_events",
+        "type": "index"
+      },
+      {
+        "name": "runtime_schedule_occurrences_by_delivery",
+        "sql": "CREATE INDEX runtime_schedule_occurrences_by_delivery ON runtime_schedule_occurrences( state, next_attempt_at, lease_expires_at, occurrence_id )",
+        "table": "runtime_schedule_occurrences",
+        "type": "index"
+      },
+      {
+        "name": "runtime_schedules_by_due",
+        "sql": "CREATE INDEX runtime_schedules_by_due ON runtime_schedules(state, next_fire_at, schedule_id)",
+        "table": "runtime_schedules",
+        "type": "index"
+      },
+      {
+        "name": "runtime_sessions_by_principal",
+        "sql": "CREATE INDEX runtime_sessions_by_principal ON runtime_sessions(principal_id, updated_at DESC)",
+        "table": "runtime_sessions",
+        "type": "index"
+      },
+      {
+        "name": "runtime_task_approvals_by_owner_state",
+        "sql": "CREATE INDEX runtime_task_approvals_by_owner_state ON runtime_task_approvals( principal_id, state, created_at, approval_id )",
+        "table": "runtime_task_approvals",
+        "type": "index"
+      },
+      {
+        "name": "runtime_task_attempts_by_task",
+        "sql": "CREATE INDEX runtime_task_attempts_by_task ON runtime_task_attempts(task_id, ordinal)",
+        "table": "runtime_task_attempts",
+        "type": "index"
+      },
+      {
+        "name": "runtime_task_tool_steps_by_task_state",
+        "sql": "CREATE INDEX runtime_task_tool_steps_by_task_state ON runtime_task_tool_steps(task_id, state, created_at)",
+        "table": "runtime_task_tool_steps",
+        "type": "index"
+      },
+      {
+        "name": "runtime_task_traces_by_retention",
+        "sql": "CREATE INDEX runtime_task_traces_by_retention ON runtime_task_execution_traces(retained_until, compacted_at)",
+        "table": "runtime_task_execution_traces",
+        "type": "index"
+      },
+      {
+        "name": "runtime_tasks_by_owner_state",
+        "sql": "CREATE INDEX runtime_tasks_by_owner_state ON runtime_tasks( principal_id, state, priority DESC, created_at, task_id )",
+        "table": "runtime_tasks",
+        "type": "index"
+      },
+      {
+        "name": "runtime_tasks_by_session_state",
+        "sql": "CREATE INDEX runtime_tasks_by_session_state ON runtime_tasks(session_handle, state, created_at, task_id)",
+        "table": "runtime_tasks",
+        "type": "index"
+      },
+      {
+        "name": "runtime_trigger_events_by_delivery",
+        "sql": "CREATE INDEX runtime_trigger_events_by_delivery ON runtime_trigger_events( state, next_attempt_at, lease_expires_at, trigger_event_id )",
+        "table": "runtime_trigger_events",
+        "type": "index"
+      },
+      {
+        "name": "runtime_triggers_by_owner_state",
+        "sql": "CREATE INDEX runtime_triggers_by_owner_state ON runtime_triggers(principal_id, state, created_at, trigger_id)",
+        "table": "runtime_triggers",
+        "type": "index"
+      },
+      {
+        "name": "task_executions_by_task",
+        "sql": "CREATE INDEX task_executions_by_task ON task_executions(task_id, created_at DESC, execution_id DESC)",
+        "table": "task_executions",
+        "type": "index"
+      },
+      {
+        "name": "tasks_by_owner_state",
+        "sql": "CREATE INDEX tasks_by_owner_state ON tasks(principal_id, state, updated_at DESC, task_id DESC)",
+        "table": "tasks",
+        "type": "index"
+      },
+      {
+        "name": "agent_delegations",
+        "sql": "CREATE TABLE agent_delegations ( delegation_id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, parent_kind TEXT NOT NULL, parent_id TEXT NOT NULL, parent_agent_id TEXT NOT NULL, parent_agent_digest TEXT NOT NULL, child_agent_id TEXT NOT NULL, child_agent_digest TEXT NOT NULL, child_session_handle TEXT NOT NULL, child_task_id TEXT NOT NULL UNIQUE, mode TEXT NOT NULL, depth INTEGER NOT NULL, invocation_policy_json TEXT NOT NULL, invocation_policy_digest TEXT NOT NULL, idempotency_key TEXT NOT NULL, created_at REAL NOT NULL, UNIQUE(principal_id, parent_kind, parent_id, idempotency_key) )",
+        "table": "agent_delegations",
+        "type": "table"
+      },
+      {
+        "name": "agent_session_bindings",
+        "sql": "CREATE TABLE agent_session_bindings ( session_handle TEXT PRIMARY KEY REFERENCES runtime_sessions(session_handle) ON DELETE CASCADE, principal_id TEXT NOT NULL, agent_id TEXT NOT NULL, agent_config_digest TEXT NOT NULL, runtime_session_ref TEXT NOT NULL, runtime_protocol_version TEXT NOT NULL, binding_epoch INTEGER NOT NULL, state TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, revision INTEGER NOT NULL, UNIQUE(agent_id, runtime_session_ref) )",
+        "table": "agent_session_bindings",
+        "type": "table"
+      },
+      {
+        "name": "artifact_registry",
+        "sql": "CREATE TABLE artifact_registry ( artifact_id TEXT PRIMARY KEY, session_key TEXT NOT NULL, path TEXT NOT NULL, name TEXT NOT NULL, media_type TEXT NOT NULL, kind TEXT NOT NULL, size INTEGER NOT NULL, direction TEXT NOT NULL, ownership TEXT NOT NULL, retention TEXT NOT NULL, width INTEGER NOT NULL DEFAULT 0, height INTEGER NOT NULL DEFAULT 0, content_sha256 TEXT NOT NULL DEFAULT '', expires_at REAL, delivered_at REAL )",
+        "table": "artifact_registry",
+        "type": "table"
+      },
+      {
+        "name": "config_control_state",
+        "sql": "CREATE TABLE config_control_state ( singleton INTEGER PRIMARY KEY CHECK(singleton=1), desired_revision_id TEXT NOT NULL, applied_revision_id TEXT NOT NULL, apply_status TEXT NOT NULL, apply_error_code TEXT NOT NULL, updated_at REAL NOT NULL, FOREIGN KEY(desired_revision_id) REFERENCES config_revisions(revision_id), FOREIGN KEY(applied_revision_id) REFERENCES config_revisions(revision_id) )",
+        "table": "config_control_state",
+        "type": "table"
+      },
+      {
+        "name": "config_drafts",
+        "sql": "CREATE TABLE config_drafts ( draft_id TEXT PRIMARY KEY, base_revision_id TEXT NOT NULL, document_json TEXT NOT NULL, draft_version INTEGER NOT NULL, updated_by TEXT NOT NULL, updated_at REAL NOT NULL, FOREIGN KEY(base_revision_id) REFERENCES config_revisions(revision_id) )",
+        "table": "config_drafts",
+        "type": "table"
+      },
+      {
+        "name": "config_revisions",
+        "sql": "CREATE TABLE config_revisions ( revision_id TEXT PRIMARY KEY, parent_revision_id TEXT NOT NULL, document_json TEXT NOT NULL, config_digest TEXT NOT NULL, change_summary TEXT NOT NULL, created_by TEXT NOT NULL, created_at REAL NOT NULL )",
+        "table": "config_revisions",
+        "type": "table"
+      },
+      {
+        "name": "conversation_approvals",
+        "sql": "CREATE TABLE conversation_approvals ( approval_id TEXT PRIMARY KEY, turn_id TEXT NOT NULL REFERENCES conversation_turns(turn_id) ON DELETE CASCADE, step_id TEXT NOT NULL, tool_call_id TEXT NOT NULL, tool_name TEXT NOT NULL, arguments_json TEXT NOT NULL, reason TEXT NOT NULL, state TEXT NOT NULL, created_at REAL NOT NULL, resolved_at REAL, resolved_by TEXT NOT NULL, UNIQUE(turn_id, step_id) )",
+        "table": "conversation_approvals",
+        "type": "table"
+      },
+      {
+        "name": "conversation_sessions",
+        "sql": "CREATE TABLE conversation_sessions ( session_handle TEXT PRIMARY KEY REFERENCES runtime_sessions(session_handle) ON DELETE CASCADE, principal_id TEXT NOT NULL, title TEXT NOT NULL, state TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, revision INTEGER NOT NULL )",
+        "table": "conversation_sessions",
+        "type": "table"
+      },
+      {
+        "name": "conversation_tool_steps",
+        "sql": "CREATE TABLE conversation_tool_steps ( step_id TEXT PRIMARY KEY, turn_id TEXT NOT NULL REFERENCES conversation_turns(turn_id) ON DELETE CASCADE, tool_call_id TEXT NOT NULL, tool_name TEXT NOT NULL, arguments_json TEXT NOT NULL, state TEXT NOT NULL, result_json TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, UNIQUE(turn_id, tool_call_id) )",
+        "table": "conversation_tool_steps",
+        "type": "table"
+      },
+      {
+        "name": "conversation_turns",
+        "sql": "CREATE TABLE conversation_turns ( turn_id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, session_handle TEXT NOT NULL REFERENCES runtime_sessions(session_handle) ON DELETE CASCADE, client_request_id TEXT NOT NULL, user_input TEXT NOT NULL, attachments_json TEXT NOT NULL, tools_enabled INTEGER NOT NULL, state TEXT NOT NULL, reasoning TEXT NOT NULL, content TEXT NOT NULL, final_output TEXT NOT NULL, artifacts_json TEXT NOT NULL, failure_code TEXT NOT NULL, cancel_requested INTEGER NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, finished_at REAL, revision INTEGER NOT NULL, timeline_json TEXT NOT NULL DEFAULT '[]', UNIQUE(principal_id, client_request_id) )",
+        "table": "conversation_turns",
+        "type": "table"
+      },
+      {
+        "name": "episodes",
+        "sql": "CREATE TABLE episodes ( id INTEGER PRIMARY KEY AUTOINCREMENT, principal_id TEXT NOT NULL, session_id TEXT NOT NULL, summary TEXT NOT NULL, tool_calls INTEGER NOT NULL DEFAULT 0, source TEXT NOT NULL, created_at TEXT NOT NULL )",
+        "table": "episodes",
+        "type": "table"
+      },
+      {
+        "name": "human_interactions",
+        "sql": "CREATE TABLE human_interactions ( interaction_id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, owner_kind TEXT NOT NULL, owner_id TEXT NOT NULL, runtime_session_ref TEXT NOT NULL, runtime_turn_ref TEXT NOT NULL, runtime_interaction_id TEXT NOT NULL, interaction_epoch INTEGER NOT NULL, kind TEXT NOT NULL, state TEXT NOT NULL, display_json TEXT NOT NULL, resolution_schema_json TEXT NOT NULL, resolution_json TEXT, created_at REAL NOT NULL, resolved_at REAL, expires_at REAL, resolved_by TEXT NOT NULL, UNIQUE( runtime_session_ref, runtime_turn_ref, runtime_interaction_id, interaction_epoch ) )",
+        "table": "human_interactions",
+        "type": "table"
+      },
+      {
+        "name": "invocation_policy_snapshots",
+        "sql": "CREATE TABLE invocation_policy_snapshots ( turn_id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, session_handle TEXT NOT NULL, policy_digest TEXT NOT NULL, policy_json TEXT NOT NULL, created_at REAL NOT NULL )",
+        "table": "invocation_policy_snapshots",
+        "type": "table"
+      },
+      {
+        "name": "memories",
+        "sql": "CREATE TABLE memories ( principal_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, category TEXT NOT NULL, importance TEXT NOT NULL CHECK (importance IN ('core', 'relevant')), confidence REAL NOT NULL, source TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_used_at TEXT, access_count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (principal_id, key) )",
+        "table": "memories",
+        "type": "table"
+      },
+      {
+        "name": "runtime_active_sessions",
+        "sql": "CREATE TABLE runtime_active_sessions ( principal_id TEXT PRIMARY KEY, session_handle TEXT NOT NULL REFERENCES runtime_sessions(session_handle) ON DELETE CASCADE, updated_at REAL NOT NULL )",
+        "table": "runtime_active_sessions",
+        "type": "table"
+      },
+      {
+        "name": "runtime_principal_task_events",
+        "sql": "CREATE TABLE runtime_principal_task_events ( feed_event_id INTEGER PRIMARY KEY AUTOINCREMENT, principal_id TEXT NOT NULL, task_id TEXT NOT NULL REFERENCES runtime_tasks(task_id) ON DELETE CASCADE, task_event_seq INTEGER NOT NULL, occurred_at REAL NOT NULL, UNIQUE(task_id, task_event_seq) )",
+        "table": "runtime_principal_task_events",
+        "type": "table"
+      },
+      {
+        "name": "runtime_schedule_occurrences",
+        "sql": "CREATE TABLE runtime_schedule_occurrences ( occurrence_id TEXT PRIMARY KEY, schedule_id TEXT NOT NULL REFERENCES runtime_schedules(schedule_id) ON DELETE CASCADE, principal_id TEXT NOT NULL, session_handle TEXT NOT NULL, ordinal INTEGER NOT NULL, scheduled_for REAL NOT NULL, state TEXT NOT NULL, attempt_count INTEGER NOT NULL, next_attempt_at REAL, lease_owner TEXT NOT NULL, lease_expires_at REAL, task_id TEXT NOT NULL, failure_code TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, UNIQUE(schedule_id, ordinal) )",
+        "table": "runtime_schedule_occurrences",
+        "type": "table"
+      },
+      {
+        "name": "runtime_schedules",
+        "sql": "CREATE TABLE runtime_schedules ( schedule_id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, session_handle TEXT NOT NULL REFERENCES runtime_sessions(session_handle) ON DELETE CASCADE, client_request_id TEXT NOT NULL, goal TEXT NOT NULL, spec_json TEXT NOT NULL, tools_enabled INTEGER NOT NULL, priority INTEGER NOT NULL, state TEXT NOT NULL, next_fire_at REAL, last_fire_at REAL, fire_count INTEGER NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, UNIQUE(principal_id, client_request_id) )",
+        "table": "runtime_schedules",
+        "type": "table"
+      },
+      {
+        "name": "runtime_session_transcripts",
+        "sql": "CREATE TABLE runtime_session_transcripts ( session_handle TEXT PRIMARY KEY REFERENCES runtime_sessions(session_handle) ON DELETE CASCADE, messages_json TEXT NOT NULL, updated_at REAL NOT NULL )",
+        "table": "runtime_session_transcripts",
+        "type": "table"
+      },
+      {
+        "name": "runtime_sessions",
+        "sql": "CREATE TABLE runtime_sessions ( session_handle TEXT PRIMARY KEY, principal_id TEXT NOT NULL, agent_id TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL )",
+        "table": "runtime_sessions",
+        "type": "table"
+      },
+      {
+        "name": "runtime_task_approvals",
+        "sql": "CREATE TABLE runtime_task_approvals ( approval_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES runtime_tasks(task_id) ON DELETE CASCADE, principal_id TEXT NOT NULL, tool_step_id TEXT NOT NULL, tool_call_id TEXT NOT NULL, tool_name TEXT NOT NULL, arguments_json TEXT NOT NULL, reason TEXT NOT NULL, state TEXT NOT NULL, request_event_seq INTEGER NOT NULL, created_at REAL NOT NULL, resolved_at REAL, expires_at REAL, resolved_by TEXT NOT NULL, UNIQUE(task_id, tool_step_id) )",
+        "table": "runtime_task_approvals",
+        "type": "table"
+      },
+      {
+        "name": "runtime_task_attempts",
+        "sql": "CREATE TABLE runtime_task_attempts ( attempt_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES runtime_tasks(task_id) ON DELETE CASCADE, ordinal INTEGER NOT NULL, state TEXT NOT NULL, started_at REAL NOT NULL, finished_at REAL, failure_code TEXT NOT NULL, UNIQUE(task_id, ordinal) )",
+        "table": "runtime_task_attempts",
+        "type": "table"
+      },
+      {
+        "name": "runtime_task_events",
+        "sql": "CREATE TABLE runtime_task_events ( task_id TEXT NOT NULL REFERENCES runtime_tasks(task_id) ON DELETE CASCADE, event_seq INTEGER NOT NULL, event_type TEXT NOT NULL, payload_json TEXT NOT NULL, occurred_at REAL NOT NULL, PRIMARY KEY(task_id, event_seq) )",
+        "table": "runtime_task_events",
+        "type": "table"
+      },
+      {
+        "name": "runtime_task_execution_traces",
+        "sql": "CREATE TABLE runtime_task_execution_traces ( task_id TEXT PRIMARY KEY REFERENCES runtime_tasks(task_id) ON DELETE CASCADE, entries_json TEXT NOT NULL, final_output TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, retained_until REAL NOT NULL, compacted_at REAL, revision INTEGER NOT NULL )",
+        "table": "runtime_task_execution_traces",
+        "type": "table"
+      },
+      {
+        "name": "runtime_task_tool_steps",
+        "sql": "CREATE TABLE runtime_task_tool_steps ( tool_step_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES runtime_tasks(task_id) ON DELETE CASCADE, principal_id TEXT NOT NULL, tool_call_id TEXT NOT NULL, tool_name TEXT NOT NULL, arguments_json TEXT NOT NULL, effect TEXT NOT NULL, risk TEXT NOT NULL, state TEXT NOT NULL, result_json TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, UNIQUE(task_id, tool_step_id) )",
+        "table": "runtime_task_tool_steps",
+        "type": "table"
+      },
+      {
+        "name": "runtime_tasks",
+        "sql": "CREATE TABLE runtime_tasks ( task_id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, session_handle TEXT NOT NULL REFERENCES runtime_sessions(session_handle) ON DELETE CASCADE, agent_id TEXT NOT NULL, client_request_id TEXT NOT NULL, parent_task_id TEXT REFERENCES runtime_tasks(task_id) ON DELETE RESTRICT, goal TEXT NOT NULL, attachments_json TEXT NOT NULL, tools_enabled INTEGER NOT NULL, priority INTEGER NOT NULL, state TEXT NOT NULL, phase TEXT NOT NULL, attempt_count INTEGER NOT NULL, cancel_requested INTEGER NOT NULL, final_summary TEXT NOT NULL, failure_code TEXT NOT NULL, lease_owner TEXT NOT NULL, lease_expires_at REAL, created_at REAL NOT NULL, updated_at REAL NOT NULL, started_at REAL, finished_at REAL, next_event_seq INTEGER NOT NULL, revision INTEGER NOT NULL, origin TEXT NOT NULL DEFAULT 'user', UNIQUE(principal_id, client_request_id) )",
+        "table": "runtime_tasks",
+        "type": "table"
+      },
+      {
+        "name": "runtime_trigger_events",
+        "sql": "CREATE TABLE runtime_trigger_events ( trigger_event_id TEXT PRIMARY KEY, trigger_id TEXT NOT NULL REFERENCES runtime_triggers(trigger_id) ON DELETE CASCADE, principal_id TEXT NOT NULL, session_handle TEXT NOT NULL, external_event_id TEXT NOT NULL, payload_json TEXT NOT NULL, state TEXT NOT NULL, attempt_count INTEGER NOT NULL, next_attempt_at REAL, lease_owner TEXT NOT NULL, lease_expires_at REAL, task_id TEXT NOT NULL, failure_code TEXT NOT NULL, received_at REAL NOT NULL, updated_at REAL NOT NULL, UNIQUE(trigger_id, external_event_id) )",
+        "table": "runtime_trigger_events",
+        "type": "table"
+      },
+      {
+        "name": "runtime_triggers",
+        "sql": "CREATE TABLE runtime_triggers ( trigger_id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, session_handle TEXT NOT NULL REFERENCES runtime_sessions(session_handle) ON DELETE CASCADE, client_request_id TEXT NOT NULL, name TEXT NOT NULL, goal TEXT NOT NULL, tools_enabled INTEGER NOT NULL, priority INTEGER NOT NULL, state TEXT NOT NULL, event_count INTEGER NOT NULL, last_event_at REAL, created_at REAL NOT NULL, updated_at REAL NOT NULL, UNIQUE(principal_id, client_request_id) )",
+        "table": "runtime_triggers",
+        "type": "table"
+      },
+      {
+        "name": "task_executions",
+        "sql": "CREATE TABLE task_executions ( execution_id TEXT PRIMARY KEY REFERENCES runtime_tasks(task_id) ON DELETE CASCADE, task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE, task_revision INTEGER NOT NULL, agent_id_snapshot TEXT NOT NULL, launch_reason TEXT NOT NULL, goal_snapshot TEXT NOT NULL, attachments_json TEXT NOT NULL, policy_snapshot_json TEXT NOT NULL, created_at REAL NOT NULL, UNIQUE(task_id, execution_id) )",
+        "table": "task_executions",
+        "type": "table"
+      },
+      {
+        "name": "task_launch_bindings",
+        "sql": "CREATE TABLE task_launch_bindings ( task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE, provider_kind TEXT NOT NULL, provider_id TEXT NOT NULL, PRIMARY KEY(provider_kind, provider_id), UNIQUE(task_id, provider_kind) )",
+        "table": "task_launch_bindings",
+        "type": "table"
+      },
+      {
+        "name": "task_launch_policies",
+        "sql": "CREATE TABLE task_launch_policies ( task_id TEXT PRIMARY KEY REFERENCES tasks(task_id) ON DELETE CASCADE, policy_json TEXT NOT NULL )",
+        "table": "task_launch_policies",
+        "type": "table"
+      },
+      {
+        "name": "tasks",
+        "sql": "CREATE TABLE tasks ( task_id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, client_request_id TEXT NOT NULL, session_handle TEXT NOT NULL REFERENCES runtime_sessions(session_handle) ON DELETE CASCADE, agent_id TEXT NOT NULL, title TEXT NOT NULL, goal TEXT NOT NULL, attachments_json TEXT NOT NULL, tools_enabled INTEGER NOT NULL, priority INTEGER NOT NULL, notification_policy_json TEXT NOT NULL, state TEXT NOT NULL, revision INTEGER NOT NULL, latest_execution_id TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL, UNIQUE(principal_id, client_request_id) )",
+        "table": "tasks",
+        "type": "table"
+      }
+    ],
+    "node_gateway": [
+      {
+        "name": "gateway_device_audit_device_idx",
+        "sql": "CREATE INDEX gateway_device_audit_device_idx ON gateway_device_audit(principal_id, device_id, event_id DESC)",
+        "table": "gateway_device_audit",
+        "type": "index"
+      },
+      {
+        "name": "gateway_devices_principal_idx",
+        "sql": "CREATE INDEX gateway_devices_principal_idx ON gateway_devices(principal_id, created_at)",
+        "table": "gateway_devices",
+        "type": "index"
+      },
+      {
+        "name": "gateway_devices_public_key_uidx",
+        "sql": "CREATE UNIQUE INDEX gateway_devices_public_key_uidx ON gateway_devices(public_key)",
+        "table": "gateway_devices",
+        "type": "index"
+      },
+      {
+        "name": "gateway_sessions_device_idx",
+        "sql": "CREATE INDEX gateway_sessions_device_idx ON gateway_sessions(device_id, expires_at)",
+        "table": "gateway_sessions",
+        "type": "index"
+      },
+      {
+        "name": "gateway_auth_challenges",
+        "sql": "CREATE TABLE gateway_auth_challenges ( challenge_id TEXT PRIMARY KEY, purpose TEXT NOT NULL, subject_id TEXT NOT NULL, nonce_sha256 TEXT NOT NULL, created_at REAL NOT NULL, expires_at REAL NOT NULL, consumed_at REAL )",
+        "table": "gateway_auth_challenges",
+        "type": "table"
+      },
+      {
+        "name": "gateway_device_audit",
+        "sql": "CREATE TABLE gateway_device_audit ( event_id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, principal_id TEXT NOT NULL, event_type TEXT NOT NULL, occurred_at REAL NOT NULL, remote_address_hash TEXT NOT NULL, detail_code TEXT NOT NULL )",
+        "table": "gateway_device_audit",
+        "type": "table"
+      },
+      {
+        "name": "gateway_devices",
+        "sql": "CREATE TABLE gateway_devices ( device_id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, display_name TEXT NOT NULL, public_key TEXT NOT NULL, state TEXT NOT NULL, created_at REAL NOT NULL, last_seen_at REAL, revoked_at REAL )",
+        "table": "gateway_devices",
+        "type": "table"
+      },
+      {
+        "name": "gateway_pairing_grants",
+        "sql": "CREATE TABLE gateway_pairing_grants ( grant_id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, secret_sha256 TEXT NOT NULL, created_at REAL NOT NULL, expires_at REAL NOT NULL, consumed_at REAL )",
+        "table": "gateway_pairing_grants",
+        "type": "table"
+      },
+      {
+        "name": "gateway_sessions",
+        "sql": "CREATE TABLE gateway_sessions ( session_id TEXT PRIMARY KEY, device_id TEXT NOT NULL, principal_id TEXT NOT NULL, secret_sha256 TEXT NOT NULL, created_at REAL NOT NULL, expires_at REAL NOT NULL, revoked_at REAL )",
+        "table": "gateway_sessions",
+        "type": "table"
+      }
+    ],
+    "self_hosted_hub": [
+      {
+        "name": "deployments_by_workspace_kind",
+        "sql": "CREATE INDEX deployments_by_workspace_kind ON deployments(workspace_id, kind, target_node_id, deployment_id)",
+        "table": "deployments",
+        "type": "index"
+      },
+      {
+        "name": "work_projections_by_workspace",
+        "sql": "CREATE INDEX work_projections_by_workspace ON work_projections(workspace_id, entity_kind, source_updated_at DESC)",
+        "table": "work_projections",
+        "type": "index"
+      },
+      {
+        "name": "account_subjects",
+        "sql": "CREATE TABLE account_subjects( subject_id TEXT PRIMARY KEY, login_identity TEXT NOT NULL UNIQUE, state TEXT NOT NULL, created_at REAL NOT NULL )",
+        "table": "account_subjects",
+        "type": "table"
+      },
+      {
+        "name": "app_installations",
+        "sql": "CREATE TABLE app_installations( installation_id TEXT PRIMARY KEY, hub_id TEXT NOT NULL, subject_id TEXT NOT NULL, public_key TEXT NOT NULL, display_name TEXT NOT NULL, state TEXT NOT NULL, created_at REAL NOT NULL, last_seen REAL NOT NULL )",
+        "table": "app_installations",
+        "type": "table"
+      },
+      {
+        "name": "connection_tickets",
+        "sql": "CREATE TABLE connection_tickets( ticket_id TEXT PRIMARY KEY, node_id TEXT NOT NULL, installation_id TEXT NOT NULL, expires_at REAL NOT NULL, consumed_at REAL )",
+        "table": "connection_tickets",
+        "type": "table"
+      },
+      {
+        "name": "deployment_observations",
+        "sql": "CREATE TABLE deployment_observations( deployment_id TEXT PRIMARY KEY, node_id TEXT NOT NULL, applied_digest TEXT NOT NULL, health_epoch INTEGER NOT NULL, health TEXT NOT NULL, capabilities TEXT NOT NULL, available_capacity INTEGER NOT NULL, observed_at REAL NOT NULL, expires_at REAL NOT NULL, node_signature TEXT NOT NULL )",
+        "table": "deployment_observations",
+        "type": "table"
+      },
+      {
+        "name": "deployments",
+        "sql": "CREATE TABLE deployments( deployment_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, kind TEXT NOT NULL, resource_id TEXT NOT NULL, resource_generation INTEGER NOT NULL, resource_digest TEXT NOT NULL, target_node_id TEXT NOT NULL, desired_generation INTEGER NOT NULL, spec_json TEXT NOT NULL, enabled INTEGER NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL )",
+        "table": "deployments",
+        "type": "table"
+      },
+      {
+        "name": "fleet_envelopes",
+        "sql": "CREATE TABLE fleet_envelopes( rollout_id TEXT NOT NULL, node_id TEXT NOT NULL, expected_base_revision_digest TEXT NOT NULL, candidate_digest TEXT NOT NULL, sealed_candidate TEXT NOT NULL, expires_at REAL NOT NULL, state TEXT NOT NULL, result_code TEXT NOT NULL, updated_at REAL NOT NULL, PRIMARY KEY(rollout_id, node_id) )",
+        "table": "fleet_envelopes",
+        "type": "table"
+      },
+      {
+        "name": "fleet_rollouts",
+        "sql": "CREATE TABLE fleet_rollouts( rollout_id TEXT PRIMARY KEY, hub_id TEXT NOT NULL, installation_id TEXT NOT NULL, state TEXT NOT NULL, created_at REAL NOT NULL )",
+        "table": "fleet_rollouts",
+        "type": "table"
+      },
+      {
+        "name": "hub_memberships",
+        "sql": "CREATE TABLE hub_memberships( hub_id TEXT NOT NULL, subject_id TEXT NOT NULL, role TEXT NOT NULL, state TEXT NOT NULL, created_at REAL NOT NULL, PRIMARY KEY(hub_id, subject_id) )",
+        "table": "hub_memberships",
+        "type": "table"
+      },
+      {
+        "name": "invocation_audit_observations",
+        "sql": "CREATE TABLE invocation_audit_observations( invocation_id TEXT NOT NULL, reporting_node_id TEXT NOT NULL, reported_state TEXT NOT NULL, execution_epoch TEXT NOT NULL, report_seq INTEGER NOT NULL, usage_summary TEXT NOT NULL, node_signature TEXT NOT NULL, observed_at REAL NOT NULL, PRIMARY KEY(invocation_id, reporting_node_id, report_seq) )",
+        "table": "invocation_audit_observations",
+        "type": "table"
+      },
+      {
+        "name": "node_enrollment_grants",
+        "sql": "CREATE TABLE node_enrollment_grants( grant_id TEXT PRIMARY KEY, secret_sha256 TEXT NOT NULL, challenge TEXT NOT NULL, expires_at REAL NOT NULL, consumed_at REAL )",
+        "table": "node_enrollment_grants",
+        "type": "table"
+      },
+      {
+        "name": "nodes",
+        "sql": "CREATE TABLE nodes( node_id TEXT PRIMARY KEY, hub_id TEXT NOT NULL, display_name TEXT NOT NULL, signing_public_key TEXT NOT NULL, signing_key_version INTEGER NOT NULL, configuration_public_key TEXT NOT NULL, configuration_key_version INTEGER NOT NULL, platform TEXT NOT NULL, version TEXT NOT NULL, state TEXT NOT NULL, created_at REAL NOT NULL, last_seen REAL , workspace_id TEXT NOT NULL DEFAULT '', direct_gateway_url TEXT NOT NULL DEFAULT '')",
+        "table": "nodes",
+        "type": "table"
+      },
+      {
+        "name": "presence_nonces",
+        "sql": "CREATE TABLE presence_nonces( node_id TEXT NOT NULL, nonce TEXT NOT NULL, observed_at REAL NOT NULL, PRIMARY KEY(node_id, nonce) )",
+        "table": "presence_nonces",
+        "type": "table"
+      },
+      {
+        "name": "resource_grants",
+        "sql": "CREATE TABLE resource_grants( grant_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, caller_node_id TEXT NOT NULL, target_deployment_id TEXT NOT NULL, capability TEXT NOT NULL, max_request_deadline REAL NOT NULL, expires_at REAL NOT NULL, revoked_at REAL )",
+        "table": "resource_grants",
+        "type": "table"
+      },
+      {
+        "name": "resource_invocation_tickets",
+        "sql": "CREATE TABLE resource_invocation_tickets( ticket_id TEXT PRIMARY KEY, invocation_id TEXT NOT NULL, workspace_id TEXT NOT NULL, caller_node_id TEXT NOT NULL, target_deployment_id TEXT NOT NULL, issued_at REAL NOT NULL, expires_at REAL NOT NULL, issuance_state TEXT NOT NULL )",
+        "table": "resource_invocation_tickets",
+        "type": "table"
+      },
+      {
+        "name": "work_projections",
+        "sql": "CREATE TABLE work_projections( workspace_id TEXT NOT NULL, entity_kind TEXT NOT NULL, entity_id TEXT NOT NULL, node_id TEXT NOT NULL, principal_id TEXT NOT NULL, title TEXT NOT NULL, state TEXT NOT NULL, progress REAL, summary TEXT NOT NULL, approval_summary TEXT NOT NULL, artifact_refs_json TEXT NOT NULL, source_generation INTEGER NOT NULL, source_digest TEXT NOT NULL, projection_seq INTEGER NOT NULL, source_created_at REAL NOT NULL, source_updated_at REAL NOT NULL, projected_at REAL NOT NULL, payload_json TEXT NOT NULL, PRIMARY KEY(workspace_id, entity_kind, entity_id) )",
+        "table": "work_projections",
+        "type": "table"
+      },
+      {
+        "name": "workspace_memberships",
+        "sql": "CREATE TABLE workspace_memberships( workspace_id TEXT NOT NULL, identity_issuer_id TEXT NOT NULL, subject_id TEXT NOT NULL, role TEXT NOT NULL, state TEXT NOT NULL, created_at REAL NOT NULL, PRIMARY KEY(workspace_id, identity_issuer_id, subject_id) )",
+        "table": "workspace_memberships",
+        "type": "table"
+      },
+      {
+        "name": "workspace_resources",
+        "sql": "CREATE TABLE workspace_resources( resource_id TEXT NOT NULL, workspace_id TEXT NOT NULL, kind TEXT NOT NULL, generation INTEGER NOT NULL, canonical_digest TEXT NOT NULL, display_name TEXT NOT NULL, spec_json TEXT NOT NULL, enabled INTEGER NOT NULL, created_by TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, PRIMARY KEY(workspace_id, resource_id) )",
+        "table": "workspace_resources",
+        "type": "table"
+      },
+      {
+        "name": "workspaces",
+        "sql": "CREATE TABLE workspaces( workspace_id TEXT PRIMARY KEY, identity_issuer_id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, state TEXT NOT NULL, created_at REAL NOT NULL )",
+        "table": "workspaces",
+        "type": "table"
+      }
+    ]
+  }
+}

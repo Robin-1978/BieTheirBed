@@ -1,0 +1,48 @@
+{
+  "manifest": {
+    "artifacts": [
+      {
+        "executable": true,
+        "kind": "python_runtime",
+        "path": "runtime/python",
+        "sha256": "d8f4b92ae6db09266dbc8c0b16eb75478e891c0eff8634830e8550b59e482221",
+        "size": 23
+      },
+      {
+        "executable": false,
+        "kind": "application",
+        "path": "app/knoa.whl",
+        "sha256": "5678c07cdd1420781284f8f0f2be794c23932a0f8651623deb987f31e6a7231c",
+        "size": 25
+      },
+      {
+        "executable": true,
+        "kind": "launcher",
+        "path": "bin/knoa",
+        "sha256": "81c8d66a71d35552c683814c843051b3c35223db2634bd4ff9c1064044d91be3",
+        "size": 22
+      }
+    ],
+    "created_at": "2026-08-19T00:00:00Z",
+    "extension": null,
+    "protocols": {
+      "agent_runtime_spi_max": 1,
+      "agent_runtime_spi_min": 1,
+      "release_manifest": 1
+    },
+    "release_id": "fixture-node-linux-1.0.0",
+    "release_kind": "product",
+    "role": "node",
+    "schema_version": 1,
+    "target": {
+      "arch": "x86_64",
+      "os": "linux"
+    },
+    "version": "1.0.0"
+  },
+  "signature": {
+    "algorithm": "ed25519",
+    "key_id": "fixture-product-key",
+    "value": "lZf5ti7kH6joQLrozmqDCyXs46huuXBxEDNij9MJRRa6ed5HmkMVNXJeHiKU-cnLses3I2pWIYgmCI8pKQGnCw"
+  }
+}

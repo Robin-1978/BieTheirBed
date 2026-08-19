@@ -1,0 +1,10 @@
+runtime_instance_id: "runtime-fixture-1"
+sequence: 1
+host_hello {
+  protocol_min: 1
+  protocol_max: 1
+  node_id: "node-fixture-1"
+  config_generation: 7
+  requested_features: "runtime_event_v1"
+  requested_features: "provider_credential_lease_v1"
+}

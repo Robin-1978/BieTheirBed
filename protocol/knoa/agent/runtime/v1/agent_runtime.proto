@@ -1,0 +1,338 @@
+syntax = "proto3";
+
+package knoa.agent.runtime.v1;
+
+import "google/protobuf/struct.proto";
+
+// Private Node Host <-> Agent Runtime Worker protocol.
+// Field numbers are permanent within v1 and must never be reused.
+message Envelope {
+  string runtime_instance_id = 1;
+  string invocation_id = 2;
+  uint64 sequence = 3;
+
+  oneof body {
+    HostHello host_hello = 10;
+    WorkerHello worker_hello = 11;
+    LoadGeneration load_generation = 12;
+    CreateSession create_session = 13;
+    ResumeSession resume_session = 14;
+    StartTurn start_turn = 15;
+    SteerTurn steer_turn = 16;
+    InterruptTurn interrupt_turn = 17;
+    ResolveInteraction resolve_interaction = 18;
+    Reconcile reconcile = 19;
+    ReleaseSession release_session = 20;
+    DeleteSession delete_session = 21;
+    Drain drain = 22;
+    Shutdown shutdown = 23;
+    ProviderCredentialResult provider_credential_result = 24;
+
+    Ready ready = 40;
+    Heartbeat heartbeat = 41;
+    SessionResult session_result = 42;
+    TurnStarted turn_started = 43;
+    RuntimeEvent runtime_event = 44;
+    CommandResult command_result = 45;
+    ObservedState observed_state = 46;
+    ProviderCredentialRequest provider_credential_request = 47;
+    WorkerFault worker_fault = 48;
+  }
+}
+
+message HostHello {
+  uint32 protocol_min = 1;
+  uint32 protocol_max = 2;
+  string node_id = 3;
+  uint64 config_generation = 4;
+  repeated string requested_features = 5;
+}
+
+message WorkerHello {
+  uint32 selected_protocol = 1;
+  string runtime_name = 2;
+  string runtime_version = 3;
+  repeated string supported_agent_kinds = 4;
+  repeated string supported_model_drivers = 5;
+  repeated string supported_features = 6;
+}
+
+message LoadGeneration {
+  uint64 config_generation = 1;
+  string config_digest = 2;
+  bytes redacted_config_json = 3;
+}
+
+message RuntimeSession {
+  string agent_id = 1;
+  string runtime_session_ref = 2;
+  string runtime_protocol_version = 3;
+  uint64 binding_epoch = 4;
+}
+
+message CreateSession {
+  string operation_id = 1;
+  uint64 binding_epoch = 2;
+  string agent_id = 3;
+}
+
+message ResumeSession {
+  string operation_id = 1;
+  RuntimeSession session = 2;
+}
+
+message McpEndpointGrant {
+  string server_id = 1;
+  string transport = 2;
+  string endpoint = 3;
+  string authorization = 4;
+  uint64 expires_unix_ms = 5;
+  string scope_digest = 6;
+  uint64 binding_epoch = 7;
+}
+
+message ArtifactReference {
+  string artifact_id = 1;
+  string name = 2;
+  string media_type = 3;
+  uint64 size_bytes = 4;
+  string sha256 = 5;
+}
+
+message TextPart {
+  string text = 1;
+}
+
+message ArtifactPart {
+  ArtifactReference artifact = 1;
+  string resource_uri = 2;
+  string presentation = 3;
+  string caption = 4;
+}
+
+message ResourceLinkPart {
+  string uri = 1;
+  string name = 2;
+  string media_type = 3;
+}
+
+message TurnInputPart {
+  oneof part {
+    TextPart text = 1;
+    ArtifactPart artifact = 2;
+    ResourceLinkPart resource_link = 3;
+  }
+}
+
+message RuntimeTurnContext {
+  repeated string core_memory = 1;
+  repeated string relevant_memory = 2;
+  repeated string episodic_memory = 3;
+  string skill_instructions = 4;
+}
+
+message StartTurn {
+  RuntimeSession session = 1;
+  string operation_id = 2;
+  repeated TurnInputPart input = 3;
+  McpEndpointGrant mcp = 4;
+  RuntimeTurnContext context = 5;
+  uint64 deadline_unix_ms = 6;
+  google.protobuf.Struct options = 7;
+}
+
+message SteerTurn {
+  RuntimeSession session = 1;
+  string runtime_turn_ref = 2;
+  string command_id = 3;
+  repeated TurnInputPart input = 4;
+}
+
+message InterruptTurn {
+  RuntimeSession session = 1;
+  string runtime_turn_ref = 2;
+  string command_id = 3;
+  string reason = 4;
+}
+
+message ResolveInteraction {
+  RuntimeSession session = 1;
+  string runtime_turn_ref = 2;
+  string interaction_id = 3;
+  uint64 interaction_epoch = 4;
+  string command_id = 5;
+  google.protobuf.Value value = 6;
+}
+
+message Reconcile {
+  RuntimeSession session = 1;
+  string runtime_turn_ref = 2;
+  string operation_id = 3;
+}
+
+message ReleaseSession {
+  RuntimeSession session = 1;
+}
+
+message DeleteSession {
+  RuntimeSession session = 1;
+}
+
+message Drain {
+  uint64 deadline_unix_ms = 1;
+}
+
+message Shutdown {
+  string reason = 1;
+}
+
+message ProviderCredentialResult {
+  string request_id = 1;
+  string provider_id = 2;
+  bytes credential_utf8 = 3;
+  uint64 expires_unix_ms = 4;
+  string error_code = 5;
+}
+
+message Ready {
+  uint64 config_generation = 1;
+}
+
+message Heartbeat {
+  uint64 observed_unix_ms = 1;
+  uint32 active_turns = 2;
+}
+
+message SessionResult {
+  string operation_id = 1;
+  RuntimeSession session = 2;
+  string error_code = 3;
+}
+
+message TurnStarted {
+  string operation_id = 1;
+  string runtime_turn_ref = 2;
+}
+
+message AssistantDelta {
+  string content = 1;
+}
+
+message ReasoningSummaryDelta {
+  string content = 1;
+}
+
+message PlanChanged {
+  string content = 1;
+}
+
+message ToolCallStarted {
+  string tool_call_id = 1;
+  string tool_name = 2;
+  google.protobuf.Struct arguments = 3;
+}
+
+message ToolCallFinished {
+  string tool_call_id = 1;
+  string tool_name = 2;
+  string status = 3;
+  string code = 4;
+  google.protobuf.Value output = 5;
+}
+
+message ExistingResourceArtifact {
+  string resource_uri = 1;
+  string media_type = 2;
+  string sha256 = 3;
+}
+
+message InlineArtifact {
+  string name = 1;
+  string media_type = 2;
+  bytes data = 3;
+  string sha256 = 4;
+}
+
+message ArtifactProduced {
+  oneof artifact {
+    ExistingResourceArtifact existing_resource = 1;
+    InlineArtifact inline = 2;
+  }
+}
+
+message InteractionRequested {
+  string interaction_id = 1;
+  uint64 interaction_epoch = 2;
+  string kind = 3;
+  google.protobuf.Struct display = 4;
+  google.protobuf.Struct resolution_schema = 5;
+  uint64 expires_unix_ms = 6;
+}
+
+message ContextCompacted {
+  uint64 source_cursor = 1;
+  string state_version = 2;
+  uint64 tokens_before = 3;
+  uint64 tokens_after = 4;
+}
+
+message UsageReported {
+  google.protobuf.Struct usage = 1;
+}
+
+message RuntimeWarning {
+  string code = 1;
+  string message = 2;
+}
+
+message TurnFinished {
+  string status = 1;
+  string final_output = 2;
+  string error_code = 3;
+}
+
+message RuntimeEvent {
+  string source_event_id = 1;
+  string runtime_session_ref = 2;
+  string runtime_turn_ref = 3;
+  uint64 occurred_unix_ms = 4;
+
+  oneof event {
+    AssistantDelta assistant_delta = 10;
+    ReasoningSummaryDelta reasoning_summary_delta = 11;
+    PlanChanged plan_changed = 12;
+    ToolCallStarted tool_call_started = 13;
+    ToolCallFinished tool_call_finished = 14;
+    ArtifactProduced artifact_produced = 15;
+    InteractionRequested interaction_requested = 16;
+    ContextCompacted context_compacted = 17;
+    UsageReported usage_reported = 18;
+    RuntimeWarning runtime_warning = 19;
+    TurnFinished turn_finished = 20;
+  }
+}
+
+message CommandResult {
+  string command_id = 1;
+  string status = 2;
+  string code = 3;
+}
+
+message ObservedState {
+  string operation_id = 1;
+  string session_state = 2;
+  string turn_state = 3;
+  string runtime_turn_ref = 4;
+}
+
+message ProviderCredentialRequest {
+  string request_id = 1;
+  string provider_id = 2;
+  uint64 binding_epoch = 3;
+}
+
+message WorkerFault {
+  string code = 1;
+  string message = 2;
+  bool fatal = 3;
+}
