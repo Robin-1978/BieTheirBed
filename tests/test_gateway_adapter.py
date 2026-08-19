@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import ipaddress
 import os
 from datetime import UTC, datetime, timedelta
@@ -175,6 +176,15 @@ async def test_node_console_is_loopback_only_and_csrf_protected(tmp_path) -> Non
             "/v1/console/config",
             headers={"X-Knoa-Console": adapter._console_csrf_token},
         )
+        invalid_document = copy.deepcopy(
+            configuration.json()["revision"]["document"]
+        )
+        invalid_document["providers"]["bootstrap_provider"]["driver"] = "invalid"
+        invalid_configuration = await http.post(
+            "/v1/console/config/publish",
+            headers={"X-Knoa-Console": adapter._console_csrf_token},
+            json={"document": invalid_document, "summary": "Invalid Console test"},
+        )
         published = await http.post(
             "/v1/console/config/publish",
             headers={"X-Knoa-Console": adapter._console_csrf_token},
@@ -197,6 +207,7 @@ async def test_node_console_is_loopback_only_and_csrf_protected(tmp_path) -> Non
     assert rejected.status_code == 403
     assert accepted.status_code == 200
     assert accepted.json()["hub"]["enrolled"] is False
+    assert accepted.json()["runtime_version"]
     assert invalid.status_code == 400
     assert invalid.json() == {"error": "invalid_enrollment_code"}
     assert pairing.status_code == 409
@@ -205,6 +216,9 @@ async def test_node_console_is_loopback_only_and_csrf_protected(tmp_path) -> Non
     assert lifecycle.json() == {"error": "lifecycle_not_installed"}
     assert configuration.status_code == 200
     assert configuration.json()["revision"]["document"]["agents"]["default_agent"] == "knoa"
+    assert invalid_configuration.status_code == 400
+    assert invalid_configuration.json()["error"] == "invalid_configuration"
+    assert "Input should be" in invalid_configuration.json()["detail"]
     assert published.status_code == 200
     assert published.json()["result"]["revision"]["revision_id"] == "revision-b"
     assert secret.status_code == 200

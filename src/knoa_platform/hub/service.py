@@ -135,6 +135,7 @@ class HubService:
             "node_id": node["node_id"],
             "timestamp": timestamp,
             "nonce": request["nonce"],
+            "version": str(request["version"]),
             "direct_gateway_url": str(request.get("direct_gateway_url", "")),
         }
         try:
@@ -146,6 +147,7 @@ class HubService:
         return self.repository.record_presence(
             node["node_id"],
             str(request["nonce"]),
+            version=str(request["version"]),
             direct_gateway_url=str(request.get("direct_gateway_url", "")),
         )
 

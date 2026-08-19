@@ -57,6 +57,7 @@ class PresenceRequest(_Request):
     node_id: str = Field(min_length=1, max_length=128)
     timestamp: float
     nonce: str = Field(min_length=16, max_length=256)
+    version: str = Field(min_length=1, max_length=64)
     direct_gateway_url: str = Field(default="", max_length=2048)
     signature: str = Field(min_length=80, max_length=128)
 

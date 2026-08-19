@@ -40,6 +40,21 @@ def test_node_console_owns_configuration_and_secret_management() -> None:
     assert 'id="delegationTargets"' in page
     assert "一个 Provider 可以提供多个 Model" in page
     assert "不会复制 Endpoint 或 API Key" in page
+    assert "Provider 连接" in page
+    assert "新增并热生效" in page
+    assert "保存并热生效" in page
+    assert "publishCurrent(`Add Provider" in page
+    assert 'id="newModelProvider"' in page
+    assert "发布高级 JSON 更改" in page
+    assert "新增 Provider 草稿" not in page
     for tab in ("overview", "models", "agents", "sharing", "system"):
         assert f'data-console-tab="{tab}"' in page
         assert f'data-console-panel="{tab}"' in page
+
+
+def test_node_console_script_only_references_rendered_elements() -> None:
+    page = node_console_html("csrf-token")
+    rendered_ids = set(re.findall(r'\bid="([A-Za-z0-9_-]+)"', page))
+    referenced_ids = set(re.findall(r'el\("([A-Za-z0-9_-]+)"\)', _script(page)))
+
+    assert referenced_ids <= rendered_ids

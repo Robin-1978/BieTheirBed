@@ -945,12 +945,14 @@ def _presence(
         "node_id": identity.node_id,
         "timestamp": timestamp,
         "nonce": nonce,
+        "version": __version__,
         "direct_gateway_url": direct_gateway_url,
     }
     return {
         "node_id": identity.node_id,
         "timestamp": timestamp,
         "nonce": nonce,
+        "version": __version__,
         "direct_gateway_url": direct_gateway_url,
         "signature": identity.sign(canonical_json(transcript)),
     }
