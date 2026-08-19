@@ -13,12 +13,23 @@ PROTO = PROTOCOL_ROOT / "knoa" / "agent" / "runtime" / "v1" / "agent_runtime.pro
 DIGEST = PROTO.with_name("descriptor.sha256")
 FIXTURES = PROTO.with_name("fixtures")
 MESSAGE = "knoa.agent.runtime.v1.Envelope"
+EXPECTED_PROTOC_VERSION = "31.1"
 
 
 def _protoc() -> str:
     executable = shutil.which("protoc")
     if executable is None:
         raise RuntimeError("protoc is required to verify Knoa protocol contracts")
+    version = subprocess.run(
+        [executable, "--version"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if version != f"libprotoc {EXPECTED_PROTOC_VERSION}":
+        raise RuntimeError(
+            f"protoc {EXPECTED_PROTOC_VERSION} is required; found {version or 'unknown'}"
+        )
     return executable
 
 

@@ -12,7 +12,7 @@
 
 ```text
 .venv/bin/pytest -q
-909 passed, 1 warning
+920 passed, 1 warning
 ```
 
 系统 Python 或未安装项目依赖的解释器不构成有效基线。CI 与本地证据必须记录实际 Runtime 版本，避免把环境
@@ -36,8 +36,12 @@
 当前 Agent Runtime descriptor：
 
 ```text
-sha256:b53042d4c13b7463e03ac133349024a9940da5d37bb1c629a0160bf0b06079a2
+protoc:31.1
+sha256:824a68abe0206971220ae0f9efd287de2239727bc91173fd7f62dfce84cc1918
 ```
+
+`protoc 31.1` 是可复现协议基线的一部分。descriptor bytes 不能跨任意 protoc 版本比较；检查脚本会拒绝
+机器上的其他版本，CI 也固定安装 31.1。
 
 ## 3. Release Role 不变量
 
