@@ -1,0 +1,23 @@
+[Unit]
+Description=Knoa Node Host
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=knoa
+Group=knoa
+Environment=KNOA_RUNTIME_ROOT=@NODE_ROOT@
+Environment=KNOA_RUNTIME_DIR=@NODE_ROOT@/run
+ExecStart=@INSTALL_ROOT@/bin/knoa-update run --install-root @INSTALL_ROOT@/releases --entrypoint bin/knoa-node -- --config @NODE_CONFIG@
+WorkingDirectory=@WORKSPACE_ROOT@
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=@NODE_ROOT@ @WORKSPACE_ROOT@
+
+[Install]
+WantedBy=multi-user.target

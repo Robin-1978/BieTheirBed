@@ -198,7 +198,9 @@ class WindowTool(ToolBase):
         }
 
     def _enumerate_windows(self) -> list[dict[str, Any]]:
-        import pywinctl as pwc
+        pwc = _import_pywinctl()
+        if pwc is None:
+            return []
 
         records = []
         for window in pwc.getAllWindows():

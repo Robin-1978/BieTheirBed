@@ -47,6 +47,15 @@ FAKE_WINDOWS = [
 ]
 
 
+def _backend(**overrides):
+    values = {
+        "getAllWindows": lambda: FAKE_WINDOWS,
+        "getActiveWindow": lambda: None,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
 def _run(coro):
     return asyncio.run(coro)
 
@@ -58,7 +67,10 @@ def tool():
 
 class TestWindowList:
     def test_lists_windows(self, tool):
-        with patch("pywinctl.getAllWindows", return_value=FAKE_WINDOWS):
+        with patch(
+            "knoa_platform.tools.window._import_pywinctl",
+            return_value=_backend(),
+        ):
             res = _run(tool.execute(action="list"))
         assert res["count"] == 2
         titles = [w["title"] for w in res["windows"]]
@@ -91,14 +103,20 @@ class TestWindowList:
 
 class TestWindowInfo:
     def test_info_by_title(self, tool):
-        with patch("pywinctl.getAllWindows", return_value=FAKE_WINDOWS):
+        with patch(
+            "knoa_platform.tools.window._import_pywinctl",
+            return_value=_backend(),
+        ):
             res = _run(tool.execute(action="info", window_id="Browser"))
         assert res["title"] == "Browser"
         assert res["process_id"] == 200
         assert res["width"] == 1200
 
     def test_info_missing_window(self, tool):
-        with patch("pywinctl.getAllWindows", return_value=FAKE_WINDOWS):
+        with patch(
+            "knoa_platform.tools.window._import_pywinctl",
+            return_value=_backend(),
+        ):
             res = _run(tool.execute(action="info", window_id="Nope"))
         assert "Window not found" in res["error"]
 
@@ -108,7 +126,10 @@ class TestWindowInfo:
 
     def test_active_returns_directly_usable_window(self, tool):
         active = FakeWin("Editor", "code", 300, 5, 10, 900, 700, isActive=True)
-        with patch("pywinctl.getActiveWindow", return_value=active):
+        with patch(
+            "knoa_platform.tools.window._import_pywinctl",
+            return_value=_backend(getActiveWindow=lambda: active),
+        ):
             res = _run(tool.execute(action="active"))
         assert res["found"] is True
         assert res["window"]["window_id"] == "300:Editor"
@@ -118,8 +139,10 @@ class TestWindowInfo:
 class TestWindowFocus:
     def test_focus_calls_activate(self, tool):
         with (
-            patch("pywinctl.getAllWindows", return_value=FAKE_WINDOWS),
-            patch("pywinctl.getActiveWindow", return_value=FAKE_WINDOWS[0]),
+            patch(
+                "knoa_platform.tools.window._import_pywinctl",
+                return_value=_backend(getActiveWindow=lambda: FAKE_WINDOWS[0]),
+            ),
         ):
             res = _run(tool.execute(action="focus", window_id="Terminal"))
         assert res["success"] is True
@@ -128,8 +151,13 @@ class TestWindowFocus:
     def test_focus_restores_minimized_window_and_verifies_active(self, tool):
         window = FakeWin("Chat", "chat", 300, 0, 0, 800, 600, isMinimized=True)
         with (
-            patch("pywinctl.getAllWindows", return_value=[window]),
-            patch("pywinctl.getActiveWindow", return_value=window),
+            patch(
+                "knoa_platform.tools.window._import_pywinctl",
+                return_value=_backend(
+                    getAllWindows=lambda: [window],
+                    getActiveWindow=lambda: window,
+                ),
+            ),
         ):
             res = _run(tool.execute(action="focus", window_id="Chat"))
 
@@ -141,8 +169,13 @@ class TestWindowFocus:
     def test_focus_fails_when_activation_cannot_be_verified(self, tool):
         window = FakeWin("Chat", "chat", 300, 0, 0, 800, 600)
         with (
-            patch("pywinctl.getAllWindows", return_value=[window]),
-            patch("pywinctl.getActiveWindow", return_value=None),
+            patch(
+                "knoa_platform.tools.window._import_pywinctl",
+                return_value=_backend(
+                    getAllWindows=lambda: [window],
+                    getActiveWindow=lambda: None,
+                ),
+            ),
             patch("knoa_platform.tools.window.get_platform", return_value="windows"),
         ):
             res = _run(tool.execute(action="focus", window_id="Chat"))
@@ -154,7 +187,10 @@ class TestWindowFocus:
             FakeWin("Project Alpha", "editor", 1, 0, 0, 100, 100),
             FakeWin("Project Beta", "editor2", 2, 0, 0, 100, 100),
         ]
-        with patch("pywinctl.getAllWindows", return_value=windows):
+        with patch(
+            "knoa_platform.tools.window._import_pywinctl",
+            return_value=_backend(getAllWindows=lambda: windows),
+        ):
             res = _run(tool.execute(action="focus", window_id="Project"))
         assert "Window not found" in res["error"]
         assert not any(window.activated for window in windows)

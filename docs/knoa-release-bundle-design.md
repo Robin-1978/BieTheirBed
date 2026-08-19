@@ -1,6 +1,6 @@
 # Knoa 签名 Release Bundle 与更新设计
 
-> 状态：Phase 1 实施中
+> 状态：Phase 1 代码闭环已实现，待干净 VM 发布验收
 >
 > 日期：2026-08-19
 >
@@ -117,10 +117,26 @@ pointer 假装可降级。
 - Console 资产在 Phase 2 后随宿主 Bundle 一起构建；
 - signing private key 只存在于受保护发布环境，不进入仓库或 Bundle。
 
+Python 依赖由根目录 `uv.lock` 固定；CI 只面向产品支持的 Windows/Linux 解算，并以 `uv sync --locked` 验证。
+`scripts/materialize_release_payload.py` 将目标平台的嵌入式 Runtime 与已安装 application tree 组合成 role-specific
+payload，自动生成 `knoa-hub`、`knoa-node` 和 `knoa-health` 启动器。`scripts/build_product_release.py` 再完成
+签名与确定性 ZIP，版本默认从 Knoa Platform 版本源读取，发布者不手填版本号。
+
+`knoa-health` 是候选 Bundle 的离线自检，验证 Hub import 或 Node Config/ManagedConfig/Agent SPI/Gateway schema；
+服务切换后仍必须检查 Hub `/health` 和 Node Gateway `/health`，不能用离线自检替代真实进程健康。
+
 当前代码已实现 Manifest/schema、Ed25519 签名、key trust domain、安全 inventory 校验、确定性 ZIP、安全解包、
-Python 原子版本 pointer/health callback/自动回退内核，以及不依赖系统 Python 的 Rust native verifier。Python
-与 Rust 共同验证同一份 Python 生成签名 fixture；native updater 在 Windows/Linux CI 编译和测试。平台服务
-安装器与真实进程 health orchestration 继续按 Phase 1 接入该内核。
+Python 原子版本 pointer/health callback/自动回退内核，以及不依赖系统 Python 的 Rust native updater。Python
+与 Rust 共同验证同一份 Python 生成签名 fixture；fixture 强制按 binary checkout，避免 Windows CRLF 改写已签名
+artifact。native updater 提供 `install/current/run/rollback/reject`，Windows WinSW 和 Linux systemd 都通过稳定
+`run` 入口解析活动版本，不硬编码版本目录。
+
+产品 payload 已包含平台安装资产；Windows Bundle 必须嵌入 WinSW，Linux Bundle 包含 systemd unit。两个安装器
+均在离线候选健康检查后启动真实 Hub/Node，并检查 `/health`。真实健康失败时 `reject` 恢复 previous；首次安装
+失败则清空 active pointer。详细目录和命令见 [产品 Bundle 部署与更新](./knoa-product-bundle-deployment.md)。
+
+Phase 1 剩余发布门不是继续增加另一套安装逻辑，而是用正式嵌入式 Runtime、代码签名 bootstrap 和六种
+OS/role 干净 VM 组合完成安装、更新、回退和卸载验收。
 
 ## 8. 不变量
 

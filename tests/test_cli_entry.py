@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import knoa_platform
-from knoa_platform import __version__, _is_knoa_service_pid, async_main, main
+from knoa_platform import __version__, _cmdline_is_knoa_service, async_main, main
 
 
 @pytest.mark.asyncio
@@ -143,9 +143,7 @@ def test_start_uses_authoritative_service_lifecycle(monkeypatch) -> None:
     ],
 )
 def test_service_pid_identity_requires_knoa_module(
-    monkeypatch,
     cmdline: bytes,
     expected: bool,
 ) -> None:
-    monkeypatch.setattr("pathlib.Path.read_bytes", lambda _self: cmdline)
-    assert _is_knoa_service_pid(1234) is expected
+    assert _cmdline_is_knoa_service(cmdline) is expected
