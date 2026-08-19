@@ -158,7 +158,9 @@ jobs:
         run: npm ci && npm audit --audit-level=critical
       - name: Verify generated Gateway contract
         working-directory: apps/knoa-mobile
-        run: npm run contract && git diff --exit-code -- openapi.json src/api/schema.ts
+        run: >-
+          uv run --project ../.. --no-sync npm run contract &&
+          git diff --exit-code -- openapi.json src/api/schema.ts
       - name: Typecheck and test mobile workbench
         working-directory: apps/knoa-mobile
         run: npm run typecheck && npm test && npm run doctor && npm run bundle:android
