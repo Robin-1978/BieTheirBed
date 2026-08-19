@@ -68,6 +68,26 @@ def test_node_agent_catalog_validates_default_and_targets() -> None:
     with pytest.raises(ValueError, match="default_agent"):
         NodeAgentCatalog(agents=config.agents, default_agent="missing")
 
+    hidden_default = config.agents["codex"].model_copy(update={"enabled": True})
+    with pytest.raises(ValueError, match="user-visible"):
+        NodeAgentCatalog(
+            agents={**config.agents, "codex": hidden_default},
+            default_agent="codex",
+        )
+
+    invalid_parent = config.agents["knoa"].model_copy(
+        update={
+            "delegation": config.agents["knoa"].delegation.model_copy(
+                update={"targets": frozenset({"knoa"})}
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="delegate-visible"):
+        NodeAgentCatalog(
+            agents={**config.agents, "knoa": invalid_parent},
+            default_agent="knoa",
+        )
+
 
 def test_resolver_enforces_visibility_and_parent_subset() -> None:
     resolver = NodeAgentResolver(_config(), config_revision_id="revision-2")

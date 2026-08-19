@@ -140,7 +140,9 @@ async def test_hosted_android_release_is_account_scoped_metadata_and_public_byte
     assert immutable.headers["cache-control"].endswith("immutable")
     assert stable.status_code == 206
     assert stable.content == payload[:100]
-    assert stable.headers["cache-control"] == "public, max-age=60, must-revalidate"
+    assert stable.headers["cache-control"] == "no-store"
+    assert stable.headers["cdn-cache-control"] == "no-store"
+    assert stable.headers["cloudflare-cdn-cache-control"] == "no-store"
     assert wrong_digest.status_code == 404
 
 

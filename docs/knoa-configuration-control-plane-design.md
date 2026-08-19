@@ -1,7 +1,7 @@
 # Knoa 配置控制面与管理页面设计
 
 > 状态：权威设计
-> 更新：2026-08-17
+> 更新：2026-08-19
 
 ## 1. 边界
 
@@ -57,6 +57,29 @@ NodeAgent 在一个编辑页面完成，不拆成 Runtime/Profile/Definition 三
 
 发布页展示 validation error、warning、影响组件、热生效或需重启、预计断连和当前 applied state。普通
 UI 不展示 revision graph 或 rollback tree。
+
+### 4.1 新用户流程
+
+1. 在 Node Console 完成 Hub Enrollment 与 App 配对；
+2. 在“模型”配置本地 llama.cpp 或云 Provider，API Key 只写入 Secret Store；
+3. 默认 `knoa` Agent 绑定该模型即可开始使用；
+4. 需要专业角色时，在 Agent 页面新建自定义 Knoa Agent，填写 Prompt，并选择模型、Skill 和 Tool ceiling；
+5. 需要委派时，先把目标 Agent 设为“仅作为 Subagent”，再由父 Agent 选择目标和有界 Child Task 预算；
+6. 所有修改统一执行 Draft → validate → preflight → publish → applied。
+
+### 4.2 老用户修改流程
+
+- App Agent 列表负责查看默认角色、Runtime kind、模型、Skill/Tool 摘要和 Subagent 状态；
+- App Agent 编辑页负责高频完整配置，不再要求用户编辑 JSON；
+- Node Console 负责 endpoint、API Key、本地路径、Codex command、故障诊断和没有 App 时的完整管理；
+- “高级完整配置”仍可用于导入/审计，但不是主要产品入口；
+- Prompt、模型绑定、Skill/Tool ceiling 和 delegation policy 对新 Invocation 热生效；运行中的 Invocation 保留
+  原 policy snapshot。
+
+### 4.3 管理页面边界
+
+Hub Console 不读取 Node 的 Prompt、API Key、Agent、Conversation 或 Task 正文。Node Console 与已配对 App 都
+调用同一个 ConfigurationService 发布链；它们只是不同交互界面，不拥有第二套配置语义。
 
 ## 5. 不变量
 

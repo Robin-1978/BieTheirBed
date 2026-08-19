@@ -32,13 +32,21 @@ class TestAppConfig:
             default_agent="codex",
             node_agents={
                 **base.node_agents,
+                "knoa": base.node_agents["knoa"].model_copy(
+                    update={
+                        "delegation": base.node_agents["knoa"].delegation.model_copy(
+                            update={"targets": frozenset()}
+                        )
+                    }
+                ),
                 "codex": base.node_agents["codex"].model_copy(
-                    update={"enabled": True}
+                    update={"enabled": True, "visibility": "user"}
                 ),
             },
         )
 
         assert cfg.default_agent == "codex"
+        assert cfg.node_agent_catalog().agents["codex"].visibility == "user"
 
     def test_node_agent_configuration_supports_new_roles(self):
         base = AppConfig()

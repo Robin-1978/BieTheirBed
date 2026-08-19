@@ -1,7 +1,7 @@
 # Knoa NodeAgent、Runtime 与委派设计
 
 > 状态：权威设计。文件名保留用于历史链接；产品模型已不再包含独立 AgentProfile。
-> 更新：2026-08-17
+> 更新：2026-08-19
 
 ## 1. 单一 NodeAgent
 
@@ -131,3 +131,30 @@ NodeAgent 配置经 ConfigurationService 的草稿、校验、preflight 和发�
 7. 不建设通用跨 Node Agent sharing。
 8. 普通自定义 Agent 复用内置 Runtime；只有新增执行语义才安装 Runtime Extension；
 9. 第三方 Runtime 只允许 out-of-process、签名、版本化 SPI，不加载任意 Python entry point 到 Node Host。
+
+## 8. 当前实现映射
+
+“Profile”在本架构中是 NodeAgent 内部的配置语义，不再是一个可独立持久化、部署或授权的产品资源。完整实现
+映射如下：
+
+| 层 | 当前权威实现 |
+| --- | --- |
+| Runtime SPI | `knoa_agent_contracts.AgentRuntime`；Knoa 与 Codex 分别实现同一合同 |
+| Agent 聚合与策略解析 | `knoa_platform.agents.definitions.NodeAgent`、`NodeAgentResolver` |
+| Runtime 生命周期 | `AgentManager` 管理 active/draining generation 与并发 lease |
+| Session 绑定 | `AgentSessionBindingRepository` 固化 Session 使用的 Agent identity 与 digest |
+| Invocation 快照 | `InvocationPolicyRepository` 保存解析后的权限、Skill、预算、delegation depth 与 config revision |
+| Subagent | `DelegationService` + `agent_delegations`，Child 使用普通 durable Task、独立 Session 和收窄后的 policy snapshot |
+| Agent-facing API | `spawn_subagent` 与 `subagent(get/await/cancel)` Tool，统一经过 Capability Gateway 与 ToolStep |
+| 配置持久化 | `ConfigRegistry` 保存 Draft、Revision、desired/applied state；Secret 单独进入 Node Secret Store |
+| 配置 API | `/v1/config/*`；本地 Console 使用受 CSRF 保护的 `/v1/console/config*` 聚合入口 |
+| 移动 App | Agent 列表与专用编辑页支持创建/删除自定义 Knoa Agent、Prompt、模型、Skill、Tool ceiling、运行限制和委派策略 |
+| Node Console | 本机页面支持同一 NodeAgent 聚合的可视化修改、新建/删除、preflight 与热发布，并保留完整 JSON 高级入口 |
+
+### 8.1 额外的 fail-closed 约束
+
+- `default_agent` 必须是 enabled 且 `visibility=user`；
+- 所有 delegation target 必须存在且 `visibility=delegate`；
+- target 从 delegate 改为 user/system，管理页面会清理父 Agent 的无效引用，服务端仍再次校验；
+- 内置 `knoa`、`reviewer_agent`、`codex` 不可删除，只能停用或调整角色；
+- 删除自定义 Agent 不删除历史 Conversation、Task、Delegation 或 Invocation snapshot。

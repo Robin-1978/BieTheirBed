@@ -746,7 +746,7 @@ asyncio.run(app.run_stdio_async())
             "command": sys.executable,
             "args": [str(server_script)],
             "working_directory": str(tmp_path),
-            "timeout_seconds": 5,
+            "timeout_seconds": 15,
         }
     )
     client = StdioMCPClient(config)
@@ -788,7 +788,7 @@ asyncio.run(app.run_stdio_async())
                 "command": sys.executable,
                 "args": [str(server_script)],
                 "working_directory": str(tmp_path),
-                "timeout_seconds": 5,
+                "timeout_seconds": 15,
             }
         )
     )

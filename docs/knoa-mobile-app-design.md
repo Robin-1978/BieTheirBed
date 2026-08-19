@@ -1,7 +1,7 @@
 # Knoa Mobile App 正向设计
 
 > 状态：App 产品与导航权威设计
-> 更新：2026-08-17
+> 更新：2026-08-19
 
 ## 1. 信息架构
 
@@ -57,7 +57,9 @@ Hub 登录成功不要求 Node 在线。没有 Node 时 App 仍可管理帐号�
 | Node Home | 当前 Node 工作与配置入口、连接路径、退出 Node |
 | Conversations | 当前 Node 会话 |
 | Tasks | 当前 Node 任务 |
-| Agent/Capability | 当前 NodeAgent、Skill/MCP/Tool 状态 |
+| Agent List | 当前 NodeAgent 的 Runtime、模型、Skill/Tool 摘要、调用方式和 Subagent 状态 |
+| Agent Editor | 新建/删除自定义 Knoa Agent；编辑 Prompt、模型、Skill、Tool/Capability ceiling、运行限制与委派预算 |
+| Capability | 当前 Node 的 Model、Skill、MCP 与 Tool 状态 |
 | Model Center | 当前 Node 本机/云模型与可选 Workspace 共享 |
 | System Config | 当前 Node 的日常选择、绑定、状态、发布和 Node Console 快捷入口 |
 
@@ -76,6 +78,8 @@ Node 离线仅影响该 Node 的 Conversation、Task 和配置操作。Workspace
 配置不是 YAML 编辑器外壳。App 主要提供：
 
 - NodeAgent 编辑；
+- 自定义 Knoa Agent 创建/删除、用户可选或 delegate-only 角色切换；
+- Subagent 目标、最大深度、总 Child 数、并行数与 deadline；
 - Model 选择、Agent 绑定与共享状态；
 - Skill/MCP 状态与常用开关；
 - Policy 与审批；

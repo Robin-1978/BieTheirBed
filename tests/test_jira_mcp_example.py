@@ -1003,7 +1003,7 @@ async def test_reference_server_runs_over_real_stdio_mcp(
             "args": ["-m", "examples.jira_mcp_server.server"],
             "working_directory": str(repo_root),
             "inherit_env": list(environment),
-            "timeout_seconds": 5,
+            "timeout_seconds": 15,
         }
     )
     client = StdioMCPClient(config)

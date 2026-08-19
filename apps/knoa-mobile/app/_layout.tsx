@@ -78,6 +78,7 @@ function AppNavigator() {
           <Stack.Screen name="settings/app" options={{ title: "App 设置" }} />
           <Stack.Screen name="settings/node" options={{ title: "Node 设置与诊断" }} />
           <Stack.Screen name="settings/agents" options={{ title: "Agent" }} />
+          <Stack.Screen name="settings/agent-editor" options={{ title: "Agent 配置" }} />
           <Stack.Screen name="settings/system" options={{ title: t("nav.systemConfiguration") }} />
           <Stack.Screen name="settings/extensions" options={{ title: "Extension Center" }} />
           <Stack.Screen name="settings/models" options={{ title: "Model Center" }} />
