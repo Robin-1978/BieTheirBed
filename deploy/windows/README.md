@@ -68,7 +68,32 @@ must be empty. Never replace a restored `hub-signing.key`.
 
 ## Updating the existing C:\knoa deployment
 
-Stop any manually launched foreground Node with `Ctrl+C`, then run:
+The installer persists the deployment role, source path, public Hub URL, data
+roots, Python version and ports in:
+
+```text
+C:\ProgramData\Knoa\Config\installation.json
+```
+
+After installation, double-click:
+
+```text
+C:\ProgramData\Knoa\Scripts\Update-Knoa.cmd
+```
+
+The updater requests administrator access, refuses to overwrite tracked local
+changes, runs `git pull --ff-only`, reinstalls the configured role, restarts the
+selected WinSW services and verifies that they are running. If installation
+fails after a service was stopped, it attempts to restore the existing service.
+
+The first update from an older installation can be bootstrapped by pulling the
+repository once and double-clicking:
+
+```text
+C:\knoa\deploy\windows\Update-Knoa.cmd
+```
+
+The equivalent manual commands remain:
 
 ```powershell
 cd C:\knoa
@@ -76,10 +101,9 @@ git pull
 .\deploy\windows\Install-Knoa.ps1 -Role all -SourcePath C:\knoa -HubPublicUrl https://knoa.tinydotdot.com
 ```
 
-On split hosts, use `-Role hub` on the Hub server and `-Role node` on Node
-computers. Installing or updating one role does not stop or reinstall the other
-role's service. On a host running both roles, use `-Role all` so both processes
-run the same Knoa release.
+On split hosts, the persisted role is `hub` on the Hub server and `node` on Node
+computers. On a host running both services, the installer persists `all` so both
+processes always move to the same Knoa release.
 
 On update, the installer:
 

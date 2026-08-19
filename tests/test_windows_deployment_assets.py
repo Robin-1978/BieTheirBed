@@ -24,6 +24,9 @@ def test_windows_installer_uses_python314_and_winsw_hub() -> None:
     assert 'Install-WinSWService "KnoaHostedHub"' in script
     assert "if ($installHub)" in script
     assert 'Register-ScheduledTask -TaskName "Knoa Hosted Hub"' not in script
+    assert 'Join-Path $configRoot "installation.json"' in script
+    assert 'Copy-Item -Force (Join-Path $PSScriptRoot "Update-Knoa.cmd")' in script
+    assert "-and -not $SkipPairingQr" in script
 
 
 def test_windows_node_is_always_a_winsw_service() -> None:
@@ -82,6 +85,20 @@ def test_windows_hosted_hub_can_publish_the_android_app() -> None:
     assert '"--version-code", $VersionCode' in script
     assert "knoa_platform.hub.admin mobile-latest" in script
     assert "/downloads/android/latest.apk" in script
+
+
+def test_windows_one_click_updater_pulls_reinstalls_and_recovers_services() -> None:
+    updater = _read("deploy/windows/Update-Knoa.ps1")
+    launcher = _read("deploy/windows/Update-Knoa.cmd")
+
+    assert "Start-Process" in updater
+    assert "-Verb RunAs" in updater
+    assert "pull --ff-only" in updater
+    assert 'Join-Path $resolvedSource "deploy\\windows\\Install-Knoa.ps1"' in updater
+    assert "Restart-InstalledServices $Role" in updater
+    assert "SkipPairingQr = $true" in updater
+    assert "local tracked changes" in updater
+    assert "Update-Knoa.ps1" in launcher
 
 
 def test_linux_cloudflared_services_also_keep_tokens_out_of_arguments() -> None:

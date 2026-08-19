@@ -17,6 +17,7 @@ param(
     [string]$ReleasePublishTokenSource = "",
     [string]$PythonVersion = "3.14",
     [switch]$RecreateVenv,
+    [switch]$SkipPairingQr,
     [int]$HubPort = 9529,
     [int]$NodeCorePort = 9527,
     [int]$NodeGatewayPort = 9531,
@@ -242,6 +243,8 @@ if ($WheelhousePath) {
 if ($LASTEXITCODE -ne 0) { throw "Knoa wheel installation failed" }
 
 Copy-Item -Force (Join-Path $PSScriptRoot "Uninstall-Knoa.ps1") $scriptRoot
+Copy-Item -Force (Join-Path $PSScriptRoot "Update-Knoa.ps1") $scriptRoot
+Copy-Item -Force (Join-Path $PSScriptRoot "Update-Knoa.cmd") $scriptRoot
 if ($installHub) {
     Copy-Item -Force (Join-Path $PSScriptRoot "Run-KnoaHub.ps1") $scriptRoot
     Copy-Item -Force (Join-Path $PSScriptRoot "Publish-KnoaApp.ps1") $scriptRoot
@@ -368,7 +371,7 @@ if ($installNode) {
     Write-Host "Knoa Node Gateway: http://127.0.0.1:$NodeGatewayPort"
     Write-Host "Knoa Node service: KnoaNode (WinSW)"
     $enrollmentFile = Join-Path $NodeRoot "data\node-hub.json"
-    if (Test-Path -LiteralPath $enrollmentFile) {
+    if ((Test-Path -LiteralPath $enrollmentFile) -and -not $SkipPairingQr) {
         Write-Host "Scan this QR in the Knoa App to bind the Windows Node:"
         & $python -m knoa_platform --config $nodeConfig gateway pair --ttl 600
         if ($LASTEXITCODE -ne 0) { throw "Could not create the App pairing QR" }
@@ -376,3 +379,37 @@ if ($installNode) {
         Write-Host "Use Enroll-KnoaNode.ps1 after the Windows Node has an Account token and Workspace ID."
     }
 }
+
+$hubServiceInstalled = [bool](Get-Service -Name "KnoaHostedHub" -ErrorAction SilentlyContinue)
+$nodeServiceInstalled = [bool](Get-Service -Name "KnoaNode" -ErrorAction SilentlyContinue)
+$effectiveRole = if ($hubServiceInstalled -and $nodeServiceInstalled) {
+    "all"
+} elseif ($hubServiceInstalled) {
+    "hub"
+} elseif ($nodeServiceInstalled) {
+    "node"
+} else {
+    throw "No Knoa Windows service is installed"
+}
+$installMode = if ($sourceInstall) { "source" } else { "wheel" }
+$installationSourcePath = if ($sourceInstall) { $resolvedPackage } else { "" }
+$installationState = [ordered]@{
+    schema_version = 1
+    install_mode = $installMode
+    role = $effectiveRole
+    source_path = $installationSourcePath
+    hub_public_url = $HubPublicUrl
+    hub_id = $HubId
+    hub_root = $HubRoot
+    node_root = $NodeRoot
+    install_root = $InstallRoot
+    python_version = $PythonVersion
+    hub_port = $HubPort
+    node_core_port = $NodeCorePort
+    node_gateway_port = $NodeGatewayPort
+    node_mcp_port = $NodeMcpPort
+    updated_at = [DateTimeOffset]::UtcNow.ToString("o")
+}
+$installationStatePath = Join-Path $configRoot "installation.json"
+Write-Utf8NoBom $installationStatePath ($installationState | ConvertTo-Json -Depth 3)
+Write-Host "One-click updater: $scriptRoot\Update-Knoa.cmd"
