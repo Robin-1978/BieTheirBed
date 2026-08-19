@@ -142,9 +142,11 @@ class _Authentication:
 
 @pytest.mark.asyncio
 async def test_node_console_is_loopback_only_and_csrf_protected(tmp_path) -> None:
+    config = _config(tmp_path)
     adapter = SecureGatewayAdapter(
-        _config(tmp_path),
+        config,
         authentication=_Authentication(),
+        core=_Core(config),
     )
     local = httpx.ASGITransport(app=adapter.app, client=("127.0.0.1", 32100))
     remote = httpx.ASGITransport(app=adapter.app, client=("203.0.113.7", 32100))
@@ -165,6 +167,27 @@ async def test_node_console_is_loopback_only_and_csrf_protected(tmp_path) -> Non
             headers={"X-Knoa-Console": adapter._console_csrf_token},
             json={},
         )
+        lifecycle = await http.get(
+            "/v1/console/lifecycle",
+            headers={"X-Knoa-Console": adapter._console_csrf_token},
+        )
+        configuration = await http.get(
+            "/v1/console/config",
+            headers={"X-Knoa-Console": adapter._console_csrf_token},
+        )
+        published = await http.post(
+            "/v1/console/config/publish",
+            headers={"X-Knoa-Console": adapter._console_csrf_token},
+            json={
+                "document": configuration.json()["revision"]["document"],
+                "summary": "Console test",
+            },
+        )
+        secret = await http.put(
+            "/v1/console/secrets/provider-test",
+            headers={"X-Knoa-Console": adapter._console_csrf_token},
+            json={"value": "secret-value"},
+        )
     async with httpx.AsyncClient(transport=remote, base_url="http://node") as http:
         hidden = await http.get("/console")
 
@@ -178,6 +201,14 @@ async def test_node_console_is_loopback_only_and_csrf_protected(tmp_path) -> Non
     assert invalid.json() == {"error": "invalid_enrollment_code"}
     assert pairing.status_code == 409
     assert pairing.json() == {"error": "node_not_enrolled"}
+    assert lifecycle.status_code == 503
+    assert lifecycle.json() == {"error": "lifecycle_not_installed"}
+    assert configuration.status_code == 200
+    assert configuration.json()["revision"]["document"]["agents"]["default_agent"] == "knoa"
+    assert published.status_code == 200
+    assert published.json()["result"]["revision"]["revision_id"] == "revision-b"
+    assert secret.status_code == 200
+    assert secret.json()["configured"] is True
     assert hidden.status_code == 404
 
 
@@ -289,6 +320,39 @@ class _Core:
                 updated_at=1.0,
             ),
             (),
+        )
+
+    async def create_config_draft(self, principal_id):
+        self.calls.append(("create_config_draft", principal_id))
+        return SimpleNamespace(draft_id="draft-a", draft_version=1)
+
+    async def replace_config_draft(
+        self, principal_id, draft_id, document, *, expected_version
+    ):
+        self.calls.append(
+            ("replace_config_draft", principal_id, draft_id, expected_version)
+        )
+        return SimpleNamespace(
+            draft_id=draft_id,
+            draft_version=2,
+            document=document,
+        )
+
+    async def validate_config_draft(self, principal_id, draft_id, *, preflight):
+        self.calls.append(("validate_config_draft", principal_id, draft_id, preflight))
+        return SimpleNamespace(valid=True, model_dump=lambda **_: {"valid": True, "issues": []})
+
+    async def publish_config_draft(
+        self, principal_id, draft_id, *, expected_version, summary
+    ):
+        self.calls.append(
+            ("publish_config_draft", principal_id, draft_id, expected_version, summary)
+        )
+        return SimpleNamespace(
+            model_dump=lambda **_: {
+                "revision": {"revision_id": "revision-b"},
+                "state": {"apply_status": "applying"},
+            }
         )
 
     async def create_session(self, principal_id, **kwargs):

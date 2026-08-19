@@ -37,7 +37,7 @@ def test_one_command_product_builder_creates_verified_archive(tmp_path: Path) ->
     )
 
     archive = build_product_release(
-        role="node",
+        role="all",
         target_os="linux",
         target_arch="x86_64",
         runtime_source=runtime,
@@ -48,7 +48,7 @@ def test_one_command_product_builder_creates_verified_archive(tmp_path: Path) ->
         version="3.0.0",
     )
 
-    assert archive.name == "knoa-node-3.0.0-linux-x86_64.zip"
+    assert archive.name == "knoa-host-3.0.0-linux-x86_64.zip"
     extracted = tmp_path / "extracted"
     extract_bundle(archive, extracted)
     signed = load_signed_manifest(extracted / "release-manifest.json")
@@ -93,7 +93,7 @@ def test_windows_product_builder_requires_and_embeds_winsw(tmp_path: Path) -> No
     winsw.write_bytes(b"signed-winsw")
 
     archive = build_product_release(
-        role="node",
+        role="all",
         target_os="windows",
         target_arch="x86_64",
         runtime_source=runtime,

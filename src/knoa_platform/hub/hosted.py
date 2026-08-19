@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import ipaddress
+import json
 import os
 import re
 import secrets
@@ -26,6 +28,7 @@ from knoa_platform.console_ui import hub_console_html
 from knoa_platform.hub.app import HubApplication
 from knoa_platform.hub.repository import HubRepository
 from knoa_platform.hub.service import HubService
+from knoa_platform.host_lifecycle_client import HostLifecycleClient
 from knoa_platform.mobile_releases import (
     AndroidRelease,
     AndroidReleaseRepository,
@@ -894,6 +897,7 @@ class HostedHubApplication:
         hub_id: str,
         bootstrap_token: str,
         release_publish_token: str = "",
+        public_url: str = "http://127.0.0.1:9529",
     ) -> None:
         if len(bootstrap_token) < 32:
             raise ValueError(
@@ -906,6 +910,9 @@ class HostedHubApplication:
         self.root = Path(root).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.hub_id = hub_id
+        self.public_url = public_url.strip().rstrip("/")
+        if not re.fullmatch(r"https?://[^/]+(?::[0-9]+)?", self.public_url):
+            raise ValueError("Hosted Hub public URL must be an HTTP(S) origin")
         self._bootstrap_digest = hashlib.sha256(bootstrap_token.encode()).digest()
         self._release_publish_digest = (
             hashlib.sha256(release_publish_token.encode()).digest()
@@ -913,6 +920,8 @@ class HostedHubApplication:
             else None
         )
         self._limiter = _WindowLimiter()
+        self._console_csrf_token = secrets.token_urlsafe(32)
+        self._host_lifecycle = HostLifecycleClient.from_environment()
         self.control = HostedControlRepository(
             self.root / "control.db",
             hub_id=hub_id,
@@ -928,7 +937,6 @@ class HostedHubApplication:
         self.app = Starlette(
             routes=[
                 Route("/health", self.health, methods=["GET"]),
-                Route("/console", self.console, methods=["GET"]),
                 Route(
                     "/v1/hosted/account-enrollment-grants",
                     self.account_enrollment_grants,
@@ -996,10 +1004,31 @@ class HostedHubApplication:
                 Mount("/workspaces", app=self.tenants),
             ]
         )
+        self.console_app = Starlette(
+            routes=[
+                Route("/console", self.console, methods=["GET"]),
+                Route(
+                    "/v1/console/lifecycle",
+                    self.console_lifecycle,
+                    methods=["GET"],
+                ),
+                Route(
+                    "/v1/console/lifecycle/actions",
+                    self.console_lifecycle_action,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/console/lifecycle/bundles/{name:str}",
+                    self.console_lifecycle_bundle,
+                    methods=["PUT"],
+                ),
+                Mount("/", app=self.app),
+            ]
+        )
 
     async def console(self, _request: Request) -> HTMLResponse:
         return HTMLResponse(
-            hub_console_html(),
+            hub_console_html(self._console_csrf_token, self.public_url),
             headers={
                 "Cache-Control": "no-store",
                 "Content-Security-Policy": (
@@ -1011,6 +1040,80 @@ class HostedHubApplication:
                 "X-Content-Type-Options": "nosniff",
             },
         )
+
+    def _console_authorized(self, request: Request) -> bool:
+        if request.client is None:
+            return False
+        try:
+            local = ipaddress.ip_address(request.client.host).is_loopback
+        except ValueError:
+            return False
+        return local and secrets.compare_digest(
+            request.headers.get("X-Knoa-Console", ""),
+            self._console_csrf_token,
+        )
+
+    async def console_lifecycle(self, request: Request) -> JSONResponse:
+        if not self._console_authorized(request):
+            return JSONResponse({"error": "console_csrf_rejected"}, status_code=403)
+        if self._host_lifecycle is None:
+            return JSONResponse({"error": "lifecycle_not_installed"}, status_code=503)
+        try:
+            body = await asyncio.to_thread(self._host_lifecycle.status)
+        except RuntimeError as error:
+            return JSONResponse({"error": str(error)}, status_code=503)
+        return JSONResponse(body, headers={"Cache-Control": "no-store"})
+
+    async def console_lifecycle_action(self, request: Request) -> JSONResponse:
+        if not self._console_authorized(request):
+            return JSONResponse({"error": "console_csrf_rejected"}, status_code=403)
+        if self._host_lifecycle is None:
+            return JSONResponse({"error": "lifecycle_not_installed"}, status_code=503)
+        raw = await request.body()
+        if len(raw) > 16 * 1024:
+            return JSONResponse({"error": "payload_too_large"}, status_code=413)
+        try:
+            payload = json.loads(raw)
+            body = await asyncio.to_thread(self._host_lifecycle.action, payload)
+        except (ValueError, TypeError):
+            return JSONResponse({"error": "invalid_action"}, status_code=400)
+        except RuntimeError as error:
+            return JSONResponse({"error": str(error)}, status_code=503)
+        return JSONResponse(body, headers={"Cache-Control": "no-store"})
+
+    async def console_lifecycle_bundle(self, request: Request) -> JSONResponse:
+        if not self._console_authorized(request):
+            return JSONResponse({"error": "console_csrf_rejected"}, status_code=403)
+        if self._host_lifecycle is None:
+            return JSONResponse({"error": "lifecycle_not_installed"}, status_code=503)
+        name = request.path_params["name"]
+        if not name.endswith(".zip"):
+            return JSONResponse({"error": "invalid_bundle_name"}, status_code=400)
+        try:
+            destination = self._host_lifecycle.bundle_path(name)
+        except ValueError as error:
+            return JSONResponse({"error": str(error)}, status_code=400)
+        temporary = destination.with_name(
+            f".{destination.name}.{secrets.token_hex(8)}.tmp"
+        )
+        size = 0
+        try:
+            with temporary.open("xb") as stream:
+                async for chunk in request.stream():
+                    size += len(chunk)
+                    if size > 2 * 1024 * 1024 * 1024:
+                        raise OverflowError
+                    stream.write(chunk)
+            if size == 0:
+                raise ValueError("empty_bundle")
+            os.replace(temporary, destination)
+        except OverflowError:
+            temporary.unlink(missing_ok=True)
+            return JSONResponse({"error": "payload_too_large"}, status_code=413)
+        except (OSError, ValueError):
+            temporary.unlink(missing_ok=True)
+            return JSONResponse({"error": "bundle_upload_failed"}, status_code=400)
+        return JSONResponse({"bundle_name": name, "size_bytes": size}, status_code=201)
 
     async def health(self, _request: Request) -> JSONResponse:
         return JSONResponse(

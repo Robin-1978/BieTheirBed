@@ -1,0 +1,20 @@
+[Unit]
+Description=Knoa Host Lifecycle Broker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=@INSTALL_ROOT@/bin/knoa-update run --install-root @INSTALL_ROOT@/releases --entrypoint bin/knoa-host-lifecycle -- --host 127.0.0.1 --port 9533 --updater @INSTALL_ROOT@/bin/knoa-update --release-root @INSTALL_ROOT@/releases --trust-store @LIFECYCLE_TRUST@ --state-file @HOST_STATE@ --incoming-root @INCOMING_ROOT@ --token-file @LIFECYCLE_TOKEN@
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=@INSTALL_ROOT@ @INCOMING_ROOT@ @HOST_STATE@
+
+[Install]
+WantedBy=multi-user.target

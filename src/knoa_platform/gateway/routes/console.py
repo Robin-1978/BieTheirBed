@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import ipaddress
+import json
+import os
+import secrets
 from io import BytesIO
 
 from pydantic import ValidationError
@@ -11,8 +15,9 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 
 from knoa_platform.console_ui import node_console_html
+from knoa_platform.configuration import ManagedConfig
 from knoa_platform.gateway.pairing import GatewayPairingPayload
-from knoa_platform.gateway.protocol import NodeHubEnrollmentRequest
+from knoa_platform.gateway.protocol import NodeHubEnrollmentRequest, WriteSecretRequest
 
 
 class ConsoleRoutes:
@@ -99,6 +104,150 @@ class ConsoleRoutes:
                 "X-Content-Type-Options": "nosniff",
             },
         )
+
+    async def _console_lifecycle(self, request: Request) -> JSONResponse:
+        if (error := self._console_authorize(request)) is not None:
+            return error
+        if self._host_lifecycle is None:
+            return JSONResponse({"error": "lifecycle_not_installed"}, status_code=503)
+        try:
+            body = await asyncio.to_thread(self._host_lifecycle.status)
+        except RuntimeError as error:
+            return JSONResponse({"error": str(error)}, status_code=503)
+        return JSONResponse(body, headers={"Cache-Control": "no-store"})
+
+    async def _console_lifecycle_action(self, request: Request) -> JSONResponse:
+        if (error := self._console_authorize(request)) is not None:
+            return error
+        if self._host_lifecycle is None:
+            return JSONResponse({"error": "lifecycle_not_installed"}, status_code=503)
+        raw = await request.body()
+        if len(raw) > 16 * 1024:
+            return JSONResponse({"error": "payload_too_large"}, status_code=413)
+        try:
+            payload = json.loads(raw)
+            body = await asyncio.to_thread(self._host_lifecycle.action, payload)
+        except (ValueError, TypeError):
+            return JSONResponse({"error": "invalid_action"}, status_code=400)
+        except RuntimeError as error:
+            return JSONResponse({"error": str(error)}, status_code=503)
+        return JSONResponse(body, headers={"Cache-Control": "no-store"})
+
+    async def _console_lifecycle_bundle(self, request: Request) -> JSONResponse:
+        if (error := self._console_authorize(request)) is not None:
+            return error
+        if self._host_lifecycle is None:
+            return JSONResponse({"error": "lifecycle_not_installed"}, status_code=503)
+        name = request.path_params["name"]
+        if not name.endswith(".zip"):
+            return JSONResponse({"error": "invalid_bundle_name"}, status_code=400)
+        try:
+            destination = self._host_lifecycle.bundle_path(name)
+        except ValueError as error:
+            return JSONResponse({"error": str(error)}, status_code=400)
+        temporary = destination.with_name(f".{destination.name}.{secrets.token_hex(8)}.tmp")
+        size = 0
+        try:
+            with temporary.open("xb") as stream:
+                async for chunk in request.stream():
+                    size += len(chunk)
+                    if size > 2 * 1024 * 1024 * 1024:
+                        raise OverflowError
+                    stream.write(chunk)
+            if size == 0:
+                raise ValueError("empty_bundle")
+            os.replace(temporary, destination)
+        except OverflowError:
+            temporary.unlink(missing_ok=True)
+            return JSONResponse({"error": "payload_too_large"}, status_code=413)
+        except (OSError, ValueError):
+            temporary.unlink(missing_ok=True)
+            return JSONResponse({"error": "bundle_upload_failed"}, status_code=400)
+        return JSONResponse({"bundle_name": name, "size_bytes": size}, status_code=201)
+
+    async def _console_config(self, request: Request) -> JSONResponse:
+        if (error := self._console_authorize(request)) is not None:
+            return error
+        try:
+            revision, state, generations = await self._core.get_config_current(
+                self._config.owner_principal_id
+            )
+        except Exception as error:
+            return self._core_error(error)
+        return JSONResponse(
+            {
+                "revision": revision.model_dump(mode="json"),
+                "state": state.model_dump(mode="json"),
+                "generations": generations,
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
+    async def _console_config_publish(self, request: Request) -> JSONResponse:
+        if (error := self._console_authorize(request)) is not None:
+            return error
+        raw = await request.body()
+        if len(raw) > 1024 * 1024:
+            return JSONResponse({"error": "payload_too_large"}, status_code=413)
+        try:
+            payload = json.loads(raw)
+            document = ManagedConfig.model_validate(payload.get("document"))
+            summary = str(payload.get("summary") or "Node Console configuration update")[:512]
+            principal = self._config.owner_principal_id
+            draft = await self._core.create_config_draft(principal)
+            draft = await self._core.replace_config_draft(
+                principal,
+                draft.draft_id,
+                document,
+                expected_version=draft.draft_version,
+            )
+            validation = await self._core.validate_config_draft(
+                principal,
+                draft.draft_id,
+                preflight=True,
+            )
+            if not validation.valid:
+                return JSONResponse(
+                    {"error": "preflight_failed", "validation": validation.model_dump(mode="json")},
+                    status_code=422,
+                )
+            result = await self._core.publish_config_draft(
+                principal,
+                draft.draft_id,
+                expected_version=draft.draft_version,
+                summary=summary,
+            )
+        except (ValidationError, ValueError, TypeError, json.JSONDecodeError):
+            return JSONResponse({"error": "invalid_configuration"}, status_code=400)
+        except Exception as error:
+            return self._core_error(error)
+        return JSONResponse(
+            {"result": result.model_dump(mode="json")},
+            headers={"Cache-Control": "no-store"},
+        )
+
+    async def _console_secret(self, request: Request) -> JSONResponse:
+        if (error := self._console_authorize(request)) is not None:
+            return error
+        reference = request.path_params["reference"]
+        try:
+            if request.method == "GET":
+                status = await asyncio.to_thread(self._provider_secrets.status, reference)
+            else:
+                raw = await request.body()
+                if len(raw) > 70_000:
+                    return JSONResponse({"error": "payload_too_large"}, status_code=413)
+                parsed = WriteSecretRequest.model_validate_json(raw)
+                status = await asyncio.to_thread(
+                    self._provider_secrets.put,
+                    reference,
+                    parsed.value,
+                )
+        except ValidationError:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        except (OSError, ValueError):
+            return JSONResponse({"error": "rejected"}, status_code=422)
+        return JSONResponse(status, headers={"Cache-Control": "no-store"})
 
     def _console_authorize(self, request: Request) -> JSONResponse | None:
         if not self._console_local(request):

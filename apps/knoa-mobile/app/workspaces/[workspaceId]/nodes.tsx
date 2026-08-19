@@ -1,11 +1,10 @@
 import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
-import * as Linking from "expo-linking";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
-import { listHubNodes, loadHubConnection, loadWorkspaceResourceState, type HubNode, type WorkspaceDeployment } from "@/hub/hubClient";
+import { createNodeEnrollmentCode, listHubNodes, loadWorkspaceResourceState, type HubNode, type WorkspaceDeployment } from "@/hub/hubClient";
 import { useGateway } from "@/state/GatewayProvider";
 import { updateNodeDirectGatewayUrl } from "@/security/deviceIdentity";
 import { colors } from "@/theme";
@@ -17,11 +16,12 @@ export default function WorkspaceNodesScreen() {
   const [deployments, setDeployments] = useState<WorkspaceDeployment[]>([]);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState("");
-  const [consoleUrl, setConsoleUrl] = useState("");
+  const [enrollmentCode, setEnrollmentCode] = useState("");
+  const [enrollmentExpiresAt, setEnrollmentExpiresAt] = useState(0);
   const [error, setError] = useState("");
   const refresh = useCallback(async () => {
     setLoading(true); setError("");
-    try { const [directory, resources, connection] = await Promise.all([listHubNodes(), loadWorkspaceResourceState(), loadHubConnection()]); setNodes(directory); setDeployments(resources.workspaceDeployments); setConsoleUrl(connection ? `${connection.rootUrl}/console` : ""); }
+    try { const [directory, resources] = await Promise.all([listHubNodes(), loadWorkspaceResourceState()]); setNodes(directory); setDeployments(resources.workspaceDeployments); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Node 加载失败"); }
     finally { setLoading(false); }
   }, []);
@@ -38,6 +38,20 @@ export default function WorkspaceNodesScreen() {
     catch (caught) { setError(caught instanceof Error ? caught.message : "Node 连接失败"); }
     finally { setWorking(""); }
   }
+  async function generateEnrollmentCode() {
+    setWorking("enrollment"); setError("");
+    try {
+      const payload = await createNodeEnrollmentCode();
+      setEnrollmentCode(JSON.stringify(payload));
+      setEnrollmentExpiresAt(payload.expires_at);
+    }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Enrollment Code 生成失败"); }
+    finally { setWorking(""); }
+  }
+  async function shareEnrollmentCode() {
+    if (!enrollmentCode) return;
+    await Share.share({ message: enrollmentCode, title: "Knoa Node Enrollment Code" });
+  }
   return (
     <>
       <Stack.Screen options={{ title: "Node 管理" }} />
@@ -49,10 +63,10 @@ export default function WorkspaceNodesScreen() {
           const count = deployments.filter((item) => item.target_node_id === node.node_id).length;
           return <View key={node.node_id} style={styles.card}><View style={styles.row}><AppIcon name="node" color={node.online ? colors.accent : colors.muted} size={24} /><View style={styles.flex}><Text style={styles.nodeName}>{node.display_name}</Text><Text style={styles.meta}>{node.platform} {node.version} · {count} 个部署 · {bound ? "App 已配对" : "App 未配对"}</Text></View><Text style={node.online ? styles.online : styles.offline}>{node.online ? "在线" : "离线"}</Text></View><AppPressable disabled={Boolean(working)} onPress={() => void enter(node)} style={styles.enter}>{working === node.node_id ? <ActivityIndicator color={colors.white} size="small" /> : <Text style={styles.enterText}>{bound ? "进入 Node" : "配对 App"}</Text>}</AppPressable></View>;
         })}
-        {!loading && !nodes.length ? <View style={styles.card}><Text style={styles.nodeName}>还没有 Node</Text><Text style={styles.meta}>先在 Hub Console 选择当前 Workspace 并生成 Enrollment Code，再到目标电脑的 Node Console 完成加入。Node 在线后回到这里刷新并配对 App。</Text><AppPressable disabled={!consoleUrl} style={styles.enter} onPress={() => void Linking.openURL(consoleUrl)}><Text style={styles.enterText}>打开 Hub Console</Text></AppPressable></View> : null}
+        <View style={styles.card}><Text style={styles.nodeName}>{nodes.length ? "添加 Node" : "还没有 Node"}</Text><Text style={styles.meta}>在 App 生成一次性 Enrollment Code，然后到目标电脑打开本地 Node Console（127.0.0.1:9531）粘贴加入。Code 只在当前 Workspace 生效，有效期 10 分钟。</Text><AppPressable disabled={Boolean(working)} style={styles.enter} onPress={() => void generateEnrollmentCode()}>{working === "enrollment" ? <ActivityIndicator color={colors.white} size="small" /> : <Text style={styles.enterText}>生成 Enrollment Code</Text>}</AppPressable>{enrollmentCode ? <><Text selectable style={styles.code}>{enrollmentCode}</Text><Text style={styles.meta}>有效期至 {new Date(enrollmentExpiresAt * 1000).toLocaleTimeString()}</Text><AppPressable style={styles.secondary} onPress={() => void shareEnrollmentCode()}><Text style={styles.secondaryText}>复制或分享 Code</Text></AppPressable></> : null}</View>
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </ScrollView>
     </>
   );
 }
-const styles = StyleSheet.create({ container: { padding: 17, gap: 12, paddingBottom: 48 }, header: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, icon: { width: 48, height: 48, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft }, flex: { flex: 1, minWidth: 0 }, title: { color: colors.ink, fontSize: 19, fontWeight: "800" }, meta: { color: colors.muted, fontSize: 12, lineHeight: 18 }, iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center" }, card: { padding: 15, gap: 12, borderRadius: 17, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface }, row: { flexDirection: "row", alignItems: "center", gap: 11 }, nodeName: { color: colors.ink, fontSize: 16, fontWeight: "800" }, online: { color: colors.accent, fontWeight: "800", fontSize: 12 }, offline: { color: colors.muted, fontWeight: "700", fontSize: 12 }, enter: { minHeight: 42, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.accent }, enterText: { color: colors.white, fontWeight: "800" }, error: { color: colors.danger }, });
+const styles = StyleSheet.create({ container: { padding: 17, gap: 12, paddingBottom: 48 }, header: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, icon: { width: 48, height: 48, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft }, flex: { flex: 1, minWidth: 0 }, title: { color: colors.ink, fontSize: 19, fontWeight: "800" }, meta: { color: colors.muted, fontSize: 12, lineHeight: 18 }, iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center" }, card: { padding: 15, gap: 12, borderRadius: 17, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface }, row: { flexDirection: "row", alignItems: "center", gap: 11 }, nodeName: { color: colors.ink, fontSize: 16, fontWeight: "800" }, online: { color: colors.accent, fontWeight: "800", fontSize: 12 }, offline: { color: colors.muted, fontWeight: "700", fontSize: 12 }, enter: { minHeight: 42, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.accent }, enterText: { color: colors.white, fontWeight: "800" }, secondary: { minHeight: 42, borderRadius: 12, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.accent }, secondaryText: { color: colors.accent, fontWeight: "800" }, code: { color: colors.ink, fontFamily: "monospace", fontSize: 11, lineHeight: 16, padding: 10, borderRadius: 10, backgroundColor: colors.background }, error: { color: colors.danger }, });

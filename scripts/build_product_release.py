@@ -25,12 +25,12 @@ def build_product_release(
     winsw_source: Path | None = None,
 ) -> Path:
     output_directory.mkdir(parents=True, exist_ok=True)
-    archive = output_directory / (
-        f"knoa-{role}-{version}-{target_os}-{target_arch}.zip"
-    )
+    if role != "all":
+        raise ValueError("Product Release must be the universal all-role Host Bundle")
+    archive = output_directory / f"knoa-host-{version}-{target_os}-{target_arch}.zip"
     if archive.exists():
         raise FileExistsError(f"Release archive already exists: {archive}")
-    release_id = f"knoa-{role}-{target_os}-{target_arch}-{version}"
+    release_id = f"knoa-host-{target_os}-{target_arch}-{version}"
     with tempfile.TemporaryDirectory(prefix="knoa-product-release-") as directory:
         root = Path(directory)
         payload = root / "payload"
@@ -61,7 +61,7 @@ def build_product_release(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--role", choices=("hub", "node", "all"), required=True)
+    parser.add_argument("--role", choices=("all",), default="all")
     parser.add_argument("--target-os", choices=("windows", "linux"), required=True)
     parser.add_argument("--target-arch", choices=("x86_64", "aarch64"), required=True)
     parser.add_argument("--runtime", type=Path, required=True)

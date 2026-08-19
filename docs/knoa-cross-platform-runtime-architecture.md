@@ -16,9 +16,9 @@ Knoa 不进行一次性全量 Rust 重写。采用可持续运行的渐进替换
 
 1. Rust 承担 Hub、Node Host、P2P/Relay、安装更新和内置管理 UI 承载等基础设施职责；
 2. Python Agent Runtime 作为 Node Host 管理的本机 Worker，保留成熟的 Agent、LLM、MCP、Skill 与 Tool 生态；
-3. Windows 与 Linux 都完整支持 `hub`、`node`、`all` 三种角色；
+3. Windows 与 Linux 使用同一个 Universal Host Bundle；`hub`、`node`、`all` 是安装后的角色激活集合；
 4. 用户当前选择的“Linux `all` + Windows `node`”只是部署实例，不能写入产品领域或协议；
-5. Hub Console 与 Node Console 是分别内置于 Hub、Node Host 的管理界面，不是独立服务；
+5. Hub Console 与 Node Console 分别内置于 Hub、Node Host；共用一个无 UI 的最小特权 Host Lifecycle Broker；
 6. Node 间和 App 到 Node 的数据面使用 ICE P2P 优先，现有端到端加密 Relay 仅兜底；
 7. 迁移期间一个事实始终只有一个写权威，禁止 Rust/Python 双写同一领域数据。
 
@@ -39,7 +39,7 @@ node = Node Host（内含 Node Console）+ 受管 Agent Runtime Worker
 all  = 同机安装 hub 与 node，但仍是两个独立服务和数据边界
 ```
 
-Role 描述“安装哪些组件”，不改变三种产品形态：单独 `node` 可在 No-Hub 模式本地运行并以后 enrollment；
+Role 描述 Universal Host 上“激活哪些组件”，不改变三种产品形态：单独 `node` 可在 No-Hub 模式本地运行并以后 enrollment；
 Self-hosted Hub 由用户部署 `hub` 或 `all`；Hosted Hub 是平台运营的同一 Hub 合同。No-Hub 没有 Account/
 Workspace 跨设备目录、ResourceGrant 或 Relay，但 Node-local Agent、Conversation、Task、Model/MCP 仍可工作。
 
@@ -106,10 +106,17 @@ Knoa Node Host
 
 Desktop Companion
 └── signed-in user's desktop session
+
+Knoa Host Lifecycle Broker
+├── loopback-only authenticated API
+├── signed Bundle install / rollback
+└── fixed Hub/Node service activation
 ```
 
 Hub、Node Host 和 Desktop Companion 是独立生命周期单元；Agent Runtime Worker 是由 Node Host 严格管理的
-子进程。两个 Console 只是对应宿主服务内的 UI 模块和静态资产，没有独立进程、端口、数据库或生命周期。
+子进程。两个 Console 只是对应宿主服务内的 UI 模块和静态资产，没有独立进程、数据库或版本线；Hub Console
+使用 Hub 进程的独立 loopback listener `9532`，Node Console 使用 Node Gateway `9531`。Lifecycle Broker
+监听 `9533`，没有 Console 或领域数据，只承担必须提权的固定生命周期动作。
 Agent、Skill、Tool、Conversation 和 Task 仍是 Node 内领域对象，不为追求微服务化拆成服务器。
 
 ## 4. 领域所有权不因 Rust 迁移改变

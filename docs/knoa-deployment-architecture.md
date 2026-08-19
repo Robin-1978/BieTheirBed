@@ -159,7 +159,8 @@ Relay decrypted request ─────┘
 | 部署单元 | 当前入口 | 是否独立部署 | 当前说明 |
 | --- | --- | --- | --- |
 | Knoa Node | `knoa --serve` 或 `python -m knoa_platform.service` | 是 | 完整执行服务器，拥有 Core、Gateway、Agent、Tool、Extension、本地状态和内置 Node Console |
-| HubService + Relay | `knoa-hub` | 是 | 当前作为一个进程、一个 HTTP/WSS 监听器部署，并内置 Hub Console |
+| HubService + Relay | `knoa-hub` | 是 | 一个进程；公网 API/Relay 与 localhost Hub Console 使用两个监听器 |
+| Host Lifecycle Broker | `knoa-host-lifecycle` | 否 | Universal Host 的无 UI 特权组件，只管理签名更新和固定 Hub/Node service |
 | RelayBroker | 无独立 CLI | 否 | 代码模块独立，但由 `HubApplication` 同进程创建 |
 | Mobile App | Android App | 是 | 客户端，不拥有服务端业务事实 |
 | Android Release Channel | Hosted Hub 或 Node Gateway 内建模块 | 否 | Hosted Account 的 APK 属于 Hub；No-Hub/Self-hosted 的 APK 属于 Node |
@@ -173,18 +174,17 @@ Relay decrypted request ─────┘
 
 ### 5.1 跨平台部署角色合同
 
-Windows 与 Linux 对运维暴露相同的三个角色，而不是把 Hub 与 Node 固化为同一安装单元：
+Windows 与 Linux 安装同一个 Universal Host Bundle；三个 role 只是激活集合：
 
-| Role | 安装内容 | 更新/重启边界 |
+| Role | 激活内容 | 重启边界 |
 | --- | --- | --- |
 | `hub` | Hosted Hub + Relay + 内置 Hub Console | 只操作 Hub 进程和 Hub 数据 |
 | `node` | Node Runtime + 内置 Node Console | 只操作 Node 进程和 Node 数据 |
 | `all` | 同机 Hub + Node；Console 分别内置 | 同时更新两个独立服务 |
 
-Windows 使用两个独立 WinSW Service：`KnoaHostedHub` 与 `KnoaNode`；Linux 使用两个独立
-systemd user service：`knoa-hosted-hub.service` 与 `knoa-node.service`。`all` 只是安装器编排便利项，
-不会把两个进程、数据库或故障边界合并。同一台主机运行两个角色时应使用 `all` 更新，使共享的 Knoa
-程序版本保持一致；分离主机分别使用 `hub` 与 `node`。
+Windows 使用 `KnoaHostLifecycle`、`KnoaHostedHub`、`KnoaNode` 三个 WinSW Service；Linux 使用
+`knoa-host-lifecycle.service`、`knoa-hub.service`、`knoa-node.service`。Lifecycle Broker 始终存在但不是
+部署 role；`all` 不会合并 Hub/Node 的进程、数据库或故障边界。所有激活组合共同更新同一个签名 Release。
 
 Android App 不是 Node 包，也不由 Node 安装器承载。Hosted App 发布由 Hub 独占：签名 APK 通过平台
 管理命令进入 `<HubRoot>/mobile-releases/android`，Hub 提供认证版本查询、不可变下载地址和稳定人工安装
@@ -448,6 +448,9 @@ Tool 和 Secret 不使用此远程资源路径。
 | `9528` | `127.0.0.1` | optional Webhook | 仅经受控 TLS ingress |
 | `9529` | `127.0.0.1` | Secure Gateway | 默认只监听 loopback；显式 remote mode 必须配置 TLS |
 | `9530` | `127.0.0.1` | Capability MCP Host | 不公开 |
+| `9531` | `127.0.0.1` | Node Console / Gateway（产品部署） | 不公开，由 App 经 P2P/Relay 访问数据面 |
+| `9532` | `127.0.0.1` | Hub Console | 不公开，不进入 Tunnel |
+| `9533` | `127.0.0.1` | Host Lifecycle Broker | 不公开、Token 认证、无 UI |
 
 端口可以配置，但安全性质不能因改端口而改变。Core 和 Capability MCP Host 保持 Node-local。
 
@@ -470,10 +473,13 @@ Windows 10/11 或 Windows Server 可以直接使用标准 CPython 3.14 x64、ven
 
 ```text
 Windows Host
+├── Knoa Host Lifecycle WinSW service
+│   └── listener: 127.0.0.1:9533
 ├── Knoa Hosted Hub WinSW service
 │   ├── identity: LocalSystem
 │   ├── start: Automatic
 │   ├── listener: 127.0.0.1:9529
+│   ├── console: 127.0.0.1:9532/console
 │   └── state: C:\ProgramData\Knoa\HostedHub
 ├── Knoa Node
 │   ├── service: KnoaNode / WinSW / LocalSystem / Automatic

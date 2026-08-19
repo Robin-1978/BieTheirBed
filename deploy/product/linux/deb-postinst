@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+/usr/lib/knoa/bootstrap/install-knoa-bundle.sh \
+  --role node \
+  --bundle /usr/lib/knoa/bootstrap/knoa-host.zip \
+  --trust-store /usr/lib/knoa/bootstrap/release-trust.json \
+  --updater /usr/lib/knoa/bootstrap/knoa-update
+printf '%s\n' 'Knoa Node is ready. Open http://127.0.0.1:9531/console'
+

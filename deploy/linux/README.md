@@ -69,7 +69,7 @@ Hub and Node consoles are part of their owning services rather than separate
 deployments:
 
 ```text
-https://hub.example.com/console       Hub Console
+http://127.0.0.1:9532/console         local Hub Console
 http://127.0.0.1:9531/console         local Node Console
 ```
 

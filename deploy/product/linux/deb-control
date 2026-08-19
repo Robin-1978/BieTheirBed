@@ -1,0 +1,10 @@
+Package: knoa
+Version: @VERSION@
+Section: utils
+Priority: optional
+Architecture: @ARCH@
+Maintainer: Knoa <release@knoa.dev>
+Depends: systemd, curl
+Description: Knoa universal Hub and Node host
+ Installs the signed Knoa Host Bundle, local Consoles and lifecycle broker.
+

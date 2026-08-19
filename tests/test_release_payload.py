@@ -27,25 +27,15 @@ def _inputs(root: Path, target_os: str) -> tuple[Path, Path, Path | None]:
 
 
 @pytest.mark.parametrize("target_os", ["windows", "linux"])
-@pytest.mark.parametrize(
-    ("role", "expected"),
-    [
-        ("hub", {"knoa-health", "knoa-hub"}),
-        ("node", {"knoa-health", "knoa-node"}),
-        ("all", {"knoa-health", "knoa-hub", "knoa-node"}),
-    ],
-)
-def test_materialized_payload_has_role_specific_launchers(
+def test_materialized_payload_is_a_universal_host_bundle(
     tmp_path: Path,
     target_os: str,
-    role: str,
-    expected: set[str],
 ) -> None:
     runtime, application, winsw = _inputs(tmp_path, target_os)
     output = tmp_path / "output"
 
     result = materialize_payload(
-        role=role,
+        role="all",
         target_os=target_os,
         runtime_source=runtime,
         application_source=application,
@@ -54,16 +44,30 @@ def test_materialized_payload_has_role_specific_launchers(
     )
 
     suffix = ".cmd" if target_os == "windows" else ""
+    expected = {"knoa-health", "knoa-hub", "knoa-node", "knoa-host-lifecycle"}
     assert set(result["launchers"]) == {f"{name}{suffix}" for name in expected}
     health = (output / "bin" / f"knoa-health{suffix}").read_text(encoding="utf-8")
     assert "knoa_platform.release.health" in health
-    assert role in health
+    assert "all" in health
     assert (output / "install").is_dir()
     if target_os == "windows":
         assert (output / "service" / "WinSW.exe").read_bytes() == b"winsw"
-    if role in {"node", "all"}:
-        node = (output / "bin" / f"knoa-node{suffix}").read_text(encoding="utf-8")
-        assert "knoa_platform.service" in node
+    node = (output / "bin" / f"knoa-node{suffix}").read_text(encoding="utf-8")
+    assert "knoa_platform.service" in node
+    lifecycle = (output / "bin" / f"knoa-host-lifecycle{suffix}").read_text(encoding="utf-8")
+    assert "knoa_platform.host_lifecycle" in lifecycle
+
+
+def test_role_specific_product_payloads_are_rejected(tmp_path: Path) -> None:
+    runtime, application, _winsw = _inputs(tmp_path, "linux")
+    with pytest.raises(ValueError, match="universal"):
+        materialize_payload(
+            role="node",
+            target_os="linux",
+            runtime_source=runtime,
+            application_source=application,
+            output=tmp_path / "output",
+        )
 
 
 def test_release_health_probe_covers_role_boundaries() -> None:
@@ -77,7 +81,7 @@ def test_windows_payload_requires_signed_winsw(tmp_path: Path) -> None:
     runtime, application, _winsw = _inputs(tmp_path, "windows")
     with pytest.raises(ValueError, match="WinSW"):
         materialize_payload(
-            role="node",
+            role="all",
             target_os="windows",
             runtime_source=runtime,
             application_source=application,
@@ -98,7 +102,9 @@ def test_service_assets_resolve_the_atomic_release_pointer(tmp_path: Path) -> No
 
     hub_unit = (output / "install" / "knoa-hub.service").read_text(encoding="utf-8")
     node_unit = (output / "install" / "knoa-node.service").read_text(encoding="utf-8")
+    lifecycle_unit = (output / "install" / "knoa-host-lifecycle.service").read_text(encoding="utf-8")
     assert "knoa-update run" in hub_unit
     assert "knoa-update run" in node_unit
+    assert "knoa-update run" in lifecycle_unit
     assert "/versions/" not in hub_unit
     assert "/versions/" not in node_unit
