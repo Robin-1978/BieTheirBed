@@ -14,6 +14,8 @@ def test_windows_installer_uses_python314_and_winsw_hub() -> None:
 
     assert '[string]$PythonVersion = "3.14"' in script
     assert "Py_GIL_DISABLED" in script
+    assert "$pythonProbe | & $python -" in script
+    assert "& $python -c" not in script
     assert "[string]$WinSWExecutable" in script
     assert 'Install-WinSWService "KnoaHostedHub"' in script
     assert 'Register-ScheduledTask -TaskName "Knoa Hosted Hub"' not in script
