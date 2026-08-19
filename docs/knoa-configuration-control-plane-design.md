@@ -62,6 +62,11 @@ Secret 永不上传。删除或关闭本地 Deployment 时，Node 必须同步�
 若 ModelResource 由 Workspace 管理员预先定义，Node 只能在资源定义完全一致且 Deployment 已明确指向
 本 Node 时上报物化状态和授权；不得改写 Workspace 所有的资源定义、generation 或 digest。
 
+Node Console 使用顶部任务导航，不把所有配置堆在一个长页面：`概览` 负责状态、Enrollment 与 App 配对；
+`模型` 先展示 Agent 可选择的 Model，Provider、Endpoint 和 API Key 收入高级区；`Agent` 展示模型绑定与
+Prompt，Tools/Subagent 策略默认折叠；`共享` 独立展示本 Node 发布和其他 Node 授权的模型；`系统` 承担
+服务生命周期、更新与完整 JSON。草稿状态、重新加载和热发布作为配置页共用的顶部操作条。
+
 发布页展示 validation error、warning、影响组件、热生效或需重启、预计断连和当前 applied state。普通
 UI 不展示 revision graph 或 rollback tree。
 
