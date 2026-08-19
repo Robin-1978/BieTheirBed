@@ -14,6 +14,7 @@ param(
     [string]$HubId = "hub_knoa_hosted",
     [string]$HostedBackupPath = "",
     [string]$BootstrapTokenSource = "",
+    [string]$ReleasePublishTokenSource = "",
     [string]$PythonVersion = "3.14",
     [switch]$RecreateVenv,
     [int]$HubPort = 9529,
@@ -25,8 +26,8 @@ param(
 $ErrorActionPreference = "Stop"
 $installHub = $Role -in @("all", "hub")
 $installNode = $Role -in @("all", "node")
-if (-not $installHub -and ($HostedBackupPath -or $BootstrapTokenSource)) {
-    throw "HostedBackupPath and BootstrapTokenSource require -Role hub or -Role all"
+if (-not $installHub -and ($HostedBackupPath -or $BootstrapTokenSource -or $ReleasePublishTokenSource)) {
+    throw "HostedBackupPath, BootstrapTokenSource and ReleasePublishTokenSource require -Role hub or -Role all"
 }
 
 function Assert-Administrator {
@@ -151,6 +152,7 @@ $serviceRoot = Join-Path $baseRoot "Services"
 $venvRoot = Join-Path $InstallRoot "venv"
 $python = Join-Path $venvRoot "Scripts\python.exe"
 $tokenFile = Join-Path $secretRoot "hosted-hub-bootstrap.token"
+$releasePublishTokenFile = Join-Path $secretRoot "hosted-hub-release-publisher.token"
 $nodeConfig = Join-Path $configRoot "node-windows.yaml"
 $hubWrapper = Join-Path $serviceRoot "KnoaHostedHub\KnoaHostedHub.exe"
 $nodeWrapper = Join-Path $serviceRoot "KnoaNode\KnoaNode.exe"
@@ -245,6 +247,14 @@ if ($installHub) {
     if (((Get-Content -LiteralPath $tokenFile -Raw).Trim()).Length -lt 32) {
         throw "Hosted Hub bootstrap token must contain at least 32 characters"
     }
+    if ($ReleasePublishTokenSource) {
+        Copy-Item -Force (Resolve-Path -LiteralPath $ReleasePublishTokenSource).Path $releasePublishTokenFile
+    } elseif (-not (Test-Path -LiteralPath $releasePublishTokenFile)) {
+        Set-Content -LiteralPath $releasePublishTokenFile -Value (New-RandomToken) -NoNewline -Encoding ASCII
+    }
+    if (((Get-Content -LiteralPath $releasePublishTokenFile -Raw).Trim()).Length -lt 32) {
+        throw "Hosted Hub release publisher token must contain at least 32 characters"
+    }
 
     if ($HostedBackupPath) {
         $backup = (Resolve-Path -LiteralPath $HostedBackupPath).Path
@@ -287,7 +297,7 @@ $powerShell = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
 $powerShellXml = Escape-Xml $powerShell
 if ($installHub) {
     $hubRunner = Join-Path $scriptRoot "Run-KnoaHub.ps1"
-    $hubArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$hubRunner`" -PythonExecutable `"$python`" -HubRoot `"$HubRoot`" -BootstrapTokenFile `"$tokenFile`" -HubId `"$HubId`" -Port $HubPort"
+    $hubArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$hubRunner`" -PythonExecutable `"$python`" -HubRoot `"$HubRoot`" -BootstrapTokenFile `"$tokenFile`" -ReleasePublishTokenFile `"$releasePublishTokenFile`" -HubId `"$HubId`" -Port $HubPort"
     $hubXmlArguments = Escape-Xml $hubArguments
     $hubLogPath = Escape-Xml (Join-Path $baseRoot "Logs\Hub")
     $hubXml = @"

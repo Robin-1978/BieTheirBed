@@ -185,6 +185,11 @@ Android App 不是 Node 包，也不由 Node 安装器承载。Hosted App 发布
 管理命令进入 `<HubRoot>/mobile-releases/android`，Hub 提供认证版本查询、不可变下载地址和稳定人工安装
 地址 `/downloads/android/latest.apk`。发布 App 不重启 Hub 或 Node。
 
+跨主机构建采用独立 `ReleasePublisher` 运维凭据，而不是 Account Session、Workspace Membership 或
+Hosted bootstrap token。构建机先本地验证 APK 包名、版本和签名，再通过 HTTPS 流式上传；Hub 在读取请求体
+前验证专用凭据和声明长度，限制单包不超过 100 MiB，校验 SHA-256、APK 容器、版本单调性后原子发布。
+发布权限是 Hosted 平台级运维权限，不属于任一 Account 或 Workspace，V1 不提供 App 内上传入口。
+
 ### 5.2 当前 Hub/Relay 的硬限制
 
 当前 Self-hosted Hub 是 V1 单实例实现：

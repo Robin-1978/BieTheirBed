@@ -14,8 +14,8 @@ def test_linux_installer_has_independent_roles() -> None:
 
     assert 'ROLE="all"' in script
     assert "hub|node|all" in script
-    assert 'install_hub=0' in script
-    assert 'install_node=0' in script
+    assert "install_hub=0" in script
+    assert "install_node=0" in script
     assert "systemctl --user enable --now knoa-hosted-hub.service" in script
     assert "systemctl --user enable --now knoa-node.service" in script
     assert "sudo loginctl enable-linger" in script
@@ -39,3 +39,10 @@ def test_linux_hosted_hub_can_publish_the_android_app() -> None:
     assert "knoa_platform.hub.admin mobile-publish" in script
     assert "knoa_platform.hub.admin mobile-latest" in script
     assert "/downloads/android/latest.apk" in script
+
+    remote = _read("scripts/publish-hosted-mobile-apk.sh")
+    combined = _read("scripts/build-and-publish-mobile-apk.sh")
+    assert "mobile-upload" in remote
+    assert "hosted-hub-release-publisher.token" in remote
+    assert "build-mobile-apk.sh" in combined
+    assert "publish-hosted-mobile-apk.sh" in combined

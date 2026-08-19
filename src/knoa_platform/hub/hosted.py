@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import hashlib
+import os
 import re
 import secrets
 import sqlite3
+import tempfile
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -33,6 +37,8 @@ _PASSWORD_N = 2**14
 _PASSWORD_R = 8
 _PASSWORD_P = 1
 _PASSWORD_BYTES = 32
+_MAX_REMOTE_APK_BYTES = 100 * 1024 * 1024
+_MAX_REMOTE_RELEASE_NOTES_BYTES = 4_000
 
 
 class _Request(BaseModel):
@@ -234,7 +240,9 @@ class HostedControlRepository:
         ttl_seconds: int = 900,
     ) -> AccountEnrollmentGrant:
         if not 60 <= ttl_seconds <= 3600:
-            raise ValueError("Account enrollment TTL must be between 60 and 3600 seconds")
+            raise ValueError(
+                "Account enrollment TTL must be between 60 and 3600 seconds"
+            )
         now = self._clock()
         grant = AccountEnrollmentGrant(
             grant_id=f"haeg_{secrets.token_urlsafe(18)}",
@@ -855,12 +863,16 @@ class HostedTenantDispatcher:
             relative = relative.removeprefix("workspaces/")
         workspace_id, separator, remainder = relative.partition("/")
         if not separator or not re.fullmatch(r"ws_[A-Za-z0-9_-]{12,96}", workspace_id):
-            await JSONResponse({"error": "not_found"}, status_code=404)(scope, receive, send)
+            await JSONResponse({"error": "not_found"}, status_code=404)(
+                scope, receive, send
+            )
             return
         try:
             application = self.application(workspace_id)
         except LookupError:
-            await JSONResponse({"error": "not_found"}, status_code=404)(scope, receive, send)
+            await JSONResponse({"error": "not_found"}, status_code=404)(
+                scope, receive, send
+            )
             return
         tenant_scope = dict(scope)
         tenant_scope["path"] = f"/{remainder}"
@@ -880,13 +892,25 @@ class HostedHubApplication:
         *,
         hub_id: str,
         bootstrap_token: str,
+        release_publish_token: str = "",
     ) -> None:
         if len(bootstrap_token) < 32:
-            raise ValueError("Hosted bootstrap token must contain at least 32 characters")
+            raise ValueError(
+                "Hosted bootstrap token must contain at least 32 characters"
+            )
+        if release_publish_token and len(release_publish_token) < 32:
+            raise ValueError(
+                "Hosted release publish token must contain at least 32 characters"
+            )
         self.root = Path(root).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.hub_id = hub_id
         self._bootstrap_digest = hashlib.sha256(bootstrap_token.encode()).digest()
+        self._release_publish_digest = (
+            hashlib.sha256(release_publish_token.encode()).digest()
+            if release_publish_token
+            else None
+        )
         self._limiter = _WindowLimiter()
         self.control = HostedControlRepository(
             self.root / "control.db",
@@ -916,6 +940,11 @@ class HostedHubApplication:
                     "/v1/mobile/releases/android/latest",
                     self.latest_android_release,
                     methods=["GET"],
+                ),
+                Route(
+                    "/v1/admin/mobile/releases/android",
+                    self.publish_android_release,
+                    methods=["PUT"],
                 ),
                 Route(
                     "/releases/android/{version_code:str}/{sha256:str}/knoa.apk",
@@ -1008,7 +1037,9 @@ class HostedHubApplication:
         parsed = await self._parse(request, HostedSessionRequest)
         if isinstance(parsed, JSONResponse):
             return parsed
-        login_key = hashlib.sha256(parsed.login_identity.casefold().encode()).hexdigest()
+        login_key = hashlib.sha256(
+            parsed.login_identity.casefold().encode()
+        ).hexdigest()
         if not self._allow(request, f"login:{login_key}", limit=10):
             return JSONResponse({"error": "rate_limited"}, status_code=429)
         try:
@@ -1061,6 +1092,88 @@ class HostedHubApplication:
                     f"{release.sha256}/knoa.apk"
                 ),
             )
+        )
+
+    async def publish_android_release(self, request: Request) -> JSONResponse:
+        if self._release_publish_digest is None:
+            return JSONResponse({"error": "publisher_not_configured"}, status_code=503)
+        if not self._allow(request, "mobile-publish", limit=5):
+            return JSONResponse({"error": "rate_limited"}, status_code=429)
+        if not self._release_publisher(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        if request.headers.get("Content-Type", "").partition(";")[0].strip() != (
+            "application/vnd.android.package-archive"
+        ):
+            return JSONResponse({"error": "invalid_content_type"}, status_code=415)
+        declared_length = request.headers.get("Content-Length", "").strip()
+        if not declared_length.isascii() or not declared_length.isdecimal():
+            return JSONResponse({"error": "length_required"}, status_code=411)
+        content_length = int(declared_length)
+        if content_length < 1 or content_length > _MAX_REMOTE_APK_BYTES:
+            return JSONResponse({"error": "payload_too_large"}, status_code=413)
+        declared_sha256 = request.headers.get("X-Knoa-Apk-SHA256", "").lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", declared_sha256):
+            return JSONResponse({"error": "invalid_release_metadata"}, status_code=400)
+        try:
+            version_name = self._release_version_name(request)
+            version_code = self._release_integer(request, "X-Knoa-Version-Code")
+            min_version_code = self._release_integer(request, "X-Knoa-Min-Version-Code")
+            release_notes = self._release_notes(request)
+        except ValueError:
+            return JSONResponse({"error": "invalid_release_metadata"}, status_code=400)
+
+        upload_root = self.root / ".mobile-release-uploads"
+        upload_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        upload_root.chmod(0o700)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix="android-", suffix=".apk", dir=upload_root
+        )
+        temporary = Path(temporary_name)
+        digest = hashlib.sha256()
+        received = 0
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                async for chunk in request.stream():
+                    if not chunk:
+                        continue
+                    received += len(chunk)
+                    if received > content_length or received > _MAX_REMOTE_APK_BYTES:
+                        return JSONResponse(
+                            {"error": "payload_too_large"}, status_code=413
+                        )
+                    digest.update(chunk)
+                    handle.write(chunk)
+                handle.flush()
+                os.fsync(handle.fileno())
+            temporary.chmod(0o600)
+            if received != content_length or digest.hexdigest() != declared_sha256:
+                return JSONResponse({"error": "upload_mismatch"}, status_code=400)
+            try:
+                release = await asyncio.to_thread(
+                    self.mobile_releases.publish,
+                    temporary,
+                    version_name=version_name,
+                    version_code=version_code,
+                    min_supported_version_code=min_version_code,
+                    release_notes=release_notes,
+                )
+            except (LookupError, OSError, ValueError) as exc:
+                return JSONResponse(
+                    {"error": "release_rejected", "detail": str(exc)},
+                    status_code=409,
+                )
+        finally:
+            temporary.unlink(missing_ok=True)
+        return JSONResponse(
+            android_release_payload(
+                release,
+                channel="hosted",
+                download_path=(
+                    f"/releases/android/{release.version_code}/"
+                    f"{release.sha256}/knoa.apk"
+                ),
+            ),
+            status_code=201,
         )
 
     async def download_android_release(
@@ -1182,7 +1295,11 @@ class HostedHubApplication:
         account_id = str(authenticated["account_id"])
         if request.method == "GET":
             return JSONResponse(
-                {"workspaces": self._workspace_payloads(self.control.list_workspaces(account_id))}
+                {
+                    "workspaces": self._workspace_payloads(
+                        self.control.list_workspaces(account_id)
+                    )
+                }
             )
         parsed = await self._parse(request, HostedWorkspaceRequest)
         if isinstance(parsed, JSONResponse):
@@ -1274,9 +1391,50 @@ class HostedHubApplication:
         supplied = hashlib.sha256(self._bearer(request).encode()).digest()
         return secrets.compare_digest(supplied, self._bootstrap_digest)
 
+    def _release_publisher(self, request: Request) -> bool:
+        if self._release_publish_digest is None:
+            return False
+        supplied = hashlib.sha256(self._bearer(request).encode()).digest()
+        return secrets.compare_digest(supplied, self._release_publish_digest)
+
+    @staticmethod
+    def _release_version_name(request: Request) -> str:
+        value = request.headers.get("X-Knoa-Version-Name", "").strip()
+        if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._+-]{0,31}", value):
+            raise ValueError("invalid version name")
+        return value
+
+    @staticmethod
+    def _release_integer(request: Request, header: str) -> int:
+        value = request.headers.get(header, "").strip()
+        if not value.isascii() or not value.isdecimal():
+            raise ValueError("invalid release integer")
+        parsed = int(value)
+        if parsed < 1 or parsed > 2_100_000_000:
+            raise ValueError("invalid release integer")
+        return parsed
+
+    @staticmethod
+    def _release_notes(request: Request) -> str:
+        encoded = request.headers.get("X-Knoa-Release-Notes", "").strip()
+        if not encoded:
+            return ""
+        if len(encoded) > 8_000 or not re.fullmatch(r"[A-Za-z0-9_-]+", encoded):
+            raise ValueError("invalid release notes")
+        padding = "=" * (-len(encoded) % 4)
+        try:
+            value = base64.urlsafe_b64decode(encoded + padding).decode("utf-8")
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise ValueError("invalid release notes") from exc
+        if len(value.encode("utf-8")) > _MAX_REMOTE_RELEASE_NOTES_BYTES:
+            raise ValueError("invalid release notes")
+        return value
+
     def _allow(self, request: Request, scope: str, *, limit: int) -> bool:
         forwarded = request.headers.get("CF-Connecting-IP", "").strip()
-        remote = forwarded or (request.client.host if request.client is not None else "unknown")
+        remote = forwarded or (
+            request.client.host if request.client is not None else "unknown"
+        )
         return self._limiter.allow(f"{scope}:{remote}", limit=limit)
 
     def _account_payload(self, account: dict[str, Any]) -> dict[str, Any]:
@@ -1326,11 +1484,13 @@ def create_hosted_hub_app(
     *,
     hub_id: str,
     bootstrap_token: str,
+    release_publish_token: str = "",
 ) -> Starlette:
     return HostedHubApplication(
         root,
         hub_id=hub_id,
         bootstrap_token=bootstrap_token,
+        release_publish_token=release_publish_token,
     ).app
 
 

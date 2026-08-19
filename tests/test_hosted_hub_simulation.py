@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import zipfile
 from pathlib import Path
@@ -12,6 +13,7 @@ from knoa_platform.node_identity import NodeIdentityStore
 from knoa_platform.relay_protocol import canonical_json
 
 BOOTSTRAP_TOKEN = "bootstrap-" + "b" * 40
+RELEASE_PUBLISH_TOKEN = "release-" + "r" * 40
 PASSWORD = "correct horse battery staple"
 
 
@@ -88,9 +90,7 @@ async def test_hosted_android_release_is_account_scoped_metadata_and_public_byte
             "/downloads/android/latest.apk",
             headers={"Range": "bytes=0-99"},
         )
-        wrong_digest = await client.get(
-            f"/releases/android/57/{'0' * 64}/knoa.apk"
-        )
+        wrong_digest = await client.get(f"/releases/android/57/{'0' * 64}/knoa.apk")
 
     assert unauthorized.status_code == 401
     assert latest.status_code == 200
@@ -104,6 +104,78 @@ async def test_hosted_android_release_is_account_scoped_metadata_and_public_byte
     assert stable.content == payload[:100]
     assert stable.headers["cache-control"] == "public, max-age=60, must-revalidate"
     assert wrong_digest.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_hosted_android_release_accepts_bounded_operator_upload(
+    tmp_path: Path,
+) -> None:
+    application = HostedHubApplication(
+        tmp_path / "hosted",
+        hub_id="hub_hosted",
+        bootstrap_token=BOOTSTRAP_TOKEN,
+        release_publish_token=RELEASE_PUBLISH_TOKEN,
+    )
+    apk = tmp_path / "knoa.apk"
+    payload = _apk(apk, b"remote-release")
+    notes = "远程发布"
+    headers = {
+        "Authorization": f"Bearer {RELEASE_PUBLISH_TOKEN}",
+        "Content-Type": "application/vnd.android.package-archive",
+        "Content-Length": str(len(payload)),
+        "X-Knoa-Apk-SHA256": hashlib.sha256(payload).hexdigest(),
+        "X-Knoa-Version-Name": "0.2.53",
+        "X-Knoa-Version-Code": "64",
+        "X-Knoa-Min-Version-Code": "1",
+        "X-Knoa-Release-Notes": base64.urlsafe_b64encode(notes.encode())
+        .decode()
+        .rstrip("="),
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application.app),
+        base_url="http://hub",
+    ) as client:
+        unauthorized = await client.put(
+            "/v1/admin/mobile/releases/android",
+            headers={**headers, "Authorization": "Bearer wrong"},
+            content=payload,
+        )
+        published = await client.put(
+            "/v1/admin/mobile/releases/android",
+            headers=headers,
+            content=payload,
+        )
+        duplicate = await client.put(
+            "/v1/admin/mobile/releases/android",
+            headers=headers,
+            content=payload,
+        )
+
+    assert unauthorized.status_code == 401
+    assert published.status_code == 201
+    assert published.json()["version_code"] == 64
+    assert published.json()["release_notes"] == notes
+    assert published.json()["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert duplicate.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_hosted_android_release_upload_is_disabled_without_operator_token(
+    tmp_path: Path,
+) -> None:
+    application = HostedHubApplication(
+        tmp_path / "hosted",
+        hub_id="hub_hosted",
+        bootstrap_token=BOOTSTRAP_TOKEN,
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application.app),
+        base_url="http://hub",
+    ) as client:
+        response = await client.put("/v1/admin/mobile/releases/android", content=b"x")
+
+    assert response.status_code == 503
+    assert response.json() == {"error": "publisher_not_configured"}
 
 
 @pytest.mark.asyncio
@@ -137,9 +209,10 @@ async def test_hosted_single_node_creates_isolated_personal_workspaces(
         assert alpha_hub.status_code == beta_hub.status_code == 200
         assert alpha_hub.json()["workspace_id"] == alpha["workspace_id"]
         assert beta_hub.json()["workspace_id"] == beta["workspace_id"]
-        assert alpha_hub.json()["signing_public_key"] == beta_hub.json()[
-            "signing_public_key"
-        ]
+        assert (
+            alpha_hub.json()["signing_public_key"]
+            == beta_hub.json()["signing_public_key"]
+        )
         assert cross_tenant.status_code == 401
 
         account = await client.get("/v1/hosted/account", headers=alpha_headers)
@@ -175,7 +248,10 @@ async def test_account_grants_are_single_use_and_password_login_recovers_session
         replay = await client.post("/v1/hosted/accounts", json=body)
         rejected = await client.post(
             "/v1/hosted/sessions",
-            json={"login_identity": "owner@example.com", "password": "wrong-password-1"},
+            json={
+                "login_identity": "owner@example.com",
+                "password": "wrong-password-1",
+            },
         )
         logged_in = await client.post(
             "/v1/hosted/sessions",

@@ -80,16 +80,22 @@ if [ "$install_hub" -eq 1 ]; then
     systemctl --user stop knoa-hosted-hub.service 2>/dev/null || true
     install -d -m 700 "$HUB_ROOT"
     bootstrap_token=""
+    release_publish_token=""
     if [ -f "$HUB_ENV" ]; then
         bootstrap_token="$(sed -n 's/^KNOA_HUB_BOOTSTRAP_TOKEN=//p' "$HUB_ENV" | head -n 1)"
+        release_publish_token="$(sed -n 's/^KNOA_HUB_RELEASE_PUBLISH_TOKEN=//p' "$HUB_ENV" | head -n 1)"
     fi
     if [ "${#bootstrap_token}" -lt 32 ]; then
         bootstrap_token="$("$VENV_ROOT/bin/python" -c 'import secrets; print(secrets.token_urlsafe(48))')"
     fi
-    printf 'KNOA_HUB_BOOTSTRAP_TOKEN=%s\nKNOA_HUB_PUBLIC_URL=%s\nKNOA_HUB_ADMIN_ENDPOINT=http://127.0.0.1:9529\n' \
-        "$bootstrap_token" "$HUB_PUBLIC_URL" > "$HUB_ENV"
+    if [ "${#release_publish_token}" -lt 32 ]; then
+        release_publish_token="$("$VENV_ROOT/bin/python" -c 'import secrets; print(secrets.token_urlsafe(48))')"
+    fi
+    printf 'KNOA_HUB_BOOTSTRAP_TOKEN=%s\nKNOA_HUB_RELEASE_PUBLISH_TOKEN=%s\nKNOA_HUB_PUBLIC_URL=%s\nKNOA_HUB_ADMIN_ENDPOINT=http://127.0.0.1:9529\n' \
+        "$bootstrap_token" "$release_publish_token" "$HUB_PUBLIC_URL" > "$HUB_ENV"
     chmod 600 "$HUB_ENV"
     bootstrap_token=""
+    release_publish_token=""
     install -m 600 "$SCRIPT_DIR/knoa-hosted-hub.service" \
         "$USER_SERVICE_ROOT/knoa-hosted-hub.service"
     install -m 700 "$SCRIPT_DIR/publish-knoa-app.sh" "$USER_BIN_ROOT/knoa-publish-app"
