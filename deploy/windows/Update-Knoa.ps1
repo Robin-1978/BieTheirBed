@@ -30,6 +30,15 @@ function Restart-InstalledServices([string]$SelectedRole) {
     }
 }
 
+function Get-InstalledRole {
+    $hubInstalled = [bool](Get-Service -Name "KnoaHostedHub" -ErrorAction SilentlyContinue)
+    $nodeInstalled = [bool](Get-Service -Name "KnoaNode" -ErrorAction SilentlyContinue)
+    if ($hubInstalled -and $nodeInstalled) { return "all" }
+    if ($hubInstalled) { return "hub" }
+    if ($nodeInstalled) { return "node" }
+    return ""
+}
+
 if (-not (Test-Administrator)) {
     $powerShell = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
     $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
@@ -55,7 +64,10 @@ if (-not $SourcePath) {
     }
 }
 if (-not $Role) {
-    $Role = if ($state -and $state.role) { [string]$state.role } else { "all" }
+    $Role = Get-InstalledRole
+    if (-not $Role) {
+        throw "No installed Knoa WinSW service was detected; install Hub or Node before using the updater"
+    }
 }
 if ($Role -notin @("all", "hub", "node")) {
     throw "Knoa update role must be all, hub or node"

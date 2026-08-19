@@ -100,6 +100,11 @@ def test_windows_one_click_updater_pulls_reinstalls_and_recovers_services() -> N
 
     assert "Start-Process" in updater
     assert "-Verb RunAs" in updater
+    assert "function Get-InstalledRole" in updater
+    assert 'Get-Service -Name "KnoaHostedHub"' in updater
+    assert 'Get-Service -Name "KnoaNode"' in updater
+    assert '$Role = Get-InstalledRole' in updater
+    assert 'else { "all" }' not in updater
     assert "pull --ff-only" in updater
     assert 'Join-Path $resolvedSource "deploy\\windows\\Install-Knoa.ps1"' in updater
     assert "Restart-InstalledServices $Role" in updater

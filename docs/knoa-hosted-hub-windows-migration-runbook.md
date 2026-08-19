@@ -509,9 +509,11 @@ C:\ProgramData\Knoa\Config\installation.json
 C:\ProgramData\Knoa\Scripts\Update-Knoa.cmd
 ```
 
-更新器会自动请求管理员权限，检查源码目录没有 tracked 修改，执行 `git pull --ff-only`，按已保存的
-Role 重新安装并重启对应的 WinSW 服务，最后检查服务为 `Running`。安装中途失败时会尝试恢复此前已
-安装的服务，不删除 Hub、Workspace、Node identity、Secrets 或 App release 数据。
+更新器会自动请求管理员权限，并以 Windows 服务控制管理器中实际存在的 WinSW 服务为准：仅安装
+Node 的机器只更新 `KnoaNode`，仅安装 Hub 的机器只更新 `KnoaHostedHub`，两者都存在才一起更新。
+它不会因旧的 `installation.json.role` 错误安装另一种角色。随后检查源码目录没有 tracked 修改，
+执行 `git pull --ff-only`、重新安装并重启对应服务，最后检查服务为 `Running`。安装中途失败时会
+尝试恢复此前已安装的服务，不删除 Hub、Workspace、Node identity、Secrets 或 App release 数据。
 源码更新必须同时 reconcile 新增的 Python 依赖，禁止用 `--no-deps` 只替换 Knoa 包。WebRTC P2P 是
 可选加速能力：其原生依赖暂不可用时 Node 仍必须启动，并自动使用经过认证的 Relay fallback。
 
