@@ -26,6 +26,7 @@ def test_windows_node_is_always_a_winsw_service() -> None:
     assert 'Register-ScheduledTask -TaskName "Knoa Node"' not in script
     assert "$env:ProgramData\\Knoa\\Node" in script
     assert "gateway pair --ttl 600" in script
+    assert "\n    -and " not in script
 
 
 def test_windows_enrollment_restarts_service_and_prints_pairing_qr() -> None:
