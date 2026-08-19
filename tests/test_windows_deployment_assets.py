@@ -75,6 +75,7 @@ def test_windows_hosted_hub_can_publish_the_android_app() -> None:
 
     assert '"knoa_platform.hub.admin", "mobile-publish"' in script
     assert "AppMetadataPath" in script
+    assert "-Raw -Encoding UTF8" in script
     assert '"--version-code", $VersionCode' in script
     assert "knoa_platform.hub.admin mobile-latest" in script
     assert "/downloads/android/latest.apk" in script

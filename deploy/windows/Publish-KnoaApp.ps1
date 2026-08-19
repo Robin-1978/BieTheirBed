@@ -18,7 +18,8 @@ if (-not (Test-Path -LiteralPath $HubRoot)) {
     throw "Hosted Hub root not found: $HubRoot"
 }
 if (-not $VersionName -and $VersionCode -eq 0 -and (Test-Path -LiteralPath $AppMetadataPath)) {
-    $appMetadata = Get-Content -LiteralPath $AppMetadataPath -Raw | ConvertFrom-Json
+    $appMetadata = Get-Content -LiteralPath $AppMetadataPath -Raw -Encoding UTF8 |
+        ConvertFrom-Json
     $VersionName = [string]$appMetadata.expo.version
     $VersionCode = [int]$appMetadata.expo.android.versionCode
 }
