@@ -1,0 +1,295 @@
+{
+  "$defs": {
+    "ProtocolCompatibility": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_runtime_spi_max": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Agent Runtime Spi Max",
+          "type": "integer"
+        },
+        "agent_runtime_spi_min": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Agent Runtime Spi Min",
+          "type": "integer"
+        },
+        "release_manifest": {
+          "const": 1,
+          "default": 1,
+          "title": "Release Manifest",
+          "type": "integer"
+        }
+      },
+      "title": "ProtocolCompatibility",
+      "type": "object"
+    },
+    "ReleaseArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "executable": {
+          "default": false,
+          "title": "Executable",
+          "type": "boolean"
+        },
+        "kind": {
+          "enum": [
+            "python_runtime",
+            "application",
+            "launcher",
+            "console_assets",
+            "runtime_extension_worker",
+            "metadata"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size": {
+          "minimum": 0,
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "kind",
+        "size",
+        "sha256"
+      ],
+      "title": "ReleaseArtifact",
+      "type": "object"
+    },
+    "ReleaseManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "artifacts": {
+          "items": {
+            "$ref": "#/$defs/ReleaseArtifact"
+          },
+          "maxItems": 10000,
+          "minItems": 1,
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "extension": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeExtensionDescriptor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "protocols": {
+          "$ref": "#/$defs/ProtocolCompatibility"
+        },
+        "release_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Release Id",
+          "type": "string"
+        },
+        "release_kind": {
+          "enum": [
+            "product",
+            "runtime_extension"
+          ],
+          "title": "Release Kind",
+          "type": "string"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "enum": [
+                "hub",
+                "node",
+                "all"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "target": {
+          "$ref": "#/$defs/TargetPlatform"
+        },
+        "version": {
+          "maxLength": 128,
+          "minLength": 5,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "release_id",
+        "version",
+        "release_kind",
+        "target",
+        "created_at",
+        "artifacts"
+      ],
+      "title": "ReleaseManifest",
+      "type": "object"
+    },
+    "ReleaseSignature": {
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": {
+          "const": "ed25519",
+          "default": "ed25519",
+          "title": "Algorithm",
+          "type": "string"
+        },
+        "key_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Key Id",
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 86,
+          "minLength": 86,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key_id",
+        "value"
+      ],
+      "title": "ReleaseSignature",
+      "type": "object"
+    },
+    "RuntimeExtensionDescriptor": {
+      "additionalProperties": false,
+      "properties": {
+        "display_name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        },
+        "entrypoint": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Entrypoint",
+          "type": "array"
+        },
+        "extension_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Extension Id",
+          "type": "string"
+        },
+        "native_capability_ceiling": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Native Capability Ceiling",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "publisher": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Publisher",
+          "type": "string"
+        },
+        "runtime_kind": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Runtime Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "extension_id",
+        "runtime_kind",
+        "display_name",
+        "publisher",
+        "entrypoint"
+      ],
+      "title": "RuntimeExtensionDescriptor",
+      "type": "object"
+    },
+    "TargetPlatform": {
+      "additionalProperties": false,
+      "properties": {
+        "arch": {
+          "enum": [
+            "x86_64",
+            "aarch64"
+          ],
+          "title": "Arch",
+          "type": "string"
+        },
+        "os": {
+          "enum": [
+            "windows",
+            "linux"
+          ],
+          "title": "Os",
+          "type": "string"
+        }
+      },
+      "required": [
+        "os",
+        "arch"
+      ],
+      "title": "TargetPlatform",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "manifest": {
+      "$ref": "#/$defs/ReleaseManifest"
+    },
+    "signature": {
+      "$ref": "#/$defs/ReleaseSignature"
+    }
+  },
+  "required": [
+    "manifest",
+    "signature"
+  ],
+  "title": "SignedReleaseManifest",
+  "type": "object"
+}

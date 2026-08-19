@@ -15,7 +15,7 @@
 1. Windows/Linux 都可安装 `hub`、`node`、`all`；
 2. 终端用户安装和更新不依赖源码、Git、系统 Python、pip 或手工 venv；
 3. Rust Node Host 管理 Python Agent Runtime Worker，并通过版本化私有 IPC 执行 Invocation；
-4. Hub Console 与 Node Console 可分别部署和更新；
+4. Hub 与 Node Host 分别内置对应 Console，不增加独立服务、端口或版本线；
 5. App/Node 与 Node/Node 使用 ICE P2P 优先，Relay fallback；
 6. Rust Hub 接管 Account、Workspace、目录、票据、信令和 Relay；
 7. 现有 HubRoot/NodeRoot 数据经过受测迁移继续可用；
@@ -31,10 +31,12 @@
 - Windows/Linux 测试；
 - 删除旧入口的出口条件。
 
-禁止同时开始多个没有共同验收面的核心迁移。P2P、Console 可以共享 Node Host 基础并行开发，但不能绕过
+禁止同时开始多个没有共同验收面的核心迁移。P2P、Console UI 可以共享 Node Host 基础并行开发，但不能绕过
 协议和安全测试直接接入产品。
 
 ## 3. Phase 0：冻结架构与建立基线
+
+当前可执行基线及更新规则见 [Phase 0 基线](./knoa-cross-platform-runtime-baseline.md)。
 
 ### 工作
 
@@ -64,7 +66,8 @@
 ### 工作
 
 - 定义签名 Release Manifest；
-- 构建 Windows ZIP 与 Linux tar.zst 的 Hub/Node Bundle；
+- Release Manifest 的 artifact kind 覆盖产品 Hub/Node Bundle 与可选 Agent Runtime Extension Bundle；
+- Windows/Linux/Runtime Extension 统一构建签名 ZIP Bundle；Linux 可执行位由签名 Manifest 记录和恢复；
 - Node Bundle 内置 Python Runtime、Wheel 和依赖；
 - 实现跨平台 updater：下载、校验、解包、原子切换、健康检查、自动回退；
 - Windows 提供 `hub/node/all` 服务安装；Linux 提供相同角色的 systemd 安装；
@@ -86,18 +89,18 @@
 
 产品文档删除以 `git clone + pip install` 为主的用户路径；开发文档保留。
 
-## 5. Phase 2：独立 Hub Console 与 Node Console
+## 5. Phase 2：Hub/Node 内置管理 Console
 
 ### 2A Hub Console
 
-- 独立 release，可由轻量 loopback 静态 UI 进程承载；
+- 作为 Hub Bundle 内置静态 UI，由 Hub 同 origin 提供；
 - 使用 Hub Account/Membership API；
 - 管理 Workspace、成员、Node directory、共享 Model/MCP、Grant、App release 与诊断；
 - 不读取 Node Secret 或 Work 正文。
 
 ### 2B Node Console
 
-- 独立 release，可由轻量 loopback 静态 UI 进程承载；
+- 作为 Node Bundle 内置静态 UI，由 Node Host 现有管理 surface 提供；
 - 使用 Node Configuration/Core API，不直接写 SQLite；
 - 管理 Agent、Model、API Key、MCP、Skill、Tool policy 与组件状态；
 - Key 只写 Node Secret Store；
@@ -106,18 +109,18 @@
 ### 跨平台部署
 
 ```text
-role=hub  -> Hub + Hub Console
-role=node -> Node + Node Console
-role=all  -> 两个服务 + 两个 Console
+role=hub  -> 一个 Hub 服务（内置 Hub Console）
+role=node -> 一个 Node Host 服务 + Agent Worker 子进程（内置 Node Console）
+role=all  -> Hub 服务 + Node Host 服务（各自内置 Console）
 ```
 
 ### 验收
 
-- Windows/Linux 的 Hub Console 与 Node Console 可独立安装和更新；
-- Console 默认 loopback；
+- Windows/Linux 的 Hub/Node Bundle 均包含对应 Console，不能出现宿主与 Console 版本漂移；
+- Hub Console 复用 Hub HTTPS origin；Node Console 默认 loopback 且不新增端口；
 - CSRF、认证、Secret redaction、权限和审计测试通过；
-- App 删除不适合移动端的高级 Key/endpoint 编辑，但保留查看、日常选择和快捷入口。
-- Console 不直接打开 Hub/Node SQLite，关闭 Console 不影响 Hub/Node 运行。
+- App 删除不适合移动端的高级 Key/endpoint 编辑，但保留查看、日常选择和快捷入口；
+- Console 不直接打开 Hub/Node SQLite；禁用 UI route 不影响宿主服务的数据面和后台执行。
 
 ## 6. Phase 3：Agent IPC 合同和 Python Worker 分离
 
@@ -132,6 +135,8 @@ role=all  -> 两个服务 + 两个 Console
 - IPC 复用 Agent Runtime `RuntimeEvent` 与 session-scoped Capability MCP Grant，不建立私有 Tool/MCP callback；
 - Node Host 保持 Conversation、Task、Config、Secret、Artifact 与 Capability authority；
 - Worker heartbeat、drain、crash 和 bounded restart；
+- 内置 Knoa Worker 可服务 `knoa` 与 `reviewer_agent`；Codex Adapter 和后续签名 Runtime Extension 使用同一
+  Host/Worker 版本握手与监管合同；
 - 保留单进程模式只用于测试直到跨进程 parity 完成，随后删除。
 
 ### 写权威
@@ -235,7 +240,7 @@ writer gate、binary/data rollback cutoff、删除 issue、截止子阶段和测
 - Relay 首字节与吞吐达到基线目标；
 - 记录 P2P 成功率后再决定是否建设 TURN。
 
-## 9. Phase 6：Rust Hub、Relay 与 Hub Console 后端
+## 9. Phase 6：Rust Hub、Relay 与内置 Hub Console
 
 ### 工作
 
@@ -243,7 +248,7 @@ writer gate、binary/data rollback cutoff、删除 issue、截止子阶段和测
 - 先实现只读 API parity，再切换 Account/Workspace 写入；
 - 迁移 Node presence、ticket、resource directory、grant、projection；
 - 将 Phase 5 的 Rust signaling module 直接组合进 Rust Hub，并迁移 RelayBroker；删除临时 transport edge 进程；
-- Hub Console 后端切换到 Rust Hub API；
+- 将 Hub Console 静态资产嵌入 Rust Hub，并继续使用冻结的 Hub API contract；
 - 保持 Android Release Repository 和 backup/restore manifest 兼容。
 
 ### 单实例约束
@@ -293,15 +298,15 @@ Windows: uninstall role=hub, retain role=node
 
 - 从 Windows Hub 最终一致备份恢复 HubRoot；
 - 保持 canonical domain、Hub ID、hub-signing.key；
-- 安装 Hub、Hub Console、Node、Node Console；
+- 安装 Hub 与 Node Host；对应 Console 已包含在各自 Bundle 中；
 - Linux Node 作为新/既有独立 Node enrollment 加入 Workspace；
 - 切换 Cloudflare connector 后验收 Account、Workspace、APK、Node directory。
 
 ### Windows
 
-- 精确卸载 Hub 与 Hub Console service；
+- 精确卸载 Windows Hub service；Hub Console 随 Hub 一并移除；
 - 默认保留 Windows HubRoot 作为回退快照，观察期后再显式清理；
-- 保留 NodeRoot、Node identity、Conversation、Task、Secret、Qwen 和 Node Console；
+- 保留 Node Host、内置 Node Console、NodeRoot、Node identity、Conversation、Task、Secret 和 Qwen；
 - 将 Windows Node enrollment 指向 canonical Linux Hub；
 - 验证 P2P 与 Relay fallback。
 
@@ -327,7 +332,7 @@ Windows: uninstall role=hub, retain role=node
 | Runtime | Worker healthy、crash、version mismatch、drain |
 | Update | clean install、upgrade、failed health rollback、uninstall retain data |
 | Data | fresh、现有 Hub backup、现有 NodeRoot |
-| Console | Hub-only、Node-only、all、unauthorized、secret redaction |
+| Console | Hub 内置、Node 内置、all、UI route disabled、unauthorized、secret redaction |
 
 单元测试之外必须有真实进程 E2E；mock ICE 或 mock pipe 不能替代至少一组 Windows/Linux 实机/VM 验证。
 “跨平台对称”指领域、协议、角色和 available/unavailable 语义一致，不承诺不同桌面系统的底层能力完全相同。
@@ -338,7 +343,7 @@ Windows: uninstall role=hub, retain role=node
 | --- | --- | --- |
 | M0 | 文档、基线、CI | 停止架构继续分叉 |
 | M1 | Release Bundle + updater | 用户不再接触 Python/Git/pip |
-| M2 | 双 Console | 电脑浏览器完成 Hub/LLM/Key 管理 |
+| M2 | 双内置 Console | 不增加服务即可在电脑浏览器完成 Hub/LLM/Key 管理 |
 | M3 | Agent Worker IPC | 为 Rust Node Host 建立稳定边界 |
 | M4 | Rust Node Host | 跨平台服务和安全边界统一 |
 | M5 | P2P + streaming Relay | 显著降低远程交互延迟和 Relay 压力 |

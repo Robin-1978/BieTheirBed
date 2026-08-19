@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "profile": "in_process_relay_broker",
+  "payload_bytes": 16384,
+  "long_session_frames": 2048,
+  "reconnect_cycles": 256,
+  "budgets": {
+    "first_frame_ms_max": 100.0,
+    "throughput_mib_per_second_min": 5.0,
+    "long_session_seconds_max": 15.0,
+    "reconnect_p95_ms_max": 100.0
+  }
+}

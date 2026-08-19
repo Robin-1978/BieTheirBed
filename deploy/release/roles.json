@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "roles": {
+    "hub": {
+      "services": [
+        "hub"
+      ],
+      "managed_workers": [],
+      "embedded_ui": [
+        "hub_console"
+      ],
+      "data_roots": [
+        "hub_root"
+      ]
+    },
+    "node": {
+      "services": [
+        "node_host"
+      ],
+      "managed_workers": [
+        "agent_runtime"
+      ],
+      "embedded_ui": [
+        "node_console"
+      ],
+      "data_roots": [
+        "node_root"
+      ]
+    },
+    "all": {
+      "services": [
+        "hub",
+        "node_host"
+      ],
+      "managed_workers": [
+        "agent_runtime"
+      ],
+      "embedded_ui": [
+        "hub_console",
+        "node_console"
+      ],
+      "data_roots": [
+        "hub_root",
+        "node_root"
+      ]
+    }
+  }
+}

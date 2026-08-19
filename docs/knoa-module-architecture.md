@@ -13,7 +13,8 @@ Hosted or Self-hosted Hub
 ├── Account / Workspace
 ├── Node directory / presence
 ├── LLM/MCP directory / ResourceGrant / ticket
-└── RelayBroker
+├── RelayBroker
+└── built-in Hub Console UI
 
 Knoa Node
 ├── Secure Gateway
@@ -23,11 +24,12 @@ Knoa Node
 ├── Configuration control
 ├── Capability Gateway
 ├── Model/MCP endpoints
+├── built-in Node Console UI
 └── local persistence / Secret
 ```
 
 Hub 与 Relay 当前同进程部署，但模块边界独立。Node、Hub 和 App 可独立构建与部署。Agent、Skill、Tool
-不是为追求微服务化而拆出的服务器。
+不是为追求微服务化而拆出的服务器。Hub Console 和 Node Console 分别随宿主构建、部署和更新，不是独立服务。
 
 ## 2. Node 内模块
 
@@ -35,7 +37,7 @@ Hub 与 Relay 当前同进程部署，但模块边界独立。Node、Hub 和 App
 | --- | --- | --- |
 | `gateway` | App/CLI 的安全 HTTP surface、认证、streaming、Hub edge | 领域存储 |
 | `agents` | NodeAgent typed config、解析、Invocation policy | Account/Workspace |
-| `agent_runtime` | Runtime SPI、session binding、generation 与执行编排 | Product navigation |
+| `agent_runtime` | Node-owned Runtime SPI、session binding、generation 与 Worker 执行编排 | 独立部署、Node identity、Product navigation |
 | `conversations` | NodeConversation、Turn、消息与 live control | Workspace 投影写入 |
 | `tasks` | NodeTask、trigger、execution、attempt、通知 | Workspace scheduler / deployment |
 | `configuration` | Draft、校验、impact、publish、apply | 独立业务配置真相 |
@@ -44,6 +46,7 @@ Hub 与 Relay 当前同进程部署，但模块边界独立。Node、Hub 和 App
 | `tools` | Built-in Tool registry 与实现 | 跨 Node Remote Tool |
 | `capability_gateway` | capability、policy、approval、budget、审计 | Runtime-native 行为实现 |
 | `node_hub` | enrollment、presence、direct candidate、Relay tunnel | Conversation/Task/Secret |
+| `admin_ui` | Node Console 静态资产、页面路由与 Node API client | repository、独立认证域 |
 
 ## 3. Hub 内模块
 
@@ -54,6 +57,7 @@ Hub 与 Relay 当前同进程部署，但模块边界独立。Node、Hub 和 App
 | Hub repository | Node、共享 LLM/MCP、Grant、投影、ticket |
 | Hub service | 签名、身份验证、授权与短期 ticket |
 | Relay broker | 连接注册、背压和 opaque frame 转发 |
+| Hub admin UI | Hub Console 静态资产、页面路由与 Hub API client |
 
 Relay 不调用 Node 领域 service，不解析业务 payload，不持有模型或 MCP Secret。
 

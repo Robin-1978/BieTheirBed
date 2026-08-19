@@ -1,0 +1,12 @@
+runtime_instance_id: "runtime-fixture-1"
+invocation_id: "invocation-fixture-1"
+sequence: 10
+runtime_event {
+  source_event_id: "source-event-fixture-1"
+  runtime_session_ref: "runtime-session-fixture-1"
+  runtime_turn_ref: "runtime-turn-fixture-1"
+  occurred_unix_ms: 1787076658000
+  assistant_delta {
+    content: "你好"
+  }
+}

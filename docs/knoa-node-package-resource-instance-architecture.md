@@ -62,8 +62,14 @@ NodeAgent
 内部模型由 Codex 管理。二者共享 Conversation、Task、Approval、Stop、Artifact 与审计合同，但不强迫
 共享内部编排方式。
 
-NodeAgent 是 Node-local 配置。将 Knoa Agent 安装到 Company Node 和 Home Node，表示两个 Node 各有
-一个自己的 NodeAgent，而不是部署一个 Workspace Agent 的两个实例。
+NodeAgent 是 Node-local 配置。将 Knoa Agent 配置到 Company Node 和 Home Node，表示两个 Node 各有
+一个自己的 NodeAgent，而不是部署一个 Workspace Agent 的两个实例。`knoa` 与 `reviewer_agent` 共享内置
+Knoa Runtime；`codex` 使用内置 Codex Runtime Adapter。普通自定义 Agent 仍是另一个 `kind=knoa` 的
+NodeAgent，不需要安装 package。
+
+如果第三方 Agent 确实带来新的执行循环或 session 语义，其代码以签名 Runtime Extension Bundle 安装到明确
+选择的 Node，并作为 Node Host 管理的独立 Worker 运行。该内部交付物不改变“Agent 不共享”的产品边界，也
+不进入普通 App 导航。
 
 ## 3. Conversation 与 Task
 
@@ -224,4 +230,5 @@ Workspace。Node 离线不阻断登录、Workspace 切换、Node directory 或�
 7. Hub 离线不影响 Node 本地执行；
 8. Node 离线不阻断 Account/Workspace 管理；
 9. Package 不进入普通产品导航；
-10. 不为 Agent sharing、通用 Remote Tool、Marketplace 或自动 placement 提前建设抽象。
+10. 不为 Agent sharing、通用 Remote Tool、Marketplace 或自动 placement 提前建设抽象；Runtime Extension
+    先只支持管理员向指定 Node 导入签名 Bundle。

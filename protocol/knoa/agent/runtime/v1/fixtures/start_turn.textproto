@@ -1,0 +1,39 @@
+runtime_instance_id: "runtime-fixture-1"
+invocation_id: "invocation-fixture-1"
+sequence: 9
+start_turn {
+  session {
+    agent_id: "knoa"
+    runtime_session_ref: "runtime-session-fixture-1"
+    runtime_protocol_version: "1.0"
+    binding_epoch: 3
+  }
+  operation_id: "operation-fixture-1"
+  input {
+    text {
+      text: "你好，Knoa"
+    }
+  }
+  mcp {
+    server_id: "knoa-platform-capabilities"
+    transport: "streamable_http"
+    endpoint: "http://127.0.0.1:9530/mcp"
+    authorization: "fixture-redacted-token"
+    expires_unix_ms: 1787076657000
+    scope_digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    binding_epoch: 3
+  }
+  context {
+    core_memory: "User prefers Chinese"
+    skill_instructions: "Follow the selected Skill instructions."
+  }
+  deadline_unix_ms: 1787076717000
+  options {
+    fields {
+      key: "temperature"
+      value {
+        number_value: 0.7
+      }
+    }
+  }
+}

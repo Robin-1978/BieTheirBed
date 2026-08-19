@@ -1,0 +1,77 @@
+{
+  "$defs": {
+    "ReleaseTrustKey": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_extension_ids": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            "type": "string"
+          },
+          "title": "Allowed Extension Ids",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "allowed_release_kinds": {
+          "items": {
+            "enum": [
+              "product",
+              "runtime_extension"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Allowed Release Kinds",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "key_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Key Id",
+          "type": "string"
+        },
+        "public_key": {
+          "maxLength": 43,
+          "minLength": 43,
+          "title": "Public Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key_id",
+        "public_key",
+        "allowed_release_kinds"
+      ],
+      "title": "ReleaseTrustKey",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "keys": {
+      "items": {
+        "$ref": "#/$defs/ReleaseTrustKey"
+      },
+      "maxItems": 1024,
+      "minItems": 1,
+      "title": "Keys",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "keys"
+  ],
+  "title": "ReleaseTrustStore",
+  "type": "object"
+}

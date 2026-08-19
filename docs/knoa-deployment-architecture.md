@@ -158,8 +158,8 @@ Relay decrypted request ─────┘
 
 | 部署单元 | 当前入口 | 是否独立部署 | 当前说明 |
 | --- | --- | --- | --- |
-| Knoa Node | `knoa --serve` 或 `python -m knoa_platform.service` | 是 | 完整执行服务器，拥有 Core、Gateway、Agent、Tool、Extension 和本地状态 |
-| HubService + Relay | `knoa-hub` | 是 | 当前作为一个进程、一个 HTTP/WSS 监听器部署 |
+| Knoa Node | `knoa --serve` 或 `python -m knoa_platform.service` | 是 | 完整执行服务器，拥有 Core、Gateway、Agent、Tool、Extension、本地状态和内置 Node Console |
+| HubService + Relay | `knoa-hub` | 是 | 当前作为一个进程、一个 HTTP/WSS 监听器部署，并内置 Hub Console |
 | RelayBroker | 无独立 CLI | 否 | 代码模块独立，但由 `HubApplication` 同进程创建 |
 | Mobile App | Android App | 是 | 客户端，不拥有服务端业务事实 |
 | Android Release Channel | Hosted Hub 或 Node Gateway 内建模块 | 否 | Hosted Account 的 APK 属于 Hub；No-Hub/Self-hosted 的 APK 属于 Node |
@@ -168,15 +168,18 @@ Relay decrypted request ─────┘
 | Codex App Server | Codex Runtime 自有入口 | 是 | 受信 Runtime adapter 使用，不进入 Knoa 原生模型 Provider |
 | NodeAgent/Skill/Tool | 无独立进程入口 | 否 | Node 内逻辑配置或内容，不为追求“微服务化”单独部署 |
 
+目标态 Agent Runtime Worker 虽然拥有独立代码模块和受管子进程边界，但仍包含在 Node Bundle 中，由 Node Host
+控制生命周期和兼容版本；它不是第四种部署角色，也没有独立 Hub enrollment、Console、端口或数据权威。
+
 ### 5.1 跨平台部署角色合同
 
 Windows 与 Linux 对运维暴露相同的三个角色，而不是把 Hub 与 Node 固化为同一安装单元：
 
 | Role | 安装内容 | 更新/重启边界 |
 | --- | --- | --- |
-| `hub` | Hosted Hub + Relay | 只操作 Hub 进程和 Hub 数据 |
-| `node` | Node Runtime | 只操作 Node 进程和 Node 数据 |
-| `all` | 同机 Hub + Node | 同时更新两个独立服务 |
+| `hub` | Hosted Hub + Relay + 内置 Hub Console | 只操作 Hub 进程和 Hub 数据 |
+| `node` | Node Runtime + 内置 Node Console | 只操作 Node 进程和 Node 数据 |
+| `all` | 同机 Hub + Node；Console 分别内置 | 同时更新两个独立服务 |
 
 Windows 使用两个独立 WinSW Service：`KnoaHostedHub` 与 `KnoaNode`；Linux 使用两个独立
 systemd user service：`knoa-hosted-hub.service` 与 `knoa-node.service`。`all` 只是安装器编排便利项，

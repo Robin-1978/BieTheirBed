@@ -187,7 +187,9 @@ A2A 主要解决跨组织或跨服务 Agent 之间的发现、消息、Task、Ar
 7. **终态唯一。** 每个成功启动的 Runtime Turn 必须产生且只产生一个 terminal event。
 8. **结果不明不重放。** 任何可能产生外部副作用的操作在结果不明时进入 `outcome_unknown`。
 9. **真实持久 Session。** 每个 Runtime 都创建自己的真实持久 Session，并返回非空 opaque `runtime_session_ref`；Platform 不伪造、解析或替 Agent 生成该值。
-10. **YAGNI。** 目前只有两个受信任实现，不支持配置下载代码、Python entry point 或任意第三方 Runtime 插件。
+10. **最小可扩展边界。** 普通自定义 Agent 复用内置 Knoa Runtime；新增执行语义才允许安装签名、
+    out-of-process Runtime Extension。禁止配置下载任意代码、加载 Python entry point 到 Host 或在 Prompt 中
+    声明新的执行权限。
 11. **不兼容旧数据。** 新 schema 是唯一 schema；旧数据库和旧运行目录在部署切换前删除或显式重建，不增加 legacy reader。
 12. **单向依赖倒置。** Platform 通过 `AgentRuntime` 调用 Agent；Agent 不反向调用 Platform service、repository、ORM 或配置实现。Agent 私有状态由 Agent 自己的 repository 持久化。
 13. **控制契约与数据传输分离。** `AgentRuntime` SPI 传递类型、引用和授权；Tool 调用使用标准 MCP，Artifact 内容读取使用标准 MCP Resources。SPI 不传 Python callback、数据库对象或裸文件描述符。
@@ -229,6 +231,10 @@ Token 有两种口径，必须分离：
 - Knoa Agent 的 `prompt_tokens_estimated` 只用于调用前预算与诊断。Provider 缺失 usage 时，实际 token 不得用估算冒充，source 标记为 `unavailable` 或 `partial`。
 
 系统级 `reviewer_agent` 不接收用户 memory、episodic memory 或普通 Skill context，只接收审批请求本身所需的结构化证据。
+
+`reviewer_agent` 是默认内置的系统 NodeAgent，不是第三种 Runtime。它与默认 `knoa` NodeAgent 共用
+Knoa Runtime 实现，但拥有独立的 instructions、Model binding、调用方 allowlist、单轮限制和无 Tool 策略。
+`codex` 才是另一种 Runtime Adapter，因为其 Thread、模型归属和 native action 语义不同。
 
 因此，同一个 Platform Session 若绑定 `knoa`，历史上下文和压缩由 `KnoaAgentRuntime` 完成；若绑定 `codex`，则由 Codex App Server 管理其 Thread 和 compaction。Platform 只保存产品可见消息、必要的观察元数据和恢复 binding，不尝试用一套历史或压缩算法统一两个 Agent。
 
