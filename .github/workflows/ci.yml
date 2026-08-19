@@ -27,12 +27,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install Protobuf compiler
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.14"
+      - name: Install locked protocol dependencies
+        run: uv sync --locked --python 3.12
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: "31.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Verify versioned protocol descriptors and fixtures
-        run: python scripts/check_protocol_contracts.py
+        run: uv run --no-sync python scripts/check_protocol_contracts.py
       - name: Verify signed Release Manifest schema
-        run: python scripts/check_release_manifest.py
+        run: uv run --no-sync python scripts/check_release_manifest.py
 
   release-role-contracts:
     strategy:
@@ -56,19 +63,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.14"
       - name: Install project and development tools
-        run: python -m pip install -e ".[dev]"
+        run: uv sync --locked --extra dev --python 3.12
+      - name: Verify Python dependency lock
+        run: uv lock --check
       - name: Build distributions
-        run: python -m build
+        run: uv run --no-sync python -m build
       - name: Verify runtime API and database baseline
-        run: python scripts/capture_runtime_baseline.py
+        run: uv run --no-sync python scripts/capture_runtime_baseline.py
       - name: Verify Relay performance budgets
-        run: python scripts/benchmark_relay.py --check
+        run: uv run --no-sync python scripts/benchmark_relay.py --check
       - name: Lint
-        run: ruff check src tests scripts
+        run: uv run --no-sync ruff check src tests scripts
       - name: Test and enforce Core coverage
-        run: python -m pytest -q --cov --cov-report=term-missing
+        run: uv run --no-sync python -m pytest -q --cov --cov-report=term-missing
 
   linux-python314:
     runs-on: ubuntu-latest
@@ -77,11 +88,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
-          cache: pip
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.14"
       - name: Install project and development tools
-        run: python -m pip install -e ".[dev]"
+        run: uv sync --locked --extra dev --python 3.14
       - name: Test Linux runtime on Python 3.14
-        run: python -m pytest -q
+        run: uv run --no-sync python -m pytest -q
 
   windows-native:
     runs-on: windows-latest
@@ -90,17 +103,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
-          cache: pip
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.14"
       - name: Install project and development tools
-        run: python -m pip install -e ".[dev]"
+        run: uv sync --locked --extra dev --python 3.14
       - name: Build Windows-installable wheel
-        run: python -m build
+        run: uv run --no-sync python -m build
       - name: Lint portable runtime and deployment tests
-        run: ruff check src tests scripts
+        run: uv run --no-sync ruff check src tests scripts
       - name: Parse Windows PowerShell deployment scripts
         shell: powershell
         run: |
-          Get-ChildItem deploy/windows/*.ps1 | ForEach-Object {
+          Get-ChildItem deploy/windows/*.ps1, deploy/product/windows/*.ps1 | ForEach-Object {
             $tokens = $null
             $parseErrors = $null
             [System.Management.Automation.Language.Parser]::ParseFile(
@@ -115,7 +130,7 @@ jobs:
           }
       - name: Test native Windows Hub and Node primitives
         run: >-
-          python -m pytest -q
+          uv run --no-sync python -m pytest -q
           tests/test_private_files.py
           tests/test_windows_portability.py
           tests/test_hosted_hub_simulation.py
@@ -128,14 +143,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.14"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: apps/knoa-mobile/package-lock.json
       - name: Install Gateway contract exporter
-        run: python -m pip install -e .
+        run: uv sync --locked --python 3.12
       - name: Install mobile dependencies
         working-directory: apps/knoa-mobile
         run: npm ci && npm audit --audit-level=critical

@@ -61,6 +61,10 @@
 
 ## 4. Phase 1：产品化跨平台交付
 
+> 实现状态：签名 Bundle、跨平台 lock、自包含 payload、Rust updater、WinSW/systemd service orchestration、
+> 离线/真实健康检查与自动 reject 已完成代码闭环；正式嵌入式 Runtime 构建、bootstrap 代码签名和干净 VM
+> 六组合验收待发布环境执行。部署合同见 [产品 Bundle 部署与更新](./knoa-product-bundle-deployment.md)。
+
 本阶段不改变领域实现，先消除用户面对源码和 Python 工具链的问题。
 
 ### 工作
@@ -69,6 +73,7 @@
 - Release Manifest 的 artifact kind 覆盖产品 Hub/Node Bundle 与可选 Agent Runtime Extension Bundle；
 - Windows/Linux/Runtime Extension 统一构建签名 ZIP Bundle；Linux 可执行位由签名 Manifest 记录和恢复；
 - Node Bundle 内置 Python Runtime、Wheel 和依赖；
+- 以仓库 Python lock 在目标 OS CI 物化 application tree，终端安装阶段不解析或下载依赖；
 - 实现跨平台 updater：下载、校验、解包、原子切换、健康检查、自动回退；
 - Windows 提供 `hub/node/all` 服务安装；Linux 提供相同角色的 systemd 安装；
 - 将源码安装保留为开发入口，不再作为产品部署手册主路径。

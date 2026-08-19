@@ -1,7 +1,8 @@
 use std::path::PathBuf;
+use std::process::Command;
 use std::time::Duration;
 
-use clap::{ArgGroup, Parser, ValueEnum};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use knoa_update::{
     InstallConstraints, ReleaseKind, ReleaseRole, ReleaseStore, ReleaseTrustStore, TargetArch,
     TargetOs, TargetPlatform, extract_archive, run_health_check, verify_bundle,
@@ -34,10 +35,9 @@ enum ArchArgument {
     Aarch64,
 }
 
-#[derive(Debug, Parser)]
-#[command(name = "knoa-update")]
+#[derive(Debug, Args)]
 #[command(group(ArgGroup::new("input").required(true).args(["bundle", "archive"])))]
-struct Arguments {
+struct InstallArguments {
     #[arg(long)]
     bundle: Option<PathBuf>,
     #[arg(long, requires = "staging")]
@@ -56,18 +56,77 @@ struct Arguments {
     target_arch: ArchArgument,
     #[arg(long, default_value_t = 1)]
     agent_runtime_spi: u32,
-    #[arg(long, requires = "health_entrypoint")]
-    install_root: Option<PathBuf>,
-    #[arg(long, requires = "install_root")]
-    health_entrypoint: Option<String>,
-    #[arg(long, requires = "install_root")]
+    #[arg(long)]
+    install_root: PathBuf,
+    #[arg(long)]
+    health_entrypoint: String,
+    #[arg(long)]
     health_arg: Vec<String>,
-    #[arg(long, default_value_t = 60, requires = "install_root")]
+    #[arg(long, default_value_t = 60)]
     health_timeout_seconds: u64,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Arguments::parse();
+#[derive(Debug, Args)]
+struct RollbackArguments {
+    #[arg(long)]
+    install_root: PathBuf,
+    #[arg(long)]
+    health_entrypoint: String,
+    #[arg(long)]
+    health_arg: Vec<String>,
+    #[arg(long, default_value_t = 60)]
+    health_timeout_seconds: u64,
+}
+
+#[derive(Debug, Args)]
+struct RejectArguments {
+    #[arg(long)]
+    install_root: PathBuf,
+    #[arg(long)]
+    health_entrypoint: String,
+    #[arg(long)]
+    health_arg: Vec<String>,
+    #[arg(long, default_value_t = 60)]
+    health_timeout_seconds: u64,
+}
+
+#[derive(Debug, Args)]
+struct CurrentArguments {
+    #[arg(long)]
+    install_root: PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct RunArguments {
+    #[arg(long)]
+    install_root: PathBuf,
+    #[arg(long)]
+    entrypoint: String,
+    #[arg(last = true)]
+    arguments: Vec<String>,
+}
+
+#[derive(Debug, Subcommand)]
+enum UpdateCommand {
+    Install(InstallArguments),
+    Rollback(RollbackArguments),
+    Reject(RejectArguments),
+    Current(CurrentArguments),
+    Run(RunArguments),
+}
+
+#[derive(Debug, Parser)]
+#[command(name = "knoa-update")]
+struct CommandLine {
+    #[command(subcommand)]
+    command: UpdateCommand,
+}
+
+fn health_timeout(seconds: u64) -> Duration {
+    Duration::from_secs(seconds.clamp(1, 300))
+}
+
+fn install(args: InstallArguments) -> Result<(), Box<dyn std::error::Error>> {
     let constraints = InstallConstraints {
         release_kind: match args.kind {
             KindArgument::Product => ReleaseKind::Product,
@@ -99,25 +158,99 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.bundle.ok_or("--bundle or --archive is required")?
     };
     let release = verify_bundle(&bundle, &trust_store, &constraints)?;
-    if let Some(install_root) = args.install_root {
-        let health_entrypoint = args
-            .health_entrypoint
-            .ok_or("--install-root requires --health-entrypoint")?;
-        let timeout = Duration::from_secs(args.health_timeout_seconds.clamp(1, 300));
-        let store = ReleaseStore::new(install_root);
-        let result = store.install(&bundle, &release, |candidate| {
-            run_health_check(candidate, &health_entrypoint, &args.health_arg, timeout)
-        })?;
-        println!(
-            "activated release={} previous={}",
-            result.release_id, result.previous_release_id
-        );
-    } else {
-        println!(
-            "verified release={} version={}",
-            release.manifest().release_id,
-            release.manifest().version
-        );
-    }
+    let timeout = health_timeout(args.health_timeout_seconds);
+    let store = ReleaseStore::new(args.install_root);
+    let result = store.install(&bundle, &release, |candidate| {
+        run_health_check(
+            candidate,
+            &args.health_entrypoint,
+            &args.health_arg,
+            timeout,
+        )
+    })?;
+    println!(
+        "activated release={} previous={}",
+        result.release_id, result.previous_release_id
+    );
     Ok(())
+}
+
+fn rollback(args: RollbackArguments) -> Result<(), Box<dyn std::error::Error>> {
+    let timeout = health_timeout(args.health_timeout_seconds);
+    let store = ReleaseStore::new(args.install_root);
+    let result = store.rollback(|candidate| {
+        run_health_check(
+            candidate,
+            &args.health_entrypoint,
+            &args.health_arg,
+            timeout,
+        )
+    })?;
+    println!(
+        "rolled back release={} replaced={}",
+        result.release_id, result.previous_release_id
+    );
+    Ok(())
+}
+
+fn reject(args: RejectArguments) -> Result<(), Box<dyn std::error::Error>> {
+    let timeout = health_timeout(args.health_timeout_seconds);
+    let store = ReleaseStore::new(args.install_root);
+    let result = store.reject_current(|candidate| {
+        run_health_check(
+            candidate,
+            &args.health_entrypoint,
+            &args.health_arg,
+            timeout,
+        )
+    })?;
+    println!(
+        "rejected release={} restored={}",
+        result.previous_release_id, result.release_id
+    );
+    Ok(())
+}
+
+fn run(args: RunArguments) -> Result<(), Box<dyn std::error::Error>> {
+    let store = ReleaseStore::new(args.install_root);
+    let release_root = store
+        .current_path()?
+        .ok_or("no active Knoa Release is installed")?;
+    let executable = store.current_entrypoint(&args.entrypoint)?;
+    let mut command = Command::new(executable);
+    command
+        .args(args.arguments)
+        .current_dir(&release_root)
+        .env("KNOA_RELEASE_ROOT", &release_root);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+
+        return Err(command.exec().into());
+    }
+    #[cfg(not(unix))]
+    {
+        let status = command.status()?;
+        if !status.success() {
+            return Err(format!("Knoa Release process exited with {status}").into());
+        }
+        Ok(())
+    }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    match CommandLine::parse().command {
+        UpdateCommand::Install(args) => install(args),
+        UpdateCommand::Rollback(args) => rollback(args),
+        UpdateCommand::Reject(args) => reject(args),
+        UpdateCommand::Current(args) => {
+            let store = ReleaseStore::new(args.install_root);
+            let current = store
+                .current_path()?
+                .ok_or("no active Knoa Release is installed")?;
+            println!("{}", current.display());
+            Ok(())
+        }
+        UpdateCommand::Run(args) => run(args),
+    }
 }

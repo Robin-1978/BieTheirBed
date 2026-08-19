@@ -570,6 +570,11 @@ def _is_knoa_service_pid(pid: int) -> bool:
         raw = (Path("/proc") / str(pid) / "cmdline").read_bytes()
     except OSError:
         return False
+    return _cmdline_is_knoa_service(raw)
+
+
+def _cmdline_is_knoa_service(raw: bytes) -> bool:
+    """Recognize the supported Python service entrypoints from argv bytes."""
     arguments = tuple(
         part.decode("utf-8", errors="replace")
         for part in raw.split(b"\0")

@@ -1,0 +1,10 @@
+runtime_root: "@NODE_ROOT@"
+working_directory: "@WORKSPACE_ROOT@"
+service_host: "127.0.0.1"
+service_port: 9527
+gateway_enabled: true
+gateway_host: "127.0.0.1"
+gateway_port: 9531
+gateway_remote_enabled: false
+capability_mcp_host: "127.0.0.1"
+capability_mcp_port: 9530

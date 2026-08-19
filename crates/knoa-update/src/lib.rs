@@ -667,9 +667,67 @@ impl ReleaseStore {
         })
     }
 
+    pub fn reject_current<F>(&self, health_check: F) -> Result<UpdateResult>
+    where
+        F: FnOnce(&Path) -> Result<()>,
+    {
+        let state = self.read_state()?;
+        if state.current.is_empty() {
+            return Err(UpdateError::InvalidBundle(
+                "no active Release is available to reject".into(),
+            ));
+        }
+        let rejected = state.current;
+        if state.previous.is_empty() {
+            self.write_state(&ReleaseState {
+                schema_version: 1,
+                current: String::new(),
+                previous: String::new(),
+                failed: rejected.clone(),
+            })?;
+            return Ok(UpdateResult {
+                release_id: String::new(),
+                previous_release_id: rejected,
+                rolled_back: true,
+            });
+        }
+        let candidate = self.versions_root().join(&state.previous);
+        if !candidate.is_dir() {
+            return Err(UpdateError::InvalidBundle(
+                "previous Release directory is missing".into(),
+            ));
+        }
+        health_check(&candidate)?;
+        self.write_state(&ReleaseState {
+            schema_version: 1,
+            current: state.previous.clone(),
+            previous: rejected.clone(),
+            failed: rejected.clone(),
+        })?;
+        Ok(UpdateResult {
+            release_id: state.previous,
+            previous_release_id: rejected,
+            rolled_back: true,
+        })
+    }
+
     pub fn current_path(&self) -> Result<Option<PathBuf>> {
         let state = self.read_state()?;
         Ok((!state.current.is_empty()).then(|| self.versions_root().join(state.current)))
+    }
+
+    pub fn current_entrypoint(&self, entrypoint: &str) -> Result<PathBuf> {
+        let root = self
+            .current_path()?
+            .ok_or_else(|| UpdateError::InvalidBundle("no active Release is installed".into()))?;
+        let executable = root.join(safe_relative_path(entrypoint)?);
+        let metadata = fs::symlink_metadata(&executable)?;
+        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+            return Err(UpdateError::InvalidBundle(
+                "Release entrypoint is not a regular file".into(),
+            ));
+        }
+        Ok(executable)
     }
 
     fn versions_root(&self) -> PathBuf {
@@ -766,7 +824,7 @@ fn apply_artifact_modes(root: &Path, manifest: &ReleaseManifest) -> Result<()> {
             let target = root.join(safe_relative_path(&artifact.path)?);
             fs::set_permissions(
                 target,
-                fs::Permissions::from_mode(if artifact.executable { 0o700 } else { 0o600 }),
+                fs::Permissions::from_mode(if artifact.executable { 0o755 } else { 0o644 }),
             )?;
         }
     }
@@ -976,5 +1034,76 @@ mod tests {
 
         assert!(error.to_string().contains("unhealthy"));
         assert!(store.current_path().unwrap().is_none());
+    }
+
+    #[test]
+    fn native_release_store_rolls_back_and_resolves_current_entrypoint() {
+        let fixture = repository_root().join("protocol/fixtures/release-v1");
+        let bundle = fixture.join("product-node-linux");
+        let trust = ReleaseTrustStore::load(&fixture.join("trust-store.json")).unwrap();
+        let release = verify_bundle(
+            &bundle,
+            &trust,
+            &InstallConstraints {
+                release_kind: ReleaseKind::Product,
+                role: Some(ReleaseRole::Node),
+                target: TargetPlatform {
+                    os: TargetOs::Linux,
+                    arch: TargetArch::X86_64,
+                },
+                agent_runtime_spi_version: 1,
+            },
+        )
+        .unwrap();
+        let temporary = tempfile::tempdir().unwrap();
+        let store = ReleaseStore::new(temporary.path().join("store"));
+        store.install(&bundle, &release, |_| Ok(())).unwrap();
+
+        let state = ReleaseState {
+            schema_version: 1,
+            current: "candidate".into(),
+            previous: release.manifest().release_id.clone(),
+            failed: String::new(),
+        };
+        fs::create_dir_all(temporary.path().join("store/versions/candidate")).unwrap();
+        store.write_state(&state).unwrap();
+        let result = store
+            .rollback(|candidate| {
+                assert!(candidate.join("bin/knoa").is_file());
+                Ok(())
+            })
+            .unwrap();
+
+        assert!(result.rolled_back);
+        assert_eq!(
+            store.current_entrypoint("bin/knoa").unwrap(),
+            temporary
+                .path()
+                .join("store/versions/fixture-node-linux-1.0.0/bin/knoa")
+        );
+        assert!(store.current_entrypoint("../outside").is_err());
+    }
+
+    #[test]
+    fn native_release_store_rejects_unhealthy_first_release() {
+        let temporary = tempfile::tempdir().unwrap();
+        let store = ReleaseStore::new(temporary.path().join("store"));
+        store
+            .write_state(&ReleaseState {
+                schema_version: 1,
+                current: "bad-first-release".into(),
+                previous: String::new(),
+                failed: String::new(),
+            })
+            .unwrap();
+
+        let result = store
+            .reject_current(|_| panic!("no previous health check"))
+            .unwrap();
+
+        assert!(result.rolled_back);
+        assert!(result.release_id.is_empty());
+        assert!(store.current_path().unwrap().is_none());
+        assert_eq!(store.read_state().unwrap().failed, "bad-first-release");
     }
 }

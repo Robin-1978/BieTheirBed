@@ -22,7 +22,7 @@ from knoa_platform.release.manifest import (
 from knoa_platform.release.archive import pack_bundle
 
 
-def _load_private_key(path: Path) -> Ed25519PrivateKey:
+def load_private_key(path: Path) -> Ed25519PrivateKey:
     key = serialization.load_pem_private_key(path.read_bytes(), password=None)
     if not isinstance(key, Ed25519PrivateKey):
         raise TypeError("Release signing key must be an Ed25519 private key")
@@ -183,7 +183,7 @@ def main() -> int:
         target_arch=args.target_arch,
         version=args.version,
         release_id=release_id,
-        signing_key=_load_private_key(args.signing_key),
+        signing_key=load_private_key(args.signing_key),
         key_id=args.key_id,
         extension=extension,
     )

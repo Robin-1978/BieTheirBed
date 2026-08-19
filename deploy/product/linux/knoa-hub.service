@@ -1,0 +1,21 @@
+[Unit]
+Description=Knoa Hosted Hub and Relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=knoa
+Group=knoa
+EnvironmentFile=@HUB_ENV@
+ExecStart=@INSTALL_ROOT@/bin/knoa-update run --install-root @INSTALL_ROOT@/releases --entrypoint bin/knoa-hub -- --deployment-mode hosted_single_node --host 127.0.0.1 --port 9529 --root @HUB_ROOT@ --hub-id hub_knoa_hosted
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=@HUB_ROOT@
+
+[Install]
+WantedBy=multi-user.target

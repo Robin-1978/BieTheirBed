@@ -74,6 +74,8 @@ include = [
     "/scripts/capture_runtime_baseline.py",
     "/scripts/benchmark_relay.py",
     "/scripts/build_release_bundle.py",
+    "/scripts/build_product_release.py",
+    "/scripts/materialize_release_payload.py",
     "/scripts/check_protocol_contracts.py",
     "/scripts/check_release_manifest.py",
     "/scripts/check_release_role.py",
@@ -99,6 +101,11 @@ markers = [
 # explicit so a future Ruff release cannot silently turn preview/style rules
 # into a blocking full-repository migration.
 select = ["E4", "E7", "E9", "F"]
+
+[tool.uv]
+# Knoa's supported product matrix is Windows/Linux. Avoid resolving macOS-only
+# desktop frameworks into the release dependency lock.
+environments = ["sys_platform == 'win32' or sys_platform == 'linux'"]
 
 [tool.coverage.run]
 source = [
