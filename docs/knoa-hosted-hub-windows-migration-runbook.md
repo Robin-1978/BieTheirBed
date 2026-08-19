@@ -495,6 +495,30 @@ C:\ProgramData\Knoa\Scripts\Publish-KnoaApp.ps1 -ApkPath C:\Builds\knoa-0.2.53.a
 
 发布只更新 `C:\ProgramData\Knoa\HostedHub\mobile-releases\android`，不重启 Hub 或 Node。
 
+### 12.5 Windows 一键更新与重启
+
+安装器会把 Role、源码目录、Hub 公网地址、数据目录、Python 版本和端口持久化到：
+
+```text
+C:\ProgramData\Knoa\Config\installation.json
+```
+
+后续只需双击：
+
+```text
+C:\ProgramData\Knoa\Scripts\Update-Knoa.cmd
+```
+
+更新器会自动请求管理员权限，检查源码目录没有 tracked 修改，执行 `git pull --ff-only`，按已保存的
+Role 重新安装并重启对应的 WinSW 服务，最后检查服务为 `Running`。安装中途失败时会尝试恢复此前已
+安装的服务，不删除 Hub、Workspace、Node identity、Secrets 或 App release 数据。
+
+从尚未安装一键更新器的旧版本升级时，只需先执行一次 `git pull`，再双击：
+
+```text
+C:\knoa\deploy\windows\Update-Knoa.cmd
+```
+
 跨机自动发布使用独立凭据：
 
 ```text
