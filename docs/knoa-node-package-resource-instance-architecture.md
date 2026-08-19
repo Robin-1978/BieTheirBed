@@ -159,7 +159,7 @@ Agent，也不让 Codex Runtime 改用 Platform Model Provider。
 
 ## 6. P2P-first
 
-数据路径按以下顺序解析：
+当前已交付数据路径按以下顺序解析：
 
 ```text
 1. Node 声明并签名的 direct Gateway candidate
@@ -168,8 +168,9 @@ Agent，也不让 Codex Runtime 改用 Platform Model Provider。
 4. Relay 端到端加密回退
 ```
 
-V1 支持“显式 direct candidate + Relay fallback”。完整 STUN/ICE/NAT traversal 留到真实需求出现后，
-不在当前阶段建设。
+V1 已支持“显式 direct candidate + Relay fallback”。由于真实远程使用已证明 Relay 延迟和带宽成为问题，
+[跨平台 Runtime 实施计划](./knoa-cross-platform-runtime-migration-plan.md) Phase 5 将增加 STUN/ICE/NAT traversal。
+该增强仍保持同一 Node identity、ticket、Invocation ID 和 Relay fallback，不建立第二套远程执行协议。
 
 Hub 负责 Account、Workspace、Node directory、presence、ResourceGrant、ticket 与连接协调。Relay 只转发
 端到端加密 frame，不解密 Prompt、模型响应或 MCP payload，不拥有 Invocation 状态。Node 主动连接 Hub，

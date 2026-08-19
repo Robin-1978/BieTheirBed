@@ -8,6 +8,8 @@
 >
 > 权威关系：产品对象和配置归属以 `knoa-product-domain-architecture.md` 为准；模块职责以 `knoa-module-architecture.md` 为准；跨 Node 调用以 `knoa-workspace-resource-fabric-design.md` 为准；本文是进程、网络和运维部署的权威入口
 >
+> 实现语言、Rust Node Host、Python Agent Worker、跨平台 Bundle/Updater 与迁移阶段以 `knoa-cross-platform-runtime-architecture.md` 和 `knoa-cross-platform-runtime-migration-plan.md` 为准
+>
 > 设计取向：local-first、Hub-assisted、self-hostable；高内聚、低耦合；KISS、YAGNI；当前能力与目标能力必须明确区分
 
 ## 1. 文档目的
@@ -225,7 +227,7 @@ Knoa Node
 - 没有自动 Node directory、Relay、跨设备账户恢复和多 Node 共享模型票据；
 - 不要求为了直连默认创建公网域名。
 
-### 6.2 Self-hosted Hub + Relay（当前推荐的多 Node V1）
+### 6.2 Self-hosted Hub + Relay（当前多 Node V1 与 P2P 目标）
 
 适用：一个用户或家庭拥有 N 台 Node，希望只管理一个域名。
 
@@ -251,12 +253,14 @@ Node A               Node B               Node C
 - 用户只配置一个 Hub 域名；
 - Hub 对外只暴露 TLS 保护的 HTTPS/WSS；
 - N 个 Node 主动发起出站连接，不需要 N 个公网域名；
-- 默认 transport policy 是 `p2p_preferred`：依次尝试 LAN/direct、Internet P2P/NAT traversal，再使用
-  Relay fallback；
+- 当前已交付 transport 依次尝试显式 LAN/direct candidate，再使用 Relay fallback；
+- 目标 transport policy 是 `p2p_preferred`：按跨平台 Runtime 实施计划 Phase 5 增加 Internet
+  ICE P2P/NAT traversal，再使用 Relay fallback；
 - 用户不需要为每个 Node 配置域名；显式公网 direct endpoint 只是 P2P candidate 之一，不是部署前置；
-- App 先访问 Hub 选择 Node、获取短期 ticket 和交换连接 candidate，再进行有界 P2P 建连；
-- Node-to-Node 共享 LLM/MCP 同样 P2P 优先、Relay fallback，并复用安全连接和同一 invocation ID；
-- Relay 不承担默认 LLM streaming、MCP 或 Artifact 数据面，只在 P2P 失败时兜底；
+- 目标态 App 先访问 Hub 选择 Node、获取短期 ticket 和交换连接 candidate，再进行有界 P2P 建连；
+- 目标态 Node-to-Node 共享 LLM/MCP 同样 P2P 优先、Relay fallback，并复用安全连接和同一 invocation ID；
+- 目标态 Relay 不承担默认 LLM streaming、MCP 或 Artifact 数据面，只在 P2P 失败时兜底；当前 Relay 仍可能
+  承载主要远程数据面，因此必须先完成 streaming 与 backpressure 性能修复；
 - Hub/Relay 单实例部署，不启用多 worker。
 
 ### 6.3 Knoa Hosted Hub Single-Node（形态 3 单节点 MVP）
