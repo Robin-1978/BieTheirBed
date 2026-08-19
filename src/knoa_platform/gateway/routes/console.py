@@ -221,10 +221,29 @@ class ConsoleRoutes:
             return JSONResponse({"error": "invalid_configuration"}, status_code=400)
         except Exception as error:
             return self._core_error(error)
+        workspace_sync: dict = {}
+        try:
+            workspace_sync = await self._node_relay.sync_workspace_resources()
+        except Exception as error:  # Local configuration remains applied.
+            workspace_sync = {"error": type(error).__name__}
         return JSONResponse(
-            {"result": result.model_dump(mode="json")},
+            {
+                "result": result.model_dump(mode="json"),
+                "workspace_sync": workspace_sync,
+            },
             headers={"Cache-Control": "no-store"},
         )
+
+    async def _console_workspace_resources(self, request: Request) -> JSONResponse:
+        if (error := self._console_authorize(request)) is not None:
+            return error
+        try:
+            state = await self._node_relay.workspace_resource_state()
+        except PermissionError:
+            return JSONResponse({"error": "node_not_enrolled"}, status_code=409)
+        except Exception:
+            return JSONResponse({"error": "hub_unavailable"}, status_code=503)
+        return JSONResponse(state, headers={"Cache-Control": "no-store"})
 
     async def _console_secret(self, request: Request) -> JSONResponse:
         if (error := self._console_authorize(request)) is not None:

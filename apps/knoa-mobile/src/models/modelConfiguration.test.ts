@@ -100,11 +100,13 @@ describe("model configuration", () => {
       displayName: "Qwen",
       enabled: true,
       maxRemoteConcurrency: 2,
+      allowedNodeIds: ["node-b"],
     });
     expect(next.model_deployments["deployment-1"]).toMatchObject({
       model_alias: "current",
       share_enabled: true,
       max_remote_concurrency: 2,
+      allowed_node_ids: ["node-b"],
     });
   });
 

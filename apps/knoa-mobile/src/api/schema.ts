@@ -116,6 +116,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/p2p/offer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createGatewayP2PAnswer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/resource-p2p/offer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createResourceP2PAnswer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/hub": {
         parameters: {
             query?: never;
@@ -2137,6 +2169,11 @@ export interface components {
              * @default 1
              */
             max_remote_concurrency: number;
+            /**
+             * Allowed Node Ids
+             * @default []
+             */
+            allowed_node_ids: string[];
         };
         /** ManagedOperationalConfig */
         ManagedOperationalConfig: {
@@ -2473,6 +2510,30 @@ export interface components {
              * @default
              */
             last_error: string;
+        };
+        /** P2PAnswer */
+        P2PAnswer: {
+            /**
+             * Type
+             * @constant
+             */
+            type: "answer";
+            /** Sdp */
+            sdp: string;
+        };
+        /** P2PAnswerResponse */
+        P2PAnswerResponse: {
+            answer: components["schemas"]["P2PAnswer"];
+        };
+        /** P2POfferRequest */
+        P2POfferRequest: {
+            /**
+             * Type
+             * @constant
+             */
+            type: "offer";
+            /** Sdp */
+            sdp: string;
         };
         /** PairChallengeRequest */
         PairChallengeRequest: {
@@ -2890,6 +2951,20 @@ export interface components {
         ResourceInvocationResponse: {
             /** Chunks */
             chunks: components["schemas"]["ProviderChunk"][];
+        };
+        /** ResourceP2POfferRequest */
+        ResourceP2POfferRequest: {
+            /**
+             * Type
+             * @constant
+             */
+            type: "offer";
+            /** Sdp */
+            sdp: string;
+            /** Invocation Id */
+            invocation_id: string;
+            /** Ticket */
+            ticket: string;
         };
         /** ResumeTaskRequest */
         ResumeTaskRequest: {
@@ -3668,6 +3743,135 @@ export interface operations {
             };
             /** @description Request rejected */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    createGatewayP2PAnswer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["P2POfferRequest"];
+            };
+        };
+        responses: {
+            /** @description WebRTC answer */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["P2PAnswerResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    createResourceP2PAnswer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResourceP2POfferRequest"];
+            };
+        };
+        responses: {
+            /** @description WebRTC resource answer */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["P2PAnswerResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

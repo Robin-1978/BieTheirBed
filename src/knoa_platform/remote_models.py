@@ -26,6 +26,7 @@ from knoa_platform.config import AppConfig, ResolvedModelConfig, ThinkingConfig
 from knoa_platform.configuration.models import ManagedConfig
 from knoa_platform.hub.relay import RelayFrame
 from knoa_platform.node_identity import NodeIdentity, NodeIdentityStore
+from knoa_platform.p2p import P2PClient
 from knoa_platform.relay_protocol import (
     canonical_json,
     decode_base64url,
@@ -306,6 +307,11 @@ class RemoteModelEndpoint:
         cancellation.set()
         return self.repository.cancel(invocation_id)
 
+    def authorize(self, ticket: str, invocation_id: str) -> None:
+        """Authorize P2P signaling without admitting or executing an invocation."""
+
+        self._claims(ticket, invocation_id)
+
     async def observations(self) -> tuple[dict[str, Any], ...]:
         managed = await self._managed()
         items = []
@@ -439,7 +445,7 @@ class RemoteModelEndpoint:
 
 
 class RemoteModelProvider(ModelProviderPort):
-    """Caller Node Provider: direct TLS first, then the same invocation via Relay."""
+    """Caller Node Provider: explicit Direct, NAT P2P, then bounded Relay fallback."""
 
     def __init__(
         self,
@@ -455,6 +461,9 @@ class RemoteModelProvider(ModelProviderPort):
         self._paths = paths
         self._client_factory = client_factory
         self._clock = clock
+        self._p2p = P2PClient()
+        self._p2p_lock = asyncio.Lock()
+        self._p2p_retry_after = 0.0
 
     @property
     def model_alias(self) -> str:
@@ -499,7 +508,15 @@ class RemoteModelProvider(ModelProviderPort):
                 except (httpx.HTTPError, OSError, ValueError):
                     result = None
             if result is None:
-                result = await self._relay(invocation_id, ticket, body)
+                if self._clock() >= self._p2p_retry_after:
+                    try:
+                        result = await self._p2p_request(invocation_id, ticket, body)
+                        self._p2p_retry_after = 0.0
+                    except Exception:  # Relay remains the bounded fallback.
+                        await self._p2p.close()
+                        self._p2p_retry_after = self._clock() + 60.0
+                if result is None:
+                    result = await self._relay(invocation_id, ticket, body)
             for raw in result.get("chunks", ()):
                 if cancellation.is_set():
                     return
@@ -577,6 +594,59 @@ class RemoteModelProvider(ModelProviderPort):
         ticket: str,
         body: dict[str, Any],
     ) -> dict[str, Any]:
+        return await self._relay_rpc(
+            invocation_id,
+            ticket,
+            f"/v1/resource-invocations/{quote(invocation_id, safe='')}",
+            body,
+        )
+
+    async def _p2p_request(
+        self,
+        invocation_id: str,
+        ticket: str,
+        body: dict[str, Any],
+    ) -> dict[str, Any]:
+        async with self._p2p_lock:
+            if not self._p2p.connected:
+                async def exchange(offer: dict[str, str]) -> dict[str, str]:
+                    response = await self._relay_rpc(
+                        invocation_id,
+                        ticket,
+                        "/v1/resource-p2p/offer",
+                        {
+                            "invocation_id": invocation_id,
+                            "ticket": ticket,
+                            **offer,
+                        },
+                    )
+                    answer = response.get("answer")
+                    if not isinstance(answer, dict):
+                        raise ValueError("Resource P2P answer is invalid")
+                    return {"type": str(answer["type"]), "sdp": str(answer["sdp"])}
+
+                await self._p2p.connect(exchange)
+        response = await self._p2p.request(
+            "POST",
+            f"/v1/resource-invocations/{quote(invocation_id, safe='')}",
+            headers={"content-type": "application/json"},
+            body=canonical_json(body),
+            timeout=self._model.timeout,
+        )
+        if not 200 <= response.status < 300:
+            raise PermissionError("Remote model P2P invocation rejected")
+        value = json.loads(response.body)
+        if not isinstance(value, dict):
+            raise ValueError("Remote model P2P response must be an object")
+        return value
+
+    async def _relay_rpc(
+        self,
+        invocation_id: str,
+        ticket: str,
+        path: str,
+        body: dict[str, Any],
+    ) -> dict[str, Any]:
         enrollment = self._enrollment()
         pending = create_resource_client_hello(
             self._identity(),
@@ -625,7 +695,7 @@ class RemoteModelProvider(ModelProviderPort):
                 {
                     "type": "request_start",
                     "method": "POST",
-                    "path": f"/v1/resource-invocations/{quote(invocation_id, safe='')}",
+                    "path": path,
                     "headers": {"content-type": "application/json"},
                     "body_length": len(raw_body),
                 },

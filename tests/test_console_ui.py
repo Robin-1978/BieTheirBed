@@ -38,4 +38,5 @@ def test_node_console_owns_configuration_and_secret_management() -> None:
     assert "允许创建受治理 Child Task" in page
     assert 'id="agentTools"' in page
     assert 'id="delegationTargets"' in page
-    assert "Profile 与 Definition" in page
+    assert "一个 Provider 可以提供多个 Model" in page
+    assert "共享的是模型调用能力" in page

@@ -63,7 +63,7 @@ export async function subscribeTaskEvents(input: {
       if (!closed) pollTimer = setTimeout(() => void poll(), 2000);
     }
   };
-  if (input.client.transportMode() === "relay") {
+  if (input.client.transportMode() !== "direct") {
     void poll();
     return {
       close: () => {

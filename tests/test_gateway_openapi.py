@@ -33,6 +33,7 @@ def test_gateway_openapi_matches_the_allow_listed_http_surface(tmp_path) -> None
         "/v1/console/lifecycle/bundles/{name}",
         "/v1/console/config",
         "/v1/console/config/publish",
+        "/v1/console/workspace-resources",
         "/v1/console/secrets/{reference}",
     }
 

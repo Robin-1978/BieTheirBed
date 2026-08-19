@@ -356,18 +356,35 @@ class HubRepository:
         self, node_id: str, nonce: str, *, direct_gateway_url: str = ""
     ) -> dict:
         now = self._clock()
-        with self._connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            db.execute(
-                "INSERT INTO presence_nonces VALUES (?, ?, ?)", (node_id, nonce, now)
-            )
-            db.execute(
-                """UPDATE nodes SET last_seen=?, direct_gateway_url=?
-                   WHERE node_id=? AND state='active'""",
-                (now, direct_gateway_url, node_id),
-            )
-            db.execute("DELETE FROM presence_nonces WHERE observed_at<?", (now - 600,))
+        try:
+            with self._connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                db.execute(
+                    "INSERT INTO presence_nonces VALUES (?, ?, ?)", (node_id, nonce, now)
+                )
+                db.execute(
+                    """UPDATE nodes SET last_seen=?, direct_gateway_url=?
+                       WHERE node_id=? AND state='active'""",
+                    (now, direct_gateway_url, node_id),
+                )
+                db.execute("DELETE FROM presence_nonces WHERE observed_at<?", (now - 600,))
+        except sqlite3.IntegrityError as exc:
+            raise PermissionError("Node nonce was already consumed") from exc
         return self.node(node_id)
+
+    def consume_node_nonce(self, node_id: str, nonce: str) -> None:
+        """Reject replayed Node control-plane requests without changing presence."""
+
+        now = self._clock()
+        try:
+            with self._connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                db.execute(
+                    "INSERT INTO presence_nonces VALUES (?, ?, ?)", (node_id, nonce, now)
+                )
+                db.execute("DELETE FROM presence_nonces WHERE observed_at<?", (now - 600,))
+        except sqlite3.IntegrityError as exc:
+            raise PermissionError("Node nonce was already consumed") from exc
 
     def create_ticket(self, ticket_id: str, node_id: str, installation_id: str, expires_at: float) -> None:
         with self._connect() as db:

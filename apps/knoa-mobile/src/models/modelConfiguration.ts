@@ -20,6 +20,7 @@ export type ModelSharingValue = {
   displayName: string;
   enabled: boolean;
   maxRemoteConcurrency: number;
+  allowedNodeIds: string[];
 };
 
 export type WorkspaceRemoteModelValue = {
@@ -78,6 +79,7 @@ export function setModelSharing(
     enabled: true,
     share_enabled: value.enabled,
     max_remote_concurrency: value.maxRemoteConcurrency,
+    allowed_node_ids: value.enabled ? [...new Set(value.allowedNodeIds)] : [],
   };
   return document;
 }

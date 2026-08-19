@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 from typing import Any, Literal
@@ -16,6 +17,9 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from knoa_platform.hub.relay import RelayBroker, RelayFrame
 from knoa_platform.hub.repository import HubRepository
 from knoa_platform.hub.service import HubService
+
+
+logger = logging.getLogger(__name__)
 
 
 class _Request(BaseModel):
@@ -158,6 +162,26 @@ class ResourceTicketRequest(_Request):
     signature: str = Field(min_length=80, max_length=128)
 
 
+class NodeControlStateRequest(_Request):
+    node_id: str = Field(min_length=1, max_length=128)
+    timestamp: float
+    nonce: str = Field(min_length=16, max_length=256)
+    signature: str = Field(min_length=80, max_length=128)
+
+
+class NodeModelShareRequest(NodeControlStateRequest):
+    deployment_id: str = Field(min_length=1, max_length=128)
+    resource_id: str = Field(min_length=1, max_length=128)
+    display_name: str = Field(min_length=1, max_length=120)
+    model_identity: str = Field(min_length=1, max_length=512)
+    provider_protocol: Literal["openai_compatible", "anthropic"]
+    supports_vision: bool = False
+    materialized_digest: str = Field(min_length=64, max_length=64)
+    max_remote_concurrency: int = Field(ge=1, le=64)
+    allowed_node_ids: tuple[str, ...] = Field(default=(), max_length=256)
+    enabled: bool = True
+
+
 class InvocationObservationRequest(_Request):
     node_id: str = Field(min_length=1, max_length=128)
     invocation_id: str = Field(min_length=1, max_length=128)
@@ -194,6 +218,16 @@ class HubApplication:
                 ),
                 Route("/v1/nodes/enroll", self.enroll, methods=["POST"]),
                 Route("/v1/nodes/presence", self.presence, methods=["POST"]),
+                Route(
+                    "/v1/node-control/state",
+                    self.node_control_state,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/node-control/model-shares",
+                    self.node_model_share,
+                    methods=["POST"],
+                ),
                 Route("/v1/workspace", self.workspace, methods=["GET"]),
                 Route(
                     "/v1/workspace-resources",
@@ -348,6 +382,34 @@ class HubApplication:
         if isinstance(authenticated, JSONResponse):
             return authenticated
         return JSONResponse({"workspace": self.service.repository.workspace()})
+
+    async def node_control_state(self, request: Request) -> JSONResponse:
+        parsed = await self._parse(request, NodeControlStateRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            state = self.service.node_control_state(parsed.model_dump(mode="json"))
+        except (LookupError, PermissionError, ValueError):
+            return JSONResponse({"error": "rejected"}, status_code=401)
+        return JSONResponse(state, headers={"Cache-Control": "no-store"})
+
+    async def node_model_share(self, request: Request) -> JSONResponse:
+        parsed = await self._parse(request, NodeModelShareRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            state = self.service.publish_node_model_share(
+                parsed.model_dump(mode="json")
+            )
+        except (LookupError, PermissionError, ValueError) as exc:
+            logger.warning(
+                "Node model share rejected node_id=%s deployment_id=%s: %s",
+                parsed.node_id,
+                parsed.deployment_id,
+                exc,
+            )
+            return JSONResponse({"error": "rejected"}, status_code=422)
+        return JSONResponse(state, headers={"Cache-Control": "no-store"})
 
     async def workspace_resources(self, request: Request) -> JSONResponse:
         authenticated = self._authenticate(request, admin=request.method != "GET")

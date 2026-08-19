@@ -99,6 +99,15 @@ class ManagedModelDeploymentConfig(ConfigurationModel):
     enabled: bool = True
     share_enabled: bool = False
     max_remote_concurrency: int = Field(default=1, ge=1, le=64)
+    allowed_node_ids: tuple[SafeId, ...] = Field(default=(), max_length=256)
+
+    @model_validator(mode="after")
+    def validate_allowed_nodes(self) -> ManagedModelDeploymentConfig:
+        if len(set(self.allowed_node_ids)) != len(self.allowed_node_ids):
+            raise ValueError("Model deployment allowed_node_ids must be unique")
+        if not self.share_enabled and self.allowed_node_ids:
+            raise ValueError("Disabled Model sharing cannot retain allowed Nodes")
+        return self
 
 
 class ManagedSkillConfig(ConfigurationModel):

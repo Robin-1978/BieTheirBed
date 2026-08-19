@@ -1,6 +1,6 @@
 export interface GatewayTransport {
   request(baseUrl: string, path: string, init: RequestInit): Promise<Response>;
-  mode(): "direct" | "relay";
+  mode(): "direct" | "p2p" | "relay";
   close?(): void;
 }
 

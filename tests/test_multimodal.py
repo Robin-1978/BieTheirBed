@@ -1,8 +1,16 @@
 """Multimodal content, provider serialization, and image budgeting tests."""
 from __future__ import annotations
 
+import base64
+import io
+
+import pytest
+from PIL import Image
+
 from knoa_platform.model_adapter.content import (
     build_image_block,
+    ImageNormalizationError,
+    normalize_image_messages,
     text_block,
     to_anthropic_content,
     to_openai_content,
@@ -28,6 +36,32 @@ class TestContentBlocks:
         assert block["type"] == "image"
         assert block["image_url"] == DATA_URL
         assert block["media_type"] == "image/jpeg"
+
+    def test_provider_image_is_resized_and_reencoded_before_transport(self):
+        source = io.BytesIO()
+        Image.new("RGB", (3200, 2400), "#336699").save(source, format="PNG")
+        data_url = "data:image/png;base64," + base64.b64encode(source.getvalue()).decode()
+
+        messages = normalize_image_messages([
+            {"role": "user", "content": [build_image_block(data_url, "image/png")]},
+        ])
+
+        block = messages[0]["content"][0]
+        assert block["media_type"] == "image/jpeg"
+        assert block["width"] == 1536
+        assert block["height"] == 1152
+        assert len(base64.b64decode(block["image_url"].split(",", 1)[1])) < 3 * 1024 * 1024
+
+    def test_provider_image_hard_pixel_limit_fails_before_model_call(self):
+        source = io.BytesIO()
+        Image.new("RGB", (100, 100), "white").save(source, format="JPEG")
+        data_url = "data:image/jpeg;base64," + base64.b64encode(source.getvalue()).decode()
+
+        with pytest.raises(ImageNormalizationError, match="pixel"):
+            normalize_image_messages(
+                [{"role": "user", "content": [build_image_block(data_url)]}],
+                max_source_pixels=9_999,
+            )
 
 class TestOpenAISerialization:
     def test_str_passthrough(self):

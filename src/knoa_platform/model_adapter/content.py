@@ -9,7 +9,22 @@ Helpers convert the neutral representation into each provider's wire format.
 """
 from __future__ import annotations
 
+import base64
+import binascii
+import io
 from typing import Any
+
+from PIL import Image, ImageOps, UnidentifiedImageError
+
+
+class ImageNormalizationError(ValueError):
+    """Raised before a provider can receive an unsafe image payload."""
+
+
+MAX_PROVIDER_IMAGE_EDGE = 1536
+MAX_PROVIDER_IMAGE_SOURCE_BYTES = 32 * 1024 * 1024
+MAX_PROVIDER_IMAGE_SOURCE_PIXELS = 64_000_000
+MAX_PROVIDER_IMAGE_BYTES = 3 * 1024 * 1024
 
 def text_block(text: str) -> dict[str, Any]:
     return {"type": "text", "text": text}
@@ -36,6 +51,115 @@ def _data_url_parts(image_url: str) -> tuple[str, str]:
             media_type = "image/jpeg"
         return media_type, b64
     return "image/jpeg", image_url
+
+
+def normalize_image_messages(
+    messages: list[dict[str, Any]],
+    *,
+    max_edge: int = MAX_PROVIDER_IMAGE_EDGE,
+    max_source_bytes: int = MAX_PROVIDER_IMAGE_SOURCE_BYTES,
+    max_source_pixels: int = MAX_PROVIDER_IMAGE_SOURCE_PIXELS,
+    max_output_bytes: int = MAX_PROVIDER_IMAGE_BYTES,
+) -> list[dict[str, Any]]:
+    """Return provider-safe messages with every inline image bounded.
+
+    Durable Artifacts may retain their original bytes. This function creates
+    only the bounded derivative placed on the model wire, so an old client or
+    another ingress path cannot feed a full phone photo directly to llama.cpp.
+    """
+
+    normalized: list[dict[str, Any]] = []
+    for message in messages:
+        copied = dict(message)
+        content = copied.get("content")
+        if not isinstance(content, list):
+            normalized.append(copied)
+            continue
+        blocks: list[Any] = []
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "image":
+                blocks.append(block)
+                continue
+            blocks.append(
+                _normalize_image_block(
+                    block,
+                    max_edge=max_edge,
+                    max_source_bytes=max_source_bytes,
+                    max_source_pixels=max_source_pixels,
+                    max_output_bytes=max_output_bytes,
+                )
+            )
+        copied["content"] = blocks
+        normalized.append(copied)
+    return normalized
+
+
+def _normalize_image_block(
+    block: dict[str, Any],
+    *,
+    max_edge: int,
+    max_source_bytes: int,
+    max_source_pixels: int,
+    max_output_bytes: int,
+) -> dict[str, Any]:
+    image_url = str(block.get("image_url", ""))
+    if not image_url.startswith("data:") or ";base64," not in image_url:
+        raise ImageNormalizationError("Image input must be an inline base64 data URL")
+    _media_type, encoded = _data_url_parts(image_url)
+    estimated_size = len(encoded) * 3 // 4
+    if estimated_size <= 0 or estimated_size > max_source_bytes:
+        raise ImageNormalizationError("Image source exceeds the safe byte limit")
+    try:
+        source = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise ImageNormalizationError("Image input contains invalid base64") from exc
+    if len(source) > max_source_bytes:
+        raise ImageNormalizationError("Image source exceeds the safe byte limit")
+
+    try:
+        with Image.open(io.BytesIO(source)) as opened:
+            width, height = opened.size
+            if width <= 0 or height <= 0 or width * height > max_source_pixels:
+                raise ImageNormalizationError("Image source exceeds the safe pixel limit")
+            # JPEG draft decoding avoids materializing the full camera frame
+            # before it is reduced on memory-constrained Windows Nodes.
+            if str(opened.format or "").upper() in {"JPEG", "MPO"}:
+                opened.draft("RGB", (max_edge, max_edge))
+            image = ImageOps.exif_transpose(opened)
+            image.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+            if image.mode != "RGB":
+                if "A" in image.getbands():
+                    background = Image.new("RGB", image.size, "white")
+                    background.paste(image, mask=image.getchannel("A"))
+                    image = background
+                else:
+                    image = image.convert("RGB")
+            output = _encode_bounded_jpeg(image, max_output_bytes)
+            result = dict(block)
+            result.update(
+                {
+                    "image_url": "data:image/jpeg;base64,"
+                    + base64.b64encode(output).decode("ascii"),
+                    "media_type": "image/jpeg",
+                    "width": int(image.width),
+                    "height": int(image.height),
+                }
+            )
+            return result
+    except ImageNormalizationError:
+        raise
+    except (Image.DecompressionBombError, UnidentifiedImageError, OSError) as exc:
+        raise ImageNormalizationError("Image input cannot be decoded safely") from exc
+
+
+def _encode_bounded_jpeg(image: Image.Image, max_output_bytes: int) -> bytes:
+    for quality in (82, 72, 62):
+        output = io.BytesIO()
+        image.save(output, format="JPEG", quality=quality, optimize=True)
+        value = output.getvalue()
+        if len(value) <= max_output_bytes:
+            return value
+    raise ImageNormalizationError("Normalized image exceeds the provider byte limit")
 
 
 # ── Provider serialization ─────────────────────────────────────────────

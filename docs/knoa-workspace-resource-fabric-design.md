@@ -1,7 +1,7 @@
 # Knoa Workspace LLM/MCP 共享服务架构
 
 > 状态：跨 Node 资源共享权威设计
-> 更新：2026-08-17
+> 更新：2026-08-20
 
 ## 1. 范围
 
@@ -57,6 +57,10 @@ Workspace: ModelResource + Deployment + ResourceGrant
 Caller Node: Add Workspace Model -> bind local Knoa Agent
 ```
 
+ModelResource 可以由提供方 Node 创建，也可以由 Workspace 管理员预先定义。后一种情况下，Node 只拥有
+目标 Deployment 的运行与观测职责；Hub 仅在上报的模型协议、identity 和 capability 与 Workspace 定义一致、
+且 Deployment 已指向该 Node 时接受上报，不把 Node 提升为资源定义所有者。
+
 App 在调用方 Node 的“模型”页只显示有效 `model_inference` Grant 对应的模型。用户点击“添加”后，Node
 创建只含 `remote_deployment_id` 的 `workspace_remote` Provider；Deployment ID、路由地址和 API Key 均不
 要求用户输入。Agent 绑定仍是调用方 Node-local 配置。
@@ -73,11 +77,10 @@ MCP 默认 Node-local。发布共享 MCPEndpoint 时，Secret 仍留在 Provider
 Node presence 上报签名连接 candidate。Hub 在每次短期 Resource Ticket 中返回当前目标 Node 的 candidate；
 Caller 不把该地址长期写死在模型配置中。Caller 使用同一 Invocation ID 在 transport 间转换，不得重复执行。
 
-当前已交付为显式 direct candidate + Relay fallback。目标以
-[跨平台 Runtime 演进架构](./knoa-cross-platform-runtime-architecture.md) 为准，并按
-[跨平台 Runtime 实施计划](./knoa-cross-platform-runtime-migration-plan.md) Phase 5 扩展为 host/server-reflexive
-ICE candidate + STUN P2P，失败后仍回落同一 E2E Relay。这只替换 transport，不改变 ResourceGrant、目标 Node
-最终授权和 Invocation 权威。
+当前已交付显式 Direct + WebRTC ICE/STUN P2P + Relay fallback。Caller 先用短期 Invocation Ticket 在认证
+Resource Relay 中交换 offer/answer，成功后复用 DataChannel；对称 NAT、防火墙或连接故障时回落同一 E2E
+Relay，并设置重试冷却。这只替换 transport，不改变 ResourceGrant、目标 Node 最终授权、Invocation ID、
+持久化幂等记录或执行权威。
 
 ## 7. 不变量
 

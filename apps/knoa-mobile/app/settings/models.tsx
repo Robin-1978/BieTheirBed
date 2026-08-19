@@ -30,7 +30,6 @@ import {
   type ModelDriver,
   type ModelEditorValue,
 } from "@/models/modelConfiguration";
-import { publishWorkspaceModelShare } from "@/models/workspaceModelSharing";
 import {
   availableWorkspaceModels,
   type AvailableWorkspaceModel,
@@ -216,10 +215,7 @@ export default function ModelsScreen() {
     }
     const deployment = deploymentForModel(document, alias)?.[1];
     const deploymentId = deploymentForModel(document, alias)?.[0];
-    const activeGrants = workspace?.grants.filter(
-      (grant) => grant.target_deployment_id === deploymentId && grant.revoked_at === null,
-    ) ?? [];
-    setAllowedNodeIds(activeGrants.map((grant) => grant.caller_node_id));
+    setAllowedNodeIds(deployment?.allowed_node_ids ?? []);
     setConcurrency(deployment?.max_remote_concurrency ?? 1);
     setSharingAlias(alias);
     setEditor(null);
@@ -245,21 +241,10 @@ export default function ModelsScreen() {
         displayName,
         enabled,
         maxRemoteConcurrency: concurrency,
+        allowedNodeIds,
       });
       const applied = await applyDocument(next, enabled ? "共享模型到 Workspace" : "停止共享模型");
-      const state = await publishWorkspaceModelShare({
-        state: workspace,
-        nodeId: gateway.nodeId,
-        resourceId,
-        deploymentId,
-        displayName,
-        modelIdentity: model.model || sharingAlias,
-        driver: provider.driver,
-        supportsVision: Boolean(model.supports_vision),
-        maxRemoteConcurrency: concurrency,
-        allowedNodeIds,
-        enabled,
-      });
+      const state = await loadWorkspaceResourceState();
       setDocument(applied);
       setWorkspace(state);
       setSharingAlias("");

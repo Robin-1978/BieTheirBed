@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -164,6 +165,160 @@ def _resource_ticket(
         }
     )
     return hub, target, caller, ticket
+
+
+def _node_control_request(
+    identity: NodeIdentity,
+    *,
+    workspace_id: str,
+    audience: str,
+    values: dict,
+    nonce: str | None = None,
+) -> dict:
+    payload = {
+        "node_id": identity.node_id,
+        **values,
+        "timestamp": time.time(),
+        "nonce": nonce or secrets.token_urlsafe(24),
+    }
+    transcript = {"audience": audience, "workspace_id": workspace_id, **payload}
+    return {**payload, "signature": identity.sign(canonical_json(transcript))}
+
+
+def test_node_owned_model_share_grants_are_scoped_replay_safe_and_revocable(
+    tmp_path: Path,
+) -> None:
+    repository = HubRepository(tmp_path / "hub.db", hub_id="workspace-1")
+    hub = HubService(repository, tmp_path / "hub.key", owner_token="o" * 43)
+    target = NodeIdentityStore(tmp_path / "target.json").load_or_create()
+    caller = NodeIdentityStore(tmp_path / "caller.json").load_or_create()
+    attacker = NodeIdentityStore(tmp_path / "attacker.json").load_or_create()
+    for identity, name in ((target, "Target"), (caller, "Caller"), (attacker, "Attacker")):
+        _enroll(repository, hub, identity, name)
+    values = {
+        "deployment_id": "shared-qwen",
+        "resource_id": "qwen-resource",
+        "display_name": "Qwen 3.5 4B",
+        "model_identity": "qwen3.5-4b",
+        "provider_protocol": "openai_compatible",
+        "supports_vision": True,
+        "materialized_digest": "a" * 64,
+        "max_remote_concurrency": 1,
+        "allowed_node_ids": [caller.node_id],
+        "enabled": True,
+    }
+    request = _node_control_request(
+        target,
+        workspace_id="workspace-1",
+        audience="knoa-node-model-share-v1",
+        values=values,
+        nonce="model-share-once-1234567890",
+    )
+
+    published = hub.publish_node_model_share(request)
+
+    assert published["deployment"]["target_node_id"] == target.node_id
+    assert published["allowed_node_ids"] == [caller.node_id]
+    caller_state = hub.node_control_state(_node_control_request(
+        caller,
+        workspace_id="workspace-1",
+        audience="knoa-node-control-state-v1",
+        values={},
+    ))
+    assert [item["deployment_id"] for item in caller_state["deployments"]] == ["shared-qwen"]
+    assert "api_key" not in str(caller_state).lower()
+    with pytest.raises(PermissionError, match="nonce"):
+        hub.publish_node_model_share(request)
+
+    with pytest.raises(PermissionError, match="Workspace Resource"):
+        hub.publish_node_model_share(_node_control_request(
+            attacker,
+            workspace_id="workspace-1",
+            audience="knoa-node-model-share-v1",
+            values={**values, "deployment_id": "attacker-deployment", "allowed_node_ids": []},
+        ))
+
+    disabled = hub.publish_node_model_share(_node_control_request(
+        target,
+        workspace_id="workspace-1",
+        audience="knoa-node-model-share-v1",
+        values={**values, "allowed_node_ids": [], "enabled": False},
+    ))
+    assert disabled["deployment"]["enabled"] is False
+    with pytest.raises(PermissionError):
+        repository.active_resource_grant(caller.node_id, "shared-qwen")
+
+
+def test_node_can_publish_matching_workspace_owned_model_deployment(
+    tmp_path: Path,
+) -> None:
+    repository = HubRepository(tmp_path / "hub.db", hub_id="workspace-1")
+    hub = HubService(repository, tmp_path / "hub.key", owner_token="o" * 43)
+    target = NodeIdentityStore(tmp_path / "target.json").load_or_create()
+    caller = NodeIdentityStore(tmp_path / "caller.json").load_or_create()
+    _enroll(repository, hub, target, "Target")
+    _enroll(repository, hub, caller, "Caller")
+    spec = {
+        "provider_protocol": "openai_compatible",
+        "model_identity": "qwen3.5-4b",
+        "declared_capabilities": {
+            "streaming": True,
+            "tools": True,
+            "vision": True,
+        },
+    }
+    digest = "b" * 64
+    resource = repository.put_workspace_resource(
+        {
+            "resource_id": "workspace-qwen",
+            "kind": "model",
+            "generation": 3,
+            "canonical_digest": digest,
+            "display_name": "Workspace Qwen",
+            "spec": spec,
+            "enabled": True,
+        },
+        created_by="workspace-owner",
+    )
+    repository.put_deployment(
+        {
+            "deployment_id": "workspace-qwen-on-target",
+            "kind": "model",
+            "resource_id": resource["resource_id"],
+            "resource_generation": resource["generation"],
+            "resource_digest": resource["canonical_digest"],
+            "target_node_id": target.node_id,
+            "desired_generation": 1,
+            "spec": {},
+            "enabled": True,
+        }
+    )
+
+    published = hub.publish_node_model_share(
+        _node_control_request(
+            target,
+            workspace_id="workspace-1",
+            audience="knoa-node-model-share-v1",
+            values={
+                "deployment_id": "workspace-qwen-on-target",
+                "resource_id": "workspace-qwen",
+                "display_name": "Workspace Qwen",
+                "model_identity": "qwen3.5-4b",
+                "provider_protocol": "openai_compatible",
+                "supports_vision": True,
+                "materialized_digest": "a" * 64,
+                "max_remote_concurrency": 2,
+                "allowed_node_ids": [caller.node_id],
+                "enabled": True,
+            },
+        )
+    )
+
+    assert published["resource"]["created_by"] == "workspace-owner"
+    assert published["resource"]["generation"] == 3
+    assert published["deployment"]["target_node_id"] == target.node_id
+    assert published["deployment"]["resource_digest"] == digest
+    assert published["allowed_node_ids"] == [caller.node_id]
 
 
 def test_workspace_resources_share_one_deployment_envelope_and_mcp_grant(

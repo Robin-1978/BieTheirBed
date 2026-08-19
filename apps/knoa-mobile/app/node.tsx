@@ -28,7 +28,7 @@ export default function NodeMenuScreen() {
           <Text style={styles.meta}>{workspaceName}</Text>
           <View style={styles.statusRow}>
             <Text style={gateway.status === "ready" ? styles.online : styles.offline}>{gateway.status === "ready" ? "已连接" : "未连接"}</Text>
-            <Text style={styles.meta}>{gateway.client?.transportMode() === "relay" ? "Relay" : "Direct"}</Text>
+            <Text style={styles.meta}>{transportLabel(gateway.client?.transportMode())}</Text>
           </View>
         </View>
 
@@ -56,6 +56,12 @@ export default function NodeMenuScreen() {
       </ScrollView>
     </>
   );
+}
+
+function transportLabel(mode: "direct" | "p2p" | "relay" | undefined): string {
+  if (mode === "p2p") return "P2P 直连";
+  if (mode === "relay") return "Relay 兜底";
+  return "Direct";
 }
 
 function MenuRow({ icon, title, detail, onPress }: { icon: AppIconName; title: string; detail: string; onPress(): void }) {

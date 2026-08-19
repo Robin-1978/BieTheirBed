@@ -170,7 +170,17 @@ class ConfigurationRoutes:
             )
         except Exception as exc:
             return self._core_error(exc)
-        return JSONResponse({"result": result.model_dump(mode="json")})
+        workspace_sync: dict = {}
+        try:
+            workspace_sync = await self._node_relay.sync_workspace_resources()
+        except Exception as exc:  # Local configuration remains authoritative.
+            workspace_sync = {"error": type(exc).__name__}
+        return JSONResponse(
+            {
+                "result": result.model_dump(mode="json"),
+                "workspace_sync": workspace_sync,
+            }
+        )
 
     async def _config_rollback(self, request: Request) -> JSONResponse:
         authenticated = self._authorize_configuration(request)

@@ -52,7 +52,7 @@ export default function NodeSettingsScreen() {
       <Stack.Screen options={{ title: "Node 设置与诊断" }} />
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.card}>
-          <View style={styles.header}><View style={styles.icon}><AppIcon name="node" color={colors.accent} size={25} /></View><View style={styles.flex}><Text style={styles.title}>{node?.displayName || "当前 Node"}</Text><Text style={gateway.status === "ready" ? styles.online : styles.offline}>{gateway.status === "ready" ? "已连接" : "未连接"} · {gateway.client?.transportMode() === "relay" ? "安全中继" : "直接连接"}</Text></View></View>
+          <View style={styles.header}><View style={styles.icon}><AppIcon name="node" color={colors.accent} size={25} /></View><View style={styles.flex}><Text style={styles.title}>{node?.displayName || "当前 Node"}</Text><Text style={gateway.status === "ready" ? styles.online : styles.offline}>{gateway.status === "ready" ? "已连接" : "未连接"} · {transportLabel(gateway.client?.transportMode())}</Text></View></View>
           <Metric label="Gateway" value={gateway.gatewayUrl || "—"} />
           <Metric label="Node ID" value={gateway.nodeId || "—"} compact />
         </View>
@@ -75,6 +75,12 @@ export default function NodeSettingsScreen() {
       </ScrollView>
     </>
   );
+}
+
+function transportLabel(mode: "direct" | "p2p" | "relay" | undefined): string {
+  if (mode === "p2p") return "NAT P2P";
+  if (mode === "relay") return "Relay 兜底";
+  return "直接连接";
 }
 
 function Metric({ label, value, compact = false }: { label: string; value: unknown; compact?: boolean }) { return <View style={styles.metric}><Text style={styles.meta}>{label}</Text><Text numberOfLines={compact ? 1 : 2} style={[styles.metricValue, compact && styles.compact]}>{String(value)}</Text></View>; }
