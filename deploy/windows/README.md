@@ -85,6 +85,10 @@ The updater requests administrator access, refuses to overwrite tracked local
 changes, runs `git pull --ff-only`, reinstalls the configured role, restarts the
 selected WinSW services and verifies that they are running. If installation
 fails after a service was stopped, it attempts to restore the existing service.
+Source updates also reconcile newly introduced Python dependencies; they never
+replace only the Knoa package with `--no-deps`. WebRTC P2P remains an optional
+acceleration path: if its native runtime cannot load, the Node still starts and
+uses authenticated Relay fallback.
 
 The first update from an older installation can be bootstrapped by pulling the
 repository once and double-clicking:

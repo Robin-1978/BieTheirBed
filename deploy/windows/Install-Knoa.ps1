@@ -236,7 +236,9 @@ if ($WheelhousePath) {
     $wheelhouse = (Resolve-Path -LiteralPath $WheelhousePath).Path
     & $python -m pip install --no-index --find-links $wheelhouse --force-reinstall $resolvedPackage
 } elseif ($sourceInstall -and $existingEnvironment) {
-    & $python -m pip install --no-deps --force-reinstall $resolvedPackage
+    # A source update can introduce new runtime dependencies. Let pip reconcile
+    # them instead of replacing only Knoa and leaving a half-updated service.
+    & $python -m pip install --upgrade --upgrade-strategy only-if-needed $resolvedPackage
 } else {
     & $python -m pip install --force-reinstall $resolvedPackage
 }

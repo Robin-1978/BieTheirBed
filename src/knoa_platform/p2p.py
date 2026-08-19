@@ -15,19 +15,33 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Literal
 
 import httpx
-from aiortc import (
-    RTCConfiguration,
-    RTCIceServer,
-    RTCPeerConnection,
-    RTCSessionDescription,
-)
+
+try:
+    from aiortc import (
+        RTCConfiguration,
+        RTCIceServer,
+        RTCPeerConnection,
+        RTCSessionDescription,
+    )
+except ImportError as exc:  # P2P is an acceleration path; Relay remains available.
+    RTCConfiguration = None  # type: ignore[assignment,misc]
+    RTCIceServer = None  # type: ignore[assignment,misc]
+    RTCPeerConnection = None  # type: ignore[assignment,misc]
+    RTCSessionDescription = None  # type: ignore[assignment,misc]
+    _AIORTC_IMPORT_ERROR: ImportError | None = exc
+else:
+    _AIORTC_IMPORT_ERROR = None
 
 from knoa_platform.relay_protocol import decode_base64url, encode_base64url
 
 _CHUNK_BYTES = 48 * 1024
 _MAX_BODY_BYTES = 64 * 1024 * 1024
 _BUFFER_HIGH_WATER = 1024 * 1024
-_STUN_SERVERS = [RTCIceServer(urls="stun:stun.cloudflare.com:3478")]
+_STUN_SERVERS = (
+    []
+    if RTCIceServer is None
+    else [RTCIceServer(urls="stun:stun.cloudflare.com:3478")]
+)
 _FORWARDED_REQUEST_HEADERS = {
     "accept",
     "authorization",
@@ -65,6 +79,21 @@ class P2PResponse:
     body: bytes
 
 
+class P2PUnavailableError(ConnectionError):
+    """Raised when the optional WebRTC runtime is unavailable on this host."""
+
+
+def p2p_available() -> bool:
+    return _AIORTC_IMPORT_ERROR is None
+
+
+def _require_p2p() -> None:
+    if not p2p_available():
+        raise P2PUnavailableError(
+            "WebRTC P2P runtime is unavailable; use Relay fallback"
+        ) from _AIORTC_IMPORT_ERROR
+
+
 class P2PServer:
     """Answer WebRTC offers and dispatch data-channel requests to one ASGI app."""
 
@@ -78,6 +107,7 @@ class P2PServer:
         sdp: str,
         kind: Literal["app", "resource"],
     ) -> dict[str, str]:
+        _require_p2p()
         peer = RTCPeerConnection(RTCConfiguration(iceServers=_STUN_SERVERS))
         self._peers.add(peer)
 
@@ -292,6 +322,7 @@ class P2PClient:
         *,
         timeout: float = 12.0,
     ) -> None:
+        _require_p2p()
         if self.connected:
             return
         await self.close()
@@ -472,4 +503,10 @@ async def _wait_for_ice_gathering(
     await asyncio.wait_for(completed.wait(), timeout=timeout)
 
 
-__all__ = ["P2PClient", "P2PResponse", "P2PServer"]
+__all__ = [
+    "P2PClient",
+    "P2PResponse",
+    "P2PServer",
+    "P2PUnavailableError",
+    "p2p_available",
+]
