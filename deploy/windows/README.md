@@ -94,13 +94,24 @@ On update, the installer:
 
 ## Publish the Android App to Hosted Hub
 
-Copy a signed APK to the Hub server, then run:
+`scripts/build-mobile-apk.sh` creates a self-describing release directory:
+
+```text
+/disk/dev/knoa-mobile-out/release/
+  knoa-<version>.apk
+  knoa-<version>.release.json
+  Publish-Knoa-<version>.cmd
+```
+
+Copy all three files into one directory on the Windows Hub, then double-click
+`Publish-Knoa-<version>.cmd`. The build-generated command owns the version name
+and version code; the operator does not enter or infer either value.
+
+For command-line publication, the installed publisher automatically reads and
+validates the adjacent `.release.json` file:
 
 ```powershell
-C:\ProgramData\Knoa\Scripts\Publish-KnoaApp.ps1 `
-  -ApkPath C:\Builds\knoa.apk `
-  -HubPublicUrl https://knoa.tinydotdot.com `
-  -Notes "Knoa update"
+C:\ProgramData\Knoa\Scripts\Publish-KnoaApp.ps1 -ApkPath C:\Builds\knoa-0.2.53.apk
 ```
 
 The command validates and publishes immutable release metadata, verifies the
