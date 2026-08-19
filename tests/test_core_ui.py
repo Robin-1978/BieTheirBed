@@ -136,8 +136,15 @@ async def test_tui_can_select_agent_and_resolve_interaction() -> None:
         default_agent="codex",
         node_agents={
             **base.node_agents,
+            "knoa": base.node_agents["knoa"].model_copy(
+                update={
+                    "delegation": base.node_agents["knoa"].delegation.model_copy(
+                        update={"targets": frozenset()}
+                    )
+                }
+            ),
             "codex": base.node_agents["codex"].model_copy(
-                update={"enabled": True}
+                update={"enabled": True, "visibility": "user"}
             ),
         },
     )

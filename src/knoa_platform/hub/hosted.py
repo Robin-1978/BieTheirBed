@@ -1339,21 +1339,29 @@ class HostedHubApplication:
             metadata = package.stat()
         except (LookupError, OSError):
             return JSONResponse({"error": "not_found"}, status_code=404)
+        cache_control = (
+            "public, max-age=31536000, immutable"
+            if immutable
+            else "no-store"
+        )
+        headers = {
+            "Cache-Control": cache_control,
+            "ETag": f'"{release.sha256}"',
+            "X-Knoa-SHA256": release.sha256,
+            "X-Content-Type-Options": "nosniff",
+        }
+        if not immutable:
+            # Stable aliases change identity on every release. Keep reverse proxies
+            # and managed CDNs from overriding the browser cache directive with a
+            # long edge TTL; immutable URLs remain the scalable download path.
+            headers["CDN-Cache-Control"] = "no-store"
+            headers["Cloudflare-CDN-Cache-Control"] = "no-store"
         return FileResponse(
             package,
             media_type="application/vnd.android.package-archive",
             filename=f"knoa-{release.version_name}.apk",
             stat_result=metadata,
-            headers={
-                "Cache-Control": (
-                    "public, max-age=31536000, immutable"
-                    if immutable
-                    else "public, max-age=60, must-revalidate"
-                ),
-                "ETag": f'"{release.sha256}"',
-                "X-Knoa-SHA256": release.sha256,
-                "X-Content-Type-Options": "nosniff",
-            },
+            headers=headers,
         )
 
     async def change_password(self, request: Request) -> JSONResponse:

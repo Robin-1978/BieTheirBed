@@ -255,11 +255,22 @@ class NodeAgentCatalog(AgentConfigModel):
             or not self.agents[self.default_agent].enabled
         ):
             raise ValueError("default_agent must reference an enabled NodeAgent")
+        if self.agents[self.default_agent].visibility != "user":
+            raise ValueError("default_agent must reference a user-visible NodeAgent")
         for agent_id, agent in self.agents.items():
             unknown_targets = agent.delegation.targets - self.agents.keys()
             if unknown_targets:
                 raise ValueError(
                     f"NodeAgent '{agent_id}' delegation references unknown targets"
+                )
+            invalid_targets = {
+                target
+                for target in agent.delegation.targets
+                if self.agents[target].visibility != "delegate"
+            }
+            if invalid_targets:
+                raise ValueError(
+                    f"NodeAgent '{agent_id}' delegation targets must be delegate-visible"
                 )
         return self
 

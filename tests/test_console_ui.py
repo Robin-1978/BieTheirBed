@@ -34,3 +34,8 @@ def test_node_console_owns_configuration_and_secret_management() -> None:
     assert "/v1/console/secrets/" in page
     assert "校验并热发布" in page
     assert "API Key" in page
+    assert "新建自定义 Knoa Agent ID" in page
+    assert "允许创建受治理 Child Task" in page
+    assert 'id="agentTools"' in page
+    assert 'id="delegationTargets"' in page
+    assert "Profile 与 Definition" in page
