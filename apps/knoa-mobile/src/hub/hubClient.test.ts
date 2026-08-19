@@ -18,6 +18,7 @@ vi.mock("@/security/deviceIdentity", () => ({
 }));
 
 import {
+  createNodeEnrollmentCode,
   issueConnectionTicket,
   loadHubConnection,
   registerHostedAccount,
@@ -238,6 +239,39 @@ describe("Node Relay tickets", () => {
       node_id: "node-a",
       transport: "relay",
       scope: "pairing",
+    });
+  });
+});
+
+describe("Node Enrollment Code", () => {
+  it("packages a Workspace-scoped one-time grant for the local Node Console", async () => {
+    native.cache.set("knoa.hub.connection.v1", JSON.stringify({
+      url: "https://hosted.example/workspaces/ws_personal_1",
+      rootUrl: "https://hosted.example",
+      token: `khs_${"a".repeat(48)}`,
+      accountId: "account-1",
+      hubId: "hub-hosted",
+      workspaceId: "ws_personal_1",
+      identityIssuerId: "hub-hosted",
+      signingPublicKey: "signing-key",
+      deploymentMode: "hosted_single_node",
+    }));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({
+      grant_id: "grant-1",
+      secret: "grant-secret",
+      challenge: "challenge-1",
+      expires_at: 1234,
+    }, { status: 201 }));
+
+    await expect(createNodeEnrollmentCode()).resolves.toEqual({
+      version: "knoa-node-enrollment-v1",
+      hub_url: "https://hosted.example/workspaces/ws_personal_1",
+      hub_id: "hub-hosted",
+      hub_signing_public_key: "signing-key",
+      grant_id: "grant-1",
+      grant_secret: "grant-secret",
+      challenge: "challenge-1",
+      expires_at: 1234,
     });
   });
 });

@@ -1,7 +1,7 @@
 # Knoa 完整模块架构
 
 > 状态：模块边界权威文档
-> 更新：2026-08-17
+> 更新：2026-08-19
 
 ## 1. 可部署单元
 
@@ -26,10 +26,17 @@ Knoa Node
 ├── Model/MCP endpoints
 ├── built-in Node Console UI
 └── local persistence / Secret
+
+Knoa Host Lifecycle Broker
+├── signed Universal Host Bundle install / rollback
+├── fixed Hub/Node service activation
+└── platform adapter: WinSW or systemd
 ```
 
-Hub 与 Relay 当前同进程部署，但模块边界独立。Node、Hub 和 App 可独立构建与部署。Agent、Skill、Tool
-不是为追求微服务化而拆出的服务器。Hub Console 和 Node Console 分别随宿主构建、部署和更新，不是独立服务。
+Hub 与 Relay 当前同进程部署，但模块边界独立。Node、Hub 和 App 可独立运行；Hub/Node 产品二进制由同一个
+Universal Host Bundle 交付并独立激活。Agent、Skill、Tool 不是为追求微服务化而拆出的服务器。Hub Console
+和 Node Console 分别随宿主构建、部署和更新，不是独立服务。Lifecycle Broker 没有 Console 或领域数据，只是
+两个 Console 共用的最小特权执行边界。
 
 ## 2. Node 内模块
 
@@ -47,6 +54,7 @@ Hub 与 Relay 当前同进程部署，但模块边界独立。Node、Hub 和 App
 | `capability_gateway` | capability、policy、approval、budget、审计 | Runtime-native 行为实现 |
 | `node_hub` | enrollment、presence、direct candidate、Relay tunnel | Conversation/Task/Secret |
 | `admin_ui` | Node Console 静态资产、页面路由与 Node API client | repository、独立认证域 |
+| `host_lifecycle_client` | 代理签名更新、回退和固定 service 动作 | 任意命令、任意路径、领域配置 |
 
 ## 3. Hub 内模块
 
@@ -60,6 +68,13 @@ Hub 与 Relay 当前同进程部署，但模块边界独立。Node、Hub 和 App
 | Hub admin UI | Hub Console 静态资产、页面路由与 Hub API client |
 
 Relay 不调用 Node 领域 service，不解析业务 payload，不持有模型或 MCP Secret。
+
+## 3.1 Host Lifecycle 模块
+
+`host_lifecycle` 监听 `127.0.0.1:9533`，由 product installer 创建随机 Token。Hub/Node Console 只通过
+`host_lifecycle_client` 访问；浏览器不持有 Broker Token。Broker 验证 Universal Bundle 的 product Trust
+Store，只能操作固定 Knoa service 和固定 Release/Incoming 路径。Windows/Linux 差异收敛在 service adapter，
+不进入 Hub、Node 或 Agent 领域模型。
 
 ## 4. Agent 执行边界
 
@@ -123,6 +138,8 @@ src/knoa_platform/agent_runtime/   Runtime orchestration
 src/knoa_platform/tasks/           NodeTask
 src/knoa_platform/conversations/   NodeConversation
 src/knoa_platform/configuration/   Draft/publish/apply
+src/knoa_platform/host_lifecycle.py privileged Host lifecycle broker
+src/knoa_platform/host_lifecycle_client.py Console-side local proxy
 src/knoa_platform/tools/           Node-local tools
 src/knoa_agent/                    Knoa Agent implementation
 src/knoa_codex_agent/              Codex adapter

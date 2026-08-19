@@ -28,6 +28,12 @@ def test_gateway_openapi_matches_the_allow_listed_http_surface(tmp_path) -> None
         "/v1/console/status",
         "/v1/console/hub/enroll",
         "/v1/console/pairing",
+        "/v1/console/lifecycle",
+        "/v1/console/lifecycle/actions",
+        "/v1/console/lifecycle/bundles/{name}",
+        "/v1/console/config",
+        "/v1/console/config/publish",
+        "/v1/console/secrets/{reference}",
     }
 
     assert schema["openapi"] == "3.1.0"

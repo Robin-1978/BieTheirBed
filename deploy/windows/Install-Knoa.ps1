@@ -316,7 +316,7 @@ $powerShell = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
 $powerShellXml = Escape-Xml $powerShell
 if ($installHub) {
     $hubRunner = Join-Path $scriptRoot "Run-KnoaHub.ps1"
-    $hubArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$hubRunner`" -PythonExecutable `"$python`" -HubRoot `"$HubRoot`" -BootstrapTokenFile `"$tokenFile`" -ReleasePublishTokenFile `"$releasePublishTokenFile`" -HubId `"$HubId`" -Port $HubPort"
+    $hubArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$hubRunner`" -PythonExecutable `"$python`" -HubRoot `"$HubRoot`" -BootstrapTokenFile `"$tokenFile`" -ReleasePublishTokenFile `"$releasePublishTokenFile`" -HubId `"$HubId`" -Port $HubPort -PublicUrl `"$HubPublicUrl`""
     $hubXmlArguments = Escape-Xml $hubArguments
     $hubLogPath = Escape-Xml (Join-Path $baseRoot "Logs\Hub")
     $hubXml = @"

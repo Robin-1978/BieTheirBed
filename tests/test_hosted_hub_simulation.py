@@ -25,19 +25,34 @@ async def test_hosted_hub_serves_embedded_console_without_exposing_credentials(
         tmp_path / "hosted",
         hub_id="hub_hosted",
         bootstrap_token=BOOTSTRAP_TOKEN,
+        public_url="https://hub.example.com",
     )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application.console_app),
+        base_url="http://hub",
+    ) as client:
+        response = await client.get("/console")
+        lifecycle = await client.get(
+            "/v1/console/lifecycle",
+            headers={"X-Knoa-Console": application._console_csrf_token},
+        )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=application.app),
         base_url="http://hub",
     ) as client:
-        response = await client.get("/console")
+        public = await client.get("/console")
 
     assert response.status_code == 200
     assert "Knoa Hub Console" in response.text
     assert "/v1/hosted/sessions" in response.text
     assert BOOTSTRAP_TOKEN not in response.text
+    assert "https://hub.example.com" in response.text
+    assert "location.origin+base" not in response.text
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["x-content-type-options"] == "nosniff"
+    assert public.status_code == 404
+    assert lifecycle.status_code == 503
+    assert lifecycle.json() == {"error": "lifecycle_not_installed"}
 
 
 def _apk(path: Path, payload: bytes) -> bytes:

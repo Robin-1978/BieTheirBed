@@ -163,6 +163,17 @@ export type NodeEnrollmentGrant = {
   expires_at: number;
 };
 
+export type NodeEnrollmentCode = {
+  version: "knoa-node-enrollment-v1";
+  hub_url: string;
+  hub_id: string;
+  hub_signing_public_key: string;
+  grant_id: string;
+  grant_secret: string;
+  challenge: string;
+  expires_at: number;
+};
+
 export async function connectHub(
   url: string,
   token: string,
@@ -433,6 +444,21 @@ export async function createNodeEnrollmentGrant(): Promise<NodeEnrollmentGrant> 
     method: "POST",
     body: { ttl_seconds: 600 },
   });
+}
+
+export async function createNodeEnrollmentCode(): Promise<NodeEnrollmentCode> {
+  const connection = await requiredHubConnection();
+  const grant = await createNodeEnrollmentGrant();
+  return {
+    version: "knoa-node-enrollment-v1",
+    hub_url: connection.url,
+    hub_id: connection.hubId,
+    hub_signing_public_key: connection.signingPublicKey,
+    grant_id: grant.grant_id,
+    grant_secret: grant.secret,
+    challenge: grant.challenge,
+    expires_at: grant.expires_at,
+  };
 }
 
 export async function loadWorkspaceResourceState(): Promise<WorkspaceResourceState> {

@@ -12,10 +12,10 @@
 
 重构完成时必须满足：
 
-1. Windows/Linux 都可安装 `hub`、`node`、`all`；
+1. Windows/Linux 都安装同一个 Universal Host Bundle，并可激活 `hub`、`node`、`all`；
 2. 终端用户安装和更新不依赖源码、Git、系统 Python、pip 或手工 venv；
 3. Rust Node Host 管理 Python Agent Runtime Worker，并通过版本化私有 IPC 执行 Invocation；
-4. Hub 与 Node Host 分别内置对应 Console，不增加独立服务、端口或版本线；
+4. Hub 与 Node Host 分别内置对应 Console；只增加无 UI 的特权 Lifecycle Broker，不增加 Console 版本线；
 5. App/Node 与 Node/Node 使用 ICE P2P 优先，Relay fallback；
 6. Rust Hub 接管 Account、Workspace、目录、票据、信令和 Relay；
 7. 现有 HubRoot/NodeRoot 数据经过受测迁移继续可用；
@@ -61,9 +61,10 @@
 
 ## 4. Phase 1：产品化跨平台交付
 
-> 实现状态：签名 Bundle、跨平台 lock、自包含 payload、Rust updater、WinSW/systemd service orchestration、
-> 离线/真实健康检查与自动 reject 已完成代码闭环；正式嵌入式 Runtime 构建、bootstrap 代码签名和干净 VM
-> 六组合验收待发布环境执行。部署合同见 [产品 Bundle 部署与更新](./knoa-product-bundle-deployment.md)。
+> 实现状态：Universal Host Bundle、跨平台 lock、自包含 payload、Rust updater、WinSW/systemd service
+> orchestration、localhost Console、Host Lifecycle Broker、签名更新与回退代码合同已完成；原生 Setup/`.deb`、
+> bootstrap 代码签名和干净 VM 矩阵仍待发布环境验收。部署合同见
+> [产品 Bundle 部署与更新](./knoa-product-bundle-deployment.md)。
 
 本阶段不改变领域实现，先消除用户面对源码和 Python 工具链的问题。
 
@@ -75,7 +76,7 @@
 - Node Bundle 内置 Python Runtime、Wheel 和依赖；
 - 以仓库 Python lock 在目标 OS CI 物化 application tree，终端安装阶段不解析或下载依赖；
 - 实现跨平台 updater：下载、校验、解包、原子切换、健康检查、自动回退；
-- Windows 提供 `hub/node/all` 服务安装；Linux 提供相同角色的 systemd 安装；
+- Windows/Linux 都交付包含 Hub、Node、Lifecycle Broker 的 Universal Host Bundle，安装时只选择激活角色；
 - 将源码安装保留为开发入口，不再作为产品部署手册主路径。
 - 定义 schema migration 与 binary rollback 的兼容门；不可逆数据迁移必须先备份并明确不支持自动降级。
 
@@ -86,7 +87,7 @@
 ### 验收
 
 - 无 Python、Git、pip 的干净 Windows/Linux 虚拟机可安装；
-- `hub/node/all` 六种 OS/role 组合完成安装、更新、回退、卸载测试；
+- 两种 OS 的 `hub/node/all` 六种激活组合完成安装、更新、回退、停用和卸载测试；
 - 更新不删除 HubRoot、NodeRoot、Secret 或 APK；
 - 同机 `all` 仍表现为两个独立服务。
 
@@ -122,7 +123,7 @@ role=all  -> Hub 服务 + Node Host 服务（各自内置 Console）
 ### 验收
 
 - Windows/Linux 的 Hub/Node Bundle 均包含对应 Console，不能出现宿主与 Console 版本漂移；
-- Hub Console 复用 Hub HTTPS origin；Node Console 默认 loopback 且不新增端口；
+- Hub Console 固定使用 `127.0.0.1:9532`，公网 Hub origin 不提供 Console；Node Console 固定 loopback `9531`；
 - CSRF、认证、Secret redaction、权限和审计测试通过；
 - App 删除不适合移动端的高级 Key/endpoint 编辑，但保留查看、日常选择和快捷入口；
 - Console 不直接打开 Hub/Node SQLite；禁用 UI route 不影响宿主服务的数据面和后台执行。

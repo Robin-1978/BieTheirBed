@@ -40,6 +40,7 @@ from knoa_platform.gateway.routes import (
     TaskRoutes,
 )
 from knoa_platform.gateway.streaming import GatewayStreaming
+from knoa_platform.host_lifecycle_client import HostLifecycleClient
 from knoa_platform.mobile_releases import AndroidReleaseRepository
 from knoa_platform.network_tls import is_loopback_host
 from knoa_platform.node_hub import (
@@ -175,6 +176,7 @@ class SecureGatewayAdapter(
         self._limiter = limiter or _WindowLimiter()
         self._event_heartbeat_seconds = max(0.01, event_heartbeat_seconds)
         self._console_csrf_token = token_secrets.token_urlsafe(32)
+        self._host_lifecycle = HostLifecycleClient.from_environment()
         self._active_event_streams: dict[str, int] = defaultdict(int)
         self._stream_replacements: dict[tuple[str, str], asyncio.Event] = {}
         self._server: _EmbeddedUvicornServer | None = None
@@ -192,6 +194,36 @@ class SecureGatewayAdapter(
                     "/v1/console/pairing",
                     self._console_pairing,
                     methods=["POST"],
+                ),
+                Route(
+                    "/v1/console/lifecycle",
+                    self._console_lifecycle,
+                    methods=["GET"],
+                ),
+                Route(
+                    "/v1/console/lifecycle/actions",
+                    self._console_lifecycle_action,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/console/lifecycle/bundles/{name:str}",
+                    self._console_lifecycle_bundle,
+                    methods=["PUT"],
+                ),
+                Route(
+                    "/v1/console/config",
+                    self._console_config,
+                    methods=["GET"],
+                ),
+                Route(
+                    "/v1/console/config/publish",
+                    self._console_config_publish,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/console/secrets/{reference:str}",
+                    self._console_secret,
+                    methods=["GET", "PUT"],
                 ),
                 Route("/health", self._health, methods=["GET"]),
                 Route("/openapi.json", self._openapi, methods=["GET"]),

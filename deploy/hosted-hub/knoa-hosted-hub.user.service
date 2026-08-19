@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=%h/.config/knoa/hosted-hub.env
-ExecStart=%h/.local/share/knoa/hosted-hub-venv/bin/knoa-hub --deployment-mode hosted_single_node --host 127.0.0.1 --port 9529 --root %h/.local/share/knoa/hosted-hub --hub-id hub_knoa_hosted
+ExecStart=%h/.local/share/knoa/hosted-hub-venv/bin/knoa-hub --deployment-mode hosted_single_node --host 127.0.0.1 --port 9529 --console-host 127.0.0.1 --console-port 9532 --root %h/.local/share/knoa/hosted-hub --hub-id hub_knoa_hosted
 Restart=on-failure
 RestartSec=5
 UMask=0077

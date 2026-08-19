@@ -95,8 +95,8 @@ def materialize_payload(
     output: Path,
     winsw_source: Path | None = None,
 ) -> dict[str, object]:
-    if role not in {"hub", "node", "all"}:
-        raise ValueError("Release role must be hub, node or all")
+    if role != "all":
+        raise ValueError("Product Release must be the universal all-role Host Bundle")
     if target_os not in {"windows", "linux"}:
         raise ValueError("Release target OS must be windows or linux")
     if output.exists() and any(output.iterdir()):
@@ -128,26 +128,33 @@ def materialize_payload(
             fixed_args=("--role", role),
         )
     ]
-    if role in {"hub", "all"}:
-        launchers.append(
-            _write_launcher(
-                bin_root,
-                target_os=target_os,
-                name="knoa-hub",
-                python_path=python_path,
-                module="knoa_platform.hub",
-            )
+    launchers.append(
+        _write_launcher(
+            bin_root,
+            target_os=target_os,
+            name="knoa-hub",
+            python_path=python_path,
+            module="knoa_platform.hub",
         )
-    if role in {"node", "all"}:
-        launchers.append(
-            _write_launcher(
-                bin_root,
-                target_os=target_os,
-                name="knoa-node",
-                python_path=python_path,
-                module="knoa_platform.service",
-            )
+    )
+    launchers.append(
+        _write_launcher(
+            bin_root,
+            target_os=target_os,
+            name="knoa-node",
+            python_path=python_path,
+            module="knoa_platform.service",
         )
+    )
+    launchers.append(
+        _write_launcher(
+            bin_root,
+            target_os=target_os,
+            name="knoa-host-lifecycle",
+            python_path=python_path,
+            module="knoa_platform.host_lifecycle",
+        )
+    )
     return {
         "role": role,
         "target_os": target_os,
@@ -158,7 +165,7 @@ def materialize_payload(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--role", choices=("hub", "node", "all"), required=True)
+    parser.add_argument("--role", choices=("all",), default="all")
     parser.add_argument("--target-os", choices=("windows", "linux"), required=True)
     parser.add_argument("--runtime", type=Path, required=True)
     parser.add_argument("--application", type=Path, required=True)

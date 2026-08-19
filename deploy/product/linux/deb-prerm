@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+if [ "${1:-}" = remove ]; then
+  systemctl disable --now knoa-node.service knoa-hub.service knoa-host-lifecycle.service 2>/dev/null || true
+fi
+

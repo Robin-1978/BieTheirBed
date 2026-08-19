@@ -179,8 +179,8 @@ App QR pairing  -> App receives a Node-specific device identity through Relay
 The normal product workflow uses the embedded consoles and does not expose an
 Account Token or require users to type a Workspace ID:
 
-1. Open `https://hub.example.com/console`, sign in, select the Workspace and
-   generate a one-time Enrollment Code.
+1. In the App select the Workspace and generate a one-time Enrollment Code,
+   or on the Hub computer open `http://127.0.0.1:9532/console`.
 2. On the Windows computer open `http://127.0.0.1:9531/console`, paste the Code
    and select **Join Workspace**.
 3. In the same Node Console select **Generate App pairing QR**, then scan it

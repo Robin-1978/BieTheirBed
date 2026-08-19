@@ -5,7 +5,9 @@ param(
     [Parameter(Mandatory = $true)][string]$BootstrapTokenFile,
     [Parameter(Mandatory = $true)][string]$ReleasePublishTokenFile,
     [string]$HubId = "hub_knoa_hosted",
-    [int]$Port = 9529
+    [int]$Port = 9529,
+    [int]$ConsolePort = 9532,
+    [string]$PublicUrl = "http://127.0.0.1:9529"
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,6 +25,9 @@ $env:KNOA_HUB_RELEASE_PUBLISH_TOKEN = $releasePublishToken
     --deployment-mode hosted_single_node `
     --host 127.0.0.1 `
     --port $Port `
+    --public-url $PublicUrl `
+    --console-host 127.0.0.1 `
+    --console-port $ConsolePort `
     --root $HubRoot `
     --hub-id $HubId
 exit $LASTEXITCODE
