@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 
+from knoa_platform import __version__
 from knoa_platform.console_ui import node_console_html
 from knoa_platform.configuration import ManagedConfig
 from knoa_platform.gateway.pairing import GatewayPairingPayload
@@ -35,6 +36,7 @@ class ConsoleRoutes:
         return JSONResponse(
             {
                 "node": self._node_identity.descriptor(),
+                "runtime_version": __version__,
                 "hub": self._node_relay.status,
             },
             headers={"Cache-Control": "no-store"},
@@ -217,7 +219,17 @@ class ConsoleRoutes:
                 expected_version=draft.draft_version,
                 summary=summary,
             )
-        except (ValidationError, ValueError, TypeError, json.JSONDecodeError):
+        except ValidationError as error:
+            issue = error.errors(include_url=False)[0]
+            return JSONResponse(
+                {
+                    "error": "invalid_configuration",
+                    "detail": str(issue.get("msg") or "Configuration is invalid"),
+                    "path": ".".join(str(part) for part in issue.get("loc", ())),
+                },
+                status_code=400,
+            )
+        except (ValueError, TypeError, json.JSONDecodeError):
             return JSONResponse({"error": "invalid_configuration"}, status_code=400)
         except Exception as error:
             return self._core_error(error)

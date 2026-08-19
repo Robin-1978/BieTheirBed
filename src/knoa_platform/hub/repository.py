@@ -353,7 +353,12 @@ class HubRepository:
         return tuple(dict(row) for row in rows)
 
     def record_presence(
-        self, node_id: str, nonce: str, *, direct_gateway_url: str = ""
+        self,
+        node_id: str,
+        nonce: str,
+        *,
+        version: str = "",
+        direct_gateway_url: str = "",
     ) -> dict:
         now = self._clock()
         try:
@@ -363,9 +368,10 @@ class HubRepository:
                     "INSERT INTO presence_nonces VALUES (?, ?, ?)", (node_id, nonce, now)
                 )
                 db.execute(
-                    """UPDATE nodes SET last_seen=?, direct_gateway_url=?
+                    """UPDATE nodes SET last_seen=?, direct_gateway_url=?,
+                          version=COALESCE(NULLIF(?, ''), version)
                        WHERE node_id=? AND state='active'""",
-                    (now, direct_gateway_url, node_id),
+                    (now, direct_gateway_url, version, node_id),
                 )
                 db.execute("DELETE FROM presence_nonces WHERE observed_at<?", (now - 600,))
         except sqlite3.IntegrityError as exc:

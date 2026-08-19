@@ -114,7 +114,9 @@ Relay decrypted request ──────┘
 ```
 
 Node–Hub Edge 只做协议适配，因此 direct 和 Relay 不产生两套业务 controller。Node presence 上报签名的
-`direct_gateway_url`；App 先做有界 direct 尝试，失败后使用 Hub ticket 建立 E2E Relay session。
+`direct_gateway_url` 和当前运行版本；Hub 在同一事务中更新 `last_seen`、连接 candidate 和 Node version，
+App 的 Workspace Node 目录因此展示实际运行版本，而不是首次 Enrollment 时的静态版本。App 先做有界
+direct 尝试，失败后使用 Hub ticket 建立 E2E Relay session。
 
 ## 7. 依赖规则
 

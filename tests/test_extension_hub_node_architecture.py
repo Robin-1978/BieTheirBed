@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import (
     X25519PublicKey,
 )
 
+from knoa_platform import __version__
 from knoa_platform.config import AppConfig
 from knoa_platform.configuration.models import (
     ConfigDraft,
@@ -32,7 +33,7 @@ from knoa_platform.gateway.identity import GatewayIdentityRepository
 from knoa_platform.hub.relay import RelayBroker, RelayFrame
 from knoa_platform.hub.repository import HubRepository
 from knoa_platform.hub.service import HubService
-from knoa_platform.node_hub import NodeHubStore
+from knoa_platform.node_hub import NodeHubEnrollment, NodeHubStore, _presence
 from knoa_platform.node_identity import NodeIdentityStore
 from knoa_platform.relay_protocol import (
     ClientHello,
@@ -297,29 +298,25 @@ def test_hub_enrollment_ticket_and_presence_are_separate_trust_steps(
         "subject_owner", "app-1", _public_key(app_key), "Phone"
     )
     ticket = service.issue_ticket("app-1", node.node_id, "relay", scope="session")
-    presence = {
-        "audience": "knoa-node-presence-v1",
-        "hub_id": "hub-1",
-        "node_id": node.node_id,
-        "timestamp": 1000.0,
-        "nonce": "presence-nonce-value-1234",
-        "direct_gateway_url": "https://node.example.test",
-    }
     observed = service.record_presence(
-        {
-            **{
-                key: value
-                for key, value in presence.items()
-                if key not in {"audience", "hub_id"}
-            },
-            "signature": node.sign(canonical_json(presence)),
-        }
+        _presence(
+            node,
+            NodeHubEnrollment(
+                hub_url="https://hub.example.test",
+                hub_id="hub-1",
+                hub_signing_public_key=service.signing_public_key,
+                enrolled_at=1000,
+            ),
+            lambda: 1000,
+            direct_gateway_url="https://node.example.test",
+        )
     )
 
     claims = service.verify_and_consume_ticket(ticket)
 
     assert enrolled["node_id"] == node.node_id
     assert observed["direct_gateway_url"] == "https://node.example.test"
+    assert observed["version"] == __version__
     assert claims["node_id"] == node.node_id
     with pytest.raises(PermissionError):
         service.verify_and_consume_ticket(ticket)
