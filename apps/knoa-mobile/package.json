@@ -57,6 +57,11 @@
     "vitest": "^4.0.18"
   },
   "expo": {
+    "install": {
+      "exclude": [
+        "typescript"
+      ]
+    },
     "doctor": {
       "appConfigFieldsNotSyncedCheck": {
         "enabled": false
