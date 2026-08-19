@@ -1,0 +1,19 @@
+[Unit]
+Description=Knoa Hosted Hub and Relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/knoa/hosted-hub.env
+ExecStart=%h/.local/share/knoa/runtime/venv/bin/knoa-hub --deployment-mode hosted_single_node --host 127.0.0.1 --port 9529 --root %h/.local/share/knoa/hosted-hub --hub-id hub_knoa_hosted
+WorkingDirectory=%h/.local/share/knoa
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=default.target

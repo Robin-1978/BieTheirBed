@@ -1,0 +1,19 @@
+[Unit]
+Description=Knoa Node Runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=KNOA_RUNTIME_ROOT=%h/.knoa
+Environment=KNOA_RUNTIME_DIR=%h/.knoa/run
+ExecStart=%h/.local/share/knoa/runtime/venv/bin/python -m knoa_platform.service --config %h/.config/knoa/node-linux.yaml
+WorkingDirectory=%h/.local/share/knoa/workspace
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

@@ -1,4 +1,4 @@
-# Knoa Native Windows: Hosted Hub + Node
+# Knoa Native Windows deployment
 
 Knoa runs directly on Windows with standard CPython. WSL, Docker and a
 PyInstaller EXE are not required.
@@ -18,7 +18,8 @@ Windows
 └── named cloudflared services when this host owns public Tunnels
 ```
 
-Hub and Node Runtime always use WinSW. The installer deletes the obsolete
+Hub and Node Runtime always use separate WinSW services. They can be installed
+on one computer or on different computers. The installer deletes the obsolete
 `Knoa Hosted Hub` and `Knoa Node` scheduled tasks. A future desktop Companion
 may run in the signed-in user's Session, but desktop-session access is not a
 reason to move the Node Runtime itself out of Windows Service Control Manager.
@@ -34,12 +35,32 @@ reason to move the Node Runtime itself out of Windows Service Control Manager.
 
 ## First installation
 
+The deployment roles are:
+
+| Role | Services installed | Typical host |
+| --- | --- | --- |
+| `hub` | `KnoaHostedHub` | public or always-on Hub server |
+| `node` | `KnoaNode` | workstation, GPU server or home computer |
+| `all` | both services | one-machine personal deployment |
+
 From an elevated PowerShell window:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 cd C:\knoa
-.\deploy\windows\Install-Knoa.ps1 -SourcePath C:\knoa -WinSWExecutable C:\Tools\WinSW-x64.exe -HubPublicUrl https://knoa.tinydotdot.com
+.\deploy\windows\Install-Knoa.ps1 -Role all -SourcePath C:\knoa -WinSWExecutable C:\Tools\WinSW-x64.exe -HubPublicUrl https://knoa.tinydotdot.com
+```
+
+Hub-only server:
+
+```powershell
+.\deploy\windows\Install-Knoa.ps1 -Role hub -SourcePath C:\knoa -WinSWExecutable C:\Tools\WinSW-x64.exe -HubPublicUrl https://knoa.tinydotdot.com
+```
+
+Node-only computer:
+
+```powershell
+.\deploy\windows\Install-Knoa.ps1 -Role node -SourcePath C:\knoa -WinSWExecutable C:\Tools\WinSW-x64.exe
 ```
 
 For a restored Hosted Hub, also pass `-HostedBackupPath`. The restore target
@@ -52,8 +73,13 @@ Stop any manually launched foreground Node with `Ctrl+C`, then run:
 ```powershell
 cd C:\knoa
 git pull
-.\deploy\windows\Install-Knoa.ps1 -SourcePath C:\knoa -HubPublicUrl https://knoa.tinydotdot.com
+.\deploy\windows\Install-Knoa.ps1 -Role all -SourcePath C:\knoa -HubPublicUrl https://knoa.tinydotdot.com
 ```
+
+On split hosts, use `-Role hub` on the Hub server and `-Role node` on Node
+computers. Installing or updating one role does not stop or reinstall the other
+role's service. On a host running both roles, use `-Role all` so both processes
+run the same Knoa release.
 
 On update, the installer:
 
@@ -63,8 +89,29 @@ On update, the installer:
 4. copies an existing `%LOCALAPPDATA%\Knoa\Node` identity into
    `C:\ProgramData\Knoa\Node` when the service root has no state;
 5. retains the old per-user Node directory as a rollback snapshot;
-6. installs and starts both `KnoaHostedHub` and `KnoaNode` services;
-7. prints a fresh App pairing QR when the copied Node is already enrolled.
+6. installs and starts only the selected WinSW services;
+7. prints a fresh App pairing QR when the selected Node is already enrolled.
+
+## Publish the Android App to Hosted Hub
+
+Copy a signed APK to the Hub server, then run:
+
+```powershell
+C:\ProgramData\Knoa\Scripts\Publish-KnoaApp.ps1 `
+  -ApkPath C:\Builds\knoa.apk `
+  -HubPublicUrl https://knoa.tinydotdot.com `
+  -Notes "Knoa update"
+```
+
+The command validates and publishes immutable release metadata, verifies the
+active release and prints the stable download URL:
+
+```text
+https://knoa.tinydotdot.com/downloads/android/latest.apk
+```
+
+Publishing an APK does not restart Hub or Node. Logged-in Apps query the Hub
+release channel and can download the new version from the App update page.
 
 ## Node enrollment and App QR pairing
 
@@ -90,7 +137,7 @@ C:\ProgramData\Knoa\Scripts\Show-KnoaPairingQr.cmd
 ## Verification and operations
 
 ```powershell
-Get-Service KnoaHostedHub,KnoaNode
+Get-Service KnoaHostedHub,KnoaNode -ErrorAction SilentlyContinue
 curl.exe http://127.0.0.1:9529/health
 curl.exe http://127.0.0.1:9531/health
 Restart-Service KnoaHostedHub,KnoaNode
@@ -113,8 +160,9 @@ token in an ACL-protected token file. Do not use the fixed single-instance
 ## Uninstall
 
 ```powershell
-.\deploy\windows\Uninstall-Knoa.ps1
+.\deploy\windows\Uninstall-Knoa.ps1 -Role all
 ```
 
-Uninstall removes the two WinSW services and any legacy scheduled tasks. Data
-is preserved unless `-PurgeData` is explicitly supplied.
+Use `-Role hub` or `-Role node` to remove one service only. Data is preserved
+unless `-PurgeData` is explicitly supplied; role-specific purge deletes only
+that role's persistent data.

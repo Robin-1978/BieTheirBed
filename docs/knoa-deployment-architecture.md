@@ -2,7 +2,7 @@
 
 > 状态：当前 V1 可部署架构与后续生产演进边界
 >
-> 更新日期：2026-08-18
+> 更新日期：2026-08-19
 >
 > 范围：Mobile App、Node、HubService、Relay、Agent Runtime、LLM、Skill、Tool、MCP、网络、安全、存储、故障与运维拓扑
 >
@@ -166,7 +166,26 @@ Relay decrypted request ─────┘
 | Codex App Server | Codex Runtime 自有入口 | 是 | 受信 Runtime adapter 使用，不进入 Knoa 原生模型 Provider |
 | NodeAgent/Skill/Tool | 无独立进程入口 | 否 | Node 内逻辑配置或内容，不为追求“微服务化”单独部署 |
 
-### 5.1 当前 Hub/Relay 的硬限制
+### 5.1 跨平台部署角色合同
+
+Windows 与 Linux 对运维暴露相同的三个角色，而不是把 Hub 与 Node 固化为同一安装单元：
+
+| Role | 安装内容 | 更新/重启边界 |
+| --- | --- | --- |
+| `hub` | Hosted Hub + Relay | 只操作 Hub 进程和 Hub 数据 |
+| `node` | Node Runtime | 只操作 Node 进程和 Node 数据 |
+| `all` | 同机 Hub + Node | 同时更新两个独立服务 |
+
+Windows 使用两个独立 WinSW Service：`KnoaHostedHub` 与 `KnoaNode`；Linux 使用两个独立
+systemd user service：`knoa-hosted-hub.service` 与 `knoa-node.service`。`all` 只是安装器编排便利项，
+不会把两个进程、数据库或故障边界合并。同一台主机运行两个角色时应使用 `all` 更新，使共享的 Knoa
+程序版本保持一致；分离主机分别使用 `hub` 与 `node`。
+
+Android App 不是 Node 包，也不由 Node 安装器承载。Hosted App 发布由 Hub 独占：签名 APK 通过平台
+管理命令进入 `<HubRoot>/mobile-releases/android`，Hub 提供认证版本查询、不可变下载地址和稳定人工安装
+地址 `/downloads/android/latest.apk`。发布 App 不重启 Hub 或 Node。
+
+### 5.2 当前 Hub/Relay 的硬限制
 
 当前 Self-hosted Hub 是 V1 单实例实现：
 

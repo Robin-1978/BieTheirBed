@@ -12,12 +12,17 @@ def _read(relative: str) -> str:
 def test_windows_installer_uses_python314_and_winsw_hub() -> None:
     script = _read("deploy/windows/Install-Knoa.ps1")
 
+    assert '[ValidateSet("all", "hub", "node")]' in script
+    assert '[string]$Role = "all"' in script
+    assert '$installHub = $Role -in @("all", "hub")' in script
+    assert '$installNode = $Role -in @("all", "node")' in script
     assert '[string]$PythonVersion = "3.14"' in script
     assert "Py_GIL_DISABLED" in script
     assert "$pythonProbe | & $python -" in script
     assert "& $python -c" not in script
     assert "[string]$WinSWExecutable" in script
     assert 'Install-WinSWService "KnoaHostedHub"' in script
+    assert 'if ($installHub)' in script
     assert 'Register-ScheduledTask -TaskName "Knoa Hosted Hub"' not in script
 
 
@@ -25,6 +30,7 @@ def test_windows_node_is_always_a_winsw_service() -> None:
     script = _read("deploy/windows/Install-Knoa.ps1")
 
     assert 'Install-WinSWService "KnoaNode"' in script
+    assert 'if ($installNode)' in script
     assert 'Register-ScheduledTask -TaskName "Knoa Node"' not in script
     assert "$env:ProgramData\\Knoa\\Node" in script
     assert "gateway pair --ttl 600" in script
@@ -50,6 +56,14 @@ def test_windows_cloudflared_supports_independent_token_files() -> None:
     assert "--token-file" in script
     assert "service install" not in script
     assert 'serviceId = "Cloudflared-$name"' in script
+
+
+def test_windows_hosted_hub_can_publish_the_android_app() -> None:
+    script = _read("deploy/windows/Publish-KnoaApp.ps1")
+
+    assert '"knoa_platform.hub.admin", "mobile-publish"' in script
+    assert "knoa_platform.hub.admin mobile-latest" in script
+    assert "/downloads/android/latest.apk" in script
 
 
 def test_linux_cloudflared_services_also_keep_tokens_out_of_arguments() -> None:
