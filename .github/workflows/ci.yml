@@ -34,7 +34,7 @@ jobs:
         run: uv sync --locked --python 3.12
       - uses: arduino/setup-protoc@v3
         with:
-          version: "31.x"
+          version: "31.1"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Verify versioned protocol descriptors and fixtures
         run: uv run --no-sync python scripts/check_protocol_contracts.py
