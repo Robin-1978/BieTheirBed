@@ -142,13 +142,17 @@ Remove-WinSWService "KnoaHostedHub" $hubWrapper
 Remove-WinSWService "KnoaNode" $nodeWrapper
 
 Protect-KnoaPath $baseRoot
-if (
-    $LegacyNodeRoot
-    -and [IO.Path]::GetFullPath($LegacyNodeRoot) -ne [IO.Path]::GetFullPath($NodeRoot)
-    -and (Test-Path -LiteralPath $LegacyNodeRoot)
-) {
-    $targetHasState = (Test-Path -LiteralPath $NodeRoot) -and
-        [bool](Get-ChildItem -Force -LiteralPath $NodeRoot | Select-Object -First 1)
+$legacyNodeExists = $LegacyNodeRoot -and (Test-Path -LiteralPath $LegacyNodeRoot)
+$nodeRootsDiffer = $LegacyNodeRoot -and (
+    [IO.Path]::GetFullPath($LegacyNodeRoot) -ne [IO.Path]::GetFullPath($NodeRoot)
+)
+if ($legacyNodeExists -and $nodeRootsDiffer) {
+    $targetHasState = $false
+    if (Test-Path -LiteralPath $NodeRoot) {
+        $targetHasState = [bool](
+            Get-ChildItem -Force -LiteralPath $NodeRoot | Select-Object -First 1
+        )
+    }
     if (-not $targetHasState) {
         New-Item -ItemType Directory -Force -Path $NodeRoot | Out-Null
         Get-ChildItem -Force -LiteralPath $LegacyNodeRoot |
