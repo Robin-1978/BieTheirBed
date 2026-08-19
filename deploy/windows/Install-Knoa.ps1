@@ -84,6 +84,17 @@ function Remove-WinSWService([string]$ServiceId, [string]$WrapperPath) {
     }
 }
 
+function Stop-KnoaService([string]$ServiceId) {
+    $service = Get-Service -Name $ServiceId -ErrorAction SilentlyContinue
+    if ($service -and $service.Status -ne "Stopped") {
+        Stop-Service -InputObject $service -Force
+        $service.WaitForStatus(
+            [System.ServiceProcess.ServiceControllerStatus]::Stopped,
+            [TimeSpan]::FromSeconds(30)
+        )
+    }
+}
+
 function Install-WinSWService(
     [string]$ServiceId,
     [string]$Xml,
@@ -156,6 +167,11 @@ $releasePublishTokenFile = Join-Path $secretRoot "hosted-hub-release-publisher.t
 $nodeConfig = Join-Path $configRoot "node-windows.yaml"
 $hubWrapper = Join-Path $serviceRoot "KnoaHostedHub\KnoaHostedHub.exe"
 $nodeWrapper = Join-Path $serviceRoot "KnoaNode\KnoaNode.exe"
+
+# Windows keeps loaded Python and WinSW files locked. Stop the selected
+# processes before performing an in-place runtime update.
+if ($installHub) { Stop-KnoaService "KnoaHostedHub" }
+if ($installNode) { Stop-KnoaService "KnoaNode" }
 
 $legacyTaskNames = @()
 if ($installHub) { $legacyTaskNames += "Knoa Hosted Hub" }

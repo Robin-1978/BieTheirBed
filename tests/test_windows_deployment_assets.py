@@ -37,6 +37,18 @@ def test_windows_node_is_always_a_winsw_service() -> None:
     assert "\n    -and " not in script
 
 
+def test_windows_installer_stops_services_before_updating_runtime() -> None:
+    script = _read("deploy/windows/Install-Knoa.ps1")
+
+    stop_hub = 'if ($installHub) { Stop-KnoaService "KnoaHostedHub" }'
+    stop_node = 'if ($installNode) { Stop-KnoaService "KnoaNode" }'
+    install_package = "& $python -m pip install"
+    assert stop_hub in script
+    assert stop_node in script
+    assert script.index(stop_hub) < script.index(install_package)
+    assert script.index(stop_node) < script.index(install_package)
+
+
 def test_windows_enrollment_restarts_service_and_prints_pairing_qr() -> None:
     script = _read("deploy/windows/Enroll-KnoaNode.ps1")
 
