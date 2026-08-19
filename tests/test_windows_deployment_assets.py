@@ -52,6 +52,13 @@ def test_windows_installer_stops_services_before_updating_runtime() -> None:
     assert script.index(stop_node) < script.index(install_package)
 
 
+def test_windows_source_update_reconciles_new_runtime_dependencies() -> None:
+    script = _read("deploy/windows/Install-Knoa.ps1")
+
+    assert "pip install --no-deps" not in script
+    assert "--upgrade-strategy only-if-needed" in script
+
+
 def test_windows_enrollment_restarts_service_and_prints_pairing_qr() -> None:
     script = _read("deploy/windows/Enroll-KnoaNode.ps1")
 

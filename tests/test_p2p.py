@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
+
 import pytest
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -8,6 +14,55 @@ from starlette.routing import Route
 
 import knoa_platform.p2p as p2p_module
 from knoa_platform.p2p import P2PClient, P2PServer
+
+
+def test_missing_aiortc_keeps_node_importable_and_uses_relay_fallback() -> None:
+    root = Path(__file__).resolve().parents[1]
+    code = textwrap.dedent(
+        """
+        import asyncio
+        import builtins
+
+        original_import = builtins.__import__
+
+        def blocked_import(name, *args, **kwargs):
+            if name == "aiortc" or name.startswith("aiortc."):
+                raise ModuleNotFoundError("No module named 'aiortc'", name="aiortc")
+            return original_import(name, *args, **kwargs)
+
+        builtins.__import__ = blocked_import
+
+        from knoa_platform.p2p import P2PClient, P2PUnavailableError, p2p_available
+        import knoa_platform.agent_runtime.composition
+        import knoa_platform.gateway.adapter
+        import knoa_platform.remote_models
+
+        assert not p2p_available()
+
+        async def verify():
+            client = P2PClient()
+            try:
+                await client.connect(lambda _offer: None)
+            except P2PUnavailableError:
+                return
+            raise AssertionError("P2P unexpectedly started without aiortc")
+
+        asyncio.run(verify())
+        """
+    )
+    environment = dict(os.environ)
+    environment["PYTHONPATH"] = str(root / "src")
+
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.asyncio
