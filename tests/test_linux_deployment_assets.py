@@ -46,3 +46,14 @@ def test_linux_hosted_hub_can_publish_the_android_app() -> None:
     assert "hosted-hub-release-publisher.token" in remote
     assert "build-mobile-apk.sh" in combined
     assert "publish-hosted-mobile-apk.sh" in combined
+
+
+def test_mobile_build_creates_a_self_describing_windows_release_bundle() -> None:
+    build = _read("scripts/build-mobile-apk.sh")
+    package = _read("scripts/package-mobile-release.sh")
+
+    assert '"$SCRIPT_DIR/package-mobile-release.sh"' in build
+    assert 'publisher_name="Publish-Knoa-$version_name.cmd"' in package
+    assert "knoa-$version_name.release.json" in package
+    assert "--version-name" in package
+    assert "--version-code" in package

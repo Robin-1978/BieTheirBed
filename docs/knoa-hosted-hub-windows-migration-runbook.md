@@ -475,14 +475,22 @@ curl.exe -I https://knoa.tinydotdot.com/downloads/android/latest.apk
 - `content-length`；
 - `etag` 或 `x-knoa-sha256`。
 
-如果这是新建 Hub、备份中没有 Android release，或需要发布新版 App，将已签名 APK 复制到 Windows
-Hub 主机后执行：
+如果这是新建 Hub、备份中没有 Android release，或需要发布新版 App，构建机会生成：
+
+```text
+/disk/dev/knoa-mobile-out/release/
+  knoa-<version>.apk
+  knoa-<version>.release.json
+  Publish-Knoa-<version>.cmd
+```
+
+把三个文件复制到 Windows Hub 的同一目录，双击 `Publish-Knoa-<version>.cmd` 即可。版本号、
+版本代码和发布参数均由构建流程写入，部署人员不需要填写。
+
+命令行方式也只需要 APK 路径，发布脚本会自动读取并校验相邻的 `.release.json`：
 
 ```powershell
-C:\ProgramData\Knoa\Scripts\Publish-KnoaApp.ps1 `
-  -ApkPath C:\Builds\knoa.apk `
-  -HubPublicUrl https://knoa.tinydotdot.com `
-  -Notes "Knoa update"
+C:\ProgramData\Knoa\Scripts\Publish-KnoaApp.ps1 -ApkPath C:\Builds\knoa-0.2.53.apk
 ```
 
 发布只更新 `C:\ProgramData\Knoa\HostedHub\mobile-releases\android`，不重启 Hub 或 Node。

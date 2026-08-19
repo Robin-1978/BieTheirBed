@@ -111,3 +111,7 @@ echo
 echo
 echo "OK: $APK"
 ls -lh "$APK"
+
+echo
+echo "==> Package self-describing release bundle"
+"$SCRIPT_DIR/package-mobile-release.sh" "$APK" "$KNOA_MOBILE_BUILD_DIR/release"

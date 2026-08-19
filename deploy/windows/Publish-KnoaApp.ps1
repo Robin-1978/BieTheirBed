@@ -5,6 +5,7 @@ param(
     [string]$PythonExecutable = "$env:ProgramData\Knoa\Runtime\venv\Scripts\python.exe",
     [string]$HubPublicUrl = "https://knoa.tinydotdot.com",
     [string]$AppMetadataPath = "C:\knoa\apps\knoa-mobile\app.json",
+    [string]$ReleaseMetadataPath = "",
     [int]$MinVersionCode = 1,
     [string]$VersionName = "",
     [int]$VersionCode = 0,
@@ -17,7 +18,23 @@ $resolvedPython = (Resolve-Path -LiteralPath $PythonExecutable).Path
 if (-not (Test-Path -LiteralPath $HubRoot)) {
     throw "Hosted Hub root not found: $HubRoot"
 }
-if (-not $VersionName -and $VersionCode -eq 0 -and (Test-Path -LiteralPath $AppMetadataPath)) {
+if (-not $ReleaseMetadataPath) {
+    $ReleaseMetadataPath = [IO.Path]::ChangeExtension($resolvedApk, ".release.json")
+}
+if (-not $VersionName -and $VersionCode -eq 0 -and (Test-Path -LiteralPath $ReleaseMetadataPath)) {
+    $releaseMetadata = Get-Content -LiteralPath $ReleaseMetadataPath -Raw -Encoding UTF8 |
+        ConvertFrom-Json
+    if ([string]$releaseMetadata.platform -ne "android" -or
+        [string]$releaseMetadata.package_id -ne "dev.knoa.mobile" -or
+        [string]$releaseMetadata.file_name -ne [IO.Path]::GetFileName($resolvedApk) -or
+        [int64]$releaseMetadata.size_bytes -ne (Get-Item -LiteralPath $resolvedApk).Length -or
+        [string]$releaseMetadata.sha256 -ne (Get-FileHash -LiteralPath $resolvedApk -Algorithm SHA256).Hash.ToLowerInvariant()) {
+        throw "Android release metadata does not match the APK"
+    }
+    $VersionName = [string]$releaseMetadata.version_name
+    $VersionCode = [int]$releaseMetadata.version_code
+    $MinVersionCode = [int]$releaseMetadata.min_supported_version_code
+} elseif (-not $VersionName -and $VersionCode -eq 0 -and (Test-Path -LiteralPath $AppMetadataPath)) {
     $appMetadata = Get-Content -LiteralPath $AppMetadataPath -Raw -Encoding UTF8 |
         ConvertFrom-Json
     $VersionName = [string]$appMetadata.expo.version
