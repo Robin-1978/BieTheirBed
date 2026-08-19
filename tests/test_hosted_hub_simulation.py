@@ -17,6 +17,29 @@ RELEASE_PUBLISH_TOKEN = "release-" + "r" * 40
 PASSWORD = "correct horse battery staple"
 
 
+@pytest.mark.asyncio
+async def test_hosted_hub_serves_embedded_console_without_exposing_credentials(
+    tmp_path: Path,
+) -> None:
+    application = HostedHubApplication(
+        tmp_path / "hosted",
+        hub_id="hub_hosted",
+        bootstrap_token=BOOTSTRAP_TOKEN,
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application.app),
+        base_url="http://hub",
+    ) as client:
+        response = await client.get("/console")
+
+    assert response.status_code == 200
+    assert "Knoa Hub Console" in response.text
+    assert "/v1/hosted/sessions" in response.text
+    assert BOOTSTRAP_TOKEN not in response.text
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+
 def _apk(path: Path, payload: bytes) -> bytes:
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("AndroidManifest.xml", b"manifest")

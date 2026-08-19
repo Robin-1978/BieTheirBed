@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import secrets as token_secrets
 import time
 from collections import defaultdict, deque
 from pathlib import Path
@@ -29,6 +30,7 @@ from knoa_platform.gateway.identity import (
 from knoa_platform.gateway.routes import (
     ArtifactRoutes,
     ConfigurationRoutes,
+    ConsoleRoutes,
     ConversationRoutes,
     DeviceRoutes,
     ExtensionRoutes,
@@ -82,6 +84,7 @@ class _EmbeddedUvicornServer(uvicorn.Server):
 
 
 class SecureGatewayAdapter(
+    ConsoleRoutes,
     ConversationRoutes,
     TaskRoutes,
     ArtifactRoutes,
@@ -171,12 +174,25 @@ class SecureGatewayAdapter(
         )
         self._limiter = limiter or _WindowLimiter()
         self._event_heartbeat_seconds = max(0.01, event_heartbeat_seconds)
+        self._console_csrf_token = token_secrets.token_urlsafe(32)
         self._active_event_streams: dict[str, int] = defaultdict(int)
         self._stream_replacements: dict[tuple[str, str], asyncio.Event] = {}
         self._server: _EmbeddedUvicornServer | None = None
         self._server_task: asyncio.Task[None] | None = None
         self.app = Starlette(
             routes=[
+                Route("/console", self._console_page, methods=["GET"]),
+                Route("/v1/console/status", self._console_status, methods=["GET"]),
+                Route(
+                    "/v1/console/hub/enroll",
+                    self._console_hub_enroll,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/console/pairing",
+                    self._console_pairing,
+                    methods=["POST"],
+                ),
                 Route("/health", self._health, methods=["GET"]),
                 Route("/openapi.json", self._openapi, methods=["GET"]),
                 Route("/v1/pair/challenge", self._pair_challenge, methods=["POST"]),

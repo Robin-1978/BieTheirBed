@@ -19,9 +19,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse
 from starlette.routing import Mount, Route
 
+from knoa_platform.console_ui import hub_console_html
 from knoa_platform.hub.app import HubApplication
 from knoa_platform.hub.repository import HubRepository
 from knoa_platform.hub.service import HubService
@@ -927,6 +928,7 @@ class HostedHubApplication:
         self.app = Starlette(
             routes=[
                 Route("/health", self.health, methods=["GET"]),
+                Route("/console", self.console, methods=["GET"]),
                 Route(
                     "/v1/hosted/account-enrollment-grants",
                     self.account_enrollment_grants,
@@ -993,6 +995,21 @@ class HostedHubApplication:
                 ),
                 Mount("/workspaces", app=self.tenants),
             ]
+        )
+
+    async def console(self, _request: Request) -> HTMLResponse:
+        return HTMLResponse(
+            hub_console_html(),
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Security-Policy": (
+                    "default-src 'none'; style-src 'unsafe-inline'; "
+                    "script-src 'unsafe-inline'; connect-src 'self'; "
+                    "img-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'"
+                ),
+                "Referrer-Policy": "no-referrer",
+                "X-Content-Type-Options": "nosniff",
+            },
         )
 
     async def health(self, _request: Request) -> JSONResponse:

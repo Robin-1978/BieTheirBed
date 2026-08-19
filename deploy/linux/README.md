@@ -63,6 +63,21 @@ curl --fail http://127.0.0.1:9529/health
 curl --fail http://127.0.0.1:9531/health
 ```
 
+## Embedded management consoles
+
+Hub and Node consoles are part of their owning services rather than separate
+deployments:
+
+```text
+https://hub.example.com/console       Hub Console
+http://127.0.0.1:9531/console         local Node Console
+```
+
+The Hub Console creates a ten-minute, single-use Workspace Enrollment Code.
+Paste it into the target computer's local Node Console. After the Node opens
+its outbound Relay connection, the Node Console generates the QR scanned by
+the App. Account Tokens and Workspace IDs are not part of the user workflow.
+
 ## Publish the Android App to Hosted Hub
 
 Publishing copies one signed APK into the Hub-owned immutable release channel.

@@ -23,9 +23,15 @@ def test_gateway_openapi_matches_the_allow_listed_http_surface(tmp_path) -> None
     adapter = _adapter(tmp_path)
     schema = gateway_openapi_schema()
     actual_paths = {route.path.replace(":str}", "}") for route in adapter.app.routes}
+    local_console_paths = {
+        "/console",
+        "/v1/console/status",
+        "/v1/console/hub/enroll",
+        "/v1/console/pairing",
+    }
 
     assert schema["openapi"] == "3.1.0"
-    assert set(schema["paths"]) == actual_paths - {"/openapi.json"}
+    assert set(schema["paths"]) == actual_paths - {"/openapi.json"} - local_console_paths
     assert schema["components"]["securitySchemes"]["gatewaySession"]["scheme"] == (
         "bearer"
     )
