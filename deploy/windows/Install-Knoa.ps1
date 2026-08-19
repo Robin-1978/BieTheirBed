@@ -171,7 +171,22 @@ if (-not (Test-Path -LiteralPath $python)) {
     & py "-$PythonVersion" -m venv $venvRoot
     if ($LASTEXITCODE -ne 0) { throw "Python $PythonVersion venv creation failed" }
 }
-$pythonIdentity = (& $python -c "import struct,sys,sysconfig; print(f'{sys.version_info.major}.{sys.version_info.minor}:{struct.calcsize(`"P`") * 8}:{int(bool(sysconfig.get_config_var(`"Py_GIL_DISABLED`")))}')").Trim()
+$pythonProbe = @'
+import struct
+import sys
+import sysconfig
+
+print(
+    f"{sys.version_info.major}.{sys.version_info.minor}:"
+    f"{struct.calcsize('P') * 8}:"
+    f"{int(bool(sysconfig.get_config_var('Py_GIL_DISABLED')))}"
+)
+'@
+$pythonIdentityLines = @($pythonProbe | & $python -)
+if ($LASTEXITCODE -ne 0) {
+    throw "Could not inspect the Knoa Python environment"
+}
+$pythonIdentity = ($pythonIdentityLines -join "`n").Trim()
 if ($pythonIdentity -ne "${PythonVersion}:64:0") {
     throw "Knoa requires standard CPython $PythonVersion x64; found $pythonIdentity. Use -RecreateVenv after installing it."
 }
