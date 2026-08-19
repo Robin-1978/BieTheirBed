@@ -113,6 +113,25 @@ https://knoa.tinydotdot.com/downloads/android/latest.apk
 Publishing an APK does not restart Hub or Node. Logged-in Apps query the Hub
 release channel and can download the new version from the App update page.
 
+For publishing from a separate Linux build machine, the Hub owns an independent
+publisher credential at:
+
+```text
+C:\ProgramData\Knoa\Secrets\hosted-hub-release-publisher.token
+```
+
+Copy this token once through a private channel to the build machine as
+`~/.knoa/secrets/hosted-hub-release-publisher.token` with mode `0600`. Do not
+reuse or copy the Hosted bootstrap token. The build machine can then run:
+
+```bash
+KNOA_MOBILE_RELEASE_NOTES="Knoa update" scripts/build-and-publish-mobile-apk.sh
+```
+
+The build machine reads and validates the APK manifest, uploads at most 100 MiB
+over HTTPS, and verifies the Hub-returned version and SHA-256 digest. The remote
+publisher endpoint is disabled when no dedicated publisher token is configured.
+
 ## Node enrollment and App QR pairing
 
 Enrollment and App pairing are separate trust steps:

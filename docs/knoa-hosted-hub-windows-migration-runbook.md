@@ -487,6 +487,17 @@ C:\ProgramData\Knoa\Scripts\Publish-KnoaApp.ps1 `
 
 发布只更新 `C:\ProgramData\Knoa\HostedHub\mobile-releases\android`，不重启 Hub 或 Node。
 
+跨机自动发布使用独立凭据：
+
+```text
+C:\ProgramData\Knoa\Secrets\hosted-hub-release-publisher.token
+```
+
+只需通过私密通道复制一次到构建机的
+`~/.knoa/secrets/hosted-hub-release-publisher.token` 并设置权限 `0600`。禁止复制或复用
+`hosted-hub-bootstrap.token`。之后构建机执行
+`scripts/build-and-publish-mobile-apk.sh` 即可完成签名构建、HTTPS 上传和 Hub digest 验证。
+
 ## 13. 阶段 G：Account、App 与旧 Node 验收
 
 在 App 中验证：

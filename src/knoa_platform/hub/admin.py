@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import hashlib
 import json
 import os
@@ -25,6 +26,7 @@ from knoa_platform.mobile_releases import (
 )
 from knoa_platform.node_hub import NodeHubService, NodeHubStore
 from knoa_platform.node_identity import NodeIdentityStore
+from knoa_platform.private_files import validate_private_file
 from knoa_platform.runtime import RuntimePaths
 
 _BACKUP_VERSION = "knoa-hosted-backup-v2"
@@ -59,7 +61,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _public_hub_url(enroll)
     enroll.add_argument("--workspace-id", required=True)
-    enroll.add_argument("--runtime-root", default=os.environ.get("KNOA_RUNTIME_ROOT", ""))
+    enroll.add_argument(
+        "--runtime-root", default=os.environ.get("KNOA_RUNTIME_ROOT", "")
+    )
     enroll.add_argument("--display-name", default="Knoa Node")
 
     backup = commands.add_parser(
@@ -84,12 +88,34 @@ def build_parser() -> argparse.ArgumentParser:
     mobile_publish.add_argument("--root", required=True)
     mobile_publish.add_argument("--min-version-code", type=int, default=1)
     mobile_publish.add_argument("--notes", default="")
+    mobile_publish.add_argument("--version-name", default="")
+    mobile_publish.add_argument("--version-code", type=int, default=0)
 
     mobile_latest = commands.add_parser(
         "mobile-latest",
         help="Inspect the latest Hosted Android platform release",
     )
     mobile_latest.add_argument("--root", required=True)
+
+    mobile_upload = commands.add_parser(
+        "mobile-upload",
+        help="Upload a signed Knoa Android APK to a remote Hosted Hub",
+    )
+    mobile_upload.add_argument("apk")
+    mobile_upload.add_argument(
+        "--hub-url",
+        default=os.environ.get("KNOA_HUB_PUBLIC_URL", ""),
+        required=not bool(os.environ.get("KNOA_HUB_PUBLIC_URL", "")),
+    )
+    mobile_upload.add_argument(
+        "--token-file",
+        default=os.environ.get(
+            "KNOA_HUB_RELEASE_TOKEN_FILE",
+            "~/.knoa/secrets/hosted-hub-release-publisher.token",
+        ),
+    )
+    mobile_upload.add_argument("--min-version-code", type=int, default=1)
+    mobile_upload.add_argument("--notes", default="")
     return parser
 
 
@@ -106,9 +132,19 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.apk),
             min_version_code=args.min_version_code,
             notes=args.notes,
+            version_name=args.version_name,
+            version_code=args.version_code,
         )
     if args.command == "mobile-latest":
         return _mobile_latest(Path(args.root))
+    if args.command == "mobile-upload":
+        return _mobile_upload(
+            Path(args.apk),
+            hub_url=args.hub_url,
+            token_file=Path(args.token_file),
+            min_version_code=args.min_version_code,
+            notes=args.notes,
+        )
     if args.command == "node-enroll":
         account_token = os.environ.get("KNOA_HUB_ACCOUNT_TOKEN", "")
         if len(account_token) < 32:
@@ -257,12 +293,17 @@ def _mobile_publish(
     *,
     min_version_code: int,
     notes: str,
+    version_name: str = "",
+    version_code: int = 0,
 ) -> int:
     repository = AndroidReleaseRepository(
         root.expanduser().resolve() / "mobile-releases" / "android"
     )
     try:
-        version_name, version_code = read_apk_version(apk)
+        if bool(version_name) != bool(version_code):
+            raise ValueError("Version name and version code must be supplied together")
+        if not version_name:
+            version_name, version_code = read_apk_version(apk)
         release = repository.publish(
             apk,
             version_name=version_name,
@@ -291,6 +332,98 @@ def _mobile_latest(root: Path) -> int:
     return 0
 
 
+def _mobile_upload(
+    apk: Path,
+    *,
+    hub_url: str,
+    token_file: Path,
+    min_version_code: int,
+    notes: str,
+) -> int:
+    try:
+        source = apk.expanduser().resolve(strict=True)
+        metadata = source.stat()
+        if metadata.st_size < 1 or metadata.st_size > 100 * 1024 * 1024:
+            raise ValueError(
+                "Remote Hosted APK must contain between 1 byte and 100 MiB"
+            )
+        if len(notes.encode("utf-8")) > 4_000:
+            raise ValueError("Remote Hosted release notes exceed 4000 UTF-8 bytes")
+        version_name, version_code = read_apk_version(source)
+        if min_version_code < 1 or min_version_code > version_code:
+            raise ValueError(
+                "Minimum supported version code must be between 1 and version code"
+            )
+        private_token = validate_private_file(
+            token_file,
+            label="Hosted release publisher token",
+            max_bytes=4096,
+        )
+        token = private_token.read_text(encoding="ascii").strip()
+        if len(token) < 32 or any(character.isspace() for character in token):
+            raise ValueError("Hosted release publisher token is invalid")
+        digest = _sha256(source)
+        encoded_notes = (
+            base64.urlsafe_b64encode(notes.encode("utf-8")).decode().rstrip("=")
+        )
+        public_hub_url = _url(hub_url, allow_http_loopback=True)
+        endpoint = f"{public_hub_url}/v1/admin/mobile/releases/android"
+
+        def content():
+            with source.open("rb") as handle:
+                while chunk := handle.read(1024 * 1024):
+                    yield chunk
+
+        with httpx.Client(timeout=httpx.Timeout(600.0, connect=30.0)) as client:
+            response = client.put(
+                endpoint,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/vnd.android.package-archive",
+                    "Content-Length": str(metadata.st_size),
+                    "X-Knoa-Apk-SHA256": digest,
+                    "X-Knoa-Version-Name": version_name,
+                    "X-Knoa-Version-Code": str(version_code),
+                    "X-Knoa-Min-Version-Code": str(min_version_code),
+                    "X-Knoa-Release-Notes": encoded_notes,
+                },
+                content=content(),
+            )
+        if response.status_code != 201:
+            detail = response.text[:1000]
+            raise ValueError(
+                f"Hosted Hub rejected Android release ({response.status_code}): {detail}"
+            )
+        payload = response.json()
+        remote_version_code = int(payload["version_code"])
+        remote_sha256 = str(payload["sha256"])
+        remote_version_name = str(payload["version_name"])
+        remote_size_bytes = int(payload["size_bytes"])
+        if remote_version_code != version_code or remote_sha256 != digest:
+            raise ValueError(
+                "Hosted Hub returned inconsistent Android release metadata"
+            )
+    except (
+        httpx.HTTPError,
+        KeyError,
+        LookupError,
+        OSError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        print(f"Hosted Android upload failed: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        if "token" in locals():
+            token = ""
+    print(f"version_name={remote_version_name}")
+    print(f"version_code={remote_version_code}")
+    print(f"size_bytes={remote_size_bytes}")
+    print(f"sha256={remote_sha256}")
+    print(f"download_url={public_hub_url}/downloads/android/latest.apk")
+    return 0
+
+
 def _print_mobile_release(
     repository: AndroidReleaseRepository,
     release: AndroidRelease,
@@ -313,7 +446,11 @@ def _backup(root: Path, output: Path) -> int:
     try:
         control = source / "control.db"
         signing_key = source / "hub-signing.key"
-        if not control.is_file() or not signing_key.is_file() or signing_key.is_symlink():
+        if (
+            not control.is_file()
+            or not signing_key.is_file()
+            or signing_key.is_symlink()
+        ):
             raise ValueError("Hosted root is incomplete")
         target.mkdir(parents=True, mode=0o700)
         _sqlite_backup(control, target / "control.db")
@@ -327,7 +464,9 @@ def _backup(root: Path, output: Path) -> int:
         for (workspace_id,) in rows:
             workspace = str(workspace_id)
             if not re.fullmatch(r"ws_[A-Za-z0-9_-]{12,96}", workspace):
-                raise ValueError("Hosted control database contains an invalid Workspace ID")
+                raise ValueError(
+                    "Hosted control database contains an invalid Workspace ID"
+                )
             database = source / "tenants" / workspace / "hub.db"
             if not database.is_file():
                 raise ValueError(f"Workspace database is missing: {workspace}")
@@ -378,7 +517,9 @@ def _restore(backup: Path, root: Path) -> int:
             workspace = str(item["workspace_id"])
             if not re.fullmatch(r"ws_[A-Za-z0-9_-]{12,96}", workspace):
                 raise ValueError("Hosted backup contains an invalid Workspace ID")
-            files.append((source / "tenants" / workspace / "hub.db", str(item["sha256"])))
+            files.append(
+                (source / "tenants" / workspace / "hub.db", str(item["sha256"]))
+            )
         mobile_release_files = manifest["mobile_release_files"]
         if not isinstance(mobile_release_files, list):
             raise TypeError("Hosted backup mobile release manifest is invalid")
@@ -386,7 +527,9 @@ def _restore(backup: Path, root: Path) -> int:
         for item in mobile_release_files:
             name = str(item["name"])
             if not _mobile_release_file_name(name) or name in seen_release_files:
-                raise ValueError("Hosted backup contains an invalid mobile release file")
+                raise ValueError(
+                    "Hosted backup contains an invalid mobile release file"
+                )
             seen_release_files.add(name)
             files.append(
                 (
@@ -531,7 +674,9 @@ def _url(value: str, *, allow_http_loopback: bool) -> str:
         and not parsed.path
     ):
         return normalized
-    raise ValueError("Hosted Hub URL must be HTTPS; admin endpoint may be loopback HTTP")
+    raise ValueError(
+        "Hosted Hub URL must be HTTPS; admin endpoint may be loopback HTTP"
+    )
 
 
 def _print_qr(payload: str) -> None:

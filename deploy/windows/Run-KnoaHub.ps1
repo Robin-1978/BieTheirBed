@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory = $true)][string]$PythonExecutable,
     [Parameter(Mandatory = $true)][string]$HubRoot,
     [Parameter(Mandatory = $true)][string]$BootstrapTokenFile,
+    [Parameter(Mandatory = $true)][string]$ReleasePublishTokenFile,
     [string]$HubId = "hub_knoa_hosted",
     [int]$Port = 9529
 )
@@ -13,6 +14,11 @@ if ($token.Length -lt 32) {
     throw "Knoa Hub bootstrap token must contain at least 32 characters"
 }
 $env:KNOA_HUB_BOOTSTRAP_TOKEN = $token
+$releasePublishToken = (Get-Content -LiteralPath $ReleasePublishTokenFile -Raw).Trim()
+if ($releasePublishToken.Length -lt 32) {
+    throw "Knoa Hub release publisher token must contain at least 32 characters"
+}
+$env:KNOA_HUB_RELEASE_PUBLISH_TOKEN = $releasePublishToken
 & $PythonExecutable -m knoa_platform.hub `
     --deployment-mode hosted_single_node `
     --host 127.0.0.1 `

@@ -79,3 +79,14 @@ The stable installation URL is:
 ```text
 https://hub.example.com/downloads/android/latest.apk
 ```
+
+For a separate build machine, copy only the independent value
+`KNOA_HUB_RELEASE_PUBLISH_TOKEN` from the Hub's private environment file into
+`~/.knoa/secrets/hosted-hub-release-publisher.token` on the build machine and
+set mode `0600`. Never copy the bootstrap token. Then build and publish with:
+
+```bash
+KNOA_HUB_PUBLIC_URL=https://hub.example.com \
+KNOA_MOBILE_RELEASE_NOTES="Knoa update" \
+scripts/build-and-publish-mobile-apk.sh
+```

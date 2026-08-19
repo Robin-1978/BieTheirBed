@@ -136,6 +136,22 @@ No-Hub and Self-hosted Hub installations continue to use the selected Node's
 local release channel. Hosted Apps do not silently fall back to a Node release
 when the Hosted update service fails.
 
+A separate build machine uses the independent release publisher credential,
+never the bootstrap token:
+
+```bash
+install -d -m 700 ~/.knoa/secrets
+# Securely place the Hub's release publisher token in this file once.
+chmod 600 ~/.knoa/secrets/hosted-hub-release-publisher.token
+KNOA_HUB_PUBLIC_URL=https://hub.example.com \
+KNOA_MOBILE_RELEASE_NOTES="Hosted update" \
+scripts/build-and-publish-mobile-apk.sh
+```
+
+The HTTPS upload is limited to 100 MiB, verifies the declared SHA-256 and
+publishes atomically. If no dedicated publisher token is configured, the
+remote endpoint remains disabled.
+
 ## Backup and restore
 
 Create a WAL-consistent snapshot while the service is running:
