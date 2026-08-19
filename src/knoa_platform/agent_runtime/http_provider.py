@@ -24,6 +24,10 @@ from knoa_platform.model_adapter.parsers.openai import (
     OpenAIStreamAccumulator,
     build_chat_payload,
 )
+from knoa_platform.model_adapter.content import (
+    ImageNormalizationError,
+    normalize_image_messages,
+)
 from knoa_platform.model_adapter.profiles import resolve_profile
 from knoa_platform.tools.http_limits import iter_limited_lines
 
@@ -151,6 +155,16 @@ class HttpModelProvider(ModelProviderPort):
                 provider_model=self.model_alias,
             )
             return
+        try:
+            messages = normalize_image_messages(messages)
+        except ImageNormalizationError:
+            yield ProviderChunk(
+                finish_reason="error",
+                terminal=True,
+                error_code="image_input_rejected",
+                provider_model=self.model_alias,
+            )
+            return
         payload = build_chat_payload(
             self._model.model,
             messages,
@@ -250,6 +264,16 @@ class HttpModelProvider(ModelProviderPort):
                 finish_reason="error",
                 terminal=True,
                 error_code="unsupported_input",
+                provider_model=self.model_alias,
+            )
+            return
+        try:
+            messages = normalize_image_messages(messages)
+        except ImageNormalizationError:
+            yield ProviderChunk(
+                finish_reason="error",
+                terminal=True,
+                error_code="image_input_rejected",
                 provider_model=self.model_alias,
             )
             return

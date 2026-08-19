@@ -50,6 +50,25 @@ class CreateSessionRequest(GatewayRequest):
     agent_id: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_-]{0,63}$")
 
 
+class P2POfferRequest(GatewayRequest):
+    type: Literal["offer"]
+    sdp: str = Field(min_length=1, max_length=2_000_000)
+
+
+class ResourceP2POfferRequest(P2POfferRequest):
+    invocation_id: str = Field(min_length=1, max_length=128)
+    ticket: str = Field(min_length=64, max_length=16_384)
+
+
+class P2PAnswer(BaseModel):
+    type: Literal["answer"]
+    sdp: str = Field(min_length=1, max_length=2_000_000)
+
+
+class P2PAnswerResponse(BaseModel):
+    answer: P2PAnswer
+
+
 class PairChallengeRequest(GatewayRequest):
     grant_id: str = Field(min_length=1, max_length=128)
 

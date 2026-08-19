@@ -134,6 +134,7 @@ export type ManagedConfig = {
     enabled: boolean;
     share_enabled: boolean;
     max_remote_concurrency: number;
+    allowed_node_ids: string[];
   }>;
   default_model: string;
   fallback_model: string;

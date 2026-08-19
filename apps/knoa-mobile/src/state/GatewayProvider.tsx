@@ -10,7 +10,6 @@ import {
   clearConnectionIdentity,
   deselectNode,
   loadConnectionIdentity,
-  loadCoreSession,
   loadSessionToken,
   listNodeBindings,
   selectNode,
@@ -49,7 +48,7 @@ type GatewayState = {
   removeConnection(): Promise<void>;
   disconnectNode(): Promise<void>;
   switchNode(nodeId: string): Promise<void>;
-  newConversation(): Promise<void>;
+  newConversation(agentId?: string): Promise<void>;
   ensureConversation(): Promise<string>;
   commitConversation(sessionHandle: string): Promise<void>;
   openConversation(sessionHandle: string): Promise<void>;
@@ -103,8 +102,10 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     provisionalConversationRef.current = null;
     commit({ status: "booting", error: "" });
     try {
-      const identity = await loadConnectionIdentity();
-      const nodes = await listNodeBindings();
+      const [identity, nodes] = await Promise.all([
+        loadConnectionIdentity(),
+        listNodeBindings(),
+      ]);
       if (generation !== connectionGenerationRef.current) return;
       if (!identity) {
         connectionRef.current = null;
@@ -112,7 +113,10 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         return;
       }
       const device = { deviceId: identity.deviceId, gatewayUrl: identity.gatewayUrl };
-      let token = await loadSessionToken();
+      let token = identity.sessionToken
+        && identity.sessionExpiresAt > Date.now() / 1000 + 30
+        ? identity.sessionToken
+        : null;
       let client: GatewayClient;
       if (token) {
         client = new GatewayClient(
@@ -143,16 +147,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       }
       if (!token) throw new Error("未能建立安全会话");
       if (generation !== connectionGenerationRef.current) return;
-      const sessionHandle = (await loadCoreSession()) ?? "";
-      let activeAgentId = "";
-      if (sessionHandle) {
-        try {
-          activeAgentId = (await client.getConversationSession(sessionHandle)).agent_id;
-        } catch {
-          activeAgentId = "";
-        }
-      }
-      if (generation !== connectionGenerationRef.current) return;
+      const sessionHandle = identity.coreSessionHandle || "";
       connectionRef.current = { gatewayUrl: identity.gatewayUrl, token };
       commit({
         status: "ready",
@@ -164,9 +159,20 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         nodeId: identity.nodeId,
         nodes,
         lastConnectedAt: Date.now() / 1000,
-        activeAgentId,
-        selectedAgentId: activeAgentId || stateRef.current.selectedAgentId,
+        activeAgentId: "",
       });
+      if (sessionHandle) {
+        void client.getConversationSession(sessionHandle).then((session) => {
+          if (generation !== connectionGenerationRef.current
+            || stateRef.current.sessionHandle !== sessionHandle) return;
+          commit({ activeAgentId: session.agent_id, selectedAgentId: session.agent_id });
+        }).catch(() => {
+          if (generation !== connectionGenerationRef.current
+            || stateRef.current.sessionHandle !== sessionHandle) return;
+          commit({ sessionHandle: "", activeAgentId: "" });
+          void storeCoreSession("").catch(() => undefined);
+        });
+      }
       void client.listAgents().then(({ defaultAgentId, agents }) => {
         if (generation !== connectionGenerationRef.current) return;
         const active = stateRef.current.activeAgentId;
@@ -395,20 +401,24 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     if (nodeId === stateRef.current.nodeId && stateRef.current.status === "ready") return;
     connectionGenerationRef.current += 1;
     provisionalConversationRef.current = null;
-    await selectNode(nodeId);
+    stateRef.current.client?.close();
     connectionRef.current = null;
-    commit({ client: null, sessionHandle: "", sessionToken: "", latestEvent: null, status: "booting", error: "" });
+    commit({ client: null, sessionHandle: "", sessionToken: "", latestEvent: null, status: "booting", nodeId, error: "" });
+    await selectNode(nodeId);
     await connect();
   }, [commit, connect]);
 
-  const newConversation = useCallback(async () => {
+  const newConversation = useCallback(async (agentId?: string) => {
     provisionalConversationRef.current = null;
     await storeCoreSession("");
+    const selected = agentId && stateRef.current.agents.some((agent) => agent.agent_id === agentId)
+      ? agentId
+      : stateRef.current.defaultAgentId;
     commit({
       sessionHandle: "",
       latestEvent: null,
       activeAgentId: "",
-      selectedAgentId: stateRef.current.defaultAgentId,
+      selectedAgentId: selected,
     });
   }, [commit]);
 

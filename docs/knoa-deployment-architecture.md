@@ -230,7 +230,7 @@ Knoa Node
 - 没有自动 Node directory、Relay、跨设备账户恢复和多 Node 共享模型票据；
 - 不要求为了直连默认创建公网域名。
 
-### 6.2 Self-hosted Hub + Relay（当前多 Node V1 与 P2P 目标）
+### 6.2 Self-hosted Hub + Relay（当前多 Node V1）
 
 适用：一个用户或家庭拥有 N 台 Node，希望只管理一个域名。
 
@@ -256,14 +256,14 @@ Node A               Node B               Node C
 - 用户只配置一个 Hub 域名；
 - Hub 对外只暴露 TLS 保护的 HTTPS/WSS；
 - N 个 Node 主动发起出站连接，不需要 N 个公网域名；
-- 当前已交付 transport 依次尝试显式 LAN/direct candidate，再使用 Relay fallback；
-- 目标 transport policy 是 `p2p_preferred`：按跨平台 Runtime 实施计划 Phase 5 增加 Internet
-  ICE P2P/NAT traversal，再使用 Relay fallback；
+- 当前 transport policy 是 `p2p_preferred`：复用已建立 P2P；存在显式 LAN/public Direct URL 时先做有界
+  Direct；否则通过 Relay 完成认证和 WebRTC offer/answer 信令，再以 ICE + Cloudflare STUN 建立 NAT P2P；
+- P2P 建连失败、断开或处于重试冷却时使用端到端加密 Relay fallback；
 - 用户不需要为每个 Node 配置域名；显式公网 direct endpoint 只是 P2P candidate 之一，不是部署前置；
-- 目标态 App 先访问 Hub 选择 Node、获取短期 ticket 和交换连接 candidate，再进行有界 P2P 建连；
-- 目标态 Node-to-Node 共享 LLM/MCP 同样 P2P 优先、Relay fallback，并复用安全连接和同一 invocation ID；
-- 目标态 Relay 不承担默认 LLM streaming、MCP 或 Artifact 数据面，只在 P2P 失败时兜底；当前 Relay 仍可能
-  承载主要远程数据面，因此必须先完成 streaming 与 backpressure 性能修复；
+- App 先访问 Hub 选择 Node、获取短期 ticket，并在已认证 Relay 内交换 SDP；P2P 建成后请求继续通过原
+  Secure Gateway 鉴权，不产生第二套业务 API；
+- Node-to-Node 共享 LLM 同样 P2P 优先、Relay fallback，复用安全连接和同一 invocation ID；
+- Relay 默认只承担信令与失败兜底；DataChannel 和 Relay 都具备分片、上限与 backpressure；
 - Hub/Relay 单实例部署，不启用多 worker。
 
 ### 6.3 Knoa Hosted Hub Single-Node（形态 3 单节点 MVP）
@@ -385,15 +385,16 @@ App
   -> Core application service
 ```
 
-### 9.2 App 经 Relay 访问 Node
+### 9.2 App 通过 P2P 优先访问 Node
 
 ```text
 App
   -> Hub account session
   -> request short-lived single-use connection ticket
   -> Client-to-Node ephemeral key agreement
-  -> encrypted Relay frames
-  -> Node Hub Edge decrypts
+  -> first authenticated request / WebRTC signaling over encrypted Relay
+  -> ICE + STUN P2P DataChannel when reachable
+  -> encrypted Relay frames only as fallback
   -> same SecureGatewayAdapter.app
   -> normal Node authentication and business route
 ```
@@ -401,7 +402,7 @@ App
 Hub account authentication只允许申请连接，不替代 Node business authorization。
 
 App 内部同样保持这两个边界：Hub client 负责 Account、Workspace 与目录；`GatewayProvider` 只负责
-用户已选择 Node 的 direct/Relay 会话。`GatewayProvider` 的错误不是 App 根状态，也不得覆盖或清除
+用户已选择 Node 的 Direct/P2P/Relay 会话。`GatewayProvider` 的错误不是 App 根状态，也不得覆盖或清除
 Hub 控制面状态。
 
 ### 9.3 Node B 调用 Node A 的本地 LLM

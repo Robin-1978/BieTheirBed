@@ -67,8 +67,10 @@ Hub 登录成功不要求 Node 在线。没有 Node 时 App 仍可管理帐号�
 
 ## 5. 连接
 
-App 先从 Hub Node directory 获取签名 direct candidate，再执行有界 direct 尝试，失败后 Relay。UI 只显示
-当前 `Direct` 或 `Relay` 和诊断详情，不要求普通用户选择 transport。
+App 先复用已有 P2P；存在显式 Direct URL 时执行有界 Direct 尝试；否则用认证 Relay 完成首个轻量请求和
+WebRTC offer/answer 信令，后台通过 ICE + STUN 建立 NAT P2P。P2P 成功后后续 Gateway 请求走 DataChannel，
+失败才继续使用端到端加密 Relay，并在冷却后重试。UI 显示 `Direct`、`P2P 直连` 或 `Relay 兜底`，不要求
+普通用户选择 transport。
 
 Node 离线仅影响该 Node 的 Conversation、Task 和配置操作。Workspace 投影仍可查看；选择其他在线 Node
 必须可用。
@@ -88,6 +90,15 @@ Node 离线仅影响该 Node 的 Conversation、Task 和配置操作。Workspace
 
 LLM endpoint、API Key、MCP command、本地路径、批量导入/导出和深度诊断放在 Node Console，避免在手机上
 输入长 Secret 或复杂路径。两个客户端必须调用同一 ConfigurationService。
+
+### 6.1 图片输入安全
+
+- 拍照和选取图片在 App 进入附件队列前统一纠正方向、压缩为 JPEG，并把最长边限制为 1600px；
+- Node 在 Provider 调用边界再次校验 base64、源字节、源像素，最长边缩至 1536px，并限制模型线上的派生图
+  不超过 3MiB；
+- Durable Artifact 可以保留原文件，但 llama.cpp、云视觉模型和共享模型只能收到有界派生图；
+- 旧 App、文件上传、飞书或 MCP Resource 都不能绕过 Node 最终保护；超限返回 typed provider error，不能
+  继续把原图发送给模型进程。
 
 ## 7. 中文与状态
 

@@ -35,6 +35,7 @@ from knoa_platform.gateway.routes import (
     DeviceRoutes,
     ExtensionRoutes,
     FleetRoutes,
+    P2PRoutes,
     RemoteResourceRoutes,
     SecretRoutes,
     TaskRoutes,
@@ -43,6 +44,7 @@ from knoa_platform.gateway.streaming import GatewayStreaming
 from knoa_platform.host_lifecycle_client import HostLifecycleClient
 from knoa_platform.mobile_releases import AndroidReleaseRepository
 from knoa_platform.network_tls import is_loopback_host
+from knoa_platform.p2p import P2PServer
 from knoa_platform.node_hub import (
     NodeHubRoutes,
     NodeHubService,
@@ -93,6 +95,7 @@ class SecureGatewayAdapter(
     ConfigurationRoutes,
     ExtensionRoutes,
     FleetRoutes,
+    P2PRoutes,
     SecretRoutes,
     RemoteResourceRoutes,
     NodeHubRoutes,
@@ -221,6 +224,11 @@ class SecureGatewayAdapter(
                     methods=["POST"],
                 ),
                 Route(
+                    "/v1/console/workspace-resources",
+                    self._console_workspace_resources,
+                    methods=["GET"],
+                ),
+                Route(
                     "/v1/console/secrets/{reference:str}",
                     self._console_secret,
                     methods=["GET", "PUT"],
@@ -231,6 +239,12 @@ class SecureGatewayAdapter(
                 Route("/v1/pair/complete", self._pair_complete, methods=["POST"]),
                 Route("/v1/auth/challenge", self._auth_challenge, methods=["POST"]),
                 Route("/v1/auth/complete", self._auth_complete, methods=["POST"]),
+                Route("/v1/p2p/offer", self._p2p_offer, methods=["POST"]),
+                Route(
+                    "/v1/resource-p2p/offer",
+                    self._resource_p2p_offer,
+                    methods=["POST"],
+                ),
                 Route("/v1/session", self._session, methods=["GET"]),
                 Route("/v1/node", self._node, methods=["GET"]),
                 Route("/v1/hub", self._hub_status, methods=["GET"]),
@@ -438,6 +452,7 @@ class SecureGatewayAdapter(
                 ),
             ]
         )
+        self._p2p = P2PServer(self.app)
         self._node_hub = NodeHubService(
             self._node_hub_store,
             self._node_identity,
@@ -450,6 +465,7 @@ class SecureGatewayAdapter(
             core=self._core,
             remote_models=self._remote_models,
             direct_gateway_url=config.gateway_public_url,
+            owner_principal_id=config.owner_principal_id,
         )
 
     @property
@@ -502,6 +518,7 @@ class SecureGatewayAdapter(
 
     async def stop(self) -> None:
         await self._node_relay.stop()
+        await self._p2p.close()
         server, self._server = self._server, None
         task, self._server_task = self._server_task, None
         if server is not None:

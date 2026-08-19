@@ -2,6 +2,7 @@ import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { ed25519, x25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import * as Crypto from "expo-crypto";
+import { RTCPeerConnection, RTCSessionDescription } from "react-native-webrtc";
 
 import { fromBase64Url, toBase64Url } from "./base64";
 import {
@@ -37,20 +38,35 @@ const REQUEST_CHUNK_BYTES = 192 * 1024;
 export class ConnectionResolverTransport implements GatewayTransport {
   private readonly direct = new DirectFetchTransport();
   private relay: RelayTransport | null = null;
-  private active: "direct" | "relay" = "direct";
+  private p2p: WebRtcGatewayTransport | null = null;
+  private upgradePromise: Promise<void> | null = null;
+  private p2pRetryAfter = 0;
+  private active: "direct" | "p2p" | "relay" = "direct";
   private relayPreferredUntil = 0;
   private hubEndpointBinding: Promise<boolean> | null = null;
 
   constructor(private readonly binding: NodeDeviceBinding) {}
 
-  mode(): "direct" | "relay" {
+  mode(): "direct" | "p2p" | "relay" {
     return this.active;
   }
 
   async request(baseUrl: string, path: string, init: RequestInit): Promise<Response> {
+    if (this.p2p?.ready()) {
+      try {
+        const response = await this.p2p.request(baseUrl, path, init);
+        this.active = "p2p";
+        return response;
+      } catch {
+        this.p2p.close();
+        this.p2p = null;
+      }
+    }
     if (!this.binding.directGatewayUrl && await this.bindingPointsAtCurrentHub()) {
       try {
-        return await this.relayRequest(baseUrl, path, init);
+        const response = await this.relayRequest(baseUrl, path, init);
+        this.startP2PUpgrade(baseUrl, init);
+        return response;
       } catch (relayError) {
         throw new Error(`Node Relay 不可用：${errorText(relayError)}`);
       }
@@ -78,6 +94,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
     } catch (directError) {
       try {
         const response = await this.relayRequest(baseUrl, path, init);
+        this.startP2PUpgrade(baseUrl, init);
         this.relayPreferredUntil = Date.now() + 10_000;
         return response;
       } catch (relayError) {
@@ -89,6 +106,8 @@ export class ConnectionResolverTransport implements GatewayTransport {
   }
 
   close(): void {
+    this.p2p?.close();
+    this.p2p = null;
     this.relay?.close();
     this.relay = null;
   }
@@ -98,6 +117,35 @@ export class ConnectionResolverTransport implements GatewayTransport {
     const response = await this.relay.request(baseUrl, path, init);
     this.active = "relay";
     return response;
+  }
+
+  private startP2PUpgrade(baseUrl: string, init: RequestInit): void {
+    if (this.p2p?.ready() || this.upgradePromise || Date.now() < this.p2pRetryAfter
+      || !new Headers(init.headers).get("authorization")) return;
+    const pending = (async () => {
+      const p2p = new WebRtcGatewayTransport();
+      await p2p.connect(async (offer) => {
+        const response = await this.relayRequest(baseUrl, "/v1/p2p/offer", {
+          method: "POST",
+          headers: init.headers,
+          body: JSON.stringify(offer),
+        });
+        if (!response.ok) throw new Error("Node P2P signaling rejected");
+        const payload = await response.json() as { answer?: { type?: string; sdp?: string } };
+        if (!payload.answer?.sdp || payload.answer.type !== "answer") throw new Error("Node P2P answer invalid");
+        return { type: "answer" as const, sdp: payload.answer.sdp };
+      });
+      this.p2p?.close();
+      this.p2p = p2p;
+      this.active = "p2p";
+      this.relayPreferredUntil = 0;
+      this.p2pRetryAfter = 0;
+    })().catch(() => {
+      this.p2pRetryAfter = Date.now() + 60_000;
+    }).finally(() => {
+      if (this.upgradePromise === pending) this.upgradePromise = null;
+    });
+    this.upgradePromise = pending;
   }
 
   private bindingPointsAtCurrentHub(): Promise<boolean> {
@@ -186,6 +234,149 @@ type TicketClaims = {
   ticket_id: string;
   expires_at: number;
 };
+
+type P2PResponseState = ResponseState & { requestId: string };
+
+class WebRtcGatewayTransport implements GatewayTransport {
+  private peer: RTCPeerConnection | null = null;
+  private channel: ReturnType<RTCPeerConnection["createDataChannel"]> | null = null;
+  private pending = new Map<string, P2PResponseState>();
+
+  mode(): "p2p" {
+    return "p2p";
+  }
+
+  ready(): boolean {
+    return this.peer?.connectionState === "connected" && this.channel?.readyState === "open";
+  }
+
+  async connect(exchange: (offer: { type: "offer"; sdp: string }) => Promise<{ type: "answer"; sdp: string }>): Promise<void> {
+    this.close();
+    const peer = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }] });
+    const channel = peer.createDataChannel("knoa-http-v1", { ordered: true });
+    this.peer = peer;
+    this.channel = channel;
+    channel.onmessage = (event: { data: unknown }) => this.receive(String(event.data));
+    channel.onclose = () => this.fail(new Error("P2P 连接已关闭"));
+    channel.onerror = () => this.fail(new Error("P2P 连接错误"));
+    const opened = new Promise<void>((resolve, reject) => {
+      channel.onopen = () => resolve();
+      peer.onconnectionstatechange = () => {
+        if (["failed", "closed", "disconnected"].includes(peer.connectionState)) reject(new Error("P2P 建连失败"));
+      };
+    });
+    const offer = await peer.createOffer();
+    await peer.setLocalDescription(offer);
+    await waitForIceGathering(peer);
+    if (!peer.localDescription?.sdp) throw new Error("P2P Offer 创建失败");
+    const answer = await exchange({ type: "offer", sdp: peer.localDescription.sdp });
+    await peer.setRemoteDescription(new RTCSessionDescription(answer));
+    await withPromiseTimeout(opened, 12_000, "P2P 建连超时");
+  }
+
+  async request(_baseUrl: string, path: string, init: RequestInit): Promise<Response> {
+    if (!this.ready() || !this.channel) throw new Error("P2P 尚未连接");
+    const body = await requestBody(init.body);
+    const requestId = `p2p_${toBase64Url(await Crypto.getRandomBytesAsync(18))}`;
+    const headers = Object.fromEntries(
+      [...new Headers(init.headers).entries()].map(([key, value]) => [key.toLowerCase(), value]),
+    );
+    const response = new Promise<Response>((resolve, reject) => {
+      this.pending.set(requestId, {
+        requestId,
+        status: 0,
+        headers: {},
+        expectedLength: -1,
+        chunks: [],
+        receivedLength: 0,
+        resolve,
+        reject,
+      });
+    });
+    try {
+      await this.send({
+        type: "request_start",
+        request_id: requestId,
+        method: (init.method ?? "GET").toUpperCase(),
+        path,
+        headers,
+        body_length: body.length,
+      });
+      for (let offset = 0; offset < body.length; offset += 48 * 1024) {
+        await this.send({
+          type: "request_body",
+          request_id: requestId,
+          data: toBase64Url(body.slice(offset, offset + 48 * 1024)),
+        });
+      }
+      await this.send({ type: "request_end", request_id: requestId });
+      return await withPromiseTimeout(response, 120_000, "P2P 请求超时");
+    } catch (error) {
+      this.pending.delete(requestId);
+      throw error;
+    }
+  }
+
+  close(): void {
+    const peer = this.peer;
+    this.peer = null;
+    this.channel = null;
+    this.fail(new Error("P2P 连接已关闭"));
+    peer?.close();
+  }
+
+  private async send(message: Record<string, unknown>): Promise<void> {
+    const channel = this.channel;
+    if (!channel || channel.readyState !== "open") throw new Error("P2P 连接不可用");
+    while (channel.bufferedAmount > 1024 * 1024) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    channel.send(JSON.stringify(message));
+  }
+
+  private receive(raw: string): void {
+    try {
+      const message = JSON.parse(raw) as Record<string, unknown>;
+      const requestId = String(message.request_id ?? "");
+      const pending = this.pending.get(requestId);
+      if (!pending) return;
+      if (message.type === "response_start") {
+        pending.status = Number(message.status);
+        pending.headers = isStringRecord(message.headers) ? message.headers : {};
+        pending.expectedLength = Number(message.body_length);
+        if (!Number.isSafeInteger(pending.status) || pending.status < 100 || pending.status > 599
+          || !Number.isSafeInteger(pending.expectedLength) || pending.expectedLength < 0) throw new Error("P2P 响应头无效");
+        return;
+      }
+      if (message.type === "response_body") {
+        const chunk = fromBase64Url(String(message.data ?? ""));
+        pending.chunks.push(chunk);
+        pending.receivedLength += chunk.length;
+        if (pending.receivedLength > pending.expectedLength) throw new Error("P2P 响应体过长");
+        return;
+      }
+      if (message.type === "response_end") {
+        if (pending.receivedLength !== pending.expectedLength || pending.status === 0) throw new Error("P2P 响应体不完整");
+        this.pending.delete(requestId);
+        const bytes = joinBytes(pending.chunks, pending.receivedLength);
+        pending.resolve(new Response(relayResponseBody(bytes, pending.headers), {
+          status: pending.status,
+          headers: pending.headers,
+        }));
+        return;
+      }
+      if (message.type === "reset") throw new Error("Node 重置了 P2P 请求");
+      throw new Error("P2P 响应类型无效");
+    } catch (error) {
+      this.fail(error instanceof Error ? error : new Error("P2P 响应无效"));
+    }
+  }
+
+  private fail(error: Error): void {
+    for (const pending of this.pending.values()) pending.reject(error);
+    this.pending.clear();
+  }
+}
 
 class RelayTransport implements GatewayTransport {
   private socket: WebSocket | null = null;
@@ -606,6 +797,19 @@ function waitForSocketOpen(socket: WebSocket): Promise<void> {
     socket.addEventListener("error", fail);
     socket.addEventListener("close", fail);
   }), 15_000, "Relay 连接超时");
+}
+
+function waitForIceGathering(peer: RTCPeerConnection): Promise<void> {
+  if (peer.iceGatheringState === "complete") return Promise.resolve();
+  return withPromiseTimeout(new Promise((resolve) => {
+    const check = () => {
+      if (peer.iceGatheringState !== "complete") return;
+      peer.onicegatheringstatechange = null;
+      resolve();
+    };
+    peer.onicegatheringstatechange = check;
+    check();
+  }), 8_000, "P2P ICE 候选收集超时");
 }
 
 function waitForJson(socket: WebSocket): Promise<Record<string, unknown>> {

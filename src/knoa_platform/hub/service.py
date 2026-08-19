@@ -228,6 +228,242 @@ class HubService:
             raise PermissionError("Node request signature rejected") from exc
         return node
 
+    def _verify_node_control(self, request: dict, audience: str) -> dict:
+        timestamp = float(request["timestamp"])
+        if abs(self._clock() - timestamp) > 120:
+            raise PermissionError("Node control timestamp rejected")
+        transcript = {
+            key: value
+            for key, value in request.items()
+            if key != "signature"
+        }
+        if transcript.get("audience", audience) != audience:
+            raise PermissionError("Node control audience rejected")
+        transcript["audience"] = audience
+        transcript["workspace_id"] = self.workspace_id
+        node = self.verify_node_signed_request(
+            str(request["node_id"]), transcript, str(request["signature"])
+        )
+        self.repository.consume_node_nonce(
+            str(request["node_id"]), str(request["nonce"])
+        )
+        return node
+
+    def node_control_state(self, request: dict) -> dict:
+        node = self._verify_node_control(request, "knoa-node-control-state-v1")
+        node_id = str(node["node_id"])
+        own_deployments = tuple(
+            item
+            for item in self.repository.list_deployments(node_id=node_id)
+            if item["target_node_id"] == node_id
+        )
+        all_grants = self.repository.list_resource_grants()
+        incoming_deployment_ids = {
+            str(item["target_deployment_id"])
+            for item in all_grants
+            if str(item["caller_node_id"]) == node_id
+            and item["revoked_at"] is None
+            and float(item["expires_at"]) > self._clock()
+        }
+        incoming_deployments = tuple(
+            item
+            for item in self.repository.list_deployments()
+            if str(item["deployment_id"]) in incoming_deployment_ids
+            and bool(item["enabled"])
+        )
+        deployments = own_deployments + tuple(
+            item
+            for item in incoming_deployments
+            if str(item["deployment_id"])
+            not in {str(value["deployment_id"]) for value in own_deployments}
+        )
+        own_deployment_ids = {
+            str(item["deployment_id"]) for item in own_deployments
+        }
+        deployment_ids = {str(item["deployment_id"]) for item in deployments}
+        resource_ids = {str(item["resource_id"]) for item in deployments}
+        resources = tuple(
+            item
+            for item in self.repository.list_workspace_resources()
+            if str(item["resource_id"]) in resource_ids
+        )
+        grants = tuple(
+            item
+            for item in all_grants
+            if str(item["target_deployment_id"]) in own_deployment_ids
+            or str(item["caller_node_id"]) == node_id
+        )
+        observations = tuple(
+            item
+            for item in self.repository.list_deployment_observations()
+            if str(item["deployment_id"]) in deployment_ids
+        )
+        now = self._clock()
+        nodes = [
+            {
+                "node_id": item["node_id"],
+                "display_name": item["display_name"],
+                "platform": item["platform"],
+                "version": item["version"],
+                "direct_gateway_url": item.get("direct_gateway_url", ""),
+                "last_seen": item.get("last_seen"),
+                "online": item.get("last_seen") is not None
+                and now - float(item["last_seen"]) <= 90,
+            }
+            for item in self.repository.list_nodes()
+        ]
+        return {
+            "workspace_id": self.workspace_id,
+            "node_id": node_id,
+            "nodes": nodes,
+            "resources": list(resources),
+            "deployments": list(deployments),
+            "grants": list(grants),
+            "observations": list(observations),
+        }
+
+    def publish_node_model_share(self, request: dict) -> dict:
+        node = self._verify_node_control(request, "knoa-node-model-share-v1")
+        node_id = str(node["node_id"])
+        deployment_id = str(request["deployment_id"])
+        resource_id = str(request["resource_id"])
+        enabled = bool(request["enabled"])
+        allowed_node_ids = tuple(str(value) for value in request["allowed_node_ids"])
+        if len(set(allowed_node_ids)) != len(allowed_node_ids):
+            raise ValueError("Model share allowed Nodes must be unique")
+        if node_id in allowed_node_ids:
+            raise ValueError("A Node cannot grant its shared model to itself")
+        for caller_node_id in allowed_node_ids:
+            self.repository.node(caller_node_id)
+
+        try:
+            existing_deployment = self.repository.deployment(deployment_id)
+        except LookupError:
+            existing_deployment = None
+        if existing_deployment is not None and str(
+            existing_deployment["target_node_id"]
+        ) != node_id:
+            raise PermissionError("Node cannot replace another Node deployment")
+
+        spec = {
+            "provider_protocol": str(request["provider_protocol"]),
+            "model_identity": str(request["model_identity"]),
+            "declared_capabilities": {
+                "streaming": True,
+                "tools": True,
+                "vision": bool(request["supports_vision"]),
+            },
+        }
+        canonical_digest = hashlib.sha256(
+            _canonical({"kind": "model", "spec": spec})
+        ).hexdigest()
+        try:
+            current_resource = self.repository.workspace_resource(resource_id)
+        except LookupError:
+            current_resource = None
+        resource_creator = (
+            "" if current_resource is None else str(current_resource["created_by"])
+        )
+        node_owned_resource = current_resource is None or resource_creator == f"node:{node_id}"
+        if current_resource is not None and not node_owned_resource:
+            if (
+                resource_creator.startswith("node:")
+                or existing_deployment is None
+                or str(existing_deployment["resource_id"]) != resource_id
+                or str(current_resource["kind"]) != "model"
+                or current_resource["spec"] != spec
+            ):
+                raise PermissionError(
+                    "Node cannot replace another owner's Workspace Resource"
+                )
+        resource_generation = 1
+        if current_resource is not None:
+            resource_generation = int(current_resource["generation"])
+            if node_owned_resource and (
+                str(current_resource["canonical_digest"]) != canonical_digest
+                or current_resource["spec"] != spec
+            ):
+                resource_generation += 1
+        if node_owned_resource:
+            resource = self.repository.put_workspace_resource(
+                {
+                    "resource_id": resource_id,
+                    "kind": "model",
+                    "generation": resource_generation,
+                    "canonical_digest": canonical_digest,
+                    "display_name": str(request["display_name"]),
+                    "spec": spec,
+                    "enabled": enabled,
+                },
+                created_by=f"node:{node_id}",
+            )
+        else:
+            resource = current_resource
+        resource_digest = str(resource["canonical_digest"])
+
+        deployment_spec = {
+            "max_remote_concurrency": int(request["max_remote_concurrency"]),
+            "materialized_digest": str(request["materialized_digest"]),
+        }
+        desired_generation = 1
+        if existing_deployment is not None:
+            desired_generation = int(existing_deployment["desired_generation"])
+            if any(
+                (
+                    str(existing_deployment["resource_id"]) != resource_id,
+                    int(existing_deployment["resource_generation"])
+                    != resource_generation,
+                    str(existing_deployment["resource_digest"]) != resource_digest,
+                    existing_deployment["spec"] != deployment_spec,
+                    bool(existing_deployment["enabled"]) != enabled,
+                )
+            ):
+                desired_generation += 1
+        deployment = self.repository.put_deployment(
+            {
+                "deployment_id": deployment_id,
+                "kind": "model",
+                "resource_id": resource_id,
+                "resource_generation": resource_generation,
+                "resource_digest": resource_digest,
+                "target_node_id": node_id,
+                "desired_generation": desired_generation,
+                "spec": deployment_spec,
+                "enabled": enabled,
+            }
+        )
+
+        allowed = set(allowed_node_ids if enabled else ())
+        existing_grants = [
+            item
+            for item in self.repository.list_resource_grants()
+            if str(item["target_deployment_id"]) == deployment_id
+            and item["revoked_at"] is None
+        ]
+        for grant in existing_grants:
+            if str(grant["caller_node_id"]) not in allowed:
+                self.repository.revoke_resource_grant(str(grant["grant_id"]))
+        expires_at = self._clock() + 10 * 365 * 24 * 60 * 60
+        for caller_node_id in sorted(allowed):
+            digest = hashlib.sha256(
+                f"{deployment_id}:{caller_node_id}:model_inference".encode()
+            ).hexdigest()
+            self.repository.put_resource_grant(
+                {
+                    "grant_id": f"grant_{digest[:40]}",
+                    "caller_node_id": caller_node_id,
+                    "target_deployment_id": deployment_id,
+                    "capability": "model_inference",
+                    "max_request_deadline": 600,
+                    "expires_at": expires_at,
+                }
+            )
+        return {
+            "resource": resource,
+            "deployment": deployment,
+            "allowed_node_ids": sorted(allowed),
+        }
+
     def publish_deployment_observation(self, request: dict) -> dict:
         transcript = {
             "audience": "knoa-deployment-observation-v1",

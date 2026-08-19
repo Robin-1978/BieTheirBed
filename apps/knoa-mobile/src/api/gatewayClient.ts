@@ -64,7 +64,7 @@ export class GatewayClient {
     return new GatewayClient(this.baseUrl, token, this.transport);
   }
 
-  transportMode(): "direct" | "relay" {
+  transportMode(): "direct" | "p2p" | "relay" {
     return this.transport.mode();
   }
 

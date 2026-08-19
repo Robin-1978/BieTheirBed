@@ -13,6 +13,7 @@ import {
 
 import { colors } from "@/theme";
 import { useI18n } from "@/i18n";
+import { prepareImageAttachment } from "@/media/prepareImageAttachment";
 
 export default function CaptureScreen() {
   const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string; nodeId?: string }>();
@@ -28,7 +29,11 @@ export default function CaptureScreen() {
     try {
       const photo = await camera.current.takePictureAsync({ quality: 0.65 });
       if (!photo) return;
-      setCaptured({ uri: photo.uri, name: `camera-${Date.now()}.jpg` });
+      const prepared = await prepareImageAttachment(
+        photo.uri,
+        `camera-${Date.now()}.jpg`,
+      );
+      setCaptured({ uri: prepared.uri, name: prepared.name });
     } finally {
       setWorking(false);
     }

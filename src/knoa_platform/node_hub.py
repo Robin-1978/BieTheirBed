@@ -204,6 +204,67 @@ class NodeHubService:
             hub_signing_public_key=request.hub_signing_public_key,
         )
 
+    async def control_state(self) -> dict[str, Any]:
+        enrollment = self.store.load()
+        if enrollment is None:
+            raise PermissionError("Node is not enrolled in a Workspace Hub")
+        payload = self._signed_control_payload(
+            enrollment,
+            "knoa-node-control-state-v1",
+            {},
+        )
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                f"{enrollment.hub_url}/v1/node-control/state", json=payload
+            )
+        response.raise_for_status()
+        value = response.json()
+        if not isinstance(value, dict) or value.get("node_id") != self.identity.node_id:
+            raise ValueError("Hub returned invalid Node control state")
+        return value
+
+    async def publish_model_share(self, publication: dict[str, Any]) -> dict[str, Any]:
+        enrollment = self.store.load()
+        if enrollment is None:
+            raise PermissionError("Node is not enrolled in a Workspace Hub")
+        payload = self._signed_control_payload(
+            enrollment,
+            "knoa-node-model-share-v1",
+            publication,
+        )
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.post(
+                f"{enrollment.hub_url}/v1/node-control/model-shares", json=payload
+            )
+        response.raise_for_status()
+        value = response.json()
+        if not isinstance(value, dict):
+            raise ValueError("Hub returned invalid Model share state")
+        return value
+
+    def _signed_control_payload(
+        self,
+        enrollment: NodeHubEnrollment,
+        audience: str,
+        values: dict[str, Any],
+    ) -> dict[str, Any]:
+        timestamp = float(self._clock())
+        payload = {
+            "node_id": self.identity.node_id,
+            **values,
+            "timestamp": timestamp,
+            "nonce": secrets.token_urlsafe(24),
+        }
+        transcript = {
+            "audience": audience,
+            "workspace_id": enrollment.workspace_id,
+            **payload,
+        }
+        return {
+            **payload,
+            "signature": self.identity.sign(canonical_json(transcript)),
+        }
+
 
 class NodeHubRoutes:
     async def _hub_status(self, request: Request) -> JSONResponse:
@@ -272,6 +333,7 @@ class NodeRelayManager:
         core: Any | None = None,
         remote_models: Any | None = None,
         direct_gateway_url: str = "",
+        owner_principal_id: str = "",
         clock=time.time,
     ) -> None:
         self._store = store
@@ -281,6 +343,8 @@ class NodeRelayManager:
         self._core = core
         self._remote_models = remote_models
         self._direct_gateway_url = direct_gateway_url.strip().rstrip("/")
+        self._owner_principal_id = owner_principal_id
+        self._control = NodeHubService(store, identity, clock=clock)
         self._clock = clock
         self._task: asyncio.Task[None] | None = None
         self._generation = 0
@@ -479,7 +543,9 @@ class NodeRelayManager:
         path = str(message.get("path", ""))
         length = int(message.get("body_length", -1))
         raw_headers = message.get("headers", {})
-        resource_path = path.startswith("/v1/resource-invocations/")
+        resource_path = path.startswith("/v1/resource-invocations/") or path == (
+            "/v1/resource-p2p/offer"
+        )
         pairing_path = (method, path) in {
             ("POST", "/v1/pair/challenge"),
             ("POST", "/v1/pair/complete"),
@@ -522,6 +588,7 @@ class NodeRelayManager:
     ) -> None:
         while True:
             try:
+                await self.sync_workspace_resources()
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     if self._remote_models is not None:
                         observations = await self._remote_models.observations()
@@ -553,6 +620,89 @@ class NodeRelayManager:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Deployment observation publish failed: %s", exc)
             await asyncio.sleep(30)
+
+    async def workspace_resource_state(self) -> dict[str, Any]:
+        return await self._control.control_state()
+
+    async def sync_workspace_resources(self) -> dict[str, Any]:
+        if self._core is None or not self._owner_principal_id:
+            return {}
+        workspace_state = await self._control.control_state()
+        revision, _state, _generations = await self._core.get_config_current(
+            self._owner_principal_id
+        )
+        managed = revision.document
+        published: list[dict[str, Any]] = []
+        local_deployment_ids = {
+            deployment_id
+            for deployment_id, deployment in managed.model_deployments.items()
+            if managed.providers[managed.models[deployment.model_alias].provider].driver
+            != "workspace_remote"
+        }
+        resources = {
+            str(item["resource_id"]): item
+            for item in workspace_state.get("resources", ())
+            if isinstance(item, dict)
+        }
+        for deployment in workspace_state.get("deployments", ()):
+            if (
+                not isinstance(deployment, dict)
+                or str(deployment.get("target_node_id", "")) != self._identity.node_id
+                or str(deployment.get("deployment_id", "")) in local_deployment_ids
+                or not bool(deployment.get("enabled"))
+            ):
+                continue
+            resource = resources.get(str(deployment.get("resource_id", "")))
+            if resource is None:
+                continue
+            spec = resource.get("spec", {})
+            capabilities = spec.get("declared_capabilities", {}) if isinstance(spec, dict) else {}
+            deployment_spec = deployment.get("spec", {})
+            publication = {
+                "deployment_id": str(deployment["deployment_id"]),
+                "resource_id": str(resource["resource_id"]),
+                "display_name": str(resource.get("display_name") or deployment["deployment_id"]),
+                "model_identity": str(spec.get("model_identity") or deployment["deployment_id"]),
+                "provider_protocol": str(spec.get("provider_protocol") or "openai_compatible"),
+                "supports_vision": bool(capabilities.get("vision")) if isinstance(capabilities, dict) else False,
+                "materialized_digest": str(deployment_spec.get("materialized_digest") or "0" * 64),
+                "max_remote_concurrency": int(deployment_spec.get("max_remote_concurrency") or 1),
+                "allowed_node_ids": [],
+                "enabled": False,
+            }
+            published.append(await self._control.publish_model_share(publication))
+        for deployment_id, deployment in managed.model_deployments.items():
+            model = managed.models[deployment.model_alias]
+            provider = managed.providers[model.provider]
+            if provider.driver == "workspace_remote":
+                continue
+            publication = {
+                "deployment_id": deployment_id,
+                "resource_id": deployment.resource_id,
+                "display_name": deployment.display_name or model.model or deployment.model_alias,
+                "model_identity": model.model or deployment.model_alias,
+                "provider_protocol": (
+                    "anthropic" if provider.driver == "anthropic" else "openai_compatible"
+                ),
+                "supports_vision": bool(model.supports_vision),
+                "materialized_digest": hashlib.sha256(
+                    canonical_json(
+                        {
+                            "deployment_id": deployment_id,
+                            "deployment": deployment.model_dump(mode="json"),
+                            "model": model.model_dump(mode="json"),
+                            "provider": provider.model_dump(
+                                mode="json", exclude={"api_key_ref", "api_key_env"}
+                            ),
+                        }
+                    )
+                ).hexdigest(),
+                "max_remote_concurrency": deployment.max_remote_concurrency,
+                "allowed_node_ids": list(deployment.allowed_node_ids),
+                "enabled": bool(deployment.enabled and deployment.share_enabled),
+            }
+            published.append(await self._control.publish_model_share(publication))
+        return {"published": published}
 
     async def _publish_work_projections(
         self,

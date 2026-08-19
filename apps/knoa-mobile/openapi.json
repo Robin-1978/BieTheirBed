@@ -375,6 +375,155 @@
         }
       }
     },
+    "/v1/p2p/offer": {
+      "post": {
+        "operationId": "createGatewayP2PAnswer",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/P2POfferRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "WebRTC answer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/P2PAnswerResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/resource-p2p/offer": {
+      "post": {
+        "operationId": "createResourceP2PAnswer",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResourceP2POfferRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "WebRTC resource answer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/P2PAnswerResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/hub": {
       "get": {
         "operationId": "getNodeHubStatus",
@@ -8562,6 +8711,18 @@
             "minimum": 1,
             "title": "Max Remote Concurrency",
             "type": "integer"
+          },
+          "allowed_node_ids": {
+            "default": [],
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+              "type": "string"
+            },
+            "maxItems": 256,
+            "title": "Allowed Node Ids",
+            "type": "array"
           }
         },
         "required": [
@@ -9180,6 +9341,61 @@
           "relay_connected"
         ],
         "title": "NodeHubStatusResponse",
+        "type": "object"
+      },
+      "P2PAnswer": {
+        "properties": {
+          "type": {
+            "const": "answer",
+            "title": "Type",
+            "type": "string"
+          },
+          "sdp": {
+            "maxLength": 2000000,
+            "minLength": 1,
+            "title": "Sdp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "sdp"
+        ],
+        "title": "P2PAnswer",
+        "type": "object"
+      },
+      "P2PAnswerResponse": {
+        "properties": {
+          "answer": {
+            "$ref": "#/components/schemas/P2PAnswer"
+          }
+        },
+        "required": [
+          "answer"
+        ],
+        "title": "P2PAnswerResponse",
+        "type": "object"
+      },
+      "P2POfferRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "const": "offer",
+            "title": "Type",
+            "type": "string"
+          },
+          "sdp": {
+            "maxLength": 2000000,
+            "minLength": 1,
+            "title": "Sdp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "sdp"
+        ],
+        "title": "P2POfferRequest",
         "type": "object"
       },
       "PairChallengeRequest": {
@@ -10163,6 +10379,42 @@
           "chunks"
         ],
         "title": "ResourceInvocationResponse",
+        "type": "object"
+      },
+      "ResourceP2POfferRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "const": "offer",
+            "title": "Type",
+            "type": "string"
+          },
+          "sdp": {
+            "maxLength": 2000000,
+            "minLength": 1,
+            "title": "Sdp",
+            "type": "string"
+          },
+          "invocation_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Invocation Id",
+            "type": "string"
+          },
+          "ticket": {
+            "maxLength": 16384,
+            "minLength": 64,
+            "title": "Ticket",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "sdp",
+          "invocation_id",
+          "ticket"
+        ],
+        "title": "ResourceP2POfferRequest",
         "type": "object"
       },
       "ResumeTaskRequest": {

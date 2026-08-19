@@ -55,6 +55,13 @@ Desired State；Node-local Agent/Provider/Secret 配置不能因此上传 Hub，
 NodeAgent 在一个编辑页面完成，不拆成 Runtime/Profile/Definition 三个资源。Model、MCP、Skill 和 Secret
 仍有独立页面，因为它们可被多个 NodeAgent/Task 引用且生命周期不同。
 
+Node Console 的 Model Center 必须提供完整 CRUD：新增/删除 Provider、在一个 Provider 下新增多个 Model、
+修改 endpoint、保存不回显的 API Key、设置默认模型和视觉能力。共享模型同页选择允许调用的 Workspace
+Node；发布时由 Node 身份向 Hub 同步 ModelResource、Deployment 与 ResourceGrant，Provider endpoint 和
+Secret 永不上传。删除或关闭本地 Deployment 时，Node 必须同步禁用 Hub 目录项并撤销旧 Grant。
+若 ModelResource 由 Workspace 管理员预先定义，Node 只能在资源定义完全一致且 Deployment 已明确指向
+本 Node 时上报物化状态和授权；不得改写 Workspace 所有的资源定义、generation 或 digest。
+
 发布页展示 validation error、warning、影响组件、热生效或需重启、预计断连和当前 applied state。普通
 UI 不展示 revision graph 或 rollback tree。
 

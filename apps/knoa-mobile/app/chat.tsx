@@ -53,6 +53,7 @@ import { useGateway } from "@/state/GatewayProvider";
 import { shouldResetConversation } from "@/state/conversationTransition";
 import { loadConversationCache, storeConversationCache } from "@/storage/conversationCache";
 import { mergeConversationTurns } from "@/storage/conversationMerge";
+import { prepareImageAttachment } from "@/media/prepareImageAttachment";
 import { colors } from "@/theme";
 
 type PendingAttachment = {
@@ -291,14 +292,15 @@ export default function ChatScreen() {
       copyToCacheDirectory: true,
     });
     if (picked.canceled) return;
-    setAttachments((current) => [
-      ...current,
-      ...picked.assets.slice(0, 8 - current.length).map((asset) => ({
-        uri: asset.uri,
-        name: asset.name,
-        mediaType: asset.mimeType ?? "application/octet-stream",
-      })),
-    ].slice(0, 8));
+    const available = Math.max(0, 8 - attachments.length);
+    const prepared = await Promise.all(picked.assets.slice(0, available).map(async (asset) => {
+      const mediaType = asset.mimeType ?? "application/octet-stream";
+      if (!mediaType.startsWith("image/")) {
+        return { uri: asset.uri, name: asset.name, mediaType };
+      }
+      return prepareImageAttachment(asset.uri, asset.name);
+    }));
+    setAttachments((current) => [...current, ...prepared].slice(0, 8));
   }
 
   async function submitPendingTurn(pending: PendingChatTurn) {
@@ -577,12 +579,12 @@ export default function ChatScreen() {
     }
   }, [loadArtifact, showFeedback, t]);
 
-  async function startNewTopic() {
+  async function startNewTopic(agentId?: string) {
     if (startingTopic || sending) return;
     setStartingTopic(true);
     try {
       const previousSession = gateway.sessionHandle;
-      await gateway.newConversation();
+      await gateway.newConversation(agentId);
       void removeConversationDraft(previousSession).catch(() => undefined);
       void removeConversationDraft("").catch(() => undefined);
       setTurns([]);
@@ -690,14 +692,12 @@ export default function ChatScreen() {
           >
             <AppIcon name="history" color={colors.accent} size={21} />
           </AppPressable>
-          {gateway.agents.length > 1 ? (
+          {gateway.agents.length ? (
             <AppPressable
               accessibilityRole="button"
               accessibilityLabel={agentLocked
-                ? t("agent.lockedConversation")
+                ? t("agent.changeConversation")
                 : t("agent.selectConversation")}
-              accessibilityState={{ disabled: agentLocked }}
-              disabled={agentLocked}
               onPress={() => setAgentPickerOpen(true)}
               style={[
                 styles.topAction,
@@ -977,11 +977,13 @@ export default function ChatScreen() {
             <AgentSelector
               agents={gateway.agents}
               selectedAgentId={selectedAgentId}
-              label={t("agent.selectConversation")}
+              label={agentLocked ? t("agent.changeConversation") : t("agent.selectConversation")}
               lockedLabel={t("agent.lockedConversation")}
               onChange={(agentId) => {
-                gateway.selectAgent(agentId);
                 setAgentPickerOpen(false);
+                if (agentId === selectedAgentId) return;
+                if (agentLocked) void startNewTopic(agentId);
+                else gateway.selectAgent(agentId);
               }}
             />
           </View>

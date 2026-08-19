@@ -55,6 +55,8 @@ from knoa_platform.gateway.protocol import (
     PairCompleteRequest,
     PairCompleteResponse,
     PauseTaskRequest,
+    P2PAnswerResponse,
+    P2POfferRequest,
     PreviewInvocationPolicyRequest,
     PrincipalTaskEventListResponse,
     ProductTaskExecutionListResponse,
@@ -69,6 +71,7 @@ from knoa_platform.gateway.protocol import (
     ResourceInvocationCancelResponse,
     ResourceInvocationRequest,
     ResourceInvocationResponse,
+    ResourceP2POfferRequest,
     ResumeTaskRequest,
     RuntimeStatusResponse,
     SecretStatusResponse,
@@ -153,6 +156,9 @@ _MODELS: tuple[type[BaseModel], ...] = (
     ResourceInvocationCancelRequest,
     ResourceInvocationResponse,
     ResourceInvocationCancelResponse,
+    P2POfferRequest,
+    ResourceP2POfferRequest,
+    P2PAnswerResponse,
 )
 
 
@@ -282,6 +288,27 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     "responses": {
                         "200": _json_response("Pinned Node identity", NodeDescriptorResponse),
                         **_errors("401", "429"),
+                    },
+                }
+            },
+            "/v1/p2p/offer": {
+                "post": {
+                    "operationId": "createGatewayP2PAnswer",
+                    "security": bearer,
+                    "requestBody": _json_body(P2POfferRequest),
+                    "responses": {
+                        "200": _json_response("WebRTC answer", P2PAnswerResponse),
+                        **_errors("400", "401", "415", "429", "503"),
+                    },
+                }
+            },
+            "/v1/resource-p2p/offer": {
+                "post": {
+                    "operationId": "createResourceP2PAnswer",
+                    "requestBody": _json_body(ResourceP2POfferRequest),
+                    "responses": {
+                        "200": _json_response("WebRTC resource answer", P2PAnswerResponse),
+                        **_errors("400", "403", "415", "503"),
                     },
                 }
             },
