@@ -1,10 +1,11 @@
 import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
+import * as Linking from "expo-linking";
 import { useCallback, useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
-import { listHubNodes, loadWorkspaceResourceState, type HubNode, type WorkspaceDeployment } from "@/hub/hubClient";
+import { listHubNodes, loadHubConnection, loadWorkspaceResourceState, type HubNode, type WorkspaceDeployment } from "@/hub/hubClient";
 import { useGateway } from "@/state/GatewayProvider";
 import { updateNodeDirectGatewayUrl } from "@/security/deviceIdentity";
 import { colors } from "@/theme";
@@ -16,10 +17,11 @@ export default function WorkspaceNodesScreen() {
   const [deployments, setDeployments] = useState<WorkspaceDeployment[]>([]);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState("");
+  const [consoleUrl, setConsoleUrl] = useState("");
   const [error, setError] = useState("");
   const refresh = useCallback(async () => {
     setLoading(true); setError("");
-    try { const [directory, resources] = await Promise.all([listHubNodes(), loadWorkspaceResourceState()]); setNodes(directory); setDeployments(resources.workspaceDeployments); }
+    try { const [directory, resources, connection] = await Promise.all([listHubNodes(), loadWorkspaceResourceState(), loadHubConnection()]); setNodes(directory); setDeployments(resources.workspaceDeployments); setConsoleUrl(connection ? `${connection.rootUrl}/console` : ""); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Node 加载失败"); }
     finally { setLoading(false); }
   }, []);
@@ -47,7 +49,7 @@ export default function WorkspaceNodesScreen() {
           const count = deployments.filter((item) => item.target_node_id === node.node_id).length;
           return <View key={node.node_id} style={styles.card}><View style={styles.row}><AppIcon name="node" color={node.online ? colors.accent : colors.muted} size={24} /><View style={styles.flex}><Text style={styles.nodeName}>{node.display_name}</Text><Text style={styles.meta}>{node.platform} {node.version} · {count} 个部署 · {bound ? "App 已配对" : "App 未配对"}</Text></View><Text style={node.online ? styles.online : styles.offline}>{node.online ? "在线" : "离线"}</Text></View><AppPressable disabled={Boolean(working)} onPress={() => void enter(node)} style={styles.enter}>{working === node.node_id ? <ActivityIndicator color={colors.white} size="small" /> : <Text style={styles.enterText}>{bound ? "进入 Node" : "配对 App"}</Text>}</AppPressable></View>;
         })}
-        {!loading && !nodes.length ? <View style={styles.card}><Text style={styles.nodeName}>还没有 Node</Text><Text style={styles.meta}>先生成 Enrollment Grant，在电脑上安装并加入当前 Workspace。</Text><AppPressable style={styles.enter} onPress={() => router.push({ pathname: "/pair", params })}><Text style={styles.enterText}>添加 Node</Text></AppPressable></View> : null}
+        {!loading && !nodes.length ? <View style={styles.card}><Text style={styles.nodeName}>还没有 Node</Text><Text style={styles.meta}>先在 Hub Console 选择当前 Workspace 并生成 Enrollment Code，再到目标电脑的 Node Console 完成加入。Node 在线后回到这里刷新并配对 App。</Text><AppPressable disabled={!consoleUrl} style={styles.enter} onPress={() => void Linking.openURL(consoleUrl)}><Text style={styles.enterText}>打开 Hub Console</Text></AppPressable></View> : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </ScrollView>
     </>

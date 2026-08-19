@@ -140,6 +140,47 @@ class _Authentication:
         return SimpleNamespace(device_id=device_id, principal_id=principal_id)
 
 
+@pytest.mark.asyncio
+async def test_node_console_is_loopback_only_and_csrf_protected(tmp_path) -> None:
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=_Authentication(),
+    )
+    local = httpx.ASGITransport(app=adapter.app, client=("127.0.0.1", 32100))
+    remote = httpx.ASGITransport(app=adapter.app, client=("203.0.113.7", 32100))
+    async with httpx.AsyncClient(transport=local, base_url="http://node") as http:
+        page = await http.get("/console")
+        rejected = await http.get("/v1/console/status")
+        accepted = await http.get(
+            "/v1/console/status",
+            headers={"X-Knoa-Console": adapter._console_csrf_token},
+        )
+        invalid = await http.post(
+            "/v1/console/hub/enroll",
+            headers={"X-Knoa-Console": adapter._console_csrf_token},
+            json={"version": "wrong"},
+        )
+        pairing = await http.post(
+            "/v1/console/pairing",
+            headers={"X-Knoa-Console": adapter._console_csrf_token},
+            json={},
+        )
+    async with httpx.AsyncClient(transport=remote, base_url="http://node") as http:
+        hidden = await http.get("/console")
+
+    assert page.status_code == 200
+    assert "Knoa Node Console" in page.text
+    assert adapter._console_csrf_token in page.text
+    assert rejected.status_code == 403
+    assert accepted.status_code == 200
+    assert accepted.json()["hub"]["enrolled"] is False
+    assert invalid.status_code == 400
+    assert invalid.json() == {"error": "invalid_enrollment_code"}
+    assert pairing.status_code == 409
+    assert pairing.json() == {"error": "node_not_enrolled"}
+    assert hidden.status_code == 404
+
+
 def _task_snapshot() -> TaskSnapshot:
     return TaskSnapshot(
         task_id="task-a",

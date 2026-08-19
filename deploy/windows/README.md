@@ -176,6 +176,19 @@ Node enrollment -> Node joins Workspace and opens outbound Relay
 App QR pairing  -> App receives a Node-specific device identity through Relay
 ```
 
+The normal product workflow uses the embedded consoles and does not expose an
+Account Token or require users to type a Workspace ID:
+
+1. Open `https://hub.example.com/console`, sign in, select the Workspace and
+   generate a one-time Enrollment Code.
+2. On the Windows computer open `http://127.0.0.1:9531/console`, paste the Code
+   and select **Join Workspace**.
+3. In the same Node Console select **Generate App pairing QR**, then scan it
+   from the App's Node page.
+
+`Enroll-KnoaNode.ps1` remains an operator/recovery interface, not the normal
+user onboarding path.
+
 After enrollment, `Enroll-KnoaNode.ps1` restarts `KnoaNode` and prints a QR.
 The App scans that QR. The QR names the Workspace Hub, not a public Node
 Gateway. The App obtains a short-lived pairing-only Relay ticket; the Node

@@ -96,6 +96,11 @@ Hub 与 Node 始终是两个 service：`KnoaHostedHub`、`KnoaNode`。安装 `al
 就使用 `all`。安装器拒绝原地改变 role，避免一个 role-specific Bundle 破坏同机另一个 service；role 变化必须
 走显式迁移流程。
 
+Hub Console 与 Node Console 分别内嵌在所属 service 中，不是独立部署物：Hosted Hub 使用
+`https://<hub>/console`，Node 使用仅 loopback 可访问的 `http://127.0.0.1:9531/console`。正常 Enrollment
+流程为 Hub Console 生成十分钟单次 Code、Node Console 粘贴加入 Workspace、Node Console 生成 App 配对
+二维码。Account Token、Workspace ID 和管理员脚本不进入普通用户流程。
+
 ## 4. Linux 安装或更新
 
 ```bash
