@@ -489,12 +489,13 @@ class RemoteModelProvider(ModelProviderPort):
             f"{self.model_alias}:{request.call_id}".encode()
         ).hexdigest()[:48]
         try:
-            ticket = await self._issue_ticket(invocation_id)
+            ticket, current_direct_gateway_url = await self._issue_ticket(invocation_id)
             body = {"ticket": ticket, "request": request.model_dump(mode="json")}
             result: dict[str, Any] | None = None
-            if self._model.direct_gateway_url:
+            direct_gateway_url = current_direct_gateway_url or self._model.direct_gateway_url
+            if direct_gateway_url:
                 try:
-                    result = await self._direct(invocation_id, body)
+                    result = await self._direct(invocation_id, body, direct_gateway_url)
                 except (httpx.HTTPError, OSError, ValueError):
                     result = None
             if result is None:
@@ -516,7 +517,7 @@ class RemoteModelProvider(ModelProviderPort):
                     provider_model=self.model_alias,
                 )
 
-    async def _issue_ticket(self, invocation_id: str) -> str:
+    async def _issue_ticket(self, invocation_id: str) -> tuple[str, str]:
         enrollment = self._enrollment()
         identity = self._identity()
         timestamp = float(self._clock())
@@ -550,10 +551,15 @@ class RemoteModelProvider(ModelProviderPort):
         )
         if claims.invocation_id != invocation_id:
             raise PermissionError("Hub returned a mismatched invocation ticket")
-        return ticket
+        return ticket, claims.target_direct_gateway_url
 
-    async def _direct(self, invocation_id: str, body: dict[str, Any]) -> dict[str, Any]:
-        base = self._model.direct_gateway_url.rstrip("/")
+    async def _direct(
+        self,
+        invocation_id: str,
+        body: dict[str, Any],
+        direct_gateway_url: str,
+    ) -> dict[str, Any]:
+        base = direct_gateway_url.rstrip("/")
         parsed = urlsplit(base)
         if parsed.scheme != "https" and parsed.hostname not in {"127.0.0.1", "::1", "localhost"}:
             raise ValueError("Direct resource transport requires HTTPS")

@@ -1,5 +1,5 @@
 import * as Crypto from "expo-crypto";
-import { Stack } from "expo-router";
+import { router, Stack } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -22,6 +22,7 @@ import {
   type WorkspaceResourceState,
 } from "@/hub/hubClient";
 import {
+  attachWorkspaceRemoteModel,
   deploymentForModel,
   providerEndpoint,
   setModelSharing,
@@ -30,6 +31,12 @@ import {
   type ModelEditorValue,
 } from "@/models/modelConfiguration";
 import { publishWorkspaceModelShare } from "@/models/workspaceModelSharing";
+import {
+  availableWorkspaceModels,
+  type AvailableWorkspaceModel,
+  workspaceModelIdentity,
+  workspaceModelSupportsVision,
+} from "@/models/workspaceModelConsumption";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
@@ -86,6 +93,11 @@ export default function ModelsScreen() {
     () => nodes.find((node) => node.node_id === gateway.nodeId)?.display_name || "当前 Node",
     [gateway.nodeId, nodes],
   );
+
+  const availableRemoteModels = useMemo<AvailableWorkspaceModel[]>(() => {
+    if (!document || !workspace || !gateway.nodeId) return [];
+    return availableWorkspaceModels(document, workspace, nodes, gateway.nodeId);
+  }, [document, gateway.nodeId, nodes, workspace]);
 
   function beginCreate() {
     const suffix = Crypto.randomUUID().replaceAll("-", "").slice(0, 10);
@@ -158,6 +170,39 @@ export default function ModelsScreen() {
       setMessage("模型配置已检查并生效");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "模型保存失败");
+    } finally {
+      setWorking("");
+    }
+  }
+
+  async function attachRemoteModel(item: AvailableWorkspaceModel) {
+    if (!document) return;
+    setWorking(`attach:${item.deployment.deployment_id}`);
+    setMessage("");
+    try {
+      const digest = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        `workspace-model:${item.deployment.deployment_id}`,
+      );
+      const next = attachWorkspaceRemoteModel(document, {
+        providerId: `remote_provider_${digest.slice(0, 24)}`,
+        modelAlias: `remote_model_${digest.slice(0, 24)}`,
+        deploymentId: item.deployment.deployment_id,
+        displayName: item.resource.display_name,
+        modelIdentity: workspaceModelIdentity(item.resource),
+        supportsVision: workspaceModelSupportsVision(item.resource),
+      });
+      await applyDocument(next, `添加 Workspace 模型 ${item.resource.display_name}`);
+      Alert.alert(
+        "模型已添加",
+        `${item.resource.display_name} 已加入 ${nodeName}，现在可以选择给哪个 Knoa Agent 使用。`,
+        [
+          { text: "稍后" },
+          { text: "配置 Agent", onPress: () => router.push("/settings/agents") },
+        ],
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Workspace 模型添加失败");
     } finally {
       setWorking("");
     }
@@ -240,6 +285,35 @@ export default function ModelsScreen() {
         </View>
 
         {working === "load" ? <ActivityIndicator color={colors.accent} /> : null}
+        {availableRemoteModels.length ? <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Workspace 可用模型</Text><Text style={styles.meta}>承载 Node 决定共享范围；是否添加、给哪个 Agent 使用由当前 Node 决定。</Text></View> : null}
+        {availableRemoteModels.map((item) => {
+          const busy = working === `attach:${item.deployment.deployment_id}`;
+          return (
+            <View key={item.deployment.deployment_id} style={styles.card}>
+              <View style={styles.row}>
+                <View style={[styles.modelIcon, styles.modelIconShared]}><AppIcon name="share" color={colors.accent} size={23} /></View>
+                <View style={styles.flex}>
+                  <Text style={styles.cardTitle}>{item.resource.display_name}</Text>
+                  <Text style={styles.meta}>来自 {item.providerNode?.display_name || "另一个 Node"} · 已授权当前 Node</Text>
+                </View>
+              </View>
+              <Text style={item.health === "healthy" && item.providerNode?.online ? styles.healthy : styles.meta}>
+                {item.providerNode?.online ? item.health === "healthy" ? "服务健康" : "等待模型服务状态" : "承载 Node 当前离线，仍可先添加配置"}
+              </Text>
+              {item.attachedAlias ? (
+                <View style={styles.actions}>
+                  <Text style={styles.healthy}>已添加</Text>
+                  <AppPressable style={styles.secondary} onPress={() => router.push("/settings/agents")}><Text style={styles.secondaryText}>配置 Agent</Text></AppPressable>
+                </View>
+              ) : (
+                <AppPressable disabled={Boolean(working)} style={styles.primary} onPress={() => void attachRemoteModel(item)}>
+                  {busy ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>添加到 {nodeName}</Text>}
+                </AppPressable>
+              )}
+            </View>
+          );
+        })}
+        {document ? <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>{nodeName} 已配置模型</Text></View> : null}
         {document ? Object.entries(document.models).map(([alias, model]) => {
           const provider = document.providers[model.provider];
           if (!provider) return null;
@@ -256,12 +330,18 @@ export default function ModelsScreen() {
                 </View>
                 {document.default_model === alias ? <Text style={styles.badge}>默认</Text> : null}
               </View>
-              <Text style={shared ? styles.healthy : styles.meta}>
-                {shared ? `已共享 · ${observation?.health === "healthy" ? "健康" : "等待 Node 状态"}` : "仅当前 Node 使用"}
+              <Text style={provider.driver === "workspace_remote" || shared ? styles.healthy : styles.meta}>
+                {provider.driver === "workspace_remote" ? "来自 Workspace · 推理由承载 Node 执行" : shared ? `已共享 · ${observation?.health === "healthy" ? "健康" : "等待 Node 状态"}` : "仅当前 Node 使用"}
               </Text>
               <View style={styles.actions}>
-                <AppPressable style={styles.secondary} onPress={() => beginEdit(alias)}><Text style={styles.secondaryText}>编辑</Text></AppPressable>
-                {provider.driver !== "workspace_remote" ? <AppPressable style={styles.secondary} onPress={() => beginShare(alias)}><Text style={styles.secondaryText}>{shared ? "管理共享" : "共享"}</Text></AppPressable> : null}
+                {provider.driver === "workspace_remote" ? (
+                  <AppPressable style={styles.secondary} onPress={() => router.push("/settings/agents")}><Text style={styles.secondaryText}>配置 Agent</Text></AppPressable>
+                ) : (
+                  <>
+                    <AppPressable style={styles.secondary} onPress={() => beginEdit(alias)}><Text style={styles.secondaryText}>编辑</Text></AppPressable>
+                    <AppPressable style={styles.secondary} onPress={() => beginShare(alias)}><Text style={styles.secondaryText}>{shared ? "管理共享" : "共享"}</Text></AppPressable>
+                  </>
+                )}
               </View>
             </View>
           );
@@ -348,6 +428,8 @@ const styles = StyleSheet.create({
   heroIcon: { width: 48, height: 48, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
   iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center" },
   title: { color: colors.ink, fontSize: 19, fontWeight: "800" },
+  sectionHeader: { gap: 4, paddingHorizontal: 2, paddingTop: 3 },
+  sectionTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" },
   hint: { color: colors.muted, fontSize: 13, lineHeight: 19 },
   flex: { flex: 1, minWidth: 0 },
   card: { padding: 15, gap: 11, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },

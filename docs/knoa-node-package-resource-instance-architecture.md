@@ -153,6 +153,10 @@ Home Node
 Home Node 上的 Task 可以依赖 Company Qwen Endpoint，但 Task 本身仍在 Home Node 执行。Company Node
 离线时，该依赖按 Task 策略等待或失败；App 与 Workspace 管理不能因此卡死。
 
+消费侧配置遵循本地所有权：Company Node 只负责“共享给 Home Node”，Home Node 在自己的模型页将该
+Workspace 模型加入本地目录，并由自己的 Knoa Agent 选择使用。Workspace Grant 不自动改写 Home Node
+Agent，也不让 Codex Runtime 改用 Platform Model Provider。
+
 ## 6. P2P-first
 
 数据路径按以下顺序解析：

@@ -79,6 +79,11 @@ def _resource_ticket(
     caller = NodeIdentityStore(tmp_path / "caller.json").load_or_create()
     _enroll(repository, hub, target, "Target")
     _enroll(repository, hub, caller, "Caller")
+    repository.record_presence(
+        target.node_id,
+        "target-presence-nonce",
+        direct_gateway_url="https://node-target.example.test",
+    )
     repository.put_workspace_resource(
         {
             "resource_id": "personal_model",
@@ -338,6 +343,7 @@ def test_hosted_hub_resource_ticket_distinguishes_hub_and_workspace_ids(
     )
 
     assert claims.hub_id == "hub-hosted"
+    assert claims.target_direct_gateway_url == "https://node-target.example.test"
     assert claims.workspace_id == "workspace-1"
 
 
@@ -612,12 +618,13 @@ async def test_remote_provider_reuses_invocation_when_direct_falls_back_to_relay
     )
     seen: dict[str, str] = {}
 
-    async def issue(invocation_id: str) -> str:
+    async def issue(invocation_id: str) -> tuple[str, str]:
         seen["issued"] = invocation_id
-        return "ticket"
+        return "ticket", "https://node-current.example.test"
 
-    async def direct(invocation_id: str, _body: dict) -> dict:
+    async def direct(invocation_id: str, _body: dict, direct_gateway_url: str) -> dict:
         seen["direct"] = invocation_id
+        assert direct_gateway_url == "https://node-current.example.test"
         raise httpx.ConnectError("offline")
 
     async def relay(invocation_id: str, ticket: str, _body: dict) -> dict:
