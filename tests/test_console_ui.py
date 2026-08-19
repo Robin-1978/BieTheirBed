@@ -34,9 +34,12 @@ def test_node_console_owns_configuration_and_secret_management() -> None:
     assert "/v1/console/secrets/" in page
     assert "校验并热发布" in page
     assert "API Key" in page
-    assert "新建自定义 Knoa Agent ID" in page
+    assert "新增自定义 Agent" in page
     assert "允许创建受治理 Child Task" in page
     assert 'id="agentTools"' in page
     assert 'id="delegationTargets"' in page
     assert "一个 Provider 可以提供多个 Model" in page
-    assert "共享的是模型调用能力" in page
+    assert "不会复制 Endpoint 或 API Key" in page
+    for tab in ("overview", "models", "agents", "sharing", "system"):
+        assert f'data-console-tab="{tab}"' in page
+        assert f'data-console-panel="{tab}"' in page
