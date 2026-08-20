@@ -1,0 +1,16 @@
+[Unit]
+Description=Knoa Source Lifecycle Broker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/knoa/runtime/venv/bin/python -m knoa_platform.host_lifecycle --mode source --host 127.0.0.1 --port 9533 --source-root "@SOURCE_ROOT@" --source-state-file %h/.local/share/knoa/source-updates/state.json --source-snapshots-root %h/.local/share/knoa/source-updates/releases --installation-state-file %h/.config/knoa/installation.json --token-file %h/.config/knoa/lifecycle.token
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

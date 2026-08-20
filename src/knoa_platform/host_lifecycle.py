@@ -9,10 +9,12 @@ import os
 import platform
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from collections.abc import Callable
 from typing import Literal
 
 import uvicorn
@@ -23,6 +25,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from knoa_platform.network_tls import is_loopback_host
+from knoa_platform.source_update import SourceUpdateManager
 
 HostRole = Literal["hub", "node"]
 
@@ -30,7 +33,13 @@ HostRole = Literal["hub", "node"]
 class _Action(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    action: Literal["restart", "activate", "deactivate", "rollback", "update"]
+    action: Literal[
+        "restart",
+        "activate",
+        "deactivate",
+        "check_update",
+        "update",
+    ]
     role: HostRole | None = None
     bundle_name: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$")
 
@@ -150,6 +159,7 @@ class HostLifecycleManager:
     def status(self) -> dict[str, object]:
         roles = self._roles()
         return {
+            "update_mode": "bundle",
             "platform": "windows" if os.name == "nt" else "linux",
             "architecture": platform.machine().lower(),
             "current_release": self._current_release(),
@@ -190,20 +200,8 @@ class HostLifecycleManager:
             self._service(request.role, "disable")
             roles.discard(request.role)
             self._write_roles(roles)
-        elif request.action == "rollback":
-            active = tuple(role for role in ("hub", "node") if role in roles)
-            for role in active:
-                self._service(role, "stop")
-            try:
-                self._run([
-                    str(self.updater), "rollback",
-                    "--install-root", str(self.release_root),
-                    "--health-entrypoint", "bin/knoa-health" + (".cmd" if os.name == "nt" else ""),
-                ])
-            finally:
-                for role in active:
-                    self._service(role, "start")
-            self._wait_healthy(active)
+        elif request.action == "check_update":
+            raise ValueError("automatic_bundle_check_not_configured")
         elif request.action == "update":
             if request.bundle_name is None:
                 raise ValueError("bundle_required")
@@ -251,7 +249,136 @@ class HostLifecycleManager:
         return self.status()
 
 
-def create_lifecycle_app(manager: HostLifecycleManager, token: str) -> Starlette:
+class SourceHostLifecycleManager:
+    """Lifecycle implementation for Windows/Linux source installations."""
+
+    def __init__(
+        self,
+        *,
+        source_updates: SourceUpdateManager,
+        installation_state_file: Path,
+        restart_callback: Callable[[], None] | None = None,
+    ) -> None:
+        self.source_updates = source_updates
+        self.installation_state_file = installation_state_file.resolve()
+        self.restart_callback = restart_callback
+
+    @staticmethod
+    def _service_name(role: HostRole) -> str:
+        if os.name == "nt":
+            return "KnoaHostedHub" if role == "hub" else "KnoaNode"
+        return "knoa-hosted-hub.service" if role == "hub" else "knoa-node.service"
+
+    def _run(self, command: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            command,
+            check=check,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+
+    def _installation(self) -> dict[str, object]:
+        try:
+            document = json.loads(self.installation_state_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("source_installation_state_invalid") from exc
+        if document.get("schema_version") != 1:
+            raise ValueError("source_installation_state_invalid")
+        return document
+
+    def _roles(self) -> set[HostRole]:
+        role = self._installation().get("role")
+        if role == "all":
+            return {"hub", "node"}
+        return {role} if role in {"hub", "node"} else set()
+
+    def _service_active(self, role: HostRole) -> bool:
+        name = self._service_name(role)
+        command = (
+            ["sc.exe", "query", name]
+            if os.name == "nt"
+            else ["systemctl", "--user", "is-active", "--quiet", name]
+        )
+        result = self._run(command, check=False)
+        return (
+            result.returncode == 0 and "RUNNING" in result.stdout
+            if os.name == "nt"
+            else result.returncode == 0
+        )
+
+    def _service(
+        self,
+        role: HostRole,
+        action: Literal["restart"],
+    ) -> None:
+        name = self._service_name(role)
+        if os.name == "nt":
+            command = [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                f"Restart-Service -Name '{name}' -Force",
+            ]
+        else:
+            command = ["systemctl", "--user", action, name]
+        self._run(command)
+
+    def status(self) -> dict[str, object]:
+        roles = self._roles()
+        source = self.source_updates.status()
+        current = str(source.get("current_commit") or "")
+        return {
+            "update_mode": "source",
+            "platform": "windows" if os.name == "nt" else "linux",
+            "architecture": platform.machine().lower(),
+            "current_release": current[:12] or None,
+            "installed_roles": sorted(roles),
+            "source_update": source,
+            "services": {
+                role: {
+                    "installed": role in roles,
+                    "active": self._service_active(role),
+                }
+                for role in ("hub", "node")
+            },
+        }
+
+    def act(self, request: _Action) -> dict[str, object]:
+        roles = self._roles()
+        if request.action in {"restart", "activate", "deactivate"} and request.role is None:
+            raise ValueError("role_required")
+        if request.action == "restart":
+            assert request.role is not None
+            if request.role not in roles:
+                raise ValueError("role_not_installed")
+            self._service(request.role, "restart")
+        elif request.action == "activate":
+            raise ValueError("source_role_change_requires_installer")
+        elif request.action == "deactivate":
+            raise ValueError("source_role_change_requires_installer")
+        elif request.action == "check_update":
+            self.source_updates.check()
+        elif request.action == "update":
+            if request.bundle_name is not None:
+                raise ValueError("bundle_not_supported_for_source_channel")
+            self.source_updates.update()
+            if self.restart_callback is not None:
+                self.restart_callback()
+        return self.status()
+
+
+def _schedule_source_lifecycle_restart() -> None:
+    timer = threading.Timer(2.0, lambda: os._exit(75))
+    timer.daemon = True
+    timer.start()
+
+
+def create_lifecycle_app(
+    manager: HostLifecycleManager | SourceHostLifecycleManager,
+    token: str,
+) -> Starlette:
     if len(token) < 32:
         raise ValueError("Host lifecycle token must contain at least 32 characters")
 
@@ -290,23 +417,55 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="knoa-host-lifecycle")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=9533)
-    parser.add_argument("--updater", type=Path, required=True)
-    parser.add_argument("--release-root", type=Path, required=True)
-    parser.add_argument("--trust-store", type=Path, required=True)
-    parser.add_argument("--state-file", type=Path, required=True)
-    parser.add_argument("--incoming-root", type=Path, required=True)
+    parser.add_argument("--mode", choices=("bundle", "source"), default="bundle")
+    parser.add_argument("--updater", type=Path)
+    parser.add_argument("--release-root", type=Path)
+    parser.add_argument("--trust-store", type=Path)
+    parser.add_argument("--state-file", type=Path)
+    parser.add_argument("--incoming-root", type=Path)
+    parser.add_argument("--source-root", type=Path)
+    parser.add_argument("--source-state-file", type=Path)
+    parser.add_argument("--source-snapshots-root", type=Path)
+    parser.add_argument("--installation-state-file", type=Path)
     parser.add_argument("--token-file", type=Path, required=True)
     args = parser.parse_args()
     if not is_loopback_host(args.host):
         parser.error("Host lifecycle broker must bind to loopback")
     token = args.token_file.read_text(encoding="utf-8").strip()
-    manager = HostLifecycleManager(
-        updater=args.updater,
-        release_root=args.release_root,
-        trust_store=args.trust_store,
-        state_file=args.state_file,
-        incoming_root=args.incoming_root,
-    )
+    if args.mode == "bundle":
+        required = (args.updater, args.release_root, args.trust_store, args.state_file, args.incoming_root)
+        if any(value is None for value in required):
+            parser.error("bundle mode requires updater, release-root, trust-store, state-file and incoming-root")
+        manager: HostLifecycleManager | SourceHostLifecycleManager = HostLifecycleManager(
+            updater=args.updater,
+            release_root=args.release_root,
+            trust_store=args.trust_store,
+            state_file=args.state_file,
+            incoming_root=args.incoming_root,
+        )
+    else:
+        required = (
+            args.source_root,
+            args.source_state_file,
+            args.source_snapshots_root,
+            args.installation_state_file,
+        )
+        if any(value is None for value in required):
+            parser.error(
+                "source mode requires source-root, source-state-file, "
+                "source-snapshots-root and installation-state-file"
+            )
+        updates = SourceUpdateManager(
+            source_root=args.source_root,
+            state_file=args.source_state_file,
+            snapshots_root=args.source_snapshots_root,
+            installation_state_file=args.installation_state_file,
+        )
+        manager = SourceHostLifecycleManager(
+            source_updates=updates,
+            installation_state_file=args.installation_state_file,
+            restart_callback=_schedule_source_lifecycle_restart,
+        )
     uvicorn.run(create_lifecycle_app(manager, token), host=args.host, port=args.port, access_log=False)
     return 0
 
@@ -315,4 +474,8 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
-__all__ = ["HostLifecycleManager", "create_lifecycle_app"]
+__all__ = [
+    "HostLifecycleManager",
+    "SourceHostLifecycleManager",
+    "create_lifecycle_app",
+]

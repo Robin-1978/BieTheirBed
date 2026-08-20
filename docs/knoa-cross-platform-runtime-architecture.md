@@ -111,7 +111,8 @@ Desktop Companion
 
 Knoa Host Lifecycle Broker
 ├── loopback-only authenticated API
-├── signed Bundle install / rollback
+├── Source / signed Bundle update
+├── failed-update automatic recovery
 └── fixed Hub/Node service activation
 ```
 
@@ -375,7 +376,11 @@ Node 确认 admission 后若链路断开，只允许使用同一 `application_se
 
 ## 9. 发布与更新模型
 
-开发源码不再是终端用户部署依赖。CI 对每个平台生成签名、不可变 Release Bundle：
+正式终端用户不依赖开发源码。CI 对每个平台生成签名、不可变 Release Bundle；开发期与高级自托管部署同时
+支持 Source Release Channel。Source Channel 的 mutable checkout 只负责 fetch/fast-forward，实际安装始终从
+detached worktree commit 执行，Windows/Linux 由同一个 Lifecycle API 驱动。
+
+正式 Bundle 形态：
 
 ```text
 knoa-hub-<version>-windows-x86_64.zip
@@ -396,8 +401,12 @@ venv 或 Git。Hub Console 静态资产随 Hub Bundle 发布，Node Console 静�
 ```text
 download manifest -> verify signature/digest -> unpack releases/<version>
 -> stop selected role -> atomically switch current -> start -> health check
--> success retain rollback window / failure switch previous
+-> success / failure automatically restore previous binary
 ```
+
+Source Channel 对应流程是 `check upstream -> fast-forward checkout -> detached worktree install -> restart -> health`。
+V1 不建立用户可见版本树、历史选择或手动回退入口；失败恢复只是单次更新事务的内部安全边界。成功后 staging
+worktree 可清理。Source 与 Bundle 的差别是更新输入和验证方式，不改变 Hub、Node、Console 或数据所有权。
 
 Release Manifest 必须包含 role、OS/arch、协议兼容范围、每个 artifact digest 和签名。Updater 内置信任根，
 拒绝未签名、digest 不匹配、角色不匹配和非显式降级。Binary rollback 与 data rollback 是两件事：数据库优先

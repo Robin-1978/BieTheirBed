@@ -41,7 +41,7 @@ class HostLifecycleClient:
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=310) as response:
+            with urllib.request.urlopen(request, timeout=1900) as response:
                 return json.loads(response.read())
         except urllib.error.HTTPError as error:
             try:

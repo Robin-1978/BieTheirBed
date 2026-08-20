@@ -15,6 +15,8 @@ Windows
 │   ├── Capability MCP: 127.0.0.1:9530
 │   ├── Secure Gateway: 127.0.0.1:9531
 │   └── state: C:\ProgramData\Knoa\Node
+├── KnoaHostLifecycle (WinSW / LocalSystem / Automatic for source installs)
+│   └── Source update broker: 127.0.0.1:9533
 └── named cloudflared services when this host owns public Tunnels
 ```
 
@@ -75,19 +77,27 @@ roots, Python version and ports in:
 C:\ProgramData\Knoa\Config\installation.json
 ```
 
-After installation, double-click:
+After installation, use the **System** page in either local Hub Console or Node
+Console to check and install updates. The Source Lifecycle Broker rejects dirty
+tracked files and divergent history, fast-forwards the checkout, installs from
+a detached worktree, restarts every installed role and verifies health. Failed
+updates automatically reinstall the pre-update commit; the UI does not expose
+manual version rollback.
+
+The following launcher remains only as an administrator/recovery entry when a
+Console cannot be used:
 
 ```text
 C:\ProgramData\Knoa\Scripts\Update-Knoa.cmd
 ```
 
-The updater requests administrator access, detects the WinSW services actually
+The recovery updater requests administrator access, detects the WinSW services actually
 installed on that computer, refuses to overwrite tracked local changes, runs
-`git pull --ff-only`, reinstalls only those roles, restarts the selected WinSW
-services and verifies that they are running. A Node-only computer therefore
-updates only `KnoaNode`; it never installs or updates Hub because of stale state.
-If installation
-fails after a service was stopped, it attempts to restore the existing service.
+`git pull --ff-only`, reconciles every role already installed on the shared
+runtime, restarts the WinSW services and verifies that they are running. A
+Node-only computer therefore updates only `KnoaNode`; it never installs Hub
+because of stale state.
+If installation fails after a service was stopped, it attempts to restore the existing service.
 Source updates also reconcile newly introduced Python dependencies; they never
 replace only the Knoa package with `--no-deps`. WebRTC P2P remains an optional
 acceleration path: if its native runtime cannot load, the Node still starts and
@@ -121,7 +131,7 @@ On update, the installer:
 3. deletes legacy Knoa scheduled tasks;
 4. copies an existing `%LOCALAPPDATA%\Knoa\Node` identity into
    `C:\ProgramData\Knoa\Node` when the service root has no state;
-5. retains the old per-user Node directory as a rollback snapshot;
+5. retains the old per-user Node directory as a migration backup;
 6. installs and starts only the selected WinSW services;
 7. prints a fresh App pairing QR when the selected Node is already enrolled.
 

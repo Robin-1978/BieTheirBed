@@ -40,6 +40,16 @@ foreach ($serviceId in $services) {
         & $wrapper uninstall | Out-Null
     }
 }
+$hubRemains = [bool](Get-Service -Name "KnoaHostedHub" -ErrorAction SilentlyContinue)
+$nodeRemains = [bool](Get-Service -Name "KnoaNode" -ErrorAction SilentlyContinue)
+if (-not $hubRemains -and -not $nodeRemains) {
+    $lifecycleWrapper = Join-Path $BaseRoot "Services\KnoaHostLifecycle\KnoaHostLifecycle.exe"
+    if ((Test-Path -LiteralPath $lifecycleWrapper) -and
+        (Get-Service -Name "KnoaHostLifecycle" -ErrorAction SilentlyContinue)) {
+        & $lifecycleWrapper stop | Out-Null
+        & $lifecycleWrapper uninstall | Out-Null
+    }
+}
 if ($PurgeData) {
     if ($Role -eq "all" -and $PSCmdlet.ShouldProcess($BaseRoot, "Delete all Knoa data")) {
         Remove-Item -LiteralPath $BaseRoot -Recurse -Force -ErrorAction SilentlyContinue

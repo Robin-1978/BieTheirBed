@@ -22,6 +22,23 @@ def test_linux_installer_uses_universal_bundle_and_three_services() -> None:
     assert 'product-role' not in installer
 
 
+def test_source_installers_expose_the_same_lifecycle_channel() -> None:
+    linux = _read("deploy/linux/install-knoa.sh")
+    linux_lifecycle = _read("deploy/linux/knoa-host-lifecycle.service")
+    windows = _read("deploy/windows/Install-Knoa.ps1")
+    windows_lifecycle = _read("deploy/windows/Run-KnoaHostLifecycle.ps1")
+
+    assert "--channel-source" in linux
+    assert "installed_commit" in linux
+    assert "EFFECTIVE_ROLE" in linux
+    assert "--mode source" in linux_lifecycle
+    assert "KNOA_LIFECYCLE_TOKEN_FILE" in _read("deploy/linux/knoa-node.service")
+    assert "ChannelSourcePath" in windows
+    assert "installed_commit" in windows
+    assert "KnoaHostLifecycle" in windows
+    assert "--mode source" in windows_lifecycle
+
+
 def test_linux_console_and_broker_ports_are_loopback_only() -> None:
     hub = _read("deploy/product/linux/knoa-hub.service")
     lifecycle = _read("deploy/product/linux/knoa-host-lifecycle.service")

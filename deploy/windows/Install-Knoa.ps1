@@ -4,6 +4,7 @@ param(
     [string]$Role = "all",
     [string]$WheelPath = "",
     [string]$SourcePath = "",
+    [string]$ChannelSourcePath = "",
     [string]$WinSWExecutable = "",
     [string]$WheelhousePath = "",
     [string]$HubRoot = "$env:ProgramData\Knoa\HostedHub",
@@ -25,8 +26,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$installHub = $Role -in @("all", "hub")
-$installNode = $Role -in @("all", "node")
+$installHub = ($Role -in @("all", "hub")) -or [bool](Get-Service -Name "KnoaHostedHub" -ErrorAction SilentlyContinue)
+$installNode = ($Role -in @("all", "node")) -or [bool](Get-Service -Name "KnoaNode" -ErrorAction SilentlyContinue)
 if (-not $installHub -and ($HostedBackupPath -or $BootstrapTokenSource -or $ReleasePublishTokenSource)) {
     throw "HostedBackupPath, BootstrapTokenSource and ReleasePublishTokenSource require -Role hub or -Role all"
 }
@@ -156,6 +157,13 @@ if ($WheelPath) {
     $resolvedPackage = (Resolve-Path -LiteralPath $SourcePath).Path
     $sourceInstall = $true
 }
+if ($sourceInstall) {
+    if (-not $ChannelSourcePath) { $ChannelSourcePath = $resolvedPackage }
+    $ChannelSourcePath = (Resolve-Path -LiteralPath $ChannelSourcePath).Path
+    if (-not (Test-Path -LiteralPath (Join-Path $ChannelSourcePath ".git"))) {
+        throw "ChannelSourcePath must be a Git checkout"
+    }
+}
 $baseRoot = Split-Path -Parent $InstallRoot
 $configRoot = Join-Path $baseRoot "Config"
 $secretRoot = Join-Path $baseRoot "Secrets"
@@ -163,6 +171,12 @@ $scriptRoot = Join-Path $baseRoot "Scripts"
 $serviceRoot = Join-Path $baseRoot "Services"
 $desktopRoot = Join-Path $baseRoot "Desktop"
 $desktopToken = Join-Path $desktopRoot "companion.token"
+$incomingRoot = Join-Path $baseRoot "Incoming"
+$sourceUpdateRoot = Join-Path $baseRoot "SourceUpdates"
+$sourceUpdateState = Join-Path $sourceUpdateRoot "state.json"
+$sourceSnapshotsRoot = Join-Path $sourceUpdateRoot "Releases"
+$lifecycleToken = Join-Path $secretRoot "source-lifecycle.token"
+$installationStatePath = Join-Path $configRoot "installation.json"
 $venvRoot = Join-Path $InstallRoot "venv"
 $python = Join-Path $venvRoot "Scripts\python.exe"
 $tokenFile = Join-Path $secretRoot "hosted-hub-bootstrap.token"
@@ -213,7 +227,7 @@ if ($installNode) {
     }
     Protect-KnoaPath $NodeRoot -Recursive
 }
-New-Item -ItemType Directory -Force -Path $configRoot, $secretRoot, $scriptRoot, $serviceRoot, $desktopRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $configRoot, $secretRoot, $scriptRoot, $serviceRoot, $desktopRoot, $incomingRoot, $sourceUpdateRoot, $sourceSnapshotsRoot | Out-Null
 
 if ($RecreateVenv -and (Test-Path -LiteralPath $venvRoot)) {
     Remove-Item -LiteralPath $venvRoot -Recurse -Force
@@ -257,6 +271,9 @@ if ($LASTEXITCODE -ne 0) { throw "Knoa wheel installation failed" }
 Copy-Item -Force (Join-Path $PSScriptRoot "Uninstall-Knoa.ps1") $scriptRoot
 Copy-Item -Force (Join-Path $PSScriptRoot "Update-Knoa.ps1") $scriptRoot
 Copy-Item -Force (Join-Path $PSScriptRoot "Update-Knoa.cmd") $scriptRoot
+if ($sourceInstall) {
+    Copy-Item -Force (Join-Path $PSScriptRoot "Run-KnoaHostLifecycle.ps1") $scriptRoot
+}
 if ($installHub) {
     Copy-Item -Force (Join-Path $PSScriptRoot "Run-KnoaHub.ps1") $scriptRoot
     Copy-Item -Force (Join-Path $PSScriptRoot "Publish-KnoaApp.ps1") $scriptRoot
@@ -268,6 +285,9 @@ if ($installNode) {
     Copy-Item -Force (Join-Path $PSScriptRoot "Run-KnoaDesktopCompanion.ps1") $scriptRoot
     Copy-Item -Force (Join-Path $PSScriptRoot "Enroll-KnoaNode.ps1") $scriptRoot
     Copy-Item -Force (Join-Path $PSScriptRoot "Show-KnoaPairingQr.cmd") $scriptRoot
+}
+if ($sourceInstall -and -not (Test-Path -LiteralPath $lifecycleToken)) {
+    Set-Content -LiteralPath $lifecycleToken -Value (New-RandomToken) -NoNewline -Encoding ASCII
 }
 
 if ($installHub) {
@@ -336,7 +356,8 @@ $powerShell = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
 $powerShellXml = Escape-Xml $powerShell
 if ($installHub) {
     $hubRunner = Join-Path $scriptRoot "Run-KnoaHub.ps1"
-    $hubArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$hubRunner`" -PythonExecutable `"$python`" -HubRoot `"$HubRoot`" -BootstrapTokenFile `"$tokenFile`" -ReleasePublishTokenFile `"$releasePublishTokenFile`" -HubId `"$HubId`" -Port $HubPort -PublicUrl `"$HubPublicUrl`""
+    $hubLifecycleArguments = if ($sourceInstall) { " -LifecycleTokenFile `"$lifecycleToken`" -LifecycleIncomingRoot `"$incomingRoot`"" } else { "" }
+    $hubArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$hubRunner`" -PythonExecutable `"$python`" -HubRoot `"$HubRoot`" -BootstrapTokenFile `"$tokenFile`" -ReleasePublishTokenFile `"$releasePublishTokenFile`"$hubLifecycleArguments -HubId `"$HubId`" -Port $HubPort -PublicUrl `"$HubPublicUrl`""
     $hubXmlArguments = Escape-Xml $hubArguments
     $hubLogPath = Escape-Xml (Join-Path $baseRoot "Logs\Hub")
     $hubXml = @"
@@ -365,7 +386,8 @@ if ($installHub) {
 
 if ($installNode) {
     $nodeRunner = Join-Path $scriptRoot "Run-KnoaNode.ps1"
-    $nodeArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$nodeRunner`" -PythonExecutable `"$python`" -NodeRoot `"$NodeRoot`" -ConfigPath `"$nodeConfig`" -DesktopCompanionTokenFile `"$desktopToken`""
+    $nodeLifecycleArguments = if ($sourceInstall) { " -LifecycleTokenFile `"$lifecycleToken`" -LifecycleIncomingRoot `"$incomingRoot`"" } else { "" }
+    $nodeArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$nodeRunner`" -PythonExecutable `"$python`" -NodeRoot `"$NodeRoot`" -ConfigPath `"$nodeConfig`" -DesktopCompanionTokenFile `"$desktopToken`"$nodeLifecycleArguments"
     $nodeXmlArguments = Escape-Xml $nodeArguments
     $nodeLogPath = Escape-Xml (Join-Path $baseRoot "Logs\Node")
     $nodeXml = @"
@@ -419,12 +441,21 @@ $effectiveRole = if ($hubServiceInstalled -and $nodeServiceInstalled) {
     throw "No Knoa Windows service is installed"
 }
 $installMode = if ($sourceInstall) { "source" } else { "wheel" }
-$installationSourcePath = if ($sourceInstall) { $resolvedPackage } else { "" }
+$installationSourcePath = if ($sourceInstall) { $ChannelSourcePath } else { "" }
+$installedCommit = ""
+if ($sourceInstall) {
+    $gitExecutable = (Get-Command git.exe -ErrorAction Stop).Source
+    $installedCommit = (& $gitExecutable -C $resolvedPackage rev-parse --verify HEAD).Trim().ToLowerInvariant()
+    if ($LASTEXITCODE -ne 0 -or $installedCommit -notmatch "^[0-9a-f]{40}$") {
+        throw "Could not determine the installed Knoa source revision"
+    }
+}
 $installationState = [ordered]@{
     schema_version = 1
     install_mode = $installMode
     role = $effectiveRole
     source_path = $installationSourcePath
+    installed_commit = $installedCommit
     hub_public_url = $HubPublicUrl
     hub_id = $HubId
     hub_root = $HubRoot
@@ -437,6 +468,31 @@ $installationState = [ordered]@{
     node_mcp_port = $NodeMcpPort
     updated_at = [DateTimeOffset]::UtcNow.ToString("o")
 }
-$installationStatePath = Join-Path $configRoot "installation.json"
 Write-Utf8NoBom $installationStatePath ($installationState | ConvertTo-Json -Depth 3)
-Write-Host "One-click updater: $scriptRoot\Update-Knoa.cmd"
+if ($sourceInstall) {
+    $lifecycleRunner = Join-Path $scriptRoot "Run-KnoaHostLifecycle.ps1"
+    $lifecycleArguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$lifecycleRunner`" -PythonExecutable `"$python`" -SourceRoot `"$ChannelSourcePath`" -SourceStateFile `"$sourceUpdateState`" -SourceSnapshotsRoot `"$sourceSnapshotsRoot`" -InstallationStateFile `"$installationStatePath`" -TokenFile `"$lifecycleToken`""
+    $lifecycleXmlArguments = Escape-Xml $lifecycleArguments
+    $lifecycleLogPath = Escape-Xml (Join-Path $baseRoot "Logs\Lifecycle")
+    $lifecycleXml = @"
+<service>
+  <id>KnoaHostLifecycle</id>
+  <name>Knoa Source Lifecycle</name>
+  <description>Knoa cross-platform source update and service lifecycle broker</description>
+  <executable>$powerShellXml</executable>
+  <arguments>$lifecycleXmlArguments</arguments>
+  <workingdirectory>$(Escape-Xml $baseRoot)</workingdirectory>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <onfailure action="restart" delay="10 sec" />
+  <stoptimeout>30 sec</stoptimeout>
+  <logpath>$lifecycleLogPath</logpath>
+  <log mode="roll-by-size"><sizeThreshold>10240</sizeThreshold><keepFiles>8</keepFiles></log>
+</service>
+"@
+    if ($env:KNOA_SOURCE_UPDATE_ACTIVE -ne "1") {
+        Install-WinSWService "KnoaHostLifecycle" $lifecycleXml $resolvedWinSW $serviceRoot
+    }
+}
+Write-Host "Local management: open the Hub or Node Console System page"
+Write-Host "Recovery updater: $scriptRoot\Update-Knoa.cmd"
