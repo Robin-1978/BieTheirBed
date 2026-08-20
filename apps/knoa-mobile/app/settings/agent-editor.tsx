@@ -14,6 +14,7 @@ import {
 import type { ManagedConfig, ManagedNodeAgent } from "@/api/models";
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { useI18n } from "@/i18n";
 import {
   BUILT_IN_AGENT_IDS,
   createKnoaAgent,
@@ -23,13 +24,13 @@ import {
   setDelegationEnabled,
   upsertNodeAgent,
 } from "@/models/agentConfiguration";
-import { cloneManagedConfig } from "@/models/modelConfiguration";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
 export default function AgentEditorScreen() {
   const params = useLocalSearchParams<{ agentId?: string; mode?: string }>();
   const gateway = useGateway();
+  const { t } = useI18n();
   const originalAgentId = params.mode === "new" ? "" : String(params.agentId || "");
   const [document, setDocument] = useState<ManagedConfig | null>(null);
   const [agentId, setAgentId] = useState(originalAgentId);
@@ -47,19 +48,19 @@ export default function AgentEditorScreen() {
       setDocument(next);
       if (originalAgentId) {
         const existing = next.agents.agents[originalAgentId];
-        if (!existing) throw new Error("Agent 不存在");
+        if (!existing) throw new Error(t("settings.agentEditor.notFound"));
         const copy = JSON.parse(JSON.stringify(existing)) as ManagedNodeAgent;
         setAgent(copy);
         setBuiltInPromptRef(copy.instructions_ref);
       } else {
-        setAgent(createKnoaAgent(next.default_model, "New Knoa Agent"));
+        setAgent(createKnoaAgent(next.default_model, t("settings.agentEditor.defaultName")));
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Agent 加载失败");
+      setMessage(error instanceof Error ? error.message : t("settings.agentEditor.loadFailed"));
     } finally {
       setWorking("");
     }
-  }, [gateway.runAuthenticated, originalAgentId]);
+  }, [gateway.runAuthenticated, originalAgentId, t]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -86,13 +87,13 @@ export default function AgentEditorScreen() {
       created.draft_version,
     ));
     const validation = await gateway.runAuthenticated((client) => client.validateConfigDraft(replaced.draft_id, true));
-    if (!validation.valid) throw new Error(validation.issues[0]?.message || "配置检查失败");
+    if (!validation.valid) throw new Error(validation.issues[0]?.message || t("settings.common.configValidationFailed"));
     const result = await gateway.runAuthenticated((client) => client.publishConfigDraft(
       replaced.draft_id,
       replaced.draft_version,
       summary,
     ));
-    if (result.state.apply_status === "failed") throw new Error(result.state.apply_error_code || "配置应用失败");
+    if (result.state.apply_status === "failed") throw new Error(result.state.apply_error_code || t("settings.common.configApplyFailed"));
     return result.revision.document;
   }
 
@@ -102,10 +103,10 @@ export default function AgentEditorScreen() {
     setMessage("");
     try {
       const next = upsertNodeAgent(document, agentId, agent, originalAgentId);
-      await publish(next, originalAgentId ? `更新 Agent ${originalAgentId}` : `创建 Agent ${agentId}`);
+      await publish(next, originalAgentId ? t("settings.agentEditor.updateSummary", { agentId: originalAgentId }) : t("settings.agentEditor.createSummary", { agentId }));
       router.back();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Agent 保存失败");
+      setMessage(error instanceof Error ? error.message : t("settings.agentEditor.saveFailed"));
     } finally {
       setWorking("");
     }
@@ -113,10 +114,10 @@ export default function AgentEditorScreen() {
 
   function confirmDelete() {
     if (!document || !originalAgentId || isBuiltIn || working) return;
-    Alert.alert("删除 Agent", `删除 ${agent?.display_name || originalAgentId}？历史会话和 Task 不会被删除。`, [
-      { text: "取消", style: "cancel" },
+    Alert.alert(t("settings.agentEditor.deleteTitle"), t("settings.agentEditor.deleteMessage", { name: agent?.display_name || originalAgentId }), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "删除",
+        text: t("common.delete"),
         style: "destructive",
         onPress: () => {
           void (async () => {
@@ -124,10 +125,10 @@ export default function AgentEditorScreen() {
             setMessage("");
             try {
               const next = removeNodeAgent(document, originalAgentId);
-              await publish(next, `删除 Agent ${originalAgentId}`);
+              await publish(next, t("settings.agentEditor.deleteSummary", { agentId: originalAgentId }));
               router.back();
             } catch (error) {
-              setMessage(error instanceof Error ? error.message : "Agent 删除失败");
+              setMessage(error instanceof Error ? error.message : t("settings.agentEditor.deleteFailed"));
             } finally {
               setWorking("");
             }
@@ -138,50 +139,50 @@ export default function AgentEditorScreen() {
   }
 
   if (!agent || !document) {
-    return <View style={styles.center}>{working === "load" ? <ActivityIndicator color={colors.accent} /> : <Text style={styles.message}>{message || "无法打开 Agent"}</Text>}</View>;
+    return <View style={styles.center}>{working === "load" ? <ActivityIndicator color={colors.accent} /> : <Text style={styles.message}>{message || t("settings.agentEditor.openFailed")}</Text>}</View>;
   }
 
   const isSystem = agent.visibility === "system";
   const canChangeVisibility = !isSystem && originalAgentId !== document.agents.default_agent;
   return (
     <>
-      <Stack.Screen options={{ title: originalAgentId ? agent.display_name : "新建 Agent" }} />
+      <Stack.Screen options={{ title: originalAgentId ? agent.display_name : t("settings.agentEditor.newTitle") }} />
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <View style={styles.hero}>
           <View style={styles.heroIcon}><AppIcon name="agent" color={colors.accent} size={27} /></View>
           <View style={styles.flex}>
             <Text style={styles.title}>{agent.display_name}</Text>
-            <Text style={styles.meta}>一个 NodeAgent 聚合 Prompt、模型、Skill、Tool ceiling、运行限制和 Subagent 策略；保存后只影响新的 Invocation。</Text>
+            <Text style={styles.meta}>{t("settings.agentEditor.heroDetail")}</Text>
           </View>
         </View>
 
-        <Section title="身份与 Runtime">
-          <Field label="Agent ID" value={agentId} editable={!originalAgentId} onChange={(value) => setAgentId(normalizeAgentId(value))} placeholder="research_agent" />
-          <Field label="显示名称" value={agent.display_name} onChange={(display_name) => update((next) => { next.display_name = display_name; })} />
-          <Metric label="Runtime" value={agent.kind === "codex" ? "Codex Runtime Adapter" : "Knoa Runtime"} />
-          <Toggle label="启用" value={agent.enabled} disabled={originalAgentId === document.agents.default_agent} onChange={(enabled) => update((next) => { next.enabled = enabled; })} />
+        <Section title={t("settings.agentEditor.sectionIdentity")}>
+          <Field label={t("settings.agentEditor.agentId")} value={agentId} editable={!originalAgentId} onChange={(value) => setAgentId(normalizeAgentId(value))} placeholder="research_agent" />
+          <Field label={t("settings.agentEditor.displayName")} value={agent.display_name} onChange={(display_name) => update((next) => { next.display_name = display_name; })} />
+          <Metric label="Runtime" value={agent.kind === "codex" ? t("settings.agentEditor.codexRuntimeAdapter") : t("settings.agents.knoaRuntime")} />
+          <Toggle label={t("settings.agentEditor.enabled")} value={agent.enabled} disabled={originalAgentId === document.agents.default_agent} onChange={(enabled) => update((next) => { next.enabled = enabled; })} />
           {!isSystem ? (
-            <Choice label="调用方式" value={agent.visibility} disabled={!canChangeVisibility} choices={[["user", "用户直接使用"], ["delegate", "仅作为 Subagent"]]} onChange={(visibility) => update((next) => { next.visibility = visibility as ManagedNodeAgent["visibility"]; })} />
-          ) : <Metric label="调用方式" value="系统服务专用" />}
-          <NumberField label="并发 Invocation" value={agent.max_concurrency} min={1} onChange={(max_concurrency) => update((next) => { next.max_concurrency = max_concurrency; })} />
+            <Choice label={t("settings.agentEditor.invocationMode")} value={agent.visibility} disabled={!canChangeVisibility} choices={[["user", t("settings.agentEditor.visibilityUserDirect")], ["delegate", t("settings.agentEditor.visibilityDelegateOnly")]]} onChange={(visibility) => update((next) => { next.visibility = visibility as ManagedNodeAgent["visibility"]; })} />
+          ) : <Metric label={t("settings.agentEditor.invocationMode")} value={t("settings.agentEditor.visibilitySystemOnly")} />}
+          <NumberField label={t("settings.agentEditor.maxConcurrency")} value={agent.max_concurrency} min={1} onChange={(max_concurrency) => update((next) => { next.max_concurrency = max_concurrency; })} />
         </Section>
 
         {agent.kind === "knoa" ? (
-          <Section title="Prompt 与模型">
+          <Section title={t("settings.agentEditor.sectionPromptModel")}>
             {agent.instructions_ref ? (
               <View style={styles.notice}>
-                <Text style={styles.itemTitle}>内置 Prompt</Text>
+                <Text style={styles.itemTitle}>{t("settings.agentEditor.builtInPrompt")}</Text>
                 <Text style={styles.meta}>{agent.instructions_ref}</Text>
-                <AppPressable style={styles.secondary} onPress={() => update((next) => { next.instructions_ref = ""; next.instructions = `You are ${next.display_name}.`; })}><Text style={styles.secondaryText}>改为自定义 Prompt</Text></AppPressable>
+                <AppPressable style={styles.secondary} onPress={() => update((next) => { next.instructions_ref = ""; next.instructions = `You are ${next.display_name}.`; })}><Text style={styles.secondaryText}>{t("settings.agentEditor.switchToCustomPrompt")}</Text></AppPressable>
               </View>
             ) : (
               <>
-                <Text style={styles.label}>系统 Prompt</Text>
-                <TextInput multiline value={agent.instructions} onChangeText={(instructions) => update((next) => { next.instructions = instructions; })} style={styles.prompt} placeholder="描述这个 Agent 的职责和行为" placeholderTextColor={colors.muted} />
-                {builtInPromptRef ? <AppPressable style={styles.secondary} onPress={() => update((next) => { next.instructions = ""; next.instructions_ref = builtInPromptRef; })}><Text style={styles.secondaryText}>恢复内置 Prompt</Text></AppPressable> : null}
+                <Text style={styles.label}>{t("settings.agentEditor.systemPrompt")}</Text>
+                <TextInput multiline value={agent.instructions} onChangeText={(instructions) => update((next) => { next.instructions = instructions; })} style={styles.prompt} placeholder={t("settings.agentEditor.systemPromptPlaceholder")} placeholderTextColor={colors.muted} />
+                {builtInPromptRef ? <AppPressable style={styles.secondary} onPress={() => update((next) => { next.instructions = ""; next.instructions_ref = builtInPromptRef; })}><Text style={styles.secondaryText}>{t("settings.agentEditor.restoreBuiltInPrompt")}</Text></AppPressable> : null}
               </>
             )}
-            <Text style={styles.label}>模型</Text>
+            <Text style={styles.label}>{t("settings.agentEditor.model")}</Text>
             <View style={styles.chips}>
               {Object.entries(document.models).map(([alias, model]) => (
                 <Chip key={alias} selected={agent.model_binding.model === alias} label={model.model || alias} onPress={() => update((next) => { next.model_binding = { ownership: "platform", model: alias, hint: "" }; })} />
@@ -189,72 +190,72 @@ export default function AgentEditorScreen() {
             </View>
           </Section>
         ) : (
-          <Section title="Codex Runtime">
-            <Choice label="Sandbox" value={agent.sandbox} choices={[["read-only", "只读"], ["workspace-write", "Workspace 可写"]]} onChange={(sandbox) => update((next) => {
+          <Section title={t("settings.agentEditor.sectionCodex")}>
+            <Choice label={t("settings.agentEditor.sandbox")} value={agent.sandbox} choices={[["read-only", t("settings.agentEditor.sandboxReadOnly")], ["workspace-write", t("settings.agentEditor.sandboxWorkspaceWrite")]]} onChange={(sandbox) => update((next) => {
               next.sandbox = sandbox;
               next.native_capability_ceiling = sandbox === "workspace-write"
                 ? ["workspace_read", "workspace_write", "command_execution", "native_file_edit"]
                 : ["workspace_read", "command_execution"];
             })} />
-            <Field label="启动命令（逗号分隔）" value={agent.command.join(", ")} onChange={(value) => update((next) => { next.command = csvValues(value); })} />
-            <Field label="工作目录" value={agent.cwd} onChange={(cwd) => update((next) => { next.cwd = cwd; })} />
+            <Field label={t("settings.agentEditor.startupCommand")} value={agent.command.join(", ")} onChange={(value) => update((next) => { next.command = csvValues(value); })} />
+            <Field label={t("settings.agentEditor.workingDirectory")} value={agent.cwd} onChange={(cwd) => update((next) => { next.cwd = cwd; })} />
           </Section>
         )}
 
-        <Section title="Skill 与 Tool ceiling">
-          <Text style={styles.meta}>Skill 是 Node 共享内容，Agent 这里只保存允许引用和默认注入。`*` 表示允许当前 Node 提供的全部 Platform Tool，最终仍受 Principal、Task 和 Capability Gateway 收窄。</Text>
+        <Section title={t("settings.agentEditor.sectionSkillsTools")}>
+          <Text style={styles.meta}>{t("settings.agentEditor.skillsToolsHint")}</Text>
           {Object.entries(document.skills).filter(([, skill]) => skill.enabled).map(([skillId]) => {
             const allowed = agent.allowed_skill_refs.includes(skillId);
             const selected = agent.default_skill_refs.includes(skillId);
             return (
               <View key={skillId} style={styles.skillRow}>
-                <View style={styles.flex}><Text style={styles.itemTitle}>{skillId}</Text><Text style={styles.meta}>{selected ? "每次 Invocation 默认注入" : allowed ? "允许 Task 按需使用" : "未授权"}</Text></View>
+                <View style={styles.flex}><Text style={styles.itemTitle}>{skillId}</Text><Text style={styles.meta}>{selected ? t("settings.agentEditor.skillDefaultInject") : allowed ? t("settings.agentEditor.skillAllowedOnDemand") : t("settings.agentEditor.skillUnauthorized")}</Text></View>
                 <AppPressable style={[styles.smallChip, allowed && styles.chipSelected]} onPress={() => update((next) => {
                   next.allowed_skill_refs = allowed ? next.allowed_skill_refs.filter((id) => id !== skillId) : [...next.allowed_skill_refs, skillId];
                   if (allowed) next.default_skill_refs = next.default_skill_refs.filter((id) => id !== skillId);
-                })}><Text style={allowed ? styles.chipTextSelected : styles.chipText}>允许</Text></AppPressable>
+                })}><Text style={allowed ? styles.chipTextSelected : styles.chipText}>{t("settings.agentEditor.allow")}</Text></AppPressable>
                 <AppPressable disabled={!allowed} style={[styles.smallChip, selected && styles.chipSelected, !allowed && styles.disabled]} onPress={() => update((next) => {
                   next.default_skill_refs = selected ? next.default_skill_refs.filter((id) => id !== skillId) : [...next.default_skill_refs, skillId];
-                })}><Text style={selected ? styles.chipTextSelected : styles.chipText}>默认</Text></AppPressable>
+                })}><Text style={selected ? styles.chipTextSelected : styles.chipText}>{t("settings.agentEditor.default")}</Text></AppPressable>
               </View>
             );
           })}
-          {!Object.keys(document.skills).length ? <Text style={styles.meta}>当前 Node 尚未导入 Skill。</Text> : null}
-          <Field label="允许的 Platform Tool（逗号分隔）" value={agent.allowed_platform_tools.join(", ")} onChange={(value) => update((next) => { next.allowed_platform_tools = csvValues(value); })} placeholder="* 或 read_file, web_search" />
-          <Field label="Capability ceiling（逗号分隔）" value={agent.platform_capability_ceiling.join(", ")} onChange={(value) => update((next) => { next.platform_capability_ceiling = csvValues(value); })} placeholder="* 或 host_read, network" />
+          {!Object.keys(document.skills).length ? <Text style={styles.meta}>{t("settings.agentEditor.noSkillsImported")}</Text> : null}
+          <Field label={t("settings.agentEditor.allowedPlatformTools")} value={agent.allowed_platform_tools.join(", ")} onChange={(value) => update((next) => { next.allowed_platform_tools = csvValues(value); })} placeholder={t("settings.agentEditor.platformToolsPlaceholder")} />
+          <Field label={t("settings.agentEditor.capabilityCeiling")} value={agent.platform_capability_ceiling.join(", ")} onChange={(value) => update((next) => { next.platform_capability_ceiling = csvValues(value); })} placeholder={t("settings.agentEditor.capabilityCeilingPlaceholder")} />
         </Section>
 
-        <Section title="Subagent 委派">
-          <Toggle label="允许创建受治理 Child Task" value={agent.delegation.allowed} onChange={(allowed) => setAgent((current) => current ? setDelegationEnabled(current, allowed) : current)} />
+        <Section title={t("settings.agentEditor.sectionSubagent")}>
+          <Toggle label={t("settings.agentEditor.allowChildTasks")} value={agent.delegation.allowed} onChange={(allowed) => setAgent((current) => current ? setDelegationEnabled(current, allowed) : current)} />
           {agent.delegation.allowed ? (
             <>
-              <Text style={styles.label}>允许的目标 Agent</Text>
+              <Text style={styles.label}>{t("settings.agentEditor.allowedTargetAgents")}</Text>
               <View style={styles.chips}>
                 {targetAgents.map(([targetId, target]) => {
                   const selected = agent.delegation.targets.includes(targetId);
                   return <Chip key={targetId} selected={selected} label={target.display_name} onPress={() => update((next) => { next.delegation.targets = selected ? next.delegation.targets.filter((id) => id !== targetId) : [...next.delegation.targets, targetId]; })} />;
                 })}
               </View>
-              {!targetAgents.length ? <Text style={styles.warning}>请先创建或启用一个“仅作为 Subagent”的 Agent。</Text> : null}
+              {!targetAgents.length ? <Text style={styles.warning}>{t("settings.agentEditor.needDelegateAgentWarning")}</Text> : null}
               <View style={styles.numberGrid}>
-                <NumberField label="最大深度" value={agent.delegation.max_depth} min={1} onChange={(max_depth) => update((next) => { next.delegation.max_depth = max_depth; })} />
-                <NumberField label="总 Child 数" value={agent.delegation.max_children} min={1} onChange={(max_children) => update((next) => { next.delegation.max_children = max_children; next.delegation.max_parallel_children = Math.min(next.delegation.max_parallel_children, max_children); })} />
-                <NumberField label="并行 Child 数" value={agent.delegation.max_parallel_children} min={1} onChange={(max_parallel_children) => update((next) => { next.delegation.max_parallel_children = Math.min(max_parallel_children, next.delegation.max_children); })} />
-                <NumberField label="Child 超时（秒）" value={agent.delegation.max_deadline_seconds} min={1} onChange={(max_deadline_seconds) => update((next) => { next.delegation.max_deadline_seconds = max_deadline_seconds; })} />
+                <NumberField label={t("settings.agentEditor.maxDepth")} value={agent.delegation.max_depth} min={1} onChange={(max_depth) => update((next) => { next.delegation.max_depth = max_depth; })} />
+                <NumberField label={t("settings.agentEditor.maxChildren")} value={agent.delegation.max_children} min={1} onChange={(max_children) => update((next) => { next.delegation.max_children = max_children; next.delegation.max_parallel_children = Math.min(next.delegation.max_parallel_children, max_children); })} />
+                <NumberField label={t("settings.agentEditor.maxParallelChildren")} value={agent.delegation.max_parallel_children} min={1} onChange={(max_parallel_children) => update((next) => { next.delegation.max_parallel_children = Math.min(max_parallel_children, next.delegation.max_children); })} />
+                <NumberField label={t("settings.agentEditor.childTimeoutSeconds")} value={agent.delegation.max_deadline_seconds} min={1} onChange={(max_deadline_seconds) => update((next) => { next.delegation.max_deadline_seconds = max_deadline_seconds; })} />
               </View>
             </>
-          ) : <Text style={styles.meta}>关闭后 Runtime 不会向这个 Agent 暴露有效的委派目标和 Child Task 预算。</Text>}
+          ) : <Text style={styles.meta}>{t("settings.agentEditor.delegationOffHint")}</Text>}
         </Section>
 
-        <Section title="运行限制">
-          <OptionalNumberField label="最大推理迭代（留空继承 Node）" value={agent.runtime_limits.max_iterations} min={1} onChange={(max_iterations) => update((next) => { next.runtime_limits.max_iterations = max_iterations; })} />
-          <OptionalNumberField label="最大输出 Token（留空继承 Node）" value={agent.runtime_limits.max_output_tokens} min={64} onChange={(max_output_tokens) => update((next) => { next.runtime_limits.max_output_tokens = max_output_tokens; })} />
+        <Section title={t("settings.agentEditor.sectionRuntimeLimits")}>
+          <OptionalNumberField label={t("settings.agentEditor.maxIterationsOptional")} value={agent.runtime_limits.max_iterations} min={1} onChange={(max_iterations) => update((next) => { next.runtime_limits.max_iterations = max_iterations; })} />
+          <OptionalNumberField label={t("settings.agentEditor.maxOutputTokensOptional")} value={agent.runtime_limits.max_output_tokens} min={64} onChange={(max_output_tokens) => update((next) => { next.runtime_limits.max_output_tokens = max_output_tokens; })} />
         </Section>
 
         <AppPressable disabled={Boolean(working)} style={styles.primary} onPress={() => void save()}>
-          {working === "save" ? <ActivityIndicator color={colors.white} /> : <><AppIcon name="check" color={colors.white} size={19} /><Text style={styles.primaryText}>校验、Preflight 并发布</Text></>}
+          {working === "save" ? <ActivityIndicator color={colors.white} /> : <><AppIcon name="check" color={colors.white} size={19} /><Text style={styles.primaryText}>{t("settings.agentEditor.publishButton")}</Text></>}
         </AppPressable>
-        {originalAgentId && !isBuiltIn ? <AppPressable disabled={Boolean(working)} style={styles.dangerButton} onPress={confirmDelete}><Text style={styles.dangerText}>删除这个 Agent</Text></AppPressable> : null}
+        {originalAgentId && !isBuiltIn ? <AppPressable disabled={Boolean(working)} style={styles.dangerButton} onPress={confirmDelete}><Text style={styles.dangerText}>{t("settings.agentEditor.deleteAgent")}</Text></AppPressable> : null}
         {message ? <Text style={styles.message}>{message}</Text> : null}
       </ScrollView>
     </>

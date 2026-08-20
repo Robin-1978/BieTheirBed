@@ -31,12 +31,17 @@ Account
 -> 注册/登录 Hosted Hub
 -> 创建或进入 Personal Workspace
 -> 显示“还没有 Node”
--> 在电脑安装 Knoa Node 并 Enrollment
--> App 扫描 Node pairing QR
+-> 在电脑安装 Knoa Node
+-> App 或 Hub Console 生成 Enrollment Code，Node Console 粘贴加入 Workspace
+-> Node 上线后，Node Console 生成 App 配对 QR，App 扫描完成配对
 -> 进入 Node Home
 -> 配置 NodeAgent 与 Model
 -> 开始 Conversation 或创建 Task
 ```
+
+Enrollment 与 App 配对是两个独立信任步骤：前者让 Node 加入 Workspace 并建立 Relay；
+后者让 App 获得该 Node 的设备身份。普通用户只在 Node Console 生成配对 QR，不需要手输
+Workspace ID 或 Account Token。
 
 Hub 登录成功不要求 Node 在线。没有 Node 时 App 仍可管理帐号、Workspace、成员、添加 Node 和检查更新。
 

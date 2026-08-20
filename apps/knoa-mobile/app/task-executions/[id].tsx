@@ -422,7 +422,7 @@ export default function TaskExecutionDetailScreen() {
       } : current);
       void refresh();
     } catch {
-      setError("输入未能提交，请刷新后重试");
+      setError(t("interaction.submitFailed"));
     } finally {
       setResolvingInteraction("");
     }

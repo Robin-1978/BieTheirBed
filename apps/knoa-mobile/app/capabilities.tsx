@@ -1,15 +1,17 @@
-import { router, Stack } from "expo-router";
+import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import type { ManagedConfig } from "@/api/models";
 import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
 export default function NodeResourcesScreen() {
   const gateway = useGateway();
+  const { t } = useI18n();
   const [document, setDocument] = useState<ManagedConfig | null>(null);
   const [toolCount, setToolCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -30,11 +32,11 @@ export default function NodeResourcesScreen() {
       const result = inventory.result as { descriptors?: unknown[] };
       setToolCount(result.descriptors?.length ?? 0);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Node 资源加载失败");
+      setError(caught instanceof Error ? caught.message : t("capabilities.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [gateway.client, gateway.runAuthenticated, gateway.sessionHandle]);
+  }, [gateway.client, gateway.runAuthenticated, gateway.sessionHandle, t]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -46,46 +48,85 @@ export default function NodeResourcesScreen() {
     : 0;
 
   return (
-    <>
-      <Stack.Screen options={{ title: "Node 资源" }} />
-      <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.hero}>
-          <View style={styles.heroIcon}><AppIcon name="node" color={colors.accent} size={28} /></View>
-          <View style={styles.flex}>
-            <Text style={styles.title}>{node?.displayName || "当前 Node"}</Text>
-            <Text style={styles.meta}>这里配置实际在这台电脑上运行的 Agent、模型、MCP、Skill 和 Tool。</Text>
-          </View>
-          <AppPressable accessibilityLabel="刷新" onPress={() => void load()} style={styles.iconButton}><AppIcon name="refresh" color={colors.muted} size={20} /></AppPressable>
+    <ScrollView contentContainerStyle={styles.container}>
+      <View style={styles.hero}>
+        <View style={styles.heroIcon}><AppIcon name="node" color={colors.accent} size={28} /></View>
+        <View style={styles.flex}>
+          <Text style={styles.title}>{node?.displayName || t("capabilities.currentNode")}</Text>
+          <Text style={styles.meta}>{t("capabilities.heroDetail")}</Text>
         </View>
-        {loading ? <ActivityIndicator color={colors.accent} /> : null}
+        <AppPressable accessibilityLabel={t("common.refresh")} onPress={() => void load()} style={styles.iconButton}>
+          <AppIcon name="refresh" color={colors.muted} size={20} />
+        </AppPressable>
+      </View>
+      {loading ? <ActivityIndicator color={colors.accent} /> : null}
 
-        <View style={styles.card}>
-          <ResourceRow icon="agent" title="模型" detail={`${Object.keys(document?.models ?? {}).length} 个模型 · ${sharedModels} 个已共享`} onPress={() => router.push("/settings/models")} />
-          <ResourceRow icon="agent" title="Agent" detail={`${enabledAgents.length} 个启用 · 默认 ${document?.agents.default_agent || "—"}`} onPress={() => router.push("/settings/agents")} />
-          <ResourceRow icon="share" title="MCP 与 Skill" detail={`${Object.keys(document?.mcp_servers ?? {}).length} 个 MCP · ${Object.keys(document?.skills ?? {}).length} 个 Skill`} onPress={() => router.push("/settings/extensions")} />
-          <ResourceRow icon="settings" title="Tool" detail={`${toolCount} 个当前会话可用 Tool · 权限由 Agent 和策略决定`} />
-        </View>
+      <View style={styles.card}>
+        <ResourceRow
+          icon="agent"
+          title={t("nav.models")}
+          detail={t("capabilities.modelsDetail", {
+            count: Object.keys(document?.models ?? {}).length,
+            shared: sharedModels,
+          })}
+          onPress={() => router.push("/settings/models")}
+        />
+        <ResourceRow
+          icon="agent"
+          title={t("nav.agents")}
+          detail={t("capabilities.agentsDetail", {
+            enabled: enabledAgents.length,
+            defaultAgent: document?.agents.default_agent || "—",
+          })}
+          onPress={() => router.push("/settings/agents")}
+        />
+        <ResourceRow
+          icon="share"
+          title={t("nav.extensions")}
+          detail={t("capabilities.extensionsDetail", {
+            mcp: Object.keys(document?.mcp_servers ?? {}).length,
+            skills: Object.keys(document?.skills ?? {}).length,
+          })}
+          onPress={() => router.push("/settings/extensions")}
+        />
+        <ResourceRow
+          icon="settings"
+          title="Tool"
+          detail={t("capabilities.toolsDetail", { count: toolCount })}
+        />
+      </View>
 
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Agent</Text>
-          {agents.map(([id, agent]) => (
-            <View key={id} style={styles.agentRow}>
-              <View style={styles.flex}>
-                <Text style={styles.rowTitle}>{agent.display_name}</Text>
-                <Text style={styles.meta}>{agent.kind === "codex" ? "Codex Agent" : "Knoa Agent"} · 模型 {agent.model_binding.model || "由 Runtime 决定"}</Text>
-              </View>
-              <Text style={agent.enabled ? styles.enabled : styles.disabled}>{agent.enabled ? "启用" : "停用"}</Text>
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>{t("capabilities.agentSection")}</Text>
+        {agents.map(([id, agent]) => (
+          <View key={id} style={styles.agentRow}>
+            <View style={styles.flex}>
+              <Text style={styles.rowTitle}>{agent.display_name}</Text>
+              <Text style={styles.meta}>
+                {agent.kind === "codex" ? t("capabilities.codexAgent") : t("capabilities.knoaAgent")} · {t("capabilities.modelBinding", {
+                  model: agent.model_binding.model || t("capabilities.modelRuntimeDecided"),
+                })}
+              </Text>
             </View>
-          ))}
-        </View>
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-      </ScrollView>
-    </>
+            <Text style={agent.enabled ? styles.enabled : styles.disabled}>
+              {agent.enabled ? t("capabilities.enabled") : t("capabilities.disabled")}
+            </Text>
+          </View>
+        ))}
+      </View>
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+    </ScrollView>
   );
 }
 
 function ResourceRow({ icon, title, detail, onPress }: { icon: AppIconName; title: string; detail: string; onPress?: () => void }) {
-  const content = <><AppIcon name={icon} color={colors.accent} size={22} /><View style={styles.flex}><Text style={styles.rowTitle}>{title}</Text><Text style={styles.meta}>{detail}</Text></View>{onPress ? <AppIcon name="chevron-right" color={colors.muted} size={18} /> : null}</>;
+  const content = (
+    <>
+      <AppIcon name={icon} color={colors.accent} size={22} />
+      <View style={styles.flex}><Text style={styles.rowTitle}>{title}</Text><Text style={styles.meta}>{detail}</Text></View>
+      {onPress ? <AppIcon name="chevron-right" color={colors.muted} size={18} /> : null}
+    </>
+  );
   return onPress ? <AppPressable style={styles.row} onPress={onPress}>{content}</AppPressable> : <View style={styles.row}>{content}</View>;
 }
 

@@ -1,5 +1,5 @@
 import * as Crypto from "expo-crypto";
-import { router, Stack } from "expo-router";
+import { router } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -37,6 +37,7 @@ import {
   workspaceModelSupportsVision,
 } from "@/models/workspaceModelConsumption";
 import { useGateway } from "@/state/GatewayProvider";
+import { useI18n, type MessageKey } from "@/i18n";
 import { colors } from "@/theme";
 
 type Editor = ModelEditorValue & { secret: string; originalAlias: string };
@@ -57,6 +58,7 @@ const emptyEditor = (): Editor => ({
 
 export default function ModelsScreen() {
   const gateway = useGateway();
+  const { t } = useI18n();
   const [document, setDocument] = useState<ManagedConfig | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceResourceState | null>(null);
   const [nodes, setNodes] = useState<HubNode[]>([]);
@@ -80,17 +82,17 @@ export default function ModelsScreen() {
       setWorkspace(resourceState);
       setNodes(directory);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "模型配置加载失败");
+      setMessage(error instanceof Error ? error.message : t("settings.models.loadFailed"));
     } finally {
       setWorking("");
     }
-  }, [gateway.runAuthenticated]);
+  }, [gateway.runAuthenticated, t]);
 
   useEffect(() => { void load(); }, [load]);
 
   const nodeName = useMemo(
-    () => nodes.find((node) => node.node_id === gateway.nodeId)?.display_name || "当前 Node",
-    [gateway.nodeId, nodes],
+    () => nodes.find((node) => node.node_id === gateway.nodeId)?.display_name || t("capabilities.currentNode"),
+    [gateway.nodeId, nodes, t],
   );
 
   const availableRemoteModels = useMemo<AvailableWorkspaceModel[]>(() => {
@@ -139,13 +141,13 @@ export default function ModelsScreen() {
       created.draft_version,
     ));
     const validation = await gateway.runAuthenticated((client) => client.validateConfigDraft(replaced.draft_id, true));
-    if (!validation.valid) throw new Error(validation.issues[0]?.message || "配置检查失败");
+    if (!validation.valid) throw new Error(validation.issues[0]?.message || t("settings.common.configValidationFailed"));
     const result = await gateway.runAuthenticated((client) => client.publishConfigDraft(
       replaced.draft_id,
       replaced.draft_version,
       summary,
     ));
-    if (result.state.apply_status === "failed") throw new Error(result.state.apply_error_code || "配置应用失败");
+    if (result.state.apply_status === "failed") throw new Error(result.state.apply_error_code || t("settings.common.configApplyFailed"));
     setDocument(result.revision.document);
     return result.revision.document;
   }
@@ -161,14 +163,14 @@ export default function ModelsScreen() {
         secretVersion = Math.max(editor.secretVersion + 1, Math.ceil(status.rotated_at * 1000));
       }
       if (editor.originalAlias && editor.originalAlias !== editor.alias) {
-        throw new Error("模型内部名称创建后不可修改；可以修改显示模型 ID 和连接配置");
+        throw new Error(t("settings.models.aliasImmutable"));
       }
       const next = upsertModel(document, { ...editor, secretVersion });
-      await applyDocument(next, editor.originalAlias ? "更新模型配置" : "添加模型配置");
+      await applyDocument(next, editor.originalAlias ? t("settings.models.updateModel") : t("settings.models.addModelConfig"));
       setEditor(null);
-      setMessage("模型配置已检查并生效");
+      setMessage(t("settings.models.saveSuccess"));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "模型保存失败");
+      setMessage(error instanceof Error ? error.message : t("settings.models.saveFailed"));
     } finally {
       setWorking("");
     }
@@ -191,17 +193,17 @@ export default function ModelsScreen() {
         modelIdentity: workspaceModelIdentity(item.resource),
         supportsVision: workspaceModelSupportsVision(item.resource),
       });
-      await applyDocument(next, `添加 Workspace 模型 ${item.resource.display_name}`);
+      await applyDocument(next, t("settings.models.attachSummary", { name: item.resource.display_name }));
       Alert.alert(
-        "模型已添加",
-        `${item.resource.display_name} 已加入 ${nodeName}，现在可以选择给哪个 Knoa Agent 使用。`,
+        t("settings.models.attachSuccess"),
+        t("settings.models.attachSuccessDetail", { name: item.resource.display_name, node: nodeName }),
         [
-          { text: "稍后" },
-          { text: "配置 Agent", onPress: () => router.push("/settings/agents") },
+          { text: t("settings.models.attachLater") },
+          { text: t("settings.common.configureAgents"), onPress: () => router.push("/settings/agents") },
         ],
       );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Workspace 模型添加失败");
+      setMessage(error instanceof Error ? error.message : t("settings.models.attachFailed"));
     } finally {
       setWorking("");
     }
@@ -210,7 +212,7 @@ export default function ModelsScreen() {
   function beginShare(alias: string) {
     if (!document) return;
     if (!workspace) {
-      setMessage("当前 Workspace 控制面不可用，暂时不能修改共享设置");
+      setMessage(t("settings.models.workspaceUnavailable"));
       return;
     }
     const deployment = deploymentForModel(document, alias)?.[1];
@@ -227,9 +229,9 @@ export default function ModelsScreen() {
     setMessage("");
     try {
       const model = document.models[sharingAlias];
-      if (!model) throw new Error("模型不存在");
+      if (!model) throw new Error(t("settings.models.notFound"));
       const provider = document.providers[model.provider];
-      if (!provider) throw new Error("模型 Provider 不存在");
+      if (!provider) throw new Error(t("settings.models.providerNotFound"));
       const existing = deploymentForModel(document, sharingAlias);
       const suffix = Crypto.randomUUID().replaceAll("-", "").slice(0, 18);
       const deploymentId = existing?.[0] ?? `model_deployment_${suffix}`;
@@ -243,34 +245,32 @@ export default function ModelsScreen() {
         maxRemoteConcurrency: concurrency,
         allowedNodeIds,
       });
-      const applied = await applyDocument(next, enabled ? "共享模型到 Workspace" : "停止共享模型");
+      const applied = await applyDocument(next, enabled ? t("settings.models.shareEnabled") : t("settings.models.shareDisabled"));
       const state = await loadWorkspaceResourceState();
       setDocument(applied);
       setWorkspace(state);
       setSharingAlias("");
-      setMessage(enabled ? "模型已共享到 Workspace" : "模型已停止共享");
+      setMessage(enabled ? t("settings.models.shareEnabledSuccess") : t("settings.models.shareDisabledSuccess"));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "共享设置失败");
+      setMessage(error instanceof Error ? error.message : t("settings.models.shareFailed"));
     } finally {
       setWorking("");
     }
   }
 
   return (
-    <>
-      <Stack.Screen options={{ title: "模型" }} />
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <View style={styles.hero}>
           <View style={styles.heroIcon}><AppIcon name="agent" color={colors.accent} size={27} /></View>
           <View style={styles.flex}>
-            <Text style={styles.title}>{nodeName} 的模型</Text>
-            <Text style={styles.hint}>模型默认只在当前 Node 使用。共享时，模型和密钥仍留在这里，Workspace 只管理授权。</Text>
+            <Text style={styles.title}>{t("settings.models.heroTitle", { node: nodeName })}</Text>
+            <Text style={styles.hint}>{t("settings.models.heroDetail")}</Text>
           </View>
-          <AppPressable accessibilityLabel="刷新" onPress={() => void load()} style={styles.iconButton}><AppIcon name="refresh" color={colors.muted} size={20} /></AppPressable>
+          <AppPressable accessibilityLabel={t("common.refresh")} onPress={() => void load()} style={styles.iconButton}><AppIcon name="refresh" color={colors.muted} size={20} /></AppPressable>
         </View>
 
         {working === "load" ? <ActivityIndicator color={colors.accent} /> : null}
-        {availableRemoteModels.length ? <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Workspace 可用模型</Text><Text style={styles.meta}>承载 Node 决定共享范围；是否添加、给哪个 Agent 使用由当前 Node 决定。</Text></View> : null}
+        {availableRemoteModels.length ? <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>{t("settings.models.workspaceAvailable")}</Text><Text style={styles.meta}>{t("settings.models.workspaceAvailableHint")}</Text></View> : null}
         {availableRemoteModels.map((item) => {
           const busy = working === `attach:${item.deployment.deployment_id}`;
           return (
@@ -279,26 +279,26 @@ export default function ModelsScreen() {
                 <View style={[styles.modelIcon, styles.modelIconShared]}><AppIcon name="share" color={colors.accent} size={23} /></View>
                 <View style={styles.flex}>
                   <Text style={styles.cardTitle}>{item.resource.display_name}</Text>
-                  <Text style={styles.meta}>来自 {item.providerNode?.display_name || "另一个 Node"} · 已授权当前 Node</Text>
+                  <Text style={styles.meta}>{t("settings.models.fromNodeAuthorized", { node: item.providerNode?.display_name || t("settings.models.anotherNode") })}</Text>
                 </View>
               </View>
               <Text style={item.health === "healthy" && item.providerNode?.online ? styles.healthy : styles.meta}>
-                {item.providerNode?.online ? item.health === "healthy" ? "服务健康" : "等待模型服务状态" : "承载 Node 当前离线，仍可先添加配置"}
+                {item.providerNode?.online ? item.health === "healthy" ? t("settings.models.serviceHealthy") : t("settings.models.waitingServiceHealth") : t("settings.models.hostOfflineCanConfigure")}
               </Text>
               {item.attachedAlias ? (
                 <View style={styles.actions}>
-                  <Text style={styles.healthy}>已添加</Text>
-                  <AppPressable style={styles.secondary} onPress={() => router.push("/settings/agents")}><Text style={styles.secondaryText}>配置 Agent</Text></AppPressable>
+                  <Text style={styles.healthy}>{t("settings.models.attached")}</Text>
+                  <AppPressable style={styles.secondary} onPress={() => router.push("/settings/agents")}><Text style={styles.secondaryText}>{t("settings.common.configureAgents")}</Text></AppPressable>
                 </View>
               ) : (
                 <AppPressable disabled={Boolean(working)} style={styles.primary} onPress={() => void attachRemoteModel(item)}>
-                  {busy ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>添加到 {nodeName}</Text>}
+                  {busy ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>{t("settings.models.addToNode", { node: nodeName })}</Text>}
                 </AppPressable>
               )}
             </View>
           );
         })}
-        {document ? <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>{nodeName} 已配置模型</Text></View> : null}
+        {document ? <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>{t("settings.models.configuredTitle", { node: nodeName })}</Text></View> : null}
         {document ? Object.entries(document.models).map(([alias, model]) => {
           const provider = document.providers[model.provider];
           if (!provider) return null;
@@ -311,20 +311,20 @@ export default function ModelsScreen() {
                 <View style={[styles.modelIcon, shared && styles.modelIconShared]}><AppIcon name="agent" color={colors.accent} size={23} /></View>
                 <View style={styles.flex}>
                   <Text style={styles.cardTitle}>{model.model || alias}</Text>
-                  <Text style={styles.meta}>{driverLabel(provider.driver)} · {providerEndpoint(provider) || "Workspace 远程服务"}</Text>
+                  <Text style={styles.meta}>{driverLabel(provider.driver, t)} · {providerEndpoint(provider) || t("settings.models.workspaceRemoteService")}</Text>
                 </View>
-                {document.default_model === alias ? <Text style={styles.badge}>默认</Text> : null}
+                {document.default_model === alias ? <Text style={styles.badge}>{t("settings.common.defaultBadge")}</Text> : null}
               </View>
               <Text style={provider.driver === "workspace_remote" || shared ? styles.healthy : styles.meta}>
-                {provider.driver === "workspace_remote" ? "来自 Workspace · 推理由承载 Node 执行" : shared ? `已共享 · ${observation?.health === "healthy" ? "健康" : "等待 Node 状态"}` : "仅当前 Node 使用"}
+                {provider.driver === "workspace_remote" ? t("settings.models.fromWorkspaceRelay") : shared ? observation?.health === "healthy" ? t("settings.models.sharedHealthy") : t("settings.models.sharedWaiting") : t("settings.models.localOnly")}
               </Text>
               <View style={styles.actions}>
                 {provider.driver === "workspace_remote" ? (
-                  <AppPressable style={styles.secondary} onPress={() => router.push("/settings/agents")}><Text style={styles.secondaryText}>配置 Agent</Text></AppPressable>
+                  <AppPressable style={styles.secondary} onPress={() => router.push("/settings/agents")}><Text style={styles.secondaryText}>{t("settings.common.configureAgents")}</Text></AppPressable>
                 ) : (
                   <>
-                    <AppPressable style={styles.secondary} onPress={() => beginEdit(alias)}><Text style={styles.secondaryText}>编辑</Text></AppPressable>
-                    <AppPressable style={styles.secondary} onPress={() => beginShare(alias)}><Text style={styles.secondaryText}>{shared ? "管理共享" : "共享"}</Text></AppPressable>
+                    <AppPressable style={styles.secondary} onPress={() => beginEdit(alias)}><Text style={styles.secondaryText}>{t("settings.common.edit")}</Text></AppPressable>
+                    <AppPressable style={styles.secondary} onPress={() => beginShare(alias)}><Text style={styles.secondaryText}>{shared ? t("settings.models.manageShare") : t("settings.models.share")}</Text></AppPressable>
                   </>
                 )}
               </View>
@@ -334,7 +334,7 @@ export default function ModelsScreen() {
 
         {!editor && !sharingAlias ? (
           <AppPressable style={styles.primary} onPress={beginCreate}>
-            <AppIcon name="plus" color={colors.white} size={20} /><Text style={styles.primaryText}>添加模型</Text>
+            <AppIcon name="plus" color={colors.white} size={20} /><Text style={styles.primaryText}>{t("settings.models.addModel")}</Text>
           </AppPressable>
         ) : null}
 
@@ -350,47 +350,48 @@ export default function ModelsScreen() {
             setConcurrency={setConcurrency}
             working={working === "share"}
             onSave={() => void saveSharing(true)}
-            onStop={() => Alert.alert("停止共享", "其他 Node 将不能继续调用这个模型。", [
-              { text: "取消", style: "cancel" },
-              { text: "停止共享", style: "destructive", onPress: () => void saveSharing(false) },
+            onStop={() => Alert.alert(t("settings.models.stopShareTitle"), t("settings.models.stopShareMessage"), [
+              { text: t("common.cancel"), style: "cancel" },
+              { text: t("settings.models.stopShareConfirm"), style: "destructive", onPress: () => void saveSharing(false) },
             ])}
             onCancel={() => setSharingAlias("")}
           />
         ) : null}
         {message ? <Text style={styles.message}>{message}</Text> : null}
       </ScrollView>
-    </>
   );
 }
 
 function ModelEditor({ editor, setEditor, working, onSave, onCancel }: { editor: Editor; setEditor(value: Editor): void; working: boolean; onSave(): Promise<void>; onCancel(): void }) {
+  const { t } = useI18n();
   const needsSecret = !["llamacpp", "workspace_remote"].includes(editor.driver);
   return (
     <View style={styles.editor}>
-      <Text style={styles.title}>{editor.originalAlias ? "编辑模型" : "添加模型"}</Text>
-      <Text style={styles.label}>连接类型</Text>
-      <View style={styles.choices}>{(["llamacpp", "openai_compatible", "openai", "anthropic"] as ModelDriver[]).map((driver) => <AppPressable key={driver} style={[styles.choice, editor.driver === driver && styles.choiceSelected]} onPress={() => setEditor({ ...editor, driver })}><Text style={editor.driver === driver ? styles.choiceTextSelected : styles.choiceText}>{driverLabel(driver)}</Text></AppPressable>)}</View>
-      <Field label="模型名称" value={editor.modelId} onChange={(modelId) => setEditor({ ...editor, modelId })} placeholder="例如 Qwen 3.5 4B" />
-      <Field label={editor.driver === "llamacpp" ? "本地服务地址" : "API 地址"} value={editor.endpoint} onChange={(endpoint) => setEditor({ ...editor, endpoint })} placeholder={editor.driver === "llamacpp" ? "http://127.0.0.1:8192" : "https://api.example.com/v1"} />
-      {needsSecret ? <Field label="API Key" value={editor.secret} onChange={(secret) => setEditor({ ...editor, secret })} placeholder={editor.originalAlias ? "留空表示不修改" : "输入 API Key"} secure /> : null}
-      <Toggle label="支持图片" detail="模型能够接收图片输入" value={editor.supportsVision} onChange={(supportsVision) => setEditor({ ...editor, supportsVision })} />
-      <Toggle label="设为默认模型" detail="只影响之后的新调用，不修改 Agent 的显式绑定" value={editor.setAsDefault} onChange={(setAsDefault) => setEditor({ ...editor, setAsDefault })} />
-      <View style={styles.actions}><AppPressable style={styles.secondary} onPress={onCancel}><Text style={styles.secondaryText}>取消</Text></AppPressable><AppPressable disabled={working} style={styles.primarySmall} onPress={() => void onSave()}>{working ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>检查并保存</Text>}</AppPressable></View>
+      <Text style={styles.title}>{editor.originalAlias ? t("settings.models.editModel") : t("settings.models.addModel")}</Text>
+      <Text style={styles.label}>{t("settings.models.connectionType")}</Text>
+      <View style={styles.choices}>{(["llamacpp", "openai_compatible", "openai", "anthropic"] as ModelDriver[]).map((driver) => <AppPressable key={driver} style={[styles.choice, editor.driver === driver && styles.choiceSelected]} onPress={() => setEditor({ ...editor, driver })}><Text style={editor.driver === driver ? styles.choiceTextSelected : styles.choiceText}>{driverLabel(driver, t)}</Text></AppPressable>)}</View>
+      <Field label={t("settings.models.modelName")} value={editor.modelId} onChange={(modelId) => setEditor({ ...editor, modelId })} placeholder={t("settings.models.modelNamePlaceholder")} />
+      <Field label={editor.driver === "llamacpp" ? t("settings.models.localEndpoint") : t("settings.models.apiEndpoint")} value={editor.endpoint} onChange={(endpoint) => setEditor({ ...editor, endpoint })} placeholder={editor.driver === "llamacpp" ? t("settings.models.localEndpointPlaceholder") : t("settings.models.apiEndpointPlaceholder")} />
+      {needsSecret ? <Field label={t("settings.models.apiKey")} value={editor.secret} onChange={(secret) => setEditor({ ...editor, secret })} placeholder={editor.originalAlias ? t("settings.models.apiKeyKeepEmpty") : t("settings.models.apiKeyPlaceholder")} secure /> : null}
+      <Toggle label={t("settings.models.supportsVision")} detail={t("settings.models.supportsVisionDetail")} value={editor.supportsVision} onChange={(supportsVision) => setEditor({ ...editor, supportsVision })} />
+      <Toggle label={t("settings.models.setDefaultModel")} detail={t("settings.models.setDefaultModelDetail")} value={editor.setAsDefault} onChange={(setAsDefault) => setEditor({ ...editor, setAsDefault })} />
+      <View style={styles.actions}><AppPressable style={styles.secondary} onPress={onCancel}><Text style={styles.secondaryText}>{t("common.cancel")}</Text></AppPressable><AppPressable disabled={working} style={styles.primarySmall} onPress={() => void onSave()}>{working ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>{t("settings.common.checkAndSave")}</Text>}</AppPressable></View>
     </View>
   );
 }
 
 function ShareEditor({ alias, shared, nodes, allowedNodeIds, setAllowedNodeIds, concurrency, setConcurrency, working, onSave, onStop, onCancel }: { alias: string; shared: boolean; nodes: HubNode[]; allowedNodeIds: string[]; setAllowedNodeIds(value: string[]): void; concurrency: number; setConcurrency(value: number): void; working: boolean; onSave(): void; onStop(): void; onCancel(): void }) {
+  const { t } = useI18n();
   return (
     <View style={styles.editor}>
-      <Text style={styles.title}>{shared ? "管理模型共享" : "共享模型到 Workspace"}</Text>
-      <Text style={styles.hint}>{alias} 仍在当前 Node 执行。请选择可以调用它的其他 Node。</Text>
-      {nodes.map((node) => <Toggle key={node.node_id} label={node.display_name} detail={node.online ? "在线" : "离线，授权会在上线后生效"} value={allowedNodeIds.includes(node.node_id)} onChange={(enabled) => setAllowedNodeIds(enabled ? [...allowedNodeIds, node.node_id] : allowedNodeIds.filter((id) => id !== node.node_id))} />)}
-      {!nodes.length ? <Text style={styles.meta}>Workspace 中还没有其他 Node。模型可以先发布，之后再补充授权。</Text> : null}
-      <Text style={styles.label}>最大远程并发</Text>
+      <Text style={styles.title}>{shared ? t("settings.models.manageShareTitle") : t("settings.models.shareTitle")}</Text>
+      <Text style={styles.hint}>{t("settings.models.shareHint", { alias })}</Text>
+      {nodes.map((node) => <Toggle key={node.node_id} label={node.display_name} detail={node.online ? t("nodes.online") : t("settings.models.offlineGrantHint")} value={allowedNodeIds.includes(node.node_id)} onChange={(enabled) => setAllowedNodeIds(enabled ? [...allowedNodeIds, node.node_id] : allowedNodeIds.filter((id) => id !== node.node_id))} />)}
+      {!nodes.length ? <Text style={styles.meta}>{t("settings.models.noOtherNodes")}</Text> : null}
+      <Text style={styles.label}>{t("settings.models.maxRemoteConcurrency")}</Text>
       <View style={styles.choices}>{[1, 2, 4].map((value) => <AppPressable key={value} style={[styles.choice, concurrency === value && styles.choiceSelected]} onPress={() => setConcurrency(value)}><Text style={concurrency === value ? styles.choiceTextSelected : styles.choiceText}>{value}</Text></AppPressable>)}</View>
-      <View style={styles.actions}><AppPressable style={styles.secondary} onPress={onCancel}><Text style={styles.secondaryText}>取消</Text></AppPressable><AppPressable disabled={working} style={styles.primarySmall} onPress={onSave}>{working ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>保存共享</Text>}</AppPressable></View>
-      {shared ? <AppPressable disabled={working} style={styles.dangerButton} onPress={onStop}><Text style={styles.dangerText}>停止共享</Text></AppPressable> : null}
+      <View style={styles.actions}><AppPressable style={styles.secondary} onPress={onCancel}><Text style={styles.secondaryText}>{t("common.cancel")}</Text></AppPressable><AppPressable disabled={working} style={styles.primarySmall} onPress={onSave}>{working ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>{t("settings.models.saveShare")}</Text>}</AppPressable></View>
+      {shared ? <AppPressable disabled={working} style={styles.dangerButton} onPress={onStop}><Text style={styles.dangerText}>{t("settings.models.stopShareConfirm")}</Text></AppPressable> : null}
     </View>
   );
 }
@@ -403,8 +404,16 @@ function Toggle({ label, detail, value, onChange }: { label: string; detail: str
   return <View style={styles.toggle}><View style={styles.flex}><Text style={styles.label}>{label}</Text><Text style={styles.meta}>{detail}</Text></View><Switch value={value} onValueChange={onChange} /></View>;
 }
 
-function driverLabel(driver: ModelDriver): string {
-  return ({ llamacpp: "本地 llama.cpp", openai_compatible: "OpenAI 兼容 API", openai: "OpenAI", anthropic: "Anthropic", workspace_remote: "Workspace 共享模型" })[driver];
+const DRIVER_LABEL_KEYS: Record<ModelDriver, string> = {
+  llamacpp: "settings.models.driver.llamacpp",
+  openai_compatible: "settings.models.driver.openaiCompatible",
+  openai: "settings.models.driver.openai",
+  anthropic: "settings.models.driver.anthropic",
+  workspace_remote: "settings.models.driver.workspaceRemote",
+};
+
+function driverLabel(driver: ModelDriver, t: ReturnType<typeof useI18n>["t"]): string {
+  return t(DRIVER_LABEL_KEYS[driver] as MessageKey);
 }
 
 const styles = StyleSheet.create({

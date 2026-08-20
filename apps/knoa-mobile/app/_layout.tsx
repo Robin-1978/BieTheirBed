@@ -47,9 +47,13 @@ function AppNavigator() {
           <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="connect" options={{ headerShown: false }} />
           <Stack.Screen name="account/login" options={{ headerShown: false }} />
-          <Stack.Screen name="account/index" options={{ title: "帐号与 Workspace" }} />
-          <Stack.Screen name="workspaces/[workspaceId]/index" options={{ title: "Workspace" }} />
-          <Stack.Screen name="node" options={{ title: "Node" }} />
+          <Stack.Screen name="account/index" options={{ title: t("nav.account") }} />
+          <Stack.Screen name="workspaces/[workspaceId]/index" options={{ title: t("nav.workspace") }} />
+          <Stack.Screen name="workspaces/[workspaceId]/nodes" options={{ title: t("nodes.title") }} />
+          <Stack.Screen name="workspaces/[workspaceId]/resources" options={{ title: t("nav.sharedResources") }} />
+          <Stack.Screen name="workspaces/[workspaceId]/members" options={{ title: t("nav.members") }} />
+          <Stack.Screen name="workspaces/[workspaceId]/work" options={{ title: t("nav.work") }} />
+          <Stack.Screen name="node" options={{ title: t("nav.node") }} />
           <Stack.Screen name="pair" options={{ title: t("nav.connect") }} />
           <Stack.Screen
             name="chat"
@@ -74,14 +78,14 @@ function AppNavigator() {
           <Stack.Screen name="tasks/[id]" options={{ title: t("nav.taskDetails") }} />
           <Stack.Screen name="tasks/[id]/edit" options={{ title: t("nav.editTask") }} />
           <Stack.Screen name="task-executions/[id]" options={{ title: t("nav.executionDetails") }} />
-          <Stack.Screen name="capabilities" options={{ title: t("nav.settings") }} />
-          <Stack.Screen name="settings/app" options={{ title: "App 设置" }} />
-          <Stack.Screen name="settings/node" options={{ title: "Node 设置与诊断" }} />
-          <Stack.Screen name="settings/agents" options={{ title: "Agent" }} />
-          <Stack.Screen name="settings/agent-editor" options={{ title: "Agent 配置" }} />
+          <Stack.Screen name="capabilities" options={{ title: t("nav.nodeResources") }} />
+          <Stack.Screen name="settings/app" options={{ title: t("nav.appSettings") }} />
+          <Stack.Screen name="settings/node" options={{ title: t("nav.nodeSettings") }} />
+          <Stack.Screen name="settings/agents" options={{ title: t("nav.agents") }} />
+          <Stack.Screen name="settings/agent-editor" options={{ title: t("nav.agentEditor") }} />
           <Stack.Screen name="settings/system" options={{ title: t("nav.systemConfiguration") }} />
-          <Stack.Screen name="settings/extensions" options={{ title: "Extension Center" }} />
-          <Stack.Screen name="settings/models" options={{ title: "Model Center" }} />
+          <Stack.Screen name="settings/extensions" options={{ title: t("nav.extensions") }} />
+          <Stack.Screen name="settings/models" options={{ title: t("nav.models") }} />
           <Stack.Screen name="capture" options={{ title: t("nav.capture") }} />
           <Stack.Screen name="update" options={{ title: t("nav.update") }} />
         </Stack>

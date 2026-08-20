@@ -1,16 +1,18 @@
-import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { listHubNodes, listWorkspaceWork, type HubNode, type WorkspaceWorkProjection } from "@/hub/hubClient";
+import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
 export default function WorkspaceWorkScreen() {
   const params = useLocalSearchParams<{ workspaceId: string; workspaceName?: string }>();
   const gateway = useGateway();
+  const { t } = useI18n();
   const [items, setItems] = useState<WorkspaceWorkProjection[]>([]);
   const [nodes, setNodes] = useState<HubNode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -25,11 +27,11 @@ export default function WorkspaceWorkScreen() {
       setItems(work);
       setNodes(directory);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Workspace 工作目录加载失败");
+      setError(caught instanceof Error ? caught.message : t("work.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useFocusEffect(useCallback(() => { void refresh(); }, [refresh]));
 
@@ -37,7 +39,7 @@ export default function WorkspaceWorkScreen() {
     const node = nodes.find((value) => value.node_id === item.node_id);
     const bound = gateway.nodes.some((value) => value.nodeId === item.node_id);
     if (!node?.online || !bound) {
-      setError(!node?.online ? "权威 Node 当前离线；Workspace 中仍可查看最后同步状态" : "请先将此 App 与权威 Node 配对");
+      setError(!node?.online ? t("work.offlineProjection") : t("work.pairRequired"));
       return;
     }
     setWorking(item.entity_id);
@@ -46,7 +48,7 @@ export default function WorkspaceWorkScreen() {
       await gateway.switchNode(item.node_id);
       const routeParams = {
         workspaceId: params.workspaceId,
-        workspaceName: params.workspaceName ?? "Workspace",
+        workspaceName: params.workspaceName ?? t("nav.workspace"),
         nodeId: item.node_id,
       };
       if (item.entity_kind === "conversation") {
@@ -56,46 +58,53 @@ export default function WorkspaceWorkScreen() {
         router.push({ pathname: "/tasks/[id]", params: { ...routeParams, id: item.entity_id } });
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "无法连接权威 Node");
+      setError(caught instanceof Error ? caught.message : t("work.connectFailed"));
     } finally {
       setWorking("");
     }
   }
 
   return (
-    <>
-      <Stack.Screen options={{ title: "工作" }} />
-      <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.header}>
-          <View style={styles.headerIcon}><AppIcon name="chat" color={colors.accent} size={27} /></View>
-          <View style={styles.flex}>
-            <Text style={styles.title}>Workspace 工作目录</Text>
-            <Text style={styles.meta}>会话与任务在 Node 执行；这里保存跨 Node 可见的管理投影。</Text>
-          </View>
-          <AppPressable accessibilityLabel="刷新" onPress={() => void refresh()} style={styles.iconButton}><AppIcon name="refresh" color={colors.muted} size={20} /></AppPressable>
+    <ScrollView contentContainerStyle={styles.container}>
+      <View style={styles.header}>
+        <View style={styles.headerIcon}><AppIcon name="chat" color={colors.accent} size={27} /></View>
+        <View style={styles.flex}>
+          <Text style={styles.title}>{t("work.title")}</Text>
+          <Text style={styles.meta}>{t("work.headerDetail")}</Text>
         </View>
-        {loading ? <ActivityIndicator color={colors.accent} /> : null}
-        {!loading && !items.length ? <View style={styles.empty}><Text style={styles.itemTitle}>还没有同步的工作</Text><Text style={styles.meta}>连接 Node 并创建会话或部署任务后，状态会同步到这里；Node 离线不会阻塞 Workspace 管理。</Text></View> : null}
-        {items.map((item) => {
-          const node = nodes.find((value) => value.node_id === item.node_id);
-          return (
-            <AppPressable key={`${item.entity_kind}:${item.entity_id}`} style={styles.card} onPress={() => void open(item)}>
-              <View style={styles.row}>
-                <AppIcon name={item.entity_kind === "conversation" ? "chat" : "tasks"} color={colors.accent} size={22} />
-                <View style={styles.flex}>
-                  <Text style={styles.itemTitle}>{item.title || item.entity_id}</Text>
-                  <Text style={styles.meta}>{item.entity_kind === "conversation" ? "会话" : "任务"} · {node?.display_name ?? item.node_id} · {item.state}</Text>
-                </View>
-                {working === item.entity_id ? <ActivityIndicator color={colors.accent} size="small" /> : <Text style={node?.online ? styles.online : styles.offline}>{node?.online ? "在线" : "离线"}</Text>}
+        <AppPressable accessibilityLabel={t("common.refresh")} onPress={() => void refresh()} style={styles.iconButton}>
+          <AppIcon name="refresh" color={colors.muted} size={20} />
+        </AppPressable>
+      </View>
+      {loading ? <ActivityIndicator color={colors.accent} /> : null}
+      {!loading && !items.length ? (
+        <View style={styles.empty}>
+          <Text style={styles.itemTitle}>{t("work.emptyTitle")}</Text>
+          <Text style={styles.meta}>{t("work.emptyDetail")}</Text>
+        </View>
+      ) : null}
+      {items.map((item) => {
+        const node = nodes.find((value) => value.node_id === item.node_id);
+        const kindLabel = item.entity_kind === "conversation" ? t("work.conversation") : t("work.task");
+        return (
+          <AppPressable key={`${item.entity_kind}:${item.entity_id}`} style={styles.card} onPress={() => void open(item)}>
+            <View style={styles.row}>
+              <AppIcon name={item.entity_kind === "conversation" ? "chat" : "tasks"} color={colors.accent} size={22} />
+              <View style={styles.flex}>
+                <Text style={styles.itemTitle}>{item.title || item.entity_id}</Text>
+                <Text style={styles.meta}>{kindLabel} · {node?.display_name ?? item.node_id} · {item.state}</Text>
               </View>
-              {item.summary ? <Text style={styles.summary} numberOfLines={3}>{item.summary}</Text> : null}
-              {item.approval_summary ? <Text style={styles.approval}>{item.approval_summary}</Text> : null}
-            </AppPressable>
-          );
-        })}
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-      </ScrollView>
-    </>
+              {working === item.entity_id
+                ? <ActivityIndicator color={colors.accent} size="small" />
+                : <Text style={node?.online ? styles.online : styles.offline}>{node?.online ? t("nodes.online") : t("nodes.offline")}</Text>}
+            </View>
+            {item.summary ? <Text style={styles.summary} numberOfLines={3}>{item.summary}</Text> : null}
+            {item.approval_summary ? <Text style={styles.approval}>{item.approval_summary}</Text> : null}
+          </AppPressable>
+        );
+      })}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+    </ScrollView>
   );
 }
 

@@ -1,4 +1,4 @@
-import { router, Stack, useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 
@@ -6,11 +6,13 @@ import type { ManagedConfig } from "@/api/models";
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { cloneManagedConfig } from "@/models/modelConfiguration";
+import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
 export default function AgentsScreen() {
   const gateway = useGateway();
+  const { t } = useI18n();
   const [document, setDocument] = useState<ManagedConfig | null>(null);
   const [working, setWorking] = useState("");
   const [message, setMessage] = useState("");
@@ -20,9 +22,9 @@ export default function AgentsScreen() {
       const current = await gateway.runAuthenticated((client) => client.getConfigCurrent());
       setDocument(current.revision.document);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Agent 加载失败");
+      setMessage(error instanceof Error ? error.message : t("settings.agents.loadFailed"));
     }
-  }, [gateway.runAuthenticated]);
+  }, [gateway.runAuthenticated, t]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
@@ -33,13 +35,13 @@ export default function AgentsScreen() {
       const created = await gateway.runAuthenticated((client) => client.createConfigDraft());
       const replaced = await gateway.runAuthenticated((client) => client.replaceConfigDraft(created.draft_id, next, created.draft_version));
       const validation = await gateway.runAuthenticated((client) => client.validateConfigDraft(replaced.draft_id, true));
-      if (!validation.valid) throw new Error(validation.issues[0]?.message || "配置检查失败");
+      if (!validation.valid) throw new Error(validation.issues[0]?.message || t("settings.common.configValidationFailed"));
       const result = await gateway.runAuthenticated((client) => client.publishConfigDraft(replaced.draft_id, replaced.draft_version, summary));
-      if (result.state.apply_status === "failed") throw new Error(result.state.apply_error_code || "配置应用失败");
+      if (result.state.apply_status === "failed") throw new Error(result.state.apply_error_code || t("settings.common.configApplyFailed"));
       setDocument(result.revision.document);
-      setMessage("Agent 配置已生效；运行中的 Invocation 保持原快照");
+      setMessage(t("settings.agents.publishSuccess"));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Agent 配置失败");
+      setMessage(error instanceof Error ? error.message : t("settings.agents.publishFailed"));
     } finally {
       setWorking("");
     }
@@ -51,7 +53,7 @@ export default function AgentsScreen() {
     const target = next.agents.agents[agentId];
     if (!target) return;
     target.enabled = enabled;
-    void publish(next, `${enabled ? "启用" : "停用"} Agent ${agentId}`);
+    void publish(next, enabled ? t("settings.agents.enableAgent", { agentId }) : t("settings.agents.disableAgent", { agentId }));
   }
 
   function setDefault(agentId: string) {
@@ -61,69 +63,83 @@ export default function AgentsScreen() {
     if (!target || target.visibility !== "user") return;
     next.agents.default_agent = agentId;
     target.enabled = true;
-    void publish(next, `设置默认 Agent ${agentId}`);
+    void publish(next, t("settings.agents.setDefaultAgent", { agentId }));
+  }
+
+  function visibilityLabel(value: "user" | "delegate" | "system") {
+    if (value === "delegate") return t("settings.agents.visibilityDelegate");
+    if (value === "system") return t("settings.agents.visibilitySystem");
+    return t("settings.agents.visibilityUser");
   }
 
   return (
-    <>
-      <Stack.Screen options={{ title: "Agent" }} />
-      <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.hero}>
-          <View style={styles.icon}><AppIcon name="agent" color={colors.accent} size={27} /></View>
-          <View style={styles.flex}>
-            <Text style={styles.title}>当前 Node 的 Agent</Text>
-            <Text style={styles.meta}>Agent 在当前 Node 执行。自定义工作角色复用 Knoa Runtime；Codex 使用内置 Adapter。这里不再拆分 Profile、Definition 和 Deployment。</Text>
-          </View>
+    <ScrollView contentContainerStyle={styles.container}>
+      <View style={styles.hero}>
+        <View style={styles.icon}><AppIcon name="agent" color={colors.accent} size={27} /></View>
+        <View style={styles.flex}>
+          <Text style={styles.title}>{t("settings.agents.title")}</Text>
+          <Text style={styles.meta}>{t("settings.agents.heroDetail")}</Text>
         </View>
+      </View>
 
-        {!document ? <ActivityIndicator color={colors.accent} /> : Object.entries(document.agents.agents).map(([id, agent]) => {
-          const isDefault = document.agents.default_agent === id;
-          const targets = agent.delegation.targets.map((targetId) => document.agents.agents[targetId]?.display_name || targetId);
-          return (
-            <View key={id} style={styles.card}>
-              <View style={styles.row}>
-                <View style={styles.flex}>
-                  <Text style={styles.cardTitle}>{agent.display_name}</Text>
-                  <Text style={styles.meta}>{agent.kind === "codex" ? "Codex Runtime" : "Knoa Runtime"} · {visibilityLabel(agent.visibility)}{isDefault ? " · 默认" : ""}</Text>
-                </View>
-                <Switch disabled={Boolean(working) || isDefault} value={agent.enabled} onValueChange={(enabled) => setEnabled(id, enabled)} />
+      {!document ? <ActivityIndicator color={colors.accent} /> : Object.entries(document.agents.agents).map(([id, agent]) => {
+        const isDefault = document.agents.default_agent === id;
+        const targets = agent.delegation.targets.map((targetId) => document.agents.agents[targetId]?.display_name || targetId);
+        const toolsLabel = agent.allowed_platform_tools.includes("*")
+          ? t("settings.agents.toolsBroad")
+          : t("settings.agents.toolsCount", { count: agent.allowed_platform_tools.length });
+        const subagentDetail = agent.delegation.allowed
+          ? `${targets.length ? targets.join("、") : t("settings.agents.subagentNoTargets")} · ${t("settings.agents.subagentDepth", { depth: agent.delegation.max_depth })}`
+          : t("settings.agents.subagentOff");
+        return (
+          <View key={id} style={styles.card}>
+            <View style={styles.row}>
+              <View style={styles.flex}>
+                <Text style={styles.cardTitle}>{agent.display_name}</Text>
+                <Text style={styles.meta}>
+                  {agent.kind === "codex" ? t("settings.agents.codexRuntime") : t("settings.agents.knoaRuntime")} · {visibilityLabel(agent.visibility)}{isDefault ? t("settings.agents.defaultBadge") : ""}
+                </Text>
               </View>
-
-              {agent.kind === "knoa" ? (
-                <Text style={styles.detail}>模型：{document.models[agent.model_binding.model]?.model || agent.model_binding.model}</Text>
-              ) : <Text style={styles.detail}>模型与 Thread 由 Codex Runtime 管理</Text>}
-              <Text style={styles.detail}>Skill：{agent.default_skill_refs.length ? agent.default_skill_refs.join("、") : "未默认注入"} · Tool：{agent.allowed_platform_tools.includes("*") ? "由 Node/Task 权限收窄" : `${agent.allowed_platform_tools.length} 个允许项`}</Text>
-              <Text style={agent.delegation.allowed ? styles.healthy : styles.detail}>Subagent：{agent.delegation.allowed ? `${targets.length ? targets.join("、") : "尚未选择目标"} · 深度 ${agent.delegation.max_depth}` : "关闭"}</Text>
-
-              <View style={styles.actions}>
-                <AppPressable style={styles.secondary} onPress={() => router.push({ pathname: "/settings/agent-editor", params: { agentId: id } })}>
-                  <AppIcon name="edit" color={colors.accent} size={18} /><Text style={styles.secondaryText}>配置</Text>
-                </AppPressable>
-                {!isDefault && agent.visibility === "user" ? (
-                  <AppPressable disabled={Boolean(working)} style={styles.secondary} onPress={() => setDefault(id)}><Text style={styles.secondaryText}>设为默认</Text></AppPressable>
-                ) : null}
-              </View>
+              <Switch disabled={Boolean(working) || isDefault} value={agent.enabled} onValueChange={(enabled) => setEnabled(id, enabled)} />
             </View>
-          );
-        })}
 
-        <AppPressable disabled={Boolean(working) || !document} style={styles.primary} onPress={() => router.push({ pathname: "/settings/agent-editor", params: { mode: "new" } })}>
-          <AppIcon name="plus" color={colors.white} size={20} /><Text style={styles.primaryText}>新建 Knoa Agent</Text>
-        </AppPressable>
-        <AppPressable style={styles.advanced} onPress={() => router.push("/settings/system")}>
-          <Text style={styles.advancedText}>配置发布状态与 Node 级运行参数</Text><AppIcon name="chevron-right" color={colors.muted} size={18} />
-        </AppPressable>
-        {working ? <ActivityIndicator color={colors.accent} /> : null}
-        {message ? <Text style={styles.message}>{message}</Text> : null}
-      </ScrollView>
-    </>
+            {agent.kind === "knoa" ? (
+              <Text style={styles.detail}>{t("settings.agents.modelLine", { model: document.models[agent.model_binding.model]?.model || agent.model_binding.model })}</Text>
+            ) : <Text style={styles.detail}>{t("settings.agents.codexModelManaged")}</Text>}
+            <Text style={styles.detail}>
+              {t("settings.agents.skillsLine", {
+                skills: agent.default_skill_refs.length ? agent.default_skill_refs.join("、") : t("settings.agents.skillsNone"),
+                tools: toolsLabel,
+              })}
+            </Text>
+            <Text style={agent.delegation.allowed ? styles.healthy : styles.detail}>
+              {t("settings.agents.subagentLine", { detail: subagentDetail })}
+            </Text>
+
+            <View style={styles.actions}>
+              <AppPressable style={styles.secondary} onPress={() => router.push({ pathname: "/settings/agent-editor", params: { agentId: id } })}>
+                <AppIcon name="edit" color={colors.accent} size={18} /><Text style={styles.secondaryText}>{t("settings.agents.configure")}</Text>
+              </AppPressable>
+              {!isDefault && agent.visibility === "user" ? (
+                <AppPressable disabled={Boolean(working)} style={styles.secondary} onPress={() => setDefault(id)}>
+                  <Text style={styles.secondaryText}>{t("settings.agents.setDefault")}</Text>
+                </AppPressable>
+              ) : null}
+            </View>
+          </View>
+        );
+      })}
+
+      <AppPressable disabled={Boolean(working) || !document} style={styles.primary} onPress={() => router.push({ pathname: "/settings/agent-editor", params: { mode: "new" } })}>
+        <AppIcon name="plus" color={colors.white} size={20} /><Text style={styles.primaryText}>{t("settings.agents.createKnoaAgent")}</Text>
+      </AppPressable>
+      <AppPressable style={styles.advanced} onPress={() => router.push("/settings/system")}>
+        <Text style={styles.advancedText}>{t("settings.agents.advancedLink")}</Text><AppIcon name="chevron-right" color={colors.muted} size={18} />
+      </AppPressable>
+      {working ? <ActivityIndicator color={colors.accent} /> : null}
+      {message ? <Text style={styles.message}>{message}</Text> : null}
+    </ScrollView>
   );
-}
-
-function visibilityLabel(value: "user" | "delegate" | "system") {
-  if (value === "delegate") return "Subagent";
-  if (value === "system") return "系统专用";
-  return "用户可选";
 }
 
 const styles = StyleSheet.create({

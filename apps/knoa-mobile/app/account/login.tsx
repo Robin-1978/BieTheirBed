@@ -10,12 +10,14 @@ import {
   registerHostedAccount,
   resetHostedPassword,
 } from "@/hub/hubClient";
+import { useI18n } from "@/i18n";
 import { colors } from "@/theme";
 
 type AccountMode = "login" | "register" | "recover";
 const HOSTED_HUB_URL = "https://knoa.tinydotdot.com";
 
 export default function AccountLoginScreen() {
+  const { t } = useI18n();
   const [hubUrl, setHubUrl] = useState(HOSTED_HUB_URL);
   const [mode, setMode] = useState<AccountMode>("login");
   const [loginIdentity, setLoginIdentity] = useState("");
@@ -44,7 +46,7 @@ export default function AccountLoginScreen() {
         await registerHostedAccount(
           setupPayload,
           loginIdentity,
-          displayName || loginIdentity.split("@")[0] || "Knoa User",
+          displayName || loginIdentity.split("@")[0] || t("login.defaultDisplayName"),
           password,
         );
       } else {
@@ -53,7 +55,7 @@ export default function AccountLoginScreen() {
       setPassword("");
       router.replace("/account");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Hub 帐号操作失败");
+      setMessage(error instanceof Error ? error.message : t("login.failed"));
     } finally {
       setWorking(false);
     }
@@ -63,7 +65,7 @@ export default function AccountLoginScreen() {
     if (!cameraPermission?.granted) {
       const result = await requestCameraPermission();
       if (!result.granted) {
-        setMessage("需要相机权限才能扫描 Hub 一次性二维码");
+        setMessage(t("login.cameraRequired"));
         return;
       }
     }
@@ -89,48 +91,107 @@ export default function AccountLoginScreen() {
           }}
         />
         <View style={styles.scanFrame} />
-        <Text style={styles.scanHint}>扫描 Hub 发出的帐号注册或密码恢复二维码</Text>
+        <Text style={styles.scanHint}>{t("login.scanHint")}</Text>
         <AppPressable style={styles.cancelScan} onPress={() => setScanning(false)}>
-          <Text style={styles.primaryText}>取消</Text>
+          <Text style={styles.primaryText}>{t("common.cancel")}</Text>
         </AppPressable>
       </View>
     );
   }
 
+  const modeLabels = {
+    login: t("login.modeLogin"),
+    register: t("login.modeRegister"),
+    recover: t("login.modeRecover"),
+  } as const;
+
+  const submitLabel = mode === "login"
+    ? t("login.submitLogin")
+    : mode === "register"
+      ? t("login.submitRegister")
+      : t("login.submitRecover");
+
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>KNOA ACCOUNT</Text>
-        <Text style={styles.title}>{selfHosted ? "登录自建 Hub" : "登录 Knoa"}</Text>
-        <Text style={styles.hint}>登录后先进入 Workspace，再选择实际执行工作的 Node。</Text>
+        <Text style={styles.eyebrow}>{t("login.eyebrow")}</Text>
+        <Text style={styles.title}>{selfHosted ? t("login.titleSelfHosted") : t("login.titleHosted")}</Text>
+        <Text style={styles.hint}>{t("login.hint")}</Text>
       </View>
       <View style={styles.card}>
-        {selfHosted ? <TextInput value={hubUrl} onChangeText={setHubUrl} placeholder="https://hub.example.com" placeholderTextColor={colors.muted} autoCapitalize="none" style={styles.input} /> : null}
+        {selfHosted ? (
+          <TextInput
+            value={hubUrl}
+            onChangeText={setHubUrl}
+            placeholder={t("login.hubUrlPlaceholder")}
+            placeholderTextColor={colors.muted}
+            autoCapitalize="none"
+            style={styles.input}
+          />
+        ) : null}
         <View style={styles.modeRow}>
           {(["login", "register", "recover"] as const).map((item) => (
             <AppPressable key={item} disabled={working} onPress={() => { setMode(item); setMessage(""); }} style={[styles.mode, mode === item && styles.modeActive]}>
-              <Text style={mode === item ? styles.modeTextActive : styles.modeText}>
-                {item === "login" ? "登录" : item === "register" ? "创建帐号" : "恢复密码"}
-              </Text>
+              <Text style={mode === item ? styles.modeTextActive : styles.modeText}>{modeLabels[item]}</Text>
             </AppPressable>
           ))}
         </View>
         {mode !== "login" ? (
           <>
             <AppPressable style={styles.secondary} disabled={working} onPress={() => void openScanner()}>
-              <Text style={styles.secondaryText}>扫描 Hub 一次性二维码</Text>
+              <Text style={styles.secondaryText}>{t("login.scanQr")}</Text>
             </AppPressable>
-            <TextInput value={setupPayload} onChangeText={setSetupPayload} placeholder="或粘贴 Hub 一次性凭据" placeholderTextColor={colors.muted} autoCapitalize="none" multiline style={[styles.input, styles.payload]} />
+            <TextInput
+              value={setupPayload}
+              onChangeText={setSetupPayload}
+              placeholder={t("login.setupPlaceholder")}
+              placeholderTextColor={colors.muted}
+              autoCapitalize="none"
+              multiline
+              style={[styles.input, styles.payload]}
+            />
           </>
         ) : null}
-        {mode !== "recover" ? <TextInput value={loginIdentity} onChangeText={setLoginIdentity} placeholder="登录标识" placeholderTextColor={colors.muted} autoCapitalize="none" style={styles.input} /> : null}
-        {mode === "register" ? <TextInput value={displayName} onChangeText={setDisplayName} placeholder="显示名称" placeholderTextColor={colors.muted} style={styles.input} /> : null}
-        <TextInput value={password} onChangeText={setPassword} placeholder={mode === "recover" ? "设置新密码（至少 12 位）" : "帐号密码（至少 12 位）"} placeholderTextColor={colors.muted} secureTextEntry style={styles.input} />
+        {mode !== "recover" ? (
+          <TextInput
+            value={loginIdentity}
+            onChangeText={setLoginIdentity}
+            placeholder={t("login.identityPlaceholder")}
+            placeholderTextColor={colors.muted}
+            autoCapitalize="none"
+            style={styles.input}
+          />
+        ) : null}
+        {mode === "register" ? (
+          <TextInput
+            value={displayName}
+            onChangeText={setDisplayName}
+            placeholder={t("login.displayNamePlaceholder")}
+            placeholderTextColor={colors.muted}
+            style={styles.input}
+          />
+        ) : null}
+        <TextInput
+          value={password}
+          onChangeText={setPassword}
+          placeholder={mode === "recover" ? t("login.newPasswordPlaceholder") : t("login.passwordPlaceholder")}
+          placeholderTextColor={colors.muted}
+          secureTextEntry
+          style={styles.input}
+        />
         <AppPressable style={styles.primary} disabled={working} onPress={() => void submit()}>
-          {working ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>{mode === "login" ? "登录" : mode === "register" ? "创建并登录" : "恢复并登录"}</Text>}
+          {working ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>{submitLabel}</Text>}
         </AppPressable>
-        <AppPressable disabled={working} onPress={() => { const next = !selfHosted; setSelfHosted(next); if (!next) setHubUrl(HOSTED_HUB_URL); }} style={styles.advanced}>
-          <Text style={styles.advancedText}>{selfHosted ? "使用 Knoa Hosted Hub" : "使用自建 Hub"}</Text>
+        <AppPressable
+          disabled={working}
+          onPress={() => {
+            const next = !selfHosted;
+            setSelfHosted(next);
+            if (!next) setHubUrl(HOSTED_HUB_URL);
+          }}
+          style={styles.advanced}
+        >
+          <Text style={styles.advancedText}>{selfHosted ? t("login.useHosted") : t("login.useSelfHosted")}</Text>
         </AppPressable>
         {message ? <Text style={styles.error}>{message}</Text> : null}
       </View>

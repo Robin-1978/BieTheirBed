@@ -14,6 +14,7 @@ import {
   type HostedAccountProfile,
   type HostedWorkspace,
 } from "@/hub/hubClient";
+import { useI18n } from "@/i18n";
 import {
   loadNavigationPreference,
   rememberWorkspace,
@@ -25,6 +26,7 @@ import { colors } from "@/theme";
 
 export default function AccountHomeScreen() {
   const gateway = useGateway();
+  const { t } = useI18n();
   const [profile, setProfile] = useState<HostedAccountProfile | null>(null);
   const [workspaces, setWorkspaces] = useState<HostedWorkspace[]>([]);
   const [landing, setLanding] = useState<LandingPreference>("last");
@@ -56,17 +58,17 @@ export default function AccountHomeScreen() {
       setLanding(preference.landing);
       setWorkspaces(hosted.length ? hosted : [{
         workspaceId: connection.workspaceId,
-        displayName: "Personal Workspace",
+        displayName: t("account.personalWorkspace"),
         kind: "personal",
         role: "owner",
         workspacePath: "",
       }]);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "帐号信息加载失败");
+      setError(caught instanceof Error ? caught.message : t("account.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useFocusEffect(useCallback(() => { void refresh(); }, [refresh]));
 
@@ -84,7 +86,7 @@ export default function AccountHomeScreen() {
         params: { workspaceId: workspace.workspaceId, workspaceName: workspace.displayName },
       });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Workspace 打开失败");
+      setError(caught instanceof Error ? caught.message : t("account.openWorkspaceFailed"));
     } finally {
       setWorking("");
     }
@@ -106,17 +108,17 @@ export default function AccountHomeScreen() {
       await refresh();
       await openWorkspace(workspace);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Workspace 创建失败");
+      setError(caught instanceof Error ? caught.message : t("account.createWorkspaceFailed"));
     } finally {
       setWorking("");
     }
   }
 
   function confirmLogout() {
-    Alert.alert("退出帐号", "退出 Hub 帐号，但保留本机已建立的 Node 信任。", [
-      { text: "取消", style: "cancel" },
+    Alert.alert(t("account.logoutTitle"), t("account.logoutMessage"), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "退出",
+        text: t("account.logoutConfirm"),
         style: "destructive",
         onPress: () => void (async () => {
           setWorking("logout");
@@ -137,48 +139,73 @@ export default function AccountHomeScreen() {
       <View style={styles.accountCard}>
         <View style={styles.accountIcon}><AppIcon name="user" color={colors.accent} size={34} /></View>
         <View style={styles.flex}>
-          <Text style={styles.accountName}>{profile?.displayName || "Knoa Owner"}</Text>
+          <Text style={styles.accountName}>{profile?.displayName || t("account.defaultOwner")}</Text>
           <Text style={styles.meta}>{profile?.loginIdentity || rootUrl}</Text>
         </View>
-        <AppPressable accessibilityLabel="刷新帐号" onPress={() => void refresh()} style={styles.iconButton}>
+        <AppPressable accessibilityLabel={t("account.refresh")} onPress={() => void refresh()} style={styles.iconButton}>
           <AppIcon name="refresh" color={colors.muted} size={20} />
         </AppPressable>
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>App</Text>
-        <Row icon="settings" title="App 设置" detail="外观、语言和当前版本" onPress={() => router.push("/settings/app")} />
-        <Row icon="refresh" title="版本与更新" detail="检查、下载并安装最新版本" onPress={() => router.push("/update")} />
+        <Text style={styles.cardTitle}>{t("account.appSection")}</Text>
+        <Row icon="settings" title={t("nav.appSettings")} detail={t("account.appSettingsDetail")} onPress={() => router.push("/settings/app")} />
+        <Row icon="refresh" title={t("nav.update")} detail={t("account.updateDetail")} onPress={() => router.push("/update")} />
       </View>
 
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Workspace</Text>
-        {profile ? <AppPressable onPress={() => setCreating((value) => !value)} style={styles.addButton}>
-          <AppIcon name={creating ? "x" : "plus"} color={colors.accent} size={19} />
-          <Text style={styles.addText}>{creating ? "取消" : "新建"}</Text>
-        </AppPressable> : <Text style={styles.meta}>{workspaces.length}</Text>}
+        <Text style={styles.sectionTitle}>{t("account.workspaceSection")}</Text>
+        {profile ? (
+          <AppPressable onPress={() => setCreating((value) => !value)} style={styles.addButton}>
+            <AppIcon name={creating ? "x" : "plus"} color={colors.accent} size={19} />
+            <Text style={styles.addText}>{creating ? t("account.createCancel") : t("account.create")}</Text>
+          </AppPressable>
+        ) : <Text style={styles.meta}>{workspaces.length}</Text>}
       </View>
-      {creating ? <View style={styles.card}><Text style={styles.cardTitle}>新建 Workspace</Text><TextInput value={workspaceName} onChangeText={setWorkspaceName} placeholder="Workspace 名称" placeholderTextColor={colors.muted} style={styles.input} /><AppPressable disabled={working === "create-workspace"} onPress={() => void createWorkspace()} style={styles.primary}>{working === "create-workspace" ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>创建并进入</Text>}</AppPressable></View> : null}
+
+      {creating ? (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>{t("account.createWorkspaceTitle")}</Text>
+          <TextInput
+            value={workspaceName}
+            onChangeText={setWorkspaceName}
+            placeholder={t("account.workspaceNamePlaceholder")}
+            placeholderTextColor={colors.muted}
+            style={styles.input}
+          />
+          <AppPressable disabled={working === "create-workspace"} onPress={() => void createWorkspace()} style={styles.primary}>
+            {working === "create-workspace"
+              ? <ActivityIndicator color={colors.white} />
+              : <Text style={styles.primaryText}>{t("account.createAndOpen")}</Text>}
+          </AppPressable>
+        </View>
+      ) : null}
+
       {loading ? <ActivityIndicator color={colors.accent} /> : null}
       {workspaces.map((workspace) => (
         <AppPressable key={workspace.workspaceId} disabled={Boolean(working)} onPress={() => void openWorkspace(workspace)} style={styles.workspaceCard}>
           <View style={styles.workspaceIcon}><AppIcon name="workspace" color={colors.accent} size={23} /></View>
           <View style={styles.flex}>
             <Text style={styles.workspaceName}>{workspace.displayName}</Text>
-            <Text style={styles.meta}>{workspace.kind} · {workspace.role}{workspace.workspaceId === currentWorkspaceId ? " · 当前" : ""}</Text>
+            <Text style={styles.meta}>
+              {workspace.kind} · {roleLabel(workspace.role, t)}
+              {workspace.workspaceId === currentWorkspaceId ? t("account.current") : ""}
+            </Text>
           </View>
-          {working === workspace.workspaceId ? <ActivityIndicator color={colors.accent} size="small" /> : <AppIcon name="chevron-right" color={colors.muted} size={20} />}
+          {working === workspace.workspaceId
+            ? <ActivityIndicator color={colors.accent} size="small" />
+            : <AppIcon name="chevron-right" color={colors.muted} size={20} />}
         </AppPressable>
       ))}
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>默认进入</Text>
-        <Text style={styles.hint}>只决定启动落点，不改变 Account → Workspace → Node 的层级。</Text>
+        <Text style={styles.cardTitle}>{t("account.landingTitle")}</Text>
+        <Text style={styles.hint}>{t("account.landingHint")}</Text>
         <View style={styles.choiceRow}>
           {([
-            ["last", "上次使用"],
-            ["workspace", "Workspace"],
-            ["account", "帐号首页"],
+            ["last", t("account.landingLast")],
+            ["workspace", t("account.landingWorkspace")],
+            ["account", t("account.landingAccount")],
           ] as const).map(([value, label]) => (
             <AppPressable key={value} onPress={() => void chooseLanding(value)} style={[styles.choice, landing === value && styles.choiceActive]}>
               <Text style={landing === value ? styles.choiceTextActive : styles.choiceText}>{label}</Text>
@@ -189,10 +216,16 @@ export default function AccountHomeScreen() {
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <AppPressable disabled={working === "logout"} onPress={confirmLogout} style={styles.logout}>
-        <Text style={styles.logoutText}>{working === "logout" ? "正在退出…" : "退出帐号"}</Text>
+        <Text style={styles.logoutText}>{working === "logout" ? t("account.loggingOut") : t("account.logout")}</Text>
       </AppPressable>
     </ScrollView>
   );
+}
+
+function roleLabel(role: HostedWorkspace["role"], t: ReturnType<typeof useI18n>["t"]) {
+  if (role === "admin") return t("account.roleAdmin");
+  if (role === "member") return t("account.roleMember");
+  return t("account.roleOwner");
 }
 
 function Row({ icon, title, detail, onPress }: { icon: "refresh" | "settings"; title: string; detail: string; onPress(): void }) {

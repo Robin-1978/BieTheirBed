@@ -43,9 +43,9 @@ export default function AppSettingsScreen() {
         </View>
         <AppPressable onPress={() => router.push("/update")} style={styles.updateButton}>
           <AppIcon name="refresh" color="white" size={20} />
-          <Text style={styles.updateText}>检查 App 更新</Text>
+          <Text style={styles.updateText}>{i18n.t("settings.checkAppUpdate")}</Text>
         </AppPressable>
-        <Text style={styles.updateHint}>下载支持断点续传与 SHA-256 校验；Android 安装前仍会要求你确认。</Text>
+        <Text style={styles.updateHint}>{i18n.t("settings.checkAppUpdateHint")}</Text>
       </View>
     </ScrollView>
   );
