@@ -161,6 +161,8 @@ $configRoot = Join-Path $baseRoot "Config"
 $secretRoot = Join-Path $baseRoot "Secrets"
 $scriptRoot = Join-Path $baseRoot "Scripts"
 $serviceRoot = Join-Path $baseRoot "Services"
+$desktopRoot = Join-Path $baseRoot "Desktop"
+$desktopToken = Join-Path $desktopRoot "companion.token"
 $venvRoot = Join-Path $InstallRoot "venv"
 $python = Join-Path $venvRoot "Scripts\python.exe"
 $tokenFile = Join-Path $secretRoot "hosted-hub-bootstrap.token"
@@ -173,6 +175,14 @@ $nodeWrapper = Join-Path $serviceRoot "KnoaNode\KnoaNode.exe"
 # processes before performing an in-place runtime update.
 if ($installHub) { Stop-KnoaService "KnoaHostedHub" }
 if ($installNode) { Stop-KnoaService "KnoaNode" }
+if ($installNode) {
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | `
+        Where-Object {
+            $_.CommandLine -like "*Run-KnoaDesktopCompanion.ps1*" -or
+            $_.CommandLine -like "*knoa_platform.desktop_companion*"
+        } | `
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
 
 $legacyTaskNames = @()
 if ($installHub) { $legacyTaskNames += "Knoa Hosted Hub" }
@@ -203,7 +213,7 @@ if ($installNode) {
     }
     Protect-KnoaPath $NodeRoot -Recursive
 }
-New-Item -ItemType Directory -Force -Path $configRoot, $secretRoot, $scriptRoot, $serviceRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $configRoot, $secretRoot, $scriptRoot, $serviceRoot, $desktopRoot | Out-Null
 
 if ($RecreateVenv -and (Test-Path -LiteralPath $venvRoot)) {
     Remove-Item -LiteralPath $venvRoot -Recurse -Force
@@ -255,6 +265,7 @@ if ($installHub) {
 }
 if ($installNode) {
     Copy-Item -Force (Join-Path $PSScriptRoot "Run-KnoaNode.ps1") $scriptRoot
+    Copy-Item -Force (Join-Path $PSScriptRoot "Run-KnoaDesktopCompanion.ps1") $scriptRoot
     Copy-Item -Force (Join-Path $PSScriptRoot "Enroll-KnoaNode.ps1") $scriptRoot
     Copy-Item -Force (Join-Path $PSScriptRoot "Show-KnoaPairingQr.cmd") $scriptRoot
 }
@@ -291,6 +302,13 @@ if ($installHub) {
 }
 
 if ($installNode) {
+    if (-not (Test-Path -LiteralPath $desktopToken)) {
+        Set-Content -LiteralPath $desktopToken -Value (New-RandomToken) -NoNewline -Encoding ASCII
+    }
+    & icacls.exe $desktopRoot /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not configure the Desktop Companion ACL" }
+    & icacls.exe $desktopToken /inheritance:r /grant:r "*S-1-5-18:F" "*S-1-5-32-544:F" "*S-1-5-32-545:R" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not protect the Desktop Companion token" }
     $nodeRootYaml = Quote-Yaml $NodeRoot
     $workingDirectory = Join-Path $baseRoot "Workspace"
     Protect-KnoaPath $workingDirectory
@@ -347,7 +365,7 @@ if ($installHub) {
 
 if ($installNode) {
     $nodeRunner = Join-Path $scriptRoot "Run-KnoaNode.ps1"
-    $nodeArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$nodeRunner`" -PythonExecutable `"$python`" -NodeRoot `"$NodeRoot`" -ConfigPath `"$nodeConfig`""
+    $nodeArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$nodeRunner`" -PythonExecutable `"$python`" -NodeRoot `"$NodeRoot`" -ConfigPath `"$nodeConfig`" -DesktopCompanionTokenFile `"$desktopToken`""
     $nodeXmlArguments = Escape-Xml $nodeArguments
     $nodeLogPath = Escape-Xml (Join-Path $baseRoot "Logs\Node")
     $nodeXml = @"
@@ -370,8 +388,15 @@ if ($installNode) {
 </service>
 "@
     Install-WinSWService "KnoaNode" $nodeXml $resolvedWinSW $serviceRoot
+    $companionRunner = Join-Path $scriptRoot "Run-KnoaDesktopCompanion.ps1"
+    $companionArguments = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$companionRunner`" -PythonExecutable `"$python`" -TokenFile `"$desktopToken`""
+    $companionCommand = "powershell.exe $companionArguments"
+    & reg.exe add "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "KnoaDesktopCompanion" /t REG_SZ /d $companionCommand /f | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not register the Desktop Companion login launcher" }
+    Start-Process -FilePath $powerShell -ArgumentList $companionArguments -WindowStyle Hidden | Out-Null
     Write-Host "Knoa Node Gateway: http://127.0.0.1:$NodeGatewayPort"
     Write-Host "Knoa Node service: KnoaNode (WinSW)"
+    Write-Host "Knoa Desktop Companion: current Windows session"
     $enrollmentFile = Join-Path $NodeRoot "data\node-hub.json"
     if ((Test-Path -LiteralPath $enrollmentFile) -and -not $SkipPairingQr) {
         Write-Host "Scan this QR in the Knoa App to bind the Windows Node:"

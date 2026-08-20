@@ -40,6 +40,19 @@ def test_windows_node_is_always_a_winsw_service() -> None:
     assert "\n    -and " not in script
 
 
+def test_windows_source_install_manages_desktop_companion() -> None:
+    installer = _read("deploy/windows/Install-Knoa.ps1")
+    node_runner = _read("deploy/windows/Run-KnoaNode.ps1")
+    companion_runner = _read("deploy/windows/Run-KnoaDesktopCompanion.ps1")
+    uninstaller = _read("deploy/windows/Uninstall-Knoa.ps1")
+
+    assert "KnoaDesktopCompanion" in installer
+    assert "Run-KnoaDesktopCompanion.ps1" in installer
+    assert "KNOA_DESKTOP_COMPANION_TOKEN_FILE" in node_runner
+    assert "knoa_platform.desktop_companion" in companion_runner
+    assert "KnoaDesktopCompanion" in uninstaller
+
+
 def test_windows_installer_stops_services_before_updating_runtime() -> None:
     script = _read("deploy/windows/Install-Knoa.ps1")
 
