@@ -127,20 +127,24 @@ export class ConnectionResolverTransport implements GatewayTransport {
       || !new Headers(init.headers).get("authorization")) return;
     const pending = (async () => {
       const p2p = new WebRtcGatewayTransport();
-      await p2p.connect(async (offer) => {
-        const response = await this.relayRequest(baseUrl, "/v1/p2p/offer", {
-          method: "POST",
-          headers: init.headers,
-          body: JSON.stringify(offer),
+      try {
+        await p2p.connect(async (offer) => {
+          const response = await this.relayRequest(baseUrl, "/v1/p2p/offer", {
+            method: "POST",
+            headers: init.headers,
+            body: JSON.stringify(offer),
+          });
+          if (!response.ok) throw new Error("Node P2P signaling rejected");
+          const payload = await response.json() as { answer?: { type?: string; sdp?: string } };
+          if (!payload.answer?.sdp || payload.answer.type !== "answer") throw new Error("Node P2P answer invalid");
+          return { type: "answer" as const, sdp: payload.answer.sdp };
         });
-        if (!response.ok) throw new Error("Node P2P signaling rejected");
-        const payload = await response.json() as { answer?: { type?: string; sdp?: string } };
-        if (!payload.answer?.sdp || payload.answer.type !== "answer") throw new Error("Node P2P answer invalid");
-        return { type: "answer" as const, sdp: payload.answer.sdp };
-      });
+      } catch (error) {
+        p2p.close();
+        throw error;
+      }
       this.p2p?.close();
       this.p2p = p2p;
-      this.setActive("p2p");
       this.relayPreferredUntil = 0;
       this.p2pRetryAfter = 0;
     })().catch(() => {

@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { transportDetail, transportLabel } from "@/api/transportPresentation";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
@@ -28,8 +29,9 @@ export default function NodeMenuScreen() {
           <Text style={styles.meta}>{workspaceName}</Text>
           <View style={styles.statusRow}>
             <Text style={gateway.status === "ready" ? styles.online : styles.offline}>{gateway.status === "ready" ? "已连接" : "未连接"}</Text>
-            <Text style={styles.meta}>{transportLabel(gateway.transportMode)}</Text>
+            {gateway.status === "ready" ? <Text style={styles.transport}>{transportLabel(gateway.transportMode)}</Text> : null}
           </View>
+          {gateway.status === "ready" ? <Text style={styles.transportDetail}>{transportDetail(gateway.transportMode)}</Text> : null}
         </View>
 
         <View style={styles.card}>
@@ -64,12 +66,6 @@ export default function NodeMenuScreen() {
   );
 }
 
-function transportLabel(mode: "direct" | "p2p" | "relay" | undefined): string {
-  if (mode === "p2p") return "P2P 直连";
-  if (mode === "relay") return "Relay 兜底";
-  return "Direct";
-}
-
 function MenuRow({ icon, title, detail, onPress }: { icon: AppIconName; title: string; detail: string; onPress(): void }) {
   return (
     <AppPressable onPress={onPress} style={styles.row}>
@@ -90,6 +86,8 @@ const styles = StyleSheet.create({
   nodeIcon: { width: 58, height: 58, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
   title: { color: colors.ink, fontSize: 22, fontWeight: "800" },
   meta: { color: colors.muted, fontSize: 12, marginTop: 2 },
+  transport: { color: colors.ink, fontSize: 12, fontWeight: "800" },
+  transportDetail: { color: colors.muted, fontSize: 11, lineHeight: 16, textAlign: "center" },
   statusRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   online: { color: colors.accent, fontWeight: "800" },
   offline: { color: colors.muted, fontWeight: "700" },

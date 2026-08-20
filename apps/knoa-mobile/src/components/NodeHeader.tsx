@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from "react-native";
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { transportCompactLabel } from "@/api/transportPresentation";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
@@ -14,7 +15,9 @@ export function NodeHeaderTitle() {
     <View style={styles.titleWrap}>
       <Text style={styles.node} numberOfLines={1}>{node?.displayName || "Node"}</Text>
       <Text style={styles.workspace} numberOfLines={1}>
-        {stringParam(params.workspaceName) || "Workspace"} · {gateway.status === "ready" ? "在线" : "连接中"}
+        {stringParam(params.workspaceName) || "Workspace"} · {gateway.status === "ready"
+          ? `在线 · ${transportCompactLabel(gateway.transportMode)}`
+          : "连接中"}
       </Text>
     </View>
   );
