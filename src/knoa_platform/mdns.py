@@ -130,6 +130,11 @@ class MdnsPublisher:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
+            # Never perform a blocking multicast send on the application's
+            # asyncio event loop.  On a congested or unavailable LAN route,
+            # the kernel can block sendto() while waiting for buffer space,
+            # which would stall every Node HTTP/MCP endpoint.
+            sock.setblocking(False)
             self._socket = sock
             self._task = asyncio.create_task(self._announce(packet), name="knoa-mdns")
             try:
@@ -160,13 +165,13 @@ class MdnsPublisher:
         assert self._socket is not None
         try:
             while True:
-                self._socket.sendto(packet, (MDNS_GROUP, MDNS_PORT))
+                self._send_nowait(packet, (MDNS_GROUP, MDNS_PORT))
                 await asyncio.sleep(60)
         except asyncio.CancelledError:
             goodbye = packet.replace(struct.pack("!I", 120), struct.pack("!I", 0))
             try:
                 for _ in range(2):
-                    self._socket.sendto(goodbye, (MDNS_GROUP, MDNS_PORT))
+                    self._send_nowait(goodbye, (MDNS_GROUP, MDNS_PORT))
                     await asyncio.sleep(0.05)
             except OSError:
                 pass
@@ -182,13 +187,21 @@ class MdnsPublisher:
             while True:
                 query, sender = await loop.sock_recvfrom(self._listener, 4096)
                 if b"_knoa-node" in query or b"_services" in query:
-                    self._socket.sendto(packet, (MDNS_GROUP, MDNS_PORT))
+                    self._send_nowait(packet, (MDNS_GROUP, MDNS_PORT))
                     if sender[0] != MDNS_GROUP:
-                        self._socket.sendto(packet, sender)
+                        self._send_nowait(packet, sender)
         except asyncio.CancelledError:
             raise
         except OSError as exc:
             logger.debug("mDNS query responder stopped: %s", exc)
+
+    def _send_nowait(self, packet: bytes, address: tuple[str, int]) -> None:
+        """Best-effort non-blocking send used by all mDNS paths."""
+        assert self._socket is not None
+        try:
+            self._socket.sendto(packet, address)
+        except BlockingIOError:
+            logger.debug("mDNS packet dropped because the socket buffer is full")
 
     async def stop(self) -> None:
         task, self._task = self._task, None
