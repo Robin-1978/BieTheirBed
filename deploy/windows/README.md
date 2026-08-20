@@ -219,9 +219,14 @@ curl.exe http://127.0.0.1:9531/health
 Restart-Service KnoaHostedHub,KnoaNode
 ```
 
-Both services must remain running after logout and reboot. Node desktop capture,
-clipboard, input, window and notification capabilities are intentionally absent
-from the Session 0 Runtime until the separate desktop Companion exists.
+Both services must remain running after logout and reboot. `KnoaNode` stays in
+Session 0, while the installer starts `Knoa Desktop Companion` in the signed-in
+user Session and registers it for future logins. Screenshot, clipboard, input,
+window and notification requests use its authenticated Session-bound named
+pipe; they never execute directly in the WinSW service. Node Console shows
+whether the Companion is connected. The one-click source updater stops the
+Companion before replacing Python packages and starts the new version after the
+service update.
 
 ## Cloudflare
 

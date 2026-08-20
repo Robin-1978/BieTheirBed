@@ -20,6 +20,13 @@ if ($removeHub) {
 if ($removeNode) {
     $tasks += "Knoa Node"
     $services += "KnoaNode"
+    & reg.exe delete "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "KnoaDesktopCompanion" /f 2>$null | Out-Null
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | `
+        Where-Object {
+            $_.CommandLine -like "*Run-KnoaDesktopCompanion.ps1*" -or
+            $_.CommandLine -like "*knoa_platform.desktop_companion*"
+        } | `
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
 foreach ($task in $tasks) {
     Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
