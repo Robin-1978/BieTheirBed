@@ -27,6 +27,8 @@ if ($removeNode) {
             $_.CommandLine -like "*knoa_platform.desktop_companion*"
         } | `
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Get-NetFirewallRule -Name "KnoaNodeWebRtcP2P" -ErrorAction SilentlyContinue | `
+        Remove-NetFirewallRule -ErrorAction SilentlyContinue
 }
 foreach ($task in $tasks) {
     Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue

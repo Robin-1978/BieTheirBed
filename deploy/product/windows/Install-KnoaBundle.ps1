@@ -62,6 +62,22 @@ function Wait-Health([string]$Uri) {
     throw "Knoa service health check failed: $Uri"
 }
 
+function Install-KnoaP2PFirewallRule([string]$ProgramPath) {
+    $ruleName = "KnoaNodeWebRtcP2P"
+    Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue | `
+        Remove-NetFirewallRule -ErrorAction SilentlyContinue
+    New-NetFirewallRule `
+        -Name $ruleName `
+        -DisplayName "Knoa Node WebRTC P2P" `
+        -Description "Allow authenticated WebRTC ICE/UDP traffic for Knoa Node" `
+        -Direction Inbound `
+        -Action Allow `
+        -Enabled True `
+        -Profile Any `
+        -Protocol UDP `
+        -Program $ProgramPath | Out-Null
+}
+
 function Install-WinSWService {
     param(
         [string]$ServiceId,
@@ -139,6 +155,9 @@ try {
     if ($LASTEXITCODE -ne 0 -or -not $current) { throw "Could not resolve the active Knoa Release" }
     $winsw = Join-Path $current "service\WinSW.exe"
     if (-not (Test-Path -LiteralPath $winsw)) { throw "The Windows Bundle does not contain service/WinSW.exe" }
+    if ($Role -in @("node", "all")) {
+        Install-KnoaP2PFirewallRule (Join-Path $current "runtime\python.exe")
+    }
 
     Stop-RoleServices @("KnoaHostLifecycle", "KnoaHostedHub", "KnoaNode")
     Copy-Item -LiteralPath $incomingUpdater -Destination $installedUpdater -Force

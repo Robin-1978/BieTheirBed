@@ -40,6 +40,7 @@ class ConsoleRoutes:
                 "node": self._node_identity.descriptor(),
                 "runtime_version": __version__,
                 "hub": self._node_relay.status,
+                "p2p": self._p2p.status(),
                 "desktop": await asyncio.to_thread(desktop_companion_status),
             },
             headers={"Cache-Control": "no-store"},

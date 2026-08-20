@@ -3,6 +3,8 @@ param()
 
 $ErrorActionPreference = "Stop"
 & reg.exe delete "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "KnoaDesktopCompanion" /f 2>$null | Out-Null
+Get-NetFirewallRule -Name "KnoaNodeWebRtcP2P" -ErrorAction SilentlyContinue | `
+    Remove-NetFirewallRule -ErrorAction SilentlyContinue
 foreach ($name in @("KnoaHostedHub", "KnoaNode", "KnoaHostLifecycle")) {
     $service = Get-Service -Name $name -ErrorAction SilentlyContinue
     if ($service) {

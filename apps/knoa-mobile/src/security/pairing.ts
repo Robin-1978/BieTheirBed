@@ -1,5 +1,5 @@
 import { GatewayClient, parsePairingPayload } from "@/api/gatewayClient";
-import { ConnectionResolverTransport, pairingRelayTransport } from "@/api/gatewayTransport";
+import { ConnectionResolverTransport, pairingRelayTransport, type P2PDiagnostic } from "@/api/gatewayTransport";
 import type { PairingPayload } from "@/api/models";
 import { loadHubConnection } from "@/hub/hubClient";
 import {
@@ -79,11 +79,12 @@ export async function authenticateDevice(
     binding?: NodeDeviceBinding;
   },
   onTransportMode?: (mode: "direct" | "p2p" | "relay") => void,
+  onP2PDiagnostic?: (diagnostic: P2PDiagnostic) => void,
 ): Promise<GatewayClient> {
   const client = new GatewayClient(
     payload.gateway_url,
     null,
-    payload.binding ? new ConnectionResolverTransport(payload.binding, onTransportMode) : undefined,
+    payload.binding ? new ConnectionResolverTransport(payload.binding, onTransportMode, onP2PDiagnostic) : undefined,
   );
   const privateKey = await loadOrCreatePrivateKey();
   const challenge = await client.authChallenge(payload.deviceId);

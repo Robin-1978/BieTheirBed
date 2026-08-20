@@ -55,6 +55,18 @@ def test_windows_source_install_manages_desktop_companion() -> None:
     assert "KnoaDesktopCompanion" in uninstaller
 
 
+def test_windows_node_installs_program_scoped_webrtc_firewall_rule() -> None:
+    installer = _read("deploy/windows/Install-Knoa.ps1")
+    uninstaller = _read("deploy/windows/Uninstall-Knoa.ps1")
+
+    assert 'Install-KnoaP2PFirewallRule $python' in installer
+    assert 'New-NetFirewallRule' in installer
+    assert '-Name $ruleName' in installer
+    assert '-Protocol UDP' in installer
+    assert '-Program $ProgramPath' in installer
+    assert 'KnoaNodeWebRtcP2P' in uninstaller
+
+
 def test_windows_installer_stops_services_before_updating_runtime() -> None:
     script = _read("deploy/windows/Install-Knoa.ps1")
 

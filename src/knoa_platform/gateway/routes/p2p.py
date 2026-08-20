@@ -24,7 +24,13 @@ class P2PRoutes:
         try:
             answer = await self._p2p.create_answer(sdp=parsed.sdp, kind="app")
         except Exception:
-            return JSONResponse({"error": "p2p_unavailable"}, status_code=503)
+            return JSONResponse(
+                {
+                    "error": "p2p_unavailable",
+                    "detail": self._p2p.status().get("last_error", ""),
+                },
+                status_code=503,
+            )
         return JSONResponse({"answer": answer})
 
     async def _resource_p2p_offer(self, request: Request) -> JSONResponse:
@@ -41,7 +47,13 @@ class P2PRoutes:
         except (LookupError, PermissionError, ValueError):
             return JSONResponse({"error": "rejected"}, status_code=403)
         except Exception:
-            return JSONResponse({"error": "p2p_unavailable"}, status_code=503)
+            return JSONResponse(
+                {
+                    "error": "p2p_unavailable",
+                    "detail": self._p2p.status().get("last_error", ""),
+                },
+                status_code=503,
+            )
         return JSONResponse({"answer": answer})
 
 

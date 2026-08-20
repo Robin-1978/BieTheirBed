@@ -84,6 +84,12 @@ async def test_p2p_data_channel_carries_bounded_http_without_relay(monkeypatch) 
         assert response.status == 200
         assert response.headers["content-type"].startswith("application/json")
         assert response.body == b'{"method":"POST","body":"hello-p2p"}'
+        status = server.status()
+        assert status["available"] is True
+        assert status["offers_total"] == 1
+        assert status["answers_total"] == 1
+        assert status["connected_peers"] == 1
+        assert status["last_error"] == ""
     finally:
         await client.close()
         await server.close()
