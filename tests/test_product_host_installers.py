@@ -29,6 +29,7 @@ def test_source_installers_expose_the_same_lifecycle_channel() -> None:
     windows_lifecycle = _read("deploy/windows/Run-KnoaHostLifecycle.ps1")
 
     assert "--channel-source" in linux
+    assert "--skip-pairing-qr" in linux
     assert "installed_commit" in linux
     assert "EFFECTIVE_ROLE" in linux
     assert "--mode source" in linux_lifecycle

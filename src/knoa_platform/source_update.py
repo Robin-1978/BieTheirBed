@@ -264,6 +264,7 @@ class SourceUpdateManager:
                 str(self.source_root),
                 "--hub-public-url",
                 str(installation.get("hub_public_url") or "https://knoa.tinydotdot.com"),
+                "--skip-pairing-qr",
             ]
             python_executable = str(installation.get("python_executable") or "").strip()
             if python_executable:
