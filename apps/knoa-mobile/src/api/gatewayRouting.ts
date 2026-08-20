@@ -7,6 +7,12 @@ export function bindingUsesHubEndpoint(
     || bindingUrl === normalizedEndpoint(hub.url);
 }
 
+export function p2pOfferHeaders(input?: HeadersInit): Headers {
+  const headers = new Headers(input);
+  headers.set("Content-Type", "application/json");
+  return headers;
+}
+
 function normalizedEndpoint(value: string): string {
   const url = new URL(value);
   const path = url.pathname.replace(/\/+$/, "");

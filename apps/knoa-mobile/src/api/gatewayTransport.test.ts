@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { bindingUsesHubEndpoint } from "./gatewayRouting";
+import { bindingUsesHubEndpoint, p2pOfferHeaders } from "./gatewayRouting";
 
 describe("Gateway transport routing", () => {
   it("routes a legacy Node binding through Relay when its endpoint became the Hosted Hub", () => {
@@ -21,5 +21,12 @@ describe("Gateway transport routing", () => {
         url: "https://hub.example.com/workspaces/ws_personal",
       },
     )).toBe(false);
+  });
+
+  it("sends P2P offers as JSON while preserving authentication", () => {
+    const headers = p2pOfferHeaders({ Authorization: "Bearer session" });
+
+    expect(headers.get("Authorization")).toBe("Bearer session");
+    expect(headers.get("Content-Type")).toBe("application/json");
   });
 });

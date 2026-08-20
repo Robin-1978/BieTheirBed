@@ -25,7 +25,7 @@ import {
   packetAad,
   packetNonce,
 } from "./relayCrypto";
-import { bindingUsesHubEndpoint } from "./gatewayRouting";
+import { bindingUsesHubEndpoint, p2pOfferHeaders } from "./gatewayRouting";
 import { relayResponseBody } from "./relayResponse";
 import type { PairingPayload } from "./models";
 
@@ -148,7 +148,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
         await p2p.connect(async (offer) => {
           const response = await this.relayRequest(baseUrl, "/v1/p2p/offer", {
             method: "POST",
-            headers: init.headers,
+            headers: p2pOfferHeaders(init.headers),
             body: JSON.stringify(offer),
           });
           const payload = await response.json() as {
