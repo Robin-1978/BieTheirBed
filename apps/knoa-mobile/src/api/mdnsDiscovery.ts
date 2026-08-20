@@ -36,7 +36,7 @@ export function parseMdnsService(
 
 export async function discoverNodeOnLan(
   binding: Pick<NodeDeviceBinding, "nodeId" | "nodeSigningPublicKey">,
-  timeoutMs = 1800,
+  timeoutMs = 800,
 ): Promise<string | null> {
   if (Platform.OS === "web") return null;
   const zeroconf = new Zeroconf();
@@ -54,7 +54,7 @@ export async function discoverNodeOnLan(
       if (!endpoint || endpoint.signingPublicKey !== binding.nodeSigningPublicKey) return;
       void (async () => {
         const controller = new AbortController();
-        const abortTimer = setTimeout(() => controller.abort(), 1200);
+        const abortTimer = setTimeout(() => controller.abort(), 500);
         try {
           const response = await fetch(`${endpoint.url}/health`, {
             signal: controller.signal,

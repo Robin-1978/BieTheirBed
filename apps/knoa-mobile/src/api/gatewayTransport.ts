@@ -41,6 +41,8 @@ export type P2PDiagnostic = {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const REQUEST_CHUNK_BYTES = 192 * 1024;
+const LAN_DISCOVERY_RETRY_DELAY_MS = 10_000;
+const LAN_DISCOVERY_CONNECT_TIMEOUT_MS = 900;
 const ICE_SERVERS = [
   { urls: "stun:stun.cloudflare.com:3478" },
   { urls: "stun:stun.l.google.com:19302" },
@@ -56,8 +58,9 @@ export class ConnectionResolverTransport implements GatewayTransport {
   private active: "direct" | "p2p" | "relay" = "direct";
   private relayPreferredUntil = 0;
   private hubEndpointBinding: Promise<boolean> | null = null;
-  private lanDiscovery: Promise<string | null> | null = null;
+  private lanDiscovery: Promise<void> | null = null;
   private lanGatewayUrl = "";
+  private lanDiscoveryRetryAfter = 0;
 
   constructor(
     private readonly binding: NodeDeviceBinding,
@@ -70,6 +73,23 @@ export class ConnectionResolverTransport implements GatewayTransport {
   }
 
   async request(baseUrl: string, path: string, init: RequestInit): Promise<Response> {
+    // LAN discovery is opportunistic.  It must never sit in front of Relay
+    // or P2P connection establishment.  Once a verified LAN endpoint appears,
+    // the next request will prefer it.
+    if (!this.binding.directGatewayUrl) this.startLanDiscovery();
+    if (!this.binding.directGatewayUrl && this.lanGatewayUrl) {
+      try {
+        const response = await withConnectTimeout(
+          (signal) => this.direct.request(this.lanGatewayUrl, path, { ...init, signal }),
+          LAN_DISCOVERY_CONNECT_TIMEOUT_MS,
+        );
+        this.setActive("direct");
+        return response;
+      } catch {
+        this.lanGatewayUrl = "";
+        this.lanDiscoveryRetryAfter = Date.now() + LAN_DISCOVERY_RETRY_DELAY_MS;
+      }
+    }
     if (this.p2p?.ready()) {
       try {
         const response = await this.p2p.request(baseUrl, path, init);
@@ -81,21 +101,6 @@ export class ConnectionResolverTransport implements GatewayTransport {
         this.p2p = null;
         this.p2pRetryAfter = Date.now() + 60_000;
         this.setP2PDiagnostic("cooldown", errorText(error), this.p2pRetryAfter);
-      }
-    }
-    if (!this.binding.directGatewayUrl) {
-      const lan = await this.discoverLanGateway();
-      if (lan) {
-        try {
-          const response = await withConnectTimeout(
-            (signal) => this.direct.request(lan, path, { ...init, signal }),
-            1800,
-          );
-          this.setActive("direct");
-          return response;
-        } catch {
-          this.lanGatewayUrl = "";
-        }
       }
     }
     if (!this.binding.directGatewayUrl && await this.bindingPointsAtCurrentHub()) {
@@ -149,17 +154,19 @@ export class ConnectionResolverTransport implements GatewayTransport {
     this.setP2PDiagnostic("idle");
     this.lanDiscovery = null;
     this.lanGatewayUrl = "";
+    this.lanDiscoveryRetryAfter = 0;
   }
 
-  private discoverLanGateway(): Promise<string | null> {
-    if (this.lanGatewayUrl) return Promise.resolve(this.lanGatewayUrl);
+  private startLanDiscovery(): void {
+    if (this.lanGatewayUrl || this.lanDiscovery || Date.now() < this.lanDiscoveryRetryAfter) return;
     if (!this.lanDiscovery) {
       this.lanDiscovery = discoverNodeOnLan(this.binding).then((url) => {
         this.lanGatewayUrl = url || "";
-        return url;
-      }).catch(() => null).finally(() => { this.lanDiscovery = null; });
+        if (!url) this.lanDiscoveryRetryAfter = Date.now() + LAN_DISCOVERY_RETRY_DELAY_MS;
+      }).catch(() => {
+        this.lanDiscoveryRetryAfter = Date.now() + LAN_DISCOVERY_RETRY_DELAY_MS;
+      }).finally(() => { this.lanDiscovery = null; });
     }
-    return this.lanDiscovery;
   }
 
   private async relayRequest(baseUrl: string, path: string, init: RequestInit): Promise<Response> {
