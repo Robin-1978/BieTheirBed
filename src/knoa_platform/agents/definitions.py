@@ -173,7 +173,7 @@ class NodeAgent(AgentConfigModel):
     cwd: str = ""
     sandbox: Literal["read-only", "workspace-write"] = "read-only"
     approval_policy: Literal["untrusted", "on-request", "never"] = "never"
-    request_timeout_seconds: float = Field(default=120.0, gt=0.0, le=3600.0)
+    request_timeout_seconds: float = Field(default=600.0, gt=0.0, le=3600.0)
     max_line_bytes: int = Field(default=4 * 1024 * 1024, ge=4096)
     max_event_queue: int = Field(default=1024, ge=16, le=16_384)
 
@@ -366,6 +366,7 @@ class NodeAgentResolver:
             native &= _delegable_native_capabilities(parent.platform_capabilities)
             artifact_ids &= parent.artifact_ids
         resolved_limits = limits or InvocationLimits(
+            deadline_seconds=agent.request_timeout_seconds,
             max_children=agent.delegation.max_children,
             max_parallel_children=agent.delegation.max_parallel_children,
         )

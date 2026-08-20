@@ -133,6 +133,27 @@ def test_resolver_enforces_visibility_and_parent_subset() -> None:
         )
 
 
+def test_resolver_uses_agent_request_timeout_for_invocation_deadline() -> None:
+    config = _config()
+    agents = dict(config.agents)
+    agents["knoa"] = agents["knoa"].model_copy(update={"request_timeout_seconds": 900.0})
+    resolver = NodeAgentResolver(
+        config.model_copy(update={"agents": agents}),
+        config_revision_id="revision-timeout",
+    )
+
+    policy = resolver.resolve_policy(
+        "knoa",
+        invocation_kind="user",
+        caller_id="personal:owner",
+        principal_capabilities=frozenset({"host_read", "network", "shell"}),
+        available_tools=frozenset({"read_file", "web_search"}),
+        installed_skills=frozenset(),
+    )
+
+    assert policy.limits.deadline_seconds == 900.0
+
+
 def test_node_agent_digest_changes_with_prompt() -> None:
     config = _config()
     before = NodeAgentResolver(config).agent_digest("knoa")
