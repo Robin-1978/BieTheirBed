@@ -316,7 +316,7 @@ gateway_host: "0.0.0.0"
 gateway_port: 9529
 gateway_lan_enabled: true
 gateway_lan_host: "0.0.0.0"
-gateway_lan_port: 9532
+gateway_lan_port: 9541
 gateway_remote_enabled: true
 gateway_public_url: "https://knoa.example.com"
 gateway_tls_cert_file: "/absolute/path/gateway-cert.pem"
