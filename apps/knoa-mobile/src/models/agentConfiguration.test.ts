@@ -19,6 +19,7 @@ function config(): ManagedConfig {
     models: { primary: { provider: "local", model: "qwen" } },
     model_deployments: {},
     default_model: "primary",
+    vision_model: "",
     fallback_model: "",
     fallback_enabled: false,
     agents: { default_agent: "knoa", agents: { knoa } },

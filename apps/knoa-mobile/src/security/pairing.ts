@@ -78,11 +78,12 @@ export async function authenticateDevice(
     deviceId: string;
     binding?: NodeDeviceBinding;
   },
+  onTransportMode?: (mode: "direct" | "p2p" | "relay") => void,
 ): Promise<GatewayClient> {
   const client = new GatewayClient(
     payload.gateway_url,
     null,
-    payload.binding ? new ConnectionResolverTransport(payload.binding) : undefined,
+    payload.binding ? new ConnectionResolverTransport(payload.binding, onTransportMode) : undefined,
   );
   const privateKey = await loadOrCreatePrivateKey();
   const challenge = await client.authChallenge(payload.deviceId);

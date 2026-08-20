@@ -2021,6 +2021,11 @@ export interface components {
             /** Default Model */
             default_model: string;
             /**
+             * Vision Model
+             * @default
+             */
+            vision_model: string;
+            /**
              * Fallback Model
              * @default
              */

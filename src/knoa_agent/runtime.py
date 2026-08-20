@@ -88,6 +88,10 @@ class McpConnector(Protocol):
     ) -> AbstractAsyncContextManager[McpClient]: ...
 
 
+class ImageInputUnavailable(RuntimeError):
+    """The main model cannot see images and no governed vision tool is available."""
+
+
 class KnoaAgentRuntime(AgentRuntime):
     """Own model context and ReAct state; consume Platform abilities only by MCP."""
 
@@ -111,6 +115,7 @@ class KnoaAgentRuntime(AgentRuntime):
         tool_inventory: ToolInventory | None = None,
         agent_id: str = "knoa",
         display_name: str = "Knoa",
+        supports_vision: bool = False,
     ) -> None:
         if max_iterations <= 0 or max_tool_calls <= 0:
             raise ValueError("Knoa Agent limits must be positive")
@@ -132,6 +137,7 @@ class KnoaAgentRuntime(AgentRuntime):
         self._tool_inventory = tool_inventory or ToolInventory()
         self._agent_id = agent_id
         self._display_name = display_name
+        self._supports_vision = supports_vision
         self._active: dict[str, tuple[RuntimeSession, asyncio.Event]] = {}
         self._operations: dict[str, str] = {}
         self._guard = asyncio.Lock()
@@ -231,10 +237,35 @@ class KnoaAgentRuntime(AgentRuntime):
                 )
                 tools = projection.tools
                 durable_user = self._durable_user_message(request)
-                model_user = await self._model_user_message(request, client)
+                image_inspection_available = any(
+                    str(tool.get("name") or "") == "image_inspect" for tool in tools
+                )
+                try:
+                    model_user = await self._model_user_message(
+                        request,
+                        client,
+                        image_inspection_available=image_inspection_available,
+                    )
+                except ImageInputUnavailable:
+                    yield TurnFinished(
+                        **self._event_base(request, runtime_turn_ref),
+                        status="failed",
+                        error_code="vision_unavailable",
+                    )
+                    terminal_emitted = True
+                    return
                 model_messages = [*durable_history, model_user]
                 durable_messages = [*durable_history, durable_user]
                 tool_calls = 0
+                vision_required = any(
+                    isinstance(part, ArtifactPart)
+                    and (
+                        part.presentation == "image"
+                        or part.artifact.media_type.startswith("image/")
+                    )
+                    for part in request.input
+                ) and not self._supports_vision
+                vision_observations = 0
                 final_output = ""
                 usage: dict[str, int | float | str] = {}
                 for _iteration in range(1, self._max_iterations + 1):
@@ -366,6 +397,17 @@ class KnoaAgentRuntime(AgentRuntime):
                         },
                     )
                     if not calls:
+                        if vision_required and vision_observations == 0:
+                            model_messages.append({
+                                "role": "user",
+                                "content": (
+                                    "[System] The response was not delivered because the attached image "
+                                    "has not been observed. Call image_inspect now with the available "
+                                    "artifact_id and a visual question derived from the user's request."
+                                ),
+                            })
+                            durable_messages.append(model_messages[-1])
+                            continue
                         final_output = content
                         model_messages.append({"role": "assistant", "content": content})
                         durable_messages.append(
@@ -430,6 +472,13 @@ class KnoaAgentRuntime(AgentRuntime):
                         }
                         model_messages.append(result_message)
                         durable_messages.append(result_message)
+                        if (
+                            proposed.name == "image_inspect"
+                            and str(result.status) == "completed"
+                            and isinstance(result.output, dict)
+                            and result.output.get("observation_id")
+                        ):
+                            vision_observations += 1
                         if proposed.name == "tool_help":
                             activated = self._tool_inventory.activate(
                                 request.session.runtime_session_ref,
@@ -625,6 +674,8 @@ class KnoaAgentRuntime(AgentRuntime):
         self,
         request: RuntimeTurnRequest,
         client: McpClient,
+        *,
+        image_inspection_available: bool,
     ) -> dict[str, Any]:
         blocks: list[dict[str, Any]] = []
         for part in request.input:
@@ -636,6 +687,24 @@ class KnoaAgentRuntime(AgentRuntime):
             for content in contents:
                 media_type = str(content.get("media_type") or "application/octet-stream")
                 if "blob" in content and media_type.startswith("image/"):
+                    if not self._supports_vision:
+                        if not image_inspection_available:
+                            raise ImageInputUnavailable("Dedicated vision tool is unavailable")
+                        if not isinstance(part, ArtifactPart):
+                            raise ImageInputUnavailable(
+                                "Dedicated vision requires a governed Artifact reference"
+                            )
+                        artifact_id = part.artifact.artifact_id
+                        blocks.append({
+                            "type": "text",
+                            "text": (
+                                f"[Attached image artifact_id={artifact_id}; name="
+                                f"{getattr(part, 'name', '') or getattr(getattr(part, 'artifact', None), 'name', '') or artifact_id}. "
+                                "You cannot see its pixels. Call image_inspect before making any claim "
+                                "about visible content.]"
+                            ),
+                        })
+                        continue
                     encoded = str(content["blob"])
                     base64.b64decode(encoded, validate=True)
                     blocks.append(

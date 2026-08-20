@@ -146,6 +146,7 @@ from knoa_platform.tools.create_task import CreateTaskTool
 from knoa_platform.tools.describe_tool import DescribeTool
 from knoa_platform.tools.exchange import ExchangeTool
 from knoa_platform.tools.hotkey import HotkeyTool
+from knoa_platform.tools.image_inspect import ImageInspectTool
 from knoa_platform.tools.mcp_connect import (
     MCPConnectTool,
     MCPDisableTool,
@@ -168,6 +169,7 @@ from knoa_platform.tools.web_fetch import WebFetchTool
 from knoa_platform.tools.web_search import WebSearchTool
 from knoa_platform.tools.window import WindowTool
 from knoa_platform.tools.write_file import WriteFileTool
+from knoa_platform.vision import VisionBroker
 
 PERSONAL_LOCAL_CAPABILITIES = frozenset(ToolCapability)
 REMOTE_SCOPED_CAPABILITIES = frozenset({ToolCapability.NETWORK})
@@ -503,6 +505,7 @@ def _build_agent_runtime_set(
                 ),
                 agent_id=agent_id,
                 display_name=agent.display_name,
+                supports_vision=model_config.supports_vision is True,
                 tool_inventory=(
                     ToolInventory(semantic_selector=DisabledToolSelector())
                     if not agent.allowed_platform_tools
@@ -807,6 +810,18 @@ def build_core_runtime(
         ttl_seconds=config.attachment_ttl_seconds,
     )
     registry = _build_registry(config, artifacts, memory, episodic)
+    vision_broker = VisionBroker(
+        None,
+        artifacts,
+        max_output_tokens=min(1024, managed.operational.max_output_tokens),
+    )
+    if managed.vision_model:
+        vision_config = _resolve_managed_model(managed, managed.vision_model, config)
+        vision_broker.configure(
+            provider_factory(vision_config),
+            model_alias=vision_config.alias,
+        )
+    registry.register(ImageInspectTool(vision_broker))
     skills = SkillCatalog()
     skill_providers = _managed_skill_providers(managed, skills, packages)
     mcp_providers = _managed_mcp_providers(
@@ -1124,6 +1139,19 @@ def build_core_runtime(
                     "runtime_preflight_failed",
                     "One or more Agent Runtime generations are unhealthy",
                 )
+            if candidate.vision_model:
+                vision_health = await provider_factory(
+                    _resolve_managed_model(
+                        candidate,
+                        candidate.vision_model,
+                        config,
+                    )
+                ).health_check()
+                if not vision_health.healthy:
+                    raise ConfigApplyError(
+                        "vision_runtime_preflight_failed",
+                        vision_health.detail or "Dedicated vision model is unavailable",
+                    )
             preflight_extensions = ExtensionManager(
                 ToolRegistry(),
                 (
@@ -1254,6 +1282,18 @@ def build_core_runtime(
         resolver_holder["current"] = next_resolver
         managed_holder["current"] = candidate
         model_holder["current"] = new_model
+        if candidate.vision_model:
+            vision_config = _resolve_managed_model(
+                candidate,
+                candidate.vision_model,
+                config,
+            )
+            vision_broker.configure(
+                provider_factory(vision_config),
+                model_alias=vision_config.alias,
+            )
+        else:
+            vision_broker.configure(None)
         next_reviewer = KnoaReviewerAgent(
             agent_execution,
             sessions,

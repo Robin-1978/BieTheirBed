@@ -220,6 +220,7 @@ class ManagedConfig(ConfigurationModel):
         default_factory=dict
     )
     default_model: SafeId
+    vision_model: str = ""
     fallback_model: str = ""
     fallback_enabled: bool = True
     agents: NodeAgentCatalog
@@ -236,6 +237,11 @@ class ManagedConfig(ConfigurationModel):
     def validate_references(self) -> ManagedConfig:
         if self.default_model not in self.models:
             raise ValueError("default_model must reference a configured model")
+        if self.vision_model:
+            if self.vision_model not in self.models:
+                raise ValueError("vision_model must reference a configured model")
+            if self.models[self.vision_model].supports_vision is not True:
+                raise ValueError("vision_model must explicitly support image input")
         if self.fallback_model:
             if self.fallback_model not in self.models:
                 raise ValueError("fallback_model must reference a configured model")

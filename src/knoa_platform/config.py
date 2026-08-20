@@ -239,6 +239,7 @@ class AppConfig(BaseModel):
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
     models: dict[str, ModelConfig] = Field(default_factory=dict)
     default_model: str = ""
+    vision_model: str = ""
     fallback_enabled: bool = True
     fallback_model: str = ""
 
@@ -404,6 +405,11 @@ class AppConfig(BaseModel):
                 raise ValueError("default_model is required when models are configured")
             if self.default_model not in self.models:
                 raise ValueError(f"Unknown default_model '{self.default_model}'")
+            if self.vision_model:
+                if self.vision_model not in self.models:
+                    raise ValueError(f"Unknown vision_model '{self.vision_model}'")
+                if self.models[self.vision_model].supports_vision is not True:
+                    raise ValueError("vision_model must explicitly support image input")
             if self.fallback_model and self.fallback_model not in self.models:
                 raise ValueError(f"Unknown fallback_model '{self.fallback_model}'")
             if self.fallback_model == self.default_model:
@@ -506,6 +512,7 @@ class AppConfig(BaseModel):
             providers=providers,
             models=models,
             default_model=default_model,
+            vision_model=self.vision_model if self.models else "",
             fallback_model=self.fallback_model if self.models else "",
             fallback_enabled=self.fallback_enabled,
             agents=self.node_agent_catalog(),
@@ -720,6 +727,7 @@ def _env_overrides() -> dict[str, Any]:
             int,
         ),
         "KNOA_SUPPORTS_VISION": ("supports_vision", bool),
+        "KNOA_VISION_MODEL": ("vision_model", str),
     }
     overrides: dict[str, Any] = {}
     for env_key, (field_name, field_type) in mapping.items():

@@ -28,6 +28,7 @@ function config(): ManagedConfig {
     models: { current: { provider: "current", model: "qwen" } },
     model_deployments: {},
     default_model: "current",
+    vision_model: "",
     fallback_model: "",
     fallback_enabled: false,
     agents: {

@@ -48,9 +48,9 @@ class TestContentBlocks:
 
         block = messages[0]["content"][0]
         assert block["media_type"] == "image/jpeg"
-        assert block["width"] == 1536
-        assert block["height"] == 1152
-        assert len(base64.b64decode(block["image_url"].split(",", 1)[1])) < 3 * 1024 * 1024
+        assert block["width"] == 1024
+        assert block["height"] == 768
+        assert len(base64.b64decode(block["image_url"].split(",", 1)[1])) < 2 * 1024 * 1024
 
     def test_provider_image_hard_pixel_limit_fails_before_model_call(self):
         source = io.BytesIO()

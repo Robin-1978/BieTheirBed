@@ -28,7 +28,7 @@ export default function NodeMenuScreen() {
           <Text style={styles.meta}>{workspaceName}</Text>
           <View style={styles.statusRow}>
             <Text style={gateway.status === "ready" ? styles.online : styles.offline}>{gateway.status === "ready" ? "已连接" : "未连接"}</Text>
-            <Text style={styles.meta}>{transportLabel(gateway.client?.transportMode())}</Text>
+            <Text style={styles.meta}>{transportLabel(gateway.transportMode)}</Text>
           </View>
         </View>
 
@@ -37,6 +37,12 @@ export default function NodeMenuScreen() {
           <MenuRow icon="tasks" title="任务" detail="任务与执行记录" onPress={() => router.replace({ pathname: "/tasks", params: { workspaceId, workspaceName, nodeId } })} />
           <MenuRow icon="agent" title="Node 资源" detail="Agent、模型、MCP、Skill 与 Tool" onPress={() => router.push("/capabilities")} />
           <MenuRow icon="settings" title="Node 设置与诊断" detail="连接、Runtime 状态与高级配置" onPress={() => router.push("/settings/node")} />
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>App</Text>
+          <MenuRow icon="settings" title="App 设置" detail="外观、语言和当前版本" onPress={() => router.push("/settings/app")} />
+          <MenuRow icon="refresh" title="版本与更新" detail="检查、下载并安装最新版本" onPress={() => router.push("/update")} />
         </View>
 
         <View style={styles.card}>

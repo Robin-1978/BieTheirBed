@@ -21,10 +21,10 @@ class ImageNormalizationError(ValueError):
     """Raised before a provider can receive an unsafe image payload."""
 
 
-MAX_PROVIDER_IMAGE_EDGE = 1536
+MAX_PROVIDER_IMAGE_EDGE = 1024
 MAX_PROVIDER_IMAGE_SOURCE_BYTES = 32 * 1024 * 1024
 MAX_PROVIDER_IMAGE_SOURCE_PIXELS = 64_000_000
-MAX_PROVIDER_IMAGE_BYTES = 3 * 1024 * 1024
+MAX_PROVIDER_IMAGE_BYTES = 2 * 1024 * 1024
 
 def text_block(text: str) -> dict[str, Any]:
     return {"type": "text", "text": text}

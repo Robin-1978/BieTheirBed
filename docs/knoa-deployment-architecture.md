@@ -257,7 +257,8 @@ Node A               Node B               Node C
 - Hub 对外只暴露 TLS 保护的 HTTPS/WSS；
 - N 个 Node 主动发起出站连接，不需要 N 个公网域名；
 - 当前 transport policy 是 `p2p_preferred`：复用已建立 P2P；存在显式 LAN/public Direct URL 时先做有界
-  Direct；否则通过 Relay 完成认证和 WebRTC offer/answer 信令，再以 ICE + Cloudflare STUN 建立 NAT P2P；
+  Direct；否则通过 Relay 完成认证和 WebRTC offer/answer 信令，再以 ICE 建立 NAT P2P。Cloudflare STUN
+  用于跨网候选发现，但其超时不得阻断已经可用的同局域网 host candidate；
 - P2P 建连失败、断开或处于重试冷却时使用端到端加密 Relay fallback；
 - 用户不需要为每个 Node 配置域名；显式公网 direct endpoint 只是 P2P candidate 之一，不是部署前置；
 - App 先访问 Hub 选择 Node、获取短期 ticket，并在已认证 Relay 内交换 SDP；P2P 建成后请求继续通过原

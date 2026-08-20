@@ -56,8 +56,9 @@ NodeAgent 在一个编辑页面完成，不拆成 Runtime/Profile/Definition 三
 仍有独立页面，因为它们可被多个 NodeAgent/Task 引用且生命周期不同。
 
 Node Console 的 Model Center 必须提供完整 CRUD：新增/删除 Provider、在一个 Provider 下新增多个 Model、
-修改 endpoint、保存不回显的 API Key、设置默认模型和视觉能力。共享模型同页选择允许调用的 Workspace
-Node；发布时由 Node 身份向 Hub 同步 ModelResource、Deployment 与 ResourceGrant，Provider endpoint 和
+修改 endpoint、保存不回显的 API Key、设置默认模型和专用图片理解模型。`共享` Tab 使用自己的 Model
+选择器，不读取或改变 `LLM 配置` Tab 的当前选择；用户在共享页选择 Model、允许调用的 Workspace Node 和
+远程并发上限。发布时由 Node 身份向 Hub 同步 ModelResource、Deployment 与 ResourceGrant，Provider endpoint 和
 Secret 永不上传。删除或关闭本地 Deployment 时，Node 必须同步禁用 Hub 目录项并撤销旧 Grant。
 若 ModelResource 由 Workspace 管理员预先定义，Node 只能在资源定义完全一致且 Deployment 已明确指向
 本 Node 时上报物化状态和授权；不得改写 Workspace 所有的资源定义、generation 或 digest。
@@ -65,7 +66,7 @@ Secret 永不上传。删除或关闭本地 Deployment 时，Node 必须同步�
 Node Console 使用顶部任务导航，不把所有配置堆在一个长页面：`概览` 负责状态、运行版本、Enrollment 与
 App 配对；`LLM 配置` 明确采用 Provider → Model → Agent 的顺序，Provider、Endpoint、Secret 状态和新增
 Provider 都是一级可见能力，不能藏入“高级设置”；`Agent` 展示模型绑定与 Prompt，Tools/Subagent 策略
-默认折叠；`共享` 独立展示本 Node 发布和其他 Node 授权的模型；`系统` 承担服务生命周期、更新与完整
+默认折叠；`共享` 独立选择并展示本 Node 发布和其他 Node 授权的模型；`系统` 承担服务生命周期、更新与完整
 JSON。
 
 常规表单按钮必须执行一次完整的 validate → preflight → publish → applied，并明确显示“已热生效”或具体
