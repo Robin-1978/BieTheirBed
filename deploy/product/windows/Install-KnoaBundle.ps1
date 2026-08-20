@@ -179,7 +179,7 @@ try {
     Copy-Item -LiteralPath $trust -Destination $lifecycleTrust -Force
     $nodeConfig = Join-Path $configRoot "node.yaml"
     if (-not (Test-Path -LiteralPath $nodeConfig)) {
-        $config = "runtime_root: `"$nodeRoot`"`nworking_directory: `"$workspaceRoot`"`nservice_host: `"127.0.0.1`"`nservice_port: 9527`ngateway_enabled: true`ngateway_host: `"127.0.0.1`"`ngateway_port: 9531`ngateway_lan_enabled: true`ngateway_lan_host: `"0.0.0.0`"`ngateway_lan_port: 9532`ngateway_remote_enabled: false`ncapability_mcp_host: `"127.0.0.1`"`ncapability_mcp_port: 9530`n"
+        $config = "runtime_root: `"$nodeRoot`"`nworking_directory: `"$workspaceRoot`"`nservice_host: `"127.0.0.1`"`nservice_port: 9527`ngateway_enabled: true`ngateway_host: `"127.0.0.1`"`ngateway_port: 9531`ngateway_lan_enabled: true`ngateway_lan_host: `"0.0.0.0`"`ngateway_lan_port: 9541`ngateway_remote_enabled: false`ncapability_mcp_host: `"127.0.0.1`"`ncapability_mcp_port: 9530`n"
         Write-Utf8NoBom $nodeConfig $config
     }
     $roles = if ($Role -eq "all") { @("hub", "node") } else { @($Role) }

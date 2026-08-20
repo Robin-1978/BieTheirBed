@@ -280,7 +280,7 @@ class AppConfig(BaseModel):
     # when LAN discovery is enabled.
     gateway_lan_enabled: bool = False
     gateway_lan_host: str = "0.0.0.0"
-    gateway_lan_port: int = 9532
+    gateway_lan_port: int = 9541
     gateway_session_ttl_seconds: int = Field(default=900, ge=60, le=3600)
     gateway_artifact_max_bytes: int = Field(
         default=32 * 1024 * 1024,
