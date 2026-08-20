@@ -103,19 +103,22 @@ export default function WorkspaceNodesScreen() {
             <Text style={styles.title}>{t("nodes.title")}</Text>
             <Text style={styles.meta}>{t("nodes.headerDetail")}</Text>
           </View>
+          <AppPressable
+            accessibilityLabel={t("nodes.addNode")}
+            disabled={Boolean(working)}
+            onPress={() => void generateEnrollmentCode()}
+            style={styles.iconButton}
+          >
+            {working === "enrollment"
+              ? <ActivityIndicator color={colors.accent} size="small" />
+              : <AppIcon name="plus" color={colors.accent} size={21} />}
+          </AppPressable>
           <AppPressable accessibilityLabel={t("common.refresh")} onPress={() => void refresh()} style={styles.iconButton}>
             <AppIcon name="refresh" color={colors.muted} size={20} />
           </AppPressable>
         </View>
 
         {loading ? <ActivityIndicator color={colors.accent} /> : null}
-
-        <View style={styles.guide}>
-          <Text style={styles.guideTitle}>{t("nodes.onboardingTitle")}</Text>
-          <GuideStep number="1" title={t("nodes.step1Title")} detail={t("nodes.step1Detail")} />
-          <GuideStep number="2" title={t("nodes.step2Title")} detail={t("nodes.step2Detail")} />
-          <GuideStep number="3" title={t("nodes.step3Title")} detail={t("nodes.step3Detail")} />
-        </View>
 
         {unboundOnlineNodes.length > 0 ? (
           <View style={styles.callout}>
@@ -151,44 +154,32 @@ export default function WorkspaceNodesScreen() {
           );
         })}
 
-        <View style={styles.card}>
-          <Text style={styles.nodeName}>{nodes.length ? t("nodes.addNode") : t("nodes.noNodesYet")}</Text>
-          <Text style={styles.meta}>{t("nodes.enrollmentHint")}</Text>
-          <AppPressable disabled={Boolean(working)} style={styles.enter} onPress={() => void generateEnrollmentCode()}>
-            {working === "enrollment"
-              ? <ActivityIndicator color={colors.white} size="small" />
-              : <Text style={styles.enterText}>{t("nodes.generateCode")}</Text>}
-          </AppPressable>
-          {enrollmentCode ? (
-            <>
-              <Text selectable style={styles.code}>{enrollmentCode}</Text>
-              <Text style={styles.meta}>
-                {t("nodes.codeExpires", {
-                  time: new Date(enrollmentExpiresAt * 1000).toLocaleTimeString(locale === "en-US" ? "en-US" : "zh-CN"),
-                })}
-              </Text>
-              <AppPressable style={styles.secondary} onPress={() => void shareEnrollmentCode()}>
-                <Text style={styles.secondaryText}>{t("nodes.shareCode")}</Text>
-              </AppPressable>
-              <Text style={styles.meta}>{t("nodes.afterEnrollmentHint")}</Text>
-            </>
-          ) : null}
-        </View>
+        {enrollmentCode ? (
+          <View style={styles.card}>
+            <Text style={styles.nodeName}>{t("nodes.addNode")}</Text>
+            <Text style={styles.meta}>{t("nodes.enrollmentHint")}</Text>
+            <Text selectable style={styles.code}>{enrollmentCode}</Text>
+            <Text style={styles.meta}>
+              {t("nodes.codeExpires", {
+                time: new Date(enrollmentExpiresAt * 1000).toLocaleTimeString(locale === "en-US" ? "en-US" : "zh-CN"),
+              })}
+            </Text>
+            <AppPressable style={styles.secondary} onPress={() => void shareEnrollmentCode()}>
+              <Text style={styles.secondaryText}>{t("nodes.shareCode")}</Text>
+            </AppPressable>
+            <Text style={styles.meta}>{t("nodes.afterEnrollmentHint")}</Text>
+          </View>
+        ) : null}
+
+        {!loading && nodes.length === 0 && !enrollmentCode ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.nodeName}>{t("nodes.noNodesYet")}</Text>
+            <Text style={styles.meta}>{t("nodes.emptyDetail")}</Text>
+          </View>
+        ) : null}
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </ScrollView>
-  );
-}
-
-function GuideStep({ number, title, detail }: { number: string; title: string; detail: string }) {
-  return (
-    <View style={styles.guideStep}>
-      <View style={styles.guideNumber}><Text style={styles.guideNumberText}>{number}</Text></View>
-      <View style={styles.flex}>
-        <Text style={styles.guideStepTitle}>{title}</Text>
-        <Text style={styles.meta}>{detail}</Text>
-      </View>
-    </View>
   );
 }
 
@@ -199,13 +190,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1, minWidth: 0 },
   title: { color: colors.ink, fontSize: 19, fontWeight: "800" },
   meta: { color: colors.muted, fontSize: 12, lineHeight: 18 },
-  iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center" },
-  guide: { padding: 16, gap: 12, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  guideTitle: { color: colors.ink, fontSize: 17, fontWeight: "800" },
-  guideStep: { flexDirection: "row", gap: 11, alignItems: "flex-start" },
-  guideNumber: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
-  guideNumberText: { color: colors.accent, fontWeight: "800", fontSize: 13 },
-  guideStepTitle: { color: colors.ink, fontWeight: "800", marginBottom: 2 },
+  iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center", borderRadius: 13 },
   callout: { padding: 14, gap: 6, borderRadius: 16, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accent },
   calloutTitle: { color: colors.ink, fontWeight: "800" },
   card: { padding: 15, gap: 12, borderRadius: 17, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
@@ -218,5 +203,6 @@ const styles = StyleSheet.create({
   secondary: { minHeight: 42, borderRadius: 12, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.accent },
   secondaryText: { color: colors.accent, fontWeight: "800" },
   code: { color: colors.ink, fontFamily: "monospace", fontSize: 11, lineHeight: 16, padding: 10, borderRadius: 10, backgroundColor: colors.background },
+  emptyState: { padding: 18, gap: 5, borderRadius: 17, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
   error: { color: colors.danger, lineHeight: 20 },
 });
