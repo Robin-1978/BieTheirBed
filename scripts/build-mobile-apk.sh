@@ -67,6 +67,17 @@ rsync -a --delete --no-owner --no-group --no-perms \
 
 cp "$KEY_PROPERTIES" "$ANDROID/key.properties"
 
+# AGP 8.12 probes every cmake on PATH, including the broken Snap wrapper at
+# /snap/bin/cmake on some build hosts. Give it an explicit SDK-style CMake
+# installation rooted at the real system binary instead.
+CMAKE_BIN="${KNOA_MOBILE_CMAKE_BIN:-/usr/bin/cmake}"
+if [[ -x "$CMAKE_BIN" ]]; then
+  CMAKE_ROOT="${KNOA_MOBILE_CMAKE_ROOT:-$KNOA_MOBILE_BUILD_DIR/cmake-system}"
+  mkdir -p "$CMAKE_ROOT/bin"
+  ln -sfn "$CMAKE_BIN" "$CMAKE_ROOT/bin/cmake"
+  printf 'sdk.dir=%s\ncmake.dir=%s\n' "$ANDROID_HOME" "$CMAKE_ROOT" > "$ANDROID/local.properties"
+fi
+
 cleanup() {
   rm -f "$ANDROID/key.properties"
 }
@@ -90,8 +101,18 @@ if [[ "${KNOA_MOBILE_CLEAN_BUILD:-false}" == "true" ]]; then
 fi
 GRADLE_RELEASE_ARGS+=(assembleRelease)
 
-bash ./gradlew \
-  "${GRADLE_RELEASE_ARGS[@]}"
+GRADLE_BIN="${KNOA_MOBILE_GRADLE_BIN:-}"
+if [[ -z "$GRADLE_BIN" ]]; then
+  # Gradle 9.3.1 can hang during startup on the current build image. Prefer
+  # an already-cached 9.1 binary when available; otherwise use the project's
+  # wrapper as usual.
+  GRADLE_BIN="$(find "$GRADLE_USER_HOME/wrapper/dists" -path '*/gradle-9.1.0/bin/gradle' -type f -print -quit 2>/dev/null || true)"
+fi
+if [[ -n "$GRADLE_BIN" && -x "$GRADLE_BIN" ]]; then
+  "$GRADLE_BIN" "${GRADLE_RELEASE_ARGS[@]}"
+else
+  bash ./gradlew "${GRADLE_RELEASE_ARGS[@]}"
+fi
 
 BUILT_APK="$ANDROID/app/build/outputs/apk/release/app-release.apk"
 APK="$KNOA_MOBILE_BUILD_DIR/app/outputs/apk/release/app-release.apk"
