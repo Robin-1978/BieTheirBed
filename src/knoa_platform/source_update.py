@@ -62,12 +62,21 @@ class SourceUpdateManager:
             detail = (exc.stderr or exc.stdout or "source update command failed").strip()
             raise SourceUpdateError(detail[:500]) from exc
 
-    def _git(self, *arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    def _git(
+        self,
+        *arguments: str,
+        check: bool = True,
+        timeout: float = 300,
+    ) -> subprocess.CompletedProcess[str]:
+        environment = dict(os.environ)
+        environment["GIT_TERMINAL_PROMPT"] = "0"
+        environment["GCM_INTERACTIVE"] = "never"
         return self._run(
             ["git", "-c", f"safe.directory={self.source_root}", *arguments],
             cwd=self.source_root,
             check=check,
-            timeout=300,
+            timeout=timeout,
+            environment=environment,
         )
 
     def _read_state(self) -> dict[str, Any]:
@@ -138,7 +147,7 @@ class SourceUpdateManager:
         self._assert_clean()
         upstream = self._upstream()
         remote = upstream.split("/", 1)[0]
-        self._git("fetch", "--prune", remote)
+        self._git("fetch", "--prune", remote, timeout=60)
         latest = self._head("@{upstream}")
         return upstream, latest
 
