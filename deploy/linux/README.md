@@ -34,6 +34,9 @@ The checkout must have an upstream, tracked files must be clean, and updates
 must be fast-forward. Installation uses a detached worktree rather than the
 mutable checkout. There is no manual version rollback UI; if installation or
 health verification fails, Knoa automatically reinstalls the pre-update commit.
+When the initial installer runs behind an HTTP proxy, it preserves only the
+proxy variables required by the background updater in the private
+`~/.config/knoa/source-update.env` file.
 
 Hub-only server:
 

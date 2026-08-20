@@ -82,7 +82,9 @@ Console to check and install updates. The Source Lifecycle Broker rejects dirty
 tracked files and divergent history, fast-forwards the checkout, installs from
 a detached worktree, restarts every installed role and verifies health. Failed
 updates automatically reinstall the pre-update commit; the UI does not expose
-manual version rollback.
+manual version rollback. If the bootstrap PowerShell session uses HTTP proxy
+environment variables, the installer passes them to the private WinSW updater
+service so background Git checks do not depend on an interactive shell.
 
 The following launcher remains only as an administrator/recovery entry when a
 Console cannot be used:
