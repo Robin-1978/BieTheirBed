@@ -1,6 +1,7 @@
 """Simple user-facing full-desktop screenshot artifact."""
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +72,38 @@ class ScreenshotTool(ToolBase):
         except Exception as exc:
             save_path.unlink(missing_ok=True)
             return {"error": f"Screen capture failed: {exc}"}
+
+    async def consume_desktop_companion_result(self, result: dict[str, Any]) -> Any:
+        encoded = result.get("content_base64")
+        if not isinstance(encoded, str) or result.get("media_type") != "image/jpeg":
+            return {"error": "Desktop Companion returned an invalid screenshot"}
+        save_path = self._paths.allocate(prefix="screenshot", suffix=".jpg")
+        try:
+            content = base64.b64decode(encoded, validate=True)
+            if not content or len(content) > 32 * 1024 * 1024:
+                raise ValueError("invalid screenshot size")
+            save_path.write_bytes(content)
+            artifact = self._store.register_generated(
+                current_memory_scope().session_id,
+                save_path,
+                media_type="image/jpeg",
+                retention="temporary",
+            )
+            artifact_id = str(artifact["artifact_id"])
+            return {
+                "success": True,
+                "artifact": artifact,
+                "delivery": "already_attached_to_user_reply",
+                "instruction": "Reply now; do not capture, read, or attach another image.",
+                "image_ref": self._store.reference(
+                    current_memory_scope().session_id,
+                    artifact_id,
+                    caption="Latest full-desktop screenshot",
+                ),
+            }
+        except (OSError, ValueError, TypeError):
+            save_path.unlink(missing_ok=True)
+            return {"error": "Desktop Companion returned an invalid screenshot"}
 
     def definition(self) -> dict[str, Any]:
         return {

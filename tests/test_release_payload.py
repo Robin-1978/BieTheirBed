@@ -45,6 +45,8 @@ def test_materialized_payload_is_a_universal_host_bundle(
 
     suffix = ".cmd" if target_os == "windows" else ""
     expected = {"knoa-health", "knoa-hub", "knoa-node", "knoa-host-lifecycle"}
+    if target_os == "windows":
+        expected.add("knoa-desktop-companion")
     assert set(result["launchers"]) == {f"{name}{suffix}" for name in expected}
     health = (output / "bin" / f"knoa-health{suffix}").read_text(encoding="utf-8")
     assert "knoa_platform.release.health" in health

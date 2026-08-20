@@ -2,7 +2,7 @@
 
 > 状态：目标进程、跨平台和实现语言演进权威文档
 >
-> 日期：2026-08-19
+> 日期：2026-08-20
 >
 > 范围：Windows/Linux 产品支持矩阵、Hub、Node Host、Agent Runtime、IPC、Console、P2P、部署、数据与更新
 >
@@ -57,14 +57,14 @@ Linux 主机 / role=all
 ├── Knoa Node Host
 │   ├── Python Agent Runtime Worker
 │   └── built-in Node Console
-└── Desktop Companion（存在桌面会话时，Phase 7）
+└── Desktop Companion（存在桌面会话时；Linux 待完成）
 
 Windows 主机 / role=node
 ├── Knoa Node Host
 │   ├── Python Agent Runtime Worker
 │   └── built-in Node Console
 ├── Qwen / llama.cpp
-└── Desktop Companion（Phase 7）
+└── Desktop Companion（已实现 Windows 登录自启与 Session Named Pipe）
 ```
 
 迁移完成后，Cloudflare canonical domain 只指向 Linux Hub。Linux Node 与 Windows Node 都主动加入同一个
@@ -105,7 +105,9 @@ Knoa Node Host
    └── MCP protocol adapters
 
 Desktop Companion
-└── signed-in user's desktop session
+├── signed-in user's desktop session
+├── screenshot / clipboard / window / mouse / keyboard / notification
+└── authenticated session-bound local IPC
 
 Knoa Host Lifecycle Broker
 ├── loopback-only authenticated API
@@ -118,6 +120,10 @@ Hub、Node Host 和 Desktop Companion 是独立生命周期单元；Agent Runtim
 使用 Hub 进程的独立 loopback listener `9532`，Node Console 使用 Node Gateway `9531`。Lifecycle Broker
 监听 `9533`，没有 Console 或领域数据，只承担必须提权的固定生命周期动作。
 Agent、Skill、Tool、Conversation 和 Task 仍是 Node 内领域对象，不为追求微服务化拆成服务器。
+
+Windows 的独立生命周期不表示独立安装包：Desktop Companion 包含在 Universal Host Bundle 中，仅在 Node role
+激活时注册登录启动项。WinSW Node Host 始终留在 Session 0；桌面 Tool 经 Capability Gateway 审批后，通过
+认证 Named Pipe 转发到当前活动 Windows Session。没有活动 Session 或 Companion 不可达时 fail closed。
 
 ## 4. 领域所有权不因 Rust 迁移改变
 

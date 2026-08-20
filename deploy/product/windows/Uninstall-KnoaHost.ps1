@@ -2,6 +2,7 @@
 param()
 
 $ErrorActionPreference = "Stop"
+& reg.exe delete "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "KnoaDesktopCompanion" /f 2>$null | Out-Null
 foreach ($name in @("KnoaHostedHub", "KnoaNode", "KnoaHostLifecycle")) {
     $service = Get-Service -Name $name -ErrorAction SilentlyContinue
     if ($service) {
@@ -17,4 +18,3 @@ foreach ($name in @("KnoaHostedHub", "KnoaNode", "KnoaHostLifecycle")) {
     }
 }
 Write-Host "Knoa services were removed. Data under $env:ProgramData\Knoa was retained."
-

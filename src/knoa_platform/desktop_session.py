@@ -66,6 +66,18 @@ def ensure_desktop_session(tool_name: str) -> None:
     """
     if not is_desktop_tool(tool_name):
         return
+    if os.name == "nt":
+        from knoa_platform.desktop_companion import (
+            DesktopCompanionError,
+            companion_available,
+            desktop_companion_required,
+        )
+
+        if desktop_companion_required() and not companion_available():
+            raise DesktopCompanionError(
+                "Knoa Desktop Companion is unavailable in the active Windows session"
+            )
+        return
     if not sys.platform.startswith("linux"):
         return
 
