@@ -43,6 +43,7 @@ from knoa_platform.gateway.routes import (
 from knoa_platform.gateway.streaming import GatewayStreaming
 from knoa_platform.host_lifecycle_client import HostLifecycleClient
 from knoa_platform.mobile_releases import AndroidReleaseRepository
+from knoa_platform.mdns import MdnsPublisher
 from knoa_platform.network_tls import is_loopback_host
 from knoa_platform.p2p import P2PServer
 from knoa_platform.node_hub import (
@@ -178,6 +179,9 @@ class SecureGatewayAdapter(
         )
         self._limiter = limiter or _WindowLimiter()
         self._event_heartbeat_seconds = max(0.01, event_heartbeat_seconds)
+        self._lan_server: _EmbeddedUvicornServer | None = None
+        self._lan_server_task: asyncio.Task[None] | None = None
+        self._mdns: MdnsPublisher | None = None
         self._console_csrf_token = token_secrets.token_urlsafe(32)
         self._host_lifecycle = HostLifecycleClient.from_environment()
         self._active_event_streams: dict[str, int] = defaultdict(int)
@@ -475,6 +479,13 @@ class SecureGatewayAdapter(
         sockets = self._server.servers[0].sockets
         return int(sockets[0].getsockname()[1]) if sockets else None
 
+    @property
+    def lan_bound_port(self) -> int | None:
+        if self._lan_server is None or not self._lan_server.servers:
+            return None
+        sockets = self._lan_server.servers[0].sockets
+        return int(sockets[0].getsockname()[1]) if sockets else None
+
     async def start(self) -> None:
         if self._server_task is not None:
             raise RuntimeError("SecureGatewayAdapter is already started")
@@ -506,6 +517,50 @@ class SecureGatewayAdapter(
                         self.bound_port,
                     )
                     await self._node_relay.start()
+                    if self._config.gateway_lan_enabled:
+                        try:
+                            lan_server = _EmbeddedUvicornServer(
+                                uvicorn.Config(
+                                    self.app,
+                                    host=self._config.gateway_lan_host,
+                                    port=self._config.gateway_lan_port,
+                                    log_config=None,
+                                    access_log=False,
+                                    lifespan="off",
+                                )
+                            )
+                            lan_task = asyncio.create_task(
+                                lan_server.serve(), name="knoa-lan-gateway"
+                            )
+                            self._lan_server, self._lan_server_task = lan_server, lan_task
+                            for _ in range(500):
+                                if lan_server.started:
+                                    break
+                                if lan_task.done():
+                                    await lan_task
+                                    raise RuntimeError("LAN Gateway stopped during startup")
+                                await asyncio.sleep(0.01)
+                            if not lan_server.started:
+                                raise TimeoutError("LAN Gateway startup timed out")
+                            from knoa_platform import __version__
+
+                            self._mdns = MdnsPublisher(
+                                node_id=self._node_identity.node_id,
+                                port=self.lan_bound_port or self._config.gateway_lan_port,
+                                version=__version__,
+                                signing_public_key=self._node_identity.signing_public_key,
+                            )
+                            await self._mdns.start()
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning("LAN Gateway/mDNS unavailable: %s", exc)
+                            lan_server = self._lan_server
+                            lan_task = self._lan_server_task
+                            self._lan_server, self._lan_server_task = None, None
+                            if lan_server is not None:
+                                lan_server.should_exit = True
+                            if lan_task is not None:
+                                lan_task.cancel()
+                                await asyncio.gather(lan_task, return_exceptions=True)
                     return
                 if task.done():
                     await task
@@ -517,6 +572,9 @@ class SecureGatewayAdapter(
             raise
 
     async def stop(self) -> None:
+        if self._mdns is not None:
+            await self._mdns.stop()
+            self._mdns = None
         await self._node_relay.stop()
         await self._p2p.close()
         server, self._server = self._server, None
@@ -531,4 +589,16 @@ class SecureGatewayAdapter(
                     server.force_exit = True
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
+        lan_server, self._lan_server = self._lan_server, None
+        lan_task, self._lan_server_task = self._lan_server_task, None
+        if lan_server is not None:
+            lan_server.should_exit = True
+        if lan_task is not None:
+            try:
+                await asyncio.wait_for(lan_task, timeout=5.0)
+            except TimeoutError:
+                if lan_server is not None:
+                    lan_server.force_exit = True
+                lan_task.cancel()
+                await asyncio.gather(lan_task, return_exceptions=True)
         await self._core.close()

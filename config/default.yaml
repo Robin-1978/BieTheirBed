@@ -50,6 +50,9 @@ webhook_routes: {}
 gateway_enabled: false
 gateway_host: "127.0.0.1"
 gateway_port: 9529
+gateway_lan_enabled: false
+gateway_lan_host: "0.0.0.0"
+gateway_lan_port: 9532
 gateway_session_ttl_seconds: 900
 gateway_artifact_max_bytes: 33554432
 gateway_remote_enabled: false

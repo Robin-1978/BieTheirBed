@@ -3,20 +3,28 @@
     "name": "小诺",
     "slug": "knoa-mobile",
     "scheme": "knoa",
-    "version": "0.2.64",
+    "version": "0.2.65",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "../../assets/branding/xiaonuo-avatar-tech.png",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "dev.knoa.mobile"
+      "bundleIdentifier": "dev.knoa.mobile",
+      "infoPlist": {
+        "NSBonjourServices": ["_knoa-node._tcp."],
+        "NSLocalNetworkUsageDescription": "允许小诺发现同一局域网内已配对的 Node，以优先建立局域网直连。"
+      }
     },
     "android": {
       "package": "dev.knoa.mobile",
-      "versionCode": 75,
+      "versionCode": 76,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
-        "REQUEST_INSTALL_PACKAGES"
+        "REQUEST_INSTALL_PACKAGES",
+        "ACCESS_NETWORK_STATE",
+        "ACCESS_WIFI_STATE",
+        "CHANGE_WIFI_MULTICAST_STATE",
+        "INTERNET"
       ],
       "adaptiveIcon": {
         "foregroundImage": "../../assets/branding/xiaonuo-avatar-tech.png",

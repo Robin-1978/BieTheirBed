@@ -28,6 +28,7 @@ import {
 import { bindingUsesHubEndpoint, p2pOfferHeaders } from "./gatewayRouting";
 import { relayResponseBody } from "./relayResponse";
 import type { PairingPayload } from "./models";
+import { discoverNodeOnLan } from "./mdnsDiscovery";
 
 export { DirectFetchTransport, type GatewayTransport } from "./gatewayTransportBase";
 
@@ -55,6 +56,8 @@ export class ConnectionResolverTransport implements GatewayTransport {
   private active: "direct" | "p2p" | "relay" = "direct";
   private relayPreferredUntil = 0;
   private hubEndpointBinding: Promise<boolean> | null = null;
+  private lanDiscovery: Promise<string | null> | null = null;
+  private lanGatewayUrl = "";
 
   constructor(
     private readonly binding: NodeDeviceBinding,
@@ -80,6 +83,21 @@ export class ConnectionResolverTransport implements GatewayTransport {
         this.setP2PDiagnostic("cooldown", errorText(error), this.p2pRetryAfter);
       }
     }
+    if (!this.binding.directGatewayUrl) {
+      const lan = await this.discoverLanGateway();
+      if (lan) {
+        try {
+          const response = await withConnectTimeout(
+            (signal) => this.direct.request(lan, path, { ...init, signal }),
+            1800,
+          );
+          this.setActive("direct");
+          return response;
+        } catch {
+          this.lanGatewayUrl = "";
+        }
+      }
+    }
     if (!this.binding.directGatewayUrl && await this.bindingPointsAtCurrentHub()) {
       try {
         const response = await this.relayRequest(baseUrl, path, init);
@@ -101,7 +119,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
     try {
       const response = await withConnectTimeout(
         (signal) => this.direct.request(
-          this.binding.directGatewayUrl || baseUrl,
+          this.binding.directGatewayUrl || this.lanGatewayUrl || baseUrl,
           path,
           { ...init, signal },
         ),
@@ -129,6 +147,19 @@ export class ConnectionResolverTransport implements GatewayTransport {
     this.relay?.close();
     this.relay = null;
     this.setP2PDiagnostic("idle");
+    this.lanDiscovery = null;
+    this.lanGatewayUrl = "";
+  }
+
+  private discoverLanGateway(): Promise<string | null> {
+    if (this.lanGatewayUrl) return Promise.resolve(this.lanGatewayUrl);
+    if (!this.lanDiscovery) {
+      this.lanDiscovery = discoverNodeOnLan(this.binding).then((url) => {
+        this.lanGatewayUrl = url || "";
+        return url;
+      }).catch(() => null).finally(() => { this.lanDiscovery = null; });
+    }
+    return this.lanDiscovery;
   }
 
   private async relayRequest(baseUrl: string, path: string, init: RequestInit): Promise<Response> {
