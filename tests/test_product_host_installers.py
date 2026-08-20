@@ -33,10 +33,12 @@ def test_source_installers_expose_the_same_lifecycle_channel() -> None:
     assert "installed_commit" in linux
     assert "EFFECTIVE_ROLE" in linux
     assert "--mode source" in linux_lifecycle
+    assert "source-update.env" in linux_lifecycle
     assert "KNOA_LIFECYCLE_TOKEN_FILE" in _read("deploy/linux/knoa-node.service")
     assert "ChannelSourcePath" in windows
     assert "installed_commit" in windows
     assert "KnoaHostLifecycle" in windows
+    assert "HTTPS_PROXY" in windows
     assert "--mode source" in windows_lifecycle
 
 

@@ -474,6 +474,14 @@ if ($sourceInstall) {
     $lifecycleArguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$lifecycleRunner`" -PythonExecutable `"$python`" -SourceRoot `"$ChannelSourcePath`" -SourceStateFile `"$sourceUpdateState`" -SourceSnapshotsRoot `"$sourceSnapshotsRoot`" -InstallationStateFile `"$installationStatePath`" -TokenFile `"$lifecycleToken`""
     $lifecycleXmlArguments = Escape-Xml $lifecycleArguments
     $lifecycleLogPath = Escape-Xml (Join-Path $baseRoot "Logs\Lifecycle")
+    $lifecycleProxyEntries = @()
+    foreach ($proxyName in @("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY")) {
+        $proxyValue = [Environment]::GetEnvironmentVariable($proxyName)
+        if ($proxyValue) {
+            $lifecycleProxyEntries += "  <env name=`"$(Escape-Xml $proxyName)`" value=`"$(Escape-Xml $proxyValue)`" />"
+        }
+    }
+    $lifecycleProxyXml = $lifecycleProxyEntries -join "`r`n"
     $lifecycleXml = @"
 <service>
   <id>KnoaHostLifecycle</id>
@@ -482,6 +490,7 @@ if ($sourceInstall) {
   <executable>$powerShellXml</executable>
   <arguments>$lifecycleXmlArguments</arguments>
   <workingdirectory>$(Escape-Xml $baseRoot)</workingdirectory>
+$lifecycleProxyXml
   <startmode>Automatic</startmode>
   <delayedAutoStart>true</delayedAutoStart>
   <onfailure action="restart" delay="10 sec" />
