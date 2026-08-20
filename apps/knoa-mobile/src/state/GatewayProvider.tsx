@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { GatewayClient, GatewayError } from "@/api/gatewayClient";
-import { ConnectionResolverTransport } from "@/api/gatewayTransport";
+import { ConnectionResolverTransport, type P2PDiagnostic } from "@/api/gatewayTransport";
 import type { AgentSummary, AndroidRelease, PrincipalTaskEvent } from "@/api/models";
 import { isPresentationTaskEvent, subscribeTaskEvents, type TaskEventSubscription } from "@/api/taskEvents";
 import { authenticateDevice, pairDevice } from "@/security/pairing";
@@ -36,6 +36,9 @@ type GatewayState = {
   nodes: NodeDeviceBinding[];
   lastConnectedAt: number;
   transportMode: "direct" | "p2p" | "relay";
+  p2pState: P2PDiagnostic["state"];
+  p2pLastError: string;
+  p2pRetryAt: number;
   requiredUpdate: AndroidRelease | null;
   availableUpdate: AndroidRelease | null;
   agents: AgentSummary[];
@@ -75,6 +78,9 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     nodes: [],
     lastConnectedAt: 0,
     transportMode: "direct",
+    p2pState: "idle",
+    p2pLastError: "",
+    p2pRetryAt: 0,
     requiredUpdate: null,
     availableUpdate: null,
     agents: [],
@@ -102,7 +108,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
   const connect = useCallback(async () => {
     const generation = ++connectionGenerationRef.current;
     provisionalConversationRef.current = null;
-    commit({ status: "booting", error: "" });
+    commit({ status: "booting", error: "", p2pState: "idle", p2pLastError: "", p2pRetryAt: 0 });
     try {
       const [identity, nodes] = await Promise.all([
         loadConnectionIdentity(),
@@ -118,6 +124,13 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       const transportChanged = (transportMode: "direct" | "p2p" | "relay") => {
         if (generation === connectionGenerationRef.current) commit({ transportMode });
       };
+      const p2pDiagnosticChanged = (diagnostic: P2PDiagnostic) => {
+        if (generation === connectionGenerationRef.current) commit({
+          p2pState: diagnostic.state,
+          p2pLastError: diagnostic.lastError,
+          p2pRetryAt: diagnostic.retryAt,
+        });
+      };
       let token = identity.sessionToken
         && identity.sessionExpiresAt > Date.now() / 1000 + 30
         ? identity.sessionToken
@@ -127,7 +140,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         client = new GatewayClient(
           device.gatewayUrl,
           token,
-          new ConnectionResolverTransport(identity, transportChanged),
+          new ConnectionResolverTransport(identity, transportChanged, p2pDiagnosticChanged),
         );
         try {
           await client.gatewaySession();
@@ -139,7 +152,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
             gateway_url: device.gatewayUrl,
             deviceId: device.deviceId,
             binding: identity,
-          }, transportChanged);
+          }, transportChanged, p2pDiagnosticChanged);
           token = await loadSessionToken();
         }
       } else {
@@ -147,7 +160,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
           gateway_url: device.gatewayUrl,
           deviceId: device.deviceId,
           binding: identity,
-        }, transportChanged);
+        }, transportChanged, p2pDiagnosticChanged);
         token = await loadSessionToken();
       }
       if (!token) throw new Error("未能建立安全会话");
@@ -219,11 +232,18 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       const transportChanged = (transportMode: "direct" | "p2p" | "relay") => {
         if (generation === connectionGenerationRef.current) commit({ transportMode });
       };
+      const p2pDiagnosticChanged = (diagnostic: P2PDiagnostic) => {
+        if (generation === connectionGenerationRef.current) commit({
+          p2pState: diagnostic.state,
+          p2pLastError: diagnostic.lastError,
+          p2pRetryAt: diagnostic.retryAt,
+        });
+      };
       const client = await authenticateDevice({
         gateway_url: identity.gatewayUrl,
         deviceId: identity.deviceId,
         binding: identity,
-      }, transportChanged);
+      }, transportChanged, p2pDiagnosticChanged);
       const token = await loadSessionToken();
       if (!token) throw new Error("未能恢复安全会话");
       if (generation !== connectionGenerationRef.current) throw new Error("Node 连接已切换");
@@ -404,6 +424,9 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       agents: [],
       activeAgentId: "",
       selectedAgentId: "knoa",
+      p2pState: "idle",
+      p2pLastError: "",
+      p2pRetryAt: 0,
     });
   }, [commit]);
 

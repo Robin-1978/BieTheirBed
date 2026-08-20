@@ -97,6 +97,22 @@ function Stop-KnoaService([string]$ServiceId) {
     }
 }
 
+function Install-KnoaP2PFirewallRule([string]$ProgramPath) {
+    $ruleName = "KnoaNodeWebRtcP2P"
+    Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue | `
+        Remove-NetFirewallRule -ErrorAction SilentlyContinue
+    New-NetFirewallRule `
+        -Name $ruleName `
+        -DisplayName "Knoa Node WebRTC P2P" `
+        -Description "Allow authenticated WebRTC ICE/UDP traffic for Knoa Node" `
+        -Direction Inbound `
+        -Action Allow `
+        -Enabled True `
+        -Profile Any `
+        -Protocol UDP `
+        -Program $ProgramPath | Out-Null
+}
+
 function Install-WinSWService(
     [string]$ServiceId,
     [string]$Xml,
@@ -267,6 +283,7 @@ if ($WheelhousePath) {
     & $python -m pip install --force-reinstall $resolvedPackage
 }
 if ($LASTEXITCODE -ne 0) { throw "Knoa wheel installation failed" }
+if ($installNode) { Install-KnoaP2PFirewallRule $python }
 
 Copy-Item -Force (Join-Path $PSScriptRoot "Uninstall-Knoa.ps1") $scriptRoot
 Copy-Item -Force (Join-Path $PSScriptRoot "Update-Knoa.ps1") $scriptRoot

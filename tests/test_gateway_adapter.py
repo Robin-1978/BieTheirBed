@@ -207,6 +207,8 @@ async def test_node_console_is_loopback_only_and_csrf_protected(tmp_path) -> Non
     assert rejected.status_code == 403
     assert accepted.status_code == 200
     assert accepted.json()["hub"]["enrolled"] is False
+    assert accepted.json()["p2p"]["available"] is True
+    assert accepted.json()["p2p"]["offers_total"] == 0
     assert accepted.json()["runtime_version"]
     assert invalid.status_code == 400
     assert invalid.json() == {"error": "invalid_enrollment_code"}

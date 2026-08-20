@@ -74,6 +74,16 @@ def test_windows_node_installs_interactive_desktop_companion() -> None:
     assert 'bin/knoa-desktop-companion.cmd' in companion_runner
 
 
+def test_windows_product_node_installs_webrtc_firewall_rule() -> None:
+    installer = _read("deploy/product/windows/Install-KnoaBundle.ps1")
+    uninstaller = _read("deploy/product/windows/Uninstall-KnoaHost.ps1")
+
+    assert 'Install-KnoaP2PFirewallRule (Join-Path $current "runtime\\python.exe")' in installer
+    assert 'New-NetFirewallRule' in installer
+    assert '-Protocol UDP' in installer
+    assert 'KnoaNodeWebRtcP2P' in uninstaller
+
+
 def test_windows_hub_console_public_url_is_explicit() -> None:
     runner = _read("deploy/product/windows/Run-KnoaHub.ps1")
 

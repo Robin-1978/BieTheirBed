@@ -31,6 +31,12 @@ import type { PairingPayload } from "./models";
 
 export { DirectFetchTransport, type GatewayTransport } from "./gatewayTransportBase";
 
+export type P2PDiagnostic = {
+  state: "idle" | "connecting" | "ready" | "active" | "cooldown";
+  lastError: string;
+  retryAt: number;
+};
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const REQUEST_CHUNK_BYTES = 192 * 1024;
@@ -48,6 +54,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
   constructor(
     private readonly binding: NodeDeviceBinding,
     private readonly onModeChange?: (mode: "direct" | "p2p" | "relay") => void,
+    private readonly onP2PDiagnostic?: (diagnostic: P2PDiagnostic) => void,
   ) {}
 
   mode(): "direct" | "p2p" | "relay" {
@@ -59,10 +66,13 @@ export class ConnectionResolverTransport implements GatewayTransport {
       try {
         const response = await this.p2p.request(baseUrl, path, init);
         this.setActive("p2p");
+        this.setP2PDiagnostic("active");
         return response;
-      } catch {
+      } catch (error) {
         this.p2p.close();
         this.p2p = null;
+        this.p2pRetryAfter = Date.now() + 60_000;
+        this.setP2PDiagnostic("cooldown", errorText(error), this.p2pRetryAfter);
       }
     }
     if (!this.binding.directGatewayUrl && await this.bindingPointsAtCurrentHub()) {
@@ -113,6 +123,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
     this.p2p = null;
     this.relay?.close();
     this.relay = null;
+    this.setP2PDiagnostic("idle");
   }
 
   private async relayRequest(baseUrl: string, path: string, init: RequestInit): Promise<Response> {
@@ -125,6 +136,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
   private startP2PUpgrade(baseUrl: string, init: RequestInit): void {
     if (this.p2p?.ready() || this.upgradePromise || Date.now() < this.p2pRetryAfter
       || !new Headers(init.headers).get("authorization")) return;
+    this.setP2PDiagnostic("connecting");
     const pending = (async () => {
       const p2p = new WebRtcGatewayTransport();
       try {
@@ -134,8 +146,12 @@ export class ConnectionResolverTransport implements GatewayTransport {
             headers: init.headers,
             body: JSON.stringify(offer),
           });
-          if (!response.ok) throw new Error("Node P2P signaling rejected");
-          const payload = await response.json() as { answer?: { type?: string; sdp?: string } };
+          const payload = await response.json() as {
+            answer?: { type?: string; sdp?: string };
+            error?: string;
+            detail?: string;
+          };
+          if (!response.ok) throw new Error(payload.detail || payload.error || "Node P2P signaling rejected");
           if (!payload.answer?.sdp || payload.answer.type !== "answer") throw new Error("Node P2P answer invalid");
           return { type: "answer" as const, sdp: payload.answer.sdp };
         });
@@ -147,8 +163,10 @@ export class ConnectionResolverTransport implements GatewayTransport {
       this.p2p = p2p;
       this.relayPreferredUntil = 0;
       this.p2pRetryAfter = 0;
-    })().catch(() => {
+      this.setP2PDiagnostic("ready");
+    })().catch((error) => {
       this.p2pRetryAfter = Date.now() + 60_000;
+      this.setP2PDiagnostic("cooldown", errorText(error), this.p2pRetryAfter);
     }).finally(() => {
       if (this.upgradePromise === pending) this.upgradePromise = null;
     });
@@ -168,6 +186,14 @@ export class ConnectionResolverTransport implements GatewayTransport {
     if (this.active === mode) return;
     this.active = mode;
     this.onModeChange?.(mode);
+  }
+
+  private setP2PDiagnostic(
+    state: P2PDiagnostic["state"],
+    lastError = "",
+    retryAt = 0,
+  ): void {
+    this.onP2PDiagnostic?.({ state, lastError, retryAt });
   }
 }
 

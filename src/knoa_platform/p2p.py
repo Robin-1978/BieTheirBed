@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
+import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Literal
 
@@ -100,6 +101,29 @@ class P2PServer:
     def __init__(self, app: Any) -> None:
         self._app = app
         self._peers: set[RTCPeerConnection] = set()
+        self._offers_total = 0
+        self._answers_total = 0
+        self._last_error = ""
+        self._last_failure_at = 0.0
+
+    def status(self) -> dict[str, Any]:
+        states: dict[str, int] = {}
+        for peer in self._peers:
+            state = str(peer.connectionState)
+            states[state] = states.get(state, 0) + 1
+        dependency_error = ""
+        if _AIORTC_IMPORT_ERROR is not None:
+            dependency_error = _safe_error(_AIORTC_IMPORT_ERROR)
+        return {
+            "available": p2p_available(),
+            "offers_total": self._offers_total,
+            "answers_total": self._answers_total,
+            "active_peers": len(self._peers),
+            "connected_peers": states.get("connected", 0),
+            "peer_states": states,
+            "last_error": self._last_error or dependency_error,
+            "last_failure_at": self._last_failure_at,
+        }
 
     async def create_answer(
         self,
@@ -107,31 +131,33 @@ class P2PServer:
         sdp: str,
         kind: Literal["app", "resource"],
     ) -> dict[str, str]:
-        _require_p2p()
-        peer = RTCPeerConnection(RTCConfiguration(iceServers=_STUN_SERVERS))
-        self._peers.add(peer)
-
-        @peer.on("connectionstatechange")
-        async def connection_state_change() -> None:
-            if peer.connectionState in {"failed", "closed", "disconnected"}:
-                self._peers.discard(peer)
-                await peer.close()
-
-        @peer.on("datachannel")
-        def data_channel(channel: Any) -> None:
-            requests: dict[str, _InboundRequest] = {}
-            receive_lock = asyncio.Lock()
-
-            @channel.on("message")
-            def message(raw: Any) -> None:
-                asyncio.create_task(
-                    self._receive_serialized(
-                        receive_lock, channel, requests, raw, kind
-                    ),
-                    name="knoa-p2p-message",
-                )
-
+        self._offers_total += 1
+        peer: RTCPeerConnection | None = None
         try:
+            _require_p2p()
+            peer = RTCPeerConnection(RTCConfiguration(iceServers=_STUN_SERVERS))
+            self._peers.add(peer)
+
+            @peer.on("connectionstatechange")
+            async def connection_state_change() -> None:
+                if peer.connectionState in {"failed", "closed", "disconnected"}:
+                    self._peers.discard(peer)
+                    await peer.close()
+
+            @peer.on("datachannel")
+            def data_channel(channel: Any) -> None:
+                requests: dict[str, _InboundRequest] = {}
+                receive_lock = asyncio.Lock()
+
+                @channel.on("message")
+                def message(raw: Any) -> None:
+                    asyncio.create_task(
+                        self._receive_serialized(
+                            receive_lock, channel, requests, raw, kind
+                        ),
+                        name="knoa-p2p-message",
+                    )
+
             await peer.setRemoteDescription(RTCSessionDescription(sdp=sdp, type="offer"))
             answer = await peer.createAnswer()
             await peer.setLocalDescription(answer)
@@ -139,10 +165,14 @@ class P2PServer:
             local = peer.localDescription
             if local is None:
                 raise ConnectionError("WebRTC answer was not created")
+            self._answers_total += 1
             return {"type": local.type, "sdp": local.sdp}
-        except Exception:
-            self._peers.discard(peer)
-            await peer.close()
+        except Exception as error:
+            self._last_error = _safe_error(error)
+            self._last_failure_at = time.time()
+            if peer is not None:
+                self._peers.discard(peer)
+                await peer.close()
             raise
 
     async def close(self) -> None:
@@ -506,6 +536,11 @@ async def _wait_for_ice_gathering(
         # Host candidates are normally available immediately and are enough on
         # one LAN. An unreachable public STUN server must not disable that path.
         return
+
+
+def _safe_error(error: BaseException) -> str:
+    text = " ".join(str(error).split())[:240]
+    return f"{type(error).__name__}: {text}" if text else type(error).__name__
 
 
 __all__ = [
