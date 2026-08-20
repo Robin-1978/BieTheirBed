@@ -358,6 +358,9 @@ service_port: $NodeCorePort
 gateway_enabled: true
 gateway_host: '127.0.0.1'
 gateway_port: $NodeGatewayPort
+gateway_lan_enabled: true
+gateway_lan_host: '0.0.0.0'
+gateway_lan_port: 9532
 gateway_remote_enabled: false
 gateway_public_url: ''
 capability_mcp_host: '127.0.0.1'

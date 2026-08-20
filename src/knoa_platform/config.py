@@ -275,6 +275,12 @@ class AppConfig(BaseModel):
     gateway_enabled: bool = False
     gateway_host: str = "127.0.0.1"
     gateway_port: int = 9529
+    # A separate authenticated HTTP listener for trusted local networks.
+    # The loopback listener remains unchanged; mDNS advertises this port only
+    # when LAN discovery is enabled.
+    gateway_lan_enabled: bool = False
+    gateway_lan_host: str = "0.0.0.0"
+    gateway_lan_port: int = 9532
     gateway_session_ttl_seconds: int = Field(default=900, ge=60, le=3600)
     gateway_artifact_max_bytes: int = Field(
         default=32 * 1024 * 1024,
@@ -338,6 +344,8 @@ class AppConfig(BaseModel):
             raise ValueError("Webhook port must be between 0 and 65535")
         if not 0 <= self.gateway_port <= 65535:
             raise ValueError("Secure Gateway port must be between 0 and 65535")
+        if not 0 <= self.gateway_lan_port <= 65535:
+            raise ValueError("Secure Gateway LAN port must be between 0 and 65535")
         if not 0 <= self.capability_mcp_port <= 65535:
             raise ValueError("Capability MCP port must be between 0 and 65535")
         if not is_loopback_host(self.capability_mcp_host):
@@ -361,6 +369,12 @@ class AppConfig(BaseModel):
                 raise ValueError("Secure Gateway and Core service ports must differ")
             if self.webhook_enabled and self.gateway_port == self.webhook_port:
                 raise ValueError("Secure Gateway and Webhook ports must differ")
+            if (
+                self.gateway_lan_enabled
+                and self.gateway_lan_port
+                and self.gateway_lan_port == self.gateway_port
+            ):
+                raise ValueError("Secure Gateway and LAN Gateway ports must differ")
             if not self.gateway_remote_enabled and not is_loopback_host(
                 self.gateway_host
             ):
@@ -711,6 +725,9 @@ def _env_overrides() -> dict[str, Any]:
         "KNOA_GATEWAY_ENABLED": ("gateway_enabled", bool),
         "KNOA_GATEWAY_HOST": ("gateway_host", str),
         "KNOA_GATEWAY_PORT": ("gateway_port", int),
+        "KNOA_GATEWAY_LAN_ENABLED": ("gateway_lan_enabled", bool),
+        "KNOA_GATEWAY_LAN_HOST": ("gateway_lan_host", str),
+        "KNOA_GATEWAY_LAN_PORT": ("gateway_lan_port", int),
         "KNOA_GATEWAY_REMOTE_ENABLED": ("gateway_remote_enabled", bool),
         "KNOA_GATEWAY_PUBLIC_URL": ("gateway_public_url", str),
         "KNOA_GATEWAY_TLS_CERT_FILE": ("gateway_tls_cert_file", str),

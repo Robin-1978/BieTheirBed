@@ -304,15 +304,19 @@ Send JSON to `POST /hooks/gitlab` with `X-Knoa-Event-Id` and
 bytes. Reusing an event ID is safe because Trigger ingress is durably
 idempotent.
 
-The Secure Gateway is a separate, default-off mobile API. Keep it on loopback
-for local development. A non-loopback listener is accepted only in explicit TLS
-mode with absolute service-owned certificate paths and an owner-only private
-key:
+The Secure Gateway is a separate, default-off mobile API. Keep the primary
+Gateway on loopback for local development. Node deployments can additionally
+enable an authenticated LAN listener; it is advertised as
+`_knoa-node._tcp.local.` via mDNS and is used only after the App verifies the
+Node identity. The LAN listener does not expose unauthenticated APIs:
 
 ```yaml
 gateway_enabled: true
 gateway_host: "0.0.0.0"
 gateway_port: 9529
+gateway_lan_enabled: true
+gateway_lan_host: "0.0.0.0"
+gateway_lan_port: 9532
 gateway_remote_enabled: true
 gateway_public_url: "https://knoa.example.com"
 gateway_tls_cert_file: "/absolute/path/gateway-cert.pem"
@@ -417,6 +421,9 @@ Supported environment overrides use the `KNOA_` prefix:
 | `KNOA_GATEWAY_ENABLED` | gateway_enabled |
 | `KNOA_GATEWAY_HOST` | gateway_host |
 | `KNOA_GATEWAY_PORT` | gateway_port |
+| `KNOA_GATEWAY_LAN_ENABLED` | gateway_lan_enabled |
+| `KNOA_GATEWAY_LAN_HOST` | gateway_lan_host |
+| `KNOA_GATEWAY_LAN_PORT` | gateway_lan_port |
 | `KNOA_GATEWAY_REMOTE_ENABLED` | gateway_remote_enabled |
 | `KNOA_GATEWAY_PUBLIC_URL` | gateway_public_url |
 | `KNOA_GATEWAY_TLS_CERT_FILE` | gateway_tls_cert_file |
