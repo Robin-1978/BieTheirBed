@@ -3,15 +3,17 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
-import { transportDetail, transportLabel } from "@/api/transportPresentation";
+import { transportDetailKey, transportLabelKey } from "@/api/transportPresentation";
+import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
 export default function NodeMenuScreen() {
   const gateway = useGateway();
+  const { t } = useI18n();
   const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string; nodeId?: string }>();
   const workspaceId = stringParam(params.workspaceId);
-  const workspaceName = stringParam(params.workspaceName) || "Workspace";
+  const workspaceName = stringParam(params.workspaceName) || t("nav.workspace");
   const nodeId = stringParam(params.nodeId) || gateway.nodeId;
   const node = gateway.nodes.find((item) => item.nodeId === nodeId);
   function returnToWorkspace() {
@@ -21,45 +23,41 @@ export default function NodeMenuScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: node?.displayName || "Node" }} />
+      <Stack.Screen options={{ title: node?.displayName || t("nav.node") }} />
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.hero}>
           <View style={styles.nodeIcon}><AppIcon name="node" color={colors.accent} size={31} /></View>
-          <Text style={styles.title}>{node?.displayName || nodeId || "Node"}</Text>
+          <Text style={styles.title}>{node?.displayName || nodeId || t("nav.node")}</Text>
           <Text style={styles.meta}>{workspaceName}</Text>
           <View style={styles.statusRow}>
-            <Text style={gateway.status === "ready" ? styles.online : styles.offline}>{gateway.status === "ready" ? "已连接" : "未连接"}</Text>
-            {gateway.status === "ready" ? <Text style={styles.transport}>{transportLabel(gateway.transportMode)}</Text> : null}
+            <Text style={gateway.status === "ready" ? styles.online : styles.offline}>
+              {gateway.status === "ready" ? t("nodeHeader.online") : t("nodeHeader.connecting")}
+            </Text>
+            {gateway.status === "ready" ? <Text style={styles.transport}>{t(transportLabelKey(gateway.transportMode))}</Text> : null}
           </View>
-          {gateway.status === "ready" ? <Text style={styles.transportDetail}>{transportDetail(gateway.transportMode)}</Text> : null}
+          {gateway.status === "ready" ? <Text style={styles.transportDetail}>{t(transportDetailKey(gateway.transportMode))}</Text> : null}
         </View>
 
         <View style={styles.card}>
-          <MenuRow icon="chat" title="对话" detail="返回当前 Node 对话" onPress={() => router.replace({ pathname: "/chat", params: { workspaceId, workspaceName, nodeId } })} />
-          <MenuRow icon="tasks" title="任务" detail="任务与执行记录" onPress={() => router.replace({ pathname: "/tasks", params: { workspaceId, workspaceName, nodeId } })} />
-          <MenuRow icon="agent" title="Node 资源" detail="Agent、模型、MCP、Skill 与 Tool" onPress={() => router.push("/capabilities")} />
-          <MenuRow icon="settings" title="Node 设置与诊断" detail="连接、Runtime 状态与高级配置" onPress={() => router.push("/settings/node")} />
+          <MenuRow icon="chat" title={t("header.chat")} detail={t("nodeMenu.chatDetail")} onPress={() => router.replace({ pathname: "/chat", params: { workspaceId, workspaceName, nodeId } })} />
+          <MenuRow icon="tasks" title={t("header.tasks")} detail={t("nodeMenu.tasksDetail")} onPress={() => router.replace({ pathname: "/tasks", params: { workspaceId, workspaceName, nodeId } })} />
+          <MenuRow icon="agent" title={t("nav.nodeResources")} detail={t("nodeMenu.resourcesDetail")} onPress={() => router.push("/capabilities")} />
+          <MenuRow icon="settings" title={t("nav.nodeSettings")} detail={t("nodeMenu.settingsDetail")} onPress={() => router.push("/settings/node")} />
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>App</Text>
-          <MenuRow icon="settings" title="App 设置" detail="外观、语言和当前版本" onPress={() => router.push("/settings/app")} />
-          <MenuRow icon="refresh" title="版本与更新" detail="检查、下载并安装最新版本" onPress={() => router.push("/update")} />
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>连接</Text>
-          <Text style={styles.detail}>Node ID</Text>
+          <Text style={styles.sectionTitle}>{t("nodeMenu.connection")}</Text>
+          <Text style={styles.detail}>{t("common.nodeId")}</Text>
           <Text style={styles.mono} selectable>{nodeId || "—"}</Text>
-          <Text style={styles.detail}>Gateway</Text>
+          <Text style={styles.detail}>{t("common.gateway")}</Text>
           <Text style={styles.mono} selectable>{gateway.gatewayUrl || "—"}</Text>
           <AppPressable onPress={() => void gateway.reconnect()} style={styles.secondary}>
-            <Text style={styles.secondaryText}>重新连接</Text>
+            <Text style={styles.secondaryText}>{t("nodeMenu.reconnect")}</Text>
           </AppPressable>
         </View>
 
         <AppPressable onPress={returnToWorkspace} style={styles.leave}>
-          <Text style={styles.leaveText}>返回 Workspace</Text>
+          <Text style={styles.leaveText}>{t("nodeMenu.backToWorkspace")}</Text>
         </AppPressable>
       </ScrollView>
     </>

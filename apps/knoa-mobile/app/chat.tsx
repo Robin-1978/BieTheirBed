@@ -555,7 +555,7 @@ export default function ChatScreen() {
         setTurns((current) => mergeConversationTurns(current, [fresh]));
       }).catch(() => undefined);
     } catch {
-      showFeedback("输入未能提交，请刷新后重试", "error");
+      showFeedback(t("interaction.submitFailed"), "error");
     } finally {
       setResolvingInteraction("");
     }

@@ -40,6 +40,11 @@ export type P2PDiagnostic = {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const REQUEST_CHUNK_BYTES = 192 * 1024;
+const ICE_SERVERS = [
+  { urls: "stun:stun.cloudflare.com:3478" },
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
+];
 
 export class ConnectionResolverTransport implements GatewayTransport {
   private readonly direct = new DirectFetchTransport();
@@ -298,7 +303,7 @@ class WebRtcGatewayTransport implements GatewayTransport {
 
   async connect(exchange: (offer: { type: "offer"; sdp: string }) => Promise<{ type: "answer"; sdp: string }>): Promise<void> {
     this.close();
-    const peer = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }] });
+    const peer = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     const channel = peer.createDataChannel("knoa-http-v1", { ordered: true });
     this.peer = peer;
     this.channel = channel;
@@ -856,11 +861,12 @@ function waitForIceGathering(peer: RTCPeerConnection): Promise<void> {
     peer.onicegatheringstatechange = check;
     check();
   });
-  // LAN host candidates arrive first. If public STUN is blocked, continue with
-  // those candidates instead of silently forcing every request through Relay.
+  // This flow does not implement trickle ICE, so the SDP must contain the
+  // gathered server-reflexive candidates before it is sent through Relay.
+  // Two seconds is routinely too short on mobile networks.
   return Promise.race([
     complete,
-    new Promise<void>((resolve) => setTimeout(resolve, 2_000)),
+    new Promise<void>((resolve) => setTimeout(resolve, 8_000)),
   ]);
 }
 

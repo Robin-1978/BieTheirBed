@@ -165,7 +165,7 @@ export default function SystemConfigurationScreen() {
       <Section title={t("config.overview")}>
         <Metric label={t("config.appliedRevision")} value={shortId(current?.state.applied_revision_id ?? "")} />
         <Metric label={t("config.desiredRevision")} value={shortId(current?.state.desired_revision_id ?? "")} />
-        <Metric label={t("config.applyStatus")} value={current?.state.apply_status ?? "—"} danger={current?.state.apply_status === "failed"} />
+        <Metric label={t("config.applyStatus")} value={applyStatusLabel(current?.state.apply_status, t)} danger={current?.state.apply_status === "failed"} />
         <Metric label={t("config.defaultAgent")} value={document?.agents.default_agent ?? "—"} />
         <View style={styles.generationGrid}>
           {current?.generations.map((generation) => (
@@ -191,7 +191,7 @@ export default function SystemConfigurationScreen() {
                   <View style={styles.row}>
                     <View style={styles.flex}>
                       <Text style={styles.itemTitle}>{agent.display_name}</Text>
-                      <Text style={styles.meta}>{agentId} · {agent.kind === "knoa" ? "Knoa Agent" : "Codex Agent"} · {agent.visibility}</Text>
+                      <Text style={styles.meta}>{agentId} · {agentKindLabel(agent.kind, t)} · {visibilityLabel(agent.visibility, t)}</Text>
                     </View>
                     <Switch
                       disabled={!draft || isDefault}
@@ -283,10 +283,10 @@ export default function SystemConfigurationScreen() {
 
           <Section title={t("config.skillsAndTools")}>
             {Object.entries(document.skills).map(([id, skill]) => (
-              <ToggleRow key={`skill:${id}`} title={id} detail={`Skill · ${skill.source}`} value={skill.enabled} disabled={!draft} onChange={(enabled) => updateDocument((next) => { const target = next.skills[id]; if (target) target.enabled = enabled; })} />
+              <ToggleRow key={`skill:${id}`} title={id} detail={t("config.skillDetail", { source: skill.source })} value={skill.enabled} disabled={!draft} onChange={(enabled) => updateDocument((next) => { const target = next.skills[id]; if (target) target.enabled = enabled; })} />
             ))}
             {Object.entries(document.mcp_servers).map(([id, server]) => (
-              <ToggleRow key={`mcp:${id}`} title={id} detail={`MCP · ${server.transport}`} value={server.enabled} disabled={!draft} onChange={(enabled) => updateDocument((next) => { const target = next.mcp_servers[id]; if (target) target.enabled = enabled; })} />
+              <ToggleRow key={`mcp:${id}`} title={id} detail={t("config.mcpDetail", { transport: server.transport })} value={server.enabled} disabled={!draft} onChange={(enabled) => updateDocument((next) => { const target = next.mcp_servers[id]; if (target) target.enabled = enabled; })} />
             ))}
             {!Object.keys(document.skills).length && !Object.keys(document.mcp_servers).length ? <Text style={styles.meta}>{t("config.noExtensions")}</Text> : null}
           </Section>
@@ -320,14 +320,35 @@ export default function SystemConfigurationScreen() {
         </Section>
       ) : null}
 
-      <Section title="生效语义">
-        <Text style={styles.meta}>产品只呈现 Draft → Published → Applied。发布失败时 Node 保留上一份 Active Generation；历史版本与回滚不是普通配置流程。</Text>
+      <Section title={t("settings.system.effectiveSemanticsTitle")}>
+        <Text style={styles.meta}>{t("settings.system.effectiveSemanticsDetail")}</Text>
       </Section>
     </ScrollView>
   );
 }
 
 function shortId(value: string) { return value ? value.slice(0, 12) : "—"; }
+
+function agentKindLabel(kind: ManagedConfig["agents"]["agents"][string]["kind"], t: ReturnType<typeof useI18n>["t"]): string {
+  return kind === "knoa" ? t("config.agentKindKnoa") : t("config.agentKindCodex");
+}
+
+function applyStatusLabel(status: ConfigControlState["apply_status"] | undefined, t: ReturnType<typeof useI18n>["t"]): string {
+  if (!status) return "—";
+  return ({
+    idle: t("config.applyStatusIdle"),
+    applying: t("config.applyStatusApplying"),
+    failed: t("config.applyStatusFailed"),
+  })[status];
+}
+
+function visibilityLabel(visibility: ManagedConfig["agents"]["agents"][string]["visibility"], t: ReturnType<typeof useI18n>["t"]): string {
+  return ({
+    user: t("settings.agents.visibilityUser"),
+    delegate: t("settings.agents.visibilityDelegate"),
+    system: t("settings.agents.visibilitySystem"),
+  })[visibility] ?? visibility;
+}
 
 function Section({ title, children }: React.PropsWithChildren<{ title: string }>) {
   return <View style={styles.section}><Text style={styles.sectionTitle}>{title}</Text>{children}</View>;

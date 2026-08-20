@@ -1,15 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import { transportCompactLabel, transportDetail, transportLabel } from "./transportPresentation";
+import {
+  transportCompactLabelKey,
+  transportDetailKey,
+  transportLabelKey,
+} from "./transportPresentation";
 
 describe("transport presentation", () => {
   it.each([
-    ["direct", "Direct 直连", "Direct"],
-    ["p2p", "WebRTC P2P", "P2P"],
-    ["relay", "Hub Relay", "Relay"],
-  ] as const)("presents %s without confusing route intent with active transport", (mode, label, compact) => {
-    expect(transportLabel(mode)).toBe(label);
-    expect(transportCompactLabel(mode)).toBe(compact);
-    expect(transportDetail(mode).length).toBeGreaterThan(10);
+    ["direct", "transport.direct", "transport.compact.direct", "transport.detail.direct"],
+    ["p2p", "transport.p2p", "transport.compact.p2p", "transport.detail.p2p"],
+    ["relay", "transport.relay", "transport.compact.relay", "transport.detail.relay"],
+  ] as const)("maps %s to i18n keys without embedding locale-specific labels", (mode, label, compact, detail) => {
+    expect(transportLabelKey(mode)).toBe(label);
+    expect(transportCompactLabelKey(mode)).toBe(compact);
+    expect(transportDetailKey(mode)).toBe(detail);
   });
 });

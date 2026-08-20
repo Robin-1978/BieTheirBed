@@ -135,10 +135,7 @@ export default function PairScreen() {
       </AppPressable>
       {advanced ? (
         <View style={styles.advancedCard}>
-          <Text style={styles.command} selectable>
-            Windows: C:\ProgramData\Knoa\Scripts\Show-KnoaPairingQr.cmd{"\n"}
-            Linux/macOS: knoa gateway pair --ttl 300
-          </Text>
+          <Text style={styles.command}>{t("pair.advancedHint")}</Text>
           <Text style={styles.or}>{t("pair.orPaste")}</Text>
           <TextInput
             style={[styles.input, styles.payload]}

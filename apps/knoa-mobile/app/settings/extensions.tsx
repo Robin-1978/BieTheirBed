@@ -1,14 +1,16 @@
-import { router, Stack } from "expo-router";
+import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 
 import { AppPressable } from "@/components/AppPressable";
 import type { ManagedConfig } from "@/api/models";
+import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
 export default function ExtensionCenterScreen() {
   const gateway = useGateway();
+  const { t } = useI18n();
   const [kind, setKind] = useState<"skill" | "local_mcp" | "remote_mcp">("remote_mcp");
   const [source, setSource] = useState("");
   const [serverId, setServerId] = useState("");
@@ -22,9 +24,9 @@ export default function ExtensionCenterScreen() {
       const current = await gateway.runAuthenticated((client) => client.getConfigCurrent());
       setDocument(current.revision.document);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "能力加载失败");
+      setMessage(error instanceof Error ? error.message : t("settings.extensions.loadFailed"));
     }
-  }, [gateway.runAuthenticated]);
+  }, [gateway.runAuthenticated, t]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -40,55 +42,68 @@ export default function ExtensionCenterScreen() {
       });
       router.push({ pathname: "/settings/system", params: { draftId: result.draft.draft_id } });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "导入检查失败");
+      setMessage(error instanceof Error ? error.message : t("settings.extensions.importFailed"));
     } finally {
       setWorking(false);
     }
   }
 
+  const kindLabels = {
+    remote_mcp: t("settings.extensions.remoteMcp"),
+    local_mcp: t("settings.extensions.localMcp"),
+    skill: t("settings.extensions.skillContent"),
+  } as const;
+
   return (
-    <>
-    <Stack.Screen options={{ title: "MCP 与 Skill" }} />
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <View style={styles.section}>
-        <Text style={styles.title}>当前 Node</Text>
-        {Object.entries(document?.mcp_servers ?? {}).map(([id, server]) => <View key={`mcp:${id}`} style={styles.item}><View><Text style={styles.itemTitle}>{id}</Text><Text style={styles.hint}>MCP · {server.transport}</Text></View><Text style={server.enabled ? styles.enabled : styles.disabled}>{server.enabled ? "启用" : "停用"}</Text></View>)}
-        {Object.entries(document?.skills ?? {}).map(([id, skill]) => <View key={`skill:${id}`} style={styles.item}><View><Text style={styles.itemTitle}>{id}</Text><Text style={styles.hint}>Skill · {skill.source || "已安装内容"}</Text></View><Text style={skill.enabled ? styles.enabled : styles.disabled}>{skill.enabled ? "启用" : "停用"}</Text></View>)}
-        {!Object.keys(document?.mcp_servers ?? {}).length && !Object.keys(document?.skills ?? {}).length ? <Text style={styles.hint}>还没有安装 MCP 或 Skill。</Text> : null}
+        <Text style={styles.title}>{t("settings.extensions.currentNode")}</Text>
+        {Object.entries(document?.mcp_servers ?? {}).map(([id, server]) => (
+          <View key={`mcp:${id}`} style={styles.item}>
+            <View><Text style={styles.itemTitle}>{id}</Text><Text style={styles.hint}>{t("config.mcpDetail", { transport: server.transport })}</Text></View>
+            <Text style={server.enabled ? styles.enabled : styles.disabled}>{server.enabled ? t("capabilities.enabled") : t("capabilities.disabled")}</Text>
+          </View>
+        ))}
+        {Object.entries(document?.skills ?? {}).map(([id, skill]) => (
+          <View key={`skill:${id}`} style={styles.item}>
+            <View><Text style={styles.itemTitle}>{id}</Text><Text style={styles.hint}>{t("config.skillDetail", { source: skill.source || t("settings.extensions.installedContent") })}</Text></View>
+            <Text style={skill.enabled ? styles.enabled : styles.disabled}>{skill.enabled ? t("capabilities.enabled") : t("capabilities.disabled")}</Text>
+          </View>
+        ))}
+        {!Object.keys(document?.mcp_servers ?? {}).length && !Object.keys(document?.skills ?? {}).length
+          ? <Text style={styles.hint}>{t("settings.extensions.empty")}</Text>
+          : null}
       </View>
       <View style={styles.section}>
-        <Text style={styles.title}>添加能力</Text>
-        <Text style={styles.hint}>Skill 是同步到当前 Node 的内容；MCP 是当前 Node 执行的服务。检查完成后仍需在配置草稿中预检并发布。</Text>
+        <Text style={styles.title}>{t("settings.extensions.addTitle")}</Text>
+        <Text style={styles.hint}>{t("settings.extensions.addHint")}</Text>
         <View style={styles.choices}>
           {(["remote_mcp", "local_mcp", "skill"] as const).map((value) => (
             <AppPressable key={value} style={[styles.choice, kind === value && styles.selected]} onPress={() => setKind(value)}>
-              <Text style={kind === value ? styles.selectedText : styles.choiceText}>
-                {value === "remote_mcp" ? "远程 MCP 服务" : value === "local_mcp" ? "本地 MCP 服务" : "Skill 内容"}
-              </Text>
+              <Text style={kind === value ? styles.selectedText : styles.choiceText}>{kindLabels[value]}</Text>
             </AppPressable>
           ))}
         </View>
         {kind !== "skill" ? (
-          <TextInput value={serverId} onChangeText={setServerId} placeholder="扩展 ID，例如 github" placeholderTextColor={colors.muted} style={styles.input} autoCapitalize="none" />
+          <TextInput value={serverId} onChangeText={setServerId} placeholder={t("settings.extensions.serverIdPlaceholder")} placeholderTextColor={colors.muted} style={styles.input} autoCapitalize="none" />
         ) : null}
         <TextInput
           value={source}
           onChangeText={setSource}
-          placeholder={kind === "remote_mcp" ? "https://mcp.example.com/mcp" : "Node 上的内容目录绝对路径"}
+          placeholder={kind === "remote_mcp" ? t("settings.extensions.remoteUrlPlaceholder") : t("settings.extensions.localPathPlaceholder")}
           placeholderTextColor={colors.muted}
           style={styles.input}
           autoCapitalize="none"
         />
         {kind === "remote_mcp" ? (
-          <View style={styles.row}><Text style={styles.label}>允许显式局域网目标</Text><Switch value={allowPrivate} onValueChange={setAllowPrivate} /></View>
+          <View style={styles.row}><Text style={styles.label}>{t("settings.extensions.allowPrivateNetwork")}</Text><Switch value={allowPrivate} onValueChange={setAllowPrivate} /></View>
         ) : null}
         <AppPressable style={styles.primary} disabled={working} onPress={() => void inspectAndCreateDraft()}>
-          {working ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>检查权限并创建草稿</Text>}
+          {working ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>{t("settings.extensions.inspectAndDraft")}</Text>}
         </AppPressable>
         {message ? <Text style={styles.error}>{message}</Text> : null}
       </View>
     </ScrollView>
-    </>
   );
 }
 

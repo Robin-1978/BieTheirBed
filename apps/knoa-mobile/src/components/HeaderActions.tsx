@@ -40,7 +40,7 @@ export function HeaderActions({ current }: { current: PrimaryScreen }) {
         />
         <AppPressable
           accessibilityRole="button"
-          accessibilityLabel="Node 菜单"
+          accessibilityLabel={t("header.nodeMenu")}
           hitSlop={8}
           onPress={() => router.push({ pathname: "/node", params: nodeParams })}
           style={styles.action}

@@ -11,10 +11,12 @@ import {
 import { loadNavigationPreference } from "@/navigation/navigationPreference";
 import { listNodeBindings } from "@/security/deviceIdentity";
 import { useGateway } from "@/state/GatewayProvider";
+import { useI18n } from "@/i18n";
 import { colors } from "@/theme";
 
 export default function Index() {
   const gateway = useGateway();
+  const { t } = useI18n();
   const started = useRef(false);
 
   useEffect(() => {
@@ -26,7 +28,7 @@ export default function Index() {
   return (
     <View style={styles.container}>
       <View style={styles.mark}><Text style={styles.markText}>诺</Text></View>
-      <Text style={styles.title}>正在恢复工作位置</Text>
+      <Text style={styles.title}>{t("boot.restoring")}</Text>
       <ActivityIndicator color={colors.accent} />
     </View>
   );
@@ -73,7 +75,7 @@ async function restoreLanding(gateway: ReturnType<typeof useGateway>): Promise<v
   try {
     await gateway.switchNode(preference.nodeId);
     router.replace({
-      pathname: preference.nodePage === "tasks" ? "/tasks" : "/chat",
+      pathname: "/node",
       params: {
         workspaceId: workspace.workspaceId,
         workspaceName: workspace.displayName,

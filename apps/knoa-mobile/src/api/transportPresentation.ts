@@ -1,19 +1,19 @@
 export type ActiveTransportMode = "direct" | "p2p" | "relay";
 
-export function transportLabel(mode: ActiveTransportMode): string {
-  if (mode === "p2p") return "WebRTC P2P";
-  if (mode === "relay") return "Hub Relay";
-  return "Direct 直连";
+export function transportLabelKey(mode: ActiveTransportMode) {
+  if (mode === "p2p") return "transport.p2p" as const;
+  if (mode === "relay") return "transport.relay" as const;
+  return "transport.direct" as const;
 }
 
-export function transportCompactLabel(mode: ActiveTransportMode): string {
-  if (mode === "p2p") return "P2P";
-  if (mode === "relay") return "Relay";
-  return "Direct";
+export function transportCompactLabelKey(mode: ActiveTransportMode) {
+  if (mode === "p2p") return "transport.compact.p2p" as const;
+  if (mode === "relay") return "transport.compact.relay" as const;
+  return "transport.compact.direct" as const;
 }
 
-export function transportDetail(mode: ActiveTransportMode): string {
-  if (mode === "p2p") return "App 通过 WebRTC DataChannel 与 Node 点对点通信";
-  if (mode === "relay") return "App 的请求当前由 Hub Relay 转发到 Node";
-  return "App 当前直接访问 Node Gateway，不经过 Hub Relay";
+export function transportDetailKey(mode: ActiveTransportMode) {
+  if (mode === "p2p") return "transport.detail.p2p" as const;
+  if (mode === "relay") return "transport.detail.relay" as const;
+  return "transport.detail.direct" as const;
 }

@@ -3,40 +3,52 @@ import { StyleSheet, Text, View } from "react-native";
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
-import { transportCompactLabel } from "@/api/transportPresentation";
+import { transportCompactLabelKey } from "@/api/transportPresentation";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
+import { useI18n } from "@/i18n";
 
 export function NodeHeaderTitle() {
   const gateway = useGateway();
+  const { t } = useI18n();
   const params = useLocalSearchParams<{ workspaceName?: string }>();
   const node = gateway.nodes.find((item) => item.nodeId === gateway.nodeId);
+  const statusLabel = gateway.status === "ready"
+    ? `${t("nodeHeader.online")} · ${t(transportCompactLabelKey(gateway.transportMode))}`
+    : t("nodeHeader.connecting");
   return (
     <View style={styles.titleWrap}>
-      <Text style={styles.node} numberOfLines={1}>{node?.displayName || "Node"}</Text>
+      <Text style={styles.node} numberOfLines={1}>{node?.displayName || t("nav.node")}</Text>
       <Text style={styles.workspace} numberOfLines={1}>
-        {stringParam(params.workspaceName) || "Workspace"} · {gateway.status === "ready"
-          ? `在线 · ${transportCompactLabel(gateway.transportMode)}`
-          : "连接中"}
+        {stringParam(params.workspaceName) || t("nav.workspace")} · {statusLabel}
       </Text>
     </View>
   );
 }
 
 export function NodeHeaderBack() {
-  const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string }>();
+  const gateway = useGateway();
+  const { t } = useI18n();
+  const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string; nodeId?: string }>();
   const workspaceId = stringParam(params.workspaceId);
+  const workspaceName = stringParam(params.workspaceName);
+  const nodeId = stringParam(params.nodeId) || gateway.nodeId;
   return (
     <AppPressable
       accessibilityRole="button"
-      accessibilityLabel="返回 Workspace"
+      accessibilityLabel={t("nodeHeader.back")}
       hitSlop={8}
-      onPress={() => workspaceId
+      onPress={() => nodeId
         ? router.replace({
-            pathname: "/workspaces/[workspaceId]",
-            params: { workspaceId, workspaceName: stringParam(params.workspaceName) },
+            pathname: "/node",
+            params: { workspaceId, workspaceName, nodeId },
           })
-        : router.replace("/account")}
+        : workspaceId
+          ? router.replace({
+              pathname: "/workspaces/[workspaceId]",
+              params: { workspaceId, workspaceName },
+            })
+          : router.replace("/account")}
       style={styles.back}
     >
       <AppIcon name="chevron-left" color={colors.ink} size={25} />

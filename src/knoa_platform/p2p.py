@@ -41,7 +41,11 @@ _BUFFER_HIGH_WATER = 1024 * 1024
 _STUN_SERVERS = (
     []
     if RTCIceServer is None
-    else [RTCIceServer(urls="stun:stun.cloudflare.com:3478")]
+    else [
+        RTCIceServer(urls="stun:stun.cloudflare.com:3478"),
+        RTCIceServer(urls="stun:stun.l.google.com:19302"),
+        RTCIceServer(urls="stun:stun1.l.google.com:19302"),
+    ]
 )
 _FORWARDED_REQUEST_HEADERS = {
     "accept",
@@ -518,7 +522,7 @@ async def _send_json(channel: Any, message: dict[str, Any]) -> None:
 async def _wait_for_ice_gathering(
     peer: RTCPeerConnection,
     *,
-    timeout: float = 2.0,
+    timeout: float = 8.0,
 ) -> None:
     if peer.iceGatheringState == "complete":
         return
@@ -533,8 +537,8 @@ async def _wait_for_ice_gathering(
     try:
         await asyncio.wait_for(completed.wait(), timeout=timeout)
     except TimeoutError:
-        # Host candidates are normally available immediately and are enough on
-        # one LAN. An unreachable public STUN server must not disable that path.
+        # Signaling is non-trickle: return the best SDP available if a public
+        # STUN endpoint is unreachable, then let the client use Relay fallback.
         return
 
 
