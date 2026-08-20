@@ -14,8 +14,10 @@ def test_windows_installer_uses_python314_and_winsw_hub() -> None:
 
     assert '[ValidateSet("all", "hub", "node")]' in script
     assert '[string]$Role = "all"' in script
-    assert '$installHub = $Role -in @("all", "hub")' in script
-    assert '$installNode = $Role -in @("all", "node")' in script
+    assert '$Role -in @("all", "hub")' in script
+    assert '$Role -in @("all", "node")' in script
+    assert 'Get-Service -Name "KnoaHostedHub"' in script
+    assert 'Get-Service -Name "KnoaNode"' in script
     assert '[string]$PythonVersion = "3.14"' in script
     assert "Py_GIL_DISABLED" in script
     assert "$pythonProbe | & $python -" in script

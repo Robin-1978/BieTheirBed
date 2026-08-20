@@ -39,12 +39,13 @@ installed_roles = {hub, node}
 
 - Windows：签名的 Knoa Setup；
 - Linux：发行版软件包，第一目标是 `.deb`；
-- 首次安装后：Hub Console / Node Console 负责更新、回退、角色启停和诊断。
+- 首次安装后：Hub Console / Node Console 负责更新、角色启停和诊断。
 
-“一键更新”只指 Universal Host 产品安装：Console 选择已签名 Bundle 后，Lifecycle Broker 自动完成校验、停服、
-原子切换、启动、健康检查和失败回退。旧的 source-backed user systemd/venv 部署不具备 Broker，必须先通过
-`.deb` 迁移到 Universal Host；不能把 `git pull + pip install + systemctl restart` 称为产品一键更新。当前
-Console 尚未实现从 Hosted Release Channel 自动检查和下载，选择本地签名 Bundle 仍是 V1 的一次人工输入。
+当前实现同时支持两个明确渠道：正式产品使用签名 Universal Host Bundle；开发期和高级自托管部署可使用
+Source Release Channel。Source Channel 把 Git checkout 仅作为更新源，从 detached worktree 安装指定 commit，
+并由同一个 Lifecycle Broker 完成检查、fast-forward 更新、停服、安装、启动和健康检查。两种渠道都不向用户
+提供历史版本列表或手动回退；本次更新失败时只自动恢复更新前版本，避免远程主机被失败更新直接弄离线。
+Console 会根据本机 `update_mode=source|bundle` 显示对应入口。
 
 仓库中的 PowerShell/Shell 安装资产只服务发布构建、CI、开发和灾难恢复，不是最终用户界面。
 
@@ -78,12 +79,13 @@ Broker 只允许：
 - 查询当前签名 Release、操作系统、架构、激活角色和服务状态；
 - 重启固定的 `KnoaHostedHub` / `KnoaNode` 或对应 systemd service；
 - 激活/停用 Hub、Node 角色；
-- 回退到 updater 的 `previous` Release；
+- 检查 Source Channel 并安装 fast-forward commit；
 - 从固定 Incoming 目录安装经 product Trust Store 验证的 Universal Host Bundle。
 
 Broker 不接受任意命令、任意路径、任意 service 名称或未签名程序。上传文件只进入固定 Incoming 目录，安装时
 再次校验 Manifest、签名、OS、架构、`role=all`、SPI、大小和 SHA-256。更新采用不可变版本目录和原子
-`state.json` 指针；失败恢复 previous，HubRoot、NodeRoot、Secret、Workspace 和 APK 不随版本回退删除。
+`state.json` 指针；失败自动恢复更新前版本，HubRoot、NodeRoot、Secret、Workspace 和 APK 不受代码恢复影响。
+V1 不提供用户主动选择旧版本、版本历史或降级 API。
 
 V1 的“卸载角色”表示停用 service 并保留数据。完整删除产品和清除数据必须由原生安装器提供两个不同操作，
 清除数据要求单独确认，不能由网页上的普通按钮隐式执行。
@@ -172,15 +174,15 @@ Enrollment Code 中的 `hub_url` 必须是 Workspace 的公网 Hub URL，不能�
 
 - Hub 配置、帐号、Workspace 和 Node Directory：Hub Console；
 - Node Agent、LLM、Key、MCP、Skill、Tool、Task 和 Conversation：Node Console；
-- 产品更新、回退、服务重启：任一已激活角色的本地 Console；
+- 产品更新、服务重启：任一已激活角色的本地 Console；
 - 日常 Workspace/Node 选择、会话和任务：App。
 
 ### Linux 更新现状
 
-- 安装为 Universal Host `.deb` 后：有 Console 一键安装、健康检查、失败回退和上一版回退；
-- 当前开发机若仍运行 `~/.local/share/knoa/runtime/venv` 与 user systemd：没有产品级一键更新；
-- 正向迁移目标是安装 `.deb` 并保留/导入 HubRoot、NodeRoot 和 identity，迁移完成后删除源码服务；
-- 自动检查 Hosted 最新版本属于后续 Release Channel 增量，不阻塞签名 Bundle 的本地一键安装闭环。
+- Source 安装会注册 `knoa-host-lifecycle.service`，Hub/Node Console 可检查并一键更新同一 Git upstream；
+- Source 更新只允许 clean tracked checkout、已配置 upstream 和 fast-forward 历史；失败自动恢复更新前 commit；
+- Windows 与 Linux 使用相同 Source Channel 状态和 Console 语义；脚本只是首次安装与故障恢复入口；
+- 正式大众发行仍以签名 Universal Host Bundle/原生安装器为目标，不要求用户安装 Git、Python 或 venv。
 
 ## 6. 发布构建合同
 
@@ -207,9 +209,8 @@ Windows 构建额外传入经审核的 WinSW。Private signing key 不进入仓�
 knoa-update install   验证、stage、离线健康检查、激活
 knoa-update current   输出当前不可变版本目录
 knoa-update run       从 state.json 启动签名 entrypoint
-knoa-update rollback  主动切换 previous
 knoa-update reject    当前版本失败时恢复 previous
 ```
 
-service 永远调用稳定的 `knoa-update run`，不硬编码版本目录。用户不直接调用这些命令；Console 通过 Broker
-使用它们，CLI 只保留给发布工程、CI 和灾难恢复。
+service 永远调用稳定的 `knoa-update run`，不硬编码版本目录。失败恢复由 updater/Broker 内部触发，不在 Console
+提供手动回退。CLI 只保留给发布工程、CI 和灾难恢复。

@@ -7,7 +7,11 @@ from pathlib import Path
 import httpx
 import pytest
 
-from knoa_platform.host_lifecycle import HostLifecycleManager, create_lifecycle_app
+from knoa_platform.host_lifecycle import (
+    HostLifecycleManager,
+    SourceHostLifecycleManager,
+    create_lifecycle_app,
+)
 
 
 class _FakeManager(HostLifecycleManager):
@@ -117,3 +121,94 @@ def test_update_rejects_release_when_live_service_health_fails(tmp_path: Path) -
 
     assert any("reject" in command for command in manager.commands)
     assert "node" in manager.active
+
+
+class _FakeSourceUpdates:
+    def __init__(self) -> None:
+        self.current = "a" * 40
+        self.latest = "b" * 40
+        self.actions: list[str] = []
+
+    def status(self) -> dict[str, object]:
+        return {
+            "channel": "source",
+            "current_commit": self.current,
+            "latest_commit": self.latest,
+            "update_available": self.current != self.latest,
+            "source_root": "/source",
+        }
+
+    def check(self) -> dict[str, object]:
+        self.actions.append("check")
+        return self.status()
+
+    def update(self) -> dict[str, object]:
+        self.actions.append("update")
+        self.current = self.latest
+        return self.status()
+
+
+class _FakeSourceManager(SourceHostLifecycleManager):
+    def __init__(self, root: Path, restart_callback=None) -> None:
+        installation = root / "installation.json"
+        installation.write_text(
+            json.dumps({"schema_version": 1, "role": "all"}),
+            encoding="utf-8",
+        )
+        self.updates = _FakeSourceUpdates()
+        self.active = {"hub", "node"}
+        self.service_actions: list[tuple[str, str]] = []
+        super().__init__(
+            source_updates=self.updates,
+            installation_state_file=installation,
+            restart_callback=restart_callback,
+        )
+
+    def _service_active(self, role):
+        return role in self.active
+
+    def _service(self, role, action):
+        self.service_actions.append((role, action))
+
+
+def test_source_manager_status_check_update_and_restart(tmp_path: Path) -> None:
+    lifecycle_restarts: list[str] = []
+    manager = _FakeSourceManager(tmp_path, lambda: lifecycle_restarts.append("restart"))
+
+    status = manager.status()
+    assert status["update_mode"] == "source"
+    assert status["current_release"] == "a" * 12
+    assert status["installed_roles"] == ["hub", "node"]
+
+    manager.act(manager_action("check_update"))
+    updated = manager.act(manager_action("update"))
+    assert updated["source_update"]["current_commit"] == "b" * 40
+    manager.act(manager_action("restart", role="node"))
+
+    assert manager.updates.actions == ["check", "update"]
+    assert lifecycle_restarts == ["restart"]
+    assert manager.service_actions == [("node", "restart")]
+
+
+@pytest.mark.asyncio
+async def test_source_lifecycle_api_exposes_source_actions(tmp_path: Path) -> None:
+    manager = _FakeSourceManager(tmp_path)
+    app = create_lifecycle_app(manager, "s" * 48)
+    transport = httpx.ASGITransport(app=app)
+    headers = {"Authorization": f"Bearer {'s' * 48}"}
+    async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as client:
+        checked = await client.post(
+            "/v1/lifecycle/actions",
+            headers=headers,
+            json={"action": "check_update"},
+        )
+        rejected = await client.post(
+            "/v1/lifecycle/actions",
+            headers=headers,
+            json={"action": "activate", "role": "hub"},
+        )
+
+    assert checked.status_code == 200
+    assert checked.json()["update_mode"] == "source"
+    assert rejected.status_code == 409
+    assert rejected.json() == {"error": "source_role_change_requires_installer"}

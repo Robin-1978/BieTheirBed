@@ -28,7 +28,8 @@ Knoa Node
 └── local persistence / Secret
 
 Knoa Host Lifecycle Broker
-├── signed Universal Host Bundle install / rollback
+├── Source / signed Universal Host Bundle update
+├── failed-update automatic recovery
 ├── fixed Hub/Node service activation
 └── platform adapter: WinSW or systemd
 ```
