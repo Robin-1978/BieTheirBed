@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import struct
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from knoa_platform.mdns import MdnsPublisher, SERVICE_TYPE, build_announcement
 
@@ -30,3 +34,34 @@ def test_mdns_send_drops_when_multicast_socket_is_full() -> None:
     publisher = MdnsPublisher.__new__(MdnsPublisher)
     publisher._socket = _FullSocket()
     publisher._send_nowait(b"packet", ("224.0.0.251", 5353))
+
+
+async def test_mdns_responder_ignores_own_address() -> None:
+    publisher = MdnsPublisher(
+        node_id="node_test-1",
+        port=9541,
+        version="0.2.65",
+        signing_public_key="public-key",
+        address="192.168.1.20",
+    )
+    publisher._listener = MagicMock()
+    publisher._socket = MagicMock()
+    publisher._send_nowait = MagicMock()
+    packet = b"announcement"
+    looped_query = b"query _knoa-node._tcp.local"
+    peer_query = b"query _knoa-node._tcp.local"
+
+    with patch("asyncio.get_running_loop") as get_loop:
+        get_loop.return_value.sock_recvfrom = AsyncMock(
+            side_effect=[
+                (looped_query, ("192.168.1.20", 5353)),
+                (peer_query, ("192.168.1.55", 5353)),
+                asyncio.CancelledError(),
+            ]
+        )
+        with pytest.raises(asyncio.CancelledError):
+            await publisher._answer_queries(packet)
+
+    assert publisher._send_nowait.call_count == 2
+    publisher._send_nowait.assert_any_call(packet, ("224.0.0.251", 5353))
+    publisher._send_nowait.assert_any_call(packet, ("192.168.1.55", 5353))

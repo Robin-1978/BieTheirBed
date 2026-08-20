@@ -129,7 +129,7 @@ class MdnsPublisher:
             )
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 0)
             # Never perform a blocking multicast send on the application's
             # asyncio event loop.  On a congested or unavailable LAN route,
             # the kernel can block sendto() while waiting for buffer space,
@@ -186,6 +186,8 @@ class MdnsPublisher:
         try:
             while True:
                 query, sender = await loop.sock_recvfrom(self._listener, 4096)
+                if sender[0] == self.address:
+                    continue
                 if b"_knoa-node" in query or b"_services" in query:
                     self._send_nowait(packet, (MDNS_GROUP, MDNS_PORT))
                     if sender[0] != MDNS_GROUP:
