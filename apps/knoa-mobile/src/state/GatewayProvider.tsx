@@ -35,6 +35,7 @@ type GatewayState = {
   nodeId: string;
   nodes: NodeDeviceBinding[];
   lastConnectedAt: number;
+  transportMode: "direct" | "p2p" | "relay";
   requiredUpdate: AndroidRelease | null;
   availableUpdate: AndroidRelease | null;
   agents: AgentSummary[];
@@ -73,6 +74,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     nodeId: "",
     nodes: [],
     lastConnectedAt: 0,
+    transportMode: "direct",
     requiredUpdate: null,
     availableUpdate: null,
     agents: [],
@@ -113,6 +115,9 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         return;
       }
       const device = { deviceId: identity.deviceId, gatewayUrl: identity.gatewayUrl };
+      const transportChanged = (transportMode: "direct" | "p2p" | "relay") => {
+        if (generation === connectionGenerationRef.current) commit({ transportMode });
+      };
       let token = identity.sessionToken
         && identity.sessionExpiresAt > Date.now() / 1000 + 30
         ? identity.sessionToken
@@ -122,7 +127,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         client = new GatewayClient(
           device.gatewayUrl,
           token,
-          new ConnectionResolverTransport(identity),
+          new ConnectionResolverTransport(identity, transportChanged),
         );
         try {
           await client.gatewaySession();
@@ -134,7 +139,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
             gateway_url: device.gatewayUrl,
             deviceId: device.deviceId,
             binding: identity,
-          });
+          }, transportChanged);
           token = await loadSessionToken();
         }
       } else {
@@ -142,7 +147,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
           gateway_url: device.gatewayUrl,
           deviceId: device.deviceId,
           binding: identity,
-        });
+        }, transportChanged);
         token = await loadSessionToken();
       }
       if (!token) throw new Error("未能建立安全会话");
@@ -159,6 +164,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         nodeId: identity.nodeId,
         nodes,
         lastConnectedAt: Date.now() / 1000,
+        transportMode: client.transportMode(),
         activeAgentId: "",
       });
       if (sessionHandle) {
@@ -210,11 +216,14 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     const pending = (async () => {
       const identity = await loadConnectionIdentity();
       if (!identity) throw new Error("设备尚未配对");
+      const transportChanged = (transportMode: "direct" | "p2p" | "relay") => {
+        if (generation === connectionGenerationRef.current) commit({ transportMode });
+      };
       const client = await authenticateDevice({
         gateway_url: identity.gatewayUrl,
         deviceId: identity.deviceId,
         binding: identity,
-      });
+      }, transportChanged);
       const token = await loadSessionToken();
       if (!token) throw new Error("未能恢复安全会话");
       if (generation !== connectionGenerationRef.current) throw new Error("Node 连接已切换");
@@ -225,6 +234,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         gatewayUrl: identity.gatewayUrl,
         sessionToken: token,
         error: "",
+        transportMode: client.transportMode(),
       });
       void client.listAgents().then(({ defaultAgentId, agents }) => {
         if (generation !== connectionGenerationRef.current) return;

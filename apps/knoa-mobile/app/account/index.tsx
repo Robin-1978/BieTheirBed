@@ -145,6 +145,12 @@ export default function AccountHomeScreen() {
         </AppPressable>
       </View>
 
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>App</Text>
+        <Row icon="settings" title="App 设置" detail="外观、语言和当前版本" onPress={() => router.push("/settings/app")} />
+        <Row icon="refresh" title="版本与更新" detail="检查、下载并安装最新版本" onPress={() => router.push("/update")} />
+      </View>
+
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Workspace</Text>
         {profile ? <AppPressable onPress={() => setCreating((value) => !value)} style={styles.addButton}>
@@ -181,10 +187,6 @@ export default function AccountHomeScreen() {
         </View>
       </View>
 
-      <View style={styles.card}>
-        <Row icon="refresh" title="App 更新" detail="检查、断点下载并安装新版本" onPress={() => router.push("/update")} />
-        <Row icon="settings" title="App 设置" detail="外观、语言、版本与更新" onPress={() => router.push("/settings/app")} />
-      </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <AppPressable disabled={working === "logout"} onPress={confirmLogout} style={styles.logout}>
         <Text style={styles.logoutText}>{working === "logout" ? "正在退出…" : "退出帐号"}</Text>

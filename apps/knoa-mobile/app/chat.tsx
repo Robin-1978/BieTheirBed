@@ -14,6 +14,7 @@ import * as Sharing from "expo-sharing";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   AppState,
   FlatList,
   Image,
@@ -54,6 +55,7 @@ import { shouldResetConversation } from "@/state/conversationTransition";
 import { loadConversationCache, storeConversationCache } from "@/storage/conversationCache";
 import { mergeConversationTurns } from "@/storage/conversationMerge";
 import { prepareImageAttachment } from "@/media/prepareImageAttachment";
+import { agentImageSupport } from "@/media/agentImageSupport";
 import { colors } from "@/theme";
 
 type PendingAttachment = {
@@ -122,6 +124,7 @@ export default function ChatScreen() {
   const [resolvingInteraction, setResolvingInteraction] = useState("");
   const [cancelling, setCancelling] = useState("");
   const [transcribing, setTranscribing] = useState(false);
+  const [validatingInput, setValidatingInput] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const [imagePreview, setImagePreview] = useState<ResolvedArtifactFile | null>(null);
@@ -275,6 +278,7 @@ export default function ChatScreen() {
   const canSend = Boolean(
     !pendingTurn
       && !activeTurn
+      && !validatingInput
       && gateway.client
       && !gateway.requiredUpdate
       && hasComposerContent,
@@ -374,8 +378,32 @@ export default function ChatScreen() {
     }
   }
 
-  function send() {
+  async function send() {
     if (!gateway.client || !canSend) return;
+    if (attachments.some((item) => item.mediaType.startsWith("image/"))) {
+      setValidatingInput(true);
+      try {
+        const current = await gateway.runAuthenticated((client) => client.getConfigCurrent());
+        const agentId = gateway.activeAgentId || gateway.selectedAgentId || current.revision.document.agents.default_agent;
+        const support = agentImageSupport(current.revision.document, agentId);
+        if (!support.supported) {
+          Alert.alert(
+            t("chat.imageUnsupportedTitle"),
+            t("chat.imageUnsupportedDetail", { model: support.modelAlias || t("chat.currentModel") }),
+            [
+              { text: t("chat.keepEditing"), style: "cancel" },
+              { text: t("chat.configureAgent"), onPress: () => router.push("/settings/agents") },
+            ],
+          );
+          return;
+        }
+      } catch {
+        // Capability preflight is advisory. The Node remains authoritative and
+        // will return a durable failure code if configuration changed meanwhile.
+      } finally {
+        setValidatingInput(false);
+      }
+    }
     const pending: PendingChatTurn = {
       localId: `pending:${Crypto.randomUUID()}`,
       requestId: Crypto.randomUUID(),
@@ -943,7 +971,7 @@ export default function ChatScreen() {
             primaryDisabled && styles.sendDisabled,
           ]}
         >
-          {sending || transcribing || cancelling ? (
+          {sending || validatingInput || transcribing || cancelling ? (
             <ActivityIndicator color="white" size="small" />
           ) : stoppingResponse ? (
             <AppIcon name="stop" color="white" size={17} />

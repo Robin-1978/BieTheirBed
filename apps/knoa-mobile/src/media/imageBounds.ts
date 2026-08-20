@@ -1,4 +1,7 @@
-export const MAX_CHAT_IMAGE_EDGE = 1600;
+// Phone photos are reduced before upload. 1024px is intentionally conservative:
+// it keeps text legible while avoiding excessive vision tokens and memory use on
+// small local models such as a 4B llama.cpp deployment.
+export const MAX_CHAT_IMAGE_EDGE = 1024;
 
 export function boundedDimensions(width: number, height: number): { width: number; height: number } {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {

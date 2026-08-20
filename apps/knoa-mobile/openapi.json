@@ -8413,6 +8413,11 @@
             "title": "Default Model",
             "type": "string"
           },
+          "vision_model": {
+            "default": "",
+            "title": "Vision Model",
+            "type": "string"
+          },
           "fallback_model": {
             "default": "",
             "title": "Fallback Model",

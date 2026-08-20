@@ -126,7 +126,12 @@ export type ManagedConfig = {
     requires_api_key: boolean | null;
     timeout_seconds: number;
   }>;
-  models: Record<string, { provider: string; model: string; [key: string]: unknown }>;
+  models: Record<string, {
+    provider: string;
+    model: string;
+    supports_vision?: boolean | null;
+    [key: string]: unknown;
+  }>;
   model_deployments: Record<string, {
     model_alias: string;
     resource_id: string;
@@ -137,6 +142,7 @@ export type ManagedConfig = {
     allowed_node_ids: string[];
   }>;
   default_model: string;
+  vision_model: string;
   fallback_model: string;
   fallback_enabled: boolean;
   agents: {

@@ -488,7 +488,7 @@ async def _send_json(channel: Any, message: dict[str, Any]) -> None:
 async def _wait_for_ice_gathering(
     peer: RTCPeerConnection,
     *,
-    timeout: float = 8.0,
+    timeout: float = 2.0,
 ) -> None:
     if peer.iceGatheringState == "complete":
         return
@@ -500,7 +500,12 @@ async def _wait_for_ice_gathering(
             completed.set()
 
     changed()
-    await asyncio.wait_for(completed.wait(), timeout=timeout)
+    try:
+        await asyncio.wait_for(completed.wait(), timeout=timeout)
+    except TimeoutError:
+        # Host candidates are normally available immediately and are enough on
+        # one LAN. An unreachable public STUN server must not disable that path.
+        return
 
 
 __all__ = [

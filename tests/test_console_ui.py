@@ -45,6 +45,9 @@ def test_node_console_owns_configuration_and_secret_management() -> None:
     assert "保存并热生效" in page
     assert "publishCurrent(`Add Provider" in page
     assert 'id="newModelProvider"' in page
+    assert 'id="shareModelSelect"' in page
+    assert 'const alias=el("shareModelSelect").value' in page
+    assert 'el("shareModelSelect").onchange=renderSharing' in page
     assert "发布高级 JSON 更改" in page
     assert "新增 Provider 草稿" not in page
     for tab in ("overview", "models", "agents", "sharing", "system"):

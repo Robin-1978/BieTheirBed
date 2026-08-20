@@ -7,6 +7,8 @@ import pytest
 
 from knoa_agent import ContextCheckpointRepository, KnoaAgentRuntime
 from knoa_agent_contracts import (
+    ArtifactPart,
+    ArtifactReference,
     CreateRuntimeSession,
     McpEndpointGrant,
     RuntimeInterruptCommand,
@@ -58,6 +60,81 @@ class Connector:
                 return None
 
         return Bound()
+
+
+class ImageClient(Client):
+    def __init__(self, *, expose_tool: bool = True) -> None:
+        self.expose_tool = expose_tool
+        self.calls = []
+
+    async def list_tools(self):
+        if not self.expose_tool:
+            return ()
+        return ({
+            "name": "image_inspect",
+            "description": "Observe image pixels.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "artifact_id": {"type": "string"},
+                    "question": {"type": "string"},
+                },
+                "required": ["artifact_id", "question"],
+            },
+        },)
+
+    async def read_resource(self, uri):
+        assert uri == "knoa-artifact://image-a"
+        return ({
+            "media_type": "image/png",
+            "blob": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
+        },)
+
+    async def call_tool(self, call):
+        self.calls.append(call)
+        return ToolStepResult(
+            call_id=call.call_id,
+            tool_name=call.name,
+            status="completed",
+            output={
+                "observation_id": "observation-a",
+                "artifact_id": "image-a",
+                "observation": "The image contains a blue status panel.",
+                "model": "vision",
+            },
+        )
+
+
+class ImageConnector:
+    def __init__(self, client: ImageClient) -> None:
+        self.client = client
+
+    def connect(self, grant):
+        del grant
+        client = self.client
+
+        class Bound:
+            async def __aenter__(self):
+                return client
+
+            async def __aexit__(self, *_args):
+                return None
+
+        return Bound()
+
+
+def image_part() -> ArtifactPart:
+    return ArtifactPart(
+        artifact=ArtifactReference(
+            artifact_id="image-a",
+            name="photo.png",
+            media_type="image/png",
+            size_bytes=68,
+            sha256="b" * 64,
+        ),
+        resource_uri="knoa-artifact://image-a",
+        presentation="image",
+    )
 
 
 class WeatherClient(Client):
@@ -456,6 +533,178 @@ async def test_tool_help_activates_deferred_mcp_tool_on_next_model_step(
         "properties": {"issue_key": {"type": "string"}},
         "required": ["issue_key"],
     }
+
+
+@pytest.mark.asyncio
+async def test_text_model_uses_dedicated_image_inspect_before_answering(
+    tmp_path: Path,
+) -> None:
+    class VisionRoutingProvider(Provider):
+        def stream(self, request, cancellation):
+            del cancellation
+
+            async def iterate():
+                self.requests.append(request)
+                if len(self.requests) == 1:
+                    yield ProviderChunk(
+                        tool_calls=(ProposedToolCall(
+                            call_id="inspect-a",
+                            name="image_inspect",
+                            arguments={
+                                "artifact_id": "image-a",
+                                "question": "What visible status is shown?",
+                            },
+                        ),),
+                        finish_reason="tool_calls",
+                        terminal=True,
+                    )
+                    return
+                yield ProviderChunk(content_delta="The visible panel is blue.")
+                yield ProviderChunk(finish_reason="stop", terminal=True)
+
+            return iterate()
+
+    provider = VisionRoutingProvider()
+    client = ImageClient()
+    runtime = KnoaAgentRuntime(
+        provider,
+        ContextCheckpointRepository(tmp_path / "context.db"),
+        ImageConnector(client),
+        system_prompt="system",
+        health_probe=healthy,
+        supports_vision=False,
+    )
+    session = await runtime.create_session(
+        CreateRuntimeSession(operation_id="create-image", binding_epoch=1)
+    )
+    turn = await runtime.start_turn(RuntimeTurnRequest(
+        session=session,
+        operation_id="operation-image",
+        input=(TextPart(text="What does this show?"), image_part()),
+        mcp=grant(),
+    ))
+
+    events = [event async for event in turn.events]
+
+    assert events[-1].status == "completed"
+    assert [call.name for call in client.calls] == ["image_inspect"]
+    first_content = provider.requests[0].messages[-1]["content"]
+    assert any("You cannot see its pixels" in block.get("text", "") for block in first_content)
+    assert not any(block.get("type") == "image" for block in first_content)
+    assert "observation-a" in str(provider.requests[1].messages)
+
+
+@pytest.mark.asyncio
+async def test_text_model_cannot_finish_before_image_is_observed(
+    tmp_path: Path,
+) -> None:
+    class DelayedInspectProvider(Provider):
+        def stream(self, request, cancellation):
+            del cancellation
+
+            async def iterate():
+                self.requests.append(request)
+                if len(self.requests) == 1:
+                    yield ProviderChunk(content_delta="It looks fine.")
+                    yield ProviderChunk(finish_reason="stop", terminal=True)
+                elif len(self.requests) == 2:
+                    yield ProviderChunk(
+                        tool_calls=(ProposedToolCall(
+                            call_id="inspect-b",
+                            name="image_inspect",
+                            arguments={"artifact_id": "image-a", "question": "What is visible?"},
+                        ),),
+                        finish_reason="tool_calls",
+                        terminal=True,
+                    )
+                else:
+                    yield ProviderChunk(content_delta="Observed answer.")
+                    yield ProviderChunk(finish_reason="stop", terminal=True)
+
+            return iterate()
+
+    provider = DelayedInspectProvider()
+    runtime = KnoaAgentRuntime(
+        provider,
+        ContextCheckpointRepository(tmp_path / "context.db"),
+        ImageConnector(ImageClient()),
+        system_prompt="system",
+        health_probe=healthy,
+        supports_vision=False,
+    )
+    session = await runtime.create_session(
+        CreateRuntimeSession(operation_id="create-guard", binding_epoch=1)
+    )
+    turn = await runtime.start_turn(RuntimeTurnRequest(
+        session=session,
+        operation_id="operation-guard",
+        input=(image_part(),),
+        mcp=grant(),
+    ))
+
+    events = [event async for event in turn.events]
+
+    assert events[-1].status == "completed"
+    assert len(provider.requests) == 3
+    assert "has not been observed" in str(provider.requests[1].messages)
+
+
+@pytest.mark.asyncio
+async def test_native_vision_model_receives_image_bytes_directly(tmp_path: Path) -> None:
+    provider = Provider()
+    runtime = KnoaAgentRuntime(
+        provider,
+        ContextCheckpointRepository(tmp_path / "context.db"),
+        ImageConnector(ImageClient(expose_tool=False)),
+        system_prompt="system",
+        health_probe=healthy,
+        supports_vision=True,
+    )
+    session = await runtime.create_session(
+        CreateRuntimeSession(operation_id="create-native-vision", binding_epoch=1)
+    )
+    turn = await runtime.start_turn(RuntimeTurnRequest(
+        session=session,
+        operation_id="operation-native-vision",
+        input=(image_part(),),
+        mcp=grant(),
+    ))
+
+    events = [event async for event in turn.events]
+
+    assert events[-1].status == "completed"
+    content = provider.requests[0].messages[-1]["content"]
+    assert any(block.get("type") == "image" for block in content)
+
+
+@pytest.mark.asyncio
+async def test_text_model_reports_vision_unavailable_without_dedicated_tool(
+    tmp_path: Path,
+) -> None:
+    provider = Provider()
+    runtime = KnoaAgentRuntime(
+        provider,
+        ContextCheckpointRepository(tmp_path / "context.db"),
+        ImageConnector(ImageClient(expose_tool=False)),
+        system_prompt="system",
+        health_probe=healthy,
+        supports_vision=False,
+    )
+    session = await runtime.create_session(
+        CreateRuntimeSession(operation_id="create-no-vision", binding_epoch=1)
+    )
+    turn = await runtime.start_turn(RuntimeTurnRequest(
+        session=session,
+        operation_id="operation-no-vision",
+        input=(image_part(),),
+        mcp=grant(),
+    ))
+
+    events = [event async for event in turn.events]
+
+    assert events[-1].status == "failed"
+    assert events[-1].error_code == "vision_unavailable"
+    assert provider.requests == []
 
 
 @pytest.mark.asyncio

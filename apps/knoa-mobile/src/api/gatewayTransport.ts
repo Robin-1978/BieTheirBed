@@ -45,7 +45,10 @@ export class ConnectionResolverTransport implements GatewayTransport {
   private relayPreferredUntil = 0;
   private hubEndpointBinding: Promise<boolean> | null = null;
 
-  constructor(private readonly binding: NodeDeviceBinding) {}
+  constructor(
+    private readonly binding: NodeDeviceBinding,
+    private readonly onModeChange?: (mode: "direct" | "p2p" | "relay") => void,
+  ) {}
 
   mode(): "direct" | "p2p" | "relay" {
     return this.active;
@@ -55,7 +58,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
     if (this.p2p?.ready()) {
       try {
         const response = await this.p2p.request(baseUrl, path, init);
-        this.active = "p2p";
+        this.setActive("p2p");
         return response;
       } catch {
         this.p2p.close();
@@ -89,7 +92,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
         ),
         4500,
       );
-      this.active = "direct";
+      this.setActive("direct");
       return response;
     } catch (directError) {
       try {
@@ -115,7 +118,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
   private async relayRequest(baseUrl: string, path: string, init: RequestInit): Promise<Response> {
     if (!this.relay) this.relay = new RelayTransport(this.binding, "session");
     const response = await this.relay.request(baseUrl, path, init);
-    this.active = "relay";
+    this.setActive("relay");
     return response;
   }
 
@@ -137,7 +140,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
       });
       this.p2p?.close();
       this.p2p = p2p;
-      this.active = "p2p";
+      this.setActive("p2p");
       this.relayPreferredUntil = 0;
       this.p2pRetryAfter = 0;
     })().catch(() => {
@@ -155,6 +158,12 @@ export class ConnectionResolverTransport implements GatewayTransport {
         .catch(() => false);
     }
     return this.hubEndpointBinding;
+  }
+
+  private setActive(mode: "direct" | "p2p" | "relay"): void {
+    if (this.active === mode) return;
+    this.active = mode;
+    this.onModeChange?.(mode);
   }
 }
 
@@ -801,7 +810,7 @@ function waitForSocketOpen(socket: WebSocket): Promise<void> {
 
 function waitForIceGathering(peer: RTCPeerConnection): Promise<void> {
   if (peer.iceGatheringState === "complete") return Promise.resolve();
-  return withPromiseTimeout(new Promise((resolve) => {
+  const complete = new Promise<void>((resolve) => {
     const check = () => {
       if (peer.iceGatheringState !== "complete") return;
       peer.onicegatheringstatechange = null;
@@ -809,7 +818,13 @@ function waitForIceGathering(peer: RTCPeerConnection): Promise<void> {
     };
     peer.onicegatheringstatechange = check;
     check();
-  }), 8_000, "P2P ICE 候选收集超时");
+  });
+  // LAN host candidates arrive first. If public STUN is blocked, continue with
+  // those candidates instead of silently forcing every request through Relay.
+  return Promise.race([
+    complete,
+    new Promise<void>((resolve) => setTimeout(resolve, 2_000)),
+  ]);
 }
 
 function waitForJson(socket: WebSocket): Promise<Record<string, unknown>> {

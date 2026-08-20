@@ -5,6 +5,7 @@ import type { ChatTurnSnapshot } from "@/api/models";
 import { useI18n } from "@/i18n";
 import { colors } from "@/theme";
 import { timelineDisplayEntries, type TimelineDisplayEntry } from "./turnTimeline";
+import { turnFailureMessage } from "./turnFailurePresentation";
 
 const TERMINAL_STATES = new Set<ChatTurnSnapshot["state"]>(["completed", "failed", "cancelled"]);
 
@@ -17,7 +18,7 @@ export function TurnProgress({ turn }: { turn: ChatTurnSnapshot }) {
   );
   const [expanded, setExpanded] = useState(false);
 
-  if (!active && !entries.length) return null;
+  if (!active && !entries.length && turn.state !== "failed") return null;
 
   return (
     <View style={styles.root}>
@@ -28,10 +29,15 @@ export function TurnProgress({ turn }: { turn: ChatTurnSnapshot }) {
         onPress={() => setExpanded((current) => !current)}
         style={styles.header}
       >
-        {active ? <ActivityIndicator color={colors.accent} size="small" /> : <Text style={styles.done}>✓</Text>}
+        {active
+          ? <ActivityIndicator color={colors.accent} size="small" />
+          : <Text style={turn.state === "failed" ? styles.failed : styles.done}>{turn.state === "failed" ? "!" : "✓"}</Text>}
         <Text style={styles.label}>{progressLabel(turn, entries, t)}</Text>
         {entries.length ? <Text style={styles.toggle}>{expanded ? t("turn.collapseShort") : t("turn.view")}</Text> : null}
       </Pressable>
+      {turn.state === "failed" ? (
+        <Text accessibilityRole="alert" style={styles.failureDetail}>{turnFailureMessage(turn, t)}</Text>
+      ) : null}
       {expanded && entries.length ? (
         <View style={styles.details}>
           {entries.map((entry) => (
@@ -119,5 +125,6 @@ const styles = StyleSheet.create({
   runningDot: { color: colors.accent, fontSize: 20, fontWeight: "900", width: 18, textAlign: "center" },
   done: { color: colors.accent, fontWeight: "800", width: 18, textAlign: "center" },
   failed: { color: colors.danger, fontWeight: "800", width: 18, textAlign: "center" },
+  failureDetail: { color: colors.danger, fontSize: 13, lineHeight: 19, paddingHorizontal: 11, paddingBottom: 11 },
   notice: { color: colors.muted, fontSize: 12, lineHeight: 18 },
 });
