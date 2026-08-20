@@ -7,13 +7,14 @@ CHANNEL_SOURCE_PATH=""
 PYTHON_EXECUTABLE="python3"
 HUB_PUBLIC_URL="https://knoa.tinydotdot.com"
 RECREATE_VENV=0
+SKIP_PAIRING_QR=0
 
 usage() {
     printf '%s\n' \
         "Usage: install-knoa.sh [--role hub|node|all] [--source PATH]" \
         "                       [--channel-source PATH]" \
         "                       [--python PATH] [--hub-public-url URL]" \
-        "                       [--recreate-venv]"
+        "                       [--recreate-venv] [--skip-pairing-qr]"
 }
 
 while [ "$#" -gt 0 ]; do
@@ -24,6 +25,7 @@ while [ "$#" -gt 0 ]; do
         --python) PYTHON_EXECUTABLE="${2:?missing Python executable}"; shift 2 ;;
         --hub-public-url) HUB_PUBLIC_URL="${2:?missing Hub public URL}"; shift 2 ;;
         --recreate-venv) RECREATE_VENV=1; shift ;;
+        --skip-pairing-qr) SKIP_PAIRING_QR=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) printf 'Unknown argument: %s\n' "$1" >&2; usage >&2; exit 2 ;;
     esac
@@ -173,9 +175,9 @@ fi
 if [ "$install_node" -eq 1 ]; then
     systemctl --user enable --now knoa-node.service
     printf 'Knoa Node Gateway: http://127.0.0.1:9531\n'
-    if [ -f "$NODE_ROOT/data/node-hub.json" ]; then
+    if [ -f "$NODE_ROOT/data/node-hub.json" ] && [ "$SKIP_PAIRING_QR" -ne 1 ]; then
         "$VENV_ROOT/bin/python" -m knoa_platform --config "$NODE_CONFIG" gateway pair --ttl 600 || true
-    else
+    elif [ ! -f "$NODE_ROOT/data/node-hub.json" ]; then
         printf 'Enroll this Node into a Workspace, then restart knoa-node.service.\n'
     fi
 fi
