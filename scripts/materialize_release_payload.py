@@ -137,6 +137,16 @@ def materialize_payload(
             module="knoa_platform.hub",
         )
     )
+    if target_os == "windows":
+        launchers.append(
+            _write_launcher(
+                bin_root,
+                target_os=target_os,
+                name="knoa-desktop-companion",
+                python_path=python_path,
+                module="knoa_platform.desktop_companion",
+            )
+        )
     launchers.append(
         _write_launcher(
             bin_root,

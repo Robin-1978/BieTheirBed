@@ -42,6 +42,18 @@ def test_windows_installer_uses_universal_bundle_and_three_winsw_services() -> N
     assert 'product-role' not in installer
 
 
+def test_windows_node_installs_interactive_desktop_companion() -> None:
+    installer = _read("deploy/product/windows/Install-KnoaBundle.ps1")
+    node_runner = _read("deploy/product/windows/Run-KnoaNode.ps1")
+    companion_runner = _read("deploy/product/windows/Run-KnoaDesktopCompanion.ps1")
+
+    assert 'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' in installer
+    assert 'KnoaDesktopCompanion' in installer
+    assert '*S-1-5-32-545:(OI)(CI)RX' in installer
+    assert 'KNOA_DESKTOP_COMPANION_TOKEN_FILE' in node_runner
+    assert 'bin/knoa-desktop-companion.cmd' in companion_runner
+
+
 def test_windows_hub_console_public_url_is_explicit() -> None:
     runner = _read("deploy/product/windows/Run-KnoaHub.ps1")
 

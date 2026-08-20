@@ -2,7 +2,7 @@
 
 > 状态：跨平台产品交付权威文档
 >
-> 日期：2026-08-19
+> 日期：2026-08-20
 >
 > 适用平台：Windows x86_64/aarch64、Linux x86_64/aarch64
 
@@ -20,6 +20,7 @@ knoa-host-<version>-<os>-<arch>.zip
 │   ├── knoa-hub
 │   ├── knoa-node
 │   ├── knoa-host-lifecycle
+│   ├── knoa-desktop-companion      # 仅 Windows
 │   └── knoa-health
 ├── install/                       # Windows/Linux service adapter
 └── service/WinSW.exe              # 仅 Windows
@@ -40,6 +41,11 @@ installed_roles = {hub, node}
 - Linux：发行版软件包，第一目标是 `.deb`；
 - 首次安装后：Hub Console / Node Console 负责更新、回退、角色启停和诊断。
 
+“一键更新”只指 Universal Host 产品安装：Console 选择已签名 Bundle 后，Lifecycle Broker 自动完成校验、停服、
+原子切换、启动、健康检查和失败回退。旧的 source-backed user systemd/venv 部署不具备 Broker，必须先通过
+`.deb` 迁移到 Universal Host；不能把 `git pull + pip install + systemctl restart` 称为产品一键更新。当前
+Console 尚未实现从 Hosted Release Channel 自动检查和下载，选择本地签名 Bundle 仍是 V1 的一次人工输入。
+
 仓库中的 PowerShell/Shell 安装资产只服务发布构建、CI、开发和灾难恢复，不是最终用户界面。
 
 ## 2. 进程、Console 与端口
@@ -53,6 +59,9 @@ Universal Knoa Host
 │   └── Hub Console: 127.0.0.1:9532/console
 └── Knoa Node（可激活）
     └── Node Console / Gateway: 127.0.0.1:9531/console
+
+Windows 登录用户会话
+└── Knoa Desktop Companion（Node 激活时随登录自动启动）
 ```
 
 Cloudflare Tunnel 只转发 `127.0.0.1:9529`。`9531`、`9532`、`9533` 永不进入 Tunnel。公网
@@ -101,6 +110,8 @@ C:\ProgramData\Knoa\
 │   └── node.yaml
 ├── Secrets\
 │   └── lifecycle.token
+├── Desktop\
+│   └── companion.token
 ├── Services\
 │   ├── KnoaHostLifecycle\
 │   ├── KnoaHostedHub\
@@ -109,7 +120,15 @@ C:\ProgramData\Knoa\
 ```
 
 三个 Windows service 都由 WinSW 承载并以 LocalSystem 运行；`KnoaHostLifecycle` 始终启动，Hub/Node 按
-`installed_roles` 激活。ProgramData 使用 SYSTEM 和 Administrators ACL。
+`installed_roles` 激活。ProgramData 使用 SYSTEM 和 Administrators ACL。Desktop Companion 不是 service，
+安装 Node 时会立即在当前交互 Session 启动，并通过 HKLM 登录启动项在后续登录恢复；它通过按 Windows Session ID 隔离的认证 Named Pipe 接收
+固定桌面 Tool 请求。Node service 不直接调用 BitBlt、剪贴板、窗口或键鼠 API。`Desktop` 子目录仅向本机 Users
+开放只读 Token，其余 ProgramData 数据仍不可读。
+
+Companion 启动器持续通过 `knoa-update current` 观察活动 Release；Console 更新切换 `state.json` 后自动重启
+Companion 子进程，因此 Windows 桌面能力与 Hub/Node 使用同一个版本，不需要用户再次登录。无人登录、锁屏后
+桌面不可用或 Companion 未运行时，Node 必须返回 `execution_environment_unavailable`，不得退回 Session 0
+BitBlt。
 
 ### Linux
 
@@ -155,6 +174,13 @@ Enrollment Code 中的 `hub_url` 必须是 Workspace 的公网 Hub URL，不能�
 - Node Agent、LLM、Key、MCP、Skill、Tool、Task 和 Conversation：Node Console；
 - 产品更新、回退、服务重启：任一已激活角色的本地 Console；
 - 日常 Workspace/Node 选择、会话和任务：App。
+
+### Linux 更新现状
+
+- 安装为 Universal Host `.deb` 后：有 Console 一键安装、健康检查、失败回退和上一版回退；
+- 当前开发机若仍运行 `~/.local/share/knoa/runtime/venv` 与 user systemd：没有产品级一键更新；
+- 正向迁移目标是安装 `.deb` 并保留/导入 HubRoot、NodeRoot 和 identity，迁移完成后删除源码服务；
+- 自动检查 Hosted 最新版本属于后续 Release Channel 增量，不阻塞签名 Bundle 的本地一键安装闭环。
 
 ## 6. 发布构建合同
 

@@ -113,6 +113,8 @@ $nodeRoot = Join-Path $DataRoot "Node"
 $workspaceRoot = Join-Path $DataRoot "Workspace"
 $hostState = Join-Path $configRoot "host-state.json"
 $lifecycleToken = Join-Path $secretRoot "lifecycle.token"
+$desktopRoot = Join-Path $DataRoot "Desktop"
+$desktopToken = Join-Path $desktopRoot "companion.token"
 $lifecycleTrust = Join-Path $configRoot "release-trust.json"
 $incomingRoot = Join-Path $DataRoot "Incoming"
 $staging = Join-Path $InstallRoot (".incoming." + [Guid]::NewGuid().ToString("N"))
@@ -121,7 +123,7 @@ $services = @()
 if ($Role -in @("hub", "all")) { $services += "KnoaHostedHub" }
 if ($Role -in @("node", "all")) { $services += "KnoaNode" }
 
-New-Item -ItemType Directory -Force -Path $InstallRoot, $releaseRoot, $binRoot, $serviceRoot, $scriptRoot, $configRoot, $secretRoot, $logRoot, $incomingRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $InstallRoot, $releaseRoot, $binRoot, $serviceRoot, $scriptRoot, $configRoot, $secretRoot, $logRoot, $incomingRoot, $desktopRoot | Out-Null
 & icacls.exe $DataRoot /inheritance:r /grant:r "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F" | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Could not protect the Knoa data root ACL" }
 try {
@@ -143,12 +145,18 @@ try {
     Copy-Item -LiteralPath (Join-Path $current "install\Run-KnoaHub.ps1") -Destination (Join-Path $scriptRoot "Run-KnoaHub.ps1") -Force
     Copy-Item -LiteralPath (Join-Path $current "install\Run-KnoaNode.ps1") -Destination (Join-Path $scriptRoot "Run-KnoaNode.ps1") -Force
     Copy-Item -LiteralPath (Join-Path $current "install\Run-KnoaHostLifecycle.ps1") -Destination (Join-Path $scriptRoot "Run-KnoaHostLifecycle.ps1") -Force
+    Copy-Item -LiteralPath (Join-Path $current "install\Run-KnoaDesktopCompanion.ps1") -Destination (Join-Path $scriptRoot "Run-KnoaDesktopCompanion.ps1") -Force
 
     New-Item -ItemType Directory -Force -Path $hubRoot, $nodeRoot, $workspaceRoot | Out-Null
     foreach ($name in @("hub-bootstrap.token", "hub-release-publisher.token", "lifecycle.token")) {
             $path = Join-Path $secretRoot $name
             if (-not (Test-Path -LiteralPath $path)) { Write-Utf8NoBom $path (New-Secret) }
     }
+    if (-not (Test-Path -LiteralPath $desktopToken)) { Write-Utf8NoBom $desktopToken (New-Secret) }
+    & icacls.exe $desktopRoot /inheritance:r /grant:r "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not configure the Desktop Companion ACL" }
+    & icacls.exe $desktopToken /inheritance:r /grant:r "SYSTEM:F" "Administrators:F" "*S-1-5-32-545:R" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not protect the Desktop Companion token" }
     Copy-Item -LiteralPath $trust -Destination $lifecycleTrust -Force
     $nodeConfig = Join-Path $configRoot "node.yaml"
     if (-not (Test-Path -LiteralPath $nodeConfig)) {
@@ -159,13 +167,27 @@ try {
     Write-Utf8NoBom $hostState ((@{ schema_version = 1; installed_roles = $roles } | ConvertTo-Json -Compress))
     $hubArguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Updater "{1}" -ReleaseRoot "{2}" -HubRoot "{3}" -BootstrapTokenFile "{4}" -ReleasePublishTokenFile "{5}" -LifecycleTokenFile "{6}" -LifecycleIncomingRoot "{7}" -PublicUrl "{8}"' -f `
         (Join-Path $scriptRoot "Run-KnoaHub.ps1"), $installedUpdater, $releaseRoot, $hubRoot, (Join-Path $secretRoot "hub-bootstrap.token"), (Join-Path $secretRoot "hub-release-publisher.token"), $lifecycleToken, $incomingRoot, $HubPublicUrl
-    $nodeArguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Updater "{1}" -ReleaseRoot "{2}" -NodeRoot "{3}" -ConfigPath "{4}" -LifecycleTokenFile "{5}" -LifecycleIncomingRoot "{6}"' -f `
-        (Join-Path $scriptRoot "Run-KnoaNode.ps1"), $installedUpdater, $releaseRoot, $nodeRoot, $nodeConfig, $lifecycleToken, $incomingRoot
+    $nodeArguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Updater "{1}" -ReleaseRoot "{2}" -NodeRoot "{3}" -ConfigPath "{4}" -LifecycleTokenFile "{5}" -LifecycleIncomingRoot "{6}" -DesktopCompanionTokenFile "{7}"' -f `
+        (Join-Path $scriptRoot "Run-KnoaNode.ps1"), $installedUpdater, $releaseRoot, $nodeRoot, $nodeConfig, $lifecycleToken, $incomingRoot, $desktopToken
     $lifecycleArguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Updater "{1}" -ReleaseRoot "{2}" -TrustStore "{3}" -StateFile "{4}" -IncomingRoot "{5}" -TokenFile "{6}"' -f `
         (Join-Path $scriptRoot "Run-KnoaHostLifecycle.ps1"), $installedUpdater, $releaseRoot, $lifecycleTrust, $hostState, $incomingRoot, $lifecycleToken
     Install-WinSWService "KnoaHostedHub" "Knoa Hosted Hub" $hubArguments $winsw $serviceRoot (Join-Path $logRoot "Hub")
     Install-WinSWService "KnoaNode" "Knoa Node" $nodeArguments $winsw $serviceRoot (Join-Path $logRoot "Node")
     Install-WinSWService "KnoaHostLifecycle" "Knoa Host Lifecycle" $lifecycleArguments $winsw $serviceRoot (Join-Path $logRoot "Lifecycle")
+
+    if ($Role -in @("node", "all")) {
+        $companionCommand = 'powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -Updater "{1}" -ReleaseRoot "{2}" -TokenFile "{3}"' -f `
+            (Join-Path $scriptRoot "Run-KnoaDesktopCompanion.ps1"), $installedUpdater, $releaseRoot, $desktopToken
+        & reg.exe add "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "KnoaDesktopCompanion" /t REG_SZ /d $companionCommand /f | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not register the Desktop Companion login launcher" }
+        $runningCompanion = Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue | `
+            Where-Object { $_.CommandLine -like "*Run-KnoaDesktopCompanion.ps1*" }
+        if (-not $runningCompanion) {
+            Start-Process -FilePath "powershell.exe" -ArgumentList ($companionCommand.Substring("powershell.exe ".Length)) -WindowStyle Hidden | Out-Null
+        }
+    } else {
+        & reg.exe delete "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "KnoaDesktopCompanion" /f 2>$null | Out-Null
+    }
 
     Set-Service -Name KnoaHostedHub -StartupType Disabled
     Set-Service -Name KnoaNode -StartupType Disabled
@@ -197,3 +219,4 @@ try {
 Write-Host "Installed and verified the universal Knoa Host Bundle with active roles: $Role. Persistent data remains under $DataRoot."
 if ($Role -in @("hub", "all")) { Write-Host "Hub: $HubPublicUrl" }
 if ($Role -in @("node", "all")) { Write-Host "Node Console/Gateway: http://127.0.0.1:9531" }
+if ($Role -in @("node", "all")) { Write-Host "Desktop Companion is running and will start automatically at Windows sign-in." }

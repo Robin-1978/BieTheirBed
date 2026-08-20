@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import asyncio
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, TypedDict
@@ -103,7 +104,27 @@ class ToolBase(ABC):
 
     async def execute_scoped(self, scope: Any, **kwargs: Any) -> Any:
         del scope
+        if self.capabilities & {
+            ToolCapability.DESKTOP_OBSERVE,
+            ToolCapability.DESKTOP_CONTROL,
+        }:
+            from knoa_platform.desktop_companion import (
+                desktop_companion_required,
+                invoke_desktop_companion,
+            )
+
+            if desktop_companion_required():
+                result = await asyncio.to_thread(
+                    invoke_desktop_companion,
+                    self.name,
+                    kwargs,
+                )
+                return await self.consume_desktop_companion_result(result)
         return await self.execute(**kwargs)
+
+    async def consume_desktop_companion_result(self, result: dict[str, Any]) -> Any:
+        """Convert a Companion result into the public tool result."""
+        return result
 
     @abstractmethod
     def definition(self) -> ToolDefinition:

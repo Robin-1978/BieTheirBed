@@ -33,11 +33,14 @@ class ConsoleRoutes:
     async def _console_status(self, request: Request) -> JSONResponse:
         if (error := self._console_authorize(request)) is not None:
             return error
+        from knoa_platform.desktop_companion import desktop_companion_status
+
         return JSONResponse(
             {
                 "node": self._node_identity.descriptor(),
                 "runtime_version": __version__,
                 "hub": self._node_relay.status,
+                "desktop": await asyncio.to_thread(desktop_companion_status),
             },
             headers={"Cache-Control": "no-store"},
         )

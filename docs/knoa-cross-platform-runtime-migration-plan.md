@@ -276,6 +276,9 @@ writer gate、binary/data rollback cutoff、删除 issue、截止子阶段和测
 
 ## 10. Phase 7：Desktop Companion
 
+当前状态：Windows 路径已实现第一版产品闭环；Linux 仍使用同用户图形 Session 环境恢复，尚未拆成独立
+Companion，因此本 Phase 尚未整体完成。
+
 ### 工作
 
 - Windows 和 Linux 各自实现登录用户 Companion；
@@ -283,6 +286,9 @@ writer gate、binary/data rollback cutoff、删除 issue、截止子阶段和测
 - 截图、剪贴板、窗口、键鼠和通知通过 Capability Gateway；
 - Companion 离线时 Node 不发布桌面能力；
 - Windows Service 继续运行 Session 0，不启用交互式服务。
+- Windows 安装器为 Node role 注册登录启动 Companion；Companion 监听按 Session ID 命名的认证 Pipe；
+- Companion supervisor 观察 Universal Host 活动 Release 并在产品更新后自动重启子进程；
+- 内置 screenshot、clipboard、window、mouse、keyboard、notification 统一经过该 IPC，不允许逐 Tool 绕过。
 
 ### 验收
 
