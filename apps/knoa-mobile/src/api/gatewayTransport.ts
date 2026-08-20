@@ -155,6 +155,12 @@ export class ConnectionResolverTransport implements GatewayTransport {
           if (!payload.answer?.sdp || payload.answer.type !== "answer") throw new Error("Node P2P answer invalid");
           return { type: "answer" as const, sdp: payload.answer.sdp };
         });
+        this.setP2PDiagnostic("ready");
+        const probe = await p2p.request(baseUrl, "/v1/session", {
+          method: "GET",
+          headers: init.headers,
+        });
+        if (!probe.ok) throw new Error(`P2P 探测被 Node 拒绝（HTTP ${probe.status}）`);
       } catch (error) {
         p2p.close();
         throw error;
@@ -163,7 +169,8 @@ export class ConnectionResolverTransport implements GatewayTransport {
       this.p2p = p2p;
       this.relayPreferredUntil = 0;
       this.p2pRetryAfter = 0;
-      this.setP2PDiagnostic("ready");
+      this.setActive("p2p");
+      this.setP2PDiagnostic("active");
     })().catch((error) => {
       this.p2pRetryAfter = Date.now() + 60_000;
       this.setP2PDiagnostic("cooldown", errorText(error), this.p2pRetryAfter);
