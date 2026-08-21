@@ -78,6 +78,36 @@ function Install-KnoaP2PFirewallRule([string]$ProgramPath) {
         -Program $ProgramPath | Out-Null
 }
 
+function Install-KnoaMdnsFirewallRules {
+    $mdnsRuleName = "KnoaNodeMdns"
+    Get-NetFirewallRule -Name $mdnsRuleName -ErrorAction SilentlyContinue | `
+        Remove-NetFirewallRule -ErrorAction SilentlyContinue
+    New-NetFirewallRule `
+        -Name $mdnsRuleName `
+        -DisplayName "Knoa Node mDNS Discovery" `
+        -Description "Allow Knoa Node mDNS discovery traffic on UDP 5353" `
+        -Direction Inbound `
+        -Action Allow `
+        -Enabled True `
+        -Profile Any `
+        -Protocol UDP `
+        -LocalPort 5353 | Out-Null
+
+    $gatewayRuleName = "KnoaNodeLanGateway"
+    Get-NetFirewallRule -Name $gatewayRuleName -ErrorAction SilentlyContinue | `
+        Remove-NetFirewallRule -ErrorAction SilentlyContinue
+    New-NetFirewallRule `
+        -Name $gatewayRuleName `
+        -DisplayName "Knoa Node LAN Gateway" `
+        -Description "Allow authenticated Knoa Node LAN gateway traffic on TCP 9541" `
+        -Direction Inbound `
+        -Action Allow `
+        -Enabled True `
+        -Profile Any `
+        -Protocol TCP `
+        -LocalPort 9541 | Out-Null
+}
+
 function Install-WinSWService {
     param(
         [string]$ServiceId,
@@ -157,6 +187,7 @@ try {
     if (-not (Test-Path -LiteralPath $winsw)) { throw "The Windows Bundle does not contain service/WinSW.exe" }
     if ($Role -in @("node", "all")) {
         Install-KnoaP2PFirewallRule (Join-Path $current "runtime\python.exe")
+        Install-KnoaMdnsFirewallRules
     }
 
     Stop-RoleServices @("KnoaHostLifecycle", "KnoaHostedHub", "KnoaNode")

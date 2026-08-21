@@ -50,6 +50,19 @@ def test_lan_addresses_skips_loopback_and_docker() -> None:
         assert lan_addresses() == ["10.12.28.139", "10.12.10.63"]
 
 
+def test_windows_lan_addresses_query_only_uses_preferred_physical_candidates() -> None:
+    completed = MagicMock(returncode=0, stdout="192.168.1.20\n10.0.0.5\n")
+    with patch("knoa_platform.mdns.sys.platform", "win32"), patch(
+        "knoa_platform.mdns.subprocess.run", return_value=completed
+    ) as run, patch("knoa_platform.mdns.socket.getaddrinfo", return_value=[]), patch(
+        "knoa_platform.mdns._local_address", return_value=None
+    ):
+        assert lan_addresses() == ["192.168.1.20", "10.0.0.5"]
+    command = run.call_args.args[0][-1]
+    assert "-AddressState Preferred" in command
+    assert "Tailscale|ZeroTier|WireGuard" in command
+
+
 def test_mdns_send_drops_when_multicast_socket_is_full() -> None:
     class _FullSocket:
         def setsockopt(self, *_args: object) -> None:

@@ -99,9 +99,10 @@ def _interface_ipv4_addresses() -> list[str]:
                     "powershell",
                     "-NoProfile",
                     "-Command",
-                    "Get-NetIPAddress -AddressFamily IPv4 | "
+                    "Get-NetIPAddress -AddressFamily IPv4 -AddressState Preferred | "
                     "Where-Object { $_.InterfaceAlias -notmatch "
-                    "'Loopback|vEthernet|WSL|Docker|VirtualBox|VMware|Hyper-V' } | "
+                    "'Loopback|vEthernet|WSL|Docker|VirtualBox|VMware|Hyper-V|"
+                    "Tailscale|ZeroTier|WireGuard' -and $_.PrefixOrigin -ne 'WellKnown' } | "
                     "Select-Object -ExpandProperty IPAddress",
                 ],
                 capture_output=True,
