@@ -27,7 +27,30 @@ function Restart-InstalledServices([string]$SelectedRole) {
                 [TimeSpan]::FromSeconds(30)
             )
         }
+        $service = Get-Service -Name $serviceId -ErrorAction Stop
+        $service.Refresh()
+        if ($service.Status -ne "Running") {
+            throw "Knoa service did not remain running: $serviceId ($($service.Status))"
+        }
+        Start-Sleep -Seconds 2
+        $service.Refresh()
+        if ($service.Status -ne "Running") {
+            throw "Knoa service exited during startup: $serviceId ($($service.Status))"
+        }
     }
+}
+
+function Test-NodeGatewayHealth([int]$Port) {
+    $uri = "http://127.0.0.1:$Port/health"
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        try {
+            $response = Invoke-WebRequest -UseBasicParsing -Uri $uri -TimeoutSec 2
+            if ($response.StatusCode -eq 200) { return }
+        } catch {
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    throw "Knoa Node Gateway health check failed: $uri"
 }
 
 function Get-InstalledRole {
@@ -41,8 +64,14 @@ function Get-InstalledRole {
 
 if (-not (Test-Administrator)) {
     $powerShell = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-    $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
-    $elevated = Start-Process -FilePath $powerShell -ArgumentList $arguments `
+    $argumentList = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PSCommandPath)
+    foreach ($parameterName in @("InstallationStatePath", "SourcePath", "Role", "HubPublicUrl")) {
+        if ($PSBoundParameters.ContainsKey($parameterName)) {
+            $argumentList += "-$parameterName"
+            $argumentList += [string]$PSBoundParameters[$parameterName]
+        }
+    }
+    $elevated = Start-Process -FilePath $powerShell -ArgumentList $argumentList `
         -Verb RunAs -Wait -PassThru
     exit $elevated.ExitCode
 }
@@ -136,6 +165,14 @@ try {
 }
 
 Restart-InstalledServices $Role
+if ($Role -in @("all", "node")) {
+    $nodePort = if ($state -and $state.node_gateway_port) {
+        [int]$state.node_gateway_port
+    } else {
+        9531
+    }
+    Test-NodeGatewayHealth $nodePort
+}
 $commit = (& $git -C $resolvedSource rev-parse --short HEAD).Trim()
 if ($LASTEXITCODE -ne 0) { throw "Could not read the installed Knoa revision" }
 Write-Host "Knoa update completed successfully: $commit"
