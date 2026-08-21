@@ -117,6 +117,18 @@ if ($trackedChanges.Count -gt 0) {
     throw "Knoa source checkout contains local tracked changes; update was not started"
 }
 
+$previousCommit = (& $git -C $resolvedSource rev-parse --verify HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $previousCommit -notmatch "^[0-9a-f]{40}$") {
+    throw "Could not determine the current Knoa source revision"
+}
+$backupRoot = Join-Path $env:ProgramData ("Knoa\Backups\Updates\" + [DateTime]::UtcNow.ToString("yyyyMMdd-HHmmss"))
+New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
+Set-Content -LiteralPath (Join-Path $backupRoot "source-commit.txt") -Value $previousCommit -Encoding UTF8
+if (Test-Path -LiteralPath $InstallationStatePath) {
+    Copy-Item -LiteralPath $InstallationStatePath -Destination (Join-Path $backupRoot "installation.json") -Force
+}
+Write-Host "Update backup created: $backupRoot"
+
 Write-Host "Updating Knoa source in $resolvedSource"
 & $git -C $resolvedSource pull --ff-only
 if ($LASTEXITCODE -ne 0) { throw "Knoa git pull --ff-only failed" }
@@ -156,22 +168,37 @@ if ($state) {
     }
 }
 
-try {
+function Restore-PreviousRevision {
+    Write-Warning "Restoring Knoa source revision $previousCommit"
+    & $git -C $resolvedSource reset --hard $previousCommit
+    if ($LASTEXITCODE -ne 0) { throw "Could not restore Knoa source revision $previousCommit" }
     & $installer @installArguments
-} catch {
-    Write-Warning "Knoa update failed; attempting to restore existing services"
+    if ($LASTEXITCODE -ne 0) { throw "Could not reinstall the previous Knoa revision" }
     Restart-InstalledServices $Role
-    throw
+    if ($Role -in @("all", "node")) {
+        $nodePort = if ($state -and $state.node_gateway_port) { [int]$state.node_gateway_port } else { 9531 }
+        Test-NodeGatewayHealth $nodePort
+    }
 }
 
-Restart-InstalledServices $Role
-if ($Role -in @("all", "node")) {
-    $nodePort = if ($state -and $state.node_gateway_port) {
-        [int]$state.node_gateway_port
-    } else {
-        9531
+try {
+    & $installer @installArguments
+    if ($LASTEXITCODE -ne 0) { throw "Knoa installer returned exit code $LASTEXITCODE" }
+    Restart-InstalledServices $Role
+    if ($Role -in @("all", "node")) {
+        $nodePort = if ($state -and $state.node_gateway_port) { [int]$state.node_gateway_port } else { 9531 }
+        Test-NodeGatewayHealth $nodePort
     }
-    Test-NodeGatewayHealth $nodePort
+} catch {
+    $updateError = $_
+    Write-Warning "Knoa update failed; attempting automatic rollback"
+    try {
+        Restore-PreviousRevision
+        Write-Warning "Knoa rollback completed; previous services are healthy"
+    } catch {
+        Write-Error "Knoa rollback failed: $($_.Exception.Message)"
+    }
+    throw $updateError
 }
 $commit = (& $git -C $resolvedSource rev-parse --short HEAD).Trim()
 if ($LASTEXITCODE -ne 0) { throw "Could not read the installed Knoa revision" }
