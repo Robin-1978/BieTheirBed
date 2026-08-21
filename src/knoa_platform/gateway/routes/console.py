@@ -10,6 +10,7 @@ import os
 import secrets
 import shutil
 import socket
+import subprocess
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -183,7 +184,26 @@ class ConsoleRoutes:
             elif shutil.which(codex.command[0]) is None:
                 add("codex", "Codex Runtime", "error", f"找不到可执行文件：{codex.command[0]}")
             else:
-                add("codex", "Codex Runtime", "ok", f"可执行：{' '.join(codex.command)}")
+                try:
+                    probe = await asyncio.to_thread(
+                        subprocess.run,
+                        [*codex.command, "--version"],
+                        capture_output=True,
+                        text=True,
+                        timeout=3,
+                        cwd=self._config.working_directory,
+                        check=False,
+                    )
+                    if probe.returncode != 0:
+                        detail = (probe.stderr or probe.stdout or "command failed").strip().splitlines()[0]
+                        add("codex", "Codex Runtime", "error", f"命令无法正常执行：{detail[:240]}")
+                    else:
+                        version = (probe.stdout or probe.stderr or "可执行").strip().splitlines()[0]
+                        add("codex", "Codex Runtime", "ok", f"{version[:240]}")
+                except subprocess.TimeoutExpired:
+                    add("codex", "Codex Runtime", "error", "Runtime 检查超过 3 秒")
+                except OSError as exc:
+                    add("codex", "Codex Runtime", "error", f"Runtime 启动失败：{exc}")
 
             if not document.vision_enabled:
                 add("vision", "图片理解", "warning", "图片理解能力未启用")
