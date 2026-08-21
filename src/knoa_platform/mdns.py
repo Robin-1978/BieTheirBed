@@ -136,12 +136,19 @@ def _interface_ipv4_addresses() -> list[str]:
                     _add_ipv4(addresses, seen, parts[inet_index + 1].split("/", 1)[0])
         except (OSError, subprocess.SubprocessError):
             pass
-    try:
-        for infos in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET, socket.SOCK_DGRAM):
-            _add_ipv4(addresses, seen, infos[4][0])
-    except OSError:
-        pass
-    _add_ipv4(addresses, seen, _local_address())
+    # Hostname resolution is only a fallback.  On Windows it can include a
+    # VPN/virtual adapter that the PowerShell interface query intentionally
+    # filtered out, so never merge those guesses into a verified interface
+    # list when the query already returned usable LAN addresses.
+    if not addresses:
+        try:
+            for infos in socket.getaddrinfo(
+                socket.gethostname(), None, socket.AF_INET, socket.SOCK_DGRAM
+            ):
+                _add_ipv4(addresses, seen, infos[4][0])
+        except OSError:
+            pass
+        _add_ipv4(addresses, seen, _local_address())
     return addresses
 
 
