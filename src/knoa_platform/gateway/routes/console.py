@@ -9,7 +9,10 @@ import json
 import os
 import secrets
 import shutil
+import socket
 from io import BytesIO
+from pathlib import Path
+from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 from starlette.requests import Request
@@ -73,6 +76,42 @@ class ConsoleRoutes:
 
         add("node", "Node 服务", "ok", "Console API 正常响应")
 
+        async def check_local_port(check_id: str, label: str, port: int) -> None:
+            if port <= 0:
+                add(check_id, label, "warning", "端口未配置")
+                return
+            try:
+                connection = await asyncio.to_thread(
+                    socket.create_connection, ("127.0.0.1", port), 0.4
+                )
+                connection.close()
+                add(check_id, label, "ok", f"127.0.0.1:{port} 正在监听")
+            except OSError as exc:
+                add(check_id, label, "error", f"127.0.0.1:{port} 无法连接：{exc.strerror or type(exc).__name__}")
+
+        await check_local_port("core_port", "Core 端口", self._config.service_port)
+        await check_local_port("gateway_port", "Gateway 端口", self._config.gateway_port)
+        await check_local_port("mcp_port", "Capability MCP 端口", self._config.capability_mcp_port)
+
+        for check_id, label, raw_path in (
+            ("runtime_root", "运行目录", self._config.runtime_root),
+            ("workspace", "工作目录", self._config.working_directory),
+        ):
+            path = Path(raw_path).expanduser()
+            if not path.exists():
+                add(check_id, label, "error", f"目录不存在：{path}")
+            elif not path.is_dir() or not os.access(path, os.R_OK | os.W_OK):
+                add(check_id, label, "error", f"目录不可读写：{path}")
+            else:
+                add(check_id, label, "ok", str(path))
+            try:
+                usage = shutil.disk_usage(path if path.exists() else path.parent)
+                free_gb = usage.free / (1024 ** 3)
+                if free_gb < 1:
+                    add(f"disk_{check_id}", f"{label}磁盘空间", "warning", f"剩余 {free_gb:.2f} GB")
+            except OSError:
+                pass
+
         mdns = self._mdns.status() if self._mdns is not None else {
             "enabled": False,
             "available": False,
@@ -115,6 +154,26 @@ class ConsoleRoutes:
             )
             document = revision.document
             add("config", "配置", "ok", f"当前配置已应用：{revision.revision_id}")
+
+            local_llm = next(
+                (
+                    provider
+                    for provider in document.providers.values()
+                    if provider.driver == "llamacpp"
+                ),
+                None,
+            )
+            if local_llm is None:
+                add("llamacpp", "llama.cpp", "warning", "未配置本机 llama.cpp Provider")
+            else:
+                endpoint = local_llm.server_url or local_llm.api_base
+                parsed = urlsplit(endpoint)
+                if parsed.hostname in {"127.0.0.1", "localhost", "::1"} and parsed.port:
+                    await check_local_port("llamacpp", "llama.cpp", parsed.port)
+                elif endpoint:
+                    add("llamacpp", "llama.cpp", "ok", f"已配置远程 Endpoint：{endpoint}")
+                else:
+                    add("llamacpp", "llama.cpp", "error", "Provider Endpoint 未配置")
 
             codex = document.agents.agents.get("codex")
             if codex is None or not codex.enabled:
