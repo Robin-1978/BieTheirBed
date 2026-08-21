@@ -60,6 +60,7 @@ from knoa_platform.remote_models import (
 from knoa_platform.runtime import RuntimePaths
 from knoa_platform.secrets import SecretStore
 from knoa_platform.transport_health import TransportHealth
+from knoa_platform.transport_middleware import TransportHealthMiddleware
 
 logger = logging.getLogger(__name__)
 _MAX_BODY_BYTES = 16 * 1024
@@ -464,6 +465,10 @@ class SecureGatewayAdapter(
                     methods=["POST"],
                 ),
             ]
+        )
+        self.app.add_middleware(
+            TransportHealthMiddleware,
+            health=self._transport_health,
         )
         self._p2p = P2PServer(self.app)
         self._node_hub = NodeHubService(

@@ -46,6 +46,8 @@ export default function NewTaskScreen() {
       .catch(() => setMcpResources([]));
   }, [gateway.client, gateway.runAuthenticated]);
 
+  const activeTemplate = TASK_TEMPLATES.find((template) => template.id === selectedTemplate);
+
   async function create() {
     if (gateway.requiredUpdate) {
       router.replace("/update");
@@ -134,6 +136,17 @@ export default function NewTaskScreen() {
               </AppPressable>
             ))}
           </ScrollView>
+          {activeTemplate ? (
+            <View style={styles.templateDetails}>
+              <Text style={styles.templateDetailsTitle}>{t(activeTemplate.titleKey)}</Text>
+              <Text style={styles.templateMeta}>{t("taskTemplates.connection", { value: t(activeTemplate.connectionKey) })}</Text>
+              <Text style={styles.templateMeta}>{t("taskTemplates.permission", { value: t(activeTemplate.permissionKey) })}</Text>
+              <Text style={styles.templateMeta}>{t("taskTemplates.duration", { value: t(activeTemplate.durationKey) })}</Text>
+              <Text style={styles.templateMeta}>{t("taskTemplates.result", { value: t(activeTemplate.resultKey) })}</Text>
+              <Text style={styles.templateMeta}>{t("taskTemplates.failure", { value: t(activeTemplate.failureKey) })}</Text>
+              <Text style={styles.templateMeta}>{t("taskTemplates.notification", { value: t(activeTemplate.notificationKey) })}</Text>
+            </View>
+          ) : null}
           <Text style={styles.label}>{t("taskNew.name")}</Text>
           <TextInput
             accessibilityLabel={t("taskNew.name")}
@@ -201,6 +214,9 @@ const styles = StyleSheet.create({
   templateTitle: { color: colors.ink, fontSize: 13, fontWeight: "800" },
   templateSelectedText: { color: colors.accent },
   templateDetail: { color: colors.muted, fontSize: 11, lineHeight: 15 },
+  templateDetails: { marginTop: 4, padding: 12, borderRadius: 12, backgroundColor: colors.accentSoft, gap: 3 },
+  templateDetailsTitle: { color: colors.ink, fontWeight: "800", marginBottom: 2 },
+  templateMeta: { color: colors.muted, fontSize: 11, lineHeight: 16 },
   updateRequired: { marginBottom: 12, padding: 14, borderRadius: 12, backgroundColor: colors.dangerSoft, gap: 4 },
   updateRequiredTitle: { color: colors.danger, fontWeight: "700" },
   label: { color: colors.ink, fontWeight: "700", marginTop: 4 },

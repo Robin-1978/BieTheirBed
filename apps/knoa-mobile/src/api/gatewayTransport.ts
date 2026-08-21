@@ -91,7 +91,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
     if (!this.binding.directGatewayUrl && this.lanGatewayUrl) {
       try {
         const response = await withConnectTimeout(
-          (signal) => this.direct.request(this.lanGatewayUrl, path, { ...init, signal }),
+          (signal) => this.direct.request(this.lanGatewayUrl, path, this.tag(init, "mdns", signal)),
           LAN_DISCOVERY_CONNECT_TIMEOUT_MS,
         );
         this.setActive("direct");
@@ -105,7 +105,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
     if (this.p2p?.ready()) {
       const p2p = this.p2p;
       try {
-        const response = await p2p.request(baseUrl, path, init);
+        const response = await p2p.request(baseUrl, path, this.tag(init, "p2p"));
         if (!this.lanGatewayUrl) {
           this.setActive("p2p");
           this.setP2PDiagnostic("active");
@@ -127,7 +127,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
       this.startP2PUpgrade(baseUrl, init);
       this.startRelayUpgrade(baseUrl, init);
       try {
-        const response = await this.relayRequest(baseUrl, path, init);
+        const response = await this.relayRequest(baseUrl, path, this.tag(init, "relay"));
         if (!this.lanGatewayUrl && !this.p2p?.ready()) this.setActive("relay");
         return response;
       } catch (relayError) {
@@ -137,7 +137,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
     }
     if (Date.now() < this.relayPreferredUntil) {
       try {
-        const response = await this.relayRequest(baseUrl, path, init);
+        const response = await this.relayRequest(baseUrl, path, this.tag(init, "relay"));
         if (!this.lanGatewayUrl && !this.p2p?.ready()) this.setActive("relay");
         return response;
       } catch {
@@ -152,7 +152,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
         (signal) => this.direct.request(
           this.binding.directGatewayUrl || this.lanGatewayUrl || baseUrl,
           path,
-          { ...init, signal },
+          this.tag(init, this.lanGatewayUrl ? "mdns" : "direct", signal),
         ),
         4500,
       );
@@ -161,7 +161,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
     } catch (directError) {
       void this.startRecovery(baseUrl, init);
       try {
-        const response = await this.relayRequest(baseUrl, path, init);
+        const response = await this.relayRequest(baseUrl, path, this.tag(init, "relay"));
         if (!this.lanGatewayUrl && !this.p2p?.ready()) this.setActive("relay");
         this.startP2PUpgrade(baseUrl, init);
         this.relayPreferredUntil = Date.now() + 10_000;
@@ -227,6 +227,12 @@ export class ConnectionResolverTransport implements GatewayTransport {
     return this.relay.request(baseUrl, path, init);
   }
 
+  private tag(init: RequestInit, transport: "mdns" | "p2p" | "relay" | "direct", signal?: AbortSignal): RequestInit {
+    const headers = new Headers(init.headers);
+    if (transport !== "direct") headers.set("X-Knoa-Transport", transport);
+    return { ...init, headers, ...(signal ? { signal } : {}) };
+  }
+
   /** Start all eligible recovery paths without duplicating the business request. */
   private async startRecovery(baseUrl: string, init: RequestInit): Promise<void> {
     if (!new Headers(init.headers).get("authorization")) return;
@@ -243,7 +249,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
     const pending = (async () => {
       const response = await this.relayRequest(baseUrl, "/v1/session", {
         method: "GET",
-        headers: init.headers,
+        headers: this.tag(init, "relay").headers,
       });
       if (!response.ok) throw new Error(`Relay 探测被 Node 拒绝（HTTP ${response.status}）`);
       if (!this.lanGatewayUrl && this.active !== "p2p") this.setActive("relay");
@@ -278,7 +284,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
         this.setP2PDiagnostic("ready");
         const probe = await p2p.request(baseUrl, "/v1/session", {
           method: "GET",
-          headers: init.headers,
+          headers: this.tag(init, "p2p").headers,
         });
         if (!probe.ok) throw new Error(`P2P 探测被 Node 拒绝（HTTP ${probe.status}）`);
       } catch (error) {

@@ -18,6 +18,8 @@ export default function ResultsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [sharing, setSharing] = useState("");
+  const [agentFilter, setAgentFilter] = useState("");
+  const [timeFilter, setTimeFilter] = useState<"all" | "7d" | "30d">("all");
   const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string; nodeId?: string }>();
 
   const refresh = useCallback(async (manual = false) => {
@@ -40,8 +42,10 @@ export default function ResultsScreen() {
   const results = useMemo(
     () => tasks
       .filter((task) => Boolean(task.latest_execution_id || task.latest_execution_summary || task.latest_execution_failure_code))
+      .filter((task) => !agentFilter || task.agent_id === agentFilter)
+      .filter((task) => timeFilter === "all" || (task.latest_execution_updated_at ?? task.updated_at) >= Date.now() / 1000 - (timeFilter === "7d" ? 7 : 30) * 86400)
       .sort((left, right) => (right.latest_execution_updated_at ?? right.updated_at) - (left.latest_execution_updated_at ?? left.updated_at)),
-    [tasks],
+    [agentFilter, tasks, timeFilter],
   );
 
   return (
@@ -50,7 +54,19 @@ export default function ResultsScreen() {
         <View style={styles.icon}><AppIcon name="file" color={colors.accent} size={26} /></View>
         <View style={styles.flex}><Text style={styles.title}>{t("results.title")}</Text><Text style={styles.meta}>{t("results.detail")}</Text></View>
       </View>
-      <AppPressable style={styles.artifactAction} onPress={() => router.push("/artifacts")}><Text style={styles.artifactActionText}>{t("artifacts.title")}</Text></AppPressable>
+      <AppPressable style={styles.artifactAction} onPress={() => router.push({ pathname: "/artifacts", params: { sessionHandle: gateway.sessionHandle } })}><Text style={styles.artifactActionText}>{t("artifacts.title")}</Text></AppPressable>
+      <View style={styles.filterSection}>
+        <Text style={styles.filterLabel}>{t("results.filterAgent")}</Text>
+        <View style={styles.filters}>
+          <AppPressable style={[styles.filter, !agentFilter && styles.filterActive]} onPress={() => setAgentFilter("")}><Text style={[styles.filterText, !agentFilter && styles.filterTextActive]}>{t("results.allAgents")}</Text></AppPressable>
+          {gateway.agents.map((agent) => <AppPressable key={agent.agent_id} style={[styles.filter, agentFilter === agent.agent_id && styles.filterActive]} onPress={() => setAgentFilter(agent.agent_id)}><Text style={[styles.filterText, agentFilter === agent.agent_id && styles.filterTextActive]}>{agent.display_name}</Text></AppPressable>)}
+        </View>
+        <Text style={styles.filterLabel}>{t("results.filterTime")}</Text>
+        <View style={styles.filters}>
+          {(["all", "7d", "30d"] as const).map((value) => <AppPressable key={value} style={[styles.filter, timeFilter === value && styles.filterActive]} onPress={() => setTimeFilter(value)}><Text style={[styles.filterText, timeFilter === value && styles.filterTextActive]}>{t(`results.time.${value}` as never)}</Text></AppPressable>)}
+        </View>
+        <Text style={styles.nodeScope}>{t("results.nodeScope", { node: gateway.nodes.find((item) => item.nodeId === gateway.nodeId)?.displayName || gateway.nodeId || t("nav.node") })}</Text>
+      </View>
       {loading ? <ActivityIndicator color={colors.accent} /> : null}
       {error ? <View style={styles.errorCard}><Text style={styles.error}>{error}</Text><AppPressable onPress={() => void refresh(true)}><Text style={styles.link}>{t("results.retry")}</Text></AppPressable></View> : null}
       {!loading && !error && !results.length ? <View style={styles.empty}><Text style={styles.emptyTitle}>{t("results.emptyTitle")}</Text><Text style={styles.meta}>{t("results.emptyDetail")}</Text></View> : null}
@@ -83,5 +99,5 @@ function resultState(task: Task, t: ReturnType<typeof useI18n>["t"]): string {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 17, gap: 13, paddingBottom: 52 }, hero: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, icon: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: 15, backgroundColor: colors.accentSoft }, flex: { flex: 1, minWidth: 0 }, title: { color: colors.ink, fontSize: 20, fontWeight: "800" }, meta: { color: colors.muted, fontSize: 12, lineHeight: 18 }, artifactAction: { minHeight: 42, justifyContent: "center", alignItems: "center", borderRadius: 12, borderWidth: 1, borderColor: colors.accent }, artifactActionText: { color: colors.accent, fontWeight: "800" }, card: { padding: 15, gap: 10, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, cardHeader: { flexDirection: "row", alignItems: "flex-start", gap: 10 }, cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" }, result: { color: colors.ink, lineHeight: 21 }, failure: { color: colors.danger, fontSize: 12 }, actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, primaryAction: { minHeight: 40, justifyContent: "center", paddingHorizontal: 13, borderRadius: 11, backgroundColor: colors.accent }, primaryText: { color: colors.white, fontWeight: "800" }, secondaryAction: { minHeight: 40, justifyContent: "center", paddingHorizontal: 13, borderRadius: 11, borderWidth: 1, borderColor: colors.accent }, secondaryText: { color: colors.accent, fontWeight: "800" }, empty: { padding: 22, alignItems: "center", gap: 6, borderRadius: 17, backgroundColor: colors.surface }, emptyTitle: { color: colors.ink, fontWeight: "800" }, errorCard: { padding: 14, borderRadius: 14, backgroundColor: colors.dangerSoft, gap: 7 }, error: { color: colors.danger }, link: { color: colors.accent, fontWeight: "800" },
+  container: { padding: 17, gap: 13, paddingBottom: 52 }, hero: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, icon: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: 15, backgroundColor: colors.accentSoft }, flex: { flex: 1, minWidth: 0 }, title: { color: colors.ink, fontSize: 20, fontWeight: "800" }, meta: { color: colors.muted, fontSize: 12, lineHeight: 18 }, artifactAction: { minHeight: 42, justifyContent: "center", alignItems: "center", borderRadius: 12, borderWidth: 1, borderColor: colors.accent }, artifactActionText: { color: colors.accent, fontWeight: "800" }, filterSection: { padding: 13, gap: 8, borderRadius: 15, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, filterLabel: { color: colors.muted, fontSize: 12, fontWeight: "700" }, filters: { flexDirection: "row", gap: 7, flexWrap: "wrap" }, filter: { minHeight: 34, paddingHorizontal: 11, justifyContent: "center", borderRadius: 17, borderWidth: 1, borderColor: colors.line }, filterActive: { borderColor: colors.accent, backgroundColor: colors.accentSoft }, filterText: { color: colors.muted, fontSize: 12, fontWeight: "700" }, filterTextActive: { color: colors.accent }, nodeScope: { color: colors.muted, fontSize: 11 }, card: { padding: 15, gap: 10, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, cardHeader: { flexDirection: "row", alignItems: "flex-start", gap: 10 }, cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" }, result: { color: colors.ink, lineHeight: 21 }, failure: { color: colors.danger, fontSize: 12 }, actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, primaryAction: { minHeight: 40, justifyContent: "center", paddingHorizontal: 13, borderRadius: 11, backgroundColor: colors.accent }, primaryText: { color: colors.white, fontWeight: "800" }, secondaryAction: { minHeight: 40, justifyContent: "center", paddingHorizontal: 13, borderRadius: 11, borderWidth: 1, borderColor: colors.accent }, secondaryText: { color: colors.accent, fontWeight: "800" }, empty: { padding: 22, alignItems: "center", gap: 6, borderRadius: 17, backgroundColor: colors.surface }, emptyTitle: { color: colors.ink, fontWeight: "800" }, errorCard: { padding: 14, borderRadius: 14, backgroundColor: colors.dangerSoft, gap: 7 }, error: { color: colors.danger }, link: { color: colors.accent, fontWeight: "800" },
 });
