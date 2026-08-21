@@ -255,6 +255,7 @@ export default function AgentEditorScreen() {
         <AppPressable disabled={Boolean(working)} style={styles.primary} onPress={() => void save()}>
           {working === "save" ? <ActivityIndicator color={colors.white} /> : <><AppIcon name="check" color={colors.white} size={19} /><Text style={styles.primaryText}>{t("settings.agentEditor.publishButton")}</Text></>}
         </AppPressable>
+        <Text style={styles.impact}>{t("settings.agentEditor.impactHint")}</Text>
         {originalAgentId && !isBuiltIn ? <AppPressable disabled={Boolean(working)} style={styles.dangerButton} onPress={confirmDelete}><Text style={styles.dangerText}>{t("settings.agentEditor.deleteAgent")}</Text></AppPressable> : null}
         {message ? <Text style={styles.message}>{message}</Text> : null}
       </ScrollView>
@@ -328,6 +329,7 @@ const styles = StyleSheet.create({
   dangerButton: { minHeight: 48, alignItems: "center", justifyContent: "center", borderRadius: 14, borderWidth: 1, borderColor: colors.danger },
   dangerText: { color: colors.danger, fontWeight: "800" },
   warning: { color: colors.warning, fontSize: 12, lineHeight: 18 },
+  impact: { color: colors.muted, fontSize: 12, lineHeight: 18, paddingHorizontal: 4 },
   message: { color: colors.ink, backgroundColor: colors.accentSoft, borderRadius: 13, padding: 13 },
   disabled: { opacity: 0.45 },
 });

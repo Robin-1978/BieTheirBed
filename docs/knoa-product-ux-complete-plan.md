@@ -349,7 +349,7 @@ Node Console 增加“检查 Node”按钮，依次检查：
 - 会话映射；
 - 多语言和权限策略。
 
-当前实现：DingTalk 使用官方 Stream 长连接适配器，复用 Feishu 的 Core 会话、后台 Task、Artifact、审批和重试语义；支持文本、图片、文件入站以及结果文件出站。未安装可选 `dingtalk_stream` SDK 时仅该渠道进入重试，不影响 Node/Core 启动。
+当前实现：DingTalk 使用官方 Stream 长连接适配器，复用 Feishu 的 Core 会话、后台 Task、Artifact、审批和重试语义；支持文本、图片、文件入站以及结果文件出站。审批优先沿用卡片语义；客户端不支持交互卡片时，消息明确提示使用确认/取消文本命令。未安装可选 `dingtalk_stream` SDK 时仅该渠道进入重试，不影响 Node/Core 启动。
 
 优先使用官方 Stream 长连接模式，避免要求公网回调地址。
 
@@ -628,7 +628,7 @@ Knoa 不应该把“我有很多 Tool”作为主要卖点，而应该让用户�
 已落地并完成自动化验证的个人用户范围：
 
 - P0：Node 健康诊断、mDNS 多网卡广播状态、mDNS/P2P/Relay 优先级诊断、Windows 服务树清理与更新回滚、视觉模型空 observation 受控重试、Agent/Codex Runtime 可用性说明。
-- P1：六类真实任务模板、结果交付中心、Artifact 搜索/安全下载、Markdown 分享、MCP 连接检查/草稿向导、Feishu 统一任务/审批语义、DingTalk Stream 适配和离线任务恢复。
+- P1：七类真实任务模板、结果交付中心、Artifact 搜索/安全下载、Markdown 分享、MCP 连接检查/草稿向导、Feishu 统一任务/审批语义、DingTalk Stream 适配和离线任务恢复。
 - 个人 P2：Artifact 浏览、离线队列和自动恢复、跨渠道结果交付基础契约、桌面 Companion 状态诊断。
 
 明确排除：企业 Fleet、组织成员/负责人治理、企业成本与 Token 管理、企业运维统计、复杂企业审计和组织策略中心。

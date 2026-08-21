@@ -27,6 +27,7 @@ class TransportHealth:
     request_success: dict[TransportName, int] = field(default_factory=lambda: {"mdns": 0, "p2p": 0, "relay": 0})
     last_error: dict[TransportName, str] = field(default_factory=dict)
     last_changed_at: float = field(default_factory=monotonic)
+    _observed: dict[str, bool] = field(default_factory=dict, repr=False)
 
     def record(self, transport: TransportName, stage: Stage, *, ok: bool, error: str = "") -> None:
         target = {
@@ -38,6 +39,21 @@ class TransportHealth:
             target[transport] = target.get(transport, 0) + 1
         elif error:
             self.last_error[transport] = " ".join(error.split())[:240]
+
+    def observe(self, transport: TransportName, stage: Stage, *, ok: bool, error: str = "") -> None:
+        """Record a live status observation without inflating poll-based metrics.
+
+        Console status is polled repeatedly.  A healthy state observed ten
+        times is still one discovery/verification success; a later recovery
+        after a failed state counts as a new success.
+        """
+        key = f"{transport}:{stage}"
+        previous = self._observed.get(key)
+        self._observed[key] = ok
+        if ok and previous is not True:
+            self.record(transport, stage, ok=True)
+        elif not ok and error:
+            self.record(transport, stage, ok=False, error=error)
 
     def activate(self, transport: TransportName, *, reason: str = "") -> None:
         if self.active != transport:

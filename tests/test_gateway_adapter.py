@@ -216,7 +216,7 @@ async def test_node_console_is_loopback_only_and_csrf_protected(tmp_path) -> Non
     assert diagnostics.status_code == 200
     assert diagnostics.json()["status"] in {"warning", "error"}
     assert {item["id"] for item in diagnostics.json()["checks"]} >= {
-        "node", "mdns", "p2p", "relay", "config", "codex", "vision",
+        "node", "mdns", "app_lan_discovery", "p2p", "relay", "config", "codex", "vision",
     }
     assert accepted.json()["runtime_version"]
     assert invalid.status_code == 400
