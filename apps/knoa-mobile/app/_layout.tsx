@@ -75,6 +75,7 @@ function AppNavigator() {
             }}
           />
           <Stack.Screen name="tasks/new" options={{ title: t("nav.newTask") }} />
+          <Stack.Screen name="results" options={{ title: t("nav.results") }} />
           <Stack.Screen name="tasks/[id]" options={{ title: t("nav.taskDetails") }} />
           <Stack.Screen name="tasks/[id]/edit" options={{ title: t("nav.editTask") }} />
           <Stack.Screen name="task-executions/[id]" options={{ title: t("nav.executionDetails") }} />

@@ -41,6 +41,7 @@ export default function NodeMenuScreen() {
         <View style={styles.card}>
           <MenuRow icon="chat" title={t("header.chat")} detail={t("nodeMenu.chatDetail")} onPress={() => router.replace({ pathname: "/chat", params: { workspaceId, workspaceName, nodeId } })} />
           <MenuRow icon="tasks" title={t("header.tasks")} detail={t("nodeMenu.tasksDetail")} onPress={() => router.replace({ pathname: "/tasks", params: { workspaceId, workspaceName, nodeId } })} />
+          <MenuRow icon="file" title={t("nav.results")} detail={t("nodeMenu.resultsDetail")} onPress={() => router.push({ pathname: "/results", params: { workspaceId, workspaceName, nodeId } })} />
           <MenuRow icon="agent" title={t("nav.nodeResources")} detail={t("nodeMenu.resourcesDetail")} onPress={() => router.push("/capabilities")} />
           <MenuRow icon="settings" title={t("nav.nodeSettings")} detail={t("nodeMenu.settingsDetail")} onPress={() => router.push("/settings/node")} />
         </View>
