@@ -15,6 +15,7 @@ from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import httpx
 from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
@@ -24,6 +25,7 @@ from knoa_platform.console_ui import node_console_html
 from knoa_platform.configuration import ManagedConfig
 from knoa_platform.gateway.pairing import GatewayPairingPayload
 from knoa_platform.gateway.protocol import NodeHubEnrollmentRequest, WriteSecretRequest
+from knoa_platform.model_adapter.profiles import resolve_profile
 
 
 class ConsoleRoutes:
@@ -95,14 +97,46 @@ class ConsoleRoutes:
 
         checks: list[dict[str, str]] = []
 
-        def add(check_id: str, label: str, status: str, detail: str) -> None:
-            checks.append({"id": check_id, "label": label, "status": status, "detail": detail})
+        def add(check_id: str, label: str, status: str, detail: str, action: str = "") -> None:
+            checks.append({
+                "id": check_id,
+                "label": label,
+                "status": status,
+                "detail": detail,
+                "action": action or ("无需处理" if status == "ok" else "打开 Node Console 的诊断和日志，按建议处理后重试"),
+            })
+
+        async def probe_http(
+            check_id: str,
+            label: str,
+            url: str,
+            *,
+            headers: dict[str, str] | None = None,
+            action: str = "",
+        ) -> None:
+            if not url:
+                add(check_id, label, "warning", "Endpoint 未配置", action or "配置 Endpoint 后重新检查")
+                return
+            try:
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(1.5, connect=0.6),
+                    follow_redirects=False,
+                ) as client:
+                    response = await client.get(url, headers=headers or {})
+                if 200 <= response.status_code < 400:
+                    add(check_id, label, "ok", f"HTTP {response.status_code}：{url}", action)
+                elif response.status_code in {401, 403}:
+                    add(check_id, label, "warning", f"HTTP {response.status_code}：服务可达但需要凭据", action or "检查 API Key 或 Secret 引用")
+                else:
+                    add(check_id, label, "error", f"HTTP {response.status_code}：{url}", action or "检查服务日志和 Endpoint")
+            except (httpx.HTTPError, OSError) as exc:
+                add(check_id, label, "error", f"无法连接：{type(exc).__name__}", action or "启动服务或检查地址、防火墙和网络")
 
         add("node", "Node 服务", "ok", "Console API 正常响应")
 
         async def check_local_port(check_id: str, label: str, port: int) -> None:
             if port <= 0:
-                add(check_id, label, "warning", "端口未配置")
+                add(check_id, label, "warning", "端口未配置", "在 Node 配置中设置端口并重启")
                 return
             try:
                 connection = await asyncio.to_thread(
@@ -111,7 +145,7 @@ class ConsoleRoutes:
                 connection.close()
                 add(check_id, label, "ok", f"127.0.0.1:{port} 正在监听")
             except OSError as exc:
-                add(check_id, label, "error", f"127.0.0.1:{port} 无法连接：{exc.strerror or type(exc).__name__}")
+                add(check_id, label, "error", f"127.0.0.1:{port} 无法连接：{exc.strerror or type(exc).__name__}", "检查端口占用、服务进程和启动日志")
 
         await check_local_port("core_port", "Core 端口", self._config.service_port)
         await check_local_port("gateway_port", "Gateway 端口", self._config.gateway_port)
@@ -123,16 +157,16 @@ class ConsoleRoutes:
         ):
             path = Path(raw_path).expanduser()
             if not path.exists():
-                add(check_id, label, "error", f"目录不存在：{path}")
+                add(check_id, label, "error", f"目录不存在：{path}", "创建目录或修改工作目录配置")
             elif not path.is_dir() or not os.access(path, os.R_OK | os.W_OK):
-                add(check_id, label, "error", f"目录不可读写：{path}")
+                add(check_id, label, "error", f"目录不可读写：{path}", "修复目录权限后重启 Node")
             else:
                 add(check_id, label, "ok", str(path))
             try:
                 usage = shutil.disk_usage(path if path.exists() else path.parent)
                 free_gb = usage.free / (1024 ** 3)
                 if free_gb < 1:
-                    add(f"disk_{check_id}", f"{label}磁盘空间", "warning", f"剩余 {free_gb:.2f} GB")
+                    add(f"disk_{check_id}", f"{label}磁盘空间", "warning", f"剩余 {free_gb:.2f} GB", "清理缓存或扩充磁盘空间")
             except OSError:
                 pass
 
@@ -145,14 +179,14 @@ class ConsoleRoutes:
             "last_error": "lan_gateway_disabled_or_not_started",
         }
         if not mdns["enabled"]:
-            add("mdns", "mDNS", "warning", "局域网 Gateway 或 mDNS 未启用")
+            add("mdns", "mDNS", "warning", "局域网 Gateway 或 mDNS 未启用", "在 Node 配置中启用 LAN Gateway 与 mDNS")
         elif not mdns["advertising"]:
-            add("mdns", "mDNS", "error", f"未开始广播：{mdns['last_error'] or 'unknown'}")
+            add("mdns", "mDNS", "error", f"未开始广播：{mdns['last_error'] or 'unknown'}", "检查网卡、组播权限和 Node 启动日志")
         elif not mdns["responder"]:
             detail = "已广播，但查询响应器不可用"
             if mdns.get("last_send_error"):
                 detail += f"；发送错误：{mdns['last_send_error']}"
-            add("mdns", "mDNS", "warning", detail)
+            add("mdns", "mDNS", "warning", detail, "检查 UDP 5353 防火墙规则和局域网隔离")
         else:
             addresses = ", ".join(str(item) for item in mdns["addresses"])
             count = mdns.get("announcement_count", 0)
@@ -160,21 +194,27 @@ class ConsoleRoutes:
 
         p2p = self._p2p.status()
         if not p2p.get("available"):
-            add("p2p", "P2P", "warning", p2p.get("last_error") or "WebRTC Runtime 不可用，将使用 Relay")
+            add("p2p", "P2P", "warning", p2p.get("last_error") or "WebRTC Runtime 不可用，将使用 Relay", "安装 WebRTC Runtime 并检查 UDP 防火墙")
         elif p2p.get("connected_peers"):
             add("p2p", "P2P", "ok", f"已连接 {p2p['connected_peers']} 个对端")
         elif p2p.get("answers_total"):
-            add("p2p", "P2P", "warning", "Node 已生成应答，但尚无 ICE 对端连接")
+            add("p2p", "P2P", "warning", "Node 已生成应答，但尚无 ICE 对端连接", "从 App 发起一次连接并检查 NAT/UDP 防火墙")
         else:
             add("p2p", "P2P", "ok", "运行时可用，等待 App 建连")
 
         relay = self._node_relay.status
         if not relay.get("enrolled"):
-            add("relay", "Relay", "warning", "Node 尚未加入 Workspace Hub")
+            add("relay", "Relay", "warning", "Node 尚未加入 Workspace Hub", "在 Hub Console 生成 Enrollment Code 并完成加入")
         elif relay.get("relay_connected"):
             add("relay", "Relay", "ok", "Relay 已连接")
         else:
-            add("relay", "Relay", "warning", relay.get("last_error") or "Relay 正在连接")
+            add("relay", "Relay", "warning", relay.get("last_error") or "Relay 正在连接", "检查 Hub 地址、Enrollment 和网络")
+
+        hub = relay.get("hub") or {}
+        if relay.get("enrolled") and hub.get("hub_url"):
+            await probe_http("hub", "Hub 健康", f"{str(hub['hub_url']).rstrip('/')}/health", action="检查 Hub 服务和网络")
+        elif not relay.get("enrolled"):
+            add("hub", "Hub 健康", "warning", "未配置 Hub", "完成 Node Enrollment 后重新检查")
 
         try:
             revision, _state, _generations = await self._core.get_config_current(
@@ -201,15 +241,23 @@ class ConsoleRoutes:
                 elif endpoint:
                     add("llamacpp", "llama.cpp", "ok", f"已配置远程 Endpoint：{endpoint}")
                 else:
-                    add("llamacpp", "llama.cpp", "error", "Provider Endpoint 未配置")
+                    add("llamacpp", "llama.cpp", "error", "Provider Endpoint 未配置", "在模型配置中填写 llama.cpp Endpoint")
+
+                if endpoint:
+                    profile = resolve_profile(
+                        local_llm.driver,
+                        server_url=local_llm.server_url,
+                        api_base=local_llm.api_base,
+                    )
+                    await probe_http("llamacpp_health", "llama.cpp 模型接口", profile.health_url, action="检查 llama.cpp 是否加载模型")
 
             codex = document.agents.agents.get("codex")
             if codex is None or not codex.enabled:
-                add("codex", "Codex Runtime", "warning", "Codex Agent 未启用")
+                add("codex", "Codex Runtime", "warning", "Codex Agent 未启用", "在 Agent 配置中启用 Codex 或选择其他 Agent")
             elif not codex.command:
-                add("codex", "Codex Runtime", "error", "Codex command 未配置")
+                add("codex", "Codex Runtime", "error", "Codex command 未配置", "配置 Codex 可执行命令")
             elif shutil.which(codex.command[0]) is None:
-                add("codex", "Codex Runtime", "error", f"找不到可执行文件：{codex.command[0]}")
+                add("codex", "Codex Runtime", "error", f"找不到可执行文件：{codex.command[0]}", "安装 Codex Runtime 或修正命令路径")
             else:
                 try:
                     probe = await asyncio.to_thread(
@@ -223,29 +271,38 @@ class ConsoleRoutes:
                     )
                     if probe.returncode != 0:
                         detail = (probe.stderr or probe.stdout or "command failed").strip().splitlines()[0]
-                        add("codex", "Codex Runtime", "error", f"命令无法正常执行：{detail[:240]}")
+                        add("codex", "Codex Runtime", "error", f"命令无法正常执行：{detail[:240]}", "查看 Codex Runtime 的 stderr 并修正安装或权限")
                     else:
                         version = (probe.stdout or probe.stderr or "可执行").strip().splitlines()[0]
                         add("codex", "Codex Runtime", "ok", f"{version[:240]}")
                 except subprocess.TimeoutExpired:
-                    add("codex", "Codex Runtime", "error", "Runtime 检查超过 3 秒")
+                    add("codex", "Codex Runtime", "error", "Runtime 检查超过 3 秒", "检查 Runtime 是否等待登录或网络")
                 except OSError as exc:
-                    add("codex", "Codex Runtime", "error", f"Runtime 启动失败：{exc}")
+                    add("codex", "Codex Runtime", "error", f"Runtime 启动失败：{exc}", "检查 Codex 安装路径、工作目录和权限")
 
             if not document.vision_enabled:
-                add("vision", "图片理解", "warning", "图片理解能力未启用")
+                add("vision", "图片理解", "warning", "图片理解能力未启用", "启用图片理解并配置支持图片的模型")
             elif not document.vision_model:
-                add("vision", "图片理解", "warning", "尚未配置图片理解模型")
+                add("vision", "图片理解", "warning", "尚未配置图片理解模型", "选择一个明确支持图片的模型")
             else:
                 vision = document.models.get(document.vision_model)
                 if vision is None:
-                    add("vision", "图片理解", "error", f"找不到模型：{document.vision_model}")
+                    add("vision", "图片理解", "error", f"找不到模型：{document.vision_model}", "修正图片理解模型别名")
                 elif vision.supports_vision is not True:
-                    add("vision", "图片理解", "error", f"模型未声明图片能力：{document.vision_model}")
+                    add("vision", "图片理解", "error", f"模型未声明图片能力：{document.vision_model}", "在模型配置中开启图片能力或更换模型")
                 else:
                     add("vision", "图片理解", "ok", f"当前模型：{document.vision_model}")
+                    provider = document.providers.get(vision.provider)
+                    if provider is not None:
+                        profile = resolve_profile(
+                            provider.driver,
+                            server_url=provider.server_url,
+                            api_base=provider.api_base,
+                            supports_vision=vision.supports_vision,
+                        )
+                        await probe_http("vision_health", "视觉模型接口", profile.health_url, action="确认视觉模型已加载并可响应")
         except Exception as exc:  # noqa: BLE001
-            add("config", "配置", "error", f"无法读取当前配置：{type(exc).__name__}")
+            add("config", "配置", "error", f"无法读取当前配置：{type(exc).__name__}", "查看 Node 启动日志并恢复上一份配置")
             add("codex", "Codex Runtime", "warning", "配置读取失败，无法检查")
             add("vision", "图片理解", "warning", "配置读取失败，无法检查")
 

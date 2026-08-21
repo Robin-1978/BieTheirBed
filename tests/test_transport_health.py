@@ -1,4 +1,10 @@
 from knoa_platform.transport_health import TransportHealth
+from knoa_platform.transport_middleware import TransportHealthMiddleware
+import httpx
+import pytest
+from starlette.applications import Starlette
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
 
 def test_transport_health_keeps_priority_and_stage_metrics() -> None:
@@ -12,3 +18,25 @@ def test_transport_health_keeps_priority_and_stage_metrics() -> None:
     assert snapshot["active"] == "p2p"
     assert snapshot["discovery_success"]["p2p"] == 1
     assert snapshot["last_error"]["relay"] == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_transport_health_middleware_records_completed_request() -> None:
+    health = TransportHealth()
+
+    async def endpoint(_request):
+        return JSONResponse({"ok": True})
+
+    app = Starlette(routes=[Route("/health", endpoint)])
+    app.add_middleware(TransportHealthMiddleware, health=health)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://node",
+    ) as client:
+        response = await client.get("/health", headers={"X-Knoa-Transport": "mdns"})
+
+    assert response.status_code == 200
+    snapshot = health.snapshot()
+    assert snapshot["active"] == "mdns"
+    assert snapshot["verification_success"]["mdns"] == 1
+    assert snapshot["request_success"]["mdns"] == 1

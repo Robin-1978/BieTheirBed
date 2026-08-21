@@ -55,6 +55,7 @@ _FORWARDED_REQUEST_HEADERS = {
     "if-none-match",
     "last-event-id",
     "range",
+    "x-knoa-transport",
 }
 _FORWARDED_RESPONSE_HEADERS = {
     "accept-ranges",
