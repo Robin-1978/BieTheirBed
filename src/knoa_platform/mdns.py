@@ -312,6 +312,32 @@ class MdnsPublisher:
     def _send_nowait(self, packet: bytes, address: tuple[str, int]) -> None:
         """Best-effort non-blocking send used by all mDNS paths."""
         assert self._socket is not None
+        if address == (MDNS_GROUP, MDNS_PORT):
+            # A packet containing several A records is not enough for a
+            # multi-NIC host: multicast egress still follows the system's
+            # single default route unless the interface is selected. Send
+            # once per advertised address so Wi-Fi and wired peers each see
+            # the announcement on their local link.
+            for interface_address in self.addresses:
+                try:
+                    self._socket.setsockopt(
+                        socket.IPPROTO_IP,
+                        socket.IP_MULTICAST_IF,
+                        socket.inet_aton(interface_address),
+                    )
+                    self._socket.sendto(packet, address)
+                except BlockingIOError:
+                    logger.debug(
+                        "mDNS packet dropped because the socket buffer is full on %s",
+                        interface_address,
+                    )
+                except OSError as exc:
+                    logger.debug(
+                        "mDNS multicast send skipped on %s: %s",
+                        interface_address,
+                        exc,
+                    )
+            return
         try:
             self._socket.sendto(packet, address)
         except BlockingIOError:
