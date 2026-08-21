@@ -113,6 +113,36 @@ function Install-KnoaP2PFirewallRule([string]$ProgramPath) {
         -Program $ProgramPath | Out-Null
 }
 
+function Install-KnoaMdnsFirewallRules {
+    $mdnsRuleName = "KnoaNodeMdns"
+    Get-NetFirewallRule -Name $mdnsRuleName -ErrorAction SilentlyContinue | `
+        Remove-NetFirewallRule -ErrorAction SilentlyContinue
+    New-NetFirewallRule `
+        -Name $mdnsRuleName `
+        -DisplayName "Knoa Node mDNS Discovery" `
+        -Description "Allow Knoa Node mDNS discovery traffic on UDP 5353" `
+        -Direction Inbound `
+        -Action Allow `
+        -Enabled True `
+        -Profile Any `
+        -Protocol UDP `
+        -LocalPort 5353 | Out-Null
+
+    $gatewayRuleName = "KnoaNodeLanGateway"
+    Get-NetFirewallRule -Name $gatewayRuleName -ErrorAction SilentlyContinue | `
+        Remove-NetFirewallRule -ErrorAction SilentlyContinue
+    New-NetFirewallRule `
+        -Name $gatewayRuleName `
+        -DisplayName "Knoa Node LAN Gateway" `
+        -Description "Allow authenticated Knoa Node LAN gateway traffic on TCP 9541" `
+        -Direction Inbound `
+        -Action Allow `
+        -Enabled True `
+        -Profile Any `
+        -Protocol TCP `
+        -LocalPort 9541 | Out-Null
+}
+
 function Install-WinSWService(
     [string]$ServiceId,
     [string]$Xml,
@@ -283,7 +313,10 @@ if ($WheelhousePath) {
     & $python -m pip install --force-reinstall $resolvedPackage
 }
 if ($LASTEXITCODE -ne 0) { throw "Knoa wheel installation failed" }
-if ($installNode) { Install-KnoaP2PFirewallRule $python }
+if ($installNode) {
+    Install-KnoaP2PFirewallRule $python
+    Install-KnoaMdnsFirewallRules
+}
 
 Copy-Item -Force (Join-Path $PSScriptRoot "Uninstall-Knoa.ps1") $scriptRoot
 Copy-Item -Force (Join-Path $PSScriptRoot "Update-Knoa.ps1") $scriptRoot
@@ -422,6 +455,7 @@ if ($installNode) {
   <delayedAutoStart>true</delayedAutoStart>
   <onfailure action="restart" delay="10 sec" />
   <stoptimeout>30 sec</stoptimeout>
+  <stopparentprocessfirst>true</stopparentprocessfirst>
   <logpath>$nodeLogPath</logpath>
   <log mode="roll-by-size">
     <sizeThreshold>10240</sizeThreshold>

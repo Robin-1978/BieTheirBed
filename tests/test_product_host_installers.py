@@ -84,6 +84,22 @@ def test_windows_product_node_installs_webrtc_firewall_rule() -> None:
     assert 'KnoaNodeWebRtcP2P' in uninstaller
 
 
+def test_windows_product_node_opens_mdns_and_owns_runner_process_tree() -> None:
+    installer = _read("deploy/product/windows/Install-KnoaBundle.ps1")
+    runner = _read("deploy/product/windows/Run-KnoaNode.ps1")
+    uninstaller = _read("deploy/product/windows/Uninstall-KnoaHost.ps1")
+
+    assert "Install-KnoaMdnsFirewallRules" in installer
+    assert 'KnoaNodeMdns' in installer
+    assert '-LocalPort 5353' in installer
+    assert 'KnoaNodeLanGateway' in installer
+    assert '-LocalPort 9541' in installer
+    assert "ProcessStartInfo" in runner
+    assert "taskkill.exe /F /T /PID $child.Id" in runner
+    assert 'KnoaNodeMdns' in uninstaller
+    assert 'KnoaNodeLanGateway' in uninstaller
+
+
 def test_windows_hub_console_public_url_is_explicit() -> None:
     runner = _read("deploy/product/windows/Run-KnoaHub.ps1")
 
