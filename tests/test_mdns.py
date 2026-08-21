@@ -50,6 +50,43 @@ def test_lan_addresses_skips_loopback_and_docker() -> None:
         assert lan_addresses() == ["10.12.28.139", "10.12.10.63"]
 
 
+def test_mdns_status_exposes_advertiser_health() -> None:
+    publisher = MdnsPublisher(
+        node_id="node_test-1",
+        port=9541,
+        version="0.2.65",
+        signing_public_key="public-key",
+        addresses=["192.168.1.20", "10.12.28.139"],
+    )
+
+    status = publisher.status()
+
+    assert status["enabled"] is True
+    assert status["available"] is False
+    assert status["advertising"] is False
+    assert status["responder"] is False
+    assert status["addresses"] == ["192.168.1.20", "10.12.28.139"]
+    assert status["port"] == 9541
+    assert status["service_type"] == SERVICE_TYPE
+    assert status["last_error"] == ""
+
+
+@pytest.mark.asyncio
+async def test_mdns_status_reports_missing_lan_address() -> None:
+    publisher = MdnsPublisher(
+        node_id="node_test-1",
+        port=9541,
+        version="0.2.65",
+        signing_public_key="public-key",
+        addresses=[],
+    )
+
+    assert await publisher.start() is False
+    status = publisher.status()
+    assert status["available"] is False
+    assert status["last_error"] == "no_routable_lan_address"
+
+
 def test_windows_lan_addresses_query_only_uses_preferred_physical_candidates() -> None:
     completed = MagicMock(returncode=0, stdout="192.168.1.20\n10.0.0.5\n")
     with patch("knoa_platform.mdns.sys.platform", "win32"), patch(

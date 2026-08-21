@@ -80,6 +80,9 @@ export default function NodeSettingsScreen() {
         {gateway.status === "ready" ? <Text style={styles.transportDetail}>{t(transportDetailKey(gateway.transportMode))}</Text> : null}
         {gateway.status === "ready" ? <Metric label={t("settings.node.p2pState")} value={p2pStateLabel(gateway.p2pState, t)} /> : null}
         {gateway.p2pLastError ? <Text selectable style={styles.p2pError}>{t("settings.node.p2pLastError", { error: gateway.p2pLastError })}</Text> : null}
+        <Metric label={t("settings.node.mdnsState")} value={mdnsStateLabel(gateway.lanState, t)} />
+        {gateway.lanState === "found" && gateway.lanEndpoint ? <Text selectable style={styles.lanEndpoint}>{t("settings.node.mdnsFoundEndpoint", { endpoint: gateway.lanEndpoint })}</Text> : null}
+        {gateway.lanLastError ? <Text selectable style={styles.p2pError}>{t("settings.node.mdnsLastError", { error: gateway.lanLastError })}</Text> : null}
         <Metric label={t("common.gateway")} value={gateway.gatewayUrl || "—"} />
         <Metric label={t("common.nodeId")} value={gateway.nodeId || "—"} compact />
       </View>
@@ -128,6 +131,13 @@ function p2pStateLabel(state: "idle" | "connecting" | "ready" | "active" | "cool
   return t("settings.node.p2pIdle");
 }
 
+function mdnsStateLabel(state: "idle" | "scanning" | "found" | "cooldown", t: ReturnType<typeof useI18n>["t"]) {
+  if (state === "scanning") return t("settings.node.mdnsScanning");
+  if (state === "found") return t("settings.node.mdnsFound");
+  if (state === "cooldown") return t("settings.node.mdnsCooldown");
+  return t("settings.node.mdnsIdle");
+}
+
 function Action({ title, detail, busy = false, onPress }: { title: string; detail: string; busy?: boolean; onPress(): void }) {
   return (
     <AppPressable disabled={busy} style={styles.action} onPress={onPress}>
@@ -151,6 +161,7 @@ const styles = StyleSheet.create({
   meta: { color: colors.muted, fontSize: 12, lineHeight: 18 },
   transportDetail: { color: colors.muted, fontSize: 12, lineHeight: 18 },
   p2pError: { color: colors.danger, fontSize: 11, lineHeight: 17, padding: 10, borderRadius: 10, backgroundColor: colors.background },
+  lanEndpoint: { color: colors.accent, fontSize: 11, lineHeight: 17 },
   metricValue: { flex: 1, color: colors.ink, fontWeight: "700", textAlign: "right" },
   compact: { fontFamily: "monospace", fontSize: 11 },
   action: { minHeight: 62, flexDirection: "row", alignItems: "center", gap: 11, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },

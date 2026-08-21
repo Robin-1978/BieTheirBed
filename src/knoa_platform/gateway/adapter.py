@@ -193,6 +193,11 @@ class SecureGatewayAdapter(
                 Route("/console", self._console_page, methods=["GET"]),
                 Route("/v1/console/status", self._console_status, methods=["GET"]),
                 Route(
+                    "/v1/console/diagnostics",
+                    self._console_diagnostics,
+                    methods=["GET"],
+                ),
+                Route(
                     "/v1/console/hub/enroll",
                     self._console_hub_enroll,
                     methods=["POST"],

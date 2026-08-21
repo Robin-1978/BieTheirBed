@@ -26,6 +26,7 @@ def test_gateway_openapi_matches_the_allow_listed_http_surface(tmp_path) -> None
     local_console_paths = {
         "/console",
         "/v1/console/status",
+        "/v1/console/diagnostics",
         "/v1/console/hub/enroll",
         "/v1/console/pairing",
         "/v1/console/lifecycle",

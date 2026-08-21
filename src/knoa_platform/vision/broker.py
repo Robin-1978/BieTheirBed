@@ -89,39 +89,45 @@ class VisionBroker:
             return {**cached, "cached": True}
 
         image = self._store.hydrate_ref(session_id, {"artifact_id": artifact_id})
-        request = ProviderCallRequest(
-            call_id=uuid.uuid4().hex,
-            purpose="react",
-            messages=(
-                {"role": "system", "content": VISION_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": f"Visual question: {question}"},
-                        image,
-                    ],
-                },
-            ),
-            temperature=0.0,
-            max_output_tokens=self._max_output_tokens,
-        )
         stopped = cancellation or asyncio.Event()
-        parts: list[str] = []
-        terminal = None
-        async for chunk in provider.stream(request, stopped):
-            if stopped.is_set():
-                raise RuntimeError("Vision request was cancelled")
-            if chunk.content_delta:
-                parts.append(chunk.content_delta)
-            if chunk.terminal:
-                terminal = chunk
-        if terminal is None or terminal.finish_reason == "error":
-            raise RuntimeError(
-                f"Vision model failed: {getattr(terminal, 'error_code', '') or 'provider_failed'}"
+        observation = ""
+        for attempt in range(2):
+            request = ProviderCallRequest(
+                # A retry gets a fresh call id so llama.cpp does not reuse a
+                # partially completed multimodal request from its slot.
+                call_id=uuid.uuid4().hex,
+                purpose="react",
+                messages=(
+                    {"role": "system", "content": VISION_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": f"Visual question: {question}"},
+                            image,
+                        ],
+                    },
+                ),
+                temperature=0.0,
+                max_output_tokens=self._max_output_tokens,
             )
-        observation = "".join(parts).strip()
+            parts: list[str] = []
+            terminal = None
+            async for chunk in provider.stream(request, stopped):
+                if stopped.is_set():
+                    raise RuntimeError("Vision request was cancelled")
+                if chunk.content_delta:
+                    parts.append(chunk.content_delta)
+                if chunk.terminal:
+                    terminal = chunk
+            if terminal is None or terminal.finish_reason == "error":
+                raise RuntimeError(
+                    f"Vision model failed: {getattr(terminal, 'error_code', '') or 'provider_failed'}"
+                )
+            observation = "".join(parts).strip()
+            if observation or attempt == 1:
+                break
         if not observation:
-            raise RuntimeError("Vision model returned an empty observation")
+            raise RuntimeError("Vision model returned an empty observation after one retry")
         result = {
             "observation_id": uuid.uuid4().hex,
             "artifact_id": artifact_id,
