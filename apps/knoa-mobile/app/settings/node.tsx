@@ -72,12 +72,13 @@ export default function NodeSettingsScreen() {
           <View style={styles.flex}>
             <Text style={styles.title}>{node?.displayName || t("nav.node")}</Text>
             <Text style={gateway.status === "ready" ? styles.online : styles.offline}>
-              {gateway.status === "ready" ? `${t("nodeHeader.online")} · ${t(transportLabelKey(gateway.transportMode))}` : t("nodeHeader.connecting")}
+              {gateway.status === "ready" ? t("nodeSettings.connected") : t("nodeHeader.connecting")}
             </Text>
           </View>
         </View>
+        {gateway.status === "ready" ? <Text style={styles.transportDetail}>{t("nodeSettings.autoTransportDetail")}</Text> : null}
         {gateway.status === "ready" ? <Metric label={t("nodeSettings.activeTransport")} value={t(transportLabelKey(gateway.transportMode))} /> : null}
-        {gateway.status === "ready" ? <Text style={styles.transportDetail}>{t(transportDetailKey(gateway.transportMode))}</Text> : null}
+        {gateway.status === "ready" ? <Text style={styles.transportDetail}>{transportDetailKey(gateway.transportMode) ? `${t("nodeSettings.transportDiagnostic")} · ${t(transportDetailKey(gateway.transportMode))}` : ""}</Text> : null}
         {gateway.status === "ready" ? <Metric label={t("settings.node.p2pState")} value={p2pStateLabel(gateway.p2pState, t)} /> : null}
         {gateway.p2pLastError ? <Text selectable style={styles.p2pError}>{t("settings.node.p2pLastError", { error: gateway.p2pLastError })}</Text> : null}
         <Metric label={t("settings.node.mdnsState")} value={mdnsStateLabel(gateway.lanState, t)} />
