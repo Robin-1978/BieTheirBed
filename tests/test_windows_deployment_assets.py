@@ -83,8 +83,10 @@ def test_windows_node_opens_mdns_and_lan_gateway_firewall_rules() -> None:
 def test_windows_node_runner_owns_python_process_tree() -> None:
     runner = _read("deploy/windows/Run-KnoaNode.ps1")
 
-    assert "ProcessStartInfo" in runner
-    assert "taskkill.exe /F /T /PID $child.Id" in runner
+    assert "Start-Process -FilePath $PythonExecutable" in runner
+    assert "-PassThru" in runner
+    assert "taskkill.exe /F /T /PID $proc.Id" in runner
+    assert "ProcessStartInfo" not in runner
     assert "CancelKeyPress" in runner
     assert "finally" in runner
     assert "& $PythonExecutable -m knoa_platform.service" not in runner
