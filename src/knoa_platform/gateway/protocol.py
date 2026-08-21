@@ -424,6 +424,16 @@ class AgentListResponse(BaseModel):
     agents: tuple[AgentSummary, ...]
 
 
+class AgentAvailability(BaseModel):
+    agent_id: str
+    display_name: str
+    reason: str
+
+
+class AgentAvailabilityResponse(BaseModel):
+    unavailable: tuple[AgentAvailability, ...]
+
+
 class ConfigCurrentResponse(BaseModel):
     revision: ConfigRevision
     state: ConfigControlState

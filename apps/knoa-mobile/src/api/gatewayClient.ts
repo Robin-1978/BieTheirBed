@@ -1,5 +1,6 @@
 import type {
   AgentSummary,
+  UnavailableAgent,
   AndroidRelease,
   ArtifactInput,
   ChatApproval,
@@ -198,6 +199,11 @@ export class GatewayClient {
   async listAgents(): Promise<{ defaultAgentId: string; agents: AgentSummary[] }> {
     const response = await this.json<{ default_agent: string; agents: AgentSummary[] }>("/v1/agents");
     return { defaultAgentId: response.default_agent, agents: response.agents };
+  }
+
+  async listAgentAvailability(): Promise<UnavailableAgent[]> {
+    const response = await this.json<{ unavailable: UnavailableAgent[] }>("/v1/agents/availability");
+    return response.unavailable;
   }
 
   async getConfigCurrent(): Promise<{

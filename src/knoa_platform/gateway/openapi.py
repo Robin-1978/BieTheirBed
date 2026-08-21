@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from pydantic.json_schema import models_json_schema
 
 from knoa_platform.gateway.protocol import (
+    AgentAvailabilityResponse,
     AgentListResponse,
     AndroidReleaseResponse,
     ApplyFleetCandidateRequest,
@@ -86,6 +87,7 @@ from knoa_platform.gateway.protocol import (
 
 _MODELS: tuple[type[BaseModel], ...] = (
     AndroidReleaseResponse,
+    AgentAvailabilityResponse,
     AgentListResponse,
     ErrorResponse,
     HealthResponse,
@@ -367,6 +369,16 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     "security": bearer,
                     "responses": {
                         "200": _json_response("Enabled Agents", AgentListResponse),
+                        **_errors("401", "429"),
+                    },
+                }
+            },
+            "/v1/agents/availability": {
+                "get": {
+                    "operationId": "listAgentAvailability",
+                    "security": bearer,
+                    "responses": {
+                        "200": _json_response("Unavailable Agent explanations", AgentAvailabilityResponse),
                         **_errors("401", "429"),
                     },
                 }

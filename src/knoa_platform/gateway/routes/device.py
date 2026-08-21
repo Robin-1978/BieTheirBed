@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 
 from pydantic import ValidationError
 from starlette.requests import Request
@@ -69,6 +70,37 @@ class DeviceRoutes:
                 if agent.enabled and agent.visibility == "user"
             ],
         })
+
+    async def _agent_availability(self, request: Request) -> JSONResponse:
+        """Explain why configured agents cannot be selected for a new session."""
+        authenticated = self._authorize(request, limit=60)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        try:
+            revision, _state, _generations = await self._core.get_config_current(
+                authenticated.device.principal_id
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        unavailable = []
+        for agent_id, agent in revision.document.agents.agents.items():
+            if agent.enabled and agent.visibility == "user":
+                continue
+            if agent.visibility == "system":
+                reason = "system_only"
+            elif agent.visibility == "delegate":
+                reason = "delegate_only"
+            else:
+                reason = "disabled"
+            if agent.enabled and agent.kind == "codex" and agent.command:
+                if shutil.which(agent.command[0]) is None:
+                    reason = "runtime_unavailable"
+            unavailable.append({
+                "agent_id": agent_id,
+                "display_name": agent.display_name,
+                "reason": reason,
+            })
+        return JSONResponse({"unavailable": unavailable})
 
     async def _openapi(self, _request: Request) -> JSONResponse:
         from knoa_platform.gateway.openapi import gateway_openapi_schema
