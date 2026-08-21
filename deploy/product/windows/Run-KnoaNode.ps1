@@ -18,39 +18,36 @@ $env:KNOA_DESKTOP_COMPANION_TOKEN_FILE = $DesktopCompanionTokenFile
 
 # Keep the updater (and the runtime it launches) under this runner's process
 # tree so WinSW can stop the complete Node process tree without leaving port
-# 9530 bound by an orphaned release. Start-Process -PassThru is reliable in
-# WinSW's session-0 service context, unlike Process.Start for console apps.
-function Quote-ProcessArgument([string]$Value) {
-    return '"' + $Value.Replace('"', '\"') + '"'
-}
-
-$workingDirectory = Join-Path (Split-Path -Parent $NodeRoot) "Workspace"
-if (-not (Test-Path -LiteralPath $workingDirectory)) {
-    $workingDirectory = Split-Path -Parent $ConfigPath
-}
-$proc = Start-Process -FilePath $Updater `
-    -ArgumentList @(
-        "run",
-        "--install-root", (Quote-ProcessArgument $ReleaseRoot),
-        "--entrypoint", "bin/knoa-node.cmd",
-        "--",
-        "--config", (Quote-ProcessArgument $ConfigPath)
-    ) `
-    -PassThru -WindowStyle Hidden -WorkingDirectory $workingDirectory
-if (-not $proc) { throw "Failed to launch Knoa updater" }
+# 9530 bound by an orphaned release. The call operator is reliable in WinSW's
+# session-0 context; CIM identifies the updater child for recursive cleanup.
+$runnerPid = $PID
 
 function Stop-Child {
-    if ($proc -and -not $proc.HasExited) {
-        & taskkill.exe /F /T /PID $proc.Id 2>$null
+    try {
+        $children = @(Get-CimInstance Win32_Process `
+            -Filter "ParentProcessId = $runnerPid" `
+            -ErrorAction Stop | Where-Object {
+                $_.Name -ieq "knoa-update.exe"
+            })
+        foreach ($child in $children) {
+            & taskkill.exe /F /T /PID $child.ProcessId 2>$null
+        }
+    } catch {
+        # Cleanup is best effort; WinSW still owns the runner process.
     }
 }
 
 [Console]::CancelKeyPress.AddHandler({ Stop-Child })
+$exitCode = 1
 trap { Stop-Child; break }
-
 try {
-    $proc.WaitForExit()
-    exit $proc.ExitCode
+    & $Updater run `
+        --install-root $ReleaseRoot `
+        --entrypoint bin/knoa-node.cmd `
+        -- `
+        --config $ConfigPath
+    $exitCode = $LASTEXITCODE
 } finally {
     Stop-Child
 }
+exit $exitCode

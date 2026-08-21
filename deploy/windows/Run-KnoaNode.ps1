@@ -17,30 +17,35 @@ if ($LifecycleTokenFile -and $LifecycleIncomingRoot) {
     $env:KNOA_LIFECYCLE_INCOMING_ROOT = $LifecycleIncomingRoot
 }
 
-# Keep Python as a direct, owned child of this runner.  Start-Process is
-# reliable in WinSW's session-0 service context, where Process.Start can
-# return $null for a console child.
-$workingDirectory = Join-Path (Split-Path -Parent $NodeRoot) "Workspace"
-if (-not (Test-Path -LiteralPath $workingDirectory)) {
-    $workingDirectory = Split-Path -Parent $ConfigPath
-}
-$proc = Start-Process -FilePath $PythonExecutable `
-    -ArgumentList @("-m", "knoa_platform.service", "--config", $ConfigPath) `
-    -PassThru -WindowStyle Hidden -WorkingDirectory $workingDirectory
-if (-not $proc) { throw "Failed to launch Knoa Python runtime" }
+# Use the call operator in the WinSW session-0 service context.  Unlike both
+# Process.Start and Start-Process -WindowStyle Hidden, this reliably launches
+# the console runtime.  The CIM fallback below identifies only this runner's
+# Python child and recursively terminates it if Ctrl+C does not propagate.
+$runnerPid = $PID
 
 function Stop-Child {
-    if ($proc -and -not $proc.HasExited) {
-        & taskkill.exe /F /T /PID $proc.Id 2>$null
+    try {
+        $children = @(Get-CimInstance Win32_Process `
+            -Filter "ParentProcessId = $runnerPid" `
+            -ErrorAction Stop | Where-Object {
+                $_.Name -match '^python(?:w|3)?\.exe$' -and
+                $_.CommandLine -match 'knoa_platform\.service'
+            })
+        foreach ($child in $children) {
+            & taskkill.exe /F /T /PID $child.ProcessId 2>$null
+        }
+    } catch {
+        # Cleanup is best effort; WinSW still owns the runner process.
     }
 }
 
 [Console]::CancelKeyPress.AddHandler({ Stop-Child })
+$exitCode = 1
 trap { Stop-Child; break }
-
 try {
-    $proc.WaitForExit()
-    exit $proc.ExitCode
+    & $PythonExecutable -m knoa_platform.service --config $ConfigPath
+    $exitCode = $LASTEXITCODE
 } finally {
     Stop-Child
 }
+exit $exitCode
