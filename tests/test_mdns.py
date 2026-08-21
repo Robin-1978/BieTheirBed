@@ -61,6 +61,7 @@ def test_windows_lan_addresses_query_only_uses_preferred_physical_candidates() -
     command = run.call_args.args[0][-1]
     assert "-AddressState Preferred" in command
     assert "Tailscale|ZeroTier|WireGuard" in command
+    run.assert_called_once()
 
 
 def test_mdns_send_drops_when_multicast_socket_is_full() -> None:
