@@ -66,6 +66,7 @@ async def test_vision_broker_returns_scoped_observation_and_caches_it(tmp_path) 
     assert first["observation"] == "A single white pixel is visible."
     assert first["model"] == "vision-a"
     assert first["cached"] is False
+    assert first["retry_count"] == 0
     assert second["cached"] is True
     assert len(provider.requests) == 1
     content = provider.requests[0].messages[-1]["content"]
@@ -86,6 +87,7 @@ async def test_vision_broker_retries_once_when_first_observation_is_empty(tmp_pa
     )
 
     assert result["observation"] == "The image contains a visible status panel."
+    assert result["retry_count"] == 1
     assert len(provider.requests) == 2
     assert provider.requests[0].call_id != provider.requests[1].call_id
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import re
 import uuid
 from typing import Any
@@ -23,6 +24,7 @@ _SOLUTION_FOCUS = re.compile(
     r"为什么|怎么解决|如何解决|怎么修复|如何修复|解决方案|分析原因)",
     re.IGNORECASE,
 )
+logger = logging.getLogger(__name__)
 
 
 class VisionBroker:
@@ -91,6 +93,7 @@ class VisionBroker:
         image = self._store.hydrate_ref(session_id, {"artifact_id": artifact_id})
         stopped = cancellation or asyncio.Event()
         observation = ""
+        retry_count = 0
         for attempt in range(2):
             request = ProviderCallRequest(
                 # A retry gets a fresh call id so llama.cpp does not reuse a
@@ -126,6 +129,12 @@ class VisionBroker:
             observation = "".join(parts).strip()
             if observation or attempt == 1:
                 break
+            retry_count = 1
+            logger.info(
+                "Vision model returned empty observation; retrying once model=%s artifact=%s",
+                model_alias,
+                artifact_id,
+            )
         if not observation:
             raise RuntimeError("Vision model returned an empty observation after one retry")
         result = {
@@ -135,6 +144,7 @@ class VisionBroker:
             "observation": observation,
             "model": model_alias,
             "cached": False,
+            "retry_count": retry_count,
         }
         self._cache[cache_key] = result
         return result
