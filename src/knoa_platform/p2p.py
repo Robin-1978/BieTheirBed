@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -34,6 +35,8 @@ else:
     _AIORTC_IMPORT_ERROR = None
 
 from knoa_platform.relay_protocol import decode_base64url, encode_base64url
+
+logger = logging.getLogger(__name__)
 
 _CHUNK_BYTES = 48 * 1024
 _MAX_BODY_BYTES = 64 * 1024 * 1024
@@ -135,6 +138,7 @@ class P2PServer:
         sdp: str,
         kind: Literal["app", "resource"],
     ) -> dict[str, str]:
+        started = time.monotonic()
         self._offers_total += 1
         peer: RTCPeerConnection | None = None
         try:
@@ -145,6 +149,17 @@ class P2PServer:
             @peer.on("connectionstatechange")
             async def connection_state_change() -> None:
                 if peer.connectionState in {"failed", "closed", "disconnected"}:
+                    logger.info("P2P peer closed connection_state=%s", peer.connectionState)
+                    self._peers.discard(peer)
+                    await peer.close()
+
+            @peer.on("iceconnectionstatechange")
+            async def ice_connection_state_change() -> None:
+                if peer.iceConnectionState in {"failed", "closed", "disconnected"}:
+                    logger.info(
+                        "P2P peer closed ice_connection_state=%s",
+                        peer.iceConnectionState,
+                    )
                     self._peers.discard(peer)
                     await peer.close()
 
@@ -170,10 +185,21 @@ class P2PServer:
             if local is None:
                 raise ConnectionError("WebRTC answer was not created")
             self._answers_total += 1
+            logger.info(
+                "P2P answer created kind=%s duration_ms=%d",
+                kind,
+                int((time.monotonic() - started) * 1000),
+            )
             return {"type": local.type, "sdp": local.sdp}
         except Exception as error:
             self._last_error = _safe_error(error)
             self._last_failure_at = time.time()
+            logger.warning(
+                "P2P answer failed kind=%s duration_ms=%d error=%s",
+                kind,
+                int((time.monotonic() - started) * 1000),
+                self._last_error,
+            )
             if peer is not None:
                 self._peers.discard(peer)
                 await peer.close()
@@ -522,7 +548,7 @@ async def _send_json(channel: Any, message: dict[str, Any]) -> None:
 async def _wait_for_ice_gathering(
     peer: RTCPeerConnection,
     *,
-    timeout: float = 8.0,
+    timeout: float = 3.0,
 ) -> None:
     if peer.iceGatheringState == "complete":
         return
