@@ -12,7 +12,7 @@ from knoa_platform.agent_runtime.contracts import (
     RuntimeStatus,
     ToolListResult,
 )
-from knoa_platform.artifacts import ArtifactRef
+from knoa_platform.artifacts import ArtifactRef, ArtifactStore
 from knoa_platform.config import AppConfig
 from knoa_platform.agents.definitions import ResolvedInvocationPolicy
 from knoa_platform.configuration import (
@@ -260,6 +260,15 @@ class GatewayCoreClient(Protocol):
         artifact_id: str,
     ) -> ArtifactDownloadResult: ...
 
+    async def search_artifacts(
+        self,
+        session_handle: str,
+        *,
+        query: str = "",
+        kind: str = "",
+        limit: int = 50,
+    ) -> tuple[dict, ...]: ...
+
     def principal_task_events(
         self,
         *,
@@ -293,6 +302,15 @@ class GatewayCoreBridge:
         self._client_factory = client_factory or self._connect_client
         self._clients: dict[str, GatewayCoreClient] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        # Metadata search is read-only and uses the same registry database as
+        # the runtime ArtifactStore.  Bytes remain behind Core's authenticated
+        # download command.
+        self._artifact_store = ArtifactStore(
+            self._paths.attachments,
+            persistent_root=self._paths.artifacts,
+            db_path=self._paths.data / "assistant.db",
+            ttl_seconds=config.attachment_ttl_seconds,
+        )
 
     async def close(self) -> None:
         clients, self._clients = tuple(self._clients.values()), {}
@@ -832,6 +850,28 @@ class GatewayCoreBridge:
     ) -> ArtifactDownloadResult:
         client = await self._client_for(principal_id)
         return await client.download_artifact(session_handle, artifact_id)
+
+    async def search_artifacts(
+        self,
+        principal_id: str,
+        session_handle: str,
+        *,
+        query: str = "",
+        kind: str = "",
+        limit: int = 50,
+    ) -> tuple[dict, ...]:
+        # Principal ownership is represented by the authenticated Core client
+        # session.  Verify the session exists before returning registry rows.
+        await (await self._client_for(principal_id)).get_conversation_session(session_handle)
+        return tuple(
+            await asyncio.to_thread(
+                self._artifact_store.search,
+                session_handle,
+                query=query,
+                kind=kind,
+                limit=limit,
+            )
+        )
 
     async def principal_task_events(
         self,

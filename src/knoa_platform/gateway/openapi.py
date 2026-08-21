@@ -14,6 +14,7 @@ from knoa_platform.gateway.protocol import (
     ApplyFleetCandidateRequest,
     ApprovalResolvedResponse,
     ArtifactResponse,
+    ArtifactSearchResponse,
     ArtifactTranscriptionResponse,
     AuditEventResponse,
     AuditListResponse,
@@ -141,6 +142,7 @@ _MODELS: tuple[type[BaseModel], ...] = (
     AuditEventResponse,
     AuditListResponse,
     ArtifactResponse,
+    ArtifactSearchResponse,
     ArtifactTranscriptionResponse,
     RuntimeStatusResponse,
     ToolListResponse,
@@ -1061,6 +1063,20 @@ def gateway_openapi_schema() -> dict[str, Any]:
                 }
             },
             "/v1/artifacts": {
+                "get": {
+                    "operationId": "searchArtifacts",
+                    "security": bearer,
+                    "parameters": [
+                        session_query,
+                        _query("q", {"type": "string", "maxLength": 160}),
+                        _query("kind", {"type": "string", "enum": ["image", "file"]}),
+                        _query("limit", {"type": "integer", "minimum": 1, "maximum": 200}),
+                    ],
+                    "responses": {
+                        "200": _json_response("Artifact metadata search", ArtifactSearchResponse),
+                        **_errors("400", "401", "429", "503"),
+                    },
+                },
                 "post": {
                     "operationId": "uploadArtifact",
                     "security": bearer,

@@ -31,6 +31,10 @@ class ChannelRuntime:
             from knoa_platform.channels import FeishuChannel
 
             channels.append(FeishuChannel(config))
+        if config.dingtalk_enabled:
+            from knoa_platform.channels import DingTalkChannel
+
+            channels.append(DingTalkChannel(config))
         return cls(tuple(channels))
 
     @property

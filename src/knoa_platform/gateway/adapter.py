@@ -59,6 +59,7 @@ from knoa_platform.remote_models import (
 )
 from knoa_platform.runtime import RuntimePaths
 from knoa_platform.secrets import SecretStore
+from knoa_platform.transport_health import TransportHealth
 
 logger = logging.getLogger(__name__)
 _MAX_BODY_BYTES = 16 * 1024
@@ -136,6 +137,7 @@ class SecureGatewayAdapter(
         elif not is_loopback_host(config.gateway_host):
             raise ValueError("Secure Gateway must bind to loopback before TLS")
         self._config = config
+        self._transport_health = TransportHealth()
         paths = RuntimePaths.from_root(config.runtime_root)
         database = paths.data / "gateway.db"
         identities = GatewayIdentityRepository(database)
@@ -352,6 +354,7 @@ class SecureGatewayAdapter(
                 Route("/v1/tasks", self._list_tasks, methods=["GET"]),
                 Route("/v1/events", self._events, methods=["GET"]),
                 Route("/v1/events/poll", self._events_poll, methods=["GET"]),
+                Route("/v1/artifacts", self._search_artifacts, methods=["GET"]),
                 Route("/v1/artifacts", self._upload_artifact, methods=["POST"]),
                 Route(
                     "/v1/artifacts/{artifact_id:str}",

@@ -48,7 +48,14 @@ class ImageInspectTool(ToolBase):
                 cancellation=context.cancellation if context is not None else None,
             )
         except (KeyError, OSError, ValueError, RuntimeError) as exc:
-            return {"error": str(exc), "artifact_id": artifact_id}
+            message = str(exc)
+            retried = "after one retry" in message.lower()
+            return {
+                "error": message,
+                "artifact_id": artifact_id,
+                "retry_count": 1 if retried else 0,
+                "retry_exhausted": retried,
+            }
 
     def definition(self) -> dict[str, Any]:
         return {

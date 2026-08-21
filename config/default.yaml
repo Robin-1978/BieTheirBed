@@ -63,6 +63,11 @@ feishu_enabled: false
 feishu_app_id: ""
 feishu_app_secret: ""
 feishu_receive_id: ""
+dingtalk_enabled: false
+dingtalk_client_id: ""
+dingtalk_client_secret: ""
+dingtalk_robot_code: ""
+dingtalk_receive_id: ""
 attachment_ttl_seconds: 3600
 attachment_cleanup_interval_seconds: 300
 audio_transcription:

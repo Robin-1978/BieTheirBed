@@ -7,11 +7,13 @@ import type { ManagedConfig } from "@/api/models";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
+import { BUSINESS_CONNECTIONS, connectionDescriptor, type BusinessConnectionKind } from "@/models/connectionWizard";
 
 export default function ExtensionCenterScreen() {
   const gateway = useGateway();
   const { t } = useI18n();
   const [kind, setKind] = useState<"skill" | "local_mcp" | "remote_mcp">("remote_mcp");
+  const [connectionKind, setConnectionKind] = useState<BusinessConnectionKind>("custom");
   const [source, setSource] = useState("");
   const [serverId, setServerId] = useState("");
   const [allowPrivate, setAllowPrivate] = useState(false);
@@ -77,6 +79,16 @@ export default function ExtensionCenterScreen() {
       <View style={styles.section}>
         <Text style={styles.title}>{t("settings.extensions.addTitle")}</Text>
         <Text style={styles.hint}>{t("settings.extensions.addHint")}</Text>
+        <Text style={styles.label}>{t("connections.title")}</Text>
+        <View style={styles.choices}>
+          {BUSINESS_CONNECTIONS.map((connection) => (
+            <AppPressable key={connection.kind} style={[styles.choice, connectionKind === connection.kind && styles.selected]} onPress={() => { setConnectionKind(connection.kind); if (connection.defaultServerId) setServerId(connection.defaultServerId); }}>
+              <Text style={connectionKind === connection.kind ? styles.selectedText : styles.choiceText}>{t(connection.titleKey as never)}</Text>
+            </AppPressable>
+          ))}
+        </View>
+        <Text style={styles.hint}>{t(connectionDescriptor(connectionKind).detailKey as never)}</Text>
+        {connectionDescriptor(connectionKind).capabilities.length ? <Text style={styles.hint}>{t("connections.capabilities", { items: connectionDescriptor(connectionKind).capabilities.join("、") })}</Text> : null}
         <View style={styles.choices}>
           {(["remote_mcp", "local_mcp", "skill"] as const).map((value) => (
             <AppPressable key={value} style={[styles.choice, kind === value && styles.selected]} onPress={() => setKind(value)}>

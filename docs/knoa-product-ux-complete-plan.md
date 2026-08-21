@@ -4,6 +4,8 @@
 > 更新：2026-08-21
 > 目标：把 Knoa 从“能力完整的本地 Agent Platform”推进为“普通用户可以稳定完成真实工作的个人电脑助手”。
 
+> 本轮执行边界：完成全部 P0、P1，以及面向个人用户的 P2。企业 Fleet、组织级成员治理、企业成本/Token 管理、企业运维统计、复杂企业审计和策略中心不在本轮范围内，不作为发布阻塞项。
+
 ## 1. 结论与产品目标
 
 Knoa 已经具备真实执行闭环，而不是聊天 Demo：
@@ -78,7 +80,7 @@ Knoa 是一个 local-first 的个人电脑 Agent：
 
 ### 3.2 当前不能承诺为“开箱即用”的能力
 
-- DingTalk Channel 尚未完成；
+- DingTalk Stream Channel 已完成个人用户范围的文本、图片、文件、任务通知、审批和结果交付；
 - mDNS 在所有 Windows 网络环境中稳定发现尚未达到产品级保证；
 - P2P、Relay、mDNS 的切换仍有用户可感知异常；
 - llama.cpp 视觉模型首次请求偶发空 observation；
@@ -347,6 +349,8 @@ Node Console 增加“检查 Node”按钮，依次检查：
 - 会话映射；
 - 多语言和权限策略。
 
+当前实现：DingTalk 使用官方 Stream 长连接适配器，复用 Feishu 的 Core 会话、后台 Task、Artifact、审批和重试语义；支持文本、图片、文件入站以及结果文件出站。未安装可选 `dingtalk_stream` SDK 时仅该渠道进入重试，不影响 Node/Core 启动。
+
 优先使用官方 Stream 长连接模式，避免要求公网回调地址。
 
 ### P1-5 App 信息架构简化
@@ -431,7 +435,7 @@ Tools、Capability、Runtime 限制和 Delegation Budget 放入高级设置。
 
 ## 9. P2 计划：协作和平台化
 
-### P2-1 多人协作
+### P2-1 多人协作（本轮排除）
 
 - Workspace 成员角色；
 - Task 负责人；
@@ -441,7 +445,7 @@ Tools、Capability、Runtime 限制和 Delegation Budget 放入高级设置。
 - 操作审计；
 - 团队通知策略。
 
-### P2-2 企业运维
+### P2-2 企业运维（本轮排除）
 
 - Node Fleet 总览；
 - 在线率和健康度；
@@ -459,6 +463,8 @@ Tools、Capability、Runtime 限制和 Delegation Budget 放入高级设置。
 - 文件和 Artifact 搜索；
 - 更强的离线队列；
 - 跨设备结果同步。
+
+本轮只实现其中不依赖组织治理的个人能力：Artifact 搜索与导出、离线任务队列与恢复、桌面 Companion/浏览器控制增强；成员、负责人、团队通知和组织策略不实现。
 
 ## 10. 界面和视觉规范
 
@@ -590,9 +596,9 @@ Tools、Capability、Runtime 限制和 Delegation Budget 放入高级设置。
 
 - DingTalk Stream Channel；
 - Feishu/DingTalk 统一任务与审批语义；
-- Workspace 成员和任务负责人；
-- Node Fleet 基础健康总览；
-- 版本成功率和任务成功率统计。
+- ~~Workspace 成员和任务负责人~~（企业范围，排除）；
+- ~~Node Fleet 基础健康总览~~（企业范围，排除）；
+- ~~版本成功率和任务成功率统计~~（企业范围，排除）。
 
 ## 14. 版本完成定义
 
@@ -616,3 +622,13 @@ Knoa 不应该把“我有很多 Tool”作为主要卖点，而应该让用户�
 > 我把一件真实工作交给它，它能在我的电脑上安全地完成，并且我始终知道进展、结果和下一步。
 
 后续所有功能、界面和基础设施优化，都应以这个用户承诺为验收标准。
+
+## 16. 本轮交付状态（2026-08-21）
+
+已落地并完成自动化验证的个人用户范围：
+
+- P0：Node 健康诊断、mDNS 多网卡广播状态、mDNS/P2P/Relay 优先级诊断、Windows 服务树清理与更新回滚、视觉模型空 observation 受控重试、Agent/Codex Runtime 可用性说明。
+- P1：六类真实任务模板、结果交付中心、Artifact 搜索/安全下载、Markdown 分享、MCP 连接检查/草稿向导、Feishu 统一任务/审批语义、DingTalk Stream 适配和离线任务恢复。
+- 个人 P2：Artifact 浏览、离线队列和自动恢复、跨渠道结果交付基础契约、桌面 Companion 状态诊断。
+
+明确排除：企业 Fleet、组织成员/负责人治理、企业成本与 Token 管理、企业运维统计、复杂企业审计和组织策略中心。

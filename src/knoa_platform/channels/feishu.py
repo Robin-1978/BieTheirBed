@@ -24,6 +24,7 @@ from knoa_platform.channels.feishu_cards import (
 from knoa_platform.channels.feishu_conversation import FeishuConversationMixin
 from knoa_platform.channels.feishu_tasks import FeishuTaskMixin
 from knoa_platform.channels.feishu_transport import FeishuTransportMixin
+from knoa_platform.channels.contracts import ChannelMessage
 from knoa_platform.config import AppConfig
 from knoa_platform.runtime import RuntimePaths
 from knoa_platform.service.core_api import (
@@ -89,6 +90,21 @@ class FeishuChannel(
     """Translate Feishu ingress/egress at the CoreClient boundary."""
 
     name = "feishu"
+
+    @staticmethod
+    def message_contract(
+        open_id: str,
+        message_id: str,
+        *,
+        text: str = "",
+    ) -> ChannelMessage:
+        """Return the provider-neutral shape used by channel diagnostics."""
+        return ChannelMessage(
+            channel="feishu",
+            principal_id=open_id,
+            message_id=message_id,
+            text=text,
+        )
 
     def __init__(self, config: AppConfig) -> None:
         self._config = config

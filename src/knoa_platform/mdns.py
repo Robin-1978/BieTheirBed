@@ -4,10 +4,12 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
+import re
 import socket
 import struct
 import subprocess
 import sys
+import time
 from collections.abc import Mapping, Sequence
 
 logger = logging.getLogger(__name__)
@@ -115,6 +117,26 @@ def _interface_ipv4_addresses() -> list[str]:
                     _add_ipv4(addresses, seen, line.strip())
         except (OSError, subprocess.SubprocessError):
             pass
+        # Windows service accounts occasionally cannot resolve the
+        # Get-NetIPAddress cmdlet (restricted PowerShell profile or a very
+        # early boot).  ipconfig is present in every supported Windows build
+        # and is a safe fallback; the same routability filter removes loopback
+        # and link-local/virtual ranges below.
+        if not addresses:
+            try:
+                completed = subprocess.run(
+                    ["ipconfig"],
+                    capture_output=True,
+                    text=True,
+                    timeout=3,
+                    check=False,
+                )
+                for line in completed.stdout.splitlines():
+                    match = re.search(r"(?:IPv4[^:]*:\s*|Address[^:]*:\s*)(\d{1,3}(?:\.\d{1,3}){3})", line)
+                    if match:
+                        _add_ipv4(addresses, seen, match.group(1))
+            except (OSError, subprocess.SubprocessError):
+                pass
     else:
         try:
             completed = subprocess.run(
@@ -223,6 +245,9 @@ class MdnsPublisher:
         self._listener_task: asyncio.Task[None] | None = None
         self._last_error = ""
         self._responder_available = False
+        self._last_announcement_at = 0.0
+        self._last_send_error = ""
+        self._announcement_count = 0
 
     def status(self) -> dict[str, object]:
         """Return a safe, user-facing snapshot of LAN advertisement health."""
@@ -235,6 +260,13 @@ class MdnsPublisher:
             "port": self.port,
             "service_type": SERVICE_TYPE,
             "last_error": self._last_error,
+            "last_send_error": self._last_send_error,
+            "last_announcement_age_seconds": (
+                None
+                if not self._last_announcement_at
+                else max(0.0, time.monotonic() - self._last_announcement_at)
+            ),
+            "announcement_count": self._announcement_count,
         }
 
     async def start(self) -> bool:
@@ -348,6 +380,7 @@ class MdnsPublisher:
             # single default route unless the interface is selected. Send
             # once per advertised address so Wi-Fi and wired peers each see
             # the announcement on their local link.
+            sent = 0
             for interface_address in self.addresses:
                 try:
                     self._socket.setsockopt(
@@ -356,22 +389,32 @@ class MdnsPublisher:
                         socket.inet_aton(interface_address),
                     )
                     self._socket.sendto(packet, address)
+                    sent += 1
                 except BlockingIOError:
                     logger.debug(
                         "mDNS packet dropped because the socket buffer is full on %s",
                         interface_address,
                     )
                 except OSError as exc:
+                    self._last_send_error = f"{interface_address}:{type(exc).__name__}"
                     logger.debug(
                         "mDNS multicast send skipped on %s: %s",
                         interface_address,
                         exc,
                     )
+            if sent:
+                self._last_announcement_at = time.monotonic()
+                self._announcement_count = getattr(self, "_announcement_count", 0) + sent
+            elif self.addresses:
+                self._last_error = "multicast_send_failed"
             return
         try:
             self._socket.sendto(packet, address)
+            self._last_announcement_at = time.monotonic()
         except BlockingIOError:
             logger.debug("mDNS packet dropped because the socket buffer is full")
+        except OSError as exc:
+            self._last_send_error = f"{address[0]}:{type(exc).__name__}"
 
     async def stop(self) -> None:
         task, self._task = self._task, None

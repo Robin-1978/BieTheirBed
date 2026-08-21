@@ -297,6 +297,13 @@ class AppConfig(BaseModel):
     feishu_app_id: str = ""
     feishu_app_secret: SecretStr = Field(default_factory=lambda: SecretStr(""))
     feishu_receive_id: str = ""
+    # DingTalk Stream credentials.  Stream mode intentionally does not need a
+    # public callback URL; the client maintains the outbound connection.
+    dingtalk_enabled: bool = False
+    dingtalk_client_id: str = ""
+    dingtalk_client_secret: SecretStr = Field(default_factory=lambda: SecretStr(""))
+    dingtalk_robot_code: str = ""
+    dingtalk_receive_id: str = ""
     attachment_ttl_seconds: int = 3600
     attachment_cleanup_interval_seconds: int = 300
     task_trace_retention_days: int = Field(default=90, ge=1, le=3650)
@@ -407,6 +414,13 @@ class AppConfig(BaseModel):
             or not self.feishu_app_secret.get_secret_value().strip()
         ):
             raise ValueError("Enabled Feishu channel requires app_id and app_secret")
+        if self.dingtalk_enabled and (
+            not self.dingtalk_client_id.strip()
+            or not self.dingtalk_client_secret.get_secret_value().strip()
+        ):
+            raise ValueError(
+                "Enabled DingTalk channel requires client_id and client_secret"
+            )
         invalid_mcp_ids = [
             server_id
             for server_id in self.mcp_servers
@@ -736,6 +750,11 @@ def _env_overrides() -> dict[str, Any]:
         "KNOA_FEISHU_APP_ID": ("feishu_app_id", str),
         "KNOA_FEISHU_APP_SECRET": ("feishu_app_secret", str),
         "KNOA_FEISHU_RECEIVE_ID": ("feishu_receive_id", str),
+        "KNOA_DINGTALK_ENABLED": ("dingtalk_enabled", bool),
+        "KNOA_DINGTALK_CLIENT_ID": ("dingtalk_client_id", str),
+        "KNOA_DINGTALK_CLIENT_SECRET": ("dingtalk_client_secret", str),
+        "KNOA_DINGTALK_ROBOT_CODE": ("dingtalk_robot_code", str),
+        "KNOA_DINGTALK_RECEIVE_ID": ("dingtalk_receive_id", str),
         "KNOA_ATTACHMENT_TTL_SECONDS": ("attachment_ttl_seconds", int),
         "KNOA_ATTACHMENT_CLEANUP_INTERVAL_SECONDS": ("attachment_cleanup_interval_seconds", int),
         "KNOA_TASK_TRACE_RETENTION_DAYS": ("task_trace_retention_days", int),

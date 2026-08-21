@@ -18,6 +18,7 @@ import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { useTaskReminders } from "@/state/TaskReminderProvider";
 import { colors } from "@/theme";
+import { loadOfflineTasks, removeOfflineTask, type QueuedTask } from "@/storage/offlineTaskQueue";
 
 type Filter = "current" | TaskDefinitionState;
 type TaskSection = { key: string; title: string; data: Task[] };
@@ -37,6 +38,7 @@ export default function TasksScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [queued, setQueued] = useState<QueuedTask[]>([]);
   const latestRefreshEvent = useRef(gateway.latestEvent?.feed_event_id ?? 0);
 
   const refresh = useCallback(async () => {
@@ -58,6 +60,28 @@ export default function TasksScreen() {
   }, [gateway.client, gateway.runAuthenticated, t]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => { void loadOfflineTasks().then(setQueued); }, []);
+  const flushQueued = useCallback(async () => {
+    if (!gateway.client || gateway.status !== "ready") return;
+    for (const item of queued) {
+      try {
+        await gateway.runAuthenticated((client) => client.createTask({
+          title: item.title,
+          goal: item.goal,
+          notificationPolicy: item.notificationPolicy,
+          launchPolicy: item.launchPolicy as never,
+          agentId: item.agentId,
+          clientRequestId: item.clientRequestId,
+        }));
+        await removeOfflineTask(item.queueId);
+      } catch {
+        break;
+      }
+    }
+    setQueued(await loadOfflineTasks());
+    await refresh();
+  }, [gateway.client, gateway.runAuthenticated, gateway.status, queued, refresh]);
+  useEffect(() => { if (gateway.status === "ready" && queued.length) void flushQueued(); }, [flushQueued, gateway.status, queued.length]);
   useEffect(() => {
     if (!gateway.latestEvent || gateway.latestEvent.feed_event_id <= latestRefreshEvent.current) return;
     latestRefreshEvent.current = gateway.latestEvent.feed_event_id;
@@ -104,6 +128,7 @@ export default function TasksScreen() {
           <Text style={styles.updateLink}>{t("tasks.view")}</Text>
         </AppPressable>
       ) : null}
+      {queued.length ? <AppPressable style={styles.offlineBanner} onPress={() => void flushQueued()}><Text style={styles.offlineTitle}>{t("tasks.offlineQueued", { count: queued.length })}</Text><Text style={styles.offlineDetail}>{t("tasks.offlineQueuedDetail")}</Text></AppPressable> : null}
       <View style={styles.filters}>
         {filters.map((item) => (
           <AppPressable
@@ -244,6 +269,9 @@ const styles = StyleSheet.create({
   updateTitle: { color: colors.ink, fontWeight: "700" },
   updateDetail: { color: colors.muted, fontSize: 12, marginTop: 3 },
   updateLink: { color: colors.accent, fontWeight: "700" },
+  offlineBanner: { marginHorizontal: 16, marginBottom: 14, padding: 14, borderRadius: 16, backgroundColor: colors.warningSoft, gap: 4 },
+  offlineTitle: { color: colors.ink, fontWeight: "700" },
+  offlineDetail: { color: colors.muted, fontSize: 12 },
   filters: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 8 },
   filter: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14, backgroundColor: colors.surface },
   filterActive: { backgroundColor: colors.accentSoft },
