@@ -56,6 +56,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
   private relay: RelayTransport | null = null;
   private p2p: WebRtcGatewayTransport | null = null;
   private upgradePromise: Promise<void> | null = null;
+  private relayUpgradePromise: Promise<void> | null = null;
   private p2pRetryAfter = 0;
   private active: "direct" | "p2p" | "relay" = "direct";
   private relayPreferredUntil = 0;
@@ -90,19 +91,24 @@ export class ConnectionResolverTransport implements GatewayTransport {
       } catch {
         this.lanGatewayUrl = "";
         this.lanDiscoveryRetryAfter = Date.now() + LAN_DISCOVERY_RETRY_DELAY_MS;
+        void this.startRecovery(baseUrl, init);
       }
     }
     if (this.p2p?.ready()) {
+      const p2p = this.p2p;
       try {
-        const response = await this.p2p.request(baseUrl, path, init);
-        this.setActive("p2p");
-        this.setP2PDiagnostic("active");
+        const response = await p2p.request(baseUrl, path, init);
+        if (!this.lanGatewayUrl) {
+          this.setActive("p2p");
+          this.setP2PDiagnostic("active");
+        }
         return response;
       } catch (error) {
-        this.p2p.close();
-        this.p2p = null;
+        p2p.close();
+        if (this.p2p === p2p) this.p2p = null;
         this.p2pRetryAfter = Date.now() + 60_000;
         this.setP2PDiagnostic("cooldown", errorText(error), this.p2pRetryAfter);
+        void this.startRecovery(baseUrl, init);
       }
     }
     if (!this.binding.directGatewayUrl && await this.bindingPointsAtCurrentHub()) {
@@ -111,23 +117,26 @@ export class ConnectionResolverTransport implements GatewayTransport {
       // runs independently; the current request must be served by Relay
       // immediately and must never wait for ICE or the data channel.
       this.startP2PUpgrade(baseUrl, init);
+      this.startRelayUpgrade(baseUrl, init);
       try {
         const response = await this.relayRequest(baseUrl, path, init);
-        if (!this.p2p?.ready()) this.setActive("relay");
+        if (!this.lanGatewayUrl && !this.p2p?.ready()) this.setActive("relay");
         return response;
       } catch (relayError) {
+        void this.startRecovery(baseUrl, init);
         throw new Error(`Node Relay 不可用：${errorText(relayError)}`);
       }
     }
     if (Date.now() < this.relayPreferredUntil) {
       try {
         const response = await this.relayRequest(baseUrl, path, init);
-        if (!this.p2p?.ready()) this.setActive("relay");
+        if (!this.lanGatewayUrl && !this.p2p?.ready()) this.setActive("relay");
         return response;
       } catch {
         this.relayPreferredUntil = 0;
         this.relay?.close();
         this.relay = null;
+        void this.startRecovery(baseUrl, init);
       }
     }
     try {
@@ -142,13 +151,15 @@ export class ConnectionResolverTransport implements GatewayTransport {
       this.setActive("direct");
       return response;
     } catch (directError) {
+      void this.startRecovery(baseUrl, init);
       try {
         const response = await this.relayRequest(baseUrl, path, init);
-        if (!this.p2p?.ready()) this.setActive("relay");
+        if (!this.lanGatewayUrl && !this.p2p?.ready()) this.setActive("relay");
         this.startP2PUpgrade(baseUrl, init);
         this.relayPreferredUntil = Date.now() + 10_000;
         return response;
       } catch (relayError) {
+        void this.startRecovery(baseUrl, init);
         throw new Error(
           `Node direct 与 Relay 均不可用：${errorText(directError)}；${errorText(relayError)}`,
         );
@@ -159,6 +170,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
   close(): void {
     this.p2p?.close();
     this.p2p = null;
+    this.relayUpgradePromise = null;
     this.relay?.close();
     this.relay = null;
     this.setP2PDiagnostic("idle");
@@ -180,8 +192,17 @@ export class ConnectionResolverTransport implements GatewayTransport {
     if (this.lanGatewayUrl || this.lanDiscovery || Date.now() < this.lanDiscoveryRetryAfter) return;
     if (!this.lanDiscovery) {
       this.lanDiscovery = discoverNodeOnLan(this.binding).then((url) => {
-        this.lanGatewayUrl = url || "";
-        if (!url) this.lanDiscoveryRetryAfter = Date.now() + LAN_DISCOVERY_RETRY_DELAY_MS;
+        if (!url) {
+          this.lanDiscoveryRetryAfter = Date.now() + LAN_DISCOVERY_RETRY_DELAY_MS;
+          return;
+        }
+        this.lanGatewayUrl = url;
+        this.lanDiscoveryRetryAfter = 0;
+        // Keep P2P and Relay warm. New requests prefer this verified LAN
+        // endpoint, while requests already running on a lower-priority link
+        // finish without interruption.
+        this.relayPreferredUntil = 0;
+        this.setActive("direct");
       }).catch(() => {
         this.lanDiscoveryRetryAfter = Date.now() + LAN_DISCOVERY_RETRY_DELAY_MS;
       }).finally(() => { this.lanDiscovery = null; });
@@ -191,6 +212,32 @@ export class ConnectionResolverTransport implements GatewayTransport {
   private async relayRequest(baseUrl: string, path: string, init: RequestInit): Promise<Response> {
     if (!this.relay) this.relay = new RelayTransport(this.binding, "session");
     return this.relay.request(baseUrl, path, init);
+  }
+
+  /** Start all eligible recovery paths without duplicating the business request. */
+  private async startRecovery(baseUrl: string, init: RequestInit): Promise<void> {
+    if (!new Headers(init.headers).get("authorization")) return;
+    this.startLanDiscovery();
+    if (!this.binding.directGatewayUrl && await this.bindingPointsAtCurrentHub()) {
+      this.startP2PUpgrade(baseUrl, init);
+      this.startRelayUpgrade(baseUrl, init);
+    }
+  }
+
+  private startRelayUpgrade(baseUrl: string, init: RequestInit): void {
+    if (this.binding.directGatewayUrl || this.relay?.ready() || this.relayUpgradePromise
+      || !new Headers(init.headers).get("authorization")) return;
+    const pending = (async () => {
+      const response = await this.relayRequest(baseUrl, "/v1/session", {
+        method: "GET",
+        headers: init.headers,
+      });
+      if (!response.ok) throw new Error(`Relay 探测被 Node 拒绝（HTTP ${response.status}）`);
+      if (!this.lanGatewayUrl && this.active !== "p2p") this.setActive("relay");
+    })().catch(() => undefined).finally(() => {
+      if (this.relayUpgradePromise === pending) this.relayUpgradePromise = null;
+    });
+    this.relayUpgradePromise = pending;
   }
 
   private startP2PUpgrade(baseUrl: string, init: RequestInit): void {
@@ -229,8 +276,12 @@ export class ConnectionResolverTransport implements GatewayTransport {
       this.p2p = p2p;
       this.relayPreferredUntil = 0;
       this.p2pRetryAfter = 0;
-      this.setActive("p2p");
-      this.setP2PDiagnostic("active");
+      if (!this.lanGatewayUrl) {
+        this.setActive("p2p");
+        this.setP2PDiagnostic("active");
+      } else {
+        this.setP2PDiagnostic("ready");
+      }
     })().catch((error) => {
       this.p2pRetryAfter = Date.now() + 60_000;
       this.setP2PDiagnostic("cooldown", errorText(error), this.p2pRetryAfter);
@@ -510,6 +561,11 @@ class RelayTransport implements GatewayTransport {
 
   mode(): "relay" {
     return "relay";
+  }
+
+  ready(): boolean {
+    return this.socket?.readyState === WebSocket.OPEN
+      && Boolean(this.encryptKey && this.decryptKey);
   }
 
   async request(_baseUrl: string, path: string, init: RequestInit): Promise<Response> {
