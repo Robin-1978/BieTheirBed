@@ -39,7 +39,12 @@ function Stop-Child {
     }
 }
 
-[Console]::CancelKeyPress.AddHandler({ Stop-Child })
+# Windows PowerShell 5.1 may expose Console.CancelKeyPress as $null in the
+# WinSW session-0 service context. Guard the CLR event before binding it.
+$cancelEvent = [Console]::CancelKeyPress
+if ($null -ne $cancelEvent) {
+    $cancelEvent.AddHandler({ Stop-Child })
+}
 $exitCode = 1
 trap { Stop-Child; break }
 try {
