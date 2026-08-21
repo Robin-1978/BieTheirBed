@@ -61,9 +61,32 @@ class ConsoleRoutes:
                     }
                 ),
                 "desktop": await asyncio.to_thread(desktop_companion_status),
+                "transport": self._transport_health_snapshot(),
             },
             headers={"Cache-Control": "no-store"},
         )
+
+    def _transport_health_snapshot(self) -> dict[str, object]:
+        """Merge live adapter status into the common transport health model."""
+        health = getattr(self, "_transport_health", None)
+        if health is None:
+            return {"preferred_order": ["mdns", "p2p", "relay"], "active": None}
+        mdns = self._mdns.status() if self._mdns is not None else {}
+        p2p = self._p2p.status()
+        relay = self._node_relay.status
+        if mdns.get("responder"):
+            health.record("mdns", "discovery", ok=True)
+        elif mdns.get("enabled") and mdns.get("last_error"):
+            health.record("mdns", "discovery", ok=False, error=str(mdns["last_error"]))
+        if p2p.get("connected_peers"):
+            health.record("p2p", "verification", ok=True)
+        elif p2p.get("last_error"):
+            health.record("p2p", "verification", ok=False, error=str(p2p["last_error"]))
+        if relay.get("relay_connected"):
+            health.record("relay", "verification", ok=True)
+        elif relay.get("last_error"):
+            health.record("relay", "verification", ok=False, error=str(relay["last_error"]))
+        return health.snapshot()
 
     async def _console_diagnostics(self, request: Request) -> JSONResponse:
         """Run bounded, read-only checks that explain common Node failures."""
@@ -126,10 +149,14 @@ class ConsoleRoutes:
         elif not mdns["advertising"]:
             add("mdns", "mDNS", "error", f"未开始广播：{mdns['last_error'] or 'unknown'}")
         elif not mdns["responder"]:
-            add("mdns", "mDNS", "warning", "已广播，但查询响应器不可用")
+            detail = "已广播，但查询响应器不可用"
+            if mdns.get("last_send_error"):
+                detail += f"；发送错误：{mdns['last_send_error']}"
+            add("mdns", "mDNS", "warning", detail)
         else:
             addresses = ", ".join(str(item) for item in mdns["addresses"])
-            add("mdns", "mDNS", "ok", f"已广播并监听：{addresses}")
+            count = mdns.get("announcement_count", 0)
+            add("mdns", "mDNS", "ok", f"已广播并监听：{addresses}（已发送 {count} 次）")
 
         p2p = self._p2p.status()
         if not p2p.get("available"):

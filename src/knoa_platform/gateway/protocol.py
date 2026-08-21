@@ -286,6 +286,13 @@ class ArtifactUploadQuery(GatewayQuery):
     caption: str = Field(default="", max_length=1000)
 
 
+class ArtifactSearchQuery(GatewayQuery):
+    session_handle: str = Field(min_length=1, max_length=256)
+    q: str = Field(default="", max_length=160)
+    kind: Literal["", "image", "file"] = ""
+    limit: int = Field(default=50, ge=1, le=200)
+
+
 class ArtifactDownloadQuery(GatewayQuery):
     session_handle: str = Field(min_length=1, max_length=256)
 
@@ -552,6 +559,11 @@ class ApprovalResolvedResponse(BaseModel):
 
 class ArtifactResponse(BaseModel):
     artifact: ArtifactRef
+
+
+class ArtifactSearchResponse(BaseModel):
+    artifacts: tuple[ArtifactRef, ...]
+    next_cursor: str = ""
 
 
 class ArtifactTranscriptionResponse(BaseModel):

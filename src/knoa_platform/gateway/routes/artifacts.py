@@ -10,6 +10,7 @@ from starlette.responses import JSONResponse, Response
 
 from knoa_platform.gateway.protocol import (
     ArtifactDownloadQuery,
+    ArtifactSearchQuery,
     ArtifactUploadQuery,
     RuntimeQuery,
 )
@@ -20,6 +21,29 @@ _MAX_BODY_BYTES = 16 * 1024
 
 
 class ArtifactRoutes:
+
+    async def _search_artifacts(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=60)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        try:
+            query = ArtifactSearchQuery.model_validate(dict(request.query_params))
+        except ValidationError:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            artifacts = await self._core.search_artifacts(
+                authenticated.device.principal_id,
+                query.session_handle,
+                query=query.q,
+                kind=query.kind,
+                limit=query.limit,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse(
+            {"artifacts": list(artifacts), "next_cursor": ""},
+            headers={"Cache-Control": "no-store"},
+        )
 
     async def _transcribe_artifact(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=20)

@@ -589,6 +589,24 @@ export class GatewayClient {
     return { artifact_id: payload.artifact.artifact_id, caption: input.caption };
   }
 
+  async searchArtifacts(input: {
+    sessionHandle: string;
+    query?: string;
+    kind?: "image" | "file";
+    limit?: number;
+  }): Promise<{ artifacts: Array<{ artifact_id: string; name: string; media_type: string; size: number; kind: string; [key: string]: unknown }>; nextCursor: string }> {
+    const query = new URLSearchParams({
+      session_handle: input.sessionHandle,
+      q: input.query ?? "",
+      kind: input.kind ?? "",
+      limit: String(input.limit ?? 50),
+    });
+    const response = await this.json<{ artifacts: Array<{ artifact_id: string; name: string; media_type: string; size: number; kind: string; [key: string]: unknown }>; next_cursor?: string }>(
+      `/v1/artifacts?${query}`,
+    );
+    return { artifacts: response.artifacts, nextCursor: response.next_cursor ?? "" };
+  }
+
   async downloadArtifact(
     sessionHandle: string,
     artifactId: string,

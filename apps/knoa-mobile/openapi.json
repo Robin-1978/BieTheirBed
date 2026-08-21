@@ -864,6 +864,48 @@
         }
       }
     },
+    "/v1/agents/availability": {
+      "get": {
+        "operationId": "listAgentAvailability",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Unavailable Agent explanations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentAvailabilityResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/extensions/packages": {
       "get": {
         "operationId": "listExtensionPackages",
@@ -5555,6 +5597,109 @@
       }
     },
     "/v1/artifacts": {
+      "get": {
+        "operationId": "searchArtifacts",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_handle",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 160
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image",
+                "file"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Artifact metadata search",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactSearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "operationId": "uploadArtifact",
         "security": [
@@ -6326,6 +6471,45 @@
       }
     },
     "schemas": {
+      "AgentAvailability": {
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "display_name",
+          "reason"
+        ],
+        "title": "AgentAvailability",
+        "type": "object"
+      },
+      "AgentAvailabilityResponse": {
+        "properties": {
+          "unavailable": {
+            "items": {
+              "$ref": "#/components/schemas/AgentAvailability"
+            },
+            "title": "Unavailable",
+            "type": "array"
+          }
+        },
+        "required": [
+          "unavailable"
+        ],
+        "title": "AgentAvailabilityResponse",
+        "type": "object"
+      },
       "AgentListResponse": {
         "properties": {
           "default_agent": {
@@ -6656,6 +6840,27 @@
           "artifact"
         ],
         "title": "ArtifactResponse",
+        "type": "object"
+      },
+      "ArtifactSearchResponse": {
+        "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactRef"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "next_cursor": {
+            "default": "",
+            "title": "Next Cursor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifacts"
+        ],
+        "title": "ArtifactSearchResponse",
         "type": "object"
       },
       "ArtifactTranscriptionResponse": {
@@ -9101,7 +9306,7 @@
             "type": "string"
           },
           "request_timeout_seconds": {
-            "default": 120.0,
+            "default": 600.0,
             "exclusiveMinimum": 0.0,
             "maximum": 3600.0,
             "title": "Request Timeout Seconds",

@@ -21,6 +21,7 @@ import type { MCPResourceCatalogItem, TaskLaunchPolicy } from "@/api/models";
 import { useI18n } from "@/i18n";
 import { AppPressable } from "@/components/AppPressable";
 import { TASK_TEMPLATES } from "@/taskTemplates";
+import { enqueueOfflineTask } from "@/storage/offlineTaskQueue";
 
 export default function NewTaskScreen() {
   const gateway = useGateway();
@@ -79,7 +80,25 @@ export default function NewTaskScreen() {
       }));
       router.replace(`/tasks/${result.task.task_id}`);
     } catch {
-      setError(t("taskNew.createFailed"));
+      // A disconnected Node must not make the user retype a long task.  Keep
+      // the exact idempotency key so reconnect/retry cannot create duplicates.
+      if (gateway.status !== "ready") {
+        await enqueueOfflineTask({
+          title: title.trim(),
+          goal: normalizedGoal,
+          notificationPolicy: {
+            completed: notifyCompleted,
+            failed: notifyFailed,
+            waiting_approval: notifyApproval,
+          },
+          launchPolicy: launchPolicy as unknown as Record<string, unknown>,
+          agentId,
+          clientRequestId: requestIdentity.current!.requestId,
+        });
+        setError(t("taskNew.queuedOffline"));
+      } else {
+        setError(t("taskNew.createFailed"));
+      }
     } finally {
       setSaving(false);
     }

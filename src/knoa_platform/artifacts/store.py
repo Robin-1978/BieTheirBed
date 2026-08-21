@@ -571,6 +571,41 @@ class ArtifactStore:
             visibility="user",
         ).model_dump()
 
+    def search(
+        self,
+        session_id: str,
+        *,
+        query: str = "",
+        kind: str = "",
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Return bounded, principal/session-scoped Artifact metadata.
+
+        Search is deliberately metadata-only: callers still need the normal
+        authenticated download path to read bytes.  This powers the mobile
+        results/artifact browser without exposing backing filesystem paths.
+        """
+        session_key = self._session_key(session_id)
+        needle = " ".join(query.split()).casefold()
+        normalized_kind = kind.strip().casefold()
+        bounded = max(1, min(int(limit), 200))
+        now = self._clock()
+        matches: list[_Artifact] = []
+        for entry in self._entries.values():
+            if entry.session_key != session_key:
+                continue
+            if entry.expires_at is not None and entry.expires_at <= now:
+                continue
+            if normalized_kind and entry.kind != normalized_kind:
+                continue
+            if needle and needle not in f"{entry.name} {entry.media_type} {entry.artifact_id}".casefold():
+                continue
+            if not entry.path.is_file():
+                continue
+            matches.append(entry)
+        matches.sort(key=lambda item: item.artifact_id, reverse=True)
+        return [self.public_ref(session_id, entry.artifact_id) for entry in matches[:bounded]]
+
     def share_to_session(
         self,
         source_session_id: str,

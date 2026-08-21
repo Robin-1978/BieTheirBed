@@ -8,6 +8,7 @@ import { AppPressable } from "@/components/AppPressable";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
+import { shareResultJson, shareResultPdf, shareResultText } from "@/api/shareResult";
 
 export default function ResultsScreen() {
   const gateway = useGateway();
@@ -16,6 +17,7 @@ export default function ResultsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [sharing, setSharing] = useState("");
   const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string; nodeId?: string }>();
 
   const refresh = useCallback(async (manual = false) => {
@@ -48,6 +50,7 @@ export default function ResultsScreen() {
         <View style={styles.icon}><AppIcon name="file" color={colors.accent} size={26} /></View>
         <View style={styles.flex}><Text style={styles.title}>{t("results.title")}</Text><Text style={styles.meta}>{t("results.detail")}</Text></View>
       </View>
+      <AppPressable style={styles.artifactAction} onPress={() => router.push("/artifacts")}><Text style={styles.artifactActionText}>{t("artifacts.title")}</Text></AppPressable>
       {loading ? <ActivityIndicator color={colors.accent} /> : null}
       {error ? <View style={styles.errorCard}><Text style={styles.error}>{error}</Text><AppPressable onPress={() => void refresh(true)}><Text style={styles.link}>{t("results.retry")}</Text></AppPressable></View> : null}
       {!loading && !error && !results.length ? <View style={styles.empty}><Text style={styles.emptyTitle}>{t("results.emptyTitle")}</Text><Text style={styles.meta}>{t("results.emptyDetail")}</Text></View> : null}
@@ -59,6 +62,11 @@ export default function ResultsScreen() {
           <View style={styles.actions}>
             {task.latest_execution_id ? <AppPressable style={styles.primaryAction} onPress={() => router.push(`/task-executions/${task.latest_execution_id}`)}><Text style={styles.primaryText}>{t("results.openExecution")}</Text></AppPressable> : null}
             <AppPressable style={styles.secondaryAction} onPress={() => router.push({ pathname: `/tasks/${task.task_id}`, params })}><Text style={styles.secondaryText}>{t("results.openTask")}</Text></AppPressable>
+            {task.latest_execution_summary ? <>
+              <AppPressable style={styles.secondaryAction} disabled={sharing === task.task_id} onPress={async () => { setSharing(task.task_id); try { await shareResultText(task.title, `# ${task.title}\n\n${task.latest_execution_summary}`); } catch { setError(t("results.shareFailed")); } finally { setSharing(""); } }}><Text style={styles.secondaryText}>{sharing === task.task_id ? t("results.sharing") : t("results.share")}</Text></AppPressable>
+              <AppPressable style={styles.secondaryAction} disabled={sharing === task.task_id} onPress={async () => { setSharing(task.task_id); try { await shareResultJson(task.title, task); } catch { setError(t("results.shareFailed")); } finally { setSharing(""); } }}><Text style={styles.secondaryText}>{t("results.shareJson")}</Text></AppPressable>
+              <AppPressable style={styles.secondaryAction} disabled={sharing === task.task_id} onPress={async () => { setSharing(task.task_id); try { await shareResultPdf(task.title, `${task.title}\n\n${task.latest_execution_summary}`); } catch { setError(t("results.shareFailed")); } finally { setSharing(""); } }}><Text style={styles.secondaryText}>{t("results.sharePdf")}</Text></AppPressable>
+            </> : null}
           </View>
         </View>
       ))}
@@ -75,5 +83,5 @@ function resultState(task: Task, t: ReturnType<typeof useI18n>["t"]): string {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 17, gap: 13, paddingBottom: 52 }, hero: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, icon: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: 15, backgroundColor: colors.accentSoft }, flex: { flex: 1, minWidth: 0 }, title: { color: colors.ink, fontSize: 20, fontWeight: "800" }, meta: { color: colors.muted, fontSize: 12, lineHeight: 18 }, card: { padding: 15, gap: 10, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, cardHeader: { flexDirection: "row", alignItems: "flex-start", gap: 10 }, cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" }, result: { color: colors.ink, lineHeight: 21 }, failure: { color: colors.danger, fontSize: 12 }, actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, primaryAction: { minHeight: 40, justifyContent: "center", paddingHorizontal: 13, borderRadius: 11, backgroundColor: colors.accent }, primaryText: { color: colors.white, fontWeight: "800" }, secondaryAction: { minHeight: 40, justifyContent: "center", paddingHorizontal: 13, borderRadius: 11, borderWidth: 1, borderColor: colors.accent }, secondaryText: { color: colors.accent, fontWeight: "800" }, empty: { padding: 22, alignItems: "center", gap: 6, borderRadius: 17, backgroundColor: colors.surface }, emptyTitle: { color: colors.ink, fontWeight: "800" }, errorCard: { padding: 14, borderRadius: 14, backgroundColor: colors.dangerSoft, gap: 7 }, error: { color: colors.danger }, link: { color: colors.accent, fontWeight: "800" },
+  container: { padding: 17, gap: 13, paddingBottom: 52 }, hero: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, icon: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: 15, backgroundColor: colors.accentSoft }, flex: { flex: 1, minWidth: 0 }, title: { color: colors.ink, fontSize: 20, fontWeight: "800" }, meta: { color: colors.muted, fontSize: 12, lineHeight: 18 }, artifactAction: { minHeight: 42, justifyContent: "center", alignItems: "center", borderRadius: 12, borderWidth: 1, borderColor: colors.accent }, artifactActionText: { color: colors.accent, fontWeight: "800" }, card: { padding: 15, gap: 10, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, cardHeader: { flexDirection: "row", alignItems: "flex-start", gap: 10 }, cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" }, result: { color: colors.ink, lineHeight: 21 }, failure: { color: colors.danger, fontSize: 12 }, actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, primaryAction: { minHeight: 40, justifyContent: "center", paddingHorizontal: 13, borderRadius: 11, backgroundColor: colors.accent }, primaryText: { color: colors.white, fontWeight: "800" }, secondaryAction: { minHeight: 40, justifyContent: "center", paddingHorizontal: 13, borderRadius: 11, borderWidth: 1, borderColor: colors.accent }, secondaryText: { color: colors.accent, fontWeight: "800" }, empty: { padding: 22, alignItems: "center", gap: 6, borderRadius: 17, backgroundColor: colors.surface }, emptyTitle: { color: colors.ink, fontWeight: "800" }, errorCard: { padding: 14, borderRadius: 14, backgroundColor: colors.dangerSoft, gap: 7 }, error: { color: colors.danger }, link: { color: colors.accent, fontWeight: "800" },
 });

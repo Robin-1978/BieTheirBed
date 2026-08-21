@@ -38,6 +38,19 @@ def test_artifact_store_rejects_unscoped_session(tmp_path):
         store.prepare_path("", source)
 
 
+def test_artifact_search_is_session_scoped_and_metadata_only(tmp_path):
+    source = tmp_path / "report.txt"
+    source.write_text("hello", encoding="utf-8")
+    store = ArtifactStore(tmp_path / "attachments")
+    ref = store.prepare_path("session-a", source)
+    other = store.prepare_path("session-b", source)
+
+    matches = store.search("session-a", query="REPORT", kind="file")
+    assert [item["artifact_id"] for item in matches] == [ref["artifact_id"]]
+    assert other["artifact_id"] not in {item["artifact_id"] for item in matches}
+    assert all("path" not in item for item in matches)
+
+
 def test_artifact_share_uses_distinct_session_owned_copy(tmp_path):
     source = tmp_path / "report.txt"
     source.write_text("shared content", encoding="utf-8")
