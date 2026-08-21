@@ -94,8 +94,10 @@ def test_windows_product_node_opens_mdns_and_owns_runner_process_tree() -> None:
     assert '-LocalPort 5353' in installer
     assert 'KnoaNodeLanGateway' in installer
     assert '-LocalPort 9541' in installer
-    assert "ProcessStartInfo" in runner
-    assert "taskkill.exe /F /T /PID $child.Id" in runner
+    assert "Start-Process -FilePath $Updater" in runner
+    assert "-PassThru" in runner
+    assert "taskkill.exe /F /T /PID $proc.Id" in runner
+    assert "ProcessStartInfo" not in runner
     assert 'KnoaNodeMdns' in uninstaller
     assert 'KnoaNodeLanGateway' in uninstaller
 
