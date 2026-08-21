@@ -20,6 +20,7 @@ import { AgentSelector } from "@/components/AgentSelector";
 import type { MCPResourceCatalogItem, TaskLaunchPolicy } from "@/api/models";
 import { useI18n } from "@/i18n";
 import { AppPressable } from "@/components/AppPressable";
+import { TASK_TEMPLATES } from "@/taskTemplates";
 
 export default function NewTaskScreen() {
   const gateway = useGateway();
@@ -34,6 +35,7 @@ export default function NewTaskScreen() {
   const [launchPolicy, setLaunchPolicy] = useState<TaskLaunchPolicy>(immediatePolicy);
   const [agentId, setAgentId] = useState(gateway.defaultAgentId || "knoa");
   const [mcpResources, setMcpResources] = useState<MCPResourceCatalogItem[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState("");
   const requestIdentity = useRef<{ fingerprint: string; requestId: string } | null>(null);
 
   useEffect(() => {
@@ -96,6 +98,23 @@ export default function NewTaskScreen() {
           </AppPressable>
         ) : null}
         <View style={styles.card}>
+          <Text style={styles.label}>{t("taskTemplates.title")}</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.templateRow}>
+            {TASK_TEMPLATES.map((template) => (
+              <AppPressable
+                key={template.id}
+                style={[styles.template, selectedTemplate === template.id && styles.templateSelected]}
+                onPress={() => {
+                  setSelectedTemplate(template.id);
+                  setTitle(t(template.titleKey));
+                  setGoal(t(template.goalKey));
+                }}
+              >
+                <Text style={[styles.templateTitle, selectedTemplate === template.id && styles.templateSelectedText]}>{t(template.titleKey)}</Text>
+                <Text style={styles.templateDetail}>{t(template.detailKey)}</Text>
+              </AppPressable>
+            ))}
+          </ScrollView>
           <Text style={styles.label}>{t("taskNew.name")}</Text>
           <TextInput
             accessibilityLabel={t("taskNew.name")}
@@ -157,6 +176,12 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   container: { padding: 16, paddingBottom: 48 },
   card: { backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.line, padding: 18, gap: 10 },
+  templateRow: { gap: 9, paddingVertical: 2 },
+  template: { width: 156, minHeight: 78, padding: 11, borderRadius: 13, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.background, gap: 4 },
+  templateSelected: { borderColor: colors.accent, backgroundColor: colors.accentFaint },
+  templateTitle: { color: colors.ink, fontSize: 13, fontWeight: "800" },
+  templateSelectedText: { color: colors.accent },
+  templateDetail: { color: colors.muted, fontSize: 11, lineHeight: 15 },
   updateRequired: { marginBottom: 12, padding: 14, borderRadius: 12, backgroundColor: colors.dangerSoft, gap: 4 },
   updateRequiredTitle: { color: colors.danger, fontWeight: "700" },
   label: { color: colors.ink, fontWeight: "700", marginTop: 4 },
