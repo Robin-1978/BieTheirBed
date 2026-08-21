@@ -7,7 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from knoa_platform.mdns import MdnsPublisher, SERVICE_TYPE, build_announcement
+from knoa_platform.mdns import (
+    MdnsPublisher,
+    SERVICE_TYPE,
+    build_announcement,
+    lan_addresses,
+)
 
 
 def test_build_announcement_contains_ptr_srv_txt_and_a_records() -> None:
@@ -26,6 +31,25 @@ def test_build_announcement_contains_ptr_srv_txt_and_a_records() -> None:
     assert struct.pack("!H", 9541) in packet
 
 
+def test_build_announcement_includes_every_lan_address() -> None:
+    packet = build_announcement(
+        node_id="node_test-1",
+        port=9541,
+        addresses=["192.168.1.20", "10.12.28.139"],
+        version="0.2.65",
+        signing_public_key="public-key",
+    )
+    assert struct.unpack("!HHHHHH", packet[:12]) == (0, 0x8400, 0, 5, 0, 0)
+    assert ipaddress.ip_address("192.168.1.20").packed in packet
+    assert ipaddress.ip_address("10.12.28.139").packed in packet
+
+
+def test_lan_addresses_skips_loopback_and_docker() -> None:
+    with patch("knoa_platform.mdns._interface_ipv4_addresses") as mocked:
+        mocked.return_value = ["10.12.28.139", "10.12.10.63"]
+        assert lan_addresses() == ["10.12.28.139", "10.12.10.63"]
+
+
 def test_mdns_send_drops_when_multicast_socket_is_full() -> None:
     class _FullSocket:
         def sendto(self, _packet: bytes, _address: tuple[str, int]) -> None:
@@ -42,7 +66,7 @@ async def test_mdns_responder_ignores_own_address() -> None:
         port=9541,
         version="0.2.65",
         signing_public_key="public-key",
-        address="192.168.1.20",
+        addresses=["192.168.1.20", "192.168.1.21"],
     )
     publisher._listener = MagicMock()
     publisher._socket = MagicMock()

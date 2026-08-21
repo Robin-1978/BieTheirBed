@@ -43,6 +43,8 @@ const decoder = new TextDecoder();
 const REQUEST_CHUNK_BYTES = 192 * 1024;
 const LAN_DISCOVERY_RETRY_DELAY_MS = 10_000;
 const LAN_DISCOVERY_CONNECT_TIMEOUT_MS = 900;
+const P2P_ICE_GATHERING_TIMEOUT_MS = 3_000;
+const P2P_CHANNEL_OPEN_TIMEOUT_MS = 8_000;
 const ICE_SERVERS = [
   { urls: "stun:stun.cloudflare.com:3478" },
   { urls: "stun:stun.l.google.com:19302" },
@@ -104,9 +106,14 @@ export class ConnectionResolverTransport implements GatewayTransport {
       }
     }
     if (!this.binding.directGatewayUrl && await this.bindingPointsAtCurrentHub()) {
+      // Start the P2P upgrade before waiting for this Relay request.  The
+      // upgrade uses the same authenticated Relay session for signaling, but
+      // runs independently; the current request must be served by Relay
+      // immediately and must never wait for ICE or the data channel.
+      this.startP2PUpgrade(baseUrl, init);
       try {
         const response = await this.relayRequest(baseUrl, path, init);
-        this.startP2PUpgrade(baseUrl, init);
+        if (!this.p2p?.ready()) this.setActive("relay");
         return response;
       } catch (relayError) {
         throw new Error(`Node Relay 不可用：${errorText(relayError)}`);
@@ -114,7 +121,9 @@ export class ConnectionResolverTransport implements GatewayTransport {
     }
     if (Date.now() < this.relayPreferredUntil) {
       try {
-        return await this.relayRequest(baseUrl, path, init);
+        const response = await this.relayRequest(baseUrl, path, init);
+        if (!this.p2p?.ready()) this.setActive("relay");
+        return response;
       } catch {
         this.relayPreferredUntil = 0;
         this.relay?.close();
@@ -135,6 +144,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
     } catch (directError) {
       try {
         const response = await this.relayRequest(baseUrl, path, init);
+        if (!this.p2p?.ready()) this.setActive("relay");
         this.startP2PUpgrade(baseUrl, init);
         this.relayPreferredUntil = Date.now() + 10_000;
         return response;
@@ -157,6 +167,15 @@ export class ConnectionResolverTransport implements GatewayTransport {
     this.lanDiscoveryRetryAfter = 0;
   }
 
+  /** Wait for one LAN mDNS scan before the first authenticated request. */
+  async prepareLanDiscovery(): Promise<void> {
+    if (this.binding.directGatewayUrl || this.lanGatewayUrl) return;
+    if (Date.now() < this.lanDiscoveryRetryAfter) return;
+    this.startLanDiscovery();
+    const pending = this.lanDiscovery;
+    if (pending) await pending.catch(() => undefined);
+  }
+
   private startLanDiscovery(): void {
     if (this.lanGatewayUrl || this.lanDiscovery || Date.now() < this.lanDiscoveryRetryAfter) return;
     if (!this.lanDiscovery) {
@@ -171,9 +190,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
 
   private async relayRequest(baseUrl: string, path: string, init: RequestInit): Promise<Response> {
     if (!this.relay) this.relay = new RelayTransport(this.binding, "session");
-    const response = await this.relay.request(baseUrl, path, init);
-    this.setActive("relay");
-    return response;
+    return this.relay.request(baseUrl, path, init);
   }
 
   private startP2PUpgrade(baseUrl: string, init: RequestInit): void {
@@ -336,7 +353,10 @@ class WebRtcGatewayTransport implements GatewayTransport {
   }
 
   ready(): boolean {
-    return this.peer?.connectionState === "connected" && this.channel?.readyState === "open";
+    const peer = this.peer;
+    return peer?.connectionState === "connected"
+      && ["connected", "completed"].includes(peer.iceConnectionState)
+      && this.channel?.readyState === "open";
   }
 
   async connect(exchange: (offer: { type: "offer"; sdp: string }) => Promise<{ type: "answer"; sdp: string }>): Promise<void> {
@@ -350,9 +370,14 @@ class WebRtcGatewayTransport implements GatewayTransport {
     channel.onerror = () => this.fail(new Error("P2P 连接错误"));
     const opened = new Promise<void>((resolve, reject) => {
       channel.onopen = () => resolve();
-      peer.onconnectionstatechange = () => {
-        if (["failed", "closed", "disconnected"].includes(peer.connectionState)) reject(new Error("P2P 建连失败"));
+      const failIfDisconnected = () => {
+        if (["failed", "closed", "disconnected"].includes(peer.connectionState)
+          || ["failed", "closed", "disconnected"].includes(peer.iceConnectionState)) {
+          reject(new Error("P2P ICE 连接失败"));
+        }
       };
+      peer.onconnectionstatechange = failIfDisconnected;
+      peer.oniceconnectionstatechange = failIfDisconnected;
     });
     const offer = await peer.createOffer();
     await peer.setLocalDescription(offer);
@@ -360,7 +385,7 @@ class WebRtcGatewayTransport implements GatewayTransport {
     if (!peer.localDescription?.sdp) throw new Error("P2P Offer 创建失败");
     const answer = await exchange({ type: "offer", sdp: peer.localDescription.sdp });
     await peer.setRemoteDescription(new RTCSessionDescription(answer));
-    await withPromiseTimeout(opened, 12_000, "P2P 建连超时");
+    await withPromiseTimeout(opened, P2P_CHANNEL_OPEN_TIMEOUT_MS, "P2P 建连超时");
   }
 
   async request(_baseUrl: string, path: string, init: RequestInit): Promise<Response> {
@@ -901,10 +926,11 @@ function waitForIceGathering(peer: RTCPeerConnection): Promise<void> {
   });
   // This flow does not implement trickle ICE, so the SDP must contain the
   // gathered server-reflexive candidates before it is sent through Relay.
-  // Two seconds is routinely too short on mobile networks.
+  // Signaling is non-trickle, so wait briefly for STUN candidates.  A long
+  // wait here delays the useful Relay path and makes the transport look stuck.
   return Promise.race([
     complete,
-    new Promise<void>((resolve) => setTimeout(resolve, 8_000)),
+    new Promise<void>((resolve) => setTimeout(resolve, P2P_ICE_GATHERING_TIMEOUT_MS)),
   ]);
 }
 
