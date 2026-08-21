@@ -50,3 +50,20 @@ def test_dingtalk_message_contract_uses_channel_neutral_shape(tmp_path) -> None:
     assert message.channel == "dingtalk"
     assert message.principal_id == "staff-1"
     assert message.text == "hello"
+
+
+def test_dingtalk_approval_card_fallback_explains_text_confirmation(tmp_path) -> None:
+    channel = _channel(tmp_path)
+    sent: list[str] = []
+    channel._send_text = lambda _recipient, text: sent.append(text) or True
+
+    message_id = channel._send_card_returning_id(
+        "staff-1",
+        {
+            "header": {"title": {"content": "小诺 · 等待确认"}},
+            "body": {"elements": [{"content": "请确认 deploy 变更"}]},
+        },
+    )
+
+    assert message_id
+    assert sent and "确认" in sent[0] and "confirm/cancel" in sent[0]

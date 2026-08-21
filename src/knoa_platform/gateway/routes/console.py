@@ -7,6 +7,7 @@ import hmac
 import ipaddress
 import json
 import os
+import re
 import secrets
 import shutil
 import socket
@@ -26,6 +27,75 @@ from knoa_platform.configuration import ManagedConfig
 from knoa_platform.gateway.pairing import GatewayPairingPayload
 from knoa_platform.gateway.protocol import NodeHubEnrollmentRequest, WriteSecretRequest
 from knoa_platform.model_adapter.profiles import resolve_profile
+
+
+def _port_listener_details(port: int) -> tuple[str, ...]:
+    """Return best-effort listener details for a local TCP port.
+
+    The diagnostic endpoint must remain useful on a fresh install, so missing
+    ``ss``/``netstat`` is treated as an unavailable detail rather than a
+    failed Node check.
+    """
+    if port <= 0:
+        return ()
+    try:
+        if os.name == "nt":
+            completed = subprocess.run(
+                ["netstat.exe", "-ano", "-p", "tcp"],
+                capture_output=True,
+                text=True,
+                timeout=1.5,
+                check=False,
+            )
+            details: list[str] = []
+            pattern = re.compile(rf"^\s*TCP\s+\S+:{port}\s+\S+\s+LISTENING\s+(\d+)\s*$", re.IGNORECASE)
+            for line in completed.stdout.splitlines():
+                match = pattern.match(line)
+                if match:
+                    details.append(f"PID {match.group(1)}")
+            return tuple(dict.fromkeys(details))
+
+        if shutil.which("ss"):
+            completed = subprocess.run(
+                ["ss", "-ltnp"],
+                capture_output=True,
+                text=True,
+                timeout=1.5,
+                check=False,
+            )
+            details = []
+            for line in completed.stdout.splitlines():
+                if not re.search(rf"(?:^|[.:]){port}\s", line):
+                    continue
+                pids = re.findall(r"pid=(\d+)", line)
+                details.extend(f"PID {pid}" for pid in pids)
+                if not pids:
+                    details.append("监听器已找到")
+            if details:
+                return tuple(dict.fromkeys(details))
+
+        if shutil.which("lsof"):
+            completed = subprocess.run(
+                ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fpct"],
+                capture_output=True,
+                text=True,
+                timeout=1.5,
+                check=False,
+            )
+            details = []
+            current_pid = ""
+            current_command = ""
+            for line in completed.stdout.splitlines():
+                if line.startswith("p"):
+                    current_pid = line[1:]
+                elif line.startswith("c"):
+                    current_command = line[1:]
+                elif line.startswith("t") and current_pid:
+                    details.append(f"{current_command or '进程'} PID {current_pid}")
+            return tuple(dict.fromkeys(details))
+    except (OSError, subprocess.SubprocessError):
+        return ()
+    return ()
 
 
 class ConsoleRoutes:
@@ -77,17 +147,17 @@ class ConsoleRoutes:
         p2p = self._p2p.status()
         relay = self._node_relay.status
         if mdns.get("responder"):
-            health.record("mdns", "discovery", ok=True)
+            health.observe("mdns", "discovery", ok=True)
         elif mdns.get("enabled") and mdns.get("last_error"):
-            health.record("mdns", "discovery", ok=False, error=str(mdns["last_error"]))
+            health.observe("mdns", "discovery", ok=False, error=str(mdns["last_error"]))
         if p2p.get("connected_peers"):
-            health.record("p2p", "verification", ok=True)
+            health.observe("p2p", "verification", ok=True)
         elif p2p.get("last_error"):
-            health.record("p2p", "verification", ok=False, error=str(p2p["last_error"]))
+            health.observe("p2p", "verification", ok=False, error=str(p2p["last_error"]))
         if relay.get("relay_connected"):
-            health.record("relay", "verification", ok=True)
+            health.observe("relay", "verification", ok=True)
         elif relay.get("last_error"):
-            health.record("relay", "verification", ok=False, error=str(relay["last_error"]))
+            health.observe("relay", "verification", ok=False, error=str(relay["last_error"]))
         return health.snapshot()
 
     async def _console_diagnostics(self, request: Request) -> JSONResponse:
@@ -143,9 +213,13 @@ class ConsoleRoutes:
                     socket.create_connection, ("127.0.0.1", port), 0.4
                 )
                 connection.close()
-                add(check_id, label, "ok", f"127.0.0.1:{port} 正在监听")
+                listeners = await asyncio.to_thread(_port_listener_details, port)
+                suffix = f"；{', '.join(listeners)}" if listeners else ""
+                add(check_id, label, "ok", f"127.0.0.1:{port} 正在监听{suffix}")
             except OSError as exc:
-                add(check_id, label, "error", f"127.0.0.1:{port} 无法连接：{exc.strerror or type(exc).__name__}", "检查端口占用、服务进程和启动日志")
+                listeners = await asyncio.to_thread(_port_listener_details, port)
+                suffix = f"；{', '.join(listeners)}" if listeners else "；未找到监听器详情"
+                add(check_id, label, "error", f"127.0.0.1:{port} 无法连接：{exc.strerror or type(exc).__name__}{suffix}", "检查端口占用、服务进程和启动日志")
 
         await check_local_port("core_port", "Core 端口", self._config.service_port)
         await check_local_port("gateway_port", "Gateway 端口", self._config.gateway_port)
@@ -191,6 +265,16 @@ class ConsoleRoutes:
             addresses = ", ".join(str(item) for item in mdns["addresses"])
             count = mdns.get("announcement_count", 0)
             add("mdns", "mDNS", "ok", f"已广播并监听：{addresses}（已发送 {count} 次）")
+
+        transport = self._transport_health_snapshot()
+        request_success = transport.get("request_success")
+        mdns_requests = int(request_success.get("mdns", 0)) if isinstance(request_success, dict) else 0
+        if mdns_requests:
+            add("app_lan_discovery", "App 局域网发现", "ok", f"已观察到 App 通过 mDNS 承载请求（{mdns_requests} 次）")
+        elif mdns.get("responder"):
+            add("app_lan_discovery", "App 局域网发现", "warning", "Node 已广播并响应查询，但尚未观察到 App 请求", "在同一局域网刷新 App 的 Node 列表或发起一次会话")
+        else:
+            add("app_lan_discovery", "App 局域网发现", "warning", "暂时无法验证 App 是否发现 Node", "先修复 mDNS 广播/响应器，再从 App 发起连接")
 
         p2p = self._p2p.status()
         if not p2p.get("available"):

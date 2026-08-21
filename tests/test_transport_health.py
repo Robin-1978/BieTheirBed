@@ -20,6 +20,17 @@ def test_transport_health_keeps_priority_and_stage_metrics() -> None:
     assert snapshot["last_error"]["relay"] == "timeout"
 
 
+def test_transport_health_poll_observations_are_idempotent_until_recovery() -> None:
+    health = TransportHealth()
+    health.observe("mdns", "discovery", ok=True)
+    health.observe("mdns", "discovery", ok=True)
+    assert health.snapshot()["discovery_success"]["mdns"] == 1
+
+    health.observe("mdns", "discovery", ok=False, error="firewall")
+    health.observe("mdns", "discovery", ok=True)
+    assert health.snapshot()["discovery_success"]["mdns"] == 2
+
+
 @pytest.mark.asyncio
 async def test_transport_health_middleware_records_completed_request() -> None:
     health = TransportHealth()

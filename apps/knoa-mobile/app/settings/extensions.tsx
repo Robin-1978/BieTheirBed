@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 
 import { AppPressable } from "@/components/AppPressable";
-import type { ManagedConfig } from "@/api/models";
+import type { ExtensionImportResult, ManagedConfig } from "@/api/models";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
@@ -20,6 +20,8 @@ export default function ExtensionCenterScreen() {
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState("");
   const [document, setDocument] = useState<ManagedConfig | null>(null);
+  const [inspection, setInspection] = useState<ExtensionImportResult["inspection"] | null>(null);
+  const [draftId, setDraftId] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -42,7 +44,9 @@ export default function ExtensionCenterScreen() {
         if (kind === "local_mcp") return client.importLocalMcp(source.trim(), serverId.trim());
         return client.importRemoteMcp(serverId.trim(), source.trim(), allowPrivate);
       });
-      router.push({ pathname: "/settings/system", params: { draftId: result.draft.draft_id } });
+      setInspection(result.inspection);
+      setDraftId(result.draft.draft_id);
+      setMessage(t("settings.extensions.inspectSuccess"));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : t("settings.extensions.importFailed"));
     } finally {
@@ -76,6 +80,20 @@ export default function ExtensionCenterScreen() {
           ? <Text style={styles.hint}>{t("settings.extensions.empty")}</Text>
           : null}
       </View>
+      {inspection ? (
+        <View style={styles.section}>
+          <Text style={styles.title}>{t("settings.extensions.inspectionTitle")}</Text>
+          <Text style={styles.hint}>{t("settings.extensions.inspectionSummary", { id: inspection.extension_id })}</Text>
+          <Text style={styles.hint}>{t("settings.extensions.inspectionTools", { count: inspection.tools.length })}</Text>
+          <Text style={styles.hint}>{t("settings.extensions.inspectionResources", { count: inspection.resources.length })}</Text>
+          <Text style={styles.hint}>{t("settings.extensions.inspectionPrompts", { count: inspection.prompts.length })}</Text>
+          {inspection.requested_secrets.length ? <Text style={styles.warning}>{t("settings.extensions.inspectionSecrets", { items: inspection.requested_secrets.join("、") })}</Text> : null}
+          {inspection.withheld_tools.length ? <Text style={styles.warning}>{t("settings.extensions.inspectionWithheld", { items: inspection.withheld_tools.join("、") })}</Text> : null}
+          <AppPressable style={styles.primary} disabled={!draftId} onPress={() => router.push({ pathname: "/settings/system", params: { draftId } })}>
+            <Text style={styles.primaryText}>{t("settings.extensions.openDraft")}</Text>
+          </AppPressable>
+        </View>
+      ) : null}
       <View style={styles.section}>
         <Text style={styles.title}>{t("settings.extensions.addTitle")}</Text>
         <Text style={styles.hint}>{t("settings.extensions.addHint")}</Text>
@@ -135,6 +153,7 @@ const styles = StyleSheet.create({
   primary: { minHeight: 46, backgroundColor: colors.accent, borderRadius: 13, alignItems: "center", justifyContent: "center" },
   primaryText: { color: "#fff", fontWeight: "800" },
   error: { color: colors.danger, fontSize: 13 },
+  warning: { color: colors.warning, fontSize: 13, lineHeight: 19 },
   item: { minHeight: 58, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
   itemTitle: { color: colors.ink, fontWeight: "800" },
   enabled: { color: colors.accent, fontSize: 12, fontWeight: "800" },

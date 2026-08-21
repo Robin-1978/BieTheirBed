@@ -22,6 +22,13 @@ export default function ResultsScreen() {
   const [timeFilter, setTimeFilter] = useState<"all" | "7d" | "30d">("all");
   const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string; nodeId?: string }>();
 
+  useEffect(() => {
+    const requestedNode = params.nodeId?.trim();
+    if (requestedNode && requestedNode !== gateway.nodeId && gateway.nodes.some((node) => node.nodeId === requestedNode)) {
+      void gateway.switchNode(requestedNode);
+    }
+  }, [gateway.nodeId, gateway.nodes, gateway.switchNode, params.nodeId]);
+
   const refresh = useCallback(async (manual = false) => {
     if (!gateway.client) return;
     if (manual) setRefreshing(true);
@@ -61,6 +68,10 @@ export default function ResultsScreen() {
           <AppPressable style={[styles.filter, !agentFilter && styles.filterActive]} onPress={() => setAgentFilter("")}><Text style={[styles.filterText, !agentFilter && styles.filterTextActive]}>{t("results.allAgents")}</Text></AppPressable>
           {gateway.agents.map((agent) => <AppPressable key={agent.agent_id} style={[styles.filter, agentFilter === agent.agent_id && styles.filterActive]} onPress={() => setAgentFilter(agent.agent_id)}><Text style={[styles.filterText, agentFilter === agent.agent_id && styles.filterTextActive]}>{agent.display_name}</Text></AppPressable>)}
         </View>
+        <Text style={styles.filterLabel}>{t("results.filterNode")}</Text>
+        <View style={styles.filters}>
+          {gateway.nodes.map((node) => <AppPressable key={node.nodeId} style={[styles.filter, gateway.nodeId === node.nodeId && styles.filterActive]} onPress={() => void gateway.switchNode(node.nodeId)}><Text style={[styles.filterText, gateway.nodeId === node.nodeId && styles.filterTextActive]}>{node.displayName}</Text></AppPressable>)}
+        </View>
         <Text style={styles.filterLabel}>{t("results.filterTime")}</Text>
         <View style={styles.filters}>
           {(["all", "7d", "30d"] as const).map((value) => <AppPressable key={value} style={[styles.filter, timeFilter === value && styles.filterActive]} onPress={() => setTimeFilter(value)}><Text style={[styles.filterText, timeFilter === value && styles.filterTextActive]}>{t(`results.time.${value}` as never)}</Text></AppPressable>)}
@@ -78,6 +89,7 @@ export default function ResultsScreen() {
           <View style={styles.actions}>
             {task.latest_execution_id ? <AppPressable style={styles.primaryAction} onPress={() => router.push(`/task-executions/${task.latest_execution_id}`)}><Text style={styles.primaryText}>{t("results.openExecution")}</Text></AppPressable> : null}
             <AppPressable style={styles.secondaryAction} onPress={() => router.push({ pathname: `/tasks/${task.task_id}`, params })}><Text style={styles.secondaryText}>{t("results.openTask")}</Text></AppPressable>
+            {task.session_handle ? <AppPressable style={styles.secondaryAction} onPress={() => router.push({ pathname: "/artifacts", params: { sessionHandle: task.session_handle } })}><Text style={styles.secondaryText}>{t("results.openArtifacts")}</Text></AppPressable> : null}
             {task.latest_execution_summary ? <>
               <AppPressable style={styles.secondaryAction} disabled={sharing === task.task_id} onPress={async () => { setSharing(task.task_id); try { await shareResultText(task.title, `# ${task.title}\n\n${task.latest_execution_summary}`); } catch { setError(t("results.shareFailed")); } finally { setSharing(""); } }}><Text style={styles.secondaryText}>{sharing === task.task_id ? t("results.sharing") : t("results.share")}</Text></AppPressable>
               <AppPressable style={styles.secondaryAction} disabled={sharing === task.task_id} onPress={async () => { setSharing(task.task_id); try { await shareResultJson(task.title, task); } catch { setError(t("results.shareFailed")); } finally { setSharing(""); } }}><Text style={styles.secondaryText}>{t("results.shareJson")}</Text></AppPressable>

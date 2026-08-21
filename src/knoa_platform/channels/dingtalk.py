@@ -358,7 +358,11 @@ class DingTalkChannel(FeishuChannel):
         title = str(card.get("header", {}).get("title", {}).get("content") or ASSISTANT_NAME)
         elements = card.get("body", {}).get("elements", [])
         body = "\n\n".join(str(element.get("content") or "") for element in elements if isinstance(element, Mapping))
-        return uuid.uuid4().hex if self._send_text(open_id, f"{title}\n\n{_render_card_markdown(body)}") else None
+        rendered = _render_card_markdown(body)
+        approval_hint = ""
+        if any(marker in rendered for marker in ("确认", "批准", "confirm", "approve")):
+            approval_hint = "\n\n回复“确认”/“取消”（或 confirm/cancel）即可处理审批。"
+        return uuid.uuid4().hex if self._send_text(open_id, f"{title}\n\n{rendered}{approval_hint}") else None
 
     def _update_card(self, _message_id: str, _card: dict[str, Any]) -> bool:
         # DingTalk Stream does not guarantee interactive-card patch support
