@@ -52,12 +52,42 @@ def test_lan_addresses_skips_loopback_and_docker() -> None:
 
 def test_mdns_send_drops_when_multicast_socket_is_full() -> None:
     class _FullSocket:
+        def setsockopt(self, *_args: object) -> None:
+            return None
+
         def sendto(self, _packet: bytes, _address: tuple[str, int]) -> None:
             raise BlockingIOError
 
     publisher = MdnsPublisher.__new__(MdnsPublisher)
     publisher._socket = _FullSocket()
+    publisher.addresses = ["192.168.1.20"]
     publisher._send_nowait(b"packet", ("224.0.0.251", 5353))
+
+
+def test_mdns_multicast_send_selects_every_interface() -> None:
+    class _Socket:
+        def __init__(self) -> None:
+            self.selected: list[bytes] = []
+            self.sent: list[tuple[bytes, tuple[str, int]]] = []
+
+        def setsockopt(self, _level: int, _option: int, value: bytes) -> None:
+            self.selected.append(value)
+
+        def sendto(self, packet: bytes, address: tuple[str, int]) -> None:
+            self.sent.append((packet, address))
+
+    socket = _Socket()
+    publisher = MdnsPublisher.__new__(MdnsPublisher)
+    publisher._socket = socket
+    publisher.addresses = ["192.168.1.20", "10.12.28.139"]
+
+    publisher._send_nowait(b"packet", ("224.0.0.251", 5353))
+
+    assert socket.selected == [b"\xc0\xa8\x01\x14", b"\x0a\x0c\x1c\x8b"]
+    assert socket.sent == [
+        (b"packet", ("224.0.0.251", 5353)),
+        (b"packet", ("224.0.0.251", 5353)),
+    ]
 
 
 async def test_mdns_responder_ignores_own_address() -> None:
