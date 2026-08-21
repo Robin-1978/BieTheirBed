@@ -135,13 +135,15 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         && identity.sessionExpiresAt > Date.now() / 1000 + 30
         ? identity.sessionToken
         : null;
+      const transport = new ConnectionResolverTransport(
+        identity,
+        transportChanged,
+        p2pDiagnosticChanged,
+      );
+      await transport.prepareLanDiscovery();
       let client: GatewayClient;
       if (token) {
-        client = new GatewayClient(
-          device.gatewayUrl,
-          token,
-          new ConnectionResolverTransport(identity, transportChanged, p2pDiagnosticChanged),
-        );
+        client = new GatewayClient(device.gatewayUrl, token, transport);
         try {
           await client.gatewaySession();
         } catch (error) {
@@ -152,7 +154,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
             gateway_url: device.gatewayUrl,
             deviceId: device.deviceId,
             binding: identity,
-          }, transportChanged, p2pDiagnosticChanged);
+          }, transportChanged, p2pDiagnosticChanged, transport);
           token = await loadSessionToken();
         }
       } else {
@@ -160,7 +162,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
           gateway_url: device.gatewayUrl,
           deviceId: device.deviceId,
           binding: identity,
-        }, transportChanged, p2pDiagnosticChanged);
+        }, transportChanged, p2pDiagnosticChanged, transport);
         token = await loadSessionToken();
       }
       if (!token) throw new Error("未能建立安全会话");
@@ -239,11 +241,17 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
           p2pRetryAt: diagnostic.retryAt,
         });
       };
+      const transport = new ConnectionResolverTransport(
+        identity,
+        transportChanged,
+        p2pDiagnosticChanged,
+      );
+      await transport.prepareLanDiscovery();
       const client = await authenticateDevice({
         gateway_url: identity.gatewayUrl,
         deviceId: identity.deviceId,
         binding: identity,
-      }, transportChanged, p2pDiagnosticChanged);
+      }, transportChanged, p2pDiagnosticChanged, transport);
       const token = await loadSessionToken();
       if (!token) throw new Error("未能恢复安全会话");
       if (generation !== connectionGenerationRef.current) throw new Error("Node 连接已切换");

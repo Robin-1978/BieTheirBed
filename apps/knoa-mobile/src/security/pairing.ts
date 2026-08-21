@@ -80,11 +80,17 @@ export async function authenticateDevice(
   },
   onTransportMode?: (mode: "direct" | "p2p" | "relay") => void,
   onP2PDiagnostic?: (diagnostic: P2PDiagnostic) => void,
+  transport?: ConnectionResolverTransport,
 ): Promise<GatewayClient> {
+  let resolvedTransport = transport;
+  if (payload.binding && !resolvedTransport) {
+    resolvedTransport = new ConnectionResolverTransport(payload.binding, onTransportMode, onP2PDiagnostic);
+    await resolvedTransport.prepareLanDiscovery();
+  }
   const client = new GatewayClient(
     payload.gateway_url,
     null,
-    payload.binding ? new ConnectionResolverTransport(payload.binding, onTransportMode, onP2PDiagnostic) : undefined,
+    payload.binding ? resolvedTransport : undefined,
   );
   const privateKey = await loadOrCreatePrivateKey();
   const challenge = await client.authChallenge(payload.deviceId);
