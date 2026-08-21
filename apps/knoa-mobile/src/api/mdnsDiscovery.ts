@@ -3,7 +3,9 @@ import Zeroconf from "react-native-zeroconf";
 
 import type { NodeDeviceBinding } from "@/security/deviceIdentity";
 
-export const KNOA_MDNS_SERVICE_TYPE = "_knoa-node";
+// react-native-zeroconf expects the bare service name and adds the leading
+// underscore plus `._tcp` itself on Android and iOS.
+export const KNOA_MDNS_SERVICE_TYPE = "knoa-node";
 export const MDNS_DISCOVERY_TIMEOUT_MS = 2_500;
 export const MDNS_HEALTH_TIMEOUT_MS = 1_200;
 
