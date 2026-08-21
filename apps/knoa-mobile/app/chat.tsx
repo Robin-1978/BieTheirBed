@@ -1022,6 +1022,16 @@ export default function ChatScreen() {
                     {agent.display_name} · {agentReasonLabel(agent.reason, t)}
                   </Text>
                 ))}
+                <AppPressable
+                  style={styles.configureUnavailable}
+                  onPress={() => {
+                    setAgentPickerOpen(false);
+                    router.push("/settings/agents");
+                  }}
+                >
+                  <Text style={styles.configureUnavailableText}>{t("agent.configureUnavailable")}</Text>
+                  <AppIcon name="chevron-right" color={colors.accent} size={16} />
+                </AppPressable>
               </View>
             ) : null}
           </View>
@@ -1462,6 +1472,8 @@ const styles = StyleSheet.create({
   unavailableAgents: { gap: 4, marginTop: 12, padding: 10, borderRadius: 12, backgroundColor: colors.background },
   unavailableTitle: { color: colors.muted, fontSize: 12, fontWeight: "800" },
   unavailableText: { color: colors.muted, fontSize: 11, lineHeight: 17 },
+  configureUnavailable: { minHeight: 34, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, marginTop: 4, paddingTop: 7 },
+  configureUnavailableText: { color: colors.accent, fontSize: 12, fontWeight: "800" },
   sheetActions: { flexDirection: "row", gap: 24 },
   mediaAction: { width: 76, alignItems: "center", gap: 8 },
   mediaIcon: { width: 58, height: 58, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
