@@ -58,6 +58,12 @@ export type AgentSummary = {
   display_name: string;
 };
 
+export type UnavailableAgent = {
+  agent_id: string;
+  display_name: string;
+  reason: "disabled" | "delegate_only" | "system_only" | "runtime_unavailable" | string;
+};
+
 export type ManagedNodeAgent = {
   kind: "knoa" | "codex";
   display_name: string;

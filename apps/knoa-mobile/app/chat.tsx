@@ -1014,6 +1014,16 @@ export default function ChatScreen() {
                 else gateway.selectAgent(agentId);
               }}
             />
+            {gateway.unavailableAgents.length ? (
+              <View style={styles.unavailableAgents}>
+                <Text style={styles.unavailableTitle}>{t("agent.unavailableTitle")}</Text>
+                {gateway.unavailableAgents.map((agent) => (
+                  <Text key={agent.agent_id} style={styles.unavailableText}>
+                    {agent.display_name} · {agentReasonLabel(agent.reason, t)}
+                  </Text>
+                ))}
+              </View>
+            ) : null}
           </View>
         </View>
       </Modal>
@@ -1342,6 +1352,13 @@ function attachmentStatusLabel(status: NonNullable<PendingAttachment["status"]>,
   })[status];
 }
 
+function agentReasonLabel(reason: string, t: ReturnType<typeof useI18n>["t"]): string {
+  if (reason === "runtime_unavailable") return t("agent.unavailableRuntime");
+  if (reason === "delegate_only") return t("agent.unavailableDelegate");
+  if (reason === "system_only") return t("agent.unavailableSystem");
+  return t("agent.unavailableDisabled");
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   listArea: { flex: 1 },
@@ -1442,6 +1459,9 @@ const styles = StyleSheet.create({
   actionSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 22, paddingTop: 10, paddingBottom: 34, gap: 18 },
   sheetHandle: { width: 38, height: 4, borderRadius: 2, backgroundColor: colors.line, alignSelf: "center" },
   sheetTitle: { color: colors.ink, fontSize: 17, fontWeight: "700" },
+  unavailableAgents: { gap: 4, marginTop: 12, padding: 10, borderRadius: 12, backgroundColor: colors.background },
+  unavailableTitle: { color: colors.muted, fontSize: 12, fontWeight: "800" },
+  unavailableText: { color: colors.muted, fontSize: 11, lineHeight: 17 },
   sheetActions: { flexDirection: "row", gap: 24 },
   mediaAction: { width: 76, alignItems: "center", gap: 8 },
   mediaIcon: { width: 58, height: 58, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },

@@ -265,6 +265,7 @@ class SecureGatewayAdapter(
                     methods=["POST", "DELETE"],
                 ),
                 Route("/v1/agents", self._agents, methods=["GET"]),
+                Route("/v1/agents/availability", self._agent_availability, methods=["GET"]),
                 Route("/v1/extensions/packages", self._extension_packages, methods=["GET"]),
                 Route("/v1/extensions/import/skill", self._extension_import_skill, methods=["POST"]),
                 Route("/v1/extensions/import/mcp/local", self._extension_import_local_mcp, methods=["POST"]),

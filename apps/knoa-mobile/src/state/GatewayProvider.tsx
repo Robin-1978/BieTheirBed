@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 
 import { GatewayClient, GatewayError } from "@/api/gatewayClient";
 import { ConnectionResolverTransport, type LanDiagnostic, type P2PDiagnostic } from "@/api/gatewayTransport";
-import type { AgentSummary, AndroidRelease, PrincipalTaskEvent } from "@/api/models";
+import type { AgentSummary, AndroidRelease, PrincipalTaskEvent, UnavailableAgent } from "@/api/models";
 import { isPresentationTaskEvent, subscribeTaskEvents, type TaskEventSubscription } from "@/api/taskEvents";
 import { authenticateDevice, pairDevice } from "@/security/pairing";
 import {
@@ -46,6 +46,7 @@ type GatewayState = {
   requiredUpdate: AndroidRelease | null;
   availableUpdate: AndroidRelease | null;
   agents: AgentSummary[];
+  unavailableAgents: UnavailableAgent[];
   defaultAgentId: string;
   selectedAgentId: string;
   activeAgentId: string;
@@ -92,6 +93,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     requiredUpdate: null,
     availableUpdate: null,
     agents: [],
+    unavailableAgents: [],
     defaultAgentId: "knoa",
     selectedAgentId: "knoa",
     activeAgentId: "",
@@ -125,7 +127,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       if (generation !== connectionGenerationRef.current) return;
       if (!identity) {
         connectionRef.current = null;
-        commit({ status: nodes.length ? "selecting" : "unpaired", client: null, gatewayUrl: "", sessionToken: "", sessionHandle: "", deviceId: "", nodeId: "", nodes, lastConnectedAt: 0, requiredUpdate: null, availableUpdate: null, agents: [], activeAgentId: "", selectedAgentId: "knoa" });
+        commit({ status: nodes.length ? "selecting" : "unpaired", client: null, gatewayUrl: "", sessionToken: "", sessionHandle: "", deviceId: "", nodeId: "", nodes, lastConnectedAt: 0, requiredUpdate: null, availableUpdate: null, agents: [], unavailableAgents: [], activeAgentId: "", selectedAgentId: "knoa" });
         return;
       }
       const device = { deviceId: identity.deviceId, gatewayUrl: identity.gatewayUrl };
@@ -222,6 +224,9 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
             : defaultAgentId),
         });
       }).catch(() => undefined);
+      void client.listAgentAvailability().then((unavailableAgents) => {
+        if (generation === connectionGenerationRef.current) commit({ unavailableAgents });
+      }).catch(() => undefined);
       void resolveAndroidRelease(() => client.latestAndroidRelease())
         .then((release) => {
           if (generation !== connectionGenerationRef.current) return;
@@ -297,6 +302,9 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
           defaultAgentId,
           selectedAgentId: stateRef.current.activeAgentId || stateRef.current.selectedAgentId || defaultAgentId,
         });
+      }).catch(() => undefined);
+      void client.listAgentAvailability().then((unavailableAgents) => {
+        if (generation === connectionGenerationRef.current) commit({ unavailableAgents });
       }).catch(() => undefined);
       void resolveAndroidRelease(() => client.latestAndroidRelease())
         .then((release) => {
@@ -456,6 +464,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       requiredUpdate: null,
       availableUpdate: null,
       agents: [],
+      unavailableAgents: [],
       activeAgentId: "",
       selectedAgentId: "knoa",
       p2pState: "idle",
