@@ -17,6 +17,25 @@ if ($LifecycleTokenFile -and $LifecycleIncomingRoot) {
     $env:KNOA_LIFECYCLE_INCOMING_ROOT = $LifecycleIncomingRoot
 }
 
+$diagnosticPath = Join-Path (Join-Path $NodeRoot "run") "runner-diagnostics.log"
+function Write-Diagnostic([string]$Message) {
+    try {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $diagnosticPath) | Out-Null
+        Add-Content -LiteralPath $diagnosticPath -Value ("{0} {1}" -f (Get-Date).ToString("o"), $Message) -Encoding UTF8
+    } catch { }
+}
+
+Write-Diagnostic "runner_start pid=$PID python=$PythonExecutable config=$ConfigPath"
+try {
+    $configText = Get-Content -LiteralPath $ConfigPath -Raw -ErrorAction Stop
+    $ports = [regex]::Matches($configText, '(?m)^\s*(?:service_port|gateway_port|capability_mcp_port):\s*(\d+)\s*$') |
+        ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique
+    foreach ($port in $ports) {
+        $listeners = @(netstat.exe -ano -p tcp 2>$null | Select-String (":$port\s"))
+        if ($listeners.Count) { Write-Diagnostic "port_listener port=$port detail=$($listeners -join ' | ')" }
+    }
+} catch { Write-Diagnostic "preflight_failed error=$($_.Exception.Message)" }
+
 # Use the call operator in the WinSW session-0 service context.  Unlike both
 # Process.Start and Start-Process -WindowStyle Hidden, this reliably launches
 # the console runtime.  The CIM fallback below identifies only this runner's
@@ -50,7 +69,9 @@ trap { Stop-Child; break }
 try {
     & $PythonExecutable -m knoa_platform.service --config $ConfigPath
     $exitCode = $LASTEXITCODE
+    Write-Diagnostic "runtime_exit code=$exitCode"
 } finally {
     Stop-Child
+    Write-Diagnostic "runner_stop pid=$PID"
 }
 exit $exitCode

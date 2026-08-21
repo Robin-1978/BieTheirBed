@@ -158,6 +158,10 @@ async def test_node_console_is_loopback_only_and_csrf_protected(tmp_path) -> Non
             "/v1/console/status",
             headers={"X-Knoa-Console": adapter._console_csrf_token},
         )
+        diagnostics = await http.get(
+            "/v1/console/diagnostics",
+            headers={"X-Knoa-Console": adapter._console_csrf_token},
+        )
         invalid = await http.post(
             "/v1/console/hub/enroll",
             headers={"X-Knoa-Console": adapter._console_csrf_token},
@@ -209,6 +213,11 @@ async def test_node_console_is_loopback_only_and_csrf_protected(tmp_path) -> Non
     assert accepted.json()["hub"]["enrolled"] is False
     assert accepted.json()["p2p"]["available"] is True
     assert accepted.json()["p2p"]["offers_total"] == 0
+    assert diagnostics.status_code == 200
+    assert diagnostics.json()["status"] in {"warning", "error"}
+    assert {item["id"] for item in diagnostics.json()["checks"]} >= {
+        "node", "mdns", "p2p", "relay", "config", "codex", "vision",
+    }
     assert accepted.json()["runtime_version"]
     assert invalid.status_code == 400
     assert invalid.json() == {"error": "invalid_enrollment_code"}

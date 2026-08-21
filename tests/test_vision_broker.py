@@ -30,6 +30,21 @@ class VisionProvider:
         return iterate()
 
 
+class EmptyThenVisionProvider(VisionProvider):
+    def stream(self, request, cancellation):
+        del cancellation
+
+        async def iterate():
+            self.requests.append(request)
+            if len(self.requests) == 1:
+                yield ProviderChunk(finish_reason="stop", terminal=True)
+                return
+            yield ProviderChunk(content_delta="The image contains a visible status panel.")
+            yield ProviderChunk(finish_reason="stop", terminal=True)
+
+        return iterate()
+
+
 @pytest.mark.asyncio
 async def test_vision_broker_returns_scoped_observation_and_caches_it(tmp_path) -> None:
     store = ArtifactStore(tmp_path / "attachments", db_path=tmp_path / "data.db")
@@ -55,6 +70,24 @@ async def test_vision_broker_returns_scoped_observation_and_caches_it(tmp_path) 
     assert len(provider.requests) == 1
     content = provider.requests[0].messages[-1]["content"]
     assert any(block.get("type") == "image" for block in content)
+
+
+@pytest.mark.asyncio
+async def test_vision_broker_retries_once_when_first_observation_is_empty(tmp_path) -> None:
+    store = ArtifactStore(tmp_path / "attachments", db_path=tmp_path / "data.db")
+    ref = store.put_data_url("session-a", DATA_URL, name="photo.png")
+    provider = EmptyThenVisionProvider()
+    broker = VisionBroker(provider, store, model_alias="vision-a")
+
+    result = await broker.inspect(
+        "session-a",
+        ref["artifact_id"],
+        question="What is visibly present?",
+    )
+
+    assert result["observation"] == "The image contains a visible status panel."
+    assert len(provider.requests) == 2
+    assert provider.requests[0].call_id != provider.requests[1].call_id
 
 
 def test_image_inspect_tool_tracks_hot_vision_configuration(tmp_path) -> None:

@@ -8,6 +8,7 @@ import ipaddress
 import json
 import os
 import secrets
+import shutil
 from io import BytesIO
 
 from pydantic import ValidationError
@@ -41,8 +42,112 @@ class ConsoleRoutes:
                 "runtime_version": __version__,
                 "hub": self._node_relay.status,
                 "p2p": self._p2p.status(),
+                "mdns": (
+                    self._mdns.status()
+                    if self._mdns is not None
+                    else {
+                        "enabled": False,
+                        "available": False,
+                        "advertising": False,
+                        "responder": False,
+                        "addresses": [],
+                        "port": 0,
+                        "service_type": "_knoa-node._tcp.local.",
+                        "last_error": "lan_gateway_disabled_or_not_started",
+                    }
+                ),
                 "desktop": await asyncio.to_thread(desktop_companion_status),
             },
+            headers={"Cache-Control": "no-store"},
+        )
+
+    async def _console_diagnostics(self, request: Request) -> JSONResponse:
+        """Run bounded, read-only checks that explain common Node failures."""
+        if (error := self._console_authorize(request)) is not None:
+            return error
+
+        checks: list[dict[str, str]] = []
+
+        def add(check_id: str, label: str, status: str, detail: str) -> None:
+            checks.append({"id": check_id, "label": label, "status": status, "detail": detail})
+
+        add("node", "Node 服务", "ok", "Console API 正常响应")
+
+        mdns = self._mdns.status() if self._mdns is not None else {
+            "enabled": False,
+            "available": False,
+            "advertising": False,
+            "responder": False,
+            "addresses": [],
+            "last_error": "lan_gateway_disabled_or_not_started",
+        }
+        if not mdns["enabled"]:
+            add("mdns", "mDNS", "warning", "局域网 Gateway 或 mDNS 未启用")
+        elif not mdns["advertising"]:
+            add("mdns", "mDNS", "error", f"未开始广播：{mdns['last_error'] or 'unknown'}")
+        elif not mdns["responder"]:
+            add("mdns", "mDNS", "warning", "已广播，但查询响应器不可用")
+        else:
+            addresses = ", ".join(str(item) for item in mdns["addresses"])
+            add("mdns", "mDNS", "ok", f"已广播并监听：{addresses}")
+
+        p2p = self._p2p.status()
+        if not p2p.get("available"):
+            add("p2p", "P2P", "warning", p2p.get("last_error") or "WebRTC Runtime 不可用，将使用 Relay")
+        elif p2p.get("connected_peers"):
+            add("p2p", "P2P", "ok", f"已连接 {p2p['connected_peers']} 个对端")
+        elif p2p.get("answers_total"):
+            add("p2p", "P2P", "warning", "Node 已生成应答，但尚无 ICE 对端连接")
+        else:
+            add("p2p", "P2P", "ok", "运行时可用，等待 App 建连")
+
+        relay = self._node_relay.status
+        if not relay.get("enrolled"):
+            add("relay", "Relay", "warning", "Node 尚未加入 Workspace Hub")
+        elif relay.get("relay_connected"):
+            add("relay", "Relay", "ok", "Relay 已连接")
+        else:
+            add("relay", "Relay", "warning", relay.get("last_error") or "Relay 正在连接")
+
+        try:
+            revision, _state, _generations = await self._core.get_config_current(
+                self._config.owner_principal_id
+            )
+            document = revision.document
+            add("config", "配置", "ok", f"当前配置已应用：{revision.revision_id}")
+
+            codex = document.agents.agents.get("codex")
+            if codex is None or not codex.enabled:
+                add("codex", "Codex Runtime", "warning", "Codex Agent 未启用")
+            elif not codex.command:
+                add("codex", "Codex Runtime", "error", "Codex command 未配置")
+            elif shutil.which(codex.command[0]) is None:
+                add("codex", "Codex Runtime", "error", f"找不到可执行文件：{codex.command[0]}")
+            else:
+                add("codex", "Codex Runtime", "ok", f"可执行：{' '.join(codex.command)}")
+
+            if not document.vision_enabled:
+                add("vision", "图片理解", "warning", "图片理解能力未启用")
+            elif not document.vision_model:
+                add("vision", "图片理解", "warning", "尚未配置图片理解模型")
+            else:
+                vision = document.models.get(document.vision_model)
+                if vision is None:
+                    add("vision", "图片理解", "error", f"找不到模型：{document.vision_model}")
+                elif vision.supports_vision is not True:
+                    add("vision", "图片理解", "error", f"模型未声明图片能力：{document.vision_model}")
+                else:
+                    add("vision", "图片理解", "ok", f"当前模型：{document.vision_model}")
+        except Exception as exc:  # noqa: BLE001
+            add("config", "配置", "error", f"无法读取当前配置：{type(exc).__name__}")
+            add("codex", "Codex Runtime", "warning", "配置读取失败，无法检查")
+            add("vision", "图片理解", "warning", "配置读取失败，无法检查")
+
+        status = "error" if any(item["status"] == "error" for item in checks) else (
+            "warning" if any(item["status"] == "warning" for item in checks) else "ok"
+        )
+        return JSONResponse(
+            {"status": status, "checks": checks},
             headers={"Cache-Control": "no-store"},
         )
 

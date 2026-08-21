@@ -38,6 +38,13 @@ export type P2PDiagnostic = {
   retryAt: number;
 };
 
+export type LanDiagnostic = {
+  state: "idle" | "scanning" | "found" | "cooldown";
+  lastError: string;
+  retryAt: number;
+  endpoint?: string;
+};
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const REQUEST_CHUNK_BYTES = 192 * 1024;
@@ -69,6 +76,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
     private readonly binding: NodeDeviceBinding,
     private readonly onModeChange?: (mode: "direct" | "p2p" | "relay") => void,
     private readonly onP2PDiagnostic?: (diagnostic: P2PDiagnostic) => void,
+    private readonly onLanDiagnostic?: (diagnostic: LanDiagnostic) => void,
   ) {}
 
   mode(): "direct" | "p2p" | "relay" {
@@ -174,6 +182,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
     this.relay?.close();
     this.relay = null;
     this.setP2PDiagnostic("idle");
+    this.setLanDiagnostic("idle");
     this.lanDiscovery = null;
     this.lanGatewayUrl = "";
     this.lanDiscoveryRetryAfter = 0;
@@ -190,21 +199,25 @@ export class ConnectionResolverTransport implements GatewayTransport {
 
   private startLanDiscovery(): void {
     if (this.lanGatewayUrl || this.lanDiscovery || Date.now() < this.lanDiscoveryRetryAfter) return;
+    this.setLanDiagnostic("scanning");
     if (!this.lanDiscovery) {
       this.lanDiscovery = discoverNodeOnLan(this.binding).then((url) => {
         if (!url) {
           this.lanDiscoveryRetryAfter = Date.now() + LAN_DISCOVERY_RETRY_DELAY_MS;
+          this.setLanDiagnostic("cooldown", "not_found", this.lanDiscoveryRetryAfter);
           return;
         }
         this.lanGatewayUrl = url;
         this.lanDiscoveryRetryAfter = 0;
+        this.setLanDiagnostic("found", "", 0, url);
         // Keep P2P and Relay warm. New requests prefer this verified LAN
         // endpoint, while requests already running on a lower-priority link
         // finish without interruption.
         this.relayPreferredUntil = 0;
         this.setActive("direct");
-      }).catch(() => {
+      }).catch((error) => {
         this.lanDiscoveryRetryAfter = Date.now() + LAN_DISCOVERY_RETRY_DELAY_MS;
+        this.setLanDiagnostic("cooldown", errorText(error), this.lanDiscoveryRetryAfter);
       }).finally(() => { this.lanDiscovery = null; });
     }
   }
@@ -312,6 +325,15 @@ export class ConnectionResolverTransport implements GatewayTransport {
     retryAt = 0,
   ): void {
     this.onP2PDiagnostic?.({ state, lastError, retryAt });
+  }
+
+  private setLanDiagnostic(
+    state: LanDiagnostic["state"],
+    lastError = "",
+    retryAt = 0,
+    endpoint?: string,
+  ): void {
+    this.onLanDiagnostic?.({ state, lastError, retryAt, endpoint });
   }
 }
 

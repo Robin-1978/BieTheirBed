@@ -221,11 +221,27 @@ class MdnsPublisher:
         self._task: asyncio.Task[None] | None = None
         self._listener: socket.socket | None = None
         self._listener_task: asyncio.Task[None] | None = None
+        self._last_error = ""
+        self._responder_available = False
+
+    def status(self) -> dict[str, object]:
+        """Return a safe, user-facing snapshot of LAN advertisement health."""
+        return {
+            "enabled": True,
+            "available": self._socket is not None and self._task is not None,
+            "advertising": self._socket is not None and self._task is not None,
+            "responder": self._responder_available,
+            "addresses": list(self.addresses),
+            "port": self.port,
+            "service_type": SERVICE_TYPE,
+            "last_error": self._last_error,
+        }
 
     async def start(self) -> bool:
         if self._task is not None and not self._task.done():
             return True
         if not self.addresses:
+            self._last_error = "no_routable_lan_address"
             logger.info("mDNS disabled: no routable LAN IPv4 address")
             return False
         try:
@@ -263,10 +279,13 @@ class MdnsPublisher:
                         logger.debug("mDNS membership skipped for %s: %s", item, exc)
                 listener.setblocking(False)
                 self._listener = listener
+                self._responder_available = True
                 self._listener_task = asyncio.create_task(
                     self._answer_queries(packet), name="knoa-mdns-responder"
                 )
             except OSError as exc:
+                self._responder_available = False
+                self._last_error = f"query_responder_unavailable:{type(exc).__name__}"
                 logger.info("mDNS query responder unavailable; announcements continue: %s", exc)
             logger.info(
                 "mDNS advertising _knoa-node on %s:%s via %s",
@@ -274,8 +293,11 @@ class MdnsPublisher:
                 self.port,
                 ", ".join(self.addresses),
             )
+            if self._responder_available:
+                self._last_error = ""
             return True
         except OSError as exc:
+            self._last_error = f"advertiser_unavailable:{type(exc).__name__}"
             logger.warning("mDNS advertiser unavailable: %s", exc)
             await self.stop()
             return False
@@ -366,6 +388,7 @@ class MdnsPublisher:
         sock, self._socket = self._socket, None
         if sock is not None:
             sock.close()
+        self._responder_available = False
 
 
 __all__ = [
