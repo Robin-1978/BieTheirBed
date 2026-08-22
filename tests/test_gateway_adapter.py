@@ -749,6 +749,10 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
             headers=headers,
         )
         detail = await http.get("/v1/tasks/task-a", headers=headers)
+        preflight = await http.get(
+            "/v1/tasks/task-a/preflight",
+            headers=headers,
+        )
         timeline = await http.get(
             "/v1/task-executions/execution-a/events?after_seq=2",
             headers=headers,
@@ -788,6 +792,9 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
     assert listed.json()["tasks"][0]["latest_execution_state"] == "running"
     assert listed.json()["tasks"][0]["pending_approval_count"] == 1
     assert detail.json()["task"]["state"] == "active"
+    assert preflight.status_code == 200
+    assert preflight.json()["ready"] is True
+    assert {item["status"] for item in preflight.json()["checks"]} == {"ready"}
     assert timeline.json()["events"][0]["event_seq"] == 3
     assert timeline.json()["events"][0]["payload"]["content"] == "分析中"
     assert cancelled.json() == {"accepted": True, "state": "cancelled"}
@@ -802,6 +809,37 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
         "state": "approved",
     }
     assert {call[1] for call in core.calls} == {"personal:owner"}
+
+
+@pytest.mark.asyncio
+async def test_gateway_task_preflight_blocks_paused_task_and_disconnected_runtime(tmp_path) -> None:
+    core = _Core()
+
+    async def paused_task(principal_id, task_id):
+        return _product_task_snapshot(TaskDefinitionState.PAUSED)
+
+    async def disconnected_status(principal_id, session_handle):
+        return RuntimeStatus(status="disconnected", connected=False)
+
+    core.get_product_task = paused_task
+    core.status = disconnected_status
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=_Authentication(),
+        core=core,
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
+    async with httpx.AsyncClient(transport=transport, base_url="http://gateway.local") as http:
+        response = await http.get("/v1/tasks/task-a/preflight", headers=headers)
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["ready"] is False
+    assert {item["check_id"] for item in body["checks"] if item["status"] == "blocked"} == {
+        "task_state",
+        "runtime",
+    }
 
 
 @pytest.mark.asyncio

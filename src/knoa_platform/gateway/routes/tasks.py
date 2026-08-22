@@ -105,6 +105,83 @@ class TaskRoutes:
             return self._core_error(exc)
         return JSONResponse({"task": task.model_dump(mode="json")})
 
+    async def _preflight_task(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=60)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        task_id = self._path_identifier(request, "task_id")
+        if task_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            task = await self._core.get_product_task(
+                authenticated.device.principal_id,
+                task_id,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+
+        checks: list[dict[str, str]] = []
+        if task.state is TaskDefinitionState.ACTIVE:
+            checks.append({
+                "check_id": "task_state",
+                "status": "ready",
+                "detail": "任务可以执行",
+                "recommended_action": "none",
+            })
+        elif task.state is TaskDefinitionState.PAUSED:
+            checks.append({
+                "check_id": "task_state",
+                "status": "blocked",
+                "detail": "任务当前未启用，请先恢复任务",
+                "recommended_action": "resume",
+            })
+        else:
+            checks.append({
+                "check_id": "task_state",
+                "status": "blocked",
+                "detail": "任务已归档，请先恢复任务",
+                "recommended_action": "resume",
+            })
+
+        if task.goal.strip():
+            checks.append({
+                "check_id": "goal",
+                "status": "ready",
+                "detail": "执行目标已设置",
+                "recommended_action": "none",
+            })
+        else:
+            checks.append({
+                "check_id": "goal",
+                "status": "blocked",
+                "detail": "执行目标为空，请先编辑任务",
+                "recommended_action": "configure",
+            })
+
+        runtime_ready = False
+        runtime_detail = "Agent Runtime 当前不可用，请检查 Node 状态后重试"
+        try:
+            runtime = await self._core.status(
+                authenticated.device.principal_id,
+                task.session_handle,
+            )
+            runtime_ready = bool(runtime.connected)
+            if runtime_ready:
+                runtime_detail = "Agent Runtime 可用"
+        except Exception:
+            runtime_ready = False
+        checks.append({
+            "check_id": "runtime",
+            "status": "ready" if runtime_ready else "blocked",
+            "detail": runtime_detail,
+            "recommended_action": "none" if runtime_ready else "retry",
+        })
+        return JSONResponse({
+            "task_id": task.task_id,
+            "ready": not any(item["status"] == "blocked" for item in checks),
+            "checks": checks,
+        })
+
     async def _update_task(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=30)
         if isinstance(authenticated, JSONResponse):

@@ -539,6 +539,19 @@ class ProductTaskListResponse(BaseModel):
     tasks: tuple[ProductTaskSnapshot, ...]
 
 
+class TaskPreflightCheck(BaseModel):
+    check_id: str
+    status: Literal["ready", "warning", "blocked"]
+    detail: str
+    recommended_action: Literal["none", "retry", "resume", "configure"]
+
+
+class TaskPreflightResponse(BaseModel):
+    task_id: str
+    ready: bool
+    checks: tuple[TaskPreflightCheck, ...]
+
+
 class ProductTaskExecutionResponse(BaseModel):
     execution: ProductTaskExecutionSnapshot
 

@@ -420,6 +420,19 @@ export type Task = {
   work_status?: UserWorkStatus;
 };
 
+export type TaskPreflightCheck = {
+  check_id: "task_state" | "goal" | "runtime" | string;
+  status: "ready" | "warning" | "blocked";
+  detail: string;
+  recommended_action: "none" | "retry" | "resume" | "configure";
+};
+
+export type TaskPreflight = {
+  task_id: string;
+  ready: boolean;
+  checks: TaskPreflightCheck[];
+};
+
 export type TaskExecution = {
   execution_id: string;
   task_id: string;
