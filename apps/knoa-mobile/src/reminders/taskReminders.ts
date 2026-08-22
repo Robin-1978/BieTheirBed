@@ -44,6 +44,11 @@ export async function storeTaskReminders(reminders: TaskReminder[]): Promise<voi
   } satisfies StoredReminders));
 }
 
+export async function clearTaskReminders(): Promise<void> {
+  const file = reminderFile();
+  if (file.exists) file.delete();
+}
+
 function reminderFile(): File {
   return new File(Paths.document, "task-reminders-v1.json");
 }

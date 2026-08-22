@@ -1,4 +1,4 @@
-import { File, Paths } from "expo-file-system";
+import { Directory, File, Paths } from "expo-file-system";
 
 import type {
   HostedWorkspace,
@@ -62,6 +62,23 @@ export async function mergeWorkspaceCache(workspaceId: string, patch: WorkspaceC
   const file = cacheFile(workspaceId);
   if (!file.exists) file.create({ intermediates: true, overwrite: false });
   file.write(JSON.stringify(next));
+}
+
+export function clearWorkspaceCache(workspaceId: string): void {
+  if (!workspaceId) return;
+  const file = cacheFile(workspaceId);
+  if (file.exists) file.delete();
+}
+
+export function clearAllWorkspaceCaches(): void {
+  try {
+    const document = new Directory(Paths.document);
+    for (const item of document.list()) {
+      if (item instanceof File && item.name.startsWith(`workspace-v${CACHE_VERSION}-`)) item.delete();
+    }
+  } catch {
+    // Logout must still succeed if the cache directory is unavailable.
+  }
 }
 
 function normalize(workspaceId: string, value: Partial<WorkspaceCacheSnapshot>): WorkspaceCacheSnapshot {
