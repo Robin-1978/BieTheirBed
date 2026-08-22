@@ -436,10 +436,102 @@ class SourceHostLifecycleManager:
     def _critical_ports(role: HostRole) -> tuple[int, ...]:
         return (9529, 9532) if role == "hub" else (9527, 9530, 9531, 9541)
 
+    def _listener_pids(self, ports: tuple[int, ...]) -> dict[int, tuple[int, ...]]:
+        """Find listeners after a stop so stale runtimes cannot win a race."""
+        result = {port: set() for port in ports}
+        if os.name == "nt":
+            completed = self._run(["netstat.exe", "-ano", "-p", "tcp"], check=False)
+            for line in completed.stdout.splitlines():
+                fields = line.split()
+                if len(fields) < 5 or fields[0].upper() != "TCP" or fields[3].upper() != "LISTENING":
+                    continue
+                try:
+                    port = int(fields[1].rsplit(":", 1)[1])
+                    pid = int(fields[4])
+                except (ValueError, IndexError):
+                    continue
+                if port in result:
+                    result[port].add(pid)
+        else:
+            completed = self._run(["ss", "-ltnp"], check=False)
+            for line in completed.stdout.splitlines():
+                if "LISTEN" not in line:
+                    continue
+                match = re.search(r"pid=(\d+)", line)
+                if not match:
+                    continue
+                for port in ports:
+                    if f":{port} " in line or line.rstrip().endswith(f":{port}"):
+                        result[port].add(int(match.group(1)))
+        return {port: tuple(sorted(pids)) for port, pids in result.items()}
+
+    @staticmethod
+    def _is_knoa_process(pid: int) -> bool:
+        if pid <= 0 or pid == os.getpid():
+            return False
+        if os.name == "nt":
+            try:
+                output = subprocess.run(
+                    ["wmic", "process", "where", f"ProcessId={pid}", "get", "CommandLine"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                command_line = output.stdout.lower()
+            except (OSError, subprocess.SubprocessError):
+                return False
+        else:
+            try:
+                command_line = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="ignore").lower()
+            except OSError:
+                return False
+        return "knoa" in command_line or "knoa_platform.service" in command_line
+
+    def _terminate_tree(self, pid: int) -> None:
+        if os.name != "nt" and not Path(f"/proc/{pid}").exists():
+            return
+        if not self._is_knoa_process(pid):
+            raise RuntimeError(f"foreign_process_owns_port:{pid}")
+        if os.name == "nt":
+            self._run(["taskkill.exe", "/F", "/T", "/PID", str(pid)], check=False)
+            return
+        for candidate in Path("/proc").glob("[0-9]*"):
+            try:
+                child = int(candidate.name)
+                ppid = int((candidate / "stat").read_text().split()[3])
+            except (OSError, ValueError, IndexError):
+                continue
+            if ppid == pid:
+                self._terminate_tree(child)
+        try:
+            os.kill(pid, 15)
+        except ProcessLookupError:
+            return
+
+    def _wait_ports_released(self, ports: tuple[int, ...], timeout_seconds: float = 30.0) -> None:
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            occupied = {port: pids for port, pids in self._listener_pids(ports).items() if pids}
+            if not occupied:
+                return
+            for pids in occupied.values():
+                for pid in pids:
+                    self._terminate_tree(pid)
+            if time.monotonic() >= deadline:
+                detail = ", ".join(f"{port}:{pids}" for port, pids in occupied.items())
+                raise RuntimeError(f"ports_not_released:{detail}")
+            time.sleep(0.25)
+
     def _restart_role(self, role: HostRole) -> None:
-        # Keep the public operation atomic for source-manager callers.  The
-        # platform service wrapper performs the stop/start ordering itself.
-        self._service(role, "restart")
+        self._service(role, "stop")
+        deadline = time.monotonic() + 30
+        while self._service_active(role):
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"{role}_service_did_not_stop")
+            time.sleep(0.25)
+        self._wait_ports_released(self._critical_ports(role))
+        self._service(role, "start")
+        self._wait_healthy((role,))
 
     @staticmethod
     def _health_url(role: HostRole) -> str:
