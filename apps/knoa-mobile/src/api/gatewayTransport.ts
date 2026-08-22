@@ -192,13 +192,15 @@ export class ConnectionResolverTransport implements GatewayTransport {
     this.lanDiscoveryRetryAfter = 0;
   }
 
-  /** Wait for one LAN mDNS scan before the first authenticated request. */
+  /** Start LAN discovery without delaying authentication or page entry. */
   async prepareLanDiscovery(): Promise<void> {
     if (this.binding.directGatewayUrl || this.lanGatewayUrl) return;
     if (Date.now() < this.lanDiscoveryRetryAfter) return;
     this.startLanDiscovery();
-    const pending = this.lanDiscovery;
-    if (pending) await pending.catch(() => undefined);
+    // mDNS is an opportunistic upgrade. Waiting here made every Node entry
+    // pay the full scan timeout when the phone was not on the same LAN.
+    // Requests race Relay/P2P immediately; a verified LAN endpoint is used
+    // by the next request and never interrupts the current one.
   }
 
   private startLanDiscovery(): void {
