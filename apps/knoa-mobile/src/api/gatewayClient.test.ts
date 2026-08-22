@@ -135,6 +135,26 @@ describe("GatewayClient conversation requests", () => {
     } satisfies Partial<GatewayError>);
   });
 
+  it("surfaces blocked preflight details from execute errors", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      error: "preflight_blocked",
+      message: "任务尚未满足执行条件",
+      preflight: {
+        checks: [
+          { check_id: "runtime", status: "blocked", detail: "Agent Runtime 当前不可用" },
+          { check_id: "goal", status: "ready", detail: "执行目标已设置" },
+        ],
+      },
+    }), { status: 409, headers: { "Content-Type": "application/json" } })));
+    const client = new GatewayClient("https://knoa.example.com", "token-a");
+
+    await expect(client.executeTask("task-a")).rejects.toMatchObject({
+      status: 409,
+      code: "preflight_blocked",
+      message: "Agent Runtime 当前不可用",
+    });
+  });
+
   it("binds a newly created task to the selected agent", async () => {
     const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
       task: { task_id: "task-codex" },

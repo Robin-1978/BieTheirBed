@@ -39,8 +39,9 @@ export class GatewayError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
+    message?: string,
   ) {
-    super(userMessage(status, code));
+    super(message || userMessage(status, code));
     this.retryable = status === 408 || status === 429 || status >= 500;
   }
 }
@@ -716,13 +717,23 @@ export class GatewayClient {
     });
     if (!response.ok) {
       let code = `http_${response.status}`;
+      let message = "";
       try {
-        const payload = (await response.json()) as { error?: string };
+        const payload = (await response.json()) as {
+          error?: string;
+          message?: string;
+          preflight?: { checks?: Array<{ status?: string; detail?: string }> };
+        };
         code = payload.error ?? code;
+        const blocked = payload.preflight?.checks
+          ?.filter((check) => check.status === "blocked" && check.detail)
+          .map((check) => check.detail as string)
+          .join("；");
+        message = blocked || payload.message || "";
       } catch {
         // The status remains sufficient when the peer did not return JSON.
       }
-      throw new GatewayError(response.status, code);
+      throw new GatewayError(response.status, code, message);
     }
     return response;
   }
