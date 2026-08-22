@@ -158,6 +158,61 @@ class TaskRoutes:
                 "recommended_action": "configure",
             })
 
+        try:
+            revision, control, _generations = await self._core.get_config_current(
+                authenticated.device.principal_id,
+            )
+            agent = revision.document.agents.agents.get(task.agent_id)
+            if agent is None:
+                checks.append({
+                    "check_id": "agent_config",
+                    "status": "blocked",
+                    "detail": "任务使用的 Agent 不存在，请重新选择 Agent",
+                    "recommended_action": "configure",
+                })
+            elif not agent.enabled:
+                checks.append({
+                    "check_id": "agent_config",
+                    "status": "blocked",
+                    "detail": "任务使用的 Agent 已停用，请重新选择 Agent",
+                    "recommended_action": "configure",
+                })
+            else:
+                checks.append({
+                    "check_id": "agent_config",
+                    "status": "ready",
+                    "detail": "任务使用的 Agent 已配置",
+                    "recommended_action": "none",
+                })
+            if control.apply_status == "failed":
+                checks.append({
+                    "check_id": "config",
+                    "status": "blocked",
+                    "detail": "Node 配置应用失败，请在 Console 修复配置后重试",
+                    "recommended_action": "configure",
+                })
+            elif control.apply_status == "applying":
+                checks.append({
+                    "check_id": "config",
+                    "status": "warning",
+                    "detail": "Node 配置正在应用，执行可能使用上一版本配置",
+                    "recommended_action": "retry",
+                })
+            else:
+                checks.append({
+                    "check_id": "config",
+                    "status": "ready",
+                    "detail": "Node 配置已应用",
+                    "recommended_action": "none",
+                })
+        except Exception:
+            checks.append({
+                "check_id": "config",
+                "status": "blocked",
+                "detail": "无法读取 Node 配置，请检查 Node 状态后重试",
+                "recommended_action": "retry",
+            })
+
         runtime_ready = False
         runtime_detail = "Agent Runtime 当前不可用，请检查 Node 状态后重试"
         try:
