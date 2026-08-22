@@ -22,6 +22,7 @@ import { useI18n } from "@/i18n";
 import { AppPressable } from "@/components/AppPressable";
 import { TASK_TEMPLATES } from "@/taskTemplates";
 import { enqueueOfflineTask } from "@/storage/offlineTaskQueue";
+import { requestTaskNotificationPermission } from "@/notifications/taskNotifications";
 
 export default function NewTaskScreen() {
   const gateway = useGateway();
@@ -58,6 +59,9 @@ export default function NewTaskScreen() {
     setSaving(true);
     setError("");
     try {
+      if (notifyCompleted || notifyFailed || notifyApproval) {
+        void requestTaskNotificationPermission();
+      }
       const input = {
         title: title.trim(),
         goal: normalizedGoal,

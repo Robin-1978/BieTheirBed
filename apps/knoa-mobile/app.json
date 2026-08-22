@@ -35,6 +35,7 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
+      "expo-notifications",
       "@config-plugins/react-native-webrtc",
       [
         "expo-media-library",
