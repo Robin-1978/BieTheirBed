@@ -22,6 +22,8 @@ import {
   type LandingPreference,
 } from "@/navigation/navigationPreference";
 import { useGateway } from "@/state/GatewayProvider";
+import { clearAllWorkspaceCaches } from "@/storage/workspaceCache";
+import { clearTaskReminders } from "@/reminders/taskReminders";
 import { colors } from "@/theme";
 
 export default function AccountHomeScreen() {
@@ -125,6 +127,8 @@ export default function AccountHomeScreen() {
           try {
             await gateway.disconnectNode();
             await logoutHostedAccount();
+            clearAllWorkspaceCaches();
+            await clearTaskReminders();
             router.replace("/account/login");
           } finally {
             setWorking("");
