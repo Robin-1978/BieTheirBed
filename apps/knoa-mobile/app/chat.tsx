@@ -856,7 +856,7 @@ export default function ChatScreen() {
             <Text style={styles.emptyTitle}>{t("chat.empty")}</Text>
             <Text style={styles.emptyBody}>{t("chat.emptyBody")}</Text>
             <View style={styles.emptyExamples}>
-              {[t("chat.exampleGitLab"), t("chat.exampleJira"), t("chat.exampleTask")].map((example) => (
+              {[t("chat.exampleFiles"), t("chat.exampleImage"), t("chat.exampleCode")].map((example) => (
                 <AppPressable key={example} onPress={() => setText(example)} style={styles.emptyExample}>
                   <Text style={styles.emptyExampleText}>{example}</Text>
                   <AppIcon name="chevron-right" color={colors.accent} size={16} />
