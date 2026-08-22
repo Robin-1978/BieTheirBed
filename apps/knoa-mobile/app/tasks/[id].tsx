@@ -14,6 +14,7 @@ import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { useGateway } from "@/state/GatewayProvider";
 import { useTaskReminders } from "@/state/TaskReminderProvider";
 import { colors } from "@/theme";
+import { blockedPreflightMessages } from "@/components/preflightPresentation";
 import { useI18n } from "@/i18n";
 import { AppPressable } from "@/components/AppPressable";
 
@@ -59,10 +60,7 @@ export default function TaskDetailScreen() {
     try {
       const preflight = await gateway.runAuthenticated((client) => client.preflightTask(task.task_id));
       if (!preflight.ready) {
-        const blocked = preflight.checks
-          .filter((check) => check.status === "blocked")
-          .map((check) => check.detail)
-          .join("；");
+        const blocked = blockedPreflightMessages(preflight.checks).join("；");
         setError(blocked || t("taskDetail.executeFailed"));
         return;
       }
