@@ -50,10 +50,12 @@ type GatewayState = {
   p2pState: P2PDiagnostic["state"];
   p2pLastError: string;
   p2pRetryAt: number;
+  p2pElapsedMs: number;
   lanState: LanDiagnostic["state"];
   lanLastError: string;
   lanRetryAt: number;
   lanEndpoint: string;
+  lanElapsedMs: number;
   requiredUpdate: AndroidRelease | null;
   availableUpdate: AndroidRelease | null;
   agents: AgentSummary[];
@@ -98,10 +100,12 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     p2pState: "idle",
     p2pLastError: "",
     p2pRetryAt: 0,
+    p2pElapsedMs: 0,
     lanState: "idle",
     lanLastError: "",
     lanRetryAt: 0,
     lanEndpoint: "",
+    lanElapsedMs: 0,
     requiredUpdate: null,
     availableUpdate: null,
     agents: [],
@@ -130,7 +134,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
   const connect = useCallback(async () => {
     const generation = ++connectionGenerationRef.current;
     provisionalConversationRef.current = null;
-    commit({ status: "booting", error: "", p2pState: "idle", p2pLastError: "", p2pRetryAt: 0, lanState: "idle", lanLastError: "", lanRetryAt: 0, lanEndpoint: "" });
+    commit({ status: "booting", error: "", p2pState: "idle", p2pLastError: "", p2pRetryAt: 0, p2pElapsedMs: 0, lanState: "idle", lanLastError: "", lanRetryAt: 0, lanEndpoint: "", lanElapsedMs: 0 });
     try {
       const [identity, nodes] = await Promise.all([
         loadConnectionIdentity(),
@@ -151,6 +155,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
           p2pState: diagnostic.state,
           p2pLastError: diagnostic.lastError,
           p2pRetryAt: diagnostic.retryAt,
+          p2pElapsedMs: diagnostic.elapsedMs,
         });
       };
       const lanDiagnosticChanged = (diagnostic: LanDiagnostic) => {
@@ -159,6 +164,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
           lanLastError: diagnostic.lastError,
           lanRetryAt: diagnostic.retryAt,
           lanEndpoint: diagnostic.endpoint ?? "",
+          lanElapsedMs: diagnostic.elapsedMs,
         });
       };
       let token = identity.sessionToken
@@ -273,6 +279,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
           p2pState: diagnostic.state,
           p2pLastError: diagnostic.lastError,
           p2pRetryAt: diagnostic.retryAt,
+          p2pElapsedMs: diagnostic.elapsedMs,
         });
       };
       const lanDiagnosticChanged = (diagnostic: LanDiagnostic) => {
@@ -281,6 +288,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
           lanLastError: diagnostic.lastError,
           lanRetryAt: diagnostic.retryAt,
           lanEndpoint: diagnostic.endpoint ?? "",
+          lanElapsedMs: diagnostic.elapsedMs,
         });
       };
       const transport = new ConnectionResolverTransport(

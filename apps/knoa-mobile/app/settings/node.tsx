@@ -80,8 +80,10 @@ export default function NodeSettingsScreen() {
         {gateway.status === "ready" ? <Metric label={t("nodeSettings.activeTransport")} value={t(transportLabelKey(gateway.transportMode))} /> : null}
         {gateway.status === "ready" ? <Text style={styles.transportDetail}>{transportDetailKey(gateway.transportMode) ? `${t("nodeSettings.transportDiagnostic")} · ${t(transportDetailKey(gateway.transportMode))}` : ""}</Text> : null}
         {gateway.status === "ready" ? <Metric label={t("settings.node.p2pState")} value={p2pStateLabel(gateway.p2pState, t)} /> : null}
+        {gateway.p2pElapsedMs > 0 ? <Metric label={t("settings.node.p2pElapsed")} value={`${gateway.p2pElapsedMs} ms`} /> : null}
         {gateway.p2pLastError ? <Text selectable style={styles.p2pError}>{t("settings.node.p2pLastError", { error: gateway.p2pLastError })}</Text> : null}
         <Metric label={t("settings.node.mdnsState")} value={mdnsStateLabel(gateway.lanState, t)} />
+        {gateway.lanElapsedMs > 0 ? <Metric label={t("settings.node.mdnsElapsed")} value={`${gateway.lanElapsedMs} ms`} /> : null}
         {gateway.lanState === "found" && gateway.lanEndpoint ? <Text selectable style={styles.lanEndpoint}>{t("settings.node.mdnsFoundEndpoint", { endpoint: gateway.lanEndpoint })}</Text> : null}
         {gateway.lanLastError ? <Text selectable style={styles.p2pError}>{t("settings.node.mdnsLastError", { error: gateway.lanLastError })}</Text> : null}
         <Metric label={t("common.gateway")} value={gateway.gatewayUrl || "—"} />
