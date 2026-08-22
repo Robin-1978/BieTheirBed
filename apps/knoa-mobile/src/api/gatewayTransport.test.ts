@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { bindingUsesHubEndpoint, p2pOfferHeaders } from "./gatewayRouting";
+import { bindingUsesHubEndpoint, p2pOfferHeaders, preferredTransport } from "./gatewayRouting";
 
 describe("Gateway transport routing", () => {
   it("routes a legacy Node binding through Relay when its endpoint became the Hosted Hub", () => {
@@ -28,5 +28,12 @@ describe("Gateway transport routing", () => {
 
     expect(headers.get("Authorization")).toBe("Bearer session");
     expect(headers.get("Content-Type")).toBe("application/json");
+  });
+
+  it("keeps transport priority deterministic", () => {
+    expect(preferredTransport({ lanReady: true, p2pReady: true, relayReady: true })).toBe("direct");
+    expect(preferredTransport({ lanReady: false, p2pReady: true, relayReady: true })).toBe("p2p");
+    expect(preferredTransport({ lanReady: false, p2pReady: false, relayReady: true })).toBe("relay");
+    expect(preferredTransport({ lanReady: false, p2pReady: false, relayReady: false })).toBe("direct");
   });
 });

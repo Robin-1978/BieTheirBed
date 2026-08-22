@@ -1,3 +1,16 @@
+export type PreferredTransport = "direct" | "p2p" | "relay";
+
+export function preferredTransport(input: {
+  lanReady: boolean;
+  p2pReady: boolean;
+  relayReady: boolean;
+}): PreferredTransport {
+  if (input.lanReady) return "direct";
+  if (input.p2pReady) return "p2p";
+  if (input.relayReady) return "relay";
+  return "direct";
+}
+
 export function bindingUsesHubEndpoint(
   binding: { gatewayUrl: string },
   hub: { url: string; rootUrl: string },
