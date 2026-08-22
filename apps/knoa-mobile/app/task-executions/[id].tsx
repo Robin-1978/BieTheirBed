@@ -254,7 +254,12 @@ export default function TaskExecutionDetailScreen() {
         </View>
       ) : null}
       {execution.failure_code ? (
-        <View style={styles.failure}><Text style={styles.failureTitle}>{t("execution.incomplete")}</Text><Text style={styles.failureText}>{t("execution.incompleteHelp")}</Text></View>
+        <View style={styles.failure}>
+          <Text style={styles.failureTitle}>{t("execution.incomplete")}</Text>
+          <Text style={styles.failureText}>{t("execution.incompleteHelp")}</Text>
+          {execution.work_status?.side_effect === "unknown" ? <Text style={styles.failureImpact}>{t("execution.sideEffectUnknown")}</Text> : null}
+          {execution.work_status?.side_effect === "possible" ? <Text style={styles.failureImpact}>{t("execution.sideEffectPossible")}</Text> : null}
+        </View>
       ) : null}
 
       {approvals.map((approval, index) => (
@@ -538,6 +543,7 @@ const styles = StyleSheet.create({
   failure: { padding: 18, borderRadius: 18, backgroundColor: colors.dangerSoft, gap: 6 },
   failureTitle: { color: colors.danger, fontWeight: "700" },
   failureText: { color: colors.ink },
+  failureImpact: { color: colors.warning, lineHeight: 21 },
   approval: { padding: 18, borderRadius: 18, backgroundColor: colors.warningSoft, borderWidth: 1, borderColor: colors.warning, gap: 8 },
   approvalCount: { color: colors.muted, fontSize: 12, textAlign: "right" },
   row: { flexDirection: "row", gap: 10 },

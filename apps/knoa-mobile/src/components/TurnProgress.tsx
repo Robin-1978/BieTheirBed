@@ -38,7 +38,10 @@ export function TurnProgress({ turn }: { turn: ChatTurnSnapshot }) {
         {entries.length ? <Text style={styles.toggle}>{expanded ? t("turn.collapseShort") : t("turn.view")}</Text> : null}
       </Pressable>
       {failed ? (
-        <Text accessibilityRole="alert" style={styles.failureDetail}>{turnFailureMessage(turn, t)}</Text>
+        <View>
+          <Text accessibilityRole="alert" style={styles.failureDetail}>{turnFailureMessage(turn, t)}</Text>
+          {turn.work_status?.side_effect === "unknown" ? <Text style={styles.failureImpact}>{t("turn.failure.sideEffectUnknown")}</Text> : null}
+        </View>
       ) : null}
       {expanded && entries.length ? (
         <View style={styles.details}>
@@ -129,5 +132,6 @@ const styles = StyleSheet.create({
   done: { color: colors.accent, fontWeight: "800", width: 18, textAlign: "center" },
   failed: { color: colors.danger, fontWeight: "800", width: 18, textAlign: "center" },
   failureDetail: { color: colors.danger, fontSize: 13, lineHeight: 19, paddingHorizontal: 11, paddingBottom: 11 },
+  failureImpact: { color: colors.warning, fontSize: 13, lineHeight: 19, paddingHorizontal: 11, paddingBottom: 11 },
   notice: { color: colors.muted, fontSize: 12, lineHeight: 18 },
 });

@@ -63,6 +63,7 @@ export type UserWorkStatus = {
   terminal: boolean;
   requires_user: boolean;
   recoverable: boolean;
+  side_effect?: "none" | "possible" | "unknown";
   recommended_action: "wait" | "respond" | "retry" | "resume" | "none";
 };
 
