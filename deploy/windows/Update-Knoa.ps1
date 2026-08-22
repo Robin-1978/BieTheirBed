@@ -8,6 +8,57 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Get-ListeningPids([int[]]$Ports) {
+    $owners = @{}
+    foreach ($port in $Ports) { $owners[$port] = @() }
+    foreach ($connection in (Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue)) {
+        if ($owners.ContainsKey([int]$connection.LocalPort)) {
+            $owners[[int]$connection.LocalPort] += [int]$connection.OwningProcess
+        }
+    }
+    return $owners
+}
+
+function Stop-KnoaPortOwners([int[]]$Ports) {
+    $owners = Get-ListeningPids $Ports
+    foreach ($entry in $owners.GetEnumerator()) {
+        foreach ($pid in ($entry.Value | Select-Object -Unique)) {
+            if ($pid -le 0 -or $pid -eq $PID) { continue }
+            $process = Get-CimInstance Win32_Process -Filter "ProcessId=$pid" -ErrorAction SilentlyContinue
+            $commandLine = [string]$process.CommandLine
+            if ($commandLine -and $commandLine -notmatch "(?i)knoa|Run-Knoa") {
+                throw "Foreign process $pid owns Knoa port $($entry.Key): $commandLine"
+            }
+            & taskkill.exe /F /T /PID $pid 2>$null | Out-Null
+        }
+    }
+}
+
+function Wait-KnoaPortsReleased([int[]]$Ports, [int]$TimeoutSeconds = 30) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        Stop-KnoaPortOwners $Ports
+        $owners = Get-ListeningPids $Ports
+        if (($owners.Values | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum -eq 0) { return }
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $deadline)
+    $detail = ($owners.GetEnumerator() | Where-Object { $_.Value.Count } | ForEach-Object { "$($_.Key):$($_.Value -join ',')" }) -join '; '
+    throw "Knoa ports were not released before restart: $detail"
+}
+
+function Test-LifecycleService {
+    $service = Get-Service -Name "KnoaHostLifecycle" -ErrorAction SilentlyContinue
+    if (-not $service) { return }
+    $service.Refresh()
+    if ($service.Status -ne "Running") { throw "KnoaHostLifecycle service is not running ($($service.Status))" }
+    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+    do {
+        if (Get-NetTCPConnection -State Listen -LocalPort 9533 -ErrorAction SilentlyContinue) { return }
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "KnoaHostLifecycle is running but port 9533 is not listening"
+}
+
 function Test-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
@@ -18,9 +69,20 @@ function Restart-InstalledServices([string]$SelectedRole) {
     $serviceIds = @()
     if ($SelectedRole -in @("all", "hub")) { $serviceIds += "KnoaHostedHub" }
     if ($SelectedRole -in @("all", "node")) { $serviceIds += "KnoaNode" }
+    $ports = @()
+    if ($SelectedRole -in @("all", "hub")) { $ports += 9529, 9532 }
+    if ($SelectedRole -in @("all", "node")) { $ports += 9527, 9530, 9531, 9541 }
     foreach ($serviceId in $serviceIds) {
         $service = Get-Service -Name $serviceId -ErrorAction SilentlyContinue
-        if ($service -and $service.Status -ne "Running") {
+        if ($service -and $service.Status -ne "Stopped") {
+            Stop-Service -Name $serviceId -Force -ErrorAction Stop
+            $service.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds(30))
+        }
+    }
+    Wait-KnoaPortsReleased $ports
+    foreach ($serviceId in $serviceIds) {
+        $service = Get-Service -Name $serviceId -ErrorAction SilentlyContinue
+        if ($service) {
             Start-Service -Name $serviceId
             $service.WaitForStatus(
                 [System.ServiceProcess.ServiceControllerStatus]::Running,
@@ -38,6 +100,7 @@ function Restart-InstalledServices([string]$SelectedRole) {
             throw "Knoa service exited during startup: $serviceId ($($service.Status))"
         }
     }
+    Test-LifecycleService
 }
 
 function Test-NodeGatewayHealth([int]$Port) {

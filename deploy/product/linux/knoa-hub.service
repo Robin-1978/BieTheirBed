@@ -8,9 +8,15 @@ Type=simple
 User=knoa
 Group=knoa
 EnvironmentFile=@HUB_ENV@
+Environment=PATH=/home/knoa/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=@INSTALL_ROOT@/bin/knoa-update run --install-root @INSTALL_ROOT@/releases --entrypoint bin/knoa-hub -- --deployment-mode hosted_single_node --host 127.0.0.1 --port 9529 --console-host 127.0.0.1 --console-port 9532 --root @HUB_ROOT@ --hub-id hub_knoa_hosted
 Restart=on-failure
 RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+KillMode=control-group
+TimeoutStopSec=30
+SendSIGKILL=yes
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true

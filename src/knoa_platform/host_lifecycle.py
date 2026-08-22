@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import platform
+import re
 import subprocess
 import tempfile
 import threading
@@ -131,6 +132,105 @@ class HostLifecycleManager:
             }
         self._run(commands[action])
 
+    @staticmethod
+    def _critical_ports(role: HostRole) -> tuple[int, ...]:
+        return (9529, 9532) if role == "hub" else (9527, 9530, 9531, 9541)
+
+    def _listener_pids(self, ports: tuple[int, ...]) -> dict[int, tuple[int, ...]]:
+        """Return listeners by port without assuming that a service stop was complete."""
+        result = {port: set() for port in ports}
+        if os.name == "nt":
+            completed = self._run(["netstat.exe", "-ano", "-p", "tcp"], check=False)
+            for line in completed.stdout.splitlines():
+                fields = line.split()
+                if len(fields) >= 5 and fields[0].upper() == "TCP" and fields[3].upper() == "LISTENING":
+                    try:
+                        port = int(fields[1].rsplit(":", 1)[1])
+                        pid = int(fields[4])
+                    except (ValueError, IndexError):
+                        continue
+                    if port in result:
+                        result[port].add(pid)
+        else:
+            completed = self._run(["ss", "-ltnp"], check=False)
+            for line in completed.stdout.splitlines():
+                if "LISTEN" not in line:
+                    continue
+                for port in ports:
+                    if f":{port} " not in line and not line.rstrip().endswith(f":{port}"):
+                        continue
+                    match = re.search(r"pid=(\d+)", line)
+                    if match:
+                        result[port].add(int(match.group(1)))
+        return {port: tuple(sorted(pids)) for port, pids in result.items()}
+
+    @staticmethod
+    def _is_knoa_process(pid: int) -> bool:
+        if pid <= 0 or pid == os.getpid():
+            return False
+        if os.name == "nt":
+            try:
+                output = subprocess.run(["wmic", "process", "where", f"ProcessId={pid}", "get", "CommandLine"], capture_output=True, text=True, timeout=5)
+                command_line = output.stdout.lower()
+            except (OSError, subprocess.SubprocessError):
+                return False
+        else:
+            try:
+                command_line = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="ignore").lower()
+            except OSError:
+                return False
+        return "knoa" in command_line or "knoa_platform.service" in command_line
+
+    def _terminate_tree(self, pid: int) -> None:
+        if os.name != "nt" and not Path(f"/proc/{pid}").exists():
+            return
+        if not self._is_knoa_process(pid):
+            raise RuntimeError(f"foreign_process_owns_port:{pid}")
+        if os.name == "nt":
+            self._run(["taskkill.exe", "/F", "/T", "/PID", str(pid)], check=False)
+            return
+        descendants = []
+        for candidate in Path("/proc").glob("[0-9]*"):
+            try:
+                child = int(candidate.name)
+                ppid = int((candidate / "stat").read_text().split()[3])
+            except (OSError, ValueError, IndexError):
+                continue
+            if ppid == pid:
+                descendants.append(child)
+        for child in descendants:
+            self._terminate_tree(child)
+        try:
+            os.kill(pid, 15)
+        except ProcessLookupError:
+            return
+
+    def _wait_ports_released(self, ports: tuple[int, ...], timeout_seconds: float = 30.0) -> None:
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            listeners = self._listener_pids(ports)
+            occupied = {port: pids for port, pids in listeners.items() if pids}
+            if not occupied:
+                return
+            for pids in occupied.values():
+                for pid in pids:
+                    self._terminate_tree(pid)
+            if time.monotonic() >= deadline:
+                detail = ", ".join(f"{port}:{pids}" for port, pids in occupied.items())
+                raise RuntimeError(f"ports_not_released:{detail}")
+            time.sleep(0.25)
+
+    def _restart_role(self, role: HostRole) -> None:
+        self._service(role, "stop")
+        deadline = time.monotonic() + 30
+        while self._service_active(role):
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"{role}_service_did_not_stop")
+            time.sleep(0.25)
+        self._wait_ports_released(self._critical_ports(role))
+        self._service(role, "start")
+        self._wait_healthy((role,))
+
     def _current_release(self) -> str | None:
         result = self._run(
             [str(self.updater), "current", "--install-root", str(self.release_root)],
@@ -181,7 +281,7 @@ class HostLifecycleManager:
             assert request.role is not None
             if request.role not in roles:
                 raise ValueError("role_not_installed")
-            self._service(request.role, "restart")
+            self._restart_role(request.role)
         elif request.action == "activate":
             assert request.role is not None
             self._service(request.role, "enable")
@@ -211,6 +311,13 @@ class HostLifecycleManager:
             active = tuple(role for role in ("hub", "node") if role in roles)
             for role in active:
                 self._service(role, "stop")
+            for role in active:
+                deadline = time.monotonic() + 30
+                while self._service_active(role):
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError(f"{role}_service_did_not_stop")
+                    time.sleep(0.25)
+                self._wait_ports_released(self._critical_ports(role))
             target_arch = "aarch64" if platform.machine().lower() in {"arm64", "aarch64"} else "x86_64"
             staging = self.release_root.parent / ".incoming-lifecycle"
             try:
@@ -307,23 +414,50 @@ class SourceHostLifecycleManager:
             else result.returncode == 0
         )
 
-    def _service(
-        self,
-        role: HostRole,
-        action: Literal["restart"],
-    ) -> None:
+    def _service(self, role: HostRole, action: Literal["start", "stop", "restart"]) -> None:
         name = self._service_name(role)
         if os.name == "nt":
+            verb = {"start": "Start-Service", "stop": "Stop-Service"}.get(action)
             command = [
                 "powershell.exe",
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                f"Restart-Service -Name '{name}' -Force",
+                (f"{verb} -Name '{name}' -Force" if verb else
+                 f"Stop-Service -Name '{name}' -Force; "
+                 f"$deadline=(Get-Date).AddSeconds(30); while ((Get-Service -Name '{name}').Status -ne 'Stopped' -and (Get-Date) -lt $deadline) {{ Start-Sleep -Milliseconds 250 }}; "
+                 f"Start-Service -Name '{name}'"),
             ]
         else:
             command = ["systemctl", "--user", action, name]
         self._run(command)
+
+    @staticmethod
+    def _critical_ports(role: HostRole) -> tuple[int, ...]:
+        return (9529, 9532) if role == "hub" else (9527, 9530, 9531, 9541)
+
+    def _restart_role(self, role: HostRole) -> None:
+        # Keep the public operation atomic for source-manager callers.  The
+        # platform service wrapper performs the stop/start ordering itself.
+        self._service(role, "restart")
+
+    @staticmethod
+    def _health_url(role: HostRole) -> str:
+        return "http://127.0.0.1:9529/health" if role == "hub" else "http://127.0.0.1:9531/health"
+
+    def _wait_healthy(self, roles: tuple[HostRole, ...], timeout_seconds: float = 60.0) -> None:
+        for role in roles:
+            deadline = time.monotonic() + timeout_seconds
+            while True:
+                try:
+                    with urllib.request.urlopen(self._health_url(role), timeout=3) as response:
+                        if response.status == 200:
+                            break
+                except (OSError, urllib.error.URLError):
+                    pass
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(f"{role}_health_failed")
+                time.sleep(0.5)
 
     def status(self) -> dict[str, object]:
         roles = self._roles()
@@ -353,7 +487,7 @@ class SourceHostLifecycleManager:
             assert request.role is not None
             if request.role not in roles:
                 raise ValueError("role_not_installed")
-            self._service(request.role, "restart")
+            self._restart_role(request.role)
         elif request.action == "activate":
             raise ValueError("source_role_change_requires_installer")
         elif request.action == "deactivate":

@@ -1,6 +1,7 @@
 import { router } from "expo-router";
 import { useEffect, useRef } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { AppPressable } from "@/components/AppPressable";
 
 import {
   listHostedWorkspaces,
@@ -25,11 +26,22 @@ export default function Index() {
     void restoreLanding(gateway).catch(() => router.replace("/account"));
   }, [gateway]);
 
+  const failed = gateway.status === "error";
+  const retry = () => {
+    started.current = false;
+    void gateway.reconnect();
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.mark}><Text style={styles.markText}>诺</Text></View>
-      <Text style={styles.title}>{t("boot.restoring")}</Text>
-      <ActivityIndicator color={colors.accent} />
+      <Text style={styles.title}>{failed ? t("splash.unavailable") : t("boot.restoring")}</Text>
+      <Text style={styles.detail}>{failed ? (gateway.error || t("splash.connectionProblem")) : t("splash.restoring")}</Text>
+      {failed ? (
+        <AppPressable onPress={retry} style={styles.retry}>
+          <Text style={styles.retryText}>{t("common.reconnect")}</Text>
+        </AppPressable>
+      ) : <ActivityIndicator color={colors.accent} />}
     </View>
   );
 }
@@ -92,4 +104,7 @@ const styles = StyleSheet.create({
   mark: { width: 72, height: 72, borderRadius: 23, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
   markText: { color: "white", fontSize: 30, fontWeight: "800" },
   title: { color: colors.ink, fontSize: 18, fontWeight: "700" },
+  detail: { color: colors.muted, fontSize: 13, textAlign: "center", lineHeight: 20 },
+  retry: { paddingHorizontal: 22, paddingVertical: 12, borderRadius: 13, backgroundColor: colors.accent },
+  retryText: { color: "white", fontWeight: "800" },
 });

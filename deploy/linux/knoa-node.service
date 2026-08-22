@@ -9,10 +9,16 @@ Environment=KNOA_RUNTIME_ROOT=%h/.knoa
 Environment=KNOA_RUNTIME_DIR=%h/.knoa/run
 Environment=KNOA_LIFECYCLE_TOKEN_FILE=%h/.config/knoa/lifecycle.token
 Environment=KNOA_LIFECYCLE_INCOMING_ROOT=%h/.local/share/knoa/incoming
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=%h/.local/share/knoa/runtime/venv/bin/python -m knoa_platform.service --config %h/.config/knoa/node-linux.yaml
 WorkingDirectory=%h/.local/share/knoa/workspace
 Restart=on-failure
 RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+KillMode=control-group
+TimeoutStopSec=30
+SendSIGKILL=yes
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
