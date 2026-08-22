@@ -3,7 +3,7 @@
     "name": "小诺",
     "slug": "knoa-mobile",
     "scheme": "knoa",
-    "version": "0.2.70",
+    "version": "0.2.71",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "../../assets/branding/xiaonuo-avatar-tech.png",
@@ -17,7 +17,7 @@
     },
     "android": {
       "package": "dev.knoa.mobile",
-      "versionCode": 81,
+      "versionCode": 82,
       "usesCleartextTraffic": true,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
