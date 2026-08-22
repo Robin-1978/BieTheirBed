@@ -17,6 +17,7 @@ import { colors } from "@/theme";
 import { blockedPreflightMessages } from "@/components/preflightPresentation";
 import { useI18n } from "@/i18n";
 import { AppPressable } from "@/components/AppPressable";
+import { loadTaskDetailCache, storeTaskDetailCache } from "@/storage/taskDetailCache";
 
 export default function TaskDetailScreen() {
   const params = useLocalSearchParams<{ id: string }>();
@@ -40,12 +41,23 @@ export default function TaskDetailScreen() {
       ]));
       setTask(nextTask);
       setExecutions(nextExecutions);
+      void storeTaskDetailCache(taskId, { task: nextTask, executions: nextExecutions });
     } catch {
       setError(t("taskDetail.loadFailed"));
     }
   }, [gateway.client, gateway.runAuthenticated, t, taskId]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    let active = true;
+    void loadTaskDetailCache(taskId).then((cached) => {
+      if (!active || !cached) return;
+      setTask(cached.task);
+      setExecutions(cached.executions);
+    }).finally(() => {
+      if (active) void refresh();
+    });
+    return () => { active = false; };
+  }, [refresh, taskId]);
   useEffect(() => {
     if (!gateway.latestEvent || gateway.latestEvent.feed_event_id <= latestRefreshEvent.current) return;
     latestRefreshEvent.current = gateway.latestEvent.feed_event_id;

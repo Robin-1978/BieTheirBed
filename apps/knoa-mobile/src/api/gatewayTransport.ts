@@ -47,6 +47,13 @@ export type LanDiagnostic = {
   elapsedMs: number;
 };
 
+export type RelayDiagnostic = {
+  state: "idle" | "connecting" | "ready" | "active" | "cooldown";
+  lastError: string;
+  retryAt: number;
+  elapsedMs: number;
+};
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const REQUEST_CHUNK_BYTES = 192 * 1024;
@@ -76,12 +83,14 @@ export class ConnectionResolverTransport implements GatewayTransport {
   private lanDiscoveryRetryAfter = 0;
   private p2pAttemptStartedAt = 0;
   private lanAttemptStartedAt = 0;
+  private relayAttemptStartedAt = 0;
 
   constructor(
     private readonly binding: NodeDeviceBinding,
     private readonly onModeChange?: (mode: "direct" | "p2p" | "relay") => void,
     private readonly onP2PDiagnostic?: (diagnostic: P2PDiagnostic) => void,
     private readonly onLanDiagnostic?: (diagnostic: LanDiagnostic) => void,
+    private readonly onRelayDiagnostic?: (diagnostic: RelayDiagnostic) => void,
   ) {}
 
   mode(): "direct" | "p2p" | "relay" {
@@ -221,6 +230,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
     this.relay = null;
     this.setP2PDiagnostic("idle");
     this.setLanDiagnostic("idle");
+    this.setRelayDiagnostic("idle");
     this.lanDiscovery = null;
     this.lanGatewayUrl = "";
     this.lanDiscoveryRetryAfter = 0;
@@ -263,8 +273,18 @@ export class ConnectionResolverTransport implements GatewayTransport {
   }
 
   private async relayRequest(baseUrl: string, path: string, init: RequestInit): Promise<Response> {
-    if (!this.relay) this.relay = new RelayTransport(this.binding, "session");
-    return this.relay.request(baseUrl, path, init);
+    if (!this.relay) {
+      this.relay = new RelayTransport(this.binding, "session");
+      this.setRelayDiagnostic("connecting");
+    }
+    try {
+      const response = await this.relay.request(baseUrl, path, init);
+      this.setRelayDiagnostic("active");
+      return response;
+    } catch (error) {
+      this.setRelayDiagnostic("cooldown", errorText(error), Date.now() + 10_000);
+      throw error;
+    }
   }
 
   private async waitForReadyTransport(): Promise<"mdns" | "p2p" | "relay" | null> {
@@ -407,6 +427,18 @@ export class ConnectionResolverTransport implements GatewayTransport {
       ? Math.max(0, Date.now() - this.lanAttemptStartedAt)
       : 0;
     this.onLanDiagnostic?.({ state, lastError, retryAt, endpoint, elapsedMs });
+  }
+
+  private setRelayDiagnostic(
+    state: RelayDiagnostic["state"],
+    lastError = "",
+    retryAt = 0,
+  ): void {
+    if (state === "connecting") this.relayAttemptStartedAt = Date.now();
+    const elapsedMs = this.relayAttemptStartedAt
+      ? Math.max(0, Date.now() - this.relayAttemptStartedAt)
+      : 0;
+    this.onRelayDiagnostic?.({ state, lastError, retryAt, elapsedMs });
   }
 }
 

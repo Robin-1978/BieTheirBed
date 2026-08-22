@@ -1,5 +1,5 @@
 import { GatewayClient, parsePairingPayload } from "@/api/gatewayClient";
-import { ConnectionResolverTransport, pairingRelayTransport, type LanDiagnostic, type P2PDiagnostic } from "@/api/gatewayTransport";
+import { ConnectionResolverTransport, pairingRelayTransport, type LanDiagnostic, type P2PDiagnostic, type RelayDiagnostic } from "@/api/gatewayTransport";
 import type { PairingPayload } from "@/api/models";
 import { loadHubConnection } from "@/hub/hubClient";
 import {
@@ -81,11 +81,12 @@ export async function authenticateDevice(
   onTransportMode?: (mode: "direct" | "p2p" | "relay") => void,
   onP2PDiagnostic?: (diagnostic: P2PDiagnostic) => void,
   onLanDiagnostic?: (diagnostic: LanDiagnostic) => void,
+  onRelayDiagnostic?: (diagnostic: RelayDiagnostic) => void,
   transport?: ConnectionResolverTransport,
 ): Promise<GatewayClient> {
   let resolvedTransport = transport;
   if (payload.binding && !resolvedTransport) {
-    resolvedTransport = new ConnectionResolverTransport(payload.binding, onTransportMode, onP2PDiagnostic, onLanDiagnostic);
+    resolvedTransport = new ConnectionResolverTransport(payload.binding, onTransportMode, onP2PDiagnostic, onLanDiagnostic, onRelayDiagnostic);
     await resolvedTransport.prepareLanDiscovery();
   }
   const client = new GatewayClient(

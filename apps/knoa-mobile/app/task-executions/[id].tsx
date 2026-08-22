@@ -30,6 +30,7 @@ import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { useTaskReminders } from "@/state/TaskReminderProvider";
 import { colors } from "@/theme";
+import { loadExecutionCache, storeExecutionCache } from "@/storage/executionCache";
 
 export default function TaskExecutionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -59,13 +60,25 @@ export default function TaskExecutionDetailScreen() {
       const definition = await gateway.runAuthenticated((client) => client.getTask(snapshot.task_id));
       setExecution(snapshot);
       setTask(definition);
+      void storeExecutionCache(executionId, { execution: snapshot, task: definition });
       setExecutionViewing(executionId);
     } catch {
       setError(t("execution.loadFailed"));
     }
   }, [executionId, gateway.client, gateway.runAuthenticated, setExecutionViewing, t]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    let active = true;
+    void loadExecutionCache(executionId).then((cached) => {
+      if (!active || !cached) return;
+      setExecution(cached.execution);
+      setTask(cached.task);
+      setExecutionViewing(executionId);
+    }).finally(() => {
+      if (active) void refresh();
+    });
+    return () => { active = false; };
+  }, [executionId, refresh, setExecutionViewing]);
 
   useEffect(() => () => setExecutionViewing(null), [executionId, setExecutionViewing]);
 
