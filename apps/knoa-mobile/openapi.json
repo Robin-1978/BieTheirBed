@@ -9993,6 +9993,17 @@
             },
             "title": "Interactions",
             "type": "array"
+          },
+          "work_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserWorkStatusInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [

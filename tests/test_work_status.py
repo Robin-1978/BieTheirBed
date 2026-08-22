@@ -28,3 +28,8 @@ def test_product_task_keeps_definition_lifecycle_separate() -> None:
     assert product_task_work_status("paused", "running").status == "paused"
     assert product_task_work_status("active", "waiting_approval", pending_approval_count=1).status == "waiting_for_you"
     assert product_task_work_status("archived", "completed") is None
+
+
+def test_execution_status_uses_the_same_user_contract() -> None:
+    assert task_work_status("running").status == "working"
+    assert task_work_status("waiting_approval", pending_approval_count=1).recommended_action == "respond"

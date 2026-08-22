@@ -440,6 +440,7 @@ export type TaskExecution = {
   trace: TaskExecutionTrace | null;
   approvals: TaskApproval[];
   interactions?: HumanInteraction[];
+  work_status?: UserWorkStatus;
 };
 
 export type TaskApproval = {
