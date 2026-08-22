@@ -14,6 +14,7 @@ import {
 import { useI18n } from "@/i18n";
 import { updateNodeDirectGatewayUrl } from "@/security/deviceIdentity";
 import { useGateway } from "@/state/GatewayProvider";
+import { loadWorkspaceCache, mergeWorkspaceCache, type WorkspaceCacheSnapshot } from "@/storage/workspaceCache";
 import { colors } from "@/theme";
 
 export default function WorkspaceResourcesScreen() {
@@ -26,21 +27,35 @@ export default function WorkspaceResourcesScreen() {
   const [working, setWorking] = useState("");
   const [error, setError] = useState("");
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const applyCache = useCallback((snapshot: WorkspaceCacheSnapshot) => {
+    setState(snapshot.resources);
+    setNodes(snapshot.nodes);
+  }, []);
+
+  const refresh = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     setError("");
     try {
       const [resources, directory] = await Promise.all([loadWorkspaceResourceState(), listHubNodes()]);
       setState(resources);
       setNodes(directory);
+      await mergeWorkspaceCache(params.workspaceId, { nodes: directory, resources });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t("resources.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [params.workspaceId, t]);
 
-  useFocusEffect(useCallback(() => { void refresh(); }, [refresh]));
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    void (async () => {
+      const cached = await loadWorkspaceCache(params.workspaceId);
+      if (active && cached) { applyCache(cached); setLoading(false); }
+      await refresh(!cached);
+    })();
+    return () => { active = false; };
+  }, [applyCache, params.workspaceId, refresh]));
 
   async function manageOnNode(nodeId: string, kind: "model" | "mcp") {
     const node = nodes.find((item) => item.node_id === nodeId);

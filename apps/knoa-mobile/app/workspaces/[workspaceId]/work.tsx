@@ -7,6 +7,7 @@ import { AppPressable } from "@/components/AppPressable";
 import { listHubNodes, listWorkspaceWork, type HubNode, type WorkspaceWorkProjection } from "@/hub/hubClient";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
+import { loadWorkspaceCache, mergeWorkspaceCache, type WorkspaceCacheSnapshot } from "@/storage/workspaceCache";
 import { colors } from "@/theme";
 
 export default function WorkspaceWorkScreen() {
@@ -19,21 +20,35 @@ export default function WorkspaceWorkScreen() {
   const [working, setWorking] = useState("");
   const [error, setError] = useState("");
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const applyCache = useCallback((snapshot: WorkspaceCacheSnapshot) => {
+    setItems(snapshot.work);
+    setNodes(snapshot.nodes);
+  }, []);
+
+  const refresh = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     setError("");
     try {
       const [work, directory] = await Promise.all([listWorkspaceWork(), listHubNodes()]);
       setItems(work);
       setNodes(directory);
+      await mergeWorkspaceCache(params.workspaceId, { work, nodes: directory });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t("work.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [params.workspaceId, t]);
 
-  useFocusEffect(useCallback(() => { void refresh(); }, [refresh]));
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    void (async () => {
+      const cached = await loadWorkspaceCache(params.workspaceId);
+      if (active && cached) { applyCache(cached); setLoading(false); }
+      await refresh(!cached);
+    })();
+    return () => { active = false; };
+  }, [applyCache, params.workspaceId, refresh]));
 
   async function open(item: WorkspaceWorkProjection) {
     const node = nodes.find((value) => value.node_id === item.node_id);
