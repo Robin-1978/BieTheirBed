@@ -11626,6 +11626,16 @@
             "title": "Recoverable",
             "type": "boolean"
           },
+          "side_effect": {
+            "default": "none",
+            "enum": [
+              "none",
+              "possible",
+              "unknown"
+            ],
+            "title": "Side Effect",
+            "type": "string"
+          },
           "recommended_action": {
             "enum": [
               "wait",

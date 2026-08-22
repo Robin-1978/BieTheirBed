@@ -28,6 +28,7 @@ class UserWorkStatusInfo(BaseModel):
     terminal: bool
     requires_user: bool
     recoverable: bool
+    side_effect: Literal["none", "possible", "unknown"] = "none"
     recommended_action: Literal[
         "wait",
         "respond",
@@ -45,6 +46,7 @@ def task_work_status(state: str, *, pending_approval_count: int = 0) -> UserWork
             terminal=False,
             requires_user=True,
             recoverable=True,
+            side_effect="none",
             recommended_action="respond",
         )
     if state in {"queued", "running"}:
@@ -53,6 +55,7 @@ def task_work_status(state: str, *, pending_approval_count: int = 0) -> UserWork
             terminal=False,
             requires_user=False,
             recoverable=False,
+            side_effect="none",
             recommended_action="wait",
         )
     if state == "paused":
@@ -61,6 +64,7 @@ def task_work_status(state: str, *, pending_approval_count: int = 0) -> UserWork
             terminal=False,
             requires_user=True,
             recoverable=True,
+            side_effect="possible",
             recommended_action="resume",
         )
     if state == "completed":
@@ -69,6 +73,7 @@ def task_work_status(state: str, *, pending_approval_count: int = 0) -> UserWork
             terminal=True,
             requires_user=False,
             recoverable=False,
+            side_effect="none",
             recommended_action="none",
         )
     if state == "cancelled":
@@ -77,6 +82,7 @@ def task_work_status(state: str, *, pending_approval_count: int = 0) -> UserWork
             terminal=True,
             requires_user=False,
             recoverable=True,
+            side_effect="possible",
             recommended_action="retry",
         )
     return UserWorkStatusInfo(
@@ -84,6 +90,7 @@ def task_work_status(state: str, *, pending_approval_count: int = 0) -> UserWork
         terminal=True,
         requires_user=True,
         recoverable=True,
+        side_effect="unknown",
         recommended_action="retry",
     )
 

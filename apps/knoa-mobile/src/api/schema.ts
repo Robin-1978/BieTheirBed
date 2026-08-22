@@ -3467,6 +3467,12 @@ export interface components {
             /** Recoverable */
             recoverable: boolean;
             /**
+             * Side Effect
+             * @default none
+             * @enum {string}
+             */
+            side_effect: "none" | "possible" | "unknown";
+            /**
              * Recommended Action
              * @enum {string}
              */

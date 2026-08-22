@@ -11,6 +11,7 @@ def test_work_status_hides_task_implementation_states() -> None:
         "terminal": False,
         "requires_user": False,
         "recoverable": False,
+        "side_effect": "none",
         "recommended_action": "wait",
     }
     assert task_work_status("waiting_approval", pending_approval_count=1).status == "waiting_for_you"
