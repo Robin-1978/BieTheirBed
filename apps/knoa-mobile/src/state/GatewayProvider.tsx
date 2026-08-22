@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { GatewayClient, GatewayError } from "@/api/gatewayClient";
-import { ConnectionResolverTransport, type LanDiagnostic, type P2PDiagnostic } from "@/api/gatewayTransport";
+import { ConnectionResolverTransport, type LanDiagnostic, type P2PDiagnostic, type RelayDiagnostic } from "@/api/gatewayTransport";
 import type { AgentSummary, AndroidRelease, PrincipalTaskEvent, UnavailableAgent } from "@/api/models";
 import { isPresentationTaskEvent, subscribeTaskEvents, type TaskEventSubscription } from "@/api/taskEvents";
 import { authenticateDevice, pairDevice } from "@/security/pairing";
@@ -56,6 +56,10 @@ type GatewayState = {
   lanRetryAt: number;
   lanEndpoint: string;
   lanElapsedMs: number;
+  relayState: RelayDiagnostic["state"];
+  relayLastError: string;
+  relayRetryAt: number;
+  relayElapsedMs: number;
   requiredUpdate: AndroidRelease | null;
   availableUpdate: AndroidRelease | null;
   agents: AgentSummary[];
@@ -106,6 +110,10 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     lanRetryAt: 0,
     lanEndpoint: "",
     lanElapsedMs: 0,
+    relayState: "idle",
+    relayLastError: "",
+    relayRetryAt: 0,
+    relayElapsedMs: 0,
     requiredUpdate: null,
     availableUpdate: null,
     agents: [],
@@ -134,7 +142,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
   const connect = useCallback(async () => {
     const generation = ++connectionGenerationRef.current;
     provisionalConversationRef.current = null;
-    commit({ status: "booting", error: "", p2pState: "idle", p2pLastError: "", p2pRetryAt: 0, p2pElapsedMs: 0, lanState: "idle", lanLastError: "", lanRetryAt: 0, lanEndpoint: "", lanElapsedMs: 0 });
+    commit({ status: "booting", error: "", p2pState: "idle", p2pLastError: "", p2pRetryAt: 0, p2pElapsedMs: 0, lanState: "idle", lanLastError: "", lanRetryAt: 0, lanEndpoint: "", lanElapsedMs: 0, relayState: "idle", relayLastError: "", relayRetryAt: 0, relayElapsedMs: 0 });
     try {
       const [identity, nodes] = await Promise.all([
         loadConnectionIdentity(),
@@ -167,6 +175,14 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
           lanElapsedMs: diagnostic.elapsedMs,
         });
       };
+      const relayDiagnosticChanged = (diagnostic: RelayDiagnostic) => {
+        if (generation === connectionGenerationRef.current) commit({
+          relayState: diagnostic.state,
+          relayLastError: diagnostic.lastError,
+          relayRetryAt: diagnostic.retryAt,
+          relayElapsedMs: diagnostic.elapsedMs,
+        });
+      };
       let token = identity.sessionToken
         && identity.sessionExpiresAt > Date.now() / 1000 + 30
         ? identity.sessionToken
@@ -176,6 +192,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         transportChanged,
         p2pDiagnosticChanged,
         lanDiagnosticChanged,
+        relayDiagnosticChanged,
       );
       await withConnectionTimeout(transport.prepareLanDiscovery());
       let client: GatewayClient;
@@ -191,7 +208,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
             gateway_url: device.gatewayUrl,
             deviceId: device.deviceId,
             binding: identity,
-          }, transportChanged, p2pDiagnosticChanged, lanDiagnosticChanged, transport));
+          }, transportChanged, p2pDiagnosticChanged, lanDiagnosticChanged, relayDiagnosticChanged, transport));
           token = await loadSessionToken();
         }
       } else {
@@ -199,7 +216,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
           gateway_url: device.gatewayUrl,
           deviceId: device.deviceId,
           binding: identity,
-        }, transportChanged, p2pDiagnosticChanged, lanDiagnosticChanged, transport));
+        }, transportChanged, p2pDiagnosticChanged, lanDiagnosticChanged, relayDiagnosticChanged, transport));
         token = await loadSessionToken();
       }
       if (!token) throw new Error("未能建立安全会话");
@@ -291,18 +308,27 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
           lanElapsedMs: diagnostic.elapsedMs,
         });
       };
+      const relayDiagnosticChanged = (diagnostic: RelayDiagnostic) => {
+        if (generation === connectionGenerationRef.current) commit({
+          relayState: diagnostic.state,
+          relayLastError: diagnostic.lastError,
+          relayRetryAt: diagnostic.retryAt,
+          relayElapsedMs: diagnostic.elapsedMs,
+        });
+      };
       const transport = new ConnectionResolverTransport(
         identity,
         transportChanged,
         p2pDiagnosticChanged,
         lanDiagnosticChanged,
+        relayDiagnosticChanged,
       );
       await withConnectionTimeout(transport.prepareLanDiscovery());
       const client = await withConnectionTimeout(authenticateDevice({
         gateway_url: identity.gatewayUrl,
         deviceId: identity.deviceId,
         binding: identity,
-      }, transportChanged, p2pDiagnosticChanged, lanDiagnosticChanged, transport));
+      }, transportChanged, p2pDiagnosticChanged, lanDiagnosticChanged, relayDiagnosticChanged, transport));
       const token = await loadSessionToken();
       if (!token) throw new Error("未能恢复安全会话");
       if (generation !== connectionGenerationRef.current) throw new Error("Node 连接已切换");
@@ -513,6 +539,10 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       lanLastError: "",
       lanRetryAt: 0,
       lanEndpoint: "",
+      relayState: "idle",
+      relayLastError: "",
+      relayRetryAt: 0,
+      relayElapsedMs: 0,
     });
   }, [commit]);
 

@@ -86,6 +86,9 @@ export default function NodeSettingsScreen() {
         {gateway.lanElapsedMs > 0 ? <Metric label={t("settings.node.mdnsElapsed")} value={`${gateway.lanElapsedMs} ms`} /> : null}
         {gateway.lanState === "found" && gateway.lanEndpoint ? <Text selectable style={styles.lanEndpoint}>{t("settings.node.mdnsFoundEndpoint", { endpoint: gateway.lanEndpoint })}</Text> : null}
         {gateway.lanLastError ? <Text selectable style={styles.p2pError}>{t("settings.node.mdnsLastError", { error: gateway.lanLastError })}</Text> : null}
+        <Metric label={t("settings.node.relayState")} value={relayStateLabel(gateway.relayState, t)} />
+        {gateway.relayElapsedMs > 0 ? <Metric label={t("settings.node.relayElapsed")} value={`${gateway.relayElapsedMs} ms`} /> : null}
+        {gateway.relayLastError ? <Text selectable style={styles.p2pError}>{t("settings.node.relayLastError", { error: gateway.relayLastError })}</Text> : null}
         <Metric label={t("common.gateway")} value={gateway.gatewayUrl || "—"} />
         <Metric label={t("common.nodeId")} value={gateway.nodeId || "—"} compact />
       </View>
@@ -139,6 +142,14 @@ function mdnsStateLabel(state: "idle" | "scanning" | "found" | "cooldown", t: Re
   if (state === "found") return t("settings.node.mdnsFound");
   if (state === "cooldown") return t("settings.node.mdnsCooldown");
   return t("settings.node.mdnsIdle");
+}
+
+function relayStateLabel(state: "idle" | "connecting" | "ready" | "active" | "cooldown", t: ReturnType<typeof useI18n>["t"]) {
+  if (state === "connecting") return t("settings.node.relayConnecting");
+  if (state === "ready") return t("settings.node.relayReady");
+  if (state === "active") return t("settings.node.relayActive");
+  if (state === "cooldown") return t("settings.node.relayCooldown");
+  return t("settings.node.relayIdle");
 }
 
 function Action({ title, detail, busy = false, onPress }: { title: string; detail: string; busy?: boolean; onPress(): void }) {
