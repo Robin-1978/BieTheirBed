@@ -7429,6 +7429,17 @@
             "minimum": 1,
             "title": "Revision",
             "type": "integer"
+          },
+          "work_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserWorkStatusInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -10164,6 +10175,17 @@
             "title": "Pending Approval Count",
             "type": "integer"
           },
+          "work_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserWorkStatusInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "created_at": {
             "minimum": 0.0,
             "title": "Created At",
@@ -11563,6 +11585,56 @@
           }
         },
         "title": "UpdateProductTaskRequest",
+        "type": "object"
+      },
+      "UserWorkStatusInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "queued",
+              "working",
+              "waiting_for_you",
+              "completed",
+              "failed",
+              "paused",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "terminal": {
+            "title": "Terminal",
+            "type": "boolean"
+          },
+          "requires_user": {
+            "title": "Requires User",
+            "type": "boolean"
+          },
+          "recoverable": {
+            "title": "Recoverable",
+            "type": "boolean"
+          },
+          "recommended_action": {
+            "enum": [
+              "wait",
+              "respond",
+              "retry",
+              "resume",
+              "none"
+            ],
+            "title": "Recommended Action",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "terminal",
+          "requires_user",
+          "recoverable",
+          "recommended_action"
+        ],
+        "title": "UserWorkStatusInfo",
         "type": "object"
       },
       "WriteSecretRequest": {

@@ -19,6 +19,7 @@ import type { ResolvedArtifactFile } from "@/api/chatArtifacts";
 import { saveArtifactFile } from "@/api/saveArtifactFile";
 import { shouldRefreshExecution } from "@/api/taskEvents";
 import { AppPressable } from "@/components/AppPressable";
+import { AsyncStateView } from "@/components/AsyncStateView";
 import { AppIcon } from "@/components/AppIcon";
 import { AppMarkdown } from "@/components/AppMarkdown";
 import { ApprovalRequestDetails } from "@/components/ApprovalRequestDetails";
@@ -227,12 +228,9 @@ export default function TaskExecutionDetailScreen() {
     }
   }
 
-  if (!execution && !error) return <View style={styles.loading}><ActivityIndicator color={colors.accent} /></View>;
+  if (!execution && !error) return <AsyncStateView state="loading" />;
   if (!execution) return (
-    <View style={styles.loading}>
-      <Text style={styles.error}>{error}</Text>
-      <AppPressable onPress={() => void refresh()}><Text style={styles.link}>{t("tasks.reload")}</Text></AppPressable>
-    </View>
+    <AsyncStateView state="error" message={error} retryLabel={t("tasks.reload")} onRetry={() => void refresh()} />
   );
 
   return (
@@ -523,7 +521,6 @@ function Action({ label, primary = false, danger = false, disabled = false, busy
 }
 
 const styles = StyleSheet.create({
-  loading: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 24 },
   container: { padding: 16, gap: 14, paddingBottom: 48 },
   summary: { backgroundColor: colors.surface, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: colors.line, gap: 8 },
   summaryHeader: { flexDirection: "row", justifyContent: "space-between" },
@@ -568,7 +565,6 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.45 },
   error: { color: colors.danger, lineHeight: 21 },
   message: { color: colors.accent, lineHeight: 21 },
-  link: { color: colors.accent, fontWeight: "700" },
   technicalToggle: { minHeight: 44, paddingHorizontal: 4, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
   technicalToggleText: { color: colors.muted, fontWeight: "600" },
   technicalCard: { padding: 14, borderRadius: 14, backgroundColor: colors.surfaceMuted, gap: 6 },

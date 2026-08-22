@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 _MAX_BODY_BYTES = 16 * 1024
 
 
-
 class ConversationRoutes:
 
     async def _resolve_interaction(self, request: Request) -> JSONResponse:

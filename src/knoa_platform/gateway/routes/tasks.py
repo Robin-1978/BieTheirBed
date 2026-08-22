@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 _MAX_BODY_BYTES = 16 * 1024
 
 
-
 class TaskRoutes:
 
     async def _create_task(self, request: Request) -> JSONResponse:

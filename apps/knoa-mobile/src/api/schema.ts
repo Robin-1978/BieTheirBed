@@ -1506,6 +1506,8 @@ export interface components {
             finished_at: number | null;
             /** Revision */
             revision: number;
+            /** @default null */
+            work_status: components["schemas"]["UserWorkStatusInfo"] | null;
         };
         /**
          * ChatTurnState
@@ -2807,6 +2809,8 @@ export interface components {
              * @default 0
              */
             pending_approval_count: number;
+            /** @default null */
+            work_status: components["schemas"]["UserWorkStatusInfo"] | null;
             /** Created At */
             created_at: number;
             /** Updated At */
@@ -3446,6 +3450,25 @@ export interface components {
              * @default null
              */
             expected_revision: number | null;
+        };
+        /** UserWorkStatusInfo */
+        UserWorkStatusInfo: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "working" | "waiting_for_you" | "completed" | "failed" | "paused" | "cancelled";
+            /** Terminal */
+            terminal: boolean;
+            /** Requires User */
+            requires_user: boolean;
+            /** Recoverable */
+            recoverable: boolean;
+            /**
+             * Recommended Action
+             * @enum {string}
+             */
+            recommended_action: "wait" | "respond" | "retry" | "resume" | "none";
         };
         /** WriteSecretRequest */
         WriteSecretRequest: {
