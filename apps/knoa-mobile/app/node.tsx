@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
-import { transportDetailKey, transportLabelKey } from "@/api/transportPresentation";
+import { transportLabelKey } from "@/api/transportPresentation";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
@@ -35,7 +35,7 @@ export default function NodeMenuScreen() {
             </Text>
             {gateway.status === "ready" ? <Text style={styles.transport}>{t(transportLabelKey(gateway.transportMode))}</Text> : null}
           </View>
-          {gateway.status === "ready" ? <Text style={styles.transportDetail}>{t(transportDetailKey(gateway.transportMode))}</Text> : null}
+          {gateway.status === "ready" ? <Text style={styles.transportDetail}>{t("nodeSettings.autoTransportDetail")}</Text> : null}
         </View>
 
         <View style={styles.card}>
