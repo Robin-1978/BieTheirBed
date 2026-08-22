@@ -7,22 +7,29 @@ let configured = false;
 
 export async function configureTaskNotifications(): Promise<void> {
   if (configured) return;
-  configured = true;
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: false,
-      shouldSetBadge: true,
-    }),
-  });
-  if (Platform.OS === "android") {
-    await Notifications.setNotificationChannelAsync(TASK_NOTIFICATION_CHANNEL, {
-      name: "小诺任务",
-      importance: Notifications.AndroidImportance.DEFAULT,
-      vibrationPattern: [0, 180],
-      sound: "default",
+  try {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: false,
+        shouldSetBadge: true,
+      }),
     });
+    if (Platform.OS === "android") {
+      await Notifications.setNotificationChannelAsync(TASK_NOTIFICATION_CHANNEL, {
+        name: "小诺任务",
+        importance: Notifications.AndroidImportance.DEFAULT,
+        vibrationPattern: [0, 180],
+        sound: "default",
+      });
+    }
+  } catch {
+    // Native notification support is optional in development/web builds.
+  } finally {
+    // Avoid retry loops on platforms where native notifications are not
+    // available, while keeping all public helpers best-effort.
+    configured = true;
   }
 }
 
