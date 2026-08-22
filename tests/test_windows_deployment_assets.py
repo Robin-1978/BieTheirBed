@@ -170,6 +170,16 @@ def test_windows_one_click_updater_pulls_reinstalls_and_recovers_services() -> N
     assert "automatic rollback" in updater
 
 
+def test_windows_bundle_installer_releases_stale_knoa_ports_before_start() -> None:
+    installer = _read("deploy/product/windows/Install-KnoaBundle.ps1")
+
+    assert "function Get-ListeningPids" in installer
+    assert "function Stop-KnoaPortOwners" in installer
+    assert "function Wait-KnoaPortsReleased" in installer
+    assert "taskkill.exe /F /T /PID $ownerPid" in installer
+    assert "Wait-KnoaPortsReleased $criticalPorts" in installer
+
+
 def test_linux_cloudflared_services_also_keep_tokens_out_of_arguments() -> None:
     knoa = _read("deploy/cloudflared/cloudflared-knoa.user.service")
     per = _read("deploy/cloudflared/cloudflared-per.user.service")

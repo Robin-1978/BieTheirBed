@@ -49,6 +49,42 @@ function Start-RoleServices {
     }
 }
 
+function Get-ListeningPids([int[]]$Ports) {
+    $owners = @{}
+    foreach ($port in $Ports) { $owners[$port] = @() }
+    foreach ($connection in (Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue)) {
+        $port = [int]$connection.LocalPort
+        if ($owners.ContainsKey($port)) { $owners[$port] += [int]$connection.OwningProcess }
+    }
+    return $owners
+}
+
+function Stop-KnoaPortOwners([int[]]$Ports) {
+    foreach ($entry in (Get-ListeningPids $Ports).GetEnumerator()) {
+        foreach ($ownerPid in ($entry.Value | Select-Object -Unique)) {
+            if ($ownerPid -le 0 -or $ownerPid -eq $PID) { continue }
+            $process = Get-CimInstance Win32_Process -Filter "ProcessId=$ownerPid" -ErrorAction SilentlyContinue
+            $commandLine = [string]$process.CommandLine
+            if ($commandLine -and $commandLine -notmatch "(?i)knoa|Run-Knoa") {
+                throw "Foreign process $ownerPid owns Knoa port $($entry.Key): $commandLine"
+            }
+            & taskkill.exe /F /T /PID $ownerPid 2>$null | Out-Null
+        }
+    }
+}
+
+function Wait-KnoaPortsReleased([int[]]$Ports, [int]$TimeoutSeconds = 30) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        Stop-KnoaPortOwners $Ports
+        $owners = Get-ListeningPids $Ports
+        if (($owners.Values | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum -eq 0) { return }
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $deadline)
+    $detail = ($owners.GetEnumerator() | Where-Object { $_.Value.Count } | ForEach-Object { "$($_.Key):$($_.Value -join ',')" }) -join '; '
+    throw "Knoa ports were not released before installation: $detail"
+}
+
 function Wait-Health([string]$Uri) {
     $deadline = [DateTime]::UtcNow.AddSeconds(45)
     do {
@@ -191,6 +227,10 @@ try {
     }
 
     Stop-RoleServices @("KnoaHostLifecycle", "KnoaHostedHub", "KnoaNode")
+    $criticalPorts = @(9533)
+    if ($Role -in @("hub", "all")) { $criticalPorts += 9529, 9532 }
+    if ($Role -in @("node", "all")) { $criticalPorts += 9527, 9530, 9531, 9541 }
+    Wait-KnoaPortsReleased $criticalPorts
     Copy-Item -LiteralPath $incomingUpdater -Destination $installedUpdater -Force
     Copy-Item -LiteralPath (Join-Path $current "install\Run-KnoaHub.ps1") -Destination (Join-Path $scriptRoot "Run-KnoaHub.ps1") -Force
     Copy-Item -LiteralPath (Join-Path $current "install\Run-KnoaNode.ps1") -Destination (Join-Path $scriptRoot "Run-KnoaNode.ps1") -Force
