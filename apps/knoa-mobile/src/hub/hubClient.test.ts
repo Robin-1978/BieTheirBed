@@ -18,6 +18,8 @@ vi.mock("@/security/deviceIdentity", () => ({
 }));
 
 import {
+  HUB_REQUEST_TIMEOUT_MS,
+  HubRequestError,
   createNodeEnrollmentCode,
   issueConnectionTicket,
   loadHubConnection,
@@ -160,6 +162,37 @@ describe("Hosted Hub account onboarding", () => {
 });
 
 describe("Android release ownership", () => {
+  it("fails with a recoverable timeout when Hosted Hub does not respond", async () => {
+    native.cache.set("knoa.hub.connection.v1", JSON.stringify({
+      url: "https://hosted.example/workspaces/ws_personal_1",
+      rootUrl: "https://hosted.example",
+      token: `khs_${"a".repeat(48)}`,
+      accountId: "account-1",
+      hubId: "hub-hosted",
+      workspaceId: "ws_personal_1",
+      identityIssuerId: "hub-hosted",
+      signingPublicKey: "signing-key",
+      deploymentMode: "hosted_single_node",
+    }));
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      }));
+      const pending = expect(resolveAndroidRelease(async () => {
+        throw new Error("Node fallback must not be used");
+      })).rejects.toMatchObject<Partial<HubRequestError>>({
+        name: "HubRequestError",
+        kind: "timeout",
+        message: "Hub 请求超时，请检查网络后重试",
+      });
+      await vi.advanceTimersByTimeAsync(HUB_REQUEST_TIMEOUT_MS);
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("uses the Node channel when there is no Hosted Account", async () => {
     const nodeRelease = vi.fn(async () => ({
       platform: "android" as const,

@@ -4,6 +4,19 @@ import type { AndroidRelease } from "@/api/models";
 import { loadOrCreateInstallationId, loadOrCreatePrivateKey, publicKey } from "@/security/deviceIdentity";
 
 const HUB_CONNECTION = "knoa.hub.connection.v1";
+export const HUB_REQUEST_TIMEOUT_MS = 15_000;
+
+export type HubRequestFailureKind = "timeout" | "cancelled" | "network";
+
+export class HubRequestError extends Error {
+  constructor(
+    message: string,
+    readonly kind: HubRequestFailureKind,
+  ) {
+    super(message);
+    this.name = "HubRequestError";
+  }
+}
 
 export type HubNode = {
   node_id: string;
@@ -267,7 +280,7 @@ export async function resolveAndroidRelease(
 ): Promise<AndroidRelease | null> {
   const connection = await loadHubConnection();
   if (!connection?.accountId) return nodeRelease();
-  const response = await fetch(
+  const response = await fetchHub(
     `${connection.rootUrl}/v1/mobile/releases/android/latest`,
     { headers: { Authorization: `Bearer ${connection.token}` } },
   );
@@ -576,18 +589,46 @@ async function request<T>(
   url: string,
   token: string,
   path: string,
-  options: { method?: string; body?: unknown } = {},
+  options: { method?: string; body?: unknown; signal?: AbortSignal } = {},
 ): Promise<T> {
-  const response = await fetch(`${url}${path}`, {
+  const response = await fetchHub(`${url}${path}`, {
     method: options.method ?? "GET",
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.body === undefined ? {} : { "Content-Type": "application/json" }),
     },
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    signal: options.signal,
   });
   if (!response.ok) throw new Error(response.status === 401 ? "Hub 帐号认证失败" : "Hub 请求失败");
   return response.json() as Promise<T>;
+}
+
+async function fetchHub(
+  url: string,
+  init: RequestInit,
+  timeoutMs = HUB_REQUEST_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  const externalSignal = init.signal;
+  const abortFromCaller = () => controller.abort();
+  externalSignal?.addEventListener("abort", abortFromCaller, { once: true });
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (timedOut) throw new HubRequestError("Hub 请求超时，请检查网络后重试", "timeout");
+    if (externalSignal?.aborted) throw new HubRequestError("Hub 请求已取消", "cancelled");
+    if (error instanceof HubRequestError) throw error;
+    throw new HubRequestError("无法连接 Hub，请检查网络后重试", "network");
+  } finally {
+    clearTimeout(timer);
+    externalSignal?.removeEventListener("abort", abortFromCaller);
+  }
 }
 
 async function connectHostedAccount(
