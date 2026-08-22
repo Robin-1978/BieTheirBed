@@ -19,6 +19,12 @@ def test_transport_health_keeps_priority_and_stage_metrics() -> None:
     assert snapshot["discovery_success"]["p2p"] == 1
     assert snapshot["last_error"]["relay"] == "timeout"
 
+    health.record_request_latency("p2p", 12.5)
+    health.record_request_latency("p2p", 7.5)
+    snapshot = health.snapshot()
+    assert snapshot["last_request_latency_ms"]["p2p"] == 7.5
+    assert snapshot["average_request_latency_ms"]["p2p"] == 10.0
+
 
 def test_transport_health_poll_observations_are_idempotent_until_recovery() -> None:
     health = TransportHealth()
@@ -51,3 +57,4 @@ async def test_transport_health_middleware_records_completed_request() -> None:
     assert snapshot["active"] == "mdns"
     assert snapshot["verification_success"]["mdns"] == 1
     assert snapshot["request_success"]["mdns"] == 1
+    assert snapshot["last_request_latency_ms"]["mdns"] >= 0

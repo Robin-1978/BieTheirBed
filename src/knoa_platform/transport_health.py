@@ -25,6 +25,9 @@ class TransportHealth:
     discovery_success: dict[TransportName, int] = field(default_factory=lambda: {"mdns": 0, "p2p": 0, "relay": 0})
     verification_success: dict[TransportName, int] = field(default_factory=lambda: {"mdns": 0, "p2p": 0, "relay": 0})
     request_success: dict[TransportName, int] = field(default_factory=lambda: {"mdns": 0, "p2p": 0, "relay": 0})
+    last_request_latency_ms: dict[TransportName, float] = field(default_factory=dict)
+    request_latency_samples: dict[TransportName, int] = field(default_factory=dict)
+    request_latency_total_ms: dict[TransportName, float] = field(default_factory=dict)
     last_error: dict[TransportName, str] = field(default_factory=dict)
     last_changed_at: float = field(default_factory=monotonic)
     _observed: dict[str, bool] = field(default_factory=dict, repr=False)
@@ -62,6 +65,12 @@ class TransportHealth:
         self.active = transport
         self.last_switch_reason = " ".join(reason.split())[:240]
 
+    def record_request_latency(self, transport: TransportName, elapsed_ms: float) -> None:
+        elapsed = max(0.0, float(elapsed_ms))
+        self.last_request_latency_ms[transport] = round(elapsed, 2)
+        self.request_latency_samples[transport] = self.request_latency_samples.get(transport, 0) + 1
+        self.request_latency_total_ms[transport] = self.request_latency_total_ms.get(transport, 0.0) + elapsed
+
     def snapshot(self) -> dict[str, object]:
         return {
             "preferred_order": list(self.preferred_order),
@@ -71,6 +80,12 @@ class TransportHealth:
             "discovery_success": dict(self.discovery_success),
             "verification_success": dict(self.verification_success),
             "request_success": dict(self.request_success),
+            "last_request_latency_ms": dict(self.last_request_latency_ms),
+            "average_request_latency_ms": {
+                transport: round(self.request_latency_total_ms[transport] / self.request_latency_samples[transport], 2)
+                for transport in self.request_latency_samples
+                if self.request_latency_samples[transport] > 0
+            },
             "last_error": dict(self.last_error),
             "last_changed_age_seconds": max(0.0, monotonic() - self.last_changed_at),
         }
