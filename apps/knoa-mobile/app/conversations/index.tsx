@@ -149,14 +149,12 @@ export default function ConversationHistoryScreen() {
   async function open(session: ConversationSession) {
     if (session.state === "archived") return;
     setWorking(session.session_handle);
-    try {
-      await gateway.openConversation(session.session_handle);
-      router.replace({ pathname: "/chat", params: nodeRouteParams(params) });
-    } catch (caught) {
-      setError(t("conversations.openFailed"));
-    } finally {
-      setWorking("");
-    }
+    // The cached session is enough to render Chat.  Sync authoritative
+    // metadata in the background so opening a topic is instant.
+    void gateway.openConversation(session.session_handle, { agentId: session.agent_id, state: session.state })
+      .catch(() => setError(t("conversations.openFailed")));
+    router.replace({ pathname: "/chat", params: nodeRouteParams(params) });
+    setWorking("");
   }
 
   return (

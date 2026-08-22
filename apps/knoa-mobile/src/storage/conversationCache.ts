@@ -1,6 +1,7 @@
 import { File, Paths } from "expo-file-system";
 
 import type { ChatTurnSnapshot } from "@/api/models";
+import { scopedCacheKey } from "./cacheScope";
 
 type StoredConversation = {
   version: 1;
@@ -13,7 +14,7 @@ const MAX_CACHED_TURNS = 200;
 
 export async function loadConversationCache(sessionHandle: string): Promise<ChatTurnSnapshot[]> {
   if (!sessionHandle) return [];
-  const file = cacheFile(sessionHandle);
+  const file = cacheFile(scopedCacheKey(sessionHandle));
   if (!file.exists) return [];
   try {
     const value = JSON.parse(await file.text()) as Partial<StoredConversation>;
@@ -31,7 +32,7 @@ export async function storeConversationCache(
   turns: ChatTurnSnapshot[],
 ): Promise<void> {
   if (!sessionHandle) return;
-  const file = cacheFile(sessionHandle);
+  const file = cacheFile(scopedCacheKey(sessionHandle));
   if (!file.exists) file.create({ intermediates: true, overwrite: false });
   file.write(JSON.stringify({
     version: 1,
@@ -43,7 +44,7 @@ export async function storeConversationCache(
 
 export function removeConversationCache(sessionHandle: string): void {
   if (!sessionHandle) return;
-  const file = cacheFile(sessionHandle);
+  const file = cacheFile(scopedCacheKey(sessionHandle));
   if (file.exists) file.delete();
 }
 

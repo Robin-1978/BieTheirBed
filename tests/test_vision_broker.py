@@ -69,6 +69,7 @@ async def test_vision_broker_returns_scoped_observation_and_caches_it(tmp_path) 
     assert first["retry_count"] == 0
     assert second["cached"] is True
     assert len(provider.requests) == 1
+    assert provider.requests[0].max_output_tokens == 4096
     content = provider.requests[0].messages[-1]["content"]
     assert any(block.get("type") == "image" for block in content)
 

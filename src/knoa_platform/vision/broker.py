@@ -25,6 +25,7 @@ _SOLUTION_FOCUS = re.compile(
     re.IGNORECASE,
 )
 logger = logging.getLogger(__name__)
+DEFAULT_VISION_OUTPUT_TOKENS = 4096
 
 
 class VisionBroker:
@@ -34,7 +35,7 @@ class VisionBroker:
         artifact_store: ArtifactStore,
         *,
         model_alias: str = "",
-        max_output_tokens: int = 1024,
+        max_output_tokens: int = DEFAULT_VISION_OUTPUT_TOKENS,
     ) -> None:
         self._provider = provider
         self._store = artifact_store
