@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 
 from pydantic import ValidationError
 from starlette.requests import Request
@@ -187,27 +188,22 @@ class TaskRoutes:
                     "detail": "任务使用的 Agent 已配置",
                     "recommended_action": "none",
                 })
-            if control.apply_status == "failed":
-                checks.append({
-                    "check_id": "config",
-                    "status": "blocked",
-                    "detail": "Node 配置应用失败，请在 Console 修复配置后重试",
-                    "recommended_action": "configure",
-                })
-            elif control.apply_status == "applying":
-                checks.append({
-                    "check_id": "config",
-                    "status": "warning",
-                    "detail": "Node 配置正在应用，执行可能使用上一版本配置",
-                    "recommended_action": "retry",
-                })
-            else:
-                checks.append({
-                    "check_id": "config",
-                    "status": "ready",
-                    "detail": "Node 配置已应用",
-                    "recommended_action": "none",
-                })
+                if agent.kind == "codex":
+                    executable = agent.command[0] if agent.command else ""
+                    if executable and shutil.which(executable):
+                        checks.append({
+                            "check_id": "runtime_binary",
+                            "status": "ready",
+                            "detail": "Codex Runtime 命令可用",
+                            "recommended_action": "none",
+                        })
+                    else:
+                        checks.append({
+                            "check_id": "runtime_binary",
+                            "status": "blocked",
+                            "detail": "找不到 Codex Runtime 命令，请在 Node 上安装或修正 Agent 配置",
+                            "recommended_action": "configure",
+                        })
                 binding = agent.model_binding
                 if binding.ownership == "platform":
                     model = revision.document.models.get(binding.model)
@@ -257,6 +253,27 @@ class TaskRoutes:
                                     "detail": "模型凭据已配置",
                                     "recommended_action": "none",
                                 })
+            if control.apply_status == "failed":
+                checks.append({
+                    "check_id": "config",
+                    "status": "blocked",
+                    "detail": "Node 配置应用失败，请在 Console 修复配置后重试",
+                    "recommended_action": "configure",
+                })
+            elif control.apply_status == "applying":
+                checks.append({
+                    "check_id": "config",
+                    "status": "warning",
+                    "detail": "Node 配置正在应用，执行可能使用上一版本配置",
+                    "recommended_action": "retry",
+                })
+            else:
+                checks.append({
+                    "check_id": "config",
+                    "status": "ready",
+                    "detail": "Node 配置已应用",
+                    "recommended_action": "none",
+                })
         except Exception:
             checks.append({
                 "check_id": "config",
