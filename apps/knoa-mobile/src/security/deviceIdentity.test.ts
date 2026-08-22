@@ -18,6 +18,8 @@ import {
   listNodeBindings,
   loadConnectionIdentity,
   replaceConnectionIdentity,
+  storeCoreSession,
+  storeEventCursor,
   storeSession,
   updateNodeDirectGatewayUrl,
 } from "./deviceIdentity";
@@ -25,6 +27,43 @@ import {
 beforeEach(() => native.cache.clear());
 
 describe("Node binding selection", () => {
+  it("does not carry session, event cursor, or direct URL across re-pairing", async () => {
+    await replaceConnectionIdentity({
+      nodeId: "node_1",
+      displayName: "Old Desktop",
+      deviceId: "device_old",
+      gatewayUrl: "https://old.node.example",
+      directGatewayUrl: "http://192.168.1.10:9531",
+      nodeSigningPublicKey: "s".repeat(40),
+      nodeConfigurationPublicKey: "c".repeat(40),
+    });
+    await storeSession("old-session", Date.now() / 1000 + 3600);
+    await storeCoreSession("old-core-session");
+    await storeEventCursor(42);
+
+    await replaceConnectionIdentity({
+      nodeId: "node_1",
+      displayName: "New Desktop",
+      deviceId: "device_new",
+      gatewayUrl: "https://new.node.example",
+      nodeSigningPublicKey: "n".repeat(40),
+      nodeConfigurationPublicKey: "d".repeat(40),
+    });
+
+    await expect(loadConnectionIdentity()).resolves.toMatchObject({
+      nodeId: "node_1",
+      displayName: "New Desktop",
+      deviceId: "device_new",
+      gatewayUrl: "https://new.node.example",
+      directGatewayUrl: "",
+      sessionToken: "",
+      sessionExpiresAt: 0,
+      coreSessionHandle: "",
+      eventCursor: 0,
+      lastConnectedAt: 0,
+    });
+  });
+
   it("disconnects the active Node without deleting its trust binding", async () => {
     await replaceConnectionIdentity({
       nodeId: "node_1",
