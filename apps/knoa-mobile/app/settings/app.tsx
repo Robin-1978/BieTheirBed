@@ -1,17 +1,30 @@
 import * as Application from "expo-application";
 import { router } from "expo-router";
-import { type ReactNode } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useEffect, useState, type ReactNode } from "react";
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { useI18n, type LanguageMode } from "@/i18n";
 import { useThemePreference, type ThemeMode } from "@/state/ThemeProvider";
 import { colors } from "@/theme";
+import { hasTaskNotificationPermission, requestTaskNotificationPermission } from "@/notifications/taskNotifications";
 
 export default function AppSettingsScreen() {
   const theme = useThemePreference();
   const i18n = useI18n();
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [notificationWorking, setNotificationWorking] = useState(false);
+
+  useEffect(() => {
+    void hasTaskNotificationPermission().then(setNotificationsEnabled);
+  }, []);
+
+  async function enableNotifications() {
+    setNotificationWorking(true);
+    setNotificationsEnabled(await requestTaskNotificationPermission());
+    setNotificationWorking(false);
+  }
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -29,6 +42,22 @@ export default function AppSettingsScreen() {
           <Choice label={i18n.t("settings.language.zh")} mode="zh-CN" selected={i18n.mode === "zh-CN"} onPress={i18n.setMode} />
           <Choice label={i18n.t("settings.language.en")} mode="en-US" selected={i18n.mode === "en-US"} onPress={i18n.setMode} />
         </View>
+      </Section>
+
+      <Section title={i18n.t("settings.notifications")} detail={i18n.t("settings.notificationsHint")}>
+        <Text style={notificationsEnabled ? styles.enabled : styles.disabled}>
+          {notificationsEnabled ? i18n.t("settings.notificationsEnabled") : i18n.t("settings.notificationsDisabled")}
+        </Text>
+        {!notificationsEnabled ? (
+          <View style={styles.notificationActions}>
+            <AppPressable disabled={notificationWorking} onPress={() => void enableNotifications()} style={styles.updateButton}>
+              <Text style={styles.updateText}>{notificationWorking ? i18n.t("settings.notificationsWorking") : i18n.t("settings.notificationsEnable")}</Text>
+            </AppPressable>
+            <AppPressable onPress={() => void Linking.openSettings()} style={styles.settingsButton}>
+              <Text style={styles.settingsButtonText}>{i18n.t("settings.notificationsOpenSettings")}</Text>
+            </AppPressable>
+          </View>
+        ) : null}
       </Section>
 
       <View style={styles.card}>
@@ -105,4 +134,9 @@ const styles = StyleSheet.create({
   updateButton: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 13, backgroundColor: colors.accent },
   updateText: { color: "white", fontWeight: "800" },
   updateHint: { color: colors.muted, fontSize: 12, lineHeight: 18 },
+  enabled: { color: colors.accent, fontWeight: "800" },
+  disabled: { color: colors.warning, fontWeight: "800" },
+  notificationActions: { gap: 8 },
+  settingsButton: { minHeight: 42, alignItems: "center", justifyContent: "center", borderRadius: 13, borderWidth: 1, borderColor: colors.line },
+  settingsButtonText: { color: colors.accent, fontWeight: "800" },
 });
