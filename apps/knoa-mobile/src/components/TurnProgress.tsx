@@ -11,14 +11,16 @@ const TERMINAL_STATES = new Set<ChatTurnSnapshot["state"]>(["completed", "failed
 
 export function TurnProgress({ turn }: { turn: ChatTurnSnapshot }) {
   const { t } = useI18n();
-  const active = !TERMINAL_STATES.has(turn.state);
+  const userStatus = turn.work_status?.status;
+  const active = userStatus ? !turn.work_status?.terminal : !TERMINAL_STATES.has(turn.state);
+  const failed = userStatus ? userStatus === "failed" : turn.state === "failed";
   const entries = useMemo(
     () => timelineDisplayEntries(turn.timeline, turn.final_output),
     [turn.final_output, turn.timeline],
   );
   const [expanded, setExpanded] = useState(false);
 
-  if (!active && !entries.length && turn.state !== "failed") return null;
+  if (!active && !entries.length && !failed) return null;
 
   return (
     <View style={styles.root}>
@@ -31,11 +33,11 @@ export function TurnProgress({ turn }: { turn: ChatTurnSnapshot }) {
       >
         {active
           ? <ActivityIndicator color={colors.accent} size="small" />
-          : <Text style={turn.state === "failed" ? styles.failed : styles.done}>{turn.state === "failed" ? "!" : "✓"}</Text>}
+          : <Text style={failed ? styles.failed : styles.done}>{failed ? "!" : "✓"}</Text>}
         <Text style={styles.label}>{progressLabel(turn, entries, t)}</Text>
         {entries.length ? <Text style={styles.toggle}>{expanded ? t("turn.collapseShort") : t("turn.view")}</Text> : null}
       </Pressable>
-      {turn.state === "failed" ? (
+      {failed ? (
         <Text accessibilityRole="alert" style={styles.failureDetail}>{turnFailureMessage(turn, t)}</Text>
       ) : null}
       {expanded && entries.length ? (
@@ -86,10 +88,11 @@ function TimelineRow({ entry, t }: { entry: TimelineDisplayEntry; t: ReturnType<
 }
 
 function progressLabel(turn: ChatTurnSnapshot, entries: TimelineDisplayEntry[], t: ReturnType<typeof useI18n>["t"]): string {
-  if (turn.state === "waiting_approval") return t("turn.waitingApproval");
-  if (turn.state === "failed") return t("turn.executionFailed", { count: entries.length });
-  if (turn.state === "cancelled") return t("turn.stopped", { count: entries.length });
-  if (turn.state === "completed") return t("turn.process", { count: entries.length });
+  const status = turn.work_status?.status;
+  if (status === "waiting_for_you" || turn.state === "waiting_approval") return t("turn.waitingApproval");
+  if (status === "failed" || turn.state === "failed") return t("turn.executionFailed", { count: entries.length });
+  if (status === "cancelled" || turn.state === "cancelled") return t("turn.stopped", { count: entries.length });
+  if (status === "completed" || turn.state === "completed") return t("turn.process", { count: entries.length });
   const latest = entries.at(-1);
   if (!latest) return t("turn.starting");
   if (latest.kind === "reasoning") return t("turn.analyzing");
