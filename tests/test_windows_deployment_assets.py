@@ -157,7 +157,9 @@ def test_windows_one_click_updater_pulls_reinstalls_and_recovers_services() -> N
     assert 'Get-Service -Name "KnoaNode"' in updater
     assert '$Role = Get-InstalledRole' in updater
     assert 'else { "all" }' not in updater
-    assert "pull --ff-only" in updater
+    assert "fetch --prune origin" in updater
+    assert "merge --ff-only" in updater
+    assert "release\\versions.json" in updater
     assert 'Join-Path $resolvedSource "deploy\\windows\\Install-Knoa.ps1"' in updater
     assert "Restart-InstalledServices $Role" in updater
     assert "SkipPairingQr = $true" in updater

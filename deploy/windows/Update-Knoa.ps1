@@ -232,8 +232,28 @@ if (Test-Path -LiteralPath $InstallationStatePath) {
 Write-Host "Update backup created: $backupRoot"
 
 Write-Host "Updating Knoa source in $resolvedSource"
-& $git -C $resolvedSource pull --ff-only
-if ($LASTEXITCODE -ne 0) { throw "Knoa git pull --ff-only failed" }
+$sourceBranch = (& $git -C $resolvedSource symbolic-ref --short HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or -not $sourceBranch) {
+    throw "Knoa source checkout is not on a named branch"
+}
+& $git -C $resolvedSource fetch --prune origin $sourceBranch
+if ($LASTEXITCODE -ne 0) { throw "Knoa git fetch from origin failed" }
+& $git -C $resolvedSource merge --ff-only "origin/$sourceBranch"
+if ($LASTEXITCODE -ne 0) {
+    throw "Knoa source is not fast-forwardable from origin/$sourceBranch; check the remote and branch"
+}
+
+$sourceManifest = Join-Path $resolvedSource "release\versions.json"
+$sourceVersionFile = Join-Path $resolvedSource "src\knoa_platform\__init__.py"
+if (-not (Test-Path -LiteralPath $sourceManifest) -or -not (Test-Path -LiteralPath $sourceVersionFile)) {
+    throw "Updated Knoa source is missing release version metadata; refusing to install stale code"
+}
+$sourceManifestDocument = Get-Content -LiteralPath $sourceManifest -Raw -Encoding UTF8 | ConvertFrom-Json
+$sourceVersion = Get-DeclaredKnoaVersion $resolvedSource
+if ([string]$sourceManifestDocument.platform_version -ne $sourceVersion) {
+    throw "Knoa source release metadata is inconsistent: source=$sourceVersion manifest=$($sourceManifestDocument.platform_version)"
+}
+Write-Host "Knoa source updated to $sourceBranch / $((& $git -C $resolvedSource rev-parse --short HEAD).Trim()) version $sourceVersion"
 
 $installer = Join-Path $resolvedSource "deploy\windows\Install-Knoa.ps1"
 if (-not (Test-Path -LiteralPath $installer)) {
