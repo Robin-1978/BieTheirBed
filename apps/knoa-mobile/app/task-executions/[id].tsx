@@ -228,9 +228,9 @@ export default function TaskExecutionDetailScreen() {
     }
   }
 
-  if (!execution && !error) return <AsyncStateView state="loading" />;
+  if (!execution && !error && gateway.status === "ready") return <AsyncStateView state="loading" />;
   if (!execution) return (
-    <AsyncStateView state="error" message={error} retryLabel={t("tasks.reload")} onRetry={() => void refresh()} />
+    <AsyncStateView state="error" message={error || t("chat.reconnecting")} retryLabel={t("tasks.reload")} onRetry={() => void refresh()} />
   );
 
   return (

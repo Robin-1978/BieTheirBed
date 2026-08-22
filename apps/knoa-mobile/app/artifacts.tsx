@@ -25,7 +25,12 @@ export default function ArtifactsScreen() {
   const autoLoadedSession = useRef("");
 
   const search = useCallback(async () => {
-    if (!gateway.client || !sessionHandle.trim()) return;
+    if (!gateway.client) {
+      setLoading(false);
+      setError(t("chat.reconnecting"));
+      return;
+    }
+    if (!sessionHandle.trim()) return;
     setLoading(true);
     setError("");
     try {
@@ -45,10 +50,10 @@ export default function ArtifactsScreen() {
 
   useEffect(() => {
     const value = sessionHandle.trim();
-    if (!value || autoLoadedSession.current === value) return;
+    if (!value || !gateway.client || autoLoadedSession.current === value) return;
     autoLoadedSession.current = value;
     void search();
-  }, [sessionHandle, search]);
+  }, [gateway.client, search, sessionHandle]);
 
   async function openArtifact(item: (typeof items)[number], save = false) {
     if (!sessionHandle.trim() || opening) return;

@@ -119,14 +119,14 @@ export default function TaskDetailScreen() {
     }
   }
 
-  if (!task && !error) {
+  if (!task && !error && gateway.status === "ready") {
     return <View style={styles.loading}><ActivityIndicator color={colors.accent} /></View>;
   }
 
   if (!task) {
     return (
       <View style={styles.loading}>
-        <Text style={styles.error}>{error}</Text>
+        <Text style={styles.error}>{error || t("chat.reconnecting")}</Text>
         <AppPressable onPress={() => void refresh()}><Text style={styles.link}>{t("tasks.reload")}</Text></AppPressable>
       </View>
     );

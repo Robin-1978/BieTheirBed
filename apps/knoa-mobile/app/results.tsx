@@ -31,7 +31,12 @@ export default function ResultsScreen() {
   }, [gateway.nodeId, gateway.nodes, gateway.switchNode, params.nodeId]);
 
   const refresh = useCallback(async (manual = false) => {
-    if (!gateway.client) return;
+    if (!gateway.client) {
+      setLoading(false);
+      setError(gateway.status === "error" ? t("results.loadFailed") : t("chat.reconnecting"));
+      setRefreshing(false);
+      return;
+    }
     if (manual) setRefreshing(true);
     setError("");
     try {
@@ -43,7 +48,7 @@ export default function ResultsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [gateway.client, gateway.runAuthenticated, t]);
+  }, [gateway.client, gateway.runAuthenticated, gateway.status, t]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
