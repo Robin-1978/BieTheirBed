@@ -9,6 +9,7 @@ import time
 import uuid
 
 from knoa_platform.branding import ASSISTANT_NAME
+from knoa_platform.notification_intent import notification_intent_for_event
 from knoa_platform.channels.feishu_cards import (
     _ActiveTaskPresentation,
     _StreamingCardState,
@@ -196,9 +197,7 @@ class FeishuTaskMixin:
                     if not self._running:
                         return
                     self._notification_cursors[open_id] = cursor
-                    if feed_event.event.event_type in (
-                        _TASK_TERMINAL_EVENT_TYPES | {"approval_requested"}
-                    ):
+                    if notification_intent_for_event(feed_event.event.event_type) is not None:
                         self._save_notification_cursors()
             except asyncio.CancelledError:
                 raise
@@ -219,7 +218,7 @@ class FeishuTaskMixin:
     ) -> bool:
         event = feed_event.event
         if (
-            event.event_type == "approval_requested"
+            event.event_type in {"approval_requested", "interaction_requested"}
             and event.task_id in self._foreground_task_ids
         ):
             return True
@@ -229,9 +228,8 @@ class FeishuTaskMixin:
         ):
             self._foreground_task_ids.discard(event.task_id)
             return True
-        if event.event_type in (
-            _TASK_TERMINAL_EVENT_TYPES | {"approval_requested"}
-        ):
+        intent = notification_intent_for_event(event.event_type)
+        if intent is not None:
             try:
                 policy = await self._task_notification_policy(
                     client,
@@ -246,15 +244,16 @@ class FeishuTaskMixin:
                 return False
             if policy is None:
                 return True
-            policy_key = (
-                "waiting_approval"
-                if event.event_type == "approval_requested"
-                else event.event_type
-            )
-            if not policy.get(policy_key, False):
+            if not policy.get(intent.policy_key, False):
                 return True
         if event.event_type == "approval_requested":
             return await self._deliver_background_approval(
+                open_id,
+                client,
+                event,
+            )
+        if event.event_type == "interaction_requested":
+            return await self._deliver_background_interaction_notice(
                 open_id,
                 client,
                 event,
@@ -407,6 +406,33 @@ class FeishuTaskMixin:
                 if now - seen_at < 600
             }
         return True
+
+    async def _deliver_background_interaction_notice(
+        self,
+        open_id: str,
+        client: CoreClient,
+        event: TaskEvent,
+    ) -> bool:
+        """Tell the user that input is needed; the App remains the form surface."""
+        task_title = await self._task_notification_title(client, event.task_id)
+        detail = str(event.payload.interaction_display.get("description", "")).strip()
+        text = detail or "任务需要你补充信息，请打开 Knoa 执行详情继续。"
+        title = f"需要你处理 · {task_title}" if task_title else "需要你处理"
+        try:
+            return await asyncio.to_thread(
+                self._send_card,
+                open_id,
+                text,
+                "orange",
+                title,
+            )
+        except Exception:
+            logger.warning(
+                "Feishu background interaction notification failed task_id=%s",
+                event.task_id,
+                exc_info=True,
+            )
+            return False
 
     def _save_binding(self, open_id: str) -> bool:
         """Bind the first Feishu owner and never let another sender replace it."""
