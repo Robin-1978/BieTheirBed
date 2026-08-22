@@ -679,8 +679,19 @@ async def test_gateway_adapter_lists_only_enabled_agents(tmp_path) -> None:
     base = _config(tmp_path)
     agents = {
         **base.node_agents,
+        "knoa": base.node_agents["knoa"].model_copy(
+            update={
+                "delegation": base.node_agents["knoa"].delegation.model_copy(
+                    update={"targets": frozenset()}
+                )
+            }
+        ),
         "codex": base.node_agents["codex"].model_copy(
-            update={"enabled": True}
+            update={
+                "enabled": True,
+                "visibility": "user",
+                "command": ("knoa-test-codex-not-installed", "app-server"),
+            }
         ),
     }
     config = AppConfig(**{
@@ -705,6 +716,12 @@ async def test_gateway_adapter_lists_only_enabled_agents(tmp_path) -> None:
             {"agent_id": "knoa", "display_name": "Knoa Agent"},
         ],
     }
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://gateway.local") as http:
+        availability = await http.get("/v1/agents/availability", headers=headers)
+    assert availability.status_code == 200
+    codex = next(item for item in availability.json()["unavailable"] if item["agent_id"] == "codex")
+    assert codex["reason"] == "runtime_unavailable"
 
 
 @pytest.mark.asyncio

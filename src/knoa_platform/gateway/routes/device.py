@@ -33,6 +33,12 @@ _MAX_BODY_BYTES = 16 * 1024
 
 class DeviceRoutes:
 
+    @staticmethod
+    def _codex_runtime_available(agent: object) -> bool:
+        kind = str(getattr(agent, "kind", ""))
+        command = tuple(getattr(agent, "command", ()) or ())
+        return not (kind == "codex" and command and shutil.which(command[0]) is None)
+
     async def _health(self, _request: Request) -> JSONResponse:
         return JSONResponse(
             {
@@ -67,7 +73,9 @@ class DeviceRoutes:
                     "display_name": agent.display_name,
                 }
                 for agent_id, agent in system.agents.items()
-                if agent.enabled and agent.visibility == "user"
+                if agent.enabled
+                and agent.visibility == "user"
+                and self._codex_runtime_available(agent)
             ],
         })
 
@@ -84,17 +92,21 @@ class DeviceRoutes:
             return self._core_error(exc)
         unavailable = []
         for agent_id, agent in revision.document.agents.agents.items():
-            if agent.enabled and agent.visibility == "user":
+            runtime_unavailable = (
+                agent.enabled
+                and agent.visibility == "user"
+                and not self._codex_runtime_available(agent)
+            )
+            if agent.enabled and agent.visibility == "user" and not runtime_unavailable:
                 continue
-            if agent.visibility == "system":
+            if runtime_unavailable:
+                reason = "runtime_unavailable"
+            elif agent.visibility == "system":
                 reason = "system_only"
             elif agent.visibility == "delegate":
                 reason = "delegate_only"
             else:
                 reason = "disabled"
-            if agent.enabled and agent.kind == "codex" and agent.command:
-                if shutil.which(agent.command[0]) is None:
-                    reason = "runtime_unavailable"
             unavailable.append({
                 "agent_id": agent_id,
                 "display_name": agent.display_name,
