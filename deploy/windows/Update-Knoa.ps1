@@ -22,14 +22,14 @@ function Get-ListeningPids([int[]]$Ports) {
 function Stop-KnoaPortOwners([int[]]$Ports) {
     $owners = Get-ListeningPids $Ports
     foreach ($entry in $owners.GetEnumerator()) {
-        foreach ($pid in ($entry.Value | Select-Object -Unique)) {
-            if ($pid -le 0 -or $pid -eq $PID) { continue }
-            $process = Get-CimInstance Win32_Process -Filter "ProcessId=$pid" -ErrorAction SilentlyContinue
+        foreach ($ownerPid in ($entry.Value | Select-Object -Unique)) {
+            if ($ownerPid -le 0 -or $ownerPid -eq $PID) { continue }
+            $process = Get-CimInstance Win32_Process -Filter "ProcessId=$ownerPid" -ErrorAction SilentlyContinue
             $commandLine = [string]$process.CommandLine
             if ($commandLine -and $commandLine -notmatch "(?i)knoa|Run-Knoa") {
-                throw "Foreign process $pid owns Knoa port $($entry.Key): $commandLine"
+                throw "Foreign process $ownerPid owns Knoa port $($entry.Key): $commandLine"
             }
-            & taskkill.exe /F /T /PID $pid 2>$null | Out-Null
+            & taskkill.exe /F /T /PID $ownerPid 2>$null | Out-Null
         }
     }
 }
