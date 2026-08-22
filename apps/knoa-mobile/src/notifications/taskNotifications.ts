@@ -38,6 +38,15 @@ export async function requestTaskNotificationPermission(): Promise<boolean> {
   }
 }
 
+export async function hasTaskNotificationPermission(): Promise<boolean> {
+  try {
+    await configureTaskNotifications();
+    return (await Notifications.getPermissionsAsync()).granted;
+  } catch {
+    return false;
+  }
+}
+
 export async function presentTaskReminderNotification(input: {
   taskId: string;
   executionId: string;
