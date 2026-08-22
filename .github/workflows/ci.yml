@@ -40,6 +40,8 @@ jobs:
         run: uv run --no-sync python scripts/check_protocol_contracts.py
       - name: Verify signed Release Manifest schema
         run: uv run --no-sync python scripts/check_release_manifest.py
+      - name: Verify product release versions
+        run: uv run --no-sync python scripts/version_manager.py check
 
   release-role-contracts:
     strategy:
