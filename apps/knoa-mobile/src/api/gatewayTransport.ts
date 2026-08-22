@@ -54,6 +54,7 @@ const LAN_DISCOVERY_RETRY_DELAY_MS = 10_000;
 const LAN_DISCOVERY_CONNECT_TIMEOUT_MS = 900;
 const P2P_ICE_GATHERING_TIMEOUT_MS = 3_000;
 const P2P_CHANNEL_OPEN_TIMEOUT_MS = 8_000;
+const TRANSPORT_READY_WAIT_TIMEOUT_MS = 3_000;
 const ICE_SERVERS = [
   { urls: "stun:stun.cloudflare.com:3478" },
   { urls: "stun:stun.l.google.com:19302" },
@@ -124,12 +125,45 @@ export class ConnectionResolverTransport implements GatewayTransport {
       }
     }
     if (!this.binding.directGatewayUrl && await this.bindingPointsAtCurrentHub()) {
-      // Start the P2P upgrade before waiting for this Relay request.  The
-      // upgrade uses the same authenticated Relay session for signaling, but
-      // runs independently; the current request must be served by Relay
-      // immediately and must never wait for ICE or the data channel.
+      // Establish all eligible paths together. The first ready path carries
+      // this request; priority is applied again on subsequent requests.
       this.startP2PUpgrade(baseUrl, init);
       this.startRelayUpgrade(baseUrl, init);
+      const winner = await this.waitForReadyTransport();
+      if (winner === "mdns" && this.lanGatewayUrl) {
+        try {
+          const response = await withConnectTimeout(
+            (signal) => this.direct.request(this.lanGatewayUrl, path, this.tag(init, "mdns", signal)),
+            LAN_DISCOVERY_CONNECT_TIMEOUT_MS,
+          );
+          this.setActive("direct");
+          return response;
+        } catch {
+          this.lanGatewayUrl = "";
+        }
+      }
+      if (winner === "p2p" && this.p2p?.ready()) {
+        try {
+          const response = await this.p2p.request(baseUrl, path, this.tag(init, "p2p"));
+          this.updatePreferredActive();
+          this.setP2PDiagnostic("active");
+          return response;
+        } catch (error) {
+          this.p2p.close();
+          this.p2p = null;
+          this.setP2PDiagnostic("cooldown", errorText(error), Date.now() + 60_000);
+        }
+      }
+      if (winner === "relay" && this.relay?.ready()) {
+        try {
+          const response = await this.relayRequest(baseUrl, path, this.tag(init, "relay"));
+          this.updatePreferredActive(true);
+          return response;
+        } catch {
+          this.relay?.close();
+          this.relay = null;
+        }
+      }
       try {
         const response = await this.relayRequest(baseUrl, path, this.tag(init, "relay"));
         this.updatePreferredActive(true);
@@ -231,6 +265,17 @@ export class ConnectionResolverTransport implements GatewayTransport {
   private async relayRequest(baseUrl: string, path: string, init: RequestInit): Promise<Response> {
     if (!this.relay) this.relay = new RelayTransport(this.binding, "session");
     return this.relay.request(baseUrl, path, init);
+  }
+
+  private async waitForReadyTransport(): Promise<"mdns" | "p2p" | "relay" | null> {
+    const deadline = Date.now() + TRANSPORT_READY_WAIT_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      if (this.lanGatewayUrl) return "mdns";
+      if (this.p2p?.ready()) return "p2p";
+      if (this.relay?.ready()) return "relay";
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return null;
   }
 
   private tag(init: RequestInit, transport: "mdns" | "p2p" | "relay" | "direct", signal?: AbortSignal): RequestInit {

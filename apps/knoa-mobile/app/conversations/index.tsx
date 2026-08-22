@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -16,6 +16,7 @@ import { AppPressable } from "@/components/AppPressable";
 import { removeConversationDraft } from "@/security/conversationDrafts";
 import { useGateway } from "@/state/GatewayProvider";
 import { removeConversationCache } from "@/storage/conversationCache";
+import { loadConversationListCache, storeConversationListCache } from "@/storage/conversationListCache";
 import { colors } from "@/theme";
 import { useI18n } from "@/i18n";
 
@@ -28,13 +29,17 @@ export default function ConversationHistoryScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [working, setWorking] = useState("");
   const [editing, setEditing] = useState("");
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
+  const sessionsRef = useRef<ConversationSession[]>([]);
+  const cacheScope = `${params.workspaceId ?? ""}:${params.nodeId ?? gateway.nodeId}:${showArchived ? "archived" : "active"}`;
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    setRefreshing(true);
+    if (!sessionsRef.current.length) setLoading(true);
     setError("");
     try {
       const result = await gateway.runAuthenticated((client) => client.listConversationSessions({
@@ -42,15 +47,30 @@ export default function ConversationHistoryScreen() {
         limit: 50,
       }));
       setSessions(result.sessions);
+      sessionsRef.current = result.sessions;
       setNextCursor(result.nextCursor);
+      void storeConversationListCache(cacheScope, result.sessions, result.nextCursor);
     } catch {
       setError(t("conversations.loadFailed"));
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [gateway.runAuthenticated, showArchived, t]);
+  }, [cacheScope, gateway.runAuthenticated, showArchived, t]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    let active = true;
+    void loadConversationListCache(cacheScope).then((cached) => {
+      if (!active || !cached) return;
+      sessionsRef.current = cached.sessions;
+      setSessions(cached.sessions);
+      setNextCursor(cached.nextCursor);
+      setLoading(false);
+    }).finally(() => {
+      if (active) void refresh();
+    });
+    return () => { active = false; };
+  }, [cacheScope, refresh]);
 
   async function loadMore() {
     if (!nextCursor || loadingMore) return;
@@ -64,9 +84,12 @@ export default function ConversationHistoryScreen() {
       }));
       setSessions((current) => {
         const existing = new Set(current.map((session) => session.session_handle));
-        return [...current, ...result.sessions.filter((session) => !existing.has(session.session_handle))];
+        const next = [...current, ...result.sessions.filter((session) => !existing.has(session.session_handle))];
+        sessionsRef.current = next;
+        return next;
       });
       setNextCursor(result.nextCursor);
+      void storeConversationListCache(cacheScope, sessionsRef.current, result.nextCursor);
     } catch {
       setError(t("conversations.moreFailed"));
     } finally {
@@ -99,14 +122,21 @@ export default function ConversationHistoryScreen() {
         text: t("common.delete"),
         style: "destructive",
         onPress: () => void (async () => {
+          const previous = sessionsRef.current;
+          const optimistic = previous.filter((item) => item.session_handle !== session.session_handle);
+          sessionsRef.current = optimistic;
+          setSessions(optimistic);
           setWorking(session.session_handle);
           try {
             await gateway.runAuthenticated((client) => client.deleteConversationSession(session.session_handle));
             await removeConversationDraft(session.session_handle);
             removeConversationCache(session.session_handle);
+            void storeConversationListCache(cacheScope, optimistic, nextCursor);
             if (gateway.sessionHandle === session.session_handle) await gateway.newConversation();
-            await refresh();
+            void refresh();
           } catch {
+            sessionsRef.current = previous;
+            setSessions(previous);
             setError(t("conversations.deleteActive"));
           } finally {
             setWorking("");
@@ -146,7 +176,7 @@ export default function ConversationHistoryScreen() {
             </AppPressable>
           </View>
           {error ? <Text style={styles.error}>{error}</Text> : null}
-          {loading ? <ActivityIndicator color={colors.accent} style={styles.loading} /> : null}
+          {loading || refreshing ? <ActivityIndicator color={colors.accent} style={styles.loading} /> : null}
         </>
       )}
       ListEmptyComponent={!loading ? <Text style={styles.empty}>{t("conversations.empty")}</Text> : null}
