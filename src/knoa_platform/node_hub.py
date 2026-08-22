@@ -746,6 +746,7 @@ class NodeRelayManager:
                     },
                 }
                 for session in sessions
+                if session.state.value != "archived"
             ]
             projections.extend(
                 {
@@ -792,6 +793,7 @@ class NodeRelayManager:
                     },
                 }
                 for task in tasks
+                if task.state.value != "archived"
             )
             for projection in projections:
                 material = canonical_json(projection)
