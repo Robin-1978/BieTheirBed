@@ -114,6 +114,19 @@ export default function WorkspaceScreen() {
           <AppPressable accessibilityLabel={t("workspace.accountHome")} onPress={() => router.push("/account")} style={styles.iconButton}><AppIcon name="user" color={colors.muted} size={25} /></AppPressable>
         </View>
         <WorkspaceCacheBanner snapshot={cacheSnapshot} loading={refreshing} error={error} onRefresh={() => void refresh()} />
+        <AppPressable
+          style={styles.startWork}
+          onPress={() => router.push(gateway.status === "ready"
+            ? { pathname: "/chat", params: { workspaceId, workspaceName: displayName, nodeId: gateway.nodeId } }
+            : { pathname: "/workspaces/[workspaceId]/nodes", params: routeParams })}
+        >
+          <AppIcon name="chat" color={colors.white} size={22} />
+          <View style={styles.flex}>
+            <Text style={styles.startWorkTitle}>{t("workspace.startWork")}</Text>
+            <Text style={styles.startWorkDetail}>{gateway.status === "ready" ? t("workspace.startWorkReady") : t("workspace.startWorkConnect")}</Text>
+          </View>
+          <AppIcon name="chevron-right" color={colors.white} size={19} />
+        </AppPressable>
         {loading ? <AsyncStateView state="loading" /> : null}
 
         <View style={styles.grid}>
@@ -148,4 +161,5 @@ function roleLabel(role: HostedWorkspace["role"] | undefined, t: ReturnType<type
 }
 const styles = StyleSheet.create({
   container: { padding: 17, gap: 14, paddingBottom: 52 }, hero: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, heroIcon: { width: 50, height: 50, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft }, flex: { flex: 1, minWidth: 0 }, title: { color: colors.ink, fontSize: 20, fontWeight: "800" }, meta: { color: colors.muted, fontSize: 12, lineHeight: 18 }, iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center" }, grid: { gap: 10 }, entry: { minHeight: 82, flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, entryIcon: { width: 46, height: 46, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft }, entryTitle: { color: colors.ink, fontSize: 16, fontWeight: "800", minWidth: 70 }, onboarding: { padding: 16, gap: 12, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, sectionTitle: { color: colors.ink, fontSize: 18, fontWeight: "800" }, step: { flexDirection: "row", gap: 11, alignItems: "center" }, stepNumber: { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft }, stepNumberText: { color: colors.accent, fontWeight: "800" }, rowTitle: { color: colors.ink, fontWeight: "800" }, primary: { minHeight: 46, alignItems: "center", justifyContent: "center", borderRadius: 13, backgroundColor: colors.accent }, primaryText: { color: colors.white, fontWeight: "800" },
+  startWork: { minHeight: 72, flexDirection: "row", alignItems: "center", gap: 11, padding: 15, borderRadius: 17, backgroundColor: colors.accent }, startWorkTitle: { color: colors.white, fontSize: 16, fontWeight: "800" }, startWorkDetail: { color: colors.white, opacity: 0.86, fontSize: 12, lineHeight: 17 },
 });
