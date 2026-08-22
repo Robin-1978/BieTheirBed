@@ -87,7 +87,7 @@ export default function WorkspaceNodesScreen() {
     setError("");
     try {
       await updateNodeDirectGatewayUrl(node.node_id, node.direct_gateway_url || "");
-      await gateway.switchNode(node.node_id);
+      void gateway.switchNode(node.node_id).catch(() => undefined);
       router.push({ pathname: "/node", params: { ...params, nodeId: node.node_id } });
     } catch (caught) {
       setError(userFacingError(caught, t("nodes.connectFailed")));
