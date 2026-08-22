@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Check and bump independent Knoa Platform and Mobile product versions."""
+"""Check and bump Knoa release versions from one checked-in manifest.
+
+``release/versions.json`` is the only file an operator should edit for a
+release.  Package manifests are generated/materialized copies and are checked
+against it before a build or deployment.
+"""
 from __future__ import annotations
 
 import argparse
@@ -43,6 +48,43 @@ def _json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def release_manifest(root: Path) -> dict:
+    path = root / "release/versions.json"
+    if not path.is_file():
+        raise ValueError(f"Release version manifest is missing: {path}")
+    document = _json(path)
+    if document.get("schema_version") != 1:
+        raise ValueError("Unsupported release version manifest schema")
+    platform = document.get("platform_version")
+    mobile = document.get("mobile_version")
+    code = document.get("mobile_android_version_code")
+    if not isinstance(platform, str) or not isinstance(mobile, str):
+        raise ValueError("Release version manifest must contain product versions")
+    _semver(platform)
+    _semver(mobile)
+    if not isinstance(code, int) or code < 1:
+        raise ValueError("Release Android versionCode must be a positive integer")
+    return document
+
+
+def _write_release_manifest(root: Path, *, platform: str, mobile: str, code: int) -> None:
+    path = root / "release/versions.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "platform_version": platform,
+                "mobile_version": mobile,
+                "mobile_android_version_code": code,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def platform_version(root: Path) -> str:
     path = root / "src/knoa_platform/__init__.py"
     match = re.search(
@@ -82,6 +124,18 @@ def mobile_version(root: Path) -> tuple[str, int]:
 def check(root: Path) -> tuple[str, str, int]:
     platform = platform_version(root)
     mobile, version_code = mobile_version(root)
+    manifest = release_manifest(root)
+    expected = (
+        manifest["platform_version"],
+        manifest["mobile_version"],
+        manifest["mobile_android_version_code"],
+    )
+    actual = (platform, mobile, version_code)
+    if actual != expected:
+        raise ValueError(
+            "Release version manifest does not match generated metadata: "
+            f"manifest={expected}, files={actual}"
+        )
     return platform, mobile, version_code
 
 
@@ -106,6 +160,13 @@ def bump_platform(root: Path, requested: str) -> tuple[str, str]:
         root / "src/knoa_platform/__init__.py",
         rf'^__version__ = "{re.escape(current)}"$',
         f'__version__ = "{target}"',
+    )
+    manifest = release_manifest(root)
+    _write_release_manifest(
+        root,
+        platform=target,
+        mobile=manifest["mobile_version"],
+        code=manifest["mobile_android_version_code"],
     )
     return current, target
 
@@ -142,6 +203,13 @@ def bump_mobile(root: Path, requested: str) -> tuple[str, str, int, int]:
         rf'\1"{target}"\2',
     )
     mobile_version(root)
+    manifest = release_manifest(root)
+    _write_release_manifest(
+        root,
+        platform=manifest["platform_version"],
+        mobile=target,
+        code=current_code + 1,
+    )
     return current, target, current_code, current_code + 1
 
 
