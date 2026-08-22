@@ -29,6 +29,10 @@ export default function WorkspaceScreen() {
   const { t } = useI18n();
   const fallbackName = value(params.workspaceName) || t("nav.workspace");
   const gateway = useGateway();
+  const taskRoute = (template: string) => ({
+    pathname: "/tasks/new" as const,
+    params: { template, workspaceId, workspaceName: displayName, nodeId: gateway.nodeId },
+  });
   const [workspace, setWorkspace] = useState<HostedWorkspace | null>(null);
   const [counts, setCounts] = useState({ work: 0, resources: 0, nodes: 0, onlineNodes: 0, members: 0 });
   const [loading, setLoading] = useState(true);
@@ -132,12 +136,13 @@ export default function WorkspaceScreen() {
           <Text style={styles.sectionTitle}>{t("workspace.capabilitiesTitle")}</Text>
           <Text style={styles.meta}>{t("workspace.capabilitiesDetail")}</Text>
           <View style={styles.capabilityGrid}>
-            <Capability icon="file" title={t("taskTemplates.folderTitle")} onPress={() => router.push({ pathname: "/tasks/new", params: { template: "folder-organizer" } })} />
-            <Capability icon="settings" title={t("taskTemplates.healthTitle")} onPress={() => router.push({ pathname: "/tasks/new", params: { template: "computer-health" } })} />
-            <Capability icon="file" title={t("taskTemplates.documentTitle")} onPress={() => router.push({ pathname: "/tasks/new", params: { template: "document-digest" } })} />
-            <Capability icon="agent" title={t("taskTemplates.projectTitle")} onPress={() => router.push({ pathname: "/tasks/new", params: { template: "project-maintenance" } })} />
-            <Capability icon="alert" title={t("taskTemplates.serviceTitle")} onPress={() => router.push({ pathname: "/tasks/new", params: { template: "service-monitor" } })} />
-            <Capability icon="history" title={t("taskTemplates.summaryTitle")} onPress={() => router.push({ pathname: "/tasks/new", params: { template: "work-summary" } })} />
+            <Capability icon="file" title={t("taskTemplates.folderTitle")} onPress={() => router.push(taskRoute("folder-organizer"))} />
+            <Capability icon="settings" title={t("taskTemplates.healthTitle")} onPress={() => router.push(taskRoute("computer-health"))} />
+            <Capability icon="file" title={t("taskTemplates.documentTitle")} onPress={() => router.push(taskRoute("document-digest"))} />
+            <Capability icon="agent" title={t("taskTemplates.projectTitle")} onPress={() => router.push(taskRoute("project-maintenance"))} />
+            <Capability icon="alert" title={t("taskTemplates.serviceTitle")} onPress={() => router.push(taskRoute("service-monitor"))} />
+            <Capability icon="history" title={t("taskTemplates.summaryTitle")} onPress={() => router.push(taskRoute("work-summary"))} />
+            <Capability icon="chat" title={t("taskTemplates.researchTitle")} onPress={() => router.push(taskRoute("research-brief"))} />
           </View>
         </View>
         {loading ? <AsyncStateView state="loading" /> : null}
