@@ -11,6 +11,7 @@ import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { loadWorkspaceCache, mergeWorkspaceCache, type WorkspaceCacheSnapshot } from "@/storage/workspaceCache";
 import { colors } from "@/theme";
+import { userFacingError } from "@/ui/userFacingError";
 
 export default function WorkspaceWorkScreen() {
   const params = useLocalSearchParams<{ workspaceId: string; workspaceName?: string }>();
@@ -40,7 +41,7 @@ export default function WorkspaceWorkScreen() {
       setNodes(directory);
       await mergeWorkspaceCache(params.workspaceId, { work, nodes: directory });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("work.loadFailed"));
+      setError(userFacingError(caught, t("work.loadFailed")));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -80,7 +81,7 @@ export default function WorkspaceWorkScreen() {
         router.push({ pathname: "/tasks/[id]", params: { ...routeParams, id: item.entity_id } });
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("work.connectFailed"));
+      setError(userFacingError(caught, t("work.connectFailed")));
     } finally {
       setWorking("");
     }

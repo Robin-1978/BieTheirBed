@@ -17,6 +17,7 @@ import { useGateway } from "@/state/GatewayProvider";
 import { updateNodeDirectGatewayUrl } from "@/security/deviceIdentity";
 import { loadWorkspaceCache, mergeWorkspaceCache, type WorkspaceCacheSnapshot } from "@/storage/workspaceCache";
 import { colors } from "@/theme";
+import { userFacingError } from "@/ui/userFacingError";
 
 export default function WorkspaceNodesScreen() {
   const params = useLocalSearchParams<{ workspaceId: string; workspaceName?: string }>();
@@ -51,7 +52,7 @@ export default function WorkspaceNodesScreen() {
       setDeployments(resources.workspaceDeployments);
       await mergeWorkspaceCache(params.workspaceId, { nodes: directory, resources });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("nodes.loadFailed"));
+      setError(userFacingError(caught, t("nodes.loadFailed")));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -89,7 +90,7 @@ export default function WorkspaceNodesScreen() {
       await gateway.switchNode(node.node_id);
       router.push({ pathname: "/node", params: { ...params, nodeId: node.node_id } });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("nodes.connectFailed"));
+      setError(userFacingError(caught, t("nodes.connectFailed")));
     } finally {
       setWorking("");
     }
@@ -103,7 +104,7 @@ export default function WorkspaceNodesScreen() {
       setEnrollmentCode(JSON.stringify(payload));
       setEnrollmentExpiresAt(payload.expires_at);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("nodes.enrollmentFailed"));
+      setError(userFacingError(caught, t("nodes.enrollmentFailed")));
     } finally {
       setWorking("");
     }
