@@ -104,10 +104,24 @@ export default function ResultsScreen() {
 }
 
 function resultState(task: Task, t: ReturnType<typeof useI18n>["t"]): string {
+  if (task.work_status) {
+    return ({
+      queued: t("taskState.queued"),
+      working: t("taskState.running"),
+      waiting_for_you: t("taskState.waitingApproval"),
+      completed: t("taskState.completed"),
+      failed: t("taskState.failed"),
+      paused: t("tasks.state.paused"),
+      cancelled: t("taskState.cancelled"),
+    } as const)[task.work_status.status];
+  }
   if (task.latest_execution_state === "completed") return t("results.completed");
   if (task.latest_execution_state === "failed") return t("results.failed");
   if (task.latest_execution_state === "running") return t("results.running");
   if (task.latest_execution_state === "waiting_approval") return t("results.waitingApproval");
+  if (task.latest_execution_state === "queued") return t("taskState.queued");
+  if (task.latest_execution_state === "paused") return t("tasks.state.paused");
+  if (task.latest_execution_state === "cancelled") return t("taskState.cancelled");
   return t("results.available");
 }
 

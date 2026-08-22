@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
@@ -22,6 +22,7 @@ export default function ArtifactsScreen() {
   const [error, setError] = useState("");
   const [opening, setOpening] = useState("");
   const params = useLocalSearchParams<{ sessionHandle?: string }>();
+  const autoLoadedSession = useRef("");
 
   const search = useCallback(async () => {
     if (!gateway.client || !sessionHandle.trim()) return;
@@ -41,6 +42,13 @@ export default function ArtifactsScreen() {
     const firstSession = params.sessionHandle?.trim() || gateway.sessionHandle || "";
     if (firstSession && !sessionHandle) setSessionHandle(firstSession);
   }, [gateway.sessionHandle, params.sessionHandle, sessionHandle]);
+
+  useEffect(() => {
+    const value = sessionHandle.trim();
+    if (!value || autoLoadedSession.current === value) return;
+    autoLoadedSession.current = value;
+    void search();
+  }, [sessionHandle, search]);
 
   async function openArtifact(item: (typeof items)[number], save = false) {
     if (!sessionHandle.trim() || opening) return;
