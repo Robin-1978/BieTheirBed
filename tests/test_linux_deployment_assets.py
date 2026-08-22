@@ -18,6 +18,8 @@ def test_linux_installer_has_independent_roles() -> None:
     assert "install_node=0" in script
     assert "systemctl --user enable --now knoa-hosted-hub.service" in script
     assert "systemctl --user enable --now knoa-node.service" in script
+    assert "systemctl --user disable --now knoa.service" in script
+    assert "legacy_pids=" in script
     assert "sudo loginctl enable-linger" in script
 
 

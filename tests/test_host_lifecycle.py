@@ -169,6 +169,13 @@ class _FakeSourceManager(SourceHostLifecycleManager):
 
     def _service(self, role, action):
         self.service_actions.append((role, action))
+        if action == "stop":
+            self.active.discard(role)
+        elif action == "start":
+            self.active.add(role)
+
+    def _wait_healthy(self, roles, timeout_seconds=60.0):
+        assert all(role in self.active for role in roles)
 
 
 def test_source_manager_status_check_update_and_restart(tmp_path: Path) -> None:
@@ -187,7 +194,7 @@ def test_source_manager_status_check_update_and_restart(tmp_path: Path) -> None:
 
     assert manager.updates.actions == ["check", "update"]
     assert lifecycle_restarts == ["restart"]
-    assert manager.service_actions == [("node", "restart")]
+    assert manager.service_actions == [("node", "stop"), ("node", "start")]
 
 
 @pytest.mark.asyncio

@@ -103,6 +103,29 @@ fi
 
 umask 077
 install -d -m 700 "$DATA_ROOT" "$RUNTIME_ROOT" "$CONFIG_ROOT" "$USER_SERVICE_ROOT" "$USER_BIN_ROOT" "$SOURCE_UPDATE_ROOT" "$INCOMING_ROOT"
+# The pre-split installer used a single per-user `knoa.service` daemon.  It
+# owns the same Core/Gateway/MCP ports as the current Node service, but is no
+# longer part of the supported installation.  Stop and disable it before
+# touching the new service; otherwise systemd can report a healthy Node while
+# the new process repeatedly exits with EADDRINUSE on port 9530.
+if systemctl --user list-unit-files knoa.service >/dev/null 2>&1; then
+    systemctl --user disable --now knoa.service 2>/dev/null || true
+fi
+legacy_pids="$(pgrep -f 'knoa_platform\.service( |$).*--daemon|knoa_platform --serve.*--daemon' || true)"
+for legacy_pid in $legacy_pids; do
+    if [ "$legacy_pid" != "$$" ]; then
+        kill "$legacy_pid" 2>/dev/null || true
+    fi
+done
+for legacy_pid in $legacy_pids; do
+    for _ in 1 2 3 4 5; do
+        kill -0 "$legacy_pid" 2>/dev/null || break
+        sleep 1
+    done
+    if kill -0 "$legacy_pid" 2>/dev/null; then
+        kill -9 "$legacy_pid" 2>/dev/null || true
+    fi
+done
 if [ "$install_hub" -eq 1 ]; then
     systemctl --user stop knoa-hosted-hub.service 2>/dev/null || true
 fi
