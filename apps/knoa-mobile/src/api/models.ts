@@ -58,6 +58,14 @@ export type AgentSummary = {
   display_name: string;
 };
 
+export type UserWorkStatus = {
+  status: "queued" | "working" | "waiting_for_you" | "completed" | "failed" | "paused" | "cancelled";
+  terminal: boolean;
+  requires_user: boolean;
+  recoverable: boolean;
+  recommended_action: "wait" | "respond" | "retry" | "resume" | "none";
+};
+
 export type UnavailableAgent = {
   agent_id: string;
   display_name: string;
@@ -382,6 +390,7 @@ export type ChatTurnSnapshot = {
   updated_at: number;
   finished_at: number | null;
   revision: number;
+  work_status?: UserWorkStatus;
 };
 
 export type Task = {
@@ -407,6 +416,7 @@ export type Task = {
   pending_approval_count: number;
   created_at: number;
   updated_at: number;
+  work_status?: UserWorkStatus;
 };
 
 export type TaskExecution = {

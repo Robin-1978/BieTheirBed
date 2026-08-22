@@ -1,7 +1,6 @@
 import { router } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   RefreshControl,
   SectionList,
   StyleSheet,
@@ -12,6 +11,7 @@ import {
 import type { Task, TaskDefinitionState, TaskState } from "@/api/models";
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { AsyncStateView } from "@/components/AsyncStateView";
 import { PrimarySwipeNavigation } from "@/components/PrimarySwipeNavigation";
 import { currentTaskSections } from "@/components/taskListPresentation";
 import { useI18n } from "@/i18n";
@@ -142,23 +142,15 @@ export default function TasksScreen() {
           </AppPressable>
         ))}
       </View>
-      {loading ? <ActivityIndicator color={colors.accent} style={styles.loader} /> : null}
-      {error ? (
-        <View style={styles.errorCard}>
-          <Text style={styles.errorText}>{error}</Text>
-          <AppPressable onPress={() => void refresh()}><Text style={styles.retry}>{t("tasks.reload")}</Text></AppPressable>
-        </View>
-      ) : null}
+      {loading ? <AsyncStateView state="loading" /> : null}
+      {error ? <AsyncStateView state="error" message={error} retryLabel={t("tasks.reload")} onRetry={() => void refresh()} /> : null}
       <SectionList
         sections={sections}
         keyExtractor={(task) => task.task_id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />}
         contentContainerStyle={styles.list}
         ListEmptyComponent={!loading && !error ? (
-          <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>{t("tasks.emptyTitle")}</Text>
-            <Text style={styles.emptyText}>{t("tasks.emptyBody")}</Text>
-          </View>
+          <AsyncStateView state="empty" title={t("tasks.emptyTitle")} message={t("tasks.emptyBody")} />
         ) : null}
         renderSectionHeader={({ section }) => section.title ? (
           <View style={styles.sectionHeader}>
@@ -226,11 +218,26 @@ function taskSectionTitle(key: "needs_action" | "in_progress" | "recent" | "not_
 }
 
 function taskStatusLabel(task: Task, t: ReturnType<typeof useI18n>["t"]): string {
+  if (task.work_status) {
+    return userWorkStatusLabel(task.work_status.status, t);
+  }
   if (task.pending_approval_count > 0 || task.latest_execution_state === "waiting_approval") {
     return t("taskState.waitingApproval");
   }
   if (task.latest_execution_state) return executionStateLabel(task.latest_execution_state, t);
   return stateLabel(task.state, t);
+}
+
+function userWorkStatusLabel(status: NonNullable<Task["work_status"]>["status"], t: ReturnType<typeof useI18n>["t"]): string {
+  return ({
+    queued: t("taskState.queued"),
+    working: t("taskState.running"),
+    waiting_for_you: t("taskState.waitingApproval"),
+    completed: t("taskState.completed"),
+    failed: t("taskState.failed"),
+    paused: t("tasks.state.paused"),
+    cancelled: t("taskState.cancelled"),
+  })[status];
 }
 
 function executionStateLabel(state: TaskState, t: ReturnType<typeof useI18n>["t"]): string {
@@ -246,6 +253,11 @@ function executionStateLabel(state: TaskState, t: ReturnType<typeof useI18n>["t"
 }
 
 function taskStatusTone(task: Task): "normal" | "warning" | "danger" {
+  if (task.work_status) {
+    if (task.work_status.status === "waiting_for_you" || task.work_status.status === "paused") return "warning";
+    if (task.work_status.status === "failed") return "danger";
+    return "normal";
+  }
   if (task.pending_approval_count > 0 || task.latest_execution_state === "waiting_approval") return "warning";
   if (task.latest_execution_state === "failed") return "danger";
   if (task.latest_execution_state === "paused" || task.state === "paused") return "warning";
@@ -277,10 +289,6 @@ const styles = StyleSheet.create({
   filterActive: { backgroundColor: colors.accentSoft },
   filterText: { color: colors.muted },
   filterTextActive: { color: colors.accent, fontWeight: "600" },
-  loader: { marginTop: 32 },
-  errorCard: { margin: 16, padding: 16, borderRadius: 14, backgroundColor: colors.dangerSoft, gap: 8 },
-  errorText: { color: colors.danger },
-  retry: { color: colors.accent, fontWeight: "700" },
   list: { padding: 16, gap: 12, flexGrow: 1 },
   sectionHeader: { marginTop: 7, marginBottom: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sectionTitle: { color: colors.ink, fontSize: 16, fontWeight: "700" },
@@ -301,7 +309,4 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   metaCopy: { flexDirection: "row", flexWrap: "wrap", gap: 10, flex: 1, marginRight: 8 },
   meta: { color: colors.muted, fontSize: 12 },
-  empty: { alignItems: "center", paddingTop: 64, gap: 8 },
-  emptyTitle: { color: colors.ink, fontWeight: "700", fontSize: 17 },
-  emptyText: { color: colors.muted, textAlign: "center" },
 });

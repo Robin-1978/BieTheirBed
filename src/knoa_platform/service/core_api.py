@@ -71,6 +71,11 @@ from knoa_platform.tasks import (
     TaskRecord,
     TaskState,
 )
+from knoa_platform.work_status import (
+    UserWorkStatusInfo,
+    product_task_work_status,
+    turn_work_status,
+)
 
 NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 RequestId = Annotated[NonEmpty, StringConstraints(max_length=128)]
@@ -186,6 +191,7 @@ class ProductTaskSnapshot(CoreModel):
     latest_execution_failure_code: str = ""
     latest_execution_updated_at: float | None = Field(default=None, ge=0.0)
     pending_approval_count: int = Field(default=0, ge=0)
+    work_status: UserWorkStatusInfo | None = None
     created_at: float = Field(ge=0.0)
     updated_at: float = Field(ge=0.0)
 
@@ -218,6 +224,11 @@ class ProductTaskSnapshot(CoreModel):
             latest_execution_failure_code=task.latest_execution_failure_code,
             latest_execution_updated_at=task.latest_execution_updated_at,
             pending_approval_count=task.pending_approval_count,
+            work_status=product_task_work_status(
+                task.state.value,
+                None if task.latest_execution_state is None else task.latest_execution_state.value,
+                pending_approval_count=task.pending_approval_count,
+            ),
             created_at=task.created_at,
             updated_at=task.updated_at,
         )
@@ -398,6 +409,7 @@ class ChatTurnSnapshot(CoreModel):
     updated_at: float = Field(ge=0.0)
     finished_at: float | None = Field(default=None, ge=0.0)
     revision: int = Field(ge=1)
+    work_status: UserWorkStatusInfo | None = None
 
     @classmethod
     def from_record(cls, turn: ChatTurn) -> ChatTurnSnapshot:
@@ -449,6 +461,7 @@ class ChatTurnSnapshot(CoreModel):
             updated_at=turn.updated_at,
             finished_at=turn.finished_at,
             revision=turn.revision,
+            work_status=turn_work_status(turn.state.value),
         )
 
 

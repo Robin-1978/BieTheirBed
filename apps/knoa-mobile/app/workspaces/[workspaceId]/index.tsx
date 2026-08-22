@@ -1,9 +1,10 @@
 import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { AsyncStateView } from "@/components/AsyncStateView";
 import {
   listHostedWorkspaceMembers,
   listHostedWorkspaces,
@@ -79,7 +80,7 @@ export default function WorkspaceScreen() {
           <View style={styles.flex}><Text style={styles.title}>{displayName}</Text><Text style={styles.meta}>{workspace?.kind === "shared" ? t("workspace.shared") : t("workspace.personal")} · {roleLabel(workspace?.role, t)}</Text></View>
           <AppPressable accessibilityLabel={t("workspace.accountHome")} onPress={() => router.push("/account")} style={styles.iconButton}><AppIcon name="user" color={colors.muted} size={25} /></AppPressable>
         </View>
-        {loading ? <ActivityIndicator color={colors.accent} /> : null}
+        {loading ? <AsyncStateView state="loading" /> : null}
 
         <View style={styles.grid}>
           <Entry icon="chat" title={t("workspace.workTitle")} detail={counts.work ? t("workspace.workDetailCount", { count: counts.work }) : t("workspace.workDetailEmpty")} onPress={() => router.push({ pathname: "/workspaces/[workspaceId]/work", params: routeParams })} />
@@ -97,7 +98,7 @@ export default function WorkspaceScreen() {
             <AppPressable style={styles.primary} onPress={() => router.push({ pathname: "/workspaces/[workspaceId]/nodes", params: routeParams })}><Text style={styles.primaryText}>{t("workspace.addNode")}</Text></AppPressable>
           </View>
         ) : null}
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {error ? <AsyncStateView state="error" message={error} onRetry={() => void refresh()} retryLabel={t("common.refresh")} /> : null}
       </ScrollView>
     </>
   );
@@ -112,5 +113,5 @@ function roleLabel(role: HostedWorkspace["role"] | undefined, t: ReturnType<type
   return t("account.roleOwner");
 }
 const styles = StyleSheet.create({
-  container: { padding: 17, gap: 14, paddingBottom: 52 }, hero: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, heroIcon: { width: 50, height: 50, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft }, flex: { flex: 1, minWidth: 0 }, title: { color: colors.ink, fontSize: 20, fontWeight: "800" }, meta: { color: colors.muted, fontSize: 12, lineHeight: 18 }, iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center" }, grid: { gap: 10 }, entry: { minHeight: 82, flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, entryIcon: { width: 46, height: 46, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft }, entryTitle: { color: colors.ink, fontSize: 16, fontWeight: "800", minWidth: 70 }, onboarding: { padding: 16, gap: 12, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, sectionTitle: { color: colors.ink, fontSize: 18, fontWeight: "800" }, step: { flexDirection: "row", gap: 11, alignItems: "center" }, stepNumber: { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft }, stepNumberText: { color: colors.accent, fontWeight: "800" }, rowTitle: { color: colors.ink, fontWeight: "800" }, primary: { minHeight: 46, alignItems: "center", justifyContent: "center", borderRadius: 13, backgroundColor: colors.accent }, primaryText: { color: colors.white, fontWeight: "800" }, error: { color: colors.danger, lineHeight: 20 },
+  container: { padding: 17, gap: 14, paddingBottom: 52 }, hero: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, heroIcon: { width: 50, height: 50, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft }, flex: { flex: 1, minWidth: 0 }, title: { color: colors.ink, fontSize: 20, fontWeight: "800" }, meta: { color: colors.muted, fontSize: 12, lineHeight: 18 }, iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center" }, grid: { gap: 10 }, entry: { minHeight: 82, flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, entryIcon: { width: 46, height: 46, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft }, entryTitle: { color: colors.ink, fontSize: 16, fontWeight: "800", minWidth: 70 }, onboarding: { padding: 16, gap: 12, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, sectionTitle: { color: colors.ink, fontSize: 18, fontWeight: "800" }, step: { flexDirection: "row", gap: 11, alignItems: "center" }, stepNumber: { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft }, stepNumberText: { color: colors.accent, fontWeight: "800" }, rowTitle: { color: colors.ink, fontWeight: "800" }, primary: { minHeight: 46, alignItems: "center", justifyContent: "center", borderRadius: 13, backgroundColor: colors.accent }, primaryText: { color: colors.white, fontWeight: "800" },
 });
