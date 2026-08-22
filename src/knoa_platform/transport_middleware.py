@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from time import monotonic
 from typing import Any
 
 from knoa_platform.transport_health import TransportHealth
@@ -24,11 +25,13 @@ class TransportHealthMiddleware:
             await self.app(scope, receive, send)
             return
         transport = raw_transport  # narrowed by the membership check above
+        started_at = monotonic()
         self.health.record(transport, "verification", ok=True)
 
         async def send_with_observation(message: dict[str, Any]) -> None:
             if message.get("type") == "http.response.start":
                 status = int(message.get("status", 500))
+                self.health.record_request_latency(transport, (monotonic() - started_at) * 1000)
                 if status < 500:
                     self.health.record(transport, "request", ok=True)
                     self.health.activate(transport, reason=f"{transport} request completed")
