@@ -51,9 +51,11 @@ rsync -a --delete --no-owner --no-group --no-perms \
   --filter='protect **/.gradle/***' \
   --filter='protect **/.kotlin/***' \
   --filter='protect **/.cxx/***' \
+  --filter='protect /node_modules/***' \
   --exclude='**/.gradle' \
   --exclude='**/.kotlin' \
   --exclude='**/.expo' \
+  --exclude='node_modules' \
   --exclude='**/.ruff_cache' \
   --exclude='/android/build' \
   --exclude='/android/app/build' \
