@@ -155,7 +155,7 @@ export default function TaskDetailScreen() {
       {executions.length ? executions.map((execution) => (
         <AppPressable
           accessibilityRole="button"
-          accessibilityLabel={`${launchReasonLabel(execution.launch_reason, t)}，${executionStateLabel(execution.state, t)}${unreadExecutionIds.has(execution.execution_id) ? `，${t("reminders.unread")}` : ""}`}
+          accessibilityLabel={`${launchReasonLabel(execution.launch_reason, t)}，${executionStatusLabel(execution, t)}${unreadExecutionIds.has(execution.execution_id) ? `，${t("reminders.unread")}` : ""}`}
           key={execution.execution_id}
           style={styles.execution}
           onPress={() => router.push(`/task-executions/${execution.execution_id}`)}
@@ -165,7 +165,7 @@ export default function TaskDetailScreen() {
               {unreadExecutionIds.has(execution.execution_id) ? <View accessibilityElementsHidden style={styles.unreadDot} /> : null}
               <Text style={styles.executionTitle}>{launchReasonLabel(execution.launch_reason, t)}</Text>
             </View>
-            <Text style={styles.executionState}>{executionStateLabel(execution.state, t)}</Text>
+            <Text style={styles.executionState}>{executionStatusLabel(execution, t)}</Text>
           </View>
           {execution.final_result ? <Text style={styles.result} numberOfLines={2}>{execution.final_result}</Text> : null}
           {execution.failure_code ? <Text style={styles.failure}>{t("taskDetail.incomplete", { code: execution.failure_code })}</Text> : null}
@@ -198,6 +198,12 @@ function taskStateLabel(state: Task["state"], t: ReturnType<typeof useI18n>["t"]
 
 function executionStateLabel(state: TaskState, t: ReturnType<typeof useI18n>["t"]): string {
   return ({ queued: t("taskState.queued"), running: t("taskState.running"), waiting_approval: t("taskState.waitingApproval"), paused: t("tasks.state.paused"), completed: t("taskState.completed"), failed: t("taskState.failed"), cancelled: t("taskState.cancelled") })[state];
+}
+
+function executionStatusLabel(execution: TaskExecution, t: ReturnType<typeof useI18n>["t"]): string {
+  const status = execution.work_status?.status;
+  if (!status) return executionStateLabel(execution.state, t);
+  return ({ queued: t("taskState.queued"), working: t("taskState.running"), waiting_for_you: t("taskState.waitingApproval"), completed: t("taskState.completed"), failed: t("taskState.failed"), paused: t("tasks.state.paused"), cancelled: t("taskState.cancelled") })[status];
 }
 
 function launchLabel(task: Task, t: ReturnType<typeof useI18n>["t"]): string {
