@@ -8,10 +8,16 @@ Type=simple
 EnvironmentFile=%h/.config/knoa/hosted-hub.env
 Environment=KNOA_LIFECYCLE_TOKEN_FILE=%h/.config/knoa/lifecycle.token
 Environment=KNOA_LIFECYCLE_INCOMING_ROOT=%h/.local/share/knoa/incoming
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=%h/.local/share/knoa/runtime/venv/bin/knoa-hub --deployment-mode hosted_single_node --host 127.0.0.1 --port 9529 --console-host 127.0.0.1 --console-port 9532 --root %h/.local/share/knoa/hosted-hub --hub-id hub_knoa_hosted
 WorkingDirectory=%h/.local/share/knoa
 Restart=on-failure
 RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+KillMode=control-group
+TimeoutStopSec=30
+SendSIGKILL=yes
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true

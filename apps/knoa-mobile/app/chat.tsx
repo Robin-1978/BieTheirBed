@@ -720,13 +720,16 @@ export default function ChatScreen() {
           >
             <AppIcon name="history" color={colors.accent} size={21} />
           </AppPressable>
-          {gateway.agents.length ? (
+          {gateway.client ? (
             <AppPressable
               accessibilityRole="button"
               accessibilityLabel={agentLocked
                 ? t("agent.changeConversation")
                 : t("agent.selectConversation")}
-              onPress={() => setAgentPickerOpen(true)}
+              onPress={() => {
+                void gateway.refreshAgents().catch(() => undefined);
+                setAgentPickerOpen(true);
+              }}
               style={[
                 styles.topAction,
                 !agentLocked && selectedAgentId !== gateway.defaultAgentId && styles.selectedAgentAction,

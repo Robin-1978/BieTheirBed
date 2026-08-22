@@ -22,6 +22,17 @@ import { installedAndroidVersionCode, isAndroidUpdateAvailable } from "@/update/
 import { requiresAndroidUpdate } from "@/update/releasePolicy";
 
 type GatewayConnection = { gatewayUrl: string; token: string };
+const CONNECTION_TIMEOUT_MS = 20_000;
+
+function withConnectionTimeout<T>(promise: Promise<T>, timeoutMs = CONNECTION_TIMEOUT_MS): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("连接超时，请检查 Hub 服务和手机网络")), timeoutMs);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
 
 type GatewayState = {
   status: "booting" | "selecting" | "unpaired" | "ready" | "error";
@@ -63,13 +74,14 @@ type GatewayState = {
   openConversation(sessionHandle: string): Promise<void>;
   connection(): GatewayConnection | null;
   runAuthenticated<T>(operation: (client: GatewayClient) => Promise<T>): Promise<T>;
+  refreshAgents(): Promise<void>;
   subscribeEvents(listener: (event: PrincipalTaskEvent) => void): () => void;
 };
 
 const Context = createContext<GatewayState | null>(null);
 
 export function GatewayProvider({ children }: React.PropsWithChildren) {
-  type StoredState = Omit<GatewayState, "pair" | "reconnect" | "reauthenticate" | "removeConnection" | "disconnectNode" | "switchNode" | "newConversation" | "ensureConversation" | "commitConversation" | "openConversation" | "connection" | "runAuthenticated" | "subscribeEvents" | "selectAgent">;
+  type StoredState = Omit<GatewayState, "pair" | "reconnect" | "reauthenticate" | "removeConnection" | "disconnectNode" | "switchNode" | "newConversation" | "ensureConversation" | "commitConversation" | "openConversation" | "connection" | "runAuthenticated" | "refreshAgents" | "subscribeEvents" | "selectAgent">;
   const initialState: StoredState = {
     status: "booting",
     client: null,
@@ -159,29 +171,29 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         p2pDiagnosticChanged,
         lanDiagnosticChanged,
       );
-      await transport.prepareLanDiscovery();
+      await withConnectionTimeout(transport.prepareLanDiscovery());
       let client: GatewayClient;
       if (token) {
         client = new GatewayClient(device.gatewayUrl, token, transport);
         try {
-          await client.gatewaySession();
+          await withConnectionTimeout(client.gatewaySession(), 8_000);
         } catch (error) {
           if (!(error instanceof GatewayError) || error.status !== 401) throw error;
           await clearSession();
           token = null;
-          client = await authenticateDevice({
+          client = await withConnectionTimeout(authenticateDevice({
             gateway_url: device.gatewayUrl,
             deviceId: device.deviceId,
             binding: identity,
-          }, transportChanged, p2pDiagnosticChanged, lanDiagnosticChanged, transport);
+          }, transportChanged, p2pDiagnosticChanged, lanDiagnosticChanged, transport));
           token = await loadSessionToken();
         }
       } else {
-        client = await authenticateDevice({
+        client = await withConnectionTimeout(authenticateDevice({
           gateway_url: device.gatewayUrl,
           deviceId: device.deviceId,
           binding: identity,
-        }, transportChanged, p2pDiagnosticChanged, lanDiagnosticChanged, transport);
+        }, transportChanged, p2pDiagnosticChanged, lanDiagnosticChanged, transport));
         token = await loadSessionToken();
       }
       if (!token) throw new Error("未能建立安全会话");
@@ -277,12 +289,12 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         p2pDiagnosticChanged,
         lanDiagnosticChanged,
       );
-      await transport.prepareLanDiscovery();
-      const client = await authenticateDevice({
+      await withConnectionTimeout(transport.prepareLanDiscovery());
+      const client = await withConnectionTimeout(authenticateDevice({
         gateway_url: identity.gatewayUrl,
         deviceId: identity.deviceId,
         binding: identity,
-      }, transportChanged, p2pDiagnosticChanged, lanDiagnosticChanged, transport);
+      }, transportChanged, p2pDiagnosticChanged, lanDiagnosticChanged, transport));
       const token = await loadSessionToken();
       if (!token) throw new Error("未能恢复安全会话");
       if (generation !== connectionGenerationRef.current) throw new Error("Node 连接已切换");
@@ -342,6 +354,25 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     if (!client) return Promise.reject(new Error("小诺尚未连接"));
     return withAuthenticationRetry(client, refreshAuthentication, operation);
   }, [refreshAuthentication]);
+
+  const refreshAgents = useCallback(async () => {
+    const client = stateRef.current.client;
+    if (!client) return;
+    const [{ defaultAgentId, agents }, unavailableAgents] = await Promise.all([
+      client.listAgents(),
+      client.listAgentAvailability(),
+    ]);
+    commit({
+      agents,
+      defaultAgentId,
+      unavailableAgents,
+      selectedAgentId: stateRef.current.activeAgentId || (
+        agents.some((agent) => agent.agent_id === stateRef.current.selectedAgentId)
+          ? stateRef.current.selectedAgentId
+          : defaultAgentId
+      ),
+    });
+  }, [commit]);
 
   const connection = useCallback((): GatewayConnection | null => connectionRef.current, []);
 
@@ -555,10 +586,11 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       openConversation,
       connection,
       runAuthenticated,
+      refreshAgents,
       subscribeEvents,
       selectAgent,
     }),
-    [commitConversation, connect, connection, disconnectNode, ensureConversation, newConversation, openConversation, pair, reauthenticate, removeConnection, runAuthenticated, selectAgent, state, subscribeEvents, switchNode],
+    [commitConversation, connect, connection, disconnectNode, ensureConversation, newConversation, openConversation, pair, reauthenticate, refreshAgents, removeConnection, runAuthenticated, selectAgent, state, subscribeEvents, switchNode],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

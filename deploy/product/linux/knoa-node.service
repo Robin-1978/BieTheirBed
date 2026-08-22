@@ -11,10 +11,16 @@ Environment=KNOA_RUNTIME_ROOT=@NODE_ROOT@
 Environment=KNOA_RUNTIME_DIR=@NODE_ROOT@/run
 Environment=KNOA_LIFECYCLE_TOKEN_FILE=@LIFECYCLE_TOKEN@
 Environment=KNOA_LIFECYCLE_INCOMING_ROOT=@INCOMING_ROOT@
+Environment=PATH=/home/knoa/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=@INSTALL_ROOT@/bin/knoa-update run --install-root @INSTALL_ROOT@/releases --entrypoint bin/knoa-node -- --config @NODE_CONFIG@
 WorkingDirectory=@WORKSPACE_ROOT@
 Restart=on-failure
 RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+KillMode=control-group
+TimeoutStopSec=30
+SendSIGKILL=yes
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
