@@ -75,14 +75,17 @@ export async function replaceConnectionIdentity(input: {
       displayName: input.displayName?.trim() || current?.displayName || input.nodeId,
       deviceId: input.deviceId,
       gatewayUrl: input.gatewayUrl.replace(/\/$/, ""),
-      directGatewayUrl: input.directGatewayUrl?.replace(/\/$/, "") || current?.directGatewayUrl || "",
+      directGatewayUrl: input.directGatewayUrl?.replace(/\/$/, "") || "",
       nodeSigningPublicKey: input.nodeSigningPublicKey,
       nodeConfigurationPublicKey: input.nodeConfigurationPublicKey,
       sessionToken: "",
       sessionExpiresAt: 0,
-      coreSessionHandle: current?.coreSessionHandle ?? "",
-      eventCursor: current?.eventCursor ?? 0,
-      lastConnectedAt: current?.lastConnectedAt ?? 0,
+      // Pairing establishes a new connection identity. Never carry a Core
+      // session or event cursor across identities, otherwise a new Gateway
+      // can read an old conversation or skip its event history.
+      coreSessionHandle: "",
+      eventCursor: 0,
+      lastConnectedAt: 0,
     };
     vault.activeNodeId = input.nodeId;
     await saveVault(vault);
