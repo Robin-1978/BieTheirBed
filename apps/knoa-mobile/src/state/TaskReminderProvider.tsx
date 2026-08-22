@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type PropsWithChildren } from "react";
+import { router } from "expo-router";
 import { AppState, Vibration } from "react-native";
 
 import type { PrincipalTaskEvent } from "@/api/models";
@@ -14,6 +15,13 @@ import {
   type TaskReminderCategory,
 } from "@/reminders/taskReminders";
 import { useGateway } from "@/state/GatewayProvider";
+import {
+  configureTaskNotifications,
+  loadLastTaskNotificationResponse,
+  presentTaskReminderNotification,
+  subscribeTaskNotificationResponses,
+} from "@/notifications/taskNotifications";
+import { useI18n } from "@/i18n";
 
 type TaskReminderState = {
   reminders: TaskReminder[];
@@ -44,6 +52,7 @@ const Context = createContext<TaskReminderState | null>(null);
 
 export function TaskReminderProvider({ children }: PropsWithChildren) {
   const { latestEvent, runAuthenticated, subscribeEvents } = useGateway();
+  const { t } = useI18n();
   const [reminders, setReminders] = useState<TaskReminder[]>([]);
   const [activeReminder, setActiveReminder] = useState<TaskReminder | null>(null);
   const processQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -57,6 +66,19 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
       if (next !== current) void storeTaskReminders(next);
       return next;
     });
+  }, []);
+
+  useEffect(() => {
+    void configureTaskNotifications();
+    void loadLastTaskNotificationResponse().then((data) => {
+      if (data?.executionId) router.push({ pathname: "/task-executions/[id]", params: { id: data.executionId } });
+      else if (data?.taskId) router.push({ pathname: "/tasks/[id]", params: { id: data.taskId } });
+    });
+    const subscription = subscribeTaskNotificationResponses((data) => {
+      if (data.executionId) router.push({ pathname: "/task-executions/[id]", params: { id: data.executionId } });
+      else if (data.taskId) router.push({ pathname: "/tasks/[id]", params: { id: data.taskId } });
+    });
+    return () => subscription.remove();
   }, []);
 
   useEffect(() => {
@@ -108,13 +130,23 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
         setActiveReminder(reminder);
         Vibration.vibrate(45);
       }
+      if (!read) {
+        void presentTaskReminderNotification({
+          taskId: task.task_id,
+          executionId: execution.execution_id,
+          title: task.title || task.goal,
+          body: actionable.category === "approval"
+            ? t("reminders.notificationApproval")
+            : actionable.category === "completed" ? t("reminders.notificationCompleted") : t("reminders.notificationFailed"),
+        });
+      }
     } catch {
       if (attempt < 3) {
         await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
         await processEvent(feed, attempt + 1);
       }
     }
-  }, [replaceAndStore, runAuthenticated]);
+  }, [replaceAndStore, runAuthenticated, t]);
 
   const enqueueEvent = useCallback((feed: PrincipalTaskEvent) => {
     if (seenEventIdsRef.current.has(feed.feed_event_id)) return;
