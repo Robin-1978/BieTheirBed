@@ -44,6 +44,7 @@ from knoa_platform.resource_protocol import (
     ResourceClientHello,
     accept_resource_client_hello,
 )
+from knoa_platform.work_status import product_task_work_status
 
 logger = logging.getLogger(__name__)
 _MAX_TUNNEL_BODY_BYTES = 64 * 1024 * 1024
@@ -783,6 +784,11 @@ class NodeRelayManager:
                         "execution_count": task.execution_count,
                         "latest_execution_phase": task.latest_execution_phase,
                         "latest_execution_failure_code": task.latest_execution_failure_code,
+                        "work_status": product_task_work_status(
+                            task.state.value,
+                            task.latest_execution_state.value if task.latest_execution_state is not None else None,
+                            pending_approval_count=task.pending_approval_count,
+                        ).model_dump(mode="json"),
                     },
                 }
                 for task in tasks
