@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 
@@ -392,6 +393,19 @@ class TaskRoutes:
         task_id = self._path_identifier(request, "task_id")
         if task_id is None:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
+        preflight = await self._preflight_task(request)
+        if preflight.status_code != 200:
+            return preflight
+        preflight_body = json.loads(preflight.body)
+        if not preflight_body.get("ready", False):
+            return JSONResponse(
+                {
+                    "error": "preflight_blocked",
+                    "message": "任务尚未满足执行条件",
+                    "preflight": preflight_body,
+                },
+                status_code=409,
+            )
         try:
             execution = await self._core.execute_product_task(
                 authenticated.device.principal_id,
