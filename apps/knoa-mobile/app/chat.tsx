@@ -218,6 +218,14 @@ export default function ChatScreen() {
     };
   }, [gateway.sessionHandle, refresh, turnWatcher]);
 
+  // Warm a new conversation as soon as Chat is opened. Creating the session
+  // used to happen only after Send was pressed, adding a full round trip to
+  // the first message while the user was already waiting for a response.
+  useEffect(() => {
+    if (!gateway.client || gateway.sessionHandle) return;
+    void gateway.ensureConversation().catch(() => undefined);
+  }, [gateway.client, gateway.ensureConversation, gateway.sessionHandle]);
+
   useEffect(() => {
     if (!gateway.sessionHandle || !turns.length) return;
     const timeout = setTimeout(() => {
