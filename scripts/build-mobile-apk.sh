@@ -67,6 +67,15 @@ mkdir -p "$KNOA_MOBILE_SOURCE_ROOT/assets/branding"
 rsync -a --delete --no-owner --no-group --no-perms \
   "$REPO/assets/branding/" "$KNOA_MOBILE_SOURCE_ROOT/assets/branding/"
 
+# The source mirror intentionally excludes node_modules so Gradle's generated
+# native build directories survive between builds. Keep dependency state
+# explicit, however: a newly added Expo module must not fail later inside
+# Gradle with the opaque "plugin not found" error.
+if [[ ! -f "$MOBILE/node_modules/expo-notifications/package.json" ]]; then
+  echo "==> Installing mobile dependencies in the build mirror"
+  (cd "$MOBILE" && npm ci --ignore-scripts)
+fi
+
 cp "$KEY_PROPERTIES" "$ANDROID/key.properties"
 
 # AGP 8.12 probes every cmake on PATH, including the broken Snap wrapper at
