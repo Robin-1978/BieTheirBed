@@ -38,9 +38,14 @@ class UserWorkStatusInfo(BaseModel):
     ]
 
 
-def task_work_status(state: str, *, pending_approval_count: int = 0) -> UserWorkStatusInfo:
+def task_work_status(
+    state: str,
+    *,
+    pending_approval_count: int = 0,
+    pending_interaction_count: int = 0,
+) -> UserWorkStatusInfo:
     """Map a durable Task state to user intent without leaking internals."""
-    if pending_approval_count > 0 or state == "waiting_approval":
+    if pending_approval_count > 0 or pending_interaction_count > 0 or state == "waiting_approval":
         return UserWorkStatusInfo(
             status="waiting_for_you",
             terminal=False,
@@ -95,9 +100,18 @@ def task_work_status(state: str, *, pending_approval_count: int = 0) -> UserWork
     )
 
 
-def turn_work_status(state: str) -> UserWorkStatusInfo:
+def turn_work_status(
+    state: str,
+    *,
+    pending_approval_count: int = 0,
+    pending_interaction_count: int = 0,
+) -> UserWorkStatusInfo:
     """Map a Conversation turn state to the same user vocabulary as Tasks."""
-    return task_work_status(state)
+    return task_work_status(
+        state,
+        pending_approval_count=pending_approval_count,
+        pending_interaction_count=pending_interaction_count,
+    )
 
 
 def product_task_work_status(

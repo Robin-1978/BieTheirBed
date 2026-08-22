@@ -345,6 +345,10 @@ class ProductTaskExecutionSnapshot(CoreModel):
                     1 for approval in execution.approvals
                     if approval.state is ApprovalState.PENDING
                 ),
+                pending_interaction_count=sum(
+                    1 for interaction in execution.interactions
+                    if interaction.state == "pending"
+                ),
             ),
         )
 
@@ -470,7 +474,17 @@ class ChatTurnSnapshot(CoreModel):
             updated_at=turn.updated_at,
             finished_at=turn.finished_at,
             revision=turn.revision,
-            work_status=turn_work_status(turn.state.value),
+            work_status=turn_work_status(
+                turn.state.value,
+                pending_approval_count=sum(
+                    1 for approval in turn.approvals
+                    if approval.state == "pending"
+                ),
+                pending_interaction_count=sum(
+                    1 for interaction in turn.interactions
+                    if interaction.state == "pending"
+                ),
+            ),
         )
 
 
