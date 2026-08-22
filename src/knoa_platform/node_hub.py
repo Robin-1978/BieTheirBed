@@ -813,6 +813,33 @@ class NodeRelayManager:
                     json=payload,
                 )
                 response.raise_for_status()
+            # Core's list is authoritative. A deleted conversation/task no
+            # longer has a projection to upsert, so explicitly reconcile each
+            # principal/kind to remove stale Hub rows.
+            for entity_kind in ("conversation", "task"):
+                active_ids = [
+                    str(item["entity_id"])
+                    for item in projections
+                    if item["entity_kind"] == entity_kind
+                ]
+                reconcile = {
+                    "node_id": self._identity.node_id,
+                    "entity_kind": entity_kind,
+                    "principal_id": principal_id,
+                    "active_entity_ids": active_ids,
+                    "observed_at": float(self._clock()),
+                }
+                transcript = {
+                    "audience": "knoa-work-projection-reconcile-v1",
+                    "workspace_id": enrollment.workspace_id,
+                    **reconcile,
+                }
+                reconcile["signature"] = self._identity.sign(canonical_json(transcript))
+                response = await client.post(
+                    f"{enrollment.hub_url}/v1/work-projections/reconcile",
+                    json=reconcile,
+                )
+                response.raise_for_status()
 
     @staticmethod
     def _request_body(
