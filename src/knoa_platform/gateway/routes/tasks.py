@@ -1,7 +1,9 @@
 """Fail-closed HTTP/TLS surface for Secure Gateway mobile access."""
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 
 from pydantic import ValidationError
 from starlette.requests import Request
@@ -205,6 +207,55 @@ class TaskRoutes:
                     "detail": "Node 配置已应用",
                     "recommended_action": "none",
                 })
+                binding = agent.model_binding
+                if binding.ownership == "platform":
+                    model = revision.document.models.get(binding.model)
+                    provider = (
+                        None
+                        if model is None
+                        else revision.document.providers.get(model.provider)
+                    )
+                    if model is None or provider is None:
+                        checks.append({
+                            "check_id": "model",
+                            "status": "blocked",
+                            "detail": "任务使用的模型配置不完整，请在 Console 检查模型和 Provider",
+                            "recommended_action": "configure",
+                        })
+                    else:
+                        checks.append({
+                            "check_id": "model",
+                            "status": "ready",
+                            "detail": f"模型已配置：{binding.model}",
+                            "recommended_action": "none",
+                        })
+                        if provider.requires_api_key is True:
+                            credential_ready = False
+                            if provider.api_key_ref:
+                                try:
+                                    secret_status = await asyncio.to_thread(
+                                        self._provider_secrets.status,
+                                        provider.api_key_ref,
+                                    )
+                                    credential_ready = bool(secret_status.get("configured"))
+                                except Exception:
+                                    credential_ready = False
+                            elif provider.api_key_env:
+                                credential_ready = bool(os.environ.get(provider.api_key_env))
+                            if not credential_ready:
+                                checks.append({
+                                    "check_id": "credentials",
+                                    "status": "blocked",
+                                    "detail": "模型凭据未配置，请在 Console 设置 API Key",
+                                    "recommended_action": "configure",
+                                })
+                            else:
+                                checks.append({
+                                    "check_id": "credentials",
+                                    "status": "ready",
+                                    "detail": "模型凭据已配置",
+                                    "recommended_action": "none",
+                                })
         except Exception:
             checks.append({
                 "check_id": "config",
