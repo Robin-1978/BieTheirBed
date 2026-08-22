@@ -67,7 +67,16 @@ export default function WorkspaceScreen() {
         listWorkspaceWork().catch(() => []),
         connection.accountId ? listHostedWorkspaceMembers(target.workspaceId).catch(() => []) : Promise.resolve([]),
       ]);
-      const snapshot: WorkspaceCacheSnapshot = { version: 1, workspaceId, updatedAt: Date.now(), workspace: target, nodes, resources, work, members };
+      const snapshot: WorkspaceCacheSnapshot = {
+        version: 1,
+        workspaceId,
+        updatedAt: Date.now(),
+        workspace: target,
+        nodes,
+        resources,
+        work,
+        members,
+      };
       applyCache(snapshot);
       await rememberWorkspace(target.workspaceId, target.displayName);
       await mergeWorkspaceCache(workspaceId, snapshot);
@@ -79,7 +88,10 @@ export default function WorkspaceScreen() {
     let active = true;
     void (async () => {
       const cached = await loadWorkspaceCache(workspaceId);
-      if (active && cached) { applyCache(cached); setLoading(false); }
+      if (active && cached) {
+        applyCache(cached);
+        setLoading(false);
+      }
       await refresh(!cached);
     })();
     return () => { active = false; };
