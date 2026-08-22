@@ -114,6 +114,7 @@ class DingTalkChannel(FeishuChannel):
         self._stream_client: Any = None
         self._stream_thread: threading.Thread | None = None
         self._stream_stop = threading.Event()
+        self._card_recipients: dict[str, str] = {}
         self._token_lock = threading.RLock()
         self._access_token = ""
         self._access_token_expires_at = 0.0
@@ -355,19 +356,37 @@ class DingTalkChannel(FeishuChannel):
         return True
 
     def _send_card_returning_id(self, open_id: str, card: dict[str, Any]) -> str | None:
+        message_id = uuid.uuid4().hex
+        if not self._send_text(open_id, self._render_dingtalk_card(card)):
+            return None
+        self._card_recipients[message_id] = open_id
+        if len(self._card_recipients) > 1000:
+            self._card_recipients.pop(next(iter(self._card_recipients)))
+        return message_id
+
+    def _update_card(self, message_id: str, card: dict[str, Any]) -> bool:
+        # DingTalk Stream does not guarantee interactive-card patch support
+        # for every robot version. Send the updated state as a normal message
+        # so the initial "正在处理" card never hides the final result.
+        recipient = self._card_recipients.get(message_id)
+        if not recipient:
+            return False
+        return self._send_text(recipient, self._render_dingtalk_card(card))
+
+    @staticmethod
+    def _render_dingtalk_card(card: dict[str, Any]) -> str:
         title = str(card.get("header", {}).get("title", {}).get("content") or ASSISTANT_NAME)
         elements = card.get("body", {}).get("elements", [])
-        body = "\n\n".join(str(element.get("content") or "") for element in elements if isinstance(element, Mapping))
+        body = "\n\n".join(
+            str(element.get("content") or "")
+            for element in elements
+            if isinstance(element, Mapping)
+        )
         rendered = _render_card_markdown(body)
         approval_hint = ""
         if any(marker in rendered for marker in ("确认", "批准", "confirm", "approve")):
             approval_hint = "\n\n回复“确认”/“取消”（或 confirm/cancel）即可处理审批。"
-        return uuid.uuid4().hex if self._send_text(open_id, f"{title}\n\n{rendered}{approval_hint}") else None
-
-    def _update_card(self, _message_id: str, _card: dict[str, Any]) -> bool:
-        # DingTalk Stream does not guarantee interactive-card patch support
-        # for every robot version; progress remains visible as new messages.
-        return True
+        return f"{title}\n\n{rendered}{approval_hint}"
 
     def _send_image(self, open_id: str, path: Path, name: str = "") -> bool:
         return self._send_media(open_id, path, name or path.name, "sampleImageMsg")

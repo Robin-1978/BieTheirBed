@@ -67,3 +67,20 @@ def test_dingtalk_approval_card_fallback_explains_text_confirmation(tmp_path) ->
 
     assert message_id
     assert sent and "确认" in sent[0] and "confirm/cancel" in sent[0]
+
+
+def test_dingtalk_card_updates_deliver_final_state_as_text(tmp_path) -> None:
+    channel = _channel(tmp_path)
+    sent: list[str] = []
+    channel._send_text = lambda _recipient, text: sent.append(text) or True
+
+    message_id = channel._send_card_returning_id(
+        "staff-1",
+        {"header": {"title": {"content": "小诺"}}, "body": {"elements": [{"content": "正在处理"}]}},
+    )
+    assert message_id
+    assert channel._update_card(
+        message_id,
+        {"header": {"title": {"content": "小诺 · 已完成"}}, "body": {"elements": [{"content": "结果已交付"}]}},
+    )
+    assert "结果已交付" in sent[-1]
