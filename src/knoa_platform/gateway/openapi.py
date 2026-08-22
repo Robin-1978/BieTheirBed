@@ -65,6 +65,7 @@ from knoa_platform.gateway.protocol import (
     ProductTaskExecutionResponse,
     ProductTaskListResponse,
     ProductTaskResponse,
+    TaskPreflightBlockedResponse,
     TaskPreflightResponse,
     PublishConfigDraftRequest,
     ReplaceConfigDraftRequest,
@@ -128,6 +129,7 @@ _MODELS: tuple[type[BaseModel], ...] = (
     HumanInteractionResolvedResponse,
     ProductTaskResponse,
     ProductTaskListResponse,
+    TaskPreflightBlockedResponse,
     TaskPreflightResponse,
     ProductTaskExecutionResponse,
     ProductTaskExecutionListResponse,
@@ -834,7 +836,8 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     }],
                     "responses": {
                         "202": _json_response("Execution accepted", ProductTaskExecutionResponse),
-                        **_errors("400", "401", "404", "409", "422", "429", "503"),
+                        "409": _json_response("Execution blocked by preflight", TaskPreflightBlockedResponse),
+                        **_errors("400", "401", "404", "422", "429", "503"),
                     },
                 }
             },

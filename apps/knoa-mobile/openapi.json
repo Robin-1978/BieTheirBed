@@ -4123,6 +4123,16 @@
               }
             }
           },
+          "409": {
+            "description": "Execution blocked by preflight",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPreflightBlockedResponse"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Request rejected",
             "content": {
@@ -4144,16 +4154,6 @@
             }
           },
           "404": {
-            "description": "Request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "409": {
             "description": "Request rejected",
             "content": {
               "application/json": {
@@ -11308,6 +11308,29 @@
         ],
         "title": "TaskLaunchReason",
         "type": "string"
+      },
+      "TaskPreflightBlockedResponse": {
+        "properties": {
+          "error": {
+            "const": "preflight_blocked",
+            "default": "preflight_blocked",
+            "title": "Error",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "preflight": {
+            "$ref": "#/components/schemas/TaskPreflightResponse"
+          }
+        },
+        "required": [
+          "message",
+          "preflight"
+        ],
+        "title": "TaskPreflightBlockedResponse",
+        "type": "object"
       },
       "TaskPreflightCheck": {
         "properties": {
