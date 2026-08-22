@@ -98,6 +98,14 @@ def _port_listener_details(port: int) -> tuple[str, ...]:
     return ()
 
 
+def _safe_diagnostic_detail(exc: BaseException, fallback: str) -> str:
+    """Keep local paths and provider internals out of the main Console UI."""
+    detail = str(exc).strip()
+    if not detail or re.search(r"(?:Traceback|[\\/](?:home|Users|ProgramData|venv)[\\/])", detail, re.IGNORECASE):
+        return fallback
+    return detail[:240]
+
+
 class ConsoleRoutes:
     async def _console_page(self, request: Request) -> Response:
         if not self._console_local(request):
@@ -362,7 +370,7 @@ class ConsoleRoutes:
                 except subprocess.TimeoutExpired:
                     add("codex", "Codex Runtime", "error", "Runtime 检查超过 3 秒", "检查 Runtime 是否等待登录或网络")
                 except OSError as exc:
-                    add("codex", "Codex Runtime", "error", f"Runtime 启动失败：{exc}", "检查 Codex 安装路径、工作目录和权限")
+                    add("codex", "Codex Runtime", "error", _safe_diagnostic_detail(exc, "Runtime 无法启动"), "检查 Codex 安装、工作目录和权限")
 
             if not document.vision_model:
                 add("vision", "图片理解", "warning", "尚未配置图片理解模型", "选择一个明确支持图片的模型")
@@ -385,8 +393,9 @@ class ConsoleRoutes:
                         await probe_http("vision_health", "视觉模型接口", profile.health_url, action="确认视觉模型已加载并可响应")
         except Exception as exc:  # noqa: BLE001
             detail = f"无法读取当前配置：{type(exc).__name__}"
-            if str(exc).strip():
-                detail += f"（{str(exc).strip()[:160]}）"
+            safe_detail = _safe_diagnostic_detail(exc, "配置内容或运行目录不可用")
+            if safe_detail != "配置内容或运行目录不可用":
+                detail += f"（{safe_detail}）"
             add("config", "配置", "error", detail, "查看 Node 启动日志并恢复上一份配置")
             add("codex", "Codex Runtime", "warning", "配置读取失败，无法检查")
             add("vision", "图片理解", "warning", "配置读取失败，无法检查")
