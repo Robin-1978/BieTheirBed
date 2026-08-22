@@ -238,7 +238,7 @@ export default function TaskExecutionDetailScreen() {
       <View style={styles.summary}>
         <View style={styles.summaryHeader}>
           <Text style={styles.reason}>{launchReasonLabel(execution.launch_reason, t)}</Text>
-          <Text style={styles.state}>{stateLabel(execution.state, t)}</Text>
+          <Text style={styles.state}>{execution.work_status ? userWorkStatusLabel(execution.work_status.status, t) : stateLabel(execution.state, t)}</Text>
         </View>
         <Text style={styles.goal}>{summaryText}</Text>
         <Text style={styles.snapshot}>{formatExecutionTime(execution.created_at, t("execution.started"))}</Text>
@@ -437,6 +437,10 @@ function launchReasonLabel(reason: TaskExecution["launch_reason"], t: ReturnType
 
 function stateLabel(state: TaskExecution["state"], t: ReturnType<typeof useI18n>["t"]): string {
   return ({ queued: t("taskState.queued"), running: t("taskState.running"), waiting_approval: t("taskState.waitingApproval"), paused: t("tasks.state.paused"), completed: t("taskState.completed"), failed: t("taskState.failed"), cancelled: t("taskState.cancelled") })[state];
+}
+
+function userWorkStatusLabel(status: NonNullable<TaskExecution["work_status"]>["status"], t: ReturnType<typeof useI18n>["t"]): string {
+  return ({ queued: t("taskState.queued"), working: t("taskState.running"), waiting_for_you: t("taskState.waitingApproval"), completed: t("taskState.completed"), failed: t("taskState.failed"), paused: t("tasks.state.paused"), cancelled: t("taskState.cancelled") })[status];
 }
 
 function TraceEntry({

@@ -2734,6 +2734,8 @@ export interface components {
              * @default []
              */
             interactions: components["schemas"]["HumanInteractionSnapshot"][];
+            /** @default null */
+            work_status: components["schemas"]["UserWorkStatusInfo"] | null;
         };
         /** ProductTaskListResponse */
         ProductTaskListResponse: {

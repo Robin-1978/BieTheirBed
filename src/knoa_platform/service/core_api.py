@@ -74,6 +74,7 @@ from knoa_platform.tasks import (
 from knoa_platform.work_status import (
     UserWorkStatusInfo,
     product_task_work_status,
+    task_work_status,
     turn_work_status,
 )
 
@@ -284,6 +285,7 @@ class ProductTaskExecutionSnapshot(CoreModel):
     trace: TaskExecutionTrace | None = None
     approvals: tuple[TaskApprovalSnapshot, ...] = ()
     interactions: tuple[HumanInteractionSnapshot, ...] = ()
+    work_status: UserWorkStatusInfo | None = None
 
     @classmethod
     def from_record(
@@ -336,6 +338,13 @@ class ProductTaskExecutionSnapshot(CoreModel):
             interactions=tuple(
                 HumanInteractionSnapshot.from_record(interaction)
                 for interaction in execution.interactions
+            ),
+            work_status=task_work_status(
+                execution.state.value,
+                pending_approval_count=sum(
+                    1 for approval in execution.approvals
+                    if approval.state is ApprovalState.PENDING
+                ),
             ),
         )
 
