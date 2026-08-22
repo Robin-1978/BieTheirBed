@@ -34,3 +34,4 @@ def test_product_task_keeps_definition_lifecycle_separate() -> None:
 def test_execution_status_uses_the_same_user_contract() -> None:
     assert task_work_status("running").status == "working"
     assert task_work_status("waiting_approval", pending_approval_count=1).recommended_action == "respond"
+    assert task_work_status("running", pending_interaction_count=1).status == "waiting_for_you"
