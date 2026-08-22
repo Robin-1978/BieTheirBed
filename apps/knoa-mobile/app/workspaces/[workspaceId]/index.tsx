@@ -5,6 +5,7 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { AsyncStateView } from "@/components/AsyncStateView";
+import { WorkspaceCacheBanner } from "@/components/WorkspaceCacheBanner";
 import {
   listHostedWorkspaceMembers,
   listHostedWorkspaces,
@@ -30,9 +31,12 @@ export default function WorkspaceScreen() {
   const [workspace, setWorkspace] = useState<HostedWorkspace | null>(null);
   const [counts, setCounts] = useState({ work: 0, resources: 0, nodes: 0, onlineNodes: 0, members: 0 });
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [cacheSnapshot, setCacheSnapshot] = useState<WorkspaceCacheSnapshot | null>(null);
   const [error, setError] = useState("");
 
   const applyCache = useCallback((snapshot: WorkspaceCacheSnapshot) => {
+    setCacheSnapshot(snapshot);
     setWorkspace(snapshot.workspace);
     setCounts({
       work: snapshot.work.length,
@@ -45,6 +49,7 @@ export default function WorkspaceScreen() {
 
   const refresh = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
+    setRefreshing(true);
     setError("");
     try {
       const connection = await loadHubConnection();
@@ -81,7 +86,7 @@ export default function WorkspaceScreen() {
       await rememberWorkspace(target.workspaceId, target.displayName);
       await mergeWorkspaceCache(workspaceId, snapshot);
     } catch (caught) { setError(caught instanceof Error ? caught.message : t("workspace.loadFailed")); }
-    finally { setLoading(false); }
+    finally { setLoading(false); setRefreshing(false); }
   }, [applyCache, fallbackName, gateway.disconnectNode, t, workspaceId]);
 
   useFocusEffect(useCallback(() => {
@@ -108,6 +113,7 @@ export default function WorkspaceScreen() {
           <View style={styles.flex}><Text style={styles.title}>{displayName}</Text><Text style={styles.meta}>{workspace?.kind === "shared" ? t("workspace.shared") : t("workspace.personal")} · {roleLabel(workspace?.role, t)}</Text></View>
           <AppPressable accessibilityLabel={t("workspace.accountHome")} onPress={() => router.push("/account")} style={styles.iconButton}><AppIcon name="user" color={colors.muted} size={25} /></AppPressable>
         </View>
+        <WorkspaceCacheBanner snapshot={cacheSnapshot} loading={refreshing} error={error} onRefresh={() => void refresh()} />
         {loading ? <AsyncStateView state="loading" /> : null}
 
         <View style={styles.grid}>

@@ -4,6 +4,7 @@ import { ActivityIndicator, ScrollView, Share, StyleSheet, Text, View } from "re
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { WorkspaceCacheBanner } from "@/components/WorkspaceCacheBanner";
 import {
   createNodeEnrollmentCode,
   listHubNodes,
@@ -24,18 +25,22 @@ export default function WorkspaceNodesScreen() {
   const [nodes, setNodes] = useState<HubNode[]>([]);
   const [deployments, setDeployments] = useState<WorkspaceDeployment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [cacheSnapshot, setCacheSnapshot] = useState<WorkspaceCacheSnapshot | null>(null);
   const [working, setWorking] = useState("");
   const [enrollmentCode, setEnrollmentCode] = useState("");
   const [enrollmentExpiresAt, setEnrollmentExpiresAt] = useState(0);
   const [error, setError] = useState("");
 
   const applyCache = useCallback((snapshot: WorkspaceCacheSnapshot) => {
+    setCacheSnapshot(snapshot);
     setNodes(snapshot.nodes);
     setDeployments(snapshot.resources?.workspaceDeployments ?? []);
   }, []);
 
   const refresh = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
+    setRefreshing(true);
     setError("");
     try {
       const [directory, resources] = await Promise.all([
@@ -49,6 +54,7 @@ export default function WorkspaceNodesScreen() {
       setError(caught instanceof Error ? caught.message : t("nodes.loadFailed"));
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [params.workspaceId, t]);
 
@@ -132,6 +138,7 @@ export default function WorkspaceNodesScreen() {
             <AppIcon name="refresh" color={colors.muted} size={20} />
           </AppPressable>
         </View>
+        <WorkspaceCacheBanner snapshot={cacheSnapshot} loading={refreshing} error={error} onRefresh={() => void refresh()} />
 
         {loading ? <ActivityIndicator color={colors.accent} /> : null}
 
