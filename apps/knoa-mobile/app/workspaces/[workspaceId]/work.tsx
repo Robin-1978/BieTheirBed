@@ -5,6 +5,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-nat
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { WorkspaceCacheBanner } from "@/components/WorkspaceCacheBanner";
+import { projectionWorkStatus } from "@/components/workProjectionPresentation";
 import { listHubNodes, listWorkspaceWork, type HubNode, type WorkspaceWorkProjection } from "@/hub/hubClient";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
@@ -108,20 +109,22 @@ export default function WorkspaceWorkScreen() {
       {items.map((item) => {
         const node = nodes.find((value) => value.node_id === item.node_id);
         const kindLabel = item.entity_kind === "conversation" ? t("work.conversation") : t("work.task");
+        const status = projectionWorkStatus(item);
+        const statusLabel = t(`work.status.${status}` as Parameters<typeof t>[0]);
         return (
           <AppPressable key={`${item.entity_kind}:${item.entity_id}`} style={styles.card} onPress={() => void open(item)}>
             <View style={styles.row}>
               <AppIcon name={item.entity_kind === "conversation" ? "chat" : "tasks"} color={colors.accent} size={22} />
               <View style={styles.flex}>
                 <Text style={styles.itemTitle}>{item.title || item.entity_id}</Text>
-                <Text style={styles.meta}>{kindLabel} · {node?.display_name ?? item.node_id} · {item.state}</Text>
+                <Text style={styles.meta}>{kindLabel} · {statusLabel} · {node?.display_name ?? item.node_id}</Text>
               </View>
               {working === item.entity_id
                 ? <ActivityIndicator color={colors.accent} size="small" />
                 : <Text style={node?.online ? styles.online : styles.offline}>{node?.online ? t("nodes.online") : t("nodes.offline")}</Text>}
             </View>
             {item.summary ? <Text style={styles.summary} numberOfLines={3}>{item.summary}</Text> : null}
-            {item.approval_summary ? <Text style={styles.approval}>{item.approval_summary}</Text> : null}
+            {status === "waiting_for_you" || item.approval_summary ? <Text style={styles.approval}>{item.approval_summary || t("work.needsYourDecision")}</Text> : null}
           </AppPressable>
         );
       })}
