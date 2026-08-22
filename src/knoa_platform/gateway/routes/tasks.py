@@ -231,6 +231,33 @@ class TaskRoutes:
             "detail": runtime_detail,
             "recommended_action": "none" if runtime_ready else "retry",
         })
+        if task.tools_enabled and runtime_ready:
+            try:
+                tools = await self._core.list_tools(
+                    authenticated.device.principal_id,
+                    task.session_handle,
+                )
+                if tools.tools:
+                    checks.append({
+                        "check_id": "tools",
+                        "status": "ready",
+                        "detail": f"已发现 {len(tools.tools)} 项可用工具能力",
+                        "recommended_action": "none",
+                    })
+                else:
+                    checks.append({
+                        "check_id": "tools",
+                        "status": "warning",
+                        "detail": "当前没有可用工具，任务仍可执行但可能无法完成外部操作",
+                        "recommended_action": "configure",
+                    })
+            except Exception:
+                checks.append({
+                    "check_id": "tools",
+                    "status": "blocked",
+                    "detail": "无法读取工具能力，请检查 Agent Runtime 后重试",
+                    "recommended_action": "retry",
+                })
         return JSONResponse({
             "task_id": task.task_id,
             "ready": not any(item["status"] == "blocked" for item in checks),
