@@ -20,6 +20,7 @@ import { AgentSelector } from "@/components/AgentSelector";
 import type { MCPResourceCatalogItem, TaskLaunchPolicy } from "@/api/models";
 import { useI18n } from "@/i18n";
 import { AppPressable } from "@/components/AppPressable";
+import { AppIcon } from "@/components/AppIcon";
 import { TASK_TEMPLATES } from "@/taskTemplates";
 import { enqueueOfflineTask } from "@/storage/offlineTaskQueue";
 import { requestTaskNotificationPermission } from "@/notifications/taskNotifications";
@@ -27,7 +28,7 @@ import { requestTaskNotificationPermission } from "@/notifications/taskNotificat
 export default function NewTaskScreen() {
   const gateway = useGateway();
   const { t } = useI18n();
-  const params = useLocalSearchParams<{ template?: string }>();
+  const params = useLocalSearchParams<{ template?: string; workspaceId?: string; workspaceName?: string; nodeId?: string }>();
   const [title, setTitle] = useState("");
   const [goal, setGoal] = useState("");
   const [saving, setSaving] = useState(false);
@@ -39,6 +40,8 @@ export default function NewTaskScreen() {
   const [agentId, setAgentId] = useState(gateway.defaultAgentId || "knoa");
   const [mcpResources, setMcpResources] = useState<MCPResourceCatalogItem[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState("");
+  const [selectedNodeId, setSelectedNodeId] = useState(gateway.nodeId || params.nodeId || "");
+  const [switchingNode, setSwitchingNode] = useState(false);
   const requestIdentity = useRef<{ fingerprint: string; requestId: string } | null>(null);
 
   useEffect(() => {
@@ -57,6 +60,24 @@ export default function NewTaskScreen() {
     setTitle(t(requested.titleKey));
     setGoal(t(requested.goalKey));
   }, [params.template, t]);
+
+  useEffect(() => {
+    if (gateway.nodeId) setSelectedNodeId(gateway.nodeId);
+  }, [gateway.nodeId]);
+
+  async function chooseNode(nodeId: string) {
+    if (!nodeId || nodeId === gateway.nodeId || switchingNode) return;
+    setSwitchingNode(true);
+    setError("");
+    try {
+      await gateway.switchNode(nodeId);
+      setSelectedNodeId(nodeId);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : t("taskNew.nodeSwitchFailed"));
+    } finally {
+      setSwitchingNode(false);
+    }
+  }
 
   async function create() {
     if (gateway.requiredUpdate) {
@@ -132,6 +153,29 @@ export default function NewTaskScreen() {
           </AppPressable>
         ) : null}
         <View style={styles.card}>
+          <View style={styles.nodeHeader}>
+            <View style={styles.flex}>
+              <Text style={styles.label}>{t("taskNew.executionNode")}</Text>
+              <Text style={styles.templateMeta}>{t("taskNew.executionNodeDetail")}</Text>
+            </View>
+            {switchingNode ? <ActivityIndicator color={colors.accent} size="small" /> : null}
+          </View>
+          {gateway.nodes.length ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nodeRow}>
+              {gateway.nodes.map((node) => (
+                <AppPressable
+                  key={node.nodeId}
+                  style={[styles.nodeChoice, selectedNodeId === node.nodeId && styles.nodeChoiceSelected]}
+                  onPress={() => void chooseNode(node.nodeId)}
+                  disabled={switchingNode}
+                >
+                  <AppIcon name="node" color={selectedNodeId === node.nodeId ? colors.accent : colors.muted} size={17} />
+                  <Text style={[styles.nodeChoiceText, selectedNodeId === node.nodeId && styles.nodeChoiceTextSelected]} numberOfLines={1}>{node.displayName}</Text>
+                  <Text style={styles.nodeChoiceStatus}>{node.nodeId === gateway.nodeId && gateway.status === "ready" ? t("taskNew.nodeReady") : t("taskNew.nodeAvailable")}</Text>
+                </AppPressable>
+              ))}
+            </ScrollView>
+          ) : <Text style={styles.templateMeta}>{t("taskNew.noNode")}</Text>}
           <Text style={styles.label}>{t("taskTemplates.title")}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.templateRow}>
             {TASK_TEMPLATES.map((template) => (
@@ -201,7 +245,7 @@ export default function NewTaskScreen() {
           <AppPressable
             accessibilityRole="button"
             accessibilityLabel={launchPolicy.kind === "immediate" ? t("taskNew.createAndStart") : t("taskNew.create")}
-            disabled={!goal.trim() || saving || Boolean(gateway.requiredUpdate) || !isLaunchPolicyValid(launchPolicy)}
+            disabled={!goal.trim() || saving || switchingNode || !selectedNodeId || selectedNodeId !== gateway.nodeId || Boolean(gateway.requiredUpdate) || !isLaunchPolicyValid(launchPolicy)}
             onPress={() => void create()}
             style={[styles.primary, (!goal.trim() || saving || gateway.requiredUpdate || !isLaunchPolicyValid(launchPolicy)) && styles.disabled]}
           >
@@ -221,6 +265,13 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   container: { padding: 16, paddingBottom: 48 },
   card: { backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.line, padding: 18, gap: 10 },
+  nodeHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
+  nodeRow: { gap: 8, paddingVertical: 2 },
+  nodeChoice: { width: 150, minHeight: 62, padding: 10, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.background, gap: 3 },
+  nodeChoiceSelected: { borderColor: colors.accent, backgroundColor: colors.accentFaint },
+  nodeChoiceText: { color: colors.ink, fontSize: 12, fontWeight: "800" },
+  nodeChoiceTextSelected: { color: colors.accent },
+  nodeChoiceStatus: { color: colors.muted, fontSize: 10 },
   templateRow: { gap: 9, paddingVertical: 2 },
   template: { width: 156, minHeight: 78, padding: 11, borderRadius: 13, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.background, gap: 4 },
   templateSelected: { borderColor: colors.accent, backgroundColor: colors.accentFaint },
