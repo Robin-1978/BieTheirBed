@@ -17,6 +17,7 @@ import { updateNodeDirectGatewayUrl } from "@/security/deviceIdentity";
 import { useGateway } from "@/state/GatewayProvider";
 import { loadWorkspaceCache, mergeWorkspaceCache, type WorkspaceCacheSnapshot } from "@/storage/workspaceCache";
 import { colors } from "@/theme";
+import { userFacingError } from "@/ui/userFacingError";
 
 export default function WorkspaceResourcesScreen() {
   const params = useLocalSearchParams<{ workspaceId: string; workspaceName?: string }>();
@@ -46,7 +47,7 @@ export default function WorkspaceResourcesScreen() {
       setNodes(directory);
       await mergeWorkspaceCache(params.workspaceId, { nodes: directory, resources });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("resources.loadFailed"));
+      setError(userFacingError(caught, t("resources.loadFailed")));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -80,7 +81,7 @@ export default function WorkspaceResourcesScreen() {
       await gateway.switchNode(nodeId);
       router.push(kind === "model" ? "/settings/models" : "/settings/extensions");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("resources.connectHostFailed"));
+      setError(userFacingError(caught, t("resources.connectHostFailed")));
     } finally {
       setWorking("");
     }
@@ -103,7 +104,7 @@ export default function WorkspaceResourcesScreen() {
       await gateway.switchNode(nodeId);
       router.push("/settings/models");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("resources.connectUserNodeFailed"));
+      setError(userFacingError(caught, t("resources.connectUserNodeFailed")));
     } finally {
       setWorking("");
     }
@@ -116,7 +117,7 @@ export default function WorkspaceResourcesScreen() {
       await revokeWorkspaceResourceGrant(grantId);
       await refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("resources.revokeFailed"));
+      setError(userFacingError(caught, t("resources.revokeFailed")));
     } finally {
       setWorking("");
     }

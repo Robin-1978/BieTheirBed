@@ -21,6 +21,7 @@ import { useGateway } from "@/state/GatewayProvider";
 import { loadWorkspaceCache, mergeWorkspaceCache, type WorkspaceCacheSnapshot } from "@/storage/workspaceCache";
 import { useI18n } from "@/i18n";
 import { colors } from "@/theme";
+import { userFacingError } from "@/ui/userFacingError";
 
 export default function WorkspaceScreen() {
   const params = useLocalSearchParams<{ workspaceId: string; workspaceName?: string }>();
@@ -85,7 +86,7 @@ export default function WorkspaceScreen() {
       applyCache(snapshot);
       await rememberWorkspace(target.workspaceId, target.displayName);
       await mergeWorkspaceCache(workspaceId, snapshot);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : t("workspace.loadFailed")); }
+    } catch (caught) { setError(userFacingError(caught, t("workspace.loadFailed"))); }
     finally { setLoading(false); setRefreshing(false); }
   }, [applyCache, fallbackName, gateway.disconnectNode, t, workspaceId]);
 
