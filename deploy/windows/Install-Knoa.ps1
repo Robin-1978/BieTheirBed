@@ -120,6 +120,29 @@ function Wait-WinSWServiceDeleted([string]$ServiceId, [int]$TimeoutSeconds = 15)
     throw "Knoa service $ServiceId is still registered after uninstall; close Services.msc and retry"
 }
 
+function Wait-WrapperExecutableReleased([string]$WrapperPath, [int]$TimeoutSeconds = 15) {
+    # The SCM entry can disappear while the wrapper process is still shutting
+    # down (or was auto-restarted after an earlier force-kill). The exe stays
+    # locked until the process is gone, which would fail the wrapper copy.
+    $wrapperFullPath = [IO.Path]::GetFullPath($WrapperPath)
+    $wrapperName = Split-Path -Leaf $WrapperPath
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $lingering = @(Get-CimInstance Win32_Process -Filter "Name='$wrapperName'" -ErrorAction SilentlyContinue | `
+            Where-Object {
+                $_.ExecutablePath -and (
+                    [IO.Path]::GetFullPath($_.ExecutablePath) -ieq $wrapperFullPath
+                )
+            })
+        if ($lingering.Count -eq 0) { return }
+        $lingering | ForEach-Object {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    throw "Knoa wrapper process is still running: $WrapperPath"
+}
+
 function Stop-KnoaService([string]$ServiceId) {
     $service = Get-Service -Name $ServiceId -ErrorAction SilentlyContinue
     if ($service -and $service.Status -ne "Stopped") {
@@ -190,6 +213,7 @@ function Install-WinSWService(
     Remove-WinSWService $ServiceId $wrapper
     Wait-WinSWServiceDeleted $ServiceId
     if ([IO.Path]::GetFullPath($SourceExecutable) -ne [IO.Path]::GetFullPath($wrapper)) {
+        Wait-WrapperExecutableReleased $wrapper
         Copy-Item -Force $SourceExecutable $wrapper
     }
     & $wrapper install
