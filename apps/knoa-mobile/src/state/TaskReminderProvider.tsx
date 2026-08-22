@@ -37,6 +37,7 @@ const ACTIONABLE_EVENTS: Record<string, ActionableEvent | undefined> = {
   completed: { category: "completed", policyKey: "completed" },
   failed: { category: "failed", policyKey: "failed" },
   approval_requested: { category: "approval", policyKey: "waiting_approval" },
+  interaction_requested: { category: "approval", policyKey: "waiting_approval" },
 };
 
 const Context = createContext<TaskReminderState | null>(null);
