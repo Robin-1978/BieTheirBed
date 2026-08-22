@@ -866,6 +866,61 @@ async def test_gateway_execute_enforces_preflight_before_core_command(tmp_path) 
 
 
 @pytest.mark.asyncio
+async def test_gateway_preflight_reports_missing_codex_runtime_binary(tmp_path) -> None:
+    core = _Core()
+    document = core.config.managed_config()
+    codex = document.agents.agents["codex"].model_copy(
+        update={"enabled": True, "command": ("knoa-test-codex-not-installed", "app-server")}
+    )
+    agents = document.agents.model_copy(
+        update={"agents": {**document.agents.agents, "codex": codex}}
+    )
+    document = document.model_copy(update={"agents": agents})
+
+    async def codex_task(principal_id, task_id):
+        return _product_task_snapshot().model_copy(update={"agent_id": "codex"})
+
+    async def current_config(principal_id):
+        return (
+            ConfigRevision(
+                revision_id="revision-codex",
+                document=document,
+                config_digest=document.digest,
+                created_by=principal_id,
+                created_at=1.0,
+            ),
+            ConfigControlState(
+                desired_revision_id="revision-codex",
+                applied_revision_id="revision-codex",
+                updated_at=1.0,
+            ),
+            (),
+        )
+
+    core.get_product_task = codex_task
+    core.get_config_current = current_config
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=_Authentication(),
+        core=core,
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
+    async with httpx.AsyncClient(transport=transport, base_url="http://gateway.local") as http:
+        response = await http.get("/v1/tasks/task-a/preflight", headers=headers)
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["ready"] is False
+    assert next(item for item in body["checks"] if item["check_id"] == "runtime_binary") == {
+        "check_id": "runtime_binary",
+        "status": "blocked",
+        "detail": "找不到 Codex Runtime 命令，请在 Node 上安装或修正 Agent 配置",
+        "recommended_action": "configure",
+    }
+
+
+@pytest.mark.asyncio
 async def test_gateway_conversation_uses_turn_snapshots_not_task_feed(tmp_path) -> None:
     core = _Core()
     adapter = SecureGatewayAdapter(
