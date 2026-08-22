@@ -843,6 +843,29 @@ async def test_gateway_task_preflight_blocks_paused_task_and_disconnected_runtim
 
 
 @pytest.mark.asyncio
+async def test_gateway_execute_enforces_preflight_before_core_command(tmp_path) -> None:
+    core = _Core()
+
+    async def paused_task(principal_id, task_id):
+        return _product_task_snapshot(TaskDefinitionState.PAUSED)
+
+    core.get_product_task = paused_task
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=_Authentication(),
+        core=core,
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
+    async with httpx.AsyncClient(transport=transport, base_url="http://gateway.local") as http:
+        response = await http.post("/v1/tasks/task-a/execute", headers=headers)
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "preflight_blocked"
+    assert not any(call[0] == "execute_product_task" for call in core.calls)
+
+
+@pytest.mark.asyncio
 async def test_gateway_conversation_uses_turn_snapshots_not_task_feed(tmp_path) -> None:
     core = _Core()
     adapter = SecureGatewayAdapter(
