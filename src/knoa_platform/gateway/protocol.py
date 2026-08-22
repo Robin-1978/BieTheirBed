@@ -552,6 +552,12 @@ class TaskPreflightResponse(BaseModel):
     checks: tuple[TaskPreflightCheck, ...]
 
 
+class TaskPreflightBlockedResponse(BaseModel):
+    error: Literal["preflight_blocked"] = "preflight_blocked"
+    message: str
+    preflight: TaskPreflightResponse
+
+
 class ProductTaskExecutionResponse(BaseModel):
     execution: ProductTaskExecutionSnapshot
 

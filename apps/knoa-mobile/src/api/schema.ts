@@ -3312,6 +3312,18 @@ export interface components {
          * @enum {string}
          */
         TaskLaunchReason: "created" | "manual" | "scheduled" | "event" | "rerun" | "follow_up";
+        /** TaskPreflightBlockedResponse */
+        TaskPreflightBlockedResponse: {
+            /**
+             * Error
+             * @default preflight_blocked
+             * @constant
+             */
+            error: "preflight_blocked";
+            /** Message */
+            message: string;
+            preflight: components["schemas"]["TaskPreflightResponse"];
+        };
         /** TaskPreflightCheck */
         TaskPreflightCheck: {
             /** Check Id */
@@ -6956,13 +6968,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Request rejected */
+            /** @description Execution blocked by preflight */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["TaskPreflightBlockedResponse"];
                 };
             };
             /** @description Request rejected */
