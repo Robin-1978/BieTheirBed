@@ -19,7 +19,6 @@ vi.mock("@/security/deviceIdentity", () => ({
 
 import {
   HUB_REQUEST_TIMEOUT_MS,
-  HubRequestError,
   createNodeEnrollmentCode,
   issueConnectionTicket,
   loadHubConnection,
@@ -181,7 +180,7 @@ describe("Android release ownership", () => {
       }));
       const pending = expect(resolveAndroidRelease(async () => {
         throw new Error("Node fallback must not be used");
-      })).rejects.toMatchObject<Partial<HubRequestError>>({
+      })).rejects.toMatchObject({
         name: "HubRequestError",
         kind: "timeout",
         message: "Hub 请求超时，请检查网络后重试",

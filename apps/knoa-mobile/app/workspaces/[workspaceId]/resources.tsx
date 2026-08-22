@@ -4,6 +4,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-nat
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { WorkspaceCacheBanner } from "@/components/WorkspaceCacheBanner";
 import {
   listHubNodes,
   loadWorkspaceResourceState,
@@ -24,16 +25,20 @@ export default function WorkspaceResourcesScreen() {
   const [state, setState] = useState<WorkspaceResourceState | null>(null);
   const [nodes, setNodes] = useState<HubNode[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [cacheSnapshot, setCacheSnapshot] = useState<WorkspaceCacheSnapshot | null>(null);
   const [working, setWorking] = useState("");
   const [error, setError] = useState("");
 
   const applyCache = useCallback((snapshot: WorkspaceCacheSnapshot) => {
+    setCacheSnapshot(snapshot);
     setState(snapshot.resources);
     setNodes(snapshot.nodes);
   }, []);
 
   const refresh = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
+    setRefreshing(true);
     setError("");
     try {
       const [resources, directory] = await Promise.all([loadWorkspaceResourceState(), listHubNodes()]);
@@ -44,6 +49,7 @@ export default function WorkspaceResourcesScreen() {
       setError(caught instanceof Error ? caught.message : t("resources.loadFailed"));
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [params.workspaceId, t]);
 
@@ -142,6 +148,7 @@ export default function WorkspaceResourcesScreen() {
           <AppIcon name="refresh" color={colors.muted} size={20} />
         </AppPressable>
       </View>
+      <WorkspaceCacheBanner snapshot={cacheSnapshot} loading={refreshing} error={error} onRefresh={() => void refresh()} />
       {loading ? <ActivityIndicator color={colors.accent} /> : null}
 
       {resources.map((resource) => {

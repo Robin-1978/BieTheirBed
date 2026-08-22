@@ -10,6 +10,9 @@ import type {
 
 const CACHE_VERSION = 1 as const;
 const MAX_WORK_ITEMS = 300;
+export const WORKSPACE_CACHE_TTL_MS = 5 * 60 * 1000;
+
+export type WorkspaceCacheFreshness = "fresh" | "stale" | "empty";
 
 export type WorkspaceCacheSnapshot = {
   version: typeof CACHE_VERSION;
@@ -21,6 +24,19 @@ export type WorkspaceCacheSnapshot = {
   work: WorkspaceWorkProjection[];
   members: HostedWorkspaceMember[];
 };
+
+export function workspaceCacheAge(snapshot: WorkspaceCacheSnapshot, now = Date.now()): number {
+  if (!snapshot.updatedAt) return Number.POSITIVE_INFINITY;
+  return Math.max(0, now - snapshot.updatedAt);
+}
+
+export function workspaceCacheFreshness(
+  snapshot: WorkspaceCacheSnapshot | null,
+  now = Date.now(),
+): WorkspaceCacheFreshness {
+  if (!snapshot) return "empty";
+  return workspaceCacheAge(snapshot, now) <= WORKSPACE_CACHE_TTL_MS ? "fresh" : "stale";
+}
 
 type WorkspaceCachePatch = Partial<
   Pick<WorkspaceCacheSnapshot, "workspace" | "nodes" | "resources" | "work" | "members">

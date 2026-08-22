@@ -4,6 +4,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-nat
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { WorkspaceCacheBanner } from "@/components/WorkspaceCacheBanner";
 import { listHubNodes, listWorkspaceWork, type HubNode, type WorkspaceWorkProjection } from "@/hub/hubClient";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
@@ -17,16 +18,20 @@ export default function WorkspaceWorkScreen() {
   const [items, setItems] = useState<WorkspaceWorkProjection[]>([]);
   const [nodes, setNodes] = useState<HubNode[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [cacheSnapshot, setCacheSnapshot] = useState<WorkspaceCacheSnapshot | null>(null);
   const [working, setWorking] = useState("");
   const [error, setError] = useState("");
 
   const applyCache = useCallback((snapshot: WorkspaceCacheSnapshot) => {
+    setCacheSnapshot(snapshot);
     setItems(snapshot.work);
     setNodes(snapshot.nodes);
   }, []);
 
   const refresh = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
+    setRefreshing(true);
     setError("");
     try {
       const [work, directory] = await Promise.all([listWorkspaceWork(), listHubNodes()]);
@@ -37,6 +42,7 @@ export default function WorkspaceWorkScreen() {
       setError(caught instanceof Error ? caught.message : t("work.loadFailed"));
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [params.workspaceId, t]);
 
@@ -91,6 +97,7 @@ export default function WorkspaceWorkScreen() {
           <AppIcon name="refresh" color={colors.muted} size={20} />
         </AppPressable>
       </View>
+      <WorkspaceCacheBanner snapshot={cacheSnapshot} loading={refreshing} error={error} onRefresh={() => void refresh()} />
       {loading ? <ActivityIndicator color={colors.accent} /> : null}
       {!loading && !items.length ? (
         <View style={styles.empty}>
