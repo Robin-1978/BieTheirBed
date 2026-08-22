@@ -178,6 +178,10 @@ if (-not (Test-Administrator)) {
     exit $elevated.ExitCode
 }
 
+$updateLogRoot = Join-Path $env:ProgramData "Knoa\Logs\Updates"
+New-Item -ItemType Directory -Force -Path $updateLogRoot | Out-Null
+Start-Transcript -Path (Join-Path $updateLogRoot ("update-" + [DateTime]::UtcNow.ToString("yyyyMMdd-HHmmss") + ".log")) | Out-Null
+
 $state = $null
 if (Test-Path -LiteralPath $InstallationStatePath) {
     $state = Get-Content -LiteralPath $InstallationStatePath -Raw -Encoding UTF8 |
@@ -196,6 +200,13 @@ if (-not $SourcePath) {
 }
 if (-not $Role) {
     $Role = Get-InstalledRole
+    if (-not $Role -and $state -and $state.role) {
+        # A previously interrupted update can leave the services uninstalled
+        # while the installation state still records the machine's role; use
+        # it so the updater can recover instead of aborting.
+        $Role = [string]$state.role
+        Write-Host "No installed Knoa service was detected; recovering role '$Role' from the installation state"
+    }
     if (-not $Role) {
         throw "No installed Knoa WinSW service was detected; install Hub or Node before using the updater"
     }
