@@ -131,6 +131,15 @@ class WorkProjectionRequest(_Request):
     signature: str = Field(min_length=80, max_length=128)
 
 
+class WorkProjectionReconcileRequest(_Request):
+    node_id: str = Field(min_length=1, max_length=128)
+    entity_kind: Literal["conversation", "task"]
+    principal_id: str = Field(default="", max_length=256)
+    active_entity_ids: tuple[str, ...] = Field(default=(), max_length=500)
+    observed_at: float = Field(ge=0)
+    signature: str = Field(min_length=80, max_length=128)
+
+
 class ResourceGrantRequest(_Request):
     grant_id: str = Field(min_length=1, max_length=128)
     caller_node_id: str = Field(min_length=1, max_length=128)
@@ -240,6 +249,11 @@ class HubApplication:
                     "/v1/work-projections",
                     self.work_projections,
                     methods=["GET", "POST"],
+                ),
+                Route(
+                    "/v1/work-projections/reconcile",
+                    self.work_projection_reconcile,
+                    methods=["POST"],
                 ),
                 Route(
                     "/v1/resource-grants", self.resource_grants, methods=["GET", "POST"]
@@ -480,6 +494,16 @@ class HubApplication:
         except (LookupError, PermissionError, ValueError):
             return JSONResponse({"error": "rejected"}, status_code=401)
         return JSONResponse({"item": item}, status_code=201)
+
+    async def work_projection_reconcile(self, request: Request) -> JSONResponse:
+        parsed = await self._parse(request, WorkProjectionReconcileRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            removed = self.service.reconcile_work_projections(parsed.model_dump(mode="json"))
+        except (LookupError, PermissionError, ValueError):
+            return JSONResponse({"error": "rejected"}, status_code=401)
+        return JSONResponse({"removed": removed})
 
     async def resource_grants(self, request: Request) -> JSONResponse:
         authenticated = self._authenticate(

@@ -478,6 +478,23 @@ def test_node_signed_work_projection_is_monotonic_and_workspace_readable(
     assert repository.list_work_projections(entity_kind="task")[0]["payload"] == {
         "latest_execution_id": "execution-1"
     }
+    reconcile = {
+        "node_id": node.node_id,
+        "entity_kind": "task",
+        "principal_id": "owner",
+        "active_entity_ids": [],
+        "observed_at": now,
+    }
+    reconcile_transcript = {
+        "audience": "knoa-work-projection-reconcile-v1",
+        "workspace_id": "workspace-1",
+        **reconcile,
+    }
+    assert hub.reconcile_work_projections({
+        **reconcile,
+        "signature": node.sign(canonical_json(reconcile_transcript)),
+    }) == 1
+    assert repository.list_work_projections(entity_kind="task") == ()
 
 
 def test_hosted_hub_resource_ticket_distinguishes_hub_and_workspace_ids(

@@ -739,6 +739,33 @@ class HubRepository:
             ).fetchall()
         return tuple(self._decode_work_projection(row) for row in rows)
 
+    def prune_work_projections(
+        self,
+        node_id: str,
+        entity_kind: str,
+        principal_id: str,
+        active_entity_ids: tuple[str, ...],
+    ) -> int:
+        """Remove projections absent from the Node's authoritative snapshot.
+
+        Deleting a conversation in Core does not produce a durable projection
+        event. Reconciliation makes the Hub's read model converge without
+        allowing one Node or principal to delete another's work.
+        """
+        self.node(node_id)
+        clauses = ["workspace_id=?", "node_id=?", "entity_kind=?", "principal_id=?"]
+        values: list[object] = [self.hub_id, node_id, entity_kind, principal_id]
+        if active_entity_ids:
+            placeholders = ",".join("?" for _ in active_entity_ids)
+            clauses.append(f"entity_id NOT IN ({placeholders})")
+            values.extend(active_entity_ids)
+        with self._connect() as db:
+            cursor = db.execute(
+                "DELETE FROM work_projections WHERE " + " AND ".join(clauses),
+                tuple(values),
+            )
+            return int(cursor.rowcount)
+
     @staticmethod
     def _decode_work_projection(row: sqlite3.Row) -> dict:
         item = dict(row)

@@ -9,6 +9,7 @@ import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 import { loadCapabilityCache, storeCapabilityCache } from "@/storage/capabilityCache";
+import { TASK_TEMPLATES } from "@/taskTemplates";
 
 export default function NodeResourcesScreen() {
   const gateway = useGateway();
@@ -75,6 +76,26 @@ export default function NodeResourcesScreen() {
         </AppPressable>
       </View>
       {loading ? <ActivityIndicator color={colors.accent} /> : null}
+
+      <View style={styles.capabilityCard}>
+        <Text style={styles.sectionTitle}>{t("workspace.capabilitiesTitle")}</Text>
+        <Text style={styles.meta}>{t("workspace.capabilitiesDetail")}</Text>
+        <View style={styles.capabilityGrid}>
+          {TASK_TEMPLATES.map((template) => (
+            <AppPressable
+              key={template.id}
+              style={styles.capability}
+              onPress={() => router.push({ pathname: "/tasks/new", params: { template: template.id } })}
+            >
+              <AppIcon name={template.id === "computer-health" || template.id === "service-monitor" ? "settings" : template.id === "project-maintenance" ? "agent" : "file"} color={colors.accent} size={19} />
+              <View style={styles.flex}>
+                <Text style={styles.capabilityTitle} numberOfLines={2}>{t(template.titleKey)}</Text>
+                <Text style={styles.capabilityDetail} numberOfLines={2}>{t(template.detailKey)}</Text>
+              </View>
+            </AppPressable>
+          ))}
+        </View>
+      </View>
 
       <View style={styles.card}>
         <ResourceRow
@@ -154,6 +175,11 @@ const styles = StyleSheet.create({
   meta: { color: colors.muted, fontSize: 12, lineHeight: 18 },
   flex: { flex: 1, minWidth: 0 },
   card: { paddingHorizontal: 15, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
+  capabilityCard: { padding: 15, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, gap: 6 },
+  capabilityGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
+  capability: { width: "48%", minHeight: 76, flexDirection: "row", alignItems: "center", gap: 8, padding: 10, borderRadius: 12, backgroundColor: colors.background },
+  capabilityTitle: { color: colors.ink, fontSize: 12, fontWeight: "800" },
+  capabilityDetail: { color: colors.muted, fontSize: 10, lineHeight: 14, marginTop: 2 },
   sectionTitle: { color: colors.ink, fontSize: 17, fontWeight: "800", marginTop: 13, marginBottom: 3 },
   row: { minHeight: 66, flexDirection: "row", alignItems: "center", gap: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
   rowTitle: { color: colors.ink, fontWeight: "800" },

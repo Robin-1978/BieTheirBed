@@ -521,6 +521,29 @@ class HubService:
         )
         return self.repository.put_work_projection(str(request["node_id"]), request)
 
+    def reconcile_work_projections(self, request: dict) -> int:
+        observed_at = float(request["observed_at"])
+        if abs(observed_at - self._clock()) > 120:
+            raise PermissionError("Work projection reconciliation timestamp rejected")
+        transcript = {
+            "audience": "knoa-work-projection-reconcile-v1",
+            "workspace_id": self.workspace_id,
+            "node_id": request["node_id"],
+            "entity_kind": request["entity_kind"],
+            "principal_id": request.get("principal_id", ""),
+            "active_entity_ids": list(request.get("active_entity_ids", [])),
+            "observed_at": observed_at,
+        }
+        self.verify_node_signed_request(
+            str(request["node_id"]), transcript, str(request["signature"])
+        )
+        return self.repository.prune_work_projections(
+            str(request["node_id"]),
+            str(request["entity_kind"]),
+            str(request.get("principal_id", "")),
+            tuple(str(value) for value in request.get("active_entity_ids", [])),
+        )
+
     def issue_resource_ticket(self, request: dict) -> str:
         timestamp = float(request["timestamp"])
         if abs(self._clock() - timestamp) > 120:
