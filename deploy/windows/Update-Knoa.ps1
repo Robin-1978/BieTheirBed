@@ -125,6 +125,45 @@ function Get-InstalledRole {
     return ""
 }
 
+function Get-DeclaredKnoaVersion([string]$SourceRoot) {
+    $versionFile = Join-Path $SourceRoot "src\knoa_platform\__init__.py"
+    if (-not (Test-Path -LiteralPath $versionFile)) {
+        throw "Knoa source version file is missing: $versionFile"
+    }
+    $match = Select-String -LiteralPath $versionFile -Pattern '__version__\s*=\s*["'']([^"'']+)["'']' |
+        Select-Object -First 1
+    if (-not $match -or -not $match.Matches.Count) {
+        throw "Could not read Knoa source version from $versionFile"
+    }
+    return $match.Matches[0].Groups[1].Value
+}
+
+function Get-InstalledKnoaVersion([string]$PythonPath) {
+    if (-not (Test-Path -LiteralPath $PythonPath)) {
+        throw "Knoa runtime Python is missing: $PythonPath"
+    }
+    $output = @(& $PythonPath -c "import knoa_platform; print(knoa_platform.__version__)")
+    if ($LASTEXITCODE -ne 0 -or $output.Count -eq 0) {
+        throw "Could not read the installed Knoa runtime version"
+    }
+    return ([string]($output | Select-Object -Last 1)).Trim()
+}
+
+function Assert-InstalledRuntimeMatchesSource([string]$SourceRoot, $InstallState) {
+    $installRoot = if ($InstallState -and $InstallState.install_root) {
+        [string]$InstallState.install_root
+    } else {
+        "$env:ProgramData\Knoa\Runtime"
+    }
+    $pythonPath = Join-Path $installRoot "venv\Scripts\python.exe"
+    $sourceVersion = Get-DeclaredKnoaVersion $SourceRoot
+    $installedVersion = Get-InstalledKnoaVersion $pythonPath
+    if ($sourceVersion -ne $installedVersion) {
+        throw "Knoa runtime version mismatch: source=$sourceVersion installed=$installedVersion"
+    }
+    Write-Host "Knoa runtime version verified: $installedVersion"
+}
+
 if (-not (Test-Administrator)) {
     $powerShell = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
     $argumentList = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PSCommandPath)
@@ -247,6 +286,12 @@ function Restore-PreviousRevision {
 try {
     & $installer @installArguments
     if ($LASTEXITCODE -ne 0) { throw "Knoa installer returned exit code $LASTEXITCODE" }
+    $updatedState = $null
+    if (Test-Path -LiteralPath $InstallationStatePath) {
+        $updatedState = Get-Content -LiteralPath $InstallationStatePath -Raw -Encoding UTF8 |
+            ConvertFrom-Json
+    }
+    Assert-InstalledRuntimeMatchesSource $resolvedSource $updatedState
     Restart-InstalledServices $Role
     if ($Role -in @("all", "node")) {
         $nodePort = if ($state -and $state.node_gateway_port) { [int]$state.node_gateway_port } else { 9531 }

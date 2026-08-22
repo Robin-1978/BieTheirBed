@@ -165,6 +165,8 @@ def test_windows_one_click_updater_pulls_reinstalls_and_recovers_services() -> N
     assert "Update-Knoa.ps1" in launcher
     assert "Backups\\Updates" in updater
     assert "source-commit.txt" in updater
+    assert "Assert-InstalledRuntimeMatchesSource" in updater
+    assert "Knoa runtime version mismatch" in updater
     assert "Restore-PreviousRevision" in updater
     assert "reset --hard $previousCommit" in updater
     assert "automatic rollback" in updater

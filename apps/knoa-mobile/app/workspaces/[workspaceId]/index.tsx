@@ -17,6 +17,7 @@ import {
 } from "@/hub/hubClient";
 import { rememberWorkspace } from "@/navigation/navigationPreference";
 import { useGateway } from "@/state/GatewayProvider";
+import { loadWorkspaceCache, mergeWorkspaceCache, type WorkspaceCacheSnapshot } from "@/storage/workspaceCache";
 import { useI18n } from "@/i18n";
 import { colors } from "@/theme";
 
@@ -31,8 +32,20 @@ export default function WorkspaceScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const refresh = useCallback(async () => {
-    setLoading(true); setError("");
+  const applyCache = useCallback((snapshot: WorkspaceCacheSnapshot) => {
+    setWorkspace(snapshot.workspace);
+    setCounts({
+      work: snapshot.work.length,
+      resources: snapshot.resources?.workspaceResources.filter((item) => item.enabled).length ?? 0,
+      nodes: snapshot.nodes.length,
+      onlineNodes: snapshot.nodes.filter((node) => node.online).length,
+      members: snapshot.members.length,
+    });
+  }, []);
+
+  const refresh = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true);
+    setError("");
     try {
       const connection = await loadHubConnection();
       if (!connection) { router.replace("/account/login"); return; }
@@ -48,26 +61,29 @@ export default function WorkspaceScreen() {
         await gateway.disconnectNode();
         await selectHostedWorkspace(target);
       }
-      setWorkspace(target);
-      await rememberWorkspace(target.workspaceId, target.displayName);
       const [nodes, resources, work, members] = await Promise.all([
         listHubNodes(),
         loadWorkspaceResourceState().catch(() => null),
         listWorkspaceWork().catch(() => []),
         connection.accountId ? listHostedWorkspaceMembers(target.workspaceId).catch(() => []) : Promise.resolve([]),
       ]);
-      setCounts({
-        work: work.length,
-        resources: resources?.workspaceResources.filter((item) => item.enabled).length ?? 0,
-        nodes: nodes.length,
-        onlineNodes: nodes.filter((node) => node.online).length,
-        members: members.length,
-      });
+      const snapshot: WorkspaceCacheSnapshot = { version: 1, workspaceId, updatedAt: Date.now(), workspace: target, nodes, resources, work, members };
+      applyCache(snapshot);
+      await rememberWorkspace(target.workspaceId, target.displayName);
+      await mergeWorkspaceCache(workspaceId, snapshot);
     } catch (caught) { setError(caught instanceof Error ? caught.message : t("workspace.loadFailed")); }
     finally { setLoading(false); }
-  }, [fallbackName, gateway.disconnectNode, t, workspaceId]);
+  }, [applyCache, fallbackName, gateway.disconnectNode, t, workspaceId]);
 
-  useFocusEffect(useCallback(() => { void refresh(); }, [refresh]));
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    void (async () => {
+      const cached = await loadWorkspaceCache(workspaceId);
+      if (active && cached) { applyCache(cached); setLoading(false); }
+      await refresh(!cached);
+    })();
+    return () => { active = false; };
+  }, [applyCache, refresh, workspaceId]));
   const displayName = workspace?.displayName || fallbackName;
   const routeParams = { workspaceId, workspaceName: displayName };
 
