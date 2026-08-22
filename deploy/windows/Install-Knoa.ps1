@@ -26,6 +26,28 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+function Assert-KnoaSourceReleaseVersion([string]$SourceRoot) {
+    $versionFile = Join-Path $SourceRoot "src\knoa_platform\__init__.py"
+    $manifestFile = Join-Path $SourceRoot "release\versions.json"
+    if (-not (Test-Path -LiteralPath $versionFile)) {
+        throw "Knoa source version file is missing: $versionFile"
+    }
+    if (-not (Test-Path -LiteralPath $manifestFile)) {
+        throw "Knoa release version manifest is missing: $manifestFile. Pull the latest master before installing."
+    }
+    $sourceMatch = Select-String -LiteralPath $versionFile -Pattern '__version__\s*=\s*["'']([^"'']+)["'']' |
+        Select-Object -First 1
+    $manifest = Get-Content -LiteralPath $manifestFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    $declared = if ($sourceMatch -and $sourceMatch.Matches.Count) {
+        $sourceMatch.Matches[0].Groups[1].Value
+    } else { "" }
+    $manifestVersion = [string]$manifest.platform_version
+    if (-not $declared -or -not $manifestVersion -or $declared -ne $manifestVersion) {
+        throw "Knoa source release metadata is inconsistent: source=$declared manifest=$manifestVersion"
+    }
+    Write-Host "Knoa source release version: $declared"
+}
 $installHub = ($Role -in @("all", "hub")) -or [bool](Get-Service -Name "KnoaHostedHub" -ErrorAction SilentlyContinue)
 $installNode = ($Role -in @("all", "node")) -or [bool](Get-Service -Name "KnoaNode" -ErrorAction SilentlyContinue)
 if (-not $installHub -and ($HostedBackupPath -or $BootstrapTokenSource -or $ReleasePublishTokenSource)) {
@@ -204,6 +226,7 @@ if ($WheelPath) {
     $sourceInstall = $true
 }
 if ($sourceInstall) {
+    Assert-KnoaSourceReleaseVersion $resolvedPackage
     if (-not $ChannelSourcePath) { $ChannelSourcePath = $resolvedPackage }
     $ChannelSourcePath = (Resolve-Path -LiteralPath $ChannelSourcePath).Path
     if (-not (Test-Path -LiteralPath (Join-Path $ChannelSourcePath ".git"))) {
