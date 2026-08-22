@@ -1,4 +1,4 @@
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import * as Crypto from "expo-crypto";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -27,6 +27,7 @@ import { requestTaskNotificationPermission } from "@/notifications/taskNotificat
 export default function NewTaskScreen() {
   const gateway = useGateway();
   const { t } = useI18n();
+  const params = useLocalSearchParams<{ template?: string }>();
   const [title, setTitle] = useState("");
   const [goal, setGoal] = useState("");
   const [saving, setSaving] = useState(false);
@@ -48,6 +49,14 @@ export default function NewTaskScreen() {
   }, [gateway.client, gateway.runAuthenticated]);
 
   const activeTemplate = TASK_TEMPLATES.find((template) => template.id === selectedTemplate);
+
+  useEffect(() => {
+    const requested = TASK_TEMPLATES.find((template) => template.id === params.template);
+    if (!requested) return;
+    setSelectedTemplate(requested.id);
+    setTitle(t(requested.titleKey));
+    setGoal(t(requested.goalKey));
+  }, [params.template, t]);
 
   async function create() {
     if (gateway.requiredUpdate) {
