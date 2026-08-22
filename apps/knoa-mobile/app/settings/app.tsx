@@ -1,7 +1,7 @@
 import * as Application from "expo-application";
 import { router } from "expo-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
@@ -9,12 +9,15 @@ import { useI18n, type LanguageMode } from "@/i18n";
 import { useThemePreference, type ThemeMode } from "@/state/ThemeProvider";
 import { colors } from "@/theme";
 import { hasTaskNotificationPermission, requestTaskNotificationPermission } from "@/notifications/taskNotifications";
+import { appCacheSummary, clearAppCache, formatCacheBytes, type AppCacheSummary } from "@/storage/appCache";
 
 export default function AppSettingsScreen() {
   const theme = useThemePreference();
   const i18n = useI18n();
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationWorking, setNotificationWorking] = useState(false);
+  const [cache, setCache] = useState<AppCacheSummary>(() => appCacheSummary());
+  const [cacheWorking, setCacheWorking] = useState(false);
 
   useEffect(() => {
     void hasTaskNotificationPermission().then(setNotificationsEnabled);
@@ -24,6 +27,27 @@ export default function AppSettingsScreen() {
     setNotificationWorking(true);
     setNotificationsEnabled(await requestTaskNotificationPermission());
     setNotificationWorking(false);
+  }
+
+  function confirmClearCache() {
+    Alert.alert(i18n.t("settings.cacheClearTitle"), i18n.t("settings.cacheClearBody"), [
+      { text: i18n.t("common.cancel"), style: "cancel" },
+      {
+        text: i18n.t("settings.cacheClear"),
+        style: "destructive",
+        onPress: () => {
+          setCacheWorking(true);
+          const result = clearAppCache("all");
+          setCache(appCacheSummary());
+          setCacheWorking(false);
+          if (result.failed) {
+            Alert.alert(i18n.t("settings.cacheClearFailed", { count: result.failed }));
+          } else {
+            Alert.alert(i18n.t("settings.cacheCleared", { count: result.removed }));
+          }
+        },
+      },
+    ]);
   }
 
   return (
@@ -58,6 +82,13 @@ export default function AppSettingsScreen() {
             </AppPressable>
           </View>
         ) : null}
+      </Section>
+
+      <Section title={i18n.t("settings.cache")} detail={i18n.t("settings.cacheDetail")}>
+        <Text style={styles.detail}>{i18n.t("settings.cacheUsage", { size: formatCacheBytes(cache.bytes), files: cache.files })}</Text>
+        <AppPressable disabled={cacheWorking} onPress={confirmClearCache} style={styles.settingsButton}>
+          <Text style={styles.settingsButtonText}>{cacheWorking ? i18n.t("settings.cacheClearWorking") : i18n.t("settings.cacheClear")}</Text>
+        </AppPressable>
       </Section>
 
       <View style={styles.card}>

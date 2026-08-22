@@ -10,6 +10,7 @@ import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 import { shareResultJson, shareResultPdf, shareResultText } from "@/api/shareResult";
+import { loadTaskCache, storeTaskCache } from "@/storage/taskCache";
 
 export default function ResultsScreen() {
   const gateway = useGateway();
@@ -22,6 +23,7 @@ export default function ResultsScreen() {
   const [agentFilter, setAgentFilter] = useState("");
   const [timeFilter, setTimeFilter] = useState<"all" | "7d" | "30d">("all");
   const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string; nodeId?: string }>();
+  const taskCacheScope = params.nodeId?.trim() || gateway.nodeId || "unselected";
 
   useEffect(() => {
     const requestedNode = params.nodeId?.trim();
@@ -42,15 +44,26 @@ export default function ResultsScreen() {
     try {
       const result = await gateway.runAuthenticated((client) => client.listTasks({ includeArchived: true, limit: 100 }));
       setTasks(result.tasks);
+      void storeTaskCache(taskCacheScope, result.tasks);
     } catch {
       setError(t("results.loadFailed"));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [gateway.client, gateway.runAuthenticated, gateway.status, t]);
+  }, [gateway.client, gateway.runAuthenticated, gateway.status, t, taskCacheScope]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    let active = true;
+    void loadTaskCache(taskCacheScope).then((cached) => {
+      if (!active || !cached) return;
+      setTasks(cached);
+      setLoading(false);
+    }).finally(() => {
+      if (active) void refresh();
+    });
+    return () => { active = false; };
+  }, [refresh, taskCacheScope]);
 
   const results = useMemo(
     () => tasks

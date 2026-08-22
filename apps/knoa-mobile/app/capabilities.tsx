@@ -8,6 +8,7 @@ import { AppPressable } from "@/components/AppPressable";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
+import { loadCapabilityCache, storeCapabilityCache } from "@/storage/capabilityCache";
 
 export default function NodeResourcesScreen() {
   const gateway = useGateway();
@@ -16,6 +17,7 @@ export default function NodeResourcesScreen() {
   const [toolCount, setToolCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const capabilityScope = gateway.nodeId || "unselected";
 
   const load = useCallback(async () => {
     if (!gateway.client) return;
@@ -30,15 +32,28 @@ export default function NodeResourcesScreen() {
       ]);
       setDocument(current.revision.document);
       const result = inventory.result as { descriptors?: unknown[] };
-      setToolCount(result.descriptors?.length ?? 0);
+      const toolCount = result.descriptors?.length ?? 0;
+      setToolCount(toolCount);
+      void storeCapabilityCache(capabilityScope, { document: current.revision.document, toolCount });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t("capabilities.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [gateway.client, gateway.runAuthenticated, gateway.sessionHandle, t]);
+  }, [capabilityScope, gateway.client, gateway.runAuthenticated, gateway.sessionHandle, t]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    let active = true;
+    void loadCapabilityCache(capabilityScope).then((cached) => {
+      if (!active || !cached) return;
+      setDocument(cached.document);
+      setToolCount(cached.toolCount);
+      setLoading(false);
+    }).finally(() => {
+      if (active) void load();
+    });
+    return () => { active = false; };
+  }, [capabilityScope, load]);
 
   const node = gateway.nodes.find((item) => item.nodeId === gateway.nodeId);
   const agents = document ? Object.entries(document.agents.agents) : [];

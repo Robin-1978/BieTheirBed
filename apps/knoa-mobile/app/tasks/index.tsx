@@ -19,6 +19,7 @@ import { useGateway } from "@/state/GatewayProvider";
 import { useTaskReminders } from "@/state/TaskReminderProvider";
 import { colors } from "@/theme";
 import { loadOfflineTasks, removeOfflineTask, type QueuedTask } from "@/storage/offlineTaskQueue";
+import { loadTaskCache, storeTaskCache } from "@/storage/taskCache";
 
 type Filter = "current" | TaskDefinitionState;
 type TaskSection = { key: string; title: string; data: Task[] };
@@ -38,6 +39,7 @@ export default function TasksScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const taskCacheScope = gateway.nodeId || "unselected";
   const [queued, setQueued] = useState<QueuedTask[]>([]);
   const latestRefreshEvent = useRef(gateway.latestEvent?.feed_event_id ?? 0);
 
@@ -51,15 +53,26 @@ export default function TasksScreen() {
         limit: 200,
       }));
       setTasks(result.tasks);
+      void storeTaskCache(taskCacheScope, result.tasks);
     } catch {
       setError(t("tasks.loadFailed"));
     } finally {
       setRefreshing(false);
       setLoading(false);
     }
-  }, [gateway.client, gateway.runAuthenticated, t]);
+  }, [gateway.client, gateway.runAuthenticated, t, taskCacheScope]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    let active = true;
+    void loadTaskCache(taskCacheScope).then((cached) => {
+      if (!active || !cached) return;
+      setTasks(cached);
+      setLoading(false);
+    }).finally(() => {
+      if (active) void refresh();
+    });
+    return () => { active = false; };
+  }, [refresh, taskCacheScope]);
   useEffect(() => { void loadOfflineTasks().then(setQueued); }, []);
   const flushQueued = useCallback(async () => {
     if (!gateway.client || gateway.status !== "ready") return;
