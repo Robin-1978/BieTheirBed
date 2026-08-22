@@ -173,7 +173,7 @@ class ConsoleRoutes:
                 "label": label,
                 "status": status,
                 "detail": detail,
-                "action": action or ("无需处理" if status == "ok" else "打开 Node Console 的诊断和日志，按建议处理后重试"),
+                "action": ("无需处理" if status == "ok" else action or "打开 Node Console 的诊断和日志，按建议处理后重试"),
             })
 
         async def probe_http(
@@ -350,7 +350,7 @@ class ConsoleRoutes:
                         capture_output=True,
                         text=True,
                         timeout=3,
-                        cwd=self._config.working_directory,
+                        cwd=Path(self._config.working_directory).expanduser().resolve(),
                         check=False,
                     )
                     if probe.returncode != 0:
@@ -386,7 +386,10 @@ class ConsoleRoutes:
                         )
                         await probe_http("vision_health", "视觉模型接口", profile.health_url, action="确认视觉模型已加载并可响应")
         except Exception as exc:  # noqa: BLE001
-            add("config", "配置", "error", f"无法读取当前配置：{type(exc).__name__}", "查看 Node 启动日志并恢复上一份配置")
+            detail = f"无法读取当前配置：{type(exc).__name__}"
+            if str(exc).strip():
+                detail += f"（{str(exc).strip()[:160]}）"
+            add("config", "配置", "error", detail, "查看 Node 启动日志并恢复上一份配置")
             add("codex", "Codex Runtime", "warning", "配置读取失败，无法检查")
             add("vision", "图片理解", "warning", "配置读取失败，无法检查")
 
