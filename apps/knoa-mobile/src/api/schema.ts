@@ -660,6 +660,22 @@ export interface paths {
         patch: operations["updateTask"];
         trace?: never;
     };
+    "/v1/tasks/{task_id}/preflight": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["preflightTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/tasks/{task_id}/execute": {
         parameters: {
             query?: never;
@@ -3296,6 +3312,32 @@ export interface components {
          * @enum {string}
          */
         TaskLaunchReason: "created" | "manual" | "scheduled" | "event" | "rerun" | "follow_up";
+        /** TaskPreflightCheck */
+        TaskPreflightCheck: {
+            /** Check Id */
+            check_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ready" | "warning" | "blocked";
+            /** Detail */
+            detail: string;
+            /**
+             * Recommended Action
+             * @enum {string}
+             */
+            recommended_action: "none" | "retry" | "resume" | "configure";
+        };
+        /** TaskPreflightResponse */
+        TaskPreflightResponse: {
+            /** Task Id */
+            task_id: string;
+            /** Ready */
+            ready: boolean;
+            /** Checks */
+            checks: components["schemas"]["TaskPreflightCheck"][];
+        };
         /**
          * TaskState
          * @enum {string}
@@ -6773,6 +6815,73 @@ export interface operations {
             };
             /** @description Request rejected */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    preflightTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Task execution preflight */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskPreflightResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

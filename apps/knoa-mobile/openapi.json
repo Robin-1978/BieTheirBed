@@ -4010,6 +4010,89 @@
         }
       }
     },
+    "/v1/tasks/{task_id}/preflight": {
+      "get": {
+        "operationId": "preflightTask",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task execution preflight",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPreflightResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tasks/{task_id}/execute": {
       "post": {
         "operationId": "executeTask",
@@ -11225,6 +11308,71 @@
         ],
         "title": "TaskLaunchReason",
         "type": "string"
+      },
+      "TaskPreflightCheck": {
+        "properties": {
+          "check_id": {
+            "title": "Check Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ready",
+              "warning",
+              "blocked"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "recommended_action": {
+            "enum": [
+              "none",
+              "retry",
+              "resume",
+              "configure"
+            ],
+            "title": "Recommended Action",
+            "type": "string"
+          }
+        },
+        "required": [
+          "check_id",
+          "status",
+          "detail",
+          "recommended_action"
+        ],
+        "title": "TaskPreflightCheck",
+        "type": "object"
+      },
+      "TaskPreflightResponse": {
+        "properties": {
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskPreflightCheck"
+            },
+            "title": "Checks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "task_id",
+          "ready",
+          "checks"
+        ],
+        "title": "TaskPreflightResponse",
+        "type": "object"
       },
       "TaskState": {
         "enum": [

@@ -27,6 +27,7 @@ import type {
   TaskExecution,
   TaskEvent,
   TaskLaunchPolicy,
+  TaskPreflight,
 } from "./models";
 import { DirectFetchTransport, type GatewayTransport } from "./gatewayTransportBase";
 
@@ -344,6 +345,12 @@ export class GatewayClient {
       `/v1/tasks/${encodeURIComponent(taskId)}`,
     );
     return response.task;
+  }
+
+  async preflightTask(taskId: string): Promise<TaskPreflight> {
+    return this.json<TaskPreflight>(
+      `/v1/tasks/${encodeURIComponent(taskId)}/preflight`,
+    );
   }
 
   async taskExecutionEvents(executionId: string, afterSeq = 0): Promise<TaskEvent[]> {

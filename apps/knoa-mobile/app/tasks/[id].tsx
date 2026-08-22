@@ -57,6 +57,15 @@ export default function TaskDetailScreen() {
     setWorking("execute");
     setError("");
     try {
+      const preflight = await gateway.runAuthenticated((client) => client.preflightTask(task.task_id));
+      if (!preflight.ready) {
+        const blocked = preflight.checks
+          .filter((check) => check.status === "blocked")
+          .map((check) => check.detail)
+          .join("；");
+        setError(blocked || t("taskDetail.executeFailed"));
+        return;
+      }
       const execution = await gateway.runAuthenticated((client) => client.executeTask(task.task_id));
       router.push(`/task-executions/${execution.execution_id}`);
     } catch {

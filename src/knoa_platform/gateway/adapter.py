@@ -363,6 +363,11 @@ class SecureGatewayAdapter(
                     methods=["GET"],
                 ),
                 Route("/v1/tasks/{task_id:str}", self._get_task, methods=["GET"]),
+                Route(
+                    "/v1/tasks/{task_id:str}/preflight",
+                    self._preflight_task,
+                    methods=["GET"],
+                ),
                 Route("/v1/tasks/{task_id:str}", self._update_task, methods=["PATCH"]),
                 Route("/v1/tasks/{task_id:str}", self._delete_task, methods=["DELETE"]),
                 Route(
