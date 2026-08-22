@@ -346,7 +346,7 @@ class ConsoleRoutes:
                 try:
                     probe = await asyncio.to_thread(
                         subprocess.run,
-                        [*codex.command, "--version"],
+                        [codex.command[0], "--version"],
                         capture_output=True,
                         text=True,
                         timeout=3,
@@ -364,9 +364,7 @@ class ConsoleRoutes:
                 except OSError as exc:
                     add("codex", "Codex Runtime", "error", f"Runtime 启动失败：{exc}", "检查 Codex 安装路径、工作目录和权限")
 
-            if not document.vision_enabled:
-                add("vision", "图片理解", "warning", "图片理解能力未启用", "启用图片理解并配置支持图片的模型")
-            elif not document.vision_model:
+            if not document.vision_model:
                 add("vision", "图片理解", "warning", "尚未配置图片理解模型", "选择一个明确支持图片的模型")
             else:
                 vision = document.models.get(document.vision_model)
