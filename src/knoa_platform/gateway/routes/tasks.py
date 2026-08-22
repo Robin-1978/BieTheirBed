@@ -22,6 +22,7 @@ from knoa_platform.gateway.protocol import (
     TaskExecutionListQuery,
     UpdateProductTaskRequest,
 )
+from knoa_platform.runtime import RuntimePaths
 from knoa_platform.tasks import TaskDefinitionState
 
 logger = logging.getLogger(__name__)
@@ -202,6 +203,36 @@ class TaskRoutes:
                             "check_id": "runtime_binary",
                             "status": "blocked",
                             "detail": "找不到 Codex Runtime 命令，请在 Node 上安装或修正 Agent 配置",
+                            "recommended_action": "configure",
+                        })
+                    paths = RuntimePaths.from_root(self._config.runtime_root)
+                    workspace = (
+                        paths.resolve(agent.cwd, default_parent=paths.root)
+                        if agent.cwd
+                        else paths.resolve(
+                            f"agents/{task.agent_id}/workspace",
+                            default_parent=paths.root,
+                        )
+                    )
+                    if workspace.is_dir():
+                        checks.append({
+                            "check_id": "workspace",
+                            "status": "ready",
+                            "detail": "Codex 工作目录可用",
+                            "recommended_action": "none",
+                        })
+                    elif workspace.parent.is_dir() and os.access(workspace.parent, os.W_OK):
+                        checks.append({
+                            "check_id": "workspace",
+                            "status": "warning",
+                            "detail": "Codex 工作目录尚未创建，执行时会自动创建",
+                            "recommended_action": "none",
+                        })
+                    else:
+                        checks.append({
+                            "check_id": "workspace",
+                            "status": "blocked",
+                            "detail": "Codex 工作目录不可用，请检查路径和权限",
                             "recommended_action": "configure",
                         })
                 binding = agent.model_binding
