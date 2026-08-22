@@ -108,6 +108,18 @@ function Remove-WinSWService([string]$ServiceId, [string]$WrapperPath) {
     }
 }
 
+function Wait-WinSWServiceDeleted([string]$ServiceId, [int]$TimeoutSeconds = 15) {
+    # SCM keeps a service "marked for deletion" while any handle to it is
+    # open (Services.msc, ServiceController objects). Re-registering the
+    # same name in that window deadlocks or fails, so wait it out first.
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        if (-not (Get-Service -Name $ServiceId -ErrorAction SilentlyContinue)) { return }
+        Start-Sleep -Milliseconds 500
+    }
+    throw "Knoa service $ServiceId is still registered after uninstall; close Services.msc and retry"
+}
+
 function Stop-KnoaService([string]$ServiceId) {
     $service = Get-Service -Name $ServiceId -ErrorAction SilentlyContinue
     if ($service -and $service.Status -ne "Stopped") {
@@ -174,12 +186,12 @@ function Install-WinSWService(
     $serviceDirectory = Join-Path $ServicesRoot $ServiceId
     $wrapper = Join-Path $serviceDirectory "$ServiceId.exe"
     $configuration = Join-Path $serviceDirectory "$ServiceId.xml"
-    New-Item -ItemType Directory -Force -Path $serviceDirectory | Out-Null
+    Write-Utf8NoBom $configuration $Xml
     Remove-WinSWService $ServiceId $wrapper
+    Wait-WinSWServiceDeleted $ServiceId
     if ([IO.Path]::GetFullPath($SourceExecutable) -ne [IO.Path]::GetFullPath($wrapper)) {
         Copy-Item -Force $SourceExecutable $wrapper
     }
-    Write-Utf8NoBom $configuration $Xml
     & $wrapper install
     if ($LASTEXITCODE -ne 0) { throw "Could not install WinSW service $ServiceId" }
     & $wrapper start
@@ -187,6 +199,18 @@ function Install-WinSWService(
 }
 
 Assert-Administrator
+# The user-facing updater and the source lifecycle broker can both decide to
+# reinstall at the same time; concurrent installers deadlock on the venv and
+# the SCM service database. Serialize every install through a global mutex.
+$installerMutex = New-Object System.Threading.Mutex($false, "Global\KnoaWindowsInstaller")
+try {
+    $mutexAcquired = $installerMutex.WaitOne([TimeSpan]::Zero)
+} catch [System.Threading.AbandonedMutexException] {
+    $mutexAcquired = $true
+}
+if (-not $mutexAcquired) {
+    throw "Another Knoa install or update is already running; wait for it to finish"
+}
 if (-not $WinSWExecutable) {
     $wrapperCandidates = @(
         "$env:ProgramData\Knoa\Services\KnoaHostedHub\KnoaHostedHub.exe",
@@ -266,6 +290,29 @@ if ($installNode) {
         } | `
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
+
+# Stray Knoa runtime and wrapper processes from an interrupted earlier update
+# keep the venv and service executables locked. Stop every process running
+# from the install roots, except this script's own process tree (the source
+# lifecycle broker invokes this installer as its child).
+$protectedProcessIds = @()
+$cursor = $PID
+for ($hop = 0; $cursor -and ($hop -lt 16) -and ($protectedProcessIds -notcontains $cursor); $hop++) {
+    $protectedProcessIds += $cursor
+    $cursor = (Get-CimInstance Win32_Process -Filter "ProcessId=$cursor" -ErrorAction SilentlyContinue).ParentProcessId
+}
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | `
+    Where-Object {
+        $_.ExecutablePath -and
+        ($protectedProcessIds -notcontains $_.ProcessId) -and (
+            $_.ExecutablePath.StartsWith($InstallRoot, [StringComparison]::OrdinalIgnoreCase) -or
+            $_.ExecutablePath.StartsWith($serviceRoot, [StringComparison]::OrdinalIgnoreCase)
+        )
+    } | `
+    ForEach-Object {
+        Write-Host "Stopping stray Knoa process $($_.ProcessId): $($_.ExecutablePath)"
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
 
 $legacyTaskNames = @()
 if ($installHub) { $legacyTaskNames += "Knoa Hosted Hub" }
