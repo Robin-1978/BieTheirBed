@@ -36,6 +36,7 @@ export type P2PDiagnostic = {
   state: "idle" | "connecting" | "ready" | "active" | "cooldown";
   lastError: string;
   retryAt: number;
+  elapsedMs: number;
 };
 
 export type LanDiagnostic = {
@@ -43,6 +44,7 @@ export type LanDiagnostic = {
   lastError: string;
   retryAt: number;
   endpoint?: string;
+  elapsedMs: number;
 };
 
 const encoder = new TextEncoder();
@@ -71,6 +73,8 @@ export class ConnectionResolverTransport implements GatewayTransport {
   private lanDiscovery: Promise<void> | null = null;
   private lanGatewayUrl = "";
   private lanDiscoveryRetryAfter = 0;
+  private p2pAttemptStartedAt = 0;
+  private lanAttemptStartedAt = 0;
 
   constructor(
     private readonly binding: NodeDeviceBinding,
@@ -338,7 +342,11 @@ export class ConnectionResolverTransport implements GatewayTransport {
     lastError = "",
     retryAt = 0,
   ): void {
-    this.onP2PDiagnostic?.({ state, lastError, retryAt });
+    if (state === "connecting") this.p2pAttemptStartedAt = Date.now();
+    const elapsedMs = this.p2pAttemptStartedAt
+      ? Math.max(0, Date.now() - this.p2pAttemptStartedAt)
+      : 0;
+    this.onP2PDiagnostic?.({ state, lastError, retryAt, elapsedMs });
   }
 
   private setLanDiagnostic(
@@ -347,7 +355,11 @@ export class ConnectionResolverTransport implements GatewayTransport {
     retryAt = 0,
     endpoint?: string,
   ): void {
-    this.onLanDiagnostic?.({ state, lastError, retryAt, endpoint });
+    if (state === "scanning") this.lanAttemptStartedAt = Date.now();
+    const elapsedMs = this.lanAttemptStartedAt
+      ? Math.max(0, Date.now() - this.lanAttemptStartedAt)
+      : 0;
+    this.onLanDiagnostic?.({ state, lastError, retryAt, endpoint, elapsedMs });
   }
 }
 
