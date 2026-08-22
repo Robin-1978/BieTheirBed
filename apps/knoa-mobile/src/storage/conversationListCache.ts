@@ -1,6 +1,7 @@
 import { File, Paths } from "expo-file-system";
 
 import type { ConversationSession } from "@/api/models";
+import { scopedCacheKey } from "./cacheScope";
 
 const VERSION = 1 as const;
 
@@ -12,11 +13,12 @@ export type ConversationListCache = {
 
 export async function loadConversationListCache(scope: string): Promise<ConversationListCache | null> {
   if (!scope) return null;
-  const file = cacheFile(scope);
+  const cacheScope = scopedCacheKey(scope);
+  const file = cacheFile(cacheScope);
   if (!file.exists) return null;
   try {
     const value = JSON.parse(await file.text()) as Partial<ConversationListCache> & { version?: number; scope?: string };
-    if (value.version !== VERSION || value.scope !== scope || !Array.isArray(value.sessions)) return null;
+    if (value.version !== VERSION || value.scope !== cacheScope || !Array.isArray(value.sessions)) return null;
     if (!value.sessions.every(isConversationSession)) return null;
     return {
       sessions: value.sessions,
@@ -34,11 +36,12 @@ export async function storeConversationListCache(
   nextCursor: string,
 ): Promise<void> {
   if (!scope) return;
-  const file = cacheFile(scope);
+  const cacheScope = scopedCacheKey(scope);
+  const file = cacheFile(cacheScope);
   if (!file.exists) file.create({ intermediates: true, overwrite: false });
   file.write(JSON.stringify({
     version: VERSION,
-    scope,
+    scope: cacheScope,
     updatedAt: Date.now(),
     sessions,
     nextCursor,

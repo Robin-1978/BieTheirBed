@@ -573,7 +573,9 @@ class WebRtcGatewayTransport implements GatewayTransport {
     const headers = Object.fromEntries(
       [...new Headers(init.headers).entries()].map(([key, value]) => [key.toLowerCase(), value]),
     );
+    let rejectResponse: (error: Error) => void = () => undefined;
     const response = new Promise<Response>((resolve, reject) => {
+      rejectResponse = reject;
       this.pending.set(requestId, {
         requestId,
         status: 0,
@@ -585,6 +587,11 @@ class WebRtcGatewayTransport implements GatewayTransport {
         reject,
       });
     });
+    const abort = () => {
+      this.pending.delete(requestId);
+      rejectResponse(new Error("请求已取消"));
+    };
+    init.signal?.addEventListener("abort", abort, { once: true });
     try {
       await this.send({
         type: "request_start",
@@ -606,6 +613,8 @@ class WebRtcGatewayTransport implements GatewayTransport {
     } catch (error) {
       this.pending.delete(requestId);
       throw error;
+    } finally {
+      init.signal?.removeEventListener("abort", abort);
     }
   }
 
@@ -702,7 +711,9 @@ class RelayTransport implements GatewayTransport {
     const headers = Object.fromEntries(
       [...new Headers(init.headers).entries()].map(([key, value]) => [key.toLowerCase(), value]),
     );
+    let rejectResponse: (error: Error) => void = () => undefined;
     const response = new Promise<Response>((resolve, reject) => {
+      rejectResponse = reject;
       this.pending.set(streamId, {
         status: 0,
         headers: {},
@@ -713,6 +724,11 @@ class RelayTransport implements GatewayTransport {
         reject,
       });
     });
+    const abort = () => {
+      this.pending.delete(streamId);
+      rejectResponse(new Error("请求已取消"));
+    };
+    init.signal?.addEventListener("abort", abort, { once: true });
     try {
       this.sendEncrypted(streamId, {
         type: "request_start",
@@ -732,6 +748,8 @@ class RelayTransport implements GatewayTransport {
     } catch (error) {
       this.pending.delete(streamId);
       throw error;
+    } finally {
+      init.signal?.removeEventListener("abort", abort);
     }
   }
 

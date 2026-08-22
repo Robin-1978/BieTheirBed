@@ -1,6 +1,7 @@
 import { File, Paths } from "expo-file-system";
 
 import type { ManagedConfig } from "@/api/models";
+import { scopedCacheKey } from "./cacheScope";
 
 const VERSION = 1 as const;
 
@@ -8,11 +9,12 @@ export type CapabilityCache = { document: ManagedConfig; toolCount: number; upda
 
 export async function loadCapabilityCache(scope: string): Promise<CapabilityCache | null> {
   if (!scope) return null;
-  const file = cacheFile(scope);
+  const cacheScope = scopedCacheKey(scope);
+  const file = cacheFile(cacheScope);
   if (!file.exists) return null;
   try {
     const value = JSON.parse(await file.text()) as Partial<CapabilityCache> & { version?: number; scope?: string };
-    if (value.version !== VERSION || value.scope !== scope || !value.document || typeof value.toolCount !== "number") return null;
+    if (value.version !== VERSION || value.scope !== cacheScope || !value.document || typeof value.toolCount !== "number") return null;
     return { document: value.document, toolCount: value.toolCount, updatedAt: value.updatedAt ?? 0 };
   } catch {
     return null;
@@ -21,9 +23,10 @@ export async function loadCapabilityCache(scope: string): Promise<CapabilityCach
 
 export async function storeCapabilityCache(scope: string, value: Omit<CapabilityCache, "updatedAt">): Promise<void> {
   if (!scope) return;
-  const file = cacheFile(scope);
+  const cacheScope = scopedCacheKey(scope);
+  const file = cacheFile(cacheScope);
   if (!file.exists) file.create({ intermediates: true, overwrite: false });
-  file.write(JSON.stringify({ version: VERSION, scope, updatedAt: Date.now(), ...value }));
+  file.write(JSON.stringify({ version: VERSION, scope: cacheScope, updatedAt: Date.now(), ...value }));
 }
 
 function cacheFile(scope: string): File {

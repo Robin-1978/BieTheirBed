@@ -7,6 +7,7 @@ import type {
   WorkspaceResourceState,
   WorkspaceWorkProjection,
 } from "@/hub/hubClient";
+import { scopedCacheKey } from "./cacheScope";
 
 const CACHE_VERSION = 1 as const;
 const MAX_WORK_ITEMS = 300;
@@ -44,7 +45,8 @@ type WorkspaceCachePatch = Partial<
 
 export async function loadWorkspaceCache(workspaceId: string): Promise<WorkspaceCacheSnapshot | null> {
   if (!workspaceId) return null;
-  const file = cacheFile(workspaceId);
+  const cacheScope = scopedCacheKey(workspaceId);
+  const file = cacheFile(cacheScope);
   if (!file.exists) return null;
   try {
     const value = JSON.parse(await file.text()) as Partial<WorkspaceCacheSnapshot>;
@@ -57,16 +59,17 @@ export async function loadWorkspaceCache(workspaceId: string): Promise<Workspace
 
 export async function mergeWorkspaceCache(workspaceId: string, patch: WorkspaceCachePatch): Promise<void> {
   if (!workspaceId) return;
+  const cacheScope = scopedCacheKey(workspaceId);
   const current = await loadWorkspaceCache(workspaceId);
   const next = normalize(workspaceId, { ...current, ...patch, updatedAt: Date.now() });
-  const file = cacheFile(workspaceId);
+  const file = cacheFile(cacheScope);
   if (!file.exists) file.create({ intermediates: true, overwrite: false });
   file.write(JSON.stringify(next));
 }
 
 export function clearWorkspaceCache(workspaceId: string): void {
   if (!workspaceId) return;
-  const file = cacheFile(workspaceId);
+  const file = cacheFile(scopedCacheKey(workspaceId));
   if (file.exists) file.delete();
 }
 

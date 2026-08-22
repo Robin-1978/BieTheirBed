@@ -813,7 +813,10 @@ def build_core_runtime(
     vision_broker = VisionBroker(
         None,
         artifacts,
-        max_output_tokens=min(1024, managed.operational.max_output_tokens),
+        # Vision descriptions often need more than a short label (OCR,
+        # tables and multi-region evidence).  Respect the configured runtime
+        # budget instead of silently clamping every inspection to 1024 tokens.
+        max_output_tokens=managed.operational.max_output_tokens,
     )
     if managed.vision_model:
         vision_config = _resolve_managed_model(managed, managed.vision_model, config)

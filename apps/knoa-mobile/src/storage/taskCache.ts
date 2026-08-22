@@ -1,16 +1,18 @@
 import { File, Paths } from "expo-file-system";
 
 import type { Task } from "@/api/models";
+import { scopedCacheKey } from "./cacheScope";
 
 const VERSION = 1 as const;
 
 export async function loadTaskCache(scope: string): Promise<Task[] | null> {
   if (!scope) return null;
-  const file = cacheFile(scope);
+  const cacheScope = scopedCacheKey(scope);
+  const file = cacheFile(cacheScope);
   if (!file.exists) return null;
   try {
     const value = JSON.parse(await file.text()) as { version?: number; scope?: string; tasks?: Task[] };
-    if (value.version !== VERSION || value.scope !== scope || !Array.isArray(value.tasks)) return null;
+    if (value.version !== VERSION || value.scope !== cacheScope || !Array.isArray(value.tasks)) return null;
     return value.tasks.filter(isTask);
   } catch {
     return null;
@@ -19,9 +21,10 @@ export async function loadTaskCache(scope: string): Promise<Task[] | null> {
 
 export async function storeTaskCache(scope: string, tasks: Task[]): Promise<void> {
   if (!scope) return;
-  const file = cacheFile(scope);
+  const cacheScope = scopedCacheKey(scope);
+  const file = cacheFile(cacheScope);
   if (!file.exists) file.create({ intermediates: true, overwrite: false });
-  file.write(JSON.stringify({ version: VERSION, scope, updatedAt: Date.now(), tasks }));
+  file.write(JSON.stringify({ version: VERSION, scope: cacheScope, updatedAt: Date.now(), tasks }));
 }
 
 function cacheFile(scope: string): File {

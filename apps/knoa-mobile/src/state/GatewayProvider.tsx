@@ -17,7 +17,8 @@ import {
   type NodeDeviceBinding,
 } from "@/security/deviceIdentity";
 import { withAuthenticationRetry } from "./authenticationRecovery";
-import { resolveAndroidRelease } from "@/hub/hubClient";
+import { loadHubConnection, resolveAndroidRelease } from "@/hub/hubClient";
+import { setCacheIdentity } from "@/storage/cacheScope";
 import { installedAndroidVersionCode, isAndroidUpdateAvailable } from "@/update/androidUpdater";
 import { requiresAndroidUpdate } from "@/update/releasePolicy";
 
@@ -77,7 +78,7 @@ type GatewayState = {
   newConversation(agentId?: string): Promise<void>;
   ensureConversation(): Promise<string>;
   commitConversation(sessionHandle: string): Promise<void>;
-  openConversation(sessionHandle: string): Promise<void>;
+  openConversation(sessionHandle: string, metadata?: { agentId?: string; state?: string }): Promise<void>;
   connection(): GatewayConnection | null;
   runAuthenticated<T>(operation: (client: GatewayClient) => Promise<T>): Promise<T>;
   refreshAgents(): Promise<void>;
@@ -144,16 +145,23 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     provisionalConversationRef.current = null;
     commit({ status: "booting", error: "", p2pState: "idle", p2pLastError: "", p2pRetryAt: 0, p2pElapsedMs: 0, lanState: "idle", lanLastError: "", lanRetryAt: 0, lanEndpoint: "", lanElapsedMs: 0, relayState: "idle", relayLastError: "", relayRetryAt: 0, relayElapsedMs: 0 });
     try {
-      const [identity, nodes] = await Promise.all([
+      const [identity, nodes, hubConnection] = await Promise.all([
         loadConnectionIdentity(),
         listNodeBindings(),
+        loadHubConnection(),
       ]);
       if (generation !== connectionGenerationRef.current) return;
       if (!identity) {
+        setCacheIdentity("");
         connectionRef.current = null;
         commit({ status: nodes.length ? "selecting" : "unpaired", client: null, gatewayUrl: "", sessionToken: "", sessionHandle: "", deviceId: "", nodeId: "", nodes, lastConnectedAt: 0, requiredUpdate: null, availableUpdate: null, agents: [], unavailableAgents: [], activeAgentId: "", selectedAgentId: "knoa" });
         return;
       }
+      // Include the hosted account when available and always include the
+      // Node identity.  Cache stores use this boundary for every resource,
+      // preventing stale data from another account or paired Node from being
+      // rendered after a switch.
+      setCacheIdentity(`${hubConnection?.accountId || identity.deviceId}:${identity.nodeId}`);
       const device = { deviceId: identity.deviceId, gatewayUrl: identity.gatewayUrl };
       const transportChanged = (transportMode: "direct" | "p2p" | "relay") => {
         if (generation === connectionGenerationRef.current) commit({ transportMode });
@@ -288,6 +296,8 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     const pending = (async () => {
       const identity = await loadConnectionIdentity();
       if (!identity) throw new Error("设备尚未配对");
+      const hubConnection = await loadHubConnection();
+      setCacheIdentity(`${hubConnection?.accountId || identity.deviceId}:${identity.nodeId}`);
       const transportChanged = (transportMode: "direct" | "p2p" | "relay") => {
         if (generation === connectionGenerationRef.current) commit({ transportMode });
       };
@@ -502,6 +512,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     const client = stateRef.current.client;
     if (client) await client.revokeCurrentDevice();
     await clearConnectionIdentity();
+    setCacheIdentity("");
     connectionRef.current = null;
     commit({ client: null, sessionHandle: "", sessionToken: "", latestEvent: null, status: "booting" });
     await connect();
@@ -512,6 +523,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     provisionalConversationRef.current = null;
     stateRef.current.client?.close();
     await deselectNode();
+    setCacheIdentity("");
     const nodes = await listNodeBindings();
     connectionRef.current = null;
     commit({
@@ -595,12 +607,24 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     commit({ sessionHandle, latestEvent: null });
   }, [commit]);
 
-  const openConversation = useCallback(async (sessionHandle: string) => {
+  const openConversation = useCallback(async (sessionHandle: string, metadata?: { agentId?: string; state?: string }) => {
     provisionalConversationRef.current = null;
+    if (metadata?.state === "archived") throw new Error("请先恢复已归档的会话");
+    // Commit the target immediately so navigation and cached transcript
+    // rendering never wait for a remote session detail round trip.
+    const knownAgent = metadata?.agentId || stateRef.current.selectedAgentId;
+    commit({
+      sessionHandle,
+      latestEvent: null,
+      activeAgentId: knownAgent,
+      selectedAgentId: knownAgent,
+    });
     const session = await runAuthenticated((client) => client.getConversationSession(sessionHandle));
     if (session.state === "archived") throw new Error("请先恢复已归档的会话");
     await storeCoreSession(sessionHandle);
-    commit({ sessionHandle, latestEvent: null, activeAgentId: session.agent_id, selectedAgentId: session.agent_id });
+    if (stateRef.current.sessionHandle === sessionHandle) {
+      commit({ activeAgentId: session.agent_id, selectedAgentId: session.agent_id });
+    }
   }, [commit, runAuthenticated]);
 
   const selectAgent = useCallback((agentId: string) => {

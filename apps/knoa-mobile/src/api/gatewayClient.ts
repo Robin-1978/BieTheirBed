@@ -31,6 +31,9 @@ import type {
 } from "./models";
 import { DirectFetchTransport, type GatewayTransport } from "./gatewayTransportBase";
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
+const LONG_REQUEST_TIMEOUT_MS = 120_000;
+
 type Json = Record<string, unknown>;
 
 export class GatewayError extends Error {
@@ -711,10 +714,22 @@ export class GatewayClient {
       if (!this.token) throw new GatewayError(401, "missing_session");
       headers.set("Authorization", `Bearer ${this.token}`);
     }
-    const response = await this.transport.request(this.baseUrl, path, {
-      ...init,
-      headers,
-    });
+    const timeoutMs = isLongRequest(path, init.method) ? LONG_REQUEST_TIMEOUT_MS : DEFAULT_REQUEST_TIMEOUT_MS;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const abortExternal = () => controller.abort();
+    init.signal?.addEventListener("abort", abortExternal, { once: true });
+    let response: Response;
+    try {
+      response = await this.transport.request(this.baseUrl, path, {
+        ...init,
+        headers,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+      init.signal?.removeEventListener("abort", abortExternal);
+    }
     if (!response.ok) {
       let code = `http_${response.status}`;
       let message = "";
@@ -737,6 +752,11 @@ export class GatewayClient {
     }
     return response;
   }
+}
+
+function isLongRequest(path: string, method?: string): boolean {
+  if (method === "POST" && (path.includes("/turns") || path.includes("/execute") || path.includes("/continue") || path.includes("/artifacts"))) return true;
+  return path.includes("/transcribe") || path.includes("/rerun");
 }
 
 type Challenge = {
