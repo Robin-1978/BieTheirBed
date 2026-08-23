@@ -1044,6 +1044,342 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/capabilities/installations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listCapabilityInstallations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/capabilities/prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["prepareCapabilityInstallation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/capabilities/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["confirmCapabilityInstallation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/capabilities/{capability_id}/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["setCapabilityState"];
+        trace?: never;
+    };
+    "/v1/capabilities/{capability_id}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["rollbackCapability"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/capability-catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listCapabilityCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/capability-catalog/{capability_id}/selection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["selectCatalogCapabilityVersion"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/capability-catalog/{capability_id}/prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["prepareCatalogCapability"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/event-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listEventSources"];
+        put?: never;
+        post: operations["createEventSource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/event-sources/{source_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getEventSource"];
+        put?: never;
+        post?: never;
+        delete: operations["deleteEventSource"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/event-sources/{source_id}/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["setEventSourceState"];
+        trace?: never;
+    };
+    "/v1/event-sources/{source_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["testEventSource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/event-sources/{source_id}/rotate-secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["rotateEventSourceSecret"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/event-sources/{source_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listEventSourceEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/improvements/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["recordImprovementEvidence"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/improvements/cases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createImprovementEvaluationCase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/improvements/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listImprovementCandidates"];
+        put?: never;
+        post: operations["createImprovementCandidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/improvements/candidates/{candidate_id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["replayImprovementCandidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/improvements/candidates/{candidate_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["approveImprovementCandidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/improvements/candidates/{candidate_id}/canary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["finishImprovementCanary"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/improvements/candidates/{candidate_id}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["rollbackImprovementCandidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/device/audit": {
         parameters: {
             query?: never;
@@ -1177,6 +1513,11 @@ export interface components {
          * @enum {string}
          */
         ApprovalState: "pending" | "approved" | "denied" | "expired" | "cancelled";
+        /** ApproveImprovementCandidateRequest */
+        ApproveImprovementCandidateRequest: {
+            /** Canary Scope */
+            canary_scope: string[];
+        };
         /** ArtifactInputRef */
         ArtifactInputRef: {
             /** Artifact Id */
@@ -1313,6 +1654,207 @@ export interface components {
              * @default
              */
             reason: string;
+        };
+        /** CapabilityCatalogResponse */
+        CapabilityCatalogResponse: {
+            /** Entries */
+            entries: components["schemas"]["CatalogEntryResponse"][];
+        };
+        /** CapabilityInstallPlan */
+        CapabilityInstallPlan: {
+            /** Operation Id */
+            operation_id: string;
+            /** Capability Id */
+            capability_id: string;
+            /** Version */
+            version: string;
+            /** Display Name */
+            display_name: string;
+            /** Package Id */
+            package_id: string;
+            /** Package Digest */
+            package_digest: string;
+            /** Component Packages */
+            component_packages: {
+                [key: string]: string;
+            };
+            /** Requested Tools */
+            requested_tools: components["schemas"]["CapabilityRequestedTool"][];
+            /** Withheld Tools */
+            withheld_tools: string[];
+            /** Setup Inputs */
+            setup_inputs: components["schemas"]["CapabilitySetupInput"][];
+            /** Checks */
+            checks: {
+                [key: string]: unknown;
+            }[];
+            /** Draft Id */
+            draft_id: string;
+            /** Draft Version */
+            draft_version: number;
+            /** Previous Revision Id */
+            previous_revision_id: string;
+            /** Plan Digest */
+            plan_digest: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "awaiting_confirmation" | "installing" | "installed" | "failed";
+        };
+        /** CapabilityInstallPlanResponse */
+        CapabilityInstallPlanResponse: {
+            plan: components["schemas"]["CapabilityInstallPlan"];
+        };
+        /** CapabilityInstallation */
+        CapabilityInstallation: {
+            /** Capability Id */
+            capability_id: string;
+            /** Version */
+            version: string;
+            /** Display Name */
+            display_name: string;
+            /** Package Id */
+            package_id: string;
+            /** Component Packages */
+            component_packages: {
+                [key: string]: string;
+            };
+            /** Component Ids */
+            component_ids: string[];
+            /** Active Revision Id */
+            active_revision_id: string;
+            /** Previous Revision Id */
+            previous_revision_id: string;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Health
+             * @enum {string}
+             */
+            health: "healthy" | "failed" | "disabled";
+            /** Installed At */
+            installed_at: number;
+            /** Updated At */
+            updated_at: number;
+        };
+        /** CapabilityInstallationListResponse */
+        CapabilityInstallationListResponse: {
+            /** Installations */
+            installations: components["schemas"]["CapabilityInstallation"][];
+        };
+        /** CapabilityInstallationResponse */
+        CapabilityInstallationResponse: {
+            installation: components["schemas"]["CapabilityInstallation"];
+        };
+        /** CapabilityRequestedTool */
+        CapabilityRequestedTool: {
+            /** Name */
+            name: string;
+            /**
+             * Effect
+             * @enum {string}
+             */
+            effect: "read_only" | "internal_write" | "local_write" | "external_side_effect" | "desktop_control";
+            /**
+             * Capabilities
+             * @default []
+             */
+            capabilities: ("host_read" | "host_write" | "shell" | "network" | "desktop_observe" | "desktop_control" | "memory_read" | "memory_write" | "mcp" | "task_management")[];
+            /**
+             * Risk
+             * @enum {string}
+             */
+            risk: "low" | "medium" | "high";
+        };
+        /** CapabilitySetupInput */
+        CapabilitySetupInput: {
+            /** Name */
+            name: string;
+            /**
+             * Kind
+             * @default secret
+             * @constant
+             */
+            kind: "secret";
+            /**
+             * Required
+             * @default true
+             */
+            required: boolean;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+        };
+        /** CatalogEntryResponse */
+        CatalogEntryResponse: {
+            /** Id */
+            id: string;
+            /** Version */
+            version: string;
+            /** Display Name */
+            display_name: string;
+            /** Description */
+            description: string;
+            /** Platform */
+            platform: string;
+            /**
+             * Operating Systems
+             * @default []
+             */
+            operating_systems: ("linux" | "windows" | "darwin")[];
+            /**
+             * Architectures
+             * @default []
+             */
+            architectures: string[];
+            /** Package Digest */
+            package_digest: string;
+            /** Source */
+            source: string;
+            /**
+             * Permission Summary
+             * @default []
+             */
+            permission_summary: string[];
+            /**
+             * Revoked
+             * @default false
+             */
+            revoked: boolean;
+            /**
+             * Revocation Severity
+             * @default none
+             * @enum {string}
+             */
+            revocation_severity: "none" | "warning" | "critical";
+            selection: components["schemas"]["CatalogSelection"];
+        };
+        /** CatalogSelection */
+        CatalogSelection: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "pinned" | "latest_compatible" | "explicit";
+            /** Version */
+            version: string;
+        };
+        /** CatalogSelectionResponse */
+        CatalogSelectionResponse: {
+            /** Capability Id */
+            capability_id: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "pinned" | "latest_compatible" | "explicit";
+            /** Version */
+            version: string;
+            /** Resolved Version */
+            resolved_version: string;
         };
         /** ChallengeResponse */
         ChallengeResponse: {
@@ -1641,6 +2183,13 @@ export interface components {
              */
             issues: components["schemas"]["ConfigValidationIssue"][];
         };
+        /** ConfirmCapabilityRequest */
+        ConfirmCapabilityRequest: {
+            /** Operation Id */
+            operation_id: string;
+            /** Plan Digest */
+            plan_digest: string;
+        };
         /** ContinueProductTaskRequest */
         ContinueProductTaskRequest: {
             /** Client Request Id */
@@ -1722,6 +2271,92 @@ export interface components {
              * @default null
              */
             agent_id: string | null;
+        };
+        /** CreateEvaluationCaseRequest */
+        CreateEvaluationCaseRequest: {
+            /** Sanitized Input */
+            sanitized_input: string;
+            /** Expected Invariants */
+            expected_invariants: string[];
+            /** Fixture Results */
+            fixture_results?: {
+                [key: string]: unknown;
+            };
+            /** Dataset Version */
+            dataset_version: string;
+        };
+        /** CreateEventSourceRequest */
+        CreateEventSourceRequest: {
+            /** Client Request Id */
+            client_request_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "webhook" | "mcp_resource";
+            /** Title */
+            title: string;
+            /** Goal */
+            goal: string;
+            /**
+             * Agent Id
+             * @default null
+             */
+            agent_id: string | null;
+            /**
+             * Tools Enabled
+             * @default true
+             */
+            tools_enabled: boolean;
+            /**
+             * Priority
+             * @default 0
+             */
+            priority: number;
+            /** Notification Policy */
+            notification_policy?: {
+                [key: string]: boolean;
+            };
+            /**
+             * Mcp Server Id
+             * @default
+             */
+            mcp_server_id: string;
+            /**
+             * Resource Uri Prefix
+             * @default
+             */
+            resource_uri_prefix: string;
+            /**
+             * Include Root
+             * @default true
+             */
+            include_root: boolean;
+            /**
+             * Include Descendants
+             * @default false
+             */
+            include_descendants: boolean;
+        };
+        /** CreateImprovementCandidateRequest */
+        CreateImprovementCandidateRequest: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "prompt" | "skill";
+            /** Target Ref */
+            target_ref: string;
+            /** Base Version */
+            base_version: string;
+            /** Proposed Version */
+            proposed_version: string;
+            /** Proposed Content */
+            proposed_content: string;
+            /** Rationale */
+            rationale: string;
+            /** Evidence Ids */
+            evidence_ids: string[];
         };
         /** CreateProductTaskRequest */
         CreateProductTaskRequest: {
@@ -1826,6 +2461,102 @@ export interface components {
              */
             correlation_id: string;
         };
+        /** EvaluationCase */
+        EvaluationCase: {
+            /** Case Id */
+            case_id: string;
+            /** Principal Id */
+            principal_id: string;
+            /** Sanitized Input */
+            sanitized_input: string;
+            /** Expected Invariants */
+            expected_invariants: string[];
+            /** Fixture Results */
+            fixture_results?: {
+                [key: string]: unknown;
+            };
+            /** Dataset Version */
+            dataset_version: string;
+            /** Created At */
+            created_at: number;
+        };
+        /** EvaluationCaseResponse */
+        EvaluationCaseResponse: {
+            case: components["schemas"]["EvaluationCase"];
+        };
+        /** EventSourceEventListResponse */
+        EventSourceEventListResponse: {
+            /** Events */
+            events: components["schemas"]["TriggerEventSnapshot"][];
+        };
+        /** EventSourceEventResponse */
+        EventSourceEventResponse: {
+            event: components["schemas"]["TriggerEventSnapshot"];
+        };
+        /** EventSourceListResponse */
+        EventSourceListResponse: {
+            /** Event Sources */
+            event_sources: components["schemas"]["EventSourceSnapshot"][];
+        };
+        /** EventSourceResponse */
+        EventSourceResponse: {
+            event_source: components["schemas"]["EventSourceSnapshot"];
+        };
+        /** EventSourceSnapshot */
+        EventSourceSnapshot: {
+            /** Source Id */
+            source_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "webhook" | "mcp_resource";
+            /** Display Name */
+            display_name: string;
+            /** Task Id */
+            task_id: string;
+            state: components["schemas"]["TaskDefinitionState"];
+            /** Health */
+            health: string;
+            /**
+             * Last Event At
+             * @default null
+             */
+            last_event_at: number | null;
+            /** Event Count */
+            event_count: number;
+            /**
+             * Public Url
+             * @default
+             */
+            public_url: string;
+            /**
+             * Route Id
+             * @default
+             */
+            route_id: string;
+            /**
+             * Secret Version
+             * @default 0
+             */
+            secret_version: number;
+            /** Source Config */
+            source_config?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Secret
+             * @default null
+             */
+            secret: string | null;
+            /**
+             * Signing Example
+             * @default null
+             */
+            signing_example: {
+                [key: string]: unknown;
+            } | null;
+        };
         /** ExtensionImportResponse */
         ExtensionImportResponse: {
             /** Result */
@@ -1864,6 +2595,15 @@ export interface components {
              * @default
              */
             detail: string;
+        };
+        /** FinishImprovementCanaryRequest */
+        FinishImprovementCanaryRequest: {
+            /** Promote */
+            promote: boolean;
+            /** Metrics */
+            metrics?: {
+                [key: string]: number;
+            };
         };
         /** HealthResponse */
         HealthResponse: {
@@ -1951,6 +2691,83 @@ export interface components {
         ImportSkillRequest: {
             /** Source Path */
             source_path: string;
+        };
+        /** ImprovementCandidate */
+        ImprovementCandidate: {
+            /** Candidate Id */
+            candidate_id: string;
+            /** Principal Id */
+            principal_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "prompt" | "skill";
+            /** Target Ref */
+            target_ref: string;
+            /** Base Version */
+            base_version: string;
+            /** Proposed Version */
+            proposed_version: string;
+            /** Proposed Content */
+            proposed_content: string;
+            /** Rationale */
+            rationale: string;
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "draft" | "evaluated" | "awaiting_approval" | "canary" | "promoted" | "rejected" | "rolled_back";
+            /** Author */
+            author: string;
+            /** Created At */
+            created_at: number;
+            /** Updated At */
+            updated_at: number;
+        };
+        /** ImprovementCandidateListResponse */
+        ImprovementCandidateListResponse: {
+            /** Candidates */
+            candidates: components["schemas"]["ImprovementCandidate"][];
+        };
+        /** ImprovementCandidateResponse */
+        ImprovementCandidateResponse: {
+            candidate: components["schemas"]["ImprovementCandidate"];
+        };
+        /** ImprovementEvidence */
+        ImprovementEvidence: {
+            /** Evidence Id */
+            evidence_id: string;
+            /** Principal Id */
+            principal_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "explicit_feedback" | "failed_execution" | "recovery_result" | "metric_regression";
+            /** Subject Ref */
+            subject_ref: string;
+            /** Summary */
+            summary: string;
+            /** Created At */
+            created_at: number;
+        };
+        /** ImprovementEvidenceResponse */
+        ImprovementEvidenceResponse: {
+            evidence: components["schemas"]["ImprovementEvidence"];
+        };
+        /** ImprovementPromotionResponse */
+        ImprovementPromotionResponse: {
+            /** Promotion */
+            promotion: {
+                [key: string]: unknown;
+            };
+        };
+        /** ImprovementReplayResponse */
+        ImprovementReplayResponse: {
+            replay: components["schemas"]["ReplayResult"];
         };
         /** InvocationLimits */
         InvocationLimits: {
@@ -2636,6 +3453,11 @@ export interface components {
              */
             reason: string;
         };
+        /** PrepareCapabilityRequest */
+        PrepareCapabilityRequest: {
+            /** Source Path */
+            source_path: string;
+        };
         /** PreviewInvocationPolicyRequest */
         PreviewInvocationPolicyRequest: {
             /** Agent Id */
@@ -2934,11 +3756,60 @@ export interface components {
              */
             summary: string;
         };
+        /** RecordImprovementEvidenceRequest */
+        RecordImprovementEvidenceRequest: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "explicit_feedback" | "failed_execution" | "recovery_result" | "metric_regression";
+            /**
+             * Subject Ref
+             * @default
+             */
+            subject_ref: string;
+            /** Summary */
+            summary: string;
+        };
         /** ReplaceConfigDraftRequest */
         ReplaceConfigDraftRequest: {
             document: components["schemas"]["ManagedConfig"];
             /** Expected Version */
             expected_version: number;
+        };
+        /** ReplayImprovementCandidateRequest */
+        ReplayImprovementCandidateRequest: {
+            /** Dataset Version */
+            dataset_version: string;
+        };
+        /** ReplayResult */
+        ReplayResult: {
+            /** Replay Id */
+            replay_id: string;
+            /** Candidate Id */
+            candidate_id: string;
+            /** Dataset Version */
+            dataset_version: string;
+            /** Case Count */
+            case_count: number;
+            /** Passed */
+            passed: boolean;
+            /** Quality Score */
+            quality_score: number;
+            /** Safety Violations */
+            safety_violations: number;
+            /** Estimated Cost */
+            estimated_cost: number;
+            /** Latency Ms */
+            latency_ms: number;
+            /** Recovery Success Rate */
+            recovery_success_rate: number;
+            /** Details */
+            details: {
+                [key: string]: unknown;
+            }[];
+            /** Created At */
+            created_at: number;
         };
         /** ResolveApprovalRequest */
         ResolveApprovalRequest: {
@@ -3080,6 +3951,20 @@ export interface components {
              */
             fingerprint: string;
         };
+        /** SelectCatalogCapabilityRequest */
+        SelectCatalogCapabilityRequest: {
+            /**
+             * Mode
+             * @default latest_compatible
+             * @enum {string}
+             */
+            mode: "pinned" | "latest_compatible" | "explicit";
+            /**
+             * Version
+             * @default
+             */
+            version: string;
+        };
         /** SessionCreatedResponse */
         SessionCreatedResponse: {
             /** Session Handle */
@@ -3095,6 +3980,19 @@ export interface components {
             principal_id: string;
             /** Expires At */
             expires_at: number;
+        };
+        /** SetCapabilityStateRequest */
+        SetCapabilityStateRequest: {
+            /** Enabled */
+            enabled: boolean;
+        };
+        /** SetEventSourceStateRequest */
+        SetEventSourceStateRequest: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "active" | "paused";
         };
         /** TaskApprovalSnapshot */
         TaskApprovalSnapshot: {
@@ -3396,6 +4294,18 @@ export interface components {
             /** Occurred At */
             occurred_at: number;
         };
+        /** TestEventSourceRequest */
+        TestEventSourceRequest: {
+            /**
+             * External Event Id
+             * @default
+             */
+            external_event_id: string;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+        };
         /** ToolDescriptorRecord */
         ToolDescriptorRecord: {
             /** Name */
@@ -3447,6 +4357,28 @@ export interface components {
              */
             descriptors: components["schemas"]["ToolDescriptorRecord"][];
         };
+        /** TriggerEventSnapshot */
+        TriggerEventSnapshot: {
+            /** Trigger Event Id */
+            trigger_event_id: string;
+            /** Trigger Id */
+            trigger_id: string;
+            /** External Event Id */
+            external_event_id: string;
+            state: components["schemas"]["TriggerEventState"];
+            /**
+             * Task Id
+             * @default
+             */
+            task_id: string;
+            /** Received At */
+            received_at: number;
+        };
+        /**
+         * TriggerEventState
+         * @enum {string}
+         */
+        TriggerEventState: "baselined" | "received" | "claimed" | "retry_wait" | "task_created" | "dead";
         /** UpdateConversationSessionRequest */
         UpdateConversationSessionRequest: {
             /**
@@ -3531,6 +4463,17 @@ export interface components {
              * @enum {string}
              */
             recommended_action: "wait" | "respond" | "retry" | "resume" | "none";
+        };
+        /** WebhookSecretRotationResponse */
+        WebhookSecretRotationResponse: {
+            /** Route Id */
+            route_id: string;
+            /** Secret */
+            secret: string;
+            /** Secret Version */
+            secret_version: number;
+            /** Previous Secret Expires At */
+            previous_secret_expires_at: number;
         };
         /** WriteSecretRequest */
         WriteSecretRequest: {
@@ -8712,6 +9655,1625 @@ export interface operations {
             };
             /** @description Request rejected */
             416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listCapabilityInstallations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Installed capabilities */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityInstallationListResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    prepareCapabilityInstallation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrepareCapabilityRequest"];
+            };
+        };
+        responses: {
+            /** @description Capability installation plan */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityInstallPlanResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    confirmCapabilityInstallation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmCapabilityRequest"];
+            };
+        };
+        responses: {
+            /** @description Installed capability */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityInstallationResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    setCapabilityState: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                capability_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetCapabilityStateRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated capability */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityInstallationResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    rollbackCapability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                capability_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rolled back capability */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityInstallationResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listCapabilityCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verified capability catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityCatalogResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    selectCatalogCapabilityVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                capability_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SelectCatalogCapabilityRequest"];
+            };
+        };
+        responses: {
+            /** @description Saved catalog selection */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogSelectionResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    prepareCatalogCapability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                capability_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SelectCatalogCapabilityRequest"];
+            };
+        };
+        responses: {
+            /** @description Catalog capability installation plan */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityInstallPlanResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listEventSources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Event sources */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventSourceListResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    createEventSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateEventSourceRequest"];
+            };
+        };
+        responses: {
+            /** @description Created event source */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventSourceResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getEventSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Event source */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventSourceResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    deleteEventSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted event source */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    setEventSourceState: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetEventSourceStateRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated event source */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventSourceResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    testEventSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestEventSourceRequest"];
+            };
+        };
+        responses: {
+            /** @description Accepted test event */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventSourceEventResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    rotateEventSourceSecret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rotated webhook secret */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookSecretRotationResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listEventSourceEvents: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recent source events */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventSourceEventListResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    recordImprovementEvidence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordImprovementEvidenceRequest"];
+            };
+        };
+        responses: {
+            /** @description Recorded improvement evidence */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImprovementEvidenceResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    createImprovementEvaluationCase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateEvaluationCaseRequest"];
+            };
+        };
+        responses: {
+            /** @description Created evaluation case */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvaluationCaseResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listImprovementCandidates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Improvement candidates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImprovementCandidateListResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    createImprovementCandidate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateImprovementCandidateRequest"];
+            };
+        };
+        responses: {
+            /** @description Created improvement candidate */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImprovementCandidateResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    replayImprovementCandidate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplayImprovementCandidateRequest"];
+            };
+        };
+        responses: {
+            /** @description Offline replay result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImprovementReplayResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    approveImprovementCandidate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveImprovementCandidateRequest"];
+            };
+        };
+        responses: {
+            /** @description Approved candidate canary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImprovementPromotionResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    finishImprovementCanary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FinishImprovementCanaryRequest"];
+            };
+        };
+        responses: {
+            /** @description Finished candidate canary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImprovementCandidateResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    rollbackImprovementCandidate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rolled back improvement candidate */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImprovementCandidateResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

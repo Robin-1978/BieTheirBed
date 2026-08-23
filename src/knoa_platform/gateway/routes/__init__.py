@@ -7,6 +7,7 @@ from knoa_platform.gateway.routes.conversations import ConversationRoutes
 from knoa_platform.gateway.routes.device import DeviceRoutes
 from knoa_platform.gateway.routes.extensions import ExtensionRoutes
 from knoa_platform.gateway.routes.event_sources import EventSourceRoutes
+from knoa_platform.gateway.routes.governance import GovernanceRoutes
 from knoa_platform.gateway.routes.p2p import P2PRoutes
 from knoa_platform.gateway.routes.fleet import FleetRoutes
 from knoa_platform.gateway.routes.remote_resources import RemoteResourceRoutes
@@ -21,6 +22,7 @@ __all__ = [
     "DeviceRoutes",
     "ExtensionRoutes",
     "EventSourceRoutes",
+    "GovernanceRoutes",
     "P2PRoutes",
     "FleetRoutes",
     "RemoteResourceRoutes",

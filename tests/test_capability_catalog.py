@@ -1,0 +1,73 @@
+from __future__ import annotations
+
+import base64
+import json
+from pathlib import Path
+
+import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+from knoa_platform.extensions.capability_catalog import (
+    CapabilityCatalogService,
+    OFFICIAL_CATALOG_TRUST_ROOTS,
+)
+from knoa_platform.extensions.package_store import PackageStore
+
+
+class _Installer:
+    pass
+
+
+def test_official_catalog_is_signed_and_browser_digest_matches_reference_package(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    packages = PackageStore(tmp_path / "packages")
+    service = CapabilityCatalogService(
+        root / "catalog/capabilities.json",
+        trust_roots=OFFICIAL_CATALOG_TRUST_ROOTS,
+        source_root=root,
+        database=tmp_path / "gateway.db",
+        packages=packages,
+        installer=_Installer(),  # type: ignore[arg-type]
+    )
+    entry = service.resolve("knoa.browser")
+    package = packages.import_directory("capability", service.source_path(entry), imported_by="principal-a")
+    assert package.content_digest == entry.package_digest
+    assert service.select("principal-a", "knoa.browser", mode="pinned", version="1.0.0")["resolved_version"] == "1.0.0"
+
+
+def test_catalog_rejects_tampering_and_revoked_versions(tmp_path: Path) -> None:
+    key = Ed25519PrivateKey.generate()
+    public = base64.urlsafe_b64encode(key.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw,
+    )).rstrip(b"=").decode()
+    payload = {
+        "schema": "knoa-capability-catalog-v1", "catalog_id": "test", "generated_at": 1,
+        "entries": [{
+            "id": "demo", "version": "1.0.0", "display_name": "Demo",
+            "description": "Demo package", "platform": ">=0.2.0",
+            "operating_systems": [], "architectures": [], "package_digest": "0" * 64,
+            "source": "relative://demo", "permission_summary": [],
+            "revoked": True, "revocation_severity": "critical",
+        }],
+    }
+    transcript = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    payload["signature"] = {
+        "key_id": "test-key",
+        "value": base64.urlsafe_b64encode(key.sign(transcript)).rstrip(b"=").decode(),
+    }
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text(json.dumps(payload), encoding="utf-8")
+    service = CapabilityCatalogService(
+        catalog, trust_roots={"test-key": public}, source_root=tmp_path,
+        database=tmp_path / "gateway.db", packages=PackageStore(tmp_path / "packages"),
+        installer=_Installer(),  # type: ignore[arg-type]
+    )
+    with pytest.raises(PermissionError, match="Revoked"):
+        service.resolve("demo")
+    payload["entries"][0]["description"] = "tampered"
+    catalog.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(PermissionError, match="signature"):
+        service.load()

@@ -10,6 +10,7 @@ from knoa_platform.node_hub import NodeHubStore
 from knoa_platform.node_identity import NodeIdentityStore
 from knoa_platform.runtime import RuntimePaths
 from knoa_platform.service import processes
+from knoa_platform.service.process_output import decode_process_output
 from knoa_platform.service.credentials import resolve_local_service_token
 from knoa_platform.service.shutdown import wait_for_shutdown
 
@@ -77,3 +78,24 @@ def test_windows_process_probe_uses_read_only_native_query(monkeypatch) -> None:
 
     assert processes.process_exists(42) is True
     assert calls == [42]
+
+
+@pytest.mark.windows_contract
+def test_windows_process_output_decodes_gbk_and_keeps_raw_digest(monkeypatch) -> None:
+    monkeypatch.setattr("knoa_platform.service.process_output.locale.getpreferredencoding", lambda _do_setlocale=False: "cp1252")
+    raw = "执行成功".encode("gbk")
+    text, summary = decode_process_output(raw, windows=True)
+    assert text == "执行成功"
+    assert summary.encoding == "gb18030"
+    assert summary.byte_count == len(raw)
+    assert len(summary.sha256) == 64
+    assert summary.had_replacements is False
+
+
+@pytest.mark.windows_contract
+def test_process_output_falls_back_without_losing_audit_summary() -> None:
+    raw = b"\xff\xfe\xfd"
+    text, summary = decode_process_output(raw, windows=False)
+    assert "\ufffd" in text
+    assert summary.had_replacements is True
+    assert summary.encoding == "utf-8-replace"

@@ -8,6 +8,7 @@ import subprocess
 from typing import Any
 
 from knoa_platform.platform_ import get_platform
+from knoa_platform.service.process_output import decode_process_output
 from knoa_platform.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRisk
 
 
@@ -365,8 +366,12 @@ class ShellTool(ToolBase):
                     return_exceptions=True,
                 )
 
-            stdout = bytes(stdout_buffer).decode("utf-8", errors="replace")
-            stderr = bytes(stderr_buffer).decode("utf-8", errors="replace")
+            stdout, stdout_summary = decode_process_output(
+                bytes(stdout_buffer), windows=plat == "windows"
+            )
+            stderr, stderr_summary = decode_process_output(
+                bytes(stderr_buffer), windows=plat == "windows"
+            )
             if timed_out:
                 return {
                     "error": f"Command timed out after {timeout}s",
@@ -379,6 +384,8 @@ class ShellTool(ToolBase):
                     "returncode": -1,
                     "stdout": stdout,
                     "stderr": stderr,
+                    "stdout_meta": stdout_summary.as_dict(),
+                    "stderr_meta": stderr_summary.as_dict(),
                     "output_truncated": True,
                     "command": original_command,
                 }
@@ -386,6 +393,8 @@ class ShellTool(ToolBase):
                 "returncode": proc.returncode,
                 "stdout": stdout,
                 "stderr": stderr,
+                "stdout_meta": stdout_summary.as_dict(),
+                "stderr_meta": stderr_summary.as_dict(),
                 "command": original_command,
                 "success": proc.returncode == 0,
             }
