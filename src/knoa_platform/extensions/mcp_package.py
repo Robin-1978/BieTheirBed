@@ -187,6 +187,21 @@ def build_mcp_package_providers(
                 server_id,
             )
             continue
+        # A half-written stdio package (for example while an import is being
+        # replaced) is not an executable capability. Ignore it until the next
+        # restart instead of registering a permanent failed extension.
+        try:
+            manifest = yaml.safe_load(_read_manifest(package_root))
+        except (OSError, ValueError, yaml.YAMLError) as exc:
+            logger.warning("Ignoring unreadable local MCP package %s: %s", package_root, exc)
+            continue
+        if (
+            isinstance(manifest, dict)
+            and manifest.get("transport", "stdio") == "stdio"
+            and not str(manifest.get("command", "")).strip()
+        ):
+            logger.warning("Ignoring incomplete local MCP package without command: %s", package_root)
+            continue
         providers.append(
             MCPServerProvider(
                 server_id,

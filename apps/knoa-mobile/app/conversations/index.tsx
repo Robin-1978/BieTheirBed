@@ -30,6 +30,7 @@ export default function ConversationHistoryScreen() {
   const [showArchived, setShowArchived] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [cachedAt, setCachedAt] = useState<number | null>(null);
   const [working, setWorking] = useState("");
   const [editing, setEditing] = useState("");
   const [title, setTitle] = useState("");
@@ -50,6 +51,17 @@ export default function ConversationHistoryScreen() {
       sessionsRef.current = result.sessions;
       setNextCursor(result.nextCursor);
       void storeConversationListCache(cacheScope, result.sessions, result.nextCursor);
+      setCachedAt(Date.now());
+      // Warm the archived view in the background so switching filters is instant.
+      if (!showArchived) {
+        void gateway.runAuthenticated((client) => client.listConversationSessions({ includeArchived: true, limit: 50 }))
+          .then((archived) => storeConversationListCache(
+            `${params.workspaceId ?? ""}:${params.nodeId ?? gateway.nodeId}:archived`,
+            archived.sessions,
+            archived.nextCursor,
+          ))
+          .catch(() => undefined);
+      }
     } catch {
       setError(t("conversations.loadFailed"));
     } finally {
@@ -65,6 +77,7 @@ export default function ConversationHistoryScreen() {
       sessionsRef.current = cached.sessions;
       setSessions(cached.sessions);
       setNextCursor(cached.nextCursor);
+      setCachedAt(cached.updatedAt || null);
       setLoading(false);
     }).finally(() => {
       if (active) void refresh();
@@ -174,7 +187,9 @@ export default function ConversationHistoryScreen() {
             </AppPressable>
           </View>
           {error ? <Text style={styles.error}>{error}</Text> : null}
-          {loading || refreshing ? <ActivityIndicator color={colors.accent} style={styles.loading} /> : null}
+          {loading && sessions.length === 0 ? <ActivityIndicator color={colors.accent} style={styles.loading} /> : null}
+          {!loading && refreshing && sessions.length > 0 ? <Text style={styles.syncing}>{t("conversations.syncing")}</Text> : null}
+          {!loading && !refreshing && cachedAt ? <Text style={styles.synced}>{t("conversations.synced", { time: formatRelativeTime(cachedAt, locale) })}</Text> : null}
         </>
       )}
       ListEmptyComponent={!loading ? <Text style={styles.empty}>{t("conversations.empty")}</Text> : null}
@@ -257,6 +272,16 @@ function formatTime(value: number, locale: string): string {
   return new Date(value * 1000).toLocaleString(locale, { hour12: false });
 }
 
+function formatRelativeTime(value: number, locale: string): string {
+  const elapsed = Math.max(0, Date.now() - value);
+  if (elapsed < 60_000) return locale.startsWith("zh") ? "刚刚" : "just now";
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 60) return locale.startsWith("zh") ? `${minutes} 分钟前` : `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return locale.startsWith("zh") ? `${hours} 小时前` : `${hours}h ago`;
+  return new Date(value).toLocaleDateString(locale);
+}
+
 function agentName(agentId: string, agents: AgentSummary[]): string {
   return agents.find((agent) => agent.agent_id === agentId)?.display_name ?? agentId;
 }
@@ -275,6 +300,8 @@ const styles = StyleSheet.create({
   actions: { flexDirection: "row", gap: 18, alignItems: "center" },
   iconAction: { width: 44, height: 44, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: colors.background },
   loading: { marginTop: 60 },
+  syncing: { color: colors.muted, fontSize: 12 },
+  synced: { color: colors.muted, fontSize: 12 },
   empty: { color: colors.muted, textAlign: "center", marginTop: 60 },
   error: { color: colors.danger, lineHeight: 20 },
   loadMore: { alignItems: "center", paddingVertical: 14 },
