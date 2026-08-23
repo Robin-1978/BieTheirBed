@@ -193,11 +193,11 @@
 
 ## 发布门禁
 
-- [~] Python 全量测试通过。（本机 Windows 环境存在既有失败：POSIX 路径/进程组/chmod 类约 77 项；`test_restart_pauses_interrupted_task_until_explicit_resume` 存在与本次改动无关的既有竞态 flaky，待专项修复）
-- [ ] Mobile 类型检查和测试通过。
-- [ ] Android 签名构建、版本号、SHA256 和下载地址一致。
+- [x] Python 全量测试通过（`1022 passed`）。
+- [x] Mobile 类型检查和测试通过（Vitest `131 passed`）。
+- [x] Android 签名构建、版本号、SHA256 和下载地址一致（`0.2.85 (96)`）。
 - [ ] Windows/Linux 更新重复执行不会留下孤儿进程、端口占用或无限重启。
-- [ ] Node 健康检查、Hub 健康检查和移动端下载地址均验证通过。
+- [x] Node 健康检查、Hub 健康检查和移动端下载地址均验证通过。
 - [ ] 真机验证：冷启动、断网、切网、后台恢复、清除缓存、切换账户、切换 Workspace、Node 重启。
 - [ ] 真机验证：会话缓存、任务缓存、附件上传、语音转写、图片首次理解和失败重试。
 - [ ] 真机验证：App 完全关闭后任务通知、通知点击深链和审批恢复。
