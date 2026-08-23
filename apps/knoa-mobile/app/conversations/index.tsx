@@ -19,6 +19,7 @@ import { removeConversationCache } from "@/storage/conversationCache";
 import { loadConversationListCache, storeConversationListCache } from "@/storage/conversationListCache";
 import { colors } from "@/theme";
 import { useI18n } from "@/i18n";
+import { formatRelativeTime } from "@/ui/formatRelativeTime";
 
 export default function ConversationHistoryScreen() {
   const gateway = useGateway();
@@ -270,16 +271,6 @@ function IconAction({ label, icon, danger = false, disabled = false, onPress }: 
 
 function formatTime(value: number, locale: string): string {
   return new Date(value * 1000).toLocaleString(locale, { hour12: false });
-}
-
-function formatRelativeTime(value: number, locale: string): string {
-  const elapsed = Math.max(0, Date.now() - value);
-  if (elapsed < 60_000) return locale.startsWith("zh") ? "刚刚" : "just now";
-  const minutes = Math.floor(elapsed / 60_000);
-  if (minutes < 60) return locale.startsWith("zh") ? `${minutes} 分钟前` : `${minutes} min ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return locale.startsWith("zh") ? `${hours} 小时前` : `${hours}h ago`;
-  return new Date(value).toLocaleDateString(locale);
 }
 
 function agentName(agentId: string, agents: AgentSummary[]): string {
