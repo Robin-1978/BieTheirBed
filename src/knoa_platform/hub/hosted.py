@@ -560,6 +560,13 @@ class HostedControlRepository:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def all_workspace_ids(self) -> tuple[str, ...]:
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT workspace_id FROM hosted_workspaces WHERE state='active' ORDER BY workspace_id"
+            ).fetchall()
+        return tuple(str(row["workspace_id"]) for row in rows)
+
     def create_workspace(
         self,
         account_id: str,
@@ -832,6 +839,7 @@ class HostedTenantDispatcher:
         self._hub_id = hub_id
         self._control = control
         self._applications: dict[str, Starlette] = {}
+        self._hub_applications: dict[str, HubApplication] = {}
 
     def application(self, workspace_id: str) -> Starlette:
         existing = self._applications.get(workspace_id)
@@ -856,9 +864,15 @@ class HostedTenantDispatcher:
             ),
             hub_id=self._hub_id,
         )
-        application = HubApplication(service, deployment_mode=DEPLOYMENT_MODE).app
+        hub_application = HubApplication(service, deployment_mode=DEPLOYMENT_MODE)
+        application = hub_application.app
         self._applications[workspace_id] = application
+        self._hub_applications[workspace_id] = hub_application
         return application
+
+    def hub_application(self, workspace_id: str) -> HubApplication:
+        self.application(workspace_id)
+        return self._hub_applications[workspace_id]
 
     async def __call__(self, scope, receive, send) -> None:
         path = str(scope.get("path", ""))
@@ -966,6 +980,7 @@ class HostedHubApplication:
                     self.download_latest_android_release,
                     methods=["GET"],
                 ),
+                Route("/hooks/v1/{route_id:str}", self.webhook_ingress, methods=["POST"]),
                 Route(
                     "/v1/hosted/account/password",
                     self.change_password,
@@ -1040,6 +1055,17 @@ class HostedHubApplication:
                 "X-Content-Type-Options": "nosniff",
             },
         )
+
+    async def webhook_ingress(self, request: Request) -> JSONResponse:
+        route_id = str(request.path_params.get("route_id", ""))
+        for workspace_id in self.control.all_workspace_ids():
+            hub_application = self.tenants.hub_application(workspace_id)
+            try:
+                hub_application.service.repository.webhook_route(route_id)
+            except LookupError:
+                continue
+            return await hub_application.webhook_ingress(request)
+        return JSONResponse({"error": "not_found"}, status_code=404)
 
     def _console_authorized(self, request: Request) -> bool:
         if request.client is None:

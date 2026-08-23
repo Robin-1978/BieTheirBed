@@ -20,6 +20,7 @@ from knoa_platform.extensions.capability_bundle import (
     CapabilityInstaller,
 )
 from knoa_platform.extensions.package_store import PackageStore
+from knoa_platform.events import EventSourceRepository
 from knoa_platform.fleet import FleetCandidateService
 from knoa_platform.gateway.audit import GatewayAuditRepository
 from knoa_platform.gateway.auth import (
@@ -38,6 +39,7 @@ from knoa_platform.gateway.routes import (
     ConversationRoutes,
     DeviceRoutes,
     ExtensionRoutes,
+    EventSourceRoutes,
     FleetRoutes,
     P2PRoutes,
     RemoteResourceRoutes,
@@ -101,6 +103,7 @@ class SecureGatewayAdapter(
     DeviceRoutes,
     ConfigurationRoutes,
     ExtensionRoutes,
+    EventSourceRoutes,
     FleetRoutes,
     P2PRoutes,
     SecretRoutes,
@@ -180,6 +183,7 @@ class SecureGatewayAdapter(
             CapabilityInstallationRepository(database),
             inspector=self._extension_imports,
         )
+        self._event_sources = EventSourceRepository(database)
         self._fleet_candidates = FleetCandidateService(
             self._node_identity,
             identities,
@@ -382,6 +386,14 @@ class SecureGatewayAdapter(
                 ),
                 Route("/v1/tasks", self._create_task, methods=["POST"]),
                 Route("/v1/tasks", self._list_tasks, methods=["GET"]),
+                Route("/v1/event-sources", self._list_event_sources, methods=["GET"]),
+                Route("/v1/event-sources", self._create_event_source, methods=["POST"]),
+                Route("/v1/event-sources/{source_id:str}", self._get_event_source, methods=["GET"]),
+                Route("/v1/event-sources/{source_id:str}", self._delete_event_source, methods=["DELETE"]),
+                Route("/v1/event-sources/{source_id:str}/state", self._set_event_source_state, methods=["PATCH"]),
+                Route("/v1/event-sources/{source_id:str}/test", self._test_event_source, methods=["POST"]),
+                Route("/v1/event-sources/{source_id:str}/rotate-secret", self._rotate_event_source_secret, methods=["POST"]),
+                Route("/v1/event-sources/{source_id:str}/events", self._event_source_events, methods=["GET"]),
                 Route("/v1/events", self._events, methods=["GET"]),
                 Route("/v1/events/poll", self._events_poll, methods=["GET"]),
                 Route("/v1/artifacts", self._search_artifacts, methods=["GET"]),

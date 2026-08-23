@@ -590,6 +590,33 @@ class TriggerRepository:
             raise TriggerNotFoundError("Trigger event not found")
         return self._event(row)
 
+    def list_events(
+        self,
+        principal_id: str,
+        trigger_id: str,
+        *,
+        limit: int = 50,
+    ) -> tuple[TriggerEventRecord, ...]:
+        """Return the bounded, newest-first event history for one owned Trigger."""
+        principal = self._identifier(principal_id, label="principal_id", limit=256)
+        normalized_trigger = self._identifier(trigger_id, label="trigger_id")
+        if not 1 <= limit <= 200:
+            raise ValueError("Trigger event limit must be between 1 and 200")
+        with self._connect() as db:
+            trigger = db.execute(
+                "SELECT 1 FROM runtime_triggers WHERE trigger_id=? AND principal_id=?",
+                (normalized_trigger, principal),
+            ).fetchone()
+            if trigger is None:
+                raise TriggerNotFoundError("Trigger not found")
+            rows = db.execute(
+                """SELECT * FROM runtime_trigger_events
+                   WHERE trigger_id=? AND principal_id=?
+                   ORDER BY received_at DESC, trigger_event_id DESC LIMIT ?""",
+                (normalized_trigger, principal, limit),
+            ).fetchall()
+        return tuple(self._event(row) for row in rows)
+
     def claim_next(
         self,
         worker_id: str,

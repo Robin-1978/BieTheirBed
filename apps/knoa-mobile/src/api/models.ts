@@ -532,6 +532,32 @@ export type TaskExecutionTrace = {
   revision: number;
 };
 
+export type EventSource = {
+  source_id: string;
+  kind: "webhook" | "mcp_resource";
+  display_name: string;
+  task_id: string;
+  state: "active" | "paused" | "archived";
+  health: string;
+  last_event_at: number | null;
+  event_count: number;
+  public_url: string;
+  route_id: string;
+  secret_version: number;
+  source_config: Record<string, unknown>;
+  secret?: string;
+  signing_example?: Record<string, unknown>;
+};
+
+export type EventSourceEvent = {
+  trigger_event_id: string;
+  trigger_id: string;
+  external_event_id: string;
+  state: string;
+  task_id: string;
+  received_at: number;
+};
+
 export type TaskEvent = {
   task_id: string;
   event_seq: number;

@@ -12,6 +12,7 @@ from knoa_platform.service.core_api import (
     GetTriggerRequest,
     ListSchedulesRequest,
     ListTriggersRequest,
+    ListTriggerEventsRequest,
     PauseScheduleRequest,
     PauseTriggerRequest,
     ResumeScheduleRequest,
@@ -22,6 +23,7 @@ from knoa_platform.service.core_api import (
     ScheduleSnapshotMessage,
     TriggerAcceptedMessage,
     TriggerEventAcceptedMessage,
+    TriggerEventListMessage,
     TriggerEventSnapshot,
     TriggerListMessage,
     TriggerSnapshot,
@@ -193,3 +195,20 @@ class CoreAutomationClientMixin:
         if not isinstance(response, TriggerEventAcceptedMessage):
             raise RuntimeError("CoreServer returned an invalid trigger event response")
         return response.event
+
+    async def list_trigger_events(
+        self,
+        trigger_id: str,
+        *,
+        limit: int = 50,
+    ) -> tuple[TriggerEventSnapshot, ...]:
+        response = await self._request(
+            ListTriggerEventsRequest(
+                request_id=self._request_id(),
+                trigger_id=trigger_id,
+                limit=limit,
+            )
+        )
+        if not isinstance(response, TriggerEventListMessage):
+            raise RuntimeError("CoreServer returned an invalid Trigger event list")
+        return response.events

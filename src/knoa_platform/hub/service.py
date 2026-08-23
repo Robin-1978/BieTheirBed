@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -241,6 +242,108 @@ class HubService:
         )
         key = hashlib.sha256(b"knoa-hub-push-token-v1\x00" + private).digest()
         return AESGCM(key).decrypt(raw[:12], raw[12:], self.hub_id.encode()).decode()
+
+    def _encrypt_webhook_secret(self, secret: str) -> str:
+        private = self._signing_key.private_bytes(
+            serialization.Encoding.Raw,
+            serialization.PrivateFormat.Raw,
+            serialization.NoEncryption(),
+        )
+        key = hashlib.sha256(b"knoa-hub-webhook-secret-v1\x00" + private).digest()
+        nonce = os.urandom(12)
+        return _encode(nonce + AESGCM(key).encrypt(nonce, secret.encode(), self.workspace_id.encode()))
+
+    def _decrypt_webhook_secret(self, ciphertext: str) -> str:
+        raw = _decode(ciphertext)
+        private = self._signing_key.private_bytes(
+            serialization.Encoding.Raw,
+            serialization.PrivateFormat.Raw,
+            serialization.NoEncryption(),
+        )
+        key = hashlib.sha256(b"knoa-hub-webhook-secret-v1\x00" + private).digest()
+        return AESGCM(key).decrypt(raw[:12], raw[12:], self.workspace_id.encode()).decode()
+
+    def provision_webhook_route(self, request: dict) -> dict:
+        node = self._verify_node_control(request, "knoa-webhook-route-provision-v1")
+        secret = secrets.token_urlsafe(32)
+        route_id = f"whr_{secrets.token_urlsafe(24)}"
+        item = self.repository.put_webhook_route({
+            **request,
+            "account_id": self.owner_subject_id,
+            "node_id": str(node["node_id"]),
+            "route_id": route_id,
+            "secret_ciphertext": self._encrypt_webhook_secret(secret),
+        })
+        # Idempotent route creation must never reveal an existing secret again.
+        created = item["route_id"] == route_id
+        return {
+            "route_id": item["route_id"],
+            "secret": secret if created else "",
+            "secret_version": int(item["secret_version"]),
+        }
+
+    def rotate_webhook_secret(self, request: dict) -> dict:
+        node = self._verify_node_control(request, "knoa-webhook-secret-rotate-v1")
+        route = self.repository.webhook_route(str(request["route_id"]))
+        if route["node_id"] != node["node_id"]:
+            raise PermissionError("Webhook route owner rejected")
+        secret = secrets.token_urlsafe(32)
+        route = self.repository.rotate_webhook_secret(
+            str(route["route_id"]),
+            secret_ciphertext=self._encrypt_webhook_secret(secret),
+            overlap_until=self._clock() + 300,
+        )
+        return {
+            "route_id": route["route_id"],
+            "secret": secret,
+            "secret_version": int(route["secret_version"]),
+            "previous_secret_expires_at": route["previous_secret_expires_at"],
+        }
+
+    def delete_webhook_route(self, request: dict) -> None:
+        node = self._verify_node_control(request, "knoa-webhook-route-delete-v1")
+        self.repository.delete_webhook_route(str(node["node_id"]), str(request["route_id"]))
+
+    def accept_webhook(
+        self,
+        route_id: str,
+        *,
+        event_id: str,
+        timestamp_text: str,
+        signature: str,
+        body: bytes,
+        payload: dict,
+    ) -> tuple[dict, bool]:
+        route = self.repository.webhook_route(route_id)
+        if route["state"] != "active":
+            raise LookupError("Webhook route is inactive")
+        timestamp = float(timestamp_text)
+        if abs(self._clock() - timestamp) > 300:
+            raise PermissionError("Webhook timestamp rejected")
+        transcript = event_id.encode() + b"\n" + timestamp_text.encode() + b"\n" + body
+        candidates = [self._decrypt_webhook_secret(str(route["secret_ciphertext"]))]
+        if (
+            route["previous_secret_ciphertext"]
+            and route["previous_secret_expires_at"] is not None
+            and float(route["previous_secret_expires_at"]) >= self._clock()
+        ):
+            candidates.append(self._decrypt_webhook_secret(str(route["previous_secret_ciphertext"])))
+        valid = any(
+            hmac.compare_digest(hmac.new(secret.encode(), transcript, hashlib.sha256).hexdigest(), signature)
+            for secret in candidates
+        )
+        if not valid:
+            raise PermissionError("Webhook signature rejected")
+        return self.repository.enqueue_webhook_event(route_id, event_id, payload)
+
+    def pull_webhook_events(self, request: dict) -> tuple[dict, ...]:
+        node = self._verify_node_control(request, "knoa-webhook-event-pull-v1")
+        return self.repository.pull_webhook_events(str(node["node_id"]), limit=int(request.get("limit", 50)))
+
+    def acknowledge_webhook_events(self, request: dict) -> int:
+        node = self._verify_node_control(request, "knoa-webhook-event-ack-v1")
+        ids = tuple(int(value) for value in request.get("ingress_ids", ()))
+        return self.repository.acknowledge_webhook_events(str(node["node_id"]), ids)
 
     def register_push_token(
         self,

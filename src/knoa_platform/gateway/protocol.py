@@ -148,6 +148,30 @@ class ContinueProductTaskRequest(GatewayRequest):
             raise ValueError("Task follow-up requires input or an attachment")
 
 
+class CreateEventSourceRequest(GatewayRequest):
+    client_request_id: str = Field(min_length=1, max_length=128)
+    kind: Literal["webhook", "mcp_resource"]
+    title: str = Field(min_length=1, max_length=200)
+    goal: str = Field(min_length=1, max_length=200_000)
+    agent_id: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    tools_enabled: bool = True
+    priority: int = Field(default=0, ge=0, le=9)
+    notification_policy: dict[str, bool] = Field(default_factory=dict)
+    mcp_server_id: str = Field(default="", max_length=128)
+    resource_uri_prefix: str = Field(default="", max_length=2048)
+    include_root: bool = True
+    include_descendants: bool = False
+
+
+class SetEventSourceStateRequest(GatewayRequest):
+    state: Literal["active", "paused"]
+
+
+class TestEventSourceRequest(GatewayRequest):
+    external_event_id: str = Field(default="", max_length=256)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
 class CreateChatTurnRequest(GatewayRequest):
     client_request_id: str = Field(min_length=1, max_length=128)
     input: str = Field(default="", max_length=200_000)

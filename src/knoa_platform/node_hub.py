@@ -244,6 +244,67 @@ class NodeHubService:
             raise ValueError("Hub returned invalid Model share state")
         return value
 
+    async def provision_webhook_route(
+        self,
+        *,
+        principal_id: str,
+        task_id: str,
+        trigger_id: str,
+        display_name: str,
+    ) -> dict[str, Any]:
+        enrollment = self.store.load()
+        if enrollment is None:
+            return {}
+        payload = self._signed_control_payload(
+            enrollment,
+            "knoa-webhook-route-provision-v1",
+            {
+                "principal_id": principal_id,
+                "task_id": task_id,
+                "trigger_id": trigger_id,
+                "display_name": display_name,
+            },
+        )
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(f"{enrollment.hub_url}/v1/webhook-routes", json=payload)
+        response.raise_for_status()
+        result = response.json()
+        origin = urlsplit(enrollment.hub_url)
+        result["public_url"] = urlunsplit((origin.scheme, origin.netloc, f"/hooks/v1/{result['route_id']}", "", ""))
+        result["signing_example"] = {
+            "headers": ["X-Knoa-Event-Id", "X-Knoa-Timestamp", "X-Knoa-Signature"],
+            "transcript": "<event-id>\\n<unix-timestamp>\\n<raw-body>",
+            "algorithm": "HMAC-SHA256",
+        }
+        return result
+
+    async def rotate_webhook_secret(self, route_id: str) -> dict[str, Any]:
+        enrollment = self.store.load()
+        if enrollment is None:
+            raise PermissionError("Node is not enrolled in a Workspace Hub")
+        payload = self._signed_control_payload(
+            enrollment, "knoa-webhook-secret-rotate-v1", {"route_id": route_id}
+        )
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                f"{enrollment.hub_url}/v1/webhook-routes/{route_id}/rotate-secret", json=payload
+            )
+        response.raise_for_status()
+        return response.json()
+
+    async def delete_webhook_route(self, route_id: str) -> None:
+        enrollment = self.store.load()
+        if enrollment is None:
+            return
+        payload = self._signed_control_payload(
+            enrollment, "knoa-webhook-route-delete-v1", {"route_id": route_id}
+        )
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.request(
+                "DELETE", f"{enrollment.hub_url}/v1/webhook-routes/{route_id}", json=payload
+            )
+        response.raise_for_status()
+
     def _signed_control_payload(
         self,
         enrollment: NodeHubEnrollment,
@@ -618,6 +679,7 @@ class NodeRelayManager:
                             response.raise_for_status()
                     await self._publish_work_projections(client, enrollment)
                     await self._publish_notification_intents(client, enrollment)
+                    await self._pull_webhook_events(client, enrollment)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
@@ -670,6 +732,39 @@ class NodeRelayManager:
                     principal_id,
                     intent.intent_id,
                 )
+
+    async def _pull_webhook_events(
+        self,
+        client: httpx.AsyncClient,
+        enrollment: NodeHubEnrollment,
+    ) -> None:
+        if self._core is None:
+            return
+        request = self._control._signed_control_payload(
+            enrollment, "knoa-webhook-event-pull-v1", {"limit": 50}
+        )
+        response = await client.post(
+            f"{enrollment.hub_url}/v1/webhook-events/pull", json=request
+        )
+        response.raise_for_status()
+        accepted: list[int] = []
+        for item in response.json().get("events", ()):
+            await self._core.fire_trigger(
+                str(item["principal_id"]),
+                str(item["trigger_id"]),
+                str(item["external_event_id"]),
+                item.get("payload", {}),
+            )
+            accepted.append(int(item["ingress_id"]))
+        if not accepted:
+            return
+        ack = self._control._signed_control_payload(
+            enrollment, "knoa-webhook-event-ack-v1", {"ingress_ids": accepted}
+        )
+        ack_response = await client.post(
+            f"{enrollment.hub_url}/v1/webhook-events/ack", json=ack
+        )
+        ack_response.raise_for_status()
 
     async def workspace_resource_state(self) -> dict[str, Any]:
         return await self._control.control_state()

@@ -1078,6 +1078,14 @@ class FireTriggerRequest(CoreModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class ListTriggerEventsRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["list_trigger_events"] = "list_trigger_events"
+    trigger_id: Annotated[NonEmpty, StringConstraints(max_length=128)]
+    limit: int = Field(default=50, ge=1, le=200)
+
+
 class SessionRequest(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
@@ -1267,6 +1275,7 @@ CoreRequest: TypeAlias = Annotated[
     | PauseTriggerRequest
     | ResumeTriggerRequest
     | FireTriggerRequest
+    | ListTriggerEventsRequest
     | GetStatusRequest
     | GetHistoryRequest
     | ListMemoryRequest
@@ -1763,6 +1772,13 @@ class TriggerEventAcceptedMessage(CoreModel):
     event: TriggerEventSnapshot
 
 
+class TriggerEventListMessage(CoreModel):
+    message_type: Literal["trigger_event_list"] = "trigger_event_list"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    events: tuple[TriggerEventSnapshot, ...]
+
+
 CoreServerMessage: TypeAlias = Annotated[
     AuthenticatedMessage
     | SessionCreatedMessage
@@ -1823,6 +1839,7 @@ CoreServerMessage: TypeAlias = Annotated[
     | TriggerSnapshotMessage
     | TriggerListMessage
     | TriggerEventAcceptedMessage
+    | TriggerEventListMessage
     | CoreError,
     Field(discriminator="message_type"),
 ]

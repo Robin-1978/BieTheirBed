@@ -124,6 +124,14 @@ export default function TasksScreen() {
         <View style={styles.topActions}>
           <AppPressable
             accessibilityRole="button"
+            accessibilityLabel={t("eventSources.title")}
+            onPress={() => router.push("/event-sources")}
+            style={styles.sourceButton}
+          >
+            <AppIcon name="history" color={colors.accent} size={21} />
+          </AppPressable>
+          <AppPressable
+            accessibilityRole="button"
             accessibilityLabel={t("tasks.new")}
             onPress={() => router.push("/tasks/new")}
             style={styles.newButton}
@@ -289,6 +297,7 @@ const styles = StyleSheet.create({
   heading: { color: colors.ink, fontSize: 24, fontWeight: "700" },
   description: { color: colors.muted, marginTop: 4, fontSize: 13 },
   newButton: { width: 42, height: 42, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center", borderRadius: 14 },
+  sourceButton: { width: 42, height: 42, borderWidth: 1, borderColor: colors.accent, alignItems: "center", justifyContent: "center", borderRadius: 14 },
   topActions: { flexDirection: "row", alignItems: "center", gap: 14 },
   updateBanner: { marginHorizontal: 16, marginBottom: 14, padding: 14, borderRadius: 16, backgroundColor: colors.accentSoft, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   updateTitle: { color: colors.ink, fontWeight: "700" },

@@ -20,6 +20,8 @@ import type {
   NodeDescriptor,
   ExtensionPackage,
   ExtensionImportResult,
+  EventSource,
+  EventSourceEvent,
   CapabilityInstallPlan,
   CapabilityInstallation,
   PairingPayload,
@@ -705,6 +707,68 @@ export class GatewayClient {
       "/v1/mcp/resources",
     );
     return response.result?.resources ?? [];
+  }
+
+  async listEventSources(): Promise<EventSource[]> {
+    const response = await this.json<{ event_sources: EventSource[] }>("/v1/event-sources");
+    return response.event_sources;
+  }
+
+  async createEventSource(input: {
+    clientRequestId: string;
+    kind: "webhook" | "mcp_resource";
+    title: string;
+    goal: string;
+    agentId?: string;
+    mcpServerId?: string;
+    resourceUriPrefix?: string;
+  }): Promise<EventSource> {
+    const response = await this.json<{ event_source: EventSource }>("/v1/event-sources", {
+      method: "POST",
+      body: {
+        client_request_id: input.clientRequestId,
+        kind: input.kind,
+        title: input.title,
+        goal: input.goal,
+        agent_id: input.agentId ?? null,
+        mcp_server_id: input.mcpServerId ?? "",
+        resource_uri_prefix: input.resourceUriPrefix ?? "",
+      },
+    });
+    return response.event_source;
+  }
+
+  async setEventSourceState(sourceId: string, state: "active" | "paused"): Promise<EventSource> {
+    const response = await this.json<{ event_source: EventSource }>(
+      `/v1/event-sources/${encodeURIComponent(sourceId)}/state`,
+      { method: "PATCH", body: { state } },
+    );
+    return response.event_source;
+  }
+
+  async testEventSource(sourceId: string): Promise<EventSourceEvent> {
+    const response = await this.json<{ event: EventSourceEvent }>(
+      `/v1/event-sources/${encodeURIComponent(sourceId)}/test`,
+      { method: "POST", body: {} },
+    );
+    return response.event;
+  }
+
+  async eventSourceEvents(sourceId: string): Promise<EventSourceEvent[]> {
+    const response = await this.json<{ events: EventSourceEvent[] }>(
+      `/v1/event-sources/${encodeURIComponent(sourceId)}/events?limit=50`,
+    );
+    return response.events;
+  }
+
+  async rotateEventSourceSecret(sourceId: string): Promise<{ secret: string; secret_version: number; previous_secret_expires_at: number }> {
+    return this.json(`/v1/event-sources/${encodeURIComponent(sourceId)}/rotate-secret`, {
+      method: "POST", body: {},
+    });
+  }
+
+  async deleteEventSource(sourceId: string): Promise<void> {
+    await this.json(`/v1/event-sources/${encodeURIComponent(sourceId)}`, { method: "DELETE" });
   }
 
   async deviceAudit(afterId = 0): Promise<Json> {

@@ -14,6 +14,7 @@ from knoa_platform.service.core_api import (
     GetTriggerRequest,
     ListSchedulesRequest,
     ListTriggersRequest,
+    ListTriggerEventsRequest,
     PauseScheduleRequest,
     PauseTriggerRequest,
     ResumeScheduleRequest,
@@ -24,6 +25,7 @@ from knoa_platform.service.core_api import (
     ScheduleSnapshotMessage,
     TriggerAcceptedMessage,
     TriggerEventAcceptedMessage,
+    TriggerEventListMessage,
     TriggerEventSnapshot,
     TriggerListMessage,
     TriggerSnapshot,
@@ -151,6 +153,16 @@ class AutomationCommandHandler:
             await send(TriggerEventAcceptedMessage(
                 request_id=request.request_id,
                 event=TriggerEventSnapshot.from_record(event),
+            ))
+        elif isinstance(request, ListTriggerEventsRequest):
+            events = await self._triggers.list_events(
+                principal,
+                request.trigger_id,
+                limit=request.limit,
+            )
+            await send(TriggerEventListMessage(
+                request_id=request.request_id,
+                events=tuple(TriggerEventSnapshot.from_record(item) for item in events),
             ))
         else:
             return False
