@@ -742,8 +742,6 @@ class TaskRuntimeRepositoryMixin:
             state = TaskState(str(row["state"]))
             if state in TERMINAL_TASK_STATES:
                 return TaskCancelResult(accepted=True, state=state), None
-            if bool(row["cancel_requested"]):
-                return TaskCancelResult(accepted=True, state=state), None
             if state in {
                 TaskState.QUEUED,
                 TaskState.WAITING_APPROVAL,
@@ -801,6 +799,8 @@ class TaskRuntimeRepositoryMixin:
                     ),
                     event,
                 )
+            if bool(row["cancel_requested"]):
+                return TaskCancelResult(accepted=True, state=state), None
             event = self._append_event(
                 db,
                 row,

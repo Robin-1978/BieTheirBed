@@ -875,6 +875,42 @@ def test_pause_queued_task_is_immediate_and_idempotent(tmp_path: Path) -> None:
     assert repeated_event is None
 
 
+def test_cancel_requested_task_can_finish_cancellation_after_restart(
+    tmp_path: Path,
+) -> None:
+    repository, scope = _repository(tmp_path)
+    task, _ = repository.create(
+        scope,
+        client_request_id="request-a",
+        goal="prepare the report",
+    )
+    repository.claim_next("worker-a")
+    requested, _ = repository.request_cancel(
+        scope.principal_id,
+        task.task_id,
+        reason="cancel before restart",
+    )
+    assert requested.state is TaskState.RUNNING
+
+    repository.recover_interrupted()
+    recovered = repository.get(scope.principal_id, task.task_id)
+    assert recovered.state is TaskState.PAUSED
+    assert recovered.cancel_requested is True
+
+    cancelled, event = repository.request_cancel(
+        scope.principal_id,
+        task.task_id,
+        reason="finish cancellation after restart",
+    )
+
+    assert cancelled.state is TaskState.CANCELLED
+    assert event is not None and event.event_type == "cancelled"
+    assert event.payload.previous_state is TaskState.PAUSED
+    assert repository.get(scope.principal_id, task.task_id).state is (
+        TaskState.CANCELLED
+    )
+
+
 def test_restart_preserves_pending_approval_and_interrupts_old_attempt(
     tmp_path: Path,
 ) -> None:
