@@ -51,7 +51,7 @@ const ACTIONABLE_EVENTS: Record<string, ActionableEvent | undefined> = {
 const Context = createContext<TaskReminderState | null>(null);
 
 export function TaskReminderProvider({ children }: PropsWithChildren) {
-  const { latestEvent, runAuthenticated, subscribeEvents } = useGateway();
+  const { latestEvent, runAuthenticated, status, subscribeEvents } = useGateway();
   const { t } = useI18n();
   const [reminders, setReminders] = useState<TaskReminder[]>([]);
   const [activeReminder, setActiveReminder] = useState<TaskReminder | null>(null);
@@ -88,6 +88,14 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
       if (latestUnread) setActiveReminder((current) => current ?? latestUnread);
     });
   }, []);
+
+  // Unpairing wipes the account scope (see GatewayProvider.removeConnection);
+  // in-memory reminders must not outlive the identity they belong to.
+  useEffect(() => {
+    if (status !== "unpaired") return;
+    setReminders([]);
+    setActiveReminder(null);
+  }, [status]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {

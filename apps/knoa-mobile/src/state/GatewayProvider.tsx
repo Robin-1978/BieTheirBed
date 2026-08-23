@@ -19,6 +19,8 @@ import {
 import { withAuthenticationRetry } from "./authenticationRecovery";
 import { loadHubConnection, resolveAndroidRelease } from "@/hub/hubClient";
 import { setCacheIdentity } from "@/storage/cacheScope";
+import { clearAppCache } from "@/storage/appCache";
+import { clearTaskReminders } from "@/reminders/taskReminders";
 import { installedAndroidVersionCode, isAndroidUpdateAvailable } from "@/update/androidUpdater";
 import { requiresAndroidUpdate } from "@/update/releasePolicy";
 
@@ -512,6 +514,11 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     const client = stateRef.current.client;
     if (client) await client.revokeCurrentDevice();
     await clearConnectionIdentity();
+    // Unbinding drops the whole account scope: cached snapshots and unread
+    // reminders must not survive into the next pairing.  Drafts and the
+    // offline queue live outside these stores and are preserved.
+    clearAppCache("all");
+    await clearTaskReminders();
     setCacheIdentity("");
     connectionRef.current = null;
     commit({ client: null, sessionHandle: "", sessionToken: "", latestEvent: null, status: "booting" });
