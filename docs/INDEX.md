@@ -38,6 +38,7 @@
 - [Knoa Conversation Forward Design](knoa-conversation-design.md)
 - [Knoa Mobile UI Design](knoa-mobile-ui-design.md)
 - [Knoa Mobile Product Polish Plan](knoa-mobile-product-polish-plan.md)
+- [小诺产品剩余 Backlog 方案设计](knoa-product-backlog-solution-design-2026-08-23.md)
 
 ## Refactoring Planning
 
