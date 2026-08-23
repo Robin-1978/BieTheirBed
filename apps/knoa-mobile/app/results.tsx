@@ -12,6 +12,7 @@ import { colors } from "@/theme";
 import { shareResultJson, shareResultPdf, shareResultText } from "@/api/shareResult";
 import { loadTaskCache, storeTaskCache } from "@/storage/taskCache";
 import { presentNodeName } from "@/presentation/nodePresentation";
+import { resultOutcome } from "@/components/resultSummaryPresentation";
 
 export default function ResultsScreen() {
   const gateway = useGateway();
@@ -101,11 +102,17 @@ export default function ResultsScreen() {
       {loading ? <AsyncStateView state="loading" /> : null}
       {error ? <AsyncStateView state="error" message={error} retryLabel={t("results.retry")} onRetry={() => void refresh(true)} /> : null}
       {!loading && !error && !results.length ? <AsyncStateView state="empty" title={t("results.emptyTitle")} message={t("results.emptyDetail")} /> : null}
-      {results.map((task) => (
+      {results.map((task) => {
+        const outcome = resultOutcome(task);
+        return (
         <View key={task.task_id} style={styles.card}>
-          <View style={styles.cardHeader}><View style={styles.flex}><Text style={styles.cardTitle} numberOfLines={2}>{task.title}</Text><Text style={styles.meta}>{resultState(task, t)}</Text></View><AppIcon name={task.latest_execution_state === "failed" ? "alert" : "check"} color={task.latest_execution_state === "failed" ? colors.danger : colors.accent} size={20} /></View>
+          <View style={styles.cardHeader}><View style={styles.flex}><Text style={styles.cardTitle} numberOfLines={2}>{task.title}</Text><Text style={styles.meta}>{resultState(task, t)}</Text></View><AppIcon name={outcome.incomplete ? "alert" : "check"} color={outcome.incomplete ? colors.danger : colors.accent} size={20} /></View>
           {task.latest_execution_summary ? <Text style={styles.result} numberOfLines={5}>{task.latest_execution_summary}</Text> : null}
-          {task.latest_execution_failure_code ? <Text style={styles.failure}>{t("results.failure", { code: task.latest_execution_failure_code })}</Text> : null}
+          {outcome.incomplete ? <Text style={styles.failure}>{t("results.failure", { code: outcome.failureCode || "unknown" })}</Text> : null}
+          <View style={styles.facts}>
+            <Text style={styles.fact}>{t("results.summary.evidence")}{outcome.evidenceExecutionId ? t("results.summary.execution") : t("results.summary.noExecution")}</Text>
+            <Text style={[styles.fact, styles.factNext]}>{t("results.summary.next")}{t(`results.next.${outcome.nextStep}` as never)}</Text>
+          </View>
           <View style={styles.actions}>
             {task.latest_execution_id ? <AppPressable style={styles.primaryAction} onPress={() => router.push(`/task-executions/${task.latest_execution_id}`)}><Text style={styles.primaryText}>{t("results.openExecution")}</Text></AppPressable> : null}
             <AppPressable style={styles.secondaryAction} onPress={() => router.push({ pathname: `/tasks/${task.task_id}`, params })}><Text style={styles.secondaryText}>{t("results.openTask")}</Text></AppPressable>
@@ -117,7 +124,8 @@ export default function ResultsScreen() {
             </> : null}
           </View>
         </View>
-      ))}
+        );
+      })}
     </ScrollView>
   );
 }
@@ -145,5 +153,5 @@ function resultState(task: Task, t: ReturnType<typeof useI18n>["t"]): string {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 17, gap: 13, paddingBottom: 52 }, hero: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, icon: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: 15, backgroundColor: colors.accentSoft }, flex: { flex: 1, minWidth: 0 }, title: { color: colors.ink, fontSize: 20, fontWeight: "800" }, meta: { color: colors.muted, fontSize: 12, lineHeight: 18 }, artifactAction: { minHeight: 42, justifyContent: "center", alignItems: "center", borderRadius: 12, borderWidth: 1, borderColor: colors.accent }, artifactActionText: { color: colors.accent, fontWeight: "800" }, filterSection: { padding: 13, gap: 8, borderRadius: 15, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, filterLabel: { color: colors.muted, fontSize: 12, fontWeight: "700" }, filters: { flexDirection: "row", gap: 7, flexWrap: "wrap" }, filter: { minHeight: 34, paddingHorizontal: 11, justifyContent: "center", borderRadius: 17, borderWidth: 1, borderColor: colors.line }, filterActive: { borderColor: colors.accent, backgroundColor: colors.accentSoft }, filterText: { color: colors.muted, fontSize: 12, fontWeight: "700" }, filterTextActive: { color: colors.accent }, nodeScope: { color: colors.muted, fontSize: 11 }, card: { padding: 15, gap: 10, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, cardHeader: { flexDirection: "row", alignItems: "flex-start", gap: 10 }, cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" }, result: { color: colors.ink, lineHeight: 21 }, failure: { color: colors.danger, fontSize: 12 }, actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, primaryAction: { minHeight: 40, justifyContent: "center", paddingHorizontal: 13, borderRadius: 11, backgroundColor: colors.accent }, primaryText: { color: colors.white, fontWeight: "800" }, secondaryAction: { minHeight: 40, justifyContent: "center", paddingHorizontal: 13, borderRadius: 11, borderWidth: 1, borderColor: colors.accent }, secondaryText: { color: colors.accent, fontWeight: "800" },
+  container: { padding: 17, gap: 13, paddingBottom: 52 }, hero: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, icon: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: 15, backgroundColor: colors.accentSoft }, flex: { flex: 1, minWidth: 0 }, title: { color: colors.ink, fontSize: 20, fontWeight: "800" }, meta: { color: colors.muted, fontSize: 12, lineHeight: 18 }, artifactAction: { minHeight: 42, justifyContent: "center", alignItems: "center", borderRadius: 12, borderWidth: 1, borderColor: colors.accent }, artifactActionText: { color: colors.accent, fontWeight: "800" }, filterSection: { padding: 13, gap: 8, borderRadius: 15, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, filterLabel: { color: colors.muted, fontSize: 12, fontWeight: "700" }, filters: { flexDirection: "row", gap: 7, flexWrap: "wrap" }, filter: { minHeight: 34, paddingHorizontal: 11, justifyContent: "center", borderRadius: 17, borderWidth: 1, borderColor: colors.line }, filterActive: { borderColor: colors.accent, backgroundColor: colors.accentSoft }, filterText: { color: colors.muted, fontSize: 12, fontWeight: "700" }, filterTextActive: { color: colors.accent }, nodeScope: { color: colors.muted, fontSize: 11 }, card: { padding: 15, gap: 10, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, cardHeader: { flexDirection: "row", alignItems: "flex-start", gap: 10 }, cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" }, result: { color: colors.ink, lineHeight: 21 }, failure: { color: colors.danger, fontSize: 12 }, facts: { gap: 3, padding: 10, borderRadius: 11, backgroundColor: colors.accentFaint }, fact: { color: colors.muted, fontSize: 11, lineHeight: 16 }, factNext: { color: colors.accent, fontWeight: "700" }, actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, primaryAction: { minHeight: 40, justifyContent: "center", paddingHorizontal: 13, borderRadius: 11, backgroundColor: colors.accent }, primaryText: { color: colors.white, fontWeight: "800" }, secondaryAction: { minHeight: 40, justifyContent: "center", paddingHorizontal: 13, borderRadius: 11, borderWidth: 1, borderColor: colors.accent }, secondaryText: { color: colors.accent, fontWeight: "800" },
 });
