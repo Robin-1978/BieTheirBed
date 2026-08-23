@@ -183,7 +183,10 @@ class CapabilityCatalogService:
         if frozen.content_digest != entry.package_digest:
             raise PermissionError("Capability package digest rejected")
         plan = await self._installer.prepare(principal_id, source)
-        if plan.package_digest != entry.package_digest or plan.version != entry.version or plan.capability_id != entry.id:
+        # The signed package digest binds the complete capability manifest,
+        # including its installation ID.  Catalog IDs are globally namespaced
+        # selectors and need not equal the package-local installation ID.
+        if plan.package_digest != entry.package_digest or plan.version != entry.version:
             raise PermissionError("Capability package identity rejected")
         return plan
 

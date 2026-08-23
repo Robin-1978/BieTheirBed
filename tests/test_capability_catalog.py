@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -16,10 +17,16 @@ from knoa_platform.extensions.package_store import PackageStore
 
 
 class _Installer:
-    pass
+    async def prepare(self, _principal_id, _source):
+        return SimpleNamespace(
+            package_digest="642f010a39ffd83de079da7689b95c30643810432332787b81d960b46aa5da66",
+            version="1.0.0",
+            capability_id="browser",
+        )
 
 
-def test_official_catalog_is_signed_and_browser_digest_matches_reference_package(
+@pytest.mark.asyncio
+async def test_official_catalog_is_signed_and_browser_digest_matches_reference_package(
     tmp_path: Path,
 ) -> None:
     root = Path(__file__).resolve().parents[1]
@@ -36,6 +43,8 @@ def test_official_catalog_is_signed_and_browser_digest_matches_reference_package
     package = packages.import_directory("capability", service.source_path(entry), imported_by="principal-a")
     assert package.content_digest == entry.package_digest
     assert service.select("principal-a", "knoa.browser", mode="pinned", version="1.0.0")["resolved_version"] == "1.0.0"
+    plan = await service.prepare("principal-a", "knoa.browser")
+    assert plan.capability_id == "browser"
 
 
 def test_catalog_rejects_tampering_and_revoked_versions(tmp_path: Path) -> None:
