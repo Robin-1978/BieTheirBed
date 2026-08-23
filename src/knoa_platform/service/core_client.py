@@ -151,6 +151,7 @@ from knoa_platform.tasks import (
     TaskDefinitionState,
     TaskEvent,
     TaskLaunchPolicy,
+    TaskLaunchReason,
     TaskOrigin,
     TaskState,
 )
@@ -1052,6 +1053,7 @@ class CoreClient(CoreArtifactClientMixin, CoreAutomationClientMixin):
         launch_policy: TaskLaunchPolicy | None = None,
         notification_policy: dict[str, bool] | None = None,
         agent_id: str | None = None,
+        auto_launch: bool = True,
     ) -> ProductTaskMessage:
         response = await self._request(
             CreateProductTaskRequest(
@@ -1064,6 +1066,7 @@ class CoreClient(CoreArtifactClientMixin, CoreAutomationClientMixin):
                 tools_enabled=tools_enabled,
                 priority=priority,
                 launch_policy=launch_policy or TaskLaunchPolicy(),
+                auto_launch=auto_launch,
                 notification_policy=notification_policy or {},
                 agent_id=agent_id,
             )
@@ -1159,11 +1162,14 @@ class CoreClient(CoreArtifactClientMixin, CoreAutomationClientMixin):
     async def execute_product_task(
         self,
         task_id: str,
+        *,
+        launch_reason: TaskLaunchReason = TaskLaunchReason.MANUAL,
     ) -> ProductTaskExecutionSnapshot:
         response = await self._request(
             ExecuteProductTaskRequest(
                 request_id=self._request_id(),
                 task_id=task_id,
+                launch_reason=launch_reason,
             )
         )
         if not isinstance(response, ProductTaskExecutionMessage):

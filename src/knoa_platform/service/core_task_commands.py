@@ -131,6 +131,7 @@ class TaskCommandHandler:
                 ),
                 tools_enabled=request.tools_enabled,
                 priority=request.priority,
+                auto_launch=request.auto_launch,
                 launch_policy=request.launch_policy,
                 notification_policy=request.notification_policy or None,
                 agent_id=request.agent_id,
@@ -209,6 +210,7 @@ class TaskCommandHandler:
                 principal,
                 request.task_id,
                 client_request_id=request.request_id,
+                launch_reason=request.launch_reason,
             )
             await send(ProductTaskExecutionMessage(
                 request_id=request.request_id,

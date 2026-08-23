@@ -138,6 +138,7 @@ class TaskService:
         launch_policy: TaskLaunchPolicy | None = None,
         notification_policy: dict[str, bool] | None = None,
         agent_id: str | None = None,
+        auto_launch: bool = True,
     ) -> tuple[TaskDefinitionRecord, TaskExecutionRecord | None]:
         selected = await asyncio.to_thread(self._executor.agent_id, scope)
         if agent_id is not None and selected != agent_id:
@@ -162,7 +163,7 @@ class TaskService:
         )
         if executions:
             return definition, executions[0]
-        if not created or definition.launch_policy.kind is not TaskLaunchKind.IMMEDIATE:
+        if not created or not auto_launch or definition.launch_policy.kind is not TaskLaunchKind.IMMEDIATE:
             return definition, None
         execution = await self.execute_definition(
             scope.principal_id,
