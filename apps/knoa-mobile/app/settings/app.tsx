@@ -11,6 +11,8 @@ import { colors } from "@/theme";
 import { hasTaskNotificationPermission, requestTaskNotificationPermission } from "@/notifications/taskNotifications";
 import { appCacheSummary, clearAppCache, emptyAppCacheSummary, formatCacheBytes, type AppCacheSummary, type CacheKind } from "@/storage/appCache";
 import { formatRelativeTime } from "@/ui/formatRelativeTime";
+import { summarizeTransportProbes } from "@/api/transportDiagnostics";
+import { transportLabelKey } from "@/api/transportPresentation";
 
 const CACHE_KINDS: Exclude<CacheKind, "all">[] = ["conversation", "workspace", "task", "artifact"];
 
@@ -90,6 +92,27 @@ export default function AppSettingsScreen() {
             </AppPressable>
           </View>
         ) : null}
+      </Section>
+
+      <Section title={i18n.t("settings.transportDiagnostics")} detail={i18n.t("settings.transportDiagnosticsHint")}>
+        {(() => {
+          const summary = summarizeTransportProbes();
+          if (!summary.total) return <Text style={styles.detail}>{i18n.t("settings.transportNoData")}</Text>;
+          return (
+            <>
+              {(Object.keys(summary.byMode) as Array<keyof typeof summary.byMode>).filter((mode) => summary.byMode[mode].count).map((mode) => (
+                <Text key={mode} style={styles.detail}>
+                  {i18n.t("settings.transportModeLine", {
+                    mode: i18n.t(transportLabelKey(mode)),
+                    count: summary.byMode[mode].count,
+                    failed: summary.byMode[mode].failed,
+                  })}
+                </Text>
+              ))}
+              <Text style={styles.detail}>{i18n.t("settings.transportAverage", { ms: summary.averageMs })}</Text>
+            </>
+          );
+        })()}
       </Section>
 
       <Section title={i18n.t("settings.cache")} detail={i18n.t("settings.cacheDetail")}>
