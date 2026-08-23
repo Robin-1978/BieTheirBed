@@ -1,12 +1,18 @@
 # 小诺产品剩余 Backlog 方案设计
 
-> 状态：实施前权威方案
+> 状态：已实施；全量代码门禁通过，进入 2026-08-24 发布
 >
 > 日期：2026-08-23
 >
 > 输入：[小诺产品剩余工作清单](knoa-product-remaining-backlog-2026-08-23.md)
 >
 > 原则：Node 是工作与执行权威；Hub 是身份、公网投递和连接协调边界；Capability Gateway 是 Agent 行动的唯一安全边界；正向设计、高内聚、低耦合、KISS、YAGNI。
+
+## 0. 实施结果（2026-08-24）
+
+本方案 Phase A-F 已按独立提交完成：可靠启动边界、持久通知 Intent、通用 Capability Bundle、Browser MCP 参考包、Event Source/Webhook 工作流，以及受控改进与签名 Capability Catalog 均已落地。Browser 作为标准第三方 MCP 能力包安装，不在 Core 引入浏览器特例。
+
+发布前全量门禁结果：Python `1021 passed`，Mobile Vitest `131 passed`，Python compileall、Mobile TypeScript 和 OpenAPI 契约生成通过。真实 FCM 系统通知仍以 Hosted Hub 配置有效 Service Account 和 Android Firebase 配置为运行前提；缺少生产凭据时只表示投递链路已实现，不能视为真实设备推送已验收。
 
 ## 1. 决策摘要
 
@@ -524,7 +530,7 @@ claim Attempt
 
 ## 12. 实施顺序与独立提交
 
-### Phase A：统一可靠性边界
+### Phase A：统一可靠性边界（已完成，`81218ff`）
 
 1. `task-launch-preflight-core-boundary`
 2. `task-stop-starting-cancellation-latch`
@@ -533,7 +539,7 @@ claim Attempt
 
 完成标准：所有 Task launch path 都不能绕过预检；stop race 有确定状态机；诊断不伪造阶段耗时。
 
-### Phase B：后台通知闭环
+### Phase B：后台通知闭环（已完成，`ac566fc`）
 
 1. `notification-intent-domain`
 2. `notification-node-hub-projection`
@@ -543,7 +549,7 @@ claim Attempt
 
 完成标准：App 被杀死仍能收到完成、失败和审批通知，重启/重复投递/Token refresh 不产生重复用户动作。
 
-### Phase C：通用能力包基础
+### Phase C：通用能力包基础（已完成，`c9add91`）
 
 1. `capability-bundle-schema-and-validation`
 2. `capability-install-plan-and-confirmation`
@@ -551,7 +557,7 @@ claim Attempt
 
 完成标准：一个无 Browser 特例的测试 MCP 包可一键安装、停用、更新和回滚。
 
-### Phase D：Browser MCP 参考包
+### Phase D：Browser MCP 参考包（已完成，`2a27f33`）
 
 1. `browser-mcp-session-navigation-snapshot`
 2. `browser-mcp-download-artifact-delivery`
@@ -560,7 +566,7 @@ claim Attempt
 
 完成标准：Browser 通过 Phase C 通用机制安装；第三方可复制样板创建另一个 MCP 能力包。
 
-### Phase E：事件源与工作交付
+### Phase E：事件源与工作交付（已完成，`f3431ab`）
 
 1. `event-source-facade`
 2. `hosted-webhook-ingress-outbox`
@@ -568,7 +574,7 @@ claim Attempt
 4. `work-result-summary-and-follow-up`
 5. `chat-edit-resend-folder-input`
 
-### Phase F：长期治理
+### Phase F：长期治理（已完成，`7fba63c`）
 
 1. Prompt/Skill 离线候选和回放；
 2. 人工批准、显式 canary 和回滚；
