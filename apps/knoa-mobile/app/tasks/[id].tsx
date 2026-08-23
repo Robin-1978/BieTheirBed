@@ -14,7 +14,7 @@ import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { useGateway } from "@/state/GatewayProvider";
 import { useTaskReminders } from "@/state/TaskReminderProvider";
 import { colors } from "@/theme";
-import { blockedPreflightMessages } from "@/components/preflightPresentation";
+import { blockedPreflightMessages, warningPreflightMessages } from "@/components/preflightPresentation";
 import { useI18n } from "@/i18n";
 import { AppPressable } from "@/components/AppPressable";
 import { loadTaskDetailCache, storeTaskDetailCache } from "@/storage/taskDetailCache";
@@ -75,6 +75,23 @@ export default function TaskDetailScreen() {
         const blocked = blockedPreflightMessages(preflight.checks).join("；");
         setError(blocked || t("taskDetail.executeFailed"));
         return;
+      }
+      // Warnings are a user decision, not a silent override: the run only
+      // starts after the user acknowledges them.
+      const warnings = warningPreflightMessages(preflight.checks);
+      if (warnings.length) {
+        const proceed = await new Promise<boolean>((resolve) => {
+          Alert.alert(
+            t("taskDetail.preflightConfirmTitle"),
+            warnings.join("；"),
+            [
+              { text: t("common.cancel"), style: "cancel", onPress: () => resolve(false) },
+              { text: t("taskDetail.preflightContinue"), onPress: () => resolve(true) },
+            ],
+            { cancelable: true, onDismiss: () => resolve(false) },
+          );
+        });
+        if (!proceed) return;
       }
       const execution = await gateway.runAuthenticated((client) => client.executeTask(task.task_id));
       router.push(`/task-executions/${execution.execution_id}`);
