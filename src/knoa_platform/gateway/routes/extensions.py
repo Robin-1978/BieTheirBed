@@ -8,13 +8,95 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from knoa_platform.gateway.protocol import (
+    ConfirmCapabilityRequest,
     ImportLocalMCPRequest,
     ImportRemoteMCPRequest,
     ImportSkillRequest,
+    PrepareCapabilityRequest,
+    SetCapabilityStateRequest,
 )
 
 
 class ExtensionRoutes:
+    async def _capability_installations(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize_configuration(request)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        values = await asyncio.to_thread(
+            self._capability_installer.list_installations,
+            authenticated.device.principal_id,
+        )
+        return JSONResponse({
+            "installations": [item.model_dump(mode="json") for item in values],
+        })
+
+    async def _capability_prepare(self, request: Request) -> JSONResponse:
+        parsed = await self._authorized_body(request, PrepareCapabilityRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        authenticated, body = parsed
+        try:
+            plan = await self._capability_installer.prepare(
+                authenticated.device.principal_id,
+                body.source_path,
+            )
+        except (LookupError, OSError, ValueError) as exc:
+            return JSONResponse(
+                {"error": "capability_rejected", "detail": str(exc)[:1000]},
+                status_code=422,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return self._core_error(exc)
+        return JSONResponse({"plan": plan.model_dump(mode="json")}, status_code=201)
+
+    async def _capability_confirm(self, request: Request) -> JSONResponse:
+        parsed = await self._authorized_body(request, ConfirmCapabilityRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        authenticated, body = parsed
+        try:
+            value = await self._capability_installer.confirm(
+                authenticated.device.principal_id,
+                body.operation_id,
+                body.plan_digest,
+            )
+        except (LookupError, ValueError) as exc:
+            return JSONResponse(
+                {"error": "confirmation_rejected", "detail": str(exc)[:1000]},
+                status_code=409,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return self._core_error(exc)
+        return JSONResponse({"installation": value.model_dump(mode="json")})
+
+    async def _capability_state(self, request: Request) -> JSONResponse:
+        parsed = await self._authorized_body(request, SetCapabilityStateRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        authenticated, body = parsed
+        try:
+            value = await self._capability_installer.set_enabled(
+                authenticated.device.principal_id,
+                str(request.path_params["capability_id"]),
+                body.enabled,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return self._core_error(exc)
+        return JSONResponse({"installation": value.model_dump(mode="json")})
+
+    async def _capability_rollback(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize_configuration(request)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        try:
+            value = await self._capability_installer.rollback(
+                authenticated.device.principal_id,
+                str(request.path_params["capability_id"]),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return self._core_error(exc)
+        return JSONResponse({"installation": value.model_dump(mode="json")})
+
     async def _extension_packages(self, request: Request) -> JSONResponse:
         authenticated = self._authorize_configuration(request)
         if isinstance(authenticated, JSONResponse):

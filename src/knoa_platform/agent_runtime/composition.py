@@ -707,6 +707,8 @@ def _managed_mcp_providers(
     *,
     secret_root: Path,
     packages: PackageStore,
+    managed_file_root: Path | None = None,
+    artifact_store: ArtifactStore | None = None,
 ) -> tuple[MCPServerProvider, ...]:
     return build_mcp_providers(
         _managed_mcp_configs(managed, packages),
@@ -716,6 +718,8 @@ def _managed_mcp_providers(
             for server_id, server in managed.mcp_servers.items()
             if server.inventory_digest
         },
+        managed_file_root=managed_file_root,
+        artifact_store=artifact_store,
     )
 
 
@@ -833,6 +837,8 @@ def build_core_runtime(
         managed,
         secret_root=paths.mcp_secrets,
         packages=packages,
+        managed_file_root=paths.cache / "mcp-managed-files",
+        artifact_store=artifacts,
     )
     # Imported local packages are user-owned capabilities, not one-shot
     # processes. Discover them on every Core start so a package such as Jira

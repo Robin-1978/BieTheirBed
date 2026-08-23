@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 
 import { AppPressable } from "@/components/AppPressable";
-import type { ExtensionImportResult, ManagedConfig } from "@/api/models";
+import type { CapabilityInstallPlan, CapabilityInstallation, ExtensionImportResult, ManagedConfig } from "@/api/models";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
@@ -12,7 +12,7 @@ import { BUSINESS_CONNECTIONS, connectionDescriptor, type BusinessConnectionKind
 export default function ExtensionCenterScreen() {
   const gateway = useGateway();
   const { t } = useI18n();
-  const [kind, setKind] = useState<"skill" | "local_mcp" | "remote_mcp">("remote_mcp");
+  const [kind, setKind] = useState<"capability" | "skill" | "local_mcp" | "remote_mcp">("capability");
   const [connectionKind, setConnectionKind] = useState<BusinessConnectionKind>("custom");
   const [source, setSource] = useState("");
   const [serverId, setServerId] = useState("");
@@ -22,11 +22,17 @@ export default function ExtensionCenterScreen() {
   const [document, setDocument] = useState<ManagedConfig | null>(null);
   const [inspection, setInspection] = useState<ExtensionImportResult["inspection"] | null>(null);
   const [draftId, setDraftId] = useState("");
+  const [installations, setInstallations] = useState<CapabilityInstallation[]>([]);
+  const [installPlan, setInstallPlan] = useState<CapabilityInstallPlan | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const current = await gateway.runAuthenticated((client) => client.getConfigCurrent());
+      const [current, installed] = await gateway.runAuthenticated((client) => Promise.all([
+        client.getConfigCurrent(),
+        client.listCapabilityInstallations(),
+      ]));
       setDocument(current.revision.document);
+      setInstallations(installed);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : t("settings.extensions.loadFailed"));
     }
@@ -35,17 +41,26 @@ export default function ExtensionCenterScreen() {
   useEffect(() => { void load(); }, [load]);
 
   async function inspectAndCreateDraft() {
-    if (!source.trim() || (kind !== "skill" && !serverId.trim())) return;
+    if (!source.trim() || (kind !== "skill" && kind !== "capability" && !serverId.trim())) return;
     setWorking(true);
     setMessage("");
     try {
-      const result = await gateway.runAuthenticated((client) => {
+      if (kind === "capability") {
+        const plan = await gateway.runAuthenticated(
+          (client) => client.prepareCapability(source.trim()),
+        );
+        setInstallPlan(plan);
+        setInspection(null);
+        setMessage(t("settings.extensions.planReady"));
+        return;
+      }
+      const imported = await gateway.runAuthenticated((client) => {
         if (kind === "skill") return client.importSkill(source.trim());
         if (kind === "local_mcp") return client.importLocalMcp(source.trim(), serverId.trim());
         return client.importRemoteMcp(serverId.trim(), source.trim(), allowPrivate);
       });
-      setInspection(result.inspection);
-      setDraftId(result.draft.draft_id);
+      setInspection(imported.inspection);
+      setDraftId(imported.draft.draft_id);
       setMessage(t("settings.extensions.inspectSuccess"));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : t("settings.extensions.importFailed"));
@@ -55,15 +70,59 @@ export default function ExtensionCenterScreen() {
   }
 
   const kindLabels = {
+    capability: t("settings.extensions.capabilityBundle"),
     remote_mcp: t("settings.extensions.remoteMcp"),
     local_mcp: t("settings.extensions.localMcp"),
     skill: t("settings.extensions.skillContent"),
   } as const;
 
+  async function confirmInstall() {
+    if (!installPlan) return;
+    setWorking(true);
+    try {
+      await gateway.runAuthenticated((client) => client.confirmCapability(installPlan));
+      setInstallPlan(null);
+      setMessage(t("settings.extensions.installSuccess"));
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t("settings.extensions.importFailed"));
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function capabilityAction(capabilityId: string, action: "toggle" | "rollback", enabled = false) {
+    setWorking(true);
+    try {
+      await gateway.runAuthenticated((client) => action === "rollback"
+        ? client.rollbackCapability(capabilityId)
+        : client.setCapabilityEnabled(capabilityId, enabled));
+      await load();
+    } finally {
+      setWorking(false);
+    }
+  }
+
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <View style={styles.section}>
         <Text style={styles.title}>{t("settings.extensions.currentNode")}</Text>
+        {installations.map((item) => (
+          <View key={`capability:${item.capability_id}`} style={styles.capabilityItem}>
+            <View style={styles.flex}>
+              <Text style={styles.itemTitle}>{item.display_name}</Text>
+              <Text style={styles.hint}>v{item.version} · {item.health}</Text>
+            </View>
+            <View style={styles.choices}>
+              <AppPressable style={styles.smallButton} disabled={working} onPress={() => void capabilityAction(item.capability_id, "toggle", !item.enabled)}>
+                <Text style={styles.choiceText}>{item.enabled ? t("capabilities.disable") : t("capabilities.enable")}</Text>
+              </AppPressable>
+              <AppPressable style={styles.smallButton} disabled={working} onPress={() => void capabilityAction(item.capability_id, "rollback")}>
+                <Text style={styles.choiceText}>{t("settings.extensions.rollback")}</Text>
+              </AppPressable>
+            </View>
+          </View>
+        ))}
         {Object.entries(document?.mcp_servers ?? {}).map(([id, server]) => (
           <View key={`mcp:${id}`} style={styles.item}>
             <View><Text style={styles.itemTitle}>{id}</Text><Text style={styles.hint}>{t("config.mcpDetail", { transport: server.transport })}</Text></View>
@@ -80,6 +139,22 @@ export default function ExtensionCenterScreen() {
           ? <Text style={styles.hint}>{t("settings.extensions.empty")}</Text>
           : null}
       </View>
+      {installPlan ? (
+        <View style={styles.section}>
+          <Text style={styles.title}>{installPlan.display_name} · v{installPlan.version}</Text>
+          <Text style={styles.hint}>{t("settings.extensions.permissionDelta", { count: installPlan.requested_tools.length })}</Text>
+          {installPlan.requested_tools.map((tool) => (
+            <Text key={tool.name} style={tool.risk === "high" ? styles.warning : styles.hint}>
+              {tool.name} · {tool.effect} · {tool.risk}
+            </Text>
+          ))}
+          {installPlan.withheld_tools.length ? <Text style={styles.warning}>{t("settings.extensions.inspectionWithheld", { items: installPlan.withheld_tools.join("、") })}</Text> : null}
+          <Text style={styles.hint}>{t("settings.extensions.healthChecks", { count: installPlan.checks.length })}</Text>
+          <AppPressable style={styles.primary} disabled={working} onPress={() => void confirmInstall()}>
+            {working ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>{t("settings.extensions.confirmInstall")}</Text>}
+          </AppPressable>
+        </View>
+      ) : null}
       {inspection ? (
         <View style={styles.section}>
           <Text style={styles.title}>{t("settings.extensions.inspectionTitle")}</Text>
@@ -108,13 +183,13 @@ export default function ExtensionCenterScreen() {
         <Text style={styles.hint}>{t(connectionDescriptor(connectionKind).detailKey as never)}</Text>
         {connectionDescriptor(connectionKind).capabilities.length ? <Text style={styles.hint}>{t("connections.capabilities", { items: connectionDescriptor(connectionKind).capabilities.join("、") })}</Text> : null}
         <View style={styles.choices}>
-          {(["remote_mcp", "local_mcp", "skill"] as const).map((value) => (
+          {(["capability", "remote_mcp", "local_mcp", "skill"] as const).map((value) => (
             <AppPressable key={value} style={[styles.choice, kind === value && styles.selected]} onPress={() => setKind(value)}>
               <Text style={kind === value ? styles.selectedText : styles.choiceText}>{kindLabels[value]}</Text>
             </AppPressable>
           ))}
         </View>
-        {kind !== "skill" ? (
+        {kind !== "skill" && kind !== "capability" ? (
           <TextInput value={serverId} onChangeText={setServerId} placeholder={t("settings.extensions.serverIdPlaceholder")} placeholderTextColor={colors.muted} style={styles.input} autoCapitalize="none" />
         ) : null}
         <TextInput
@@ -155,6 +230,9 @@ const styles = StyleSheet.create({
   error: { color: colors.danger, fontSize: 13 },
   warning: { color: colors.warning, fontSize: 13, lineHeight: 19 },
   item: { minHeight: 58, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
+  capabilityItem: { gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, paddingTop: 12 },
+  flex: { flex: 1 },
+  smallButton: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, backgroundColor: colors.background },
   itemTitle: { color: colors.ink, fontWeight: "800" },
   enabled: { color: colors.accent, fontSize: 12, fontWeight: "800" },
   disabled: { color: colors.muted, fontSize: 12, fontWeight: "700" },

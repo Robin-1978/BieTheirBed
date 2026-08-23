@@ -20,6 +20,8 @@ import type {
   NodeDescriptor,
   ExtensionPackage,
   ExtensionImportResult,
+  CapabilityInstallPlan,
+  CapabilityInstallation,
   PairingPayload,
   PrincipalTaskEvent,
   Task,
@@ -154,6 +156,48 @@ export class GatewayClient {
       body: { server_id: serverId, url, allow_private_network: allowPrivateNetwork },
     });
     return response.result;
+  }
+
+  async listCapabilityInstallations(): Promise<CapabilityInstallation[]> {
+    const response = await this.json<{ installations: CapabilityInstallation[] }>(
+      "/v1/capabilities/installations",
+    );
+    return response.installations;
+  }
+
+  async prepareCapability(sourcePath: string): Promise<CapabilityInstallPlan> {
+    const response = await this.json<{ plan: CapabilityInstallPlan }>(
+      "/v1/capabilities/prepare",
+      { method: "POST", body: { source_path: sourcePath } },
+    );
+    return response.plan;
+  }
+
+  async confirmCapability(plan: CapabilityInstallPlan): Promise<CapabilityInstallation> {
+    const response = await this.json<{ installation: CapabilityInstallation }>(
+      "/v1/capabilities/confirm",
+      {
+        method: "POST",
+        body: { operation_id: plan.operation_id, plan_digest: plan.plan_digest },
+      },
+    );
+    return response.installation;
+  }
+
+  async setCapabilityEnabled(capabilityId: string, enabled: boolean): Promise<CapabilityInstallation> {
+    const response = await this.json<{ installation: CapabilityInstallation }>(
+      `/v1/capabilities/${encodeURIComponent(capabilityId)}/state`,
+      { method: "PATCH", body: { enabled } },
+    );
+    return response.installation;
+  }
+
+  async rollbackCapability(capabilityId: string): Promise<CapabilityInstallation> {
+    const response = await this.json<{ installation: CapabilityInstallation }>(
+      `/v1/capabilities/${encodeURIComponent(capabilityId)}/rollback`,
+      { method: "POST" },
+    );
+    return response.installation;
   }
 
   async secretStatus(reference: string): Promise<{
@@ -755,6 +799,7 @@ export class GatewayClient {
 }
 
 function isLongRequest(path: string, method?: string): boolean {
+  if (path.startsWith("/v1/capabilities/") && method !== "GET") return true;
   if (method === "POST" && (path.includes("/turns") || path.includes("/execute") || path.includes("/continue") || path.includes("/artifacts"))) return true;
   return path.includes("/transcribe") || path.includes("/rerun");
 }

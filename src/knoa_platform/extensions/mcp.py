@@ -927,6 +927,9 @@ class MCPTool(ToolBase):
         input_schema: dict[str, Any],
         policy: MCPToolPolicyConfig,
         client: MCPClientPort,
+        managed_file_importer: Callable[
+            [str, dict[str, Any]], dict[str, Any]
+        ] | None = None,
     ) -> None:
         self.name = public_name
         self.description = description or f"MCP tool {remote_name}"
@@ -941,12 +944,12 @@ class MCPTool(ToolBase):
         self._remote_name = remote_name
         self._input_schema = input_schema
         self._client = client
+        self._managed_file_importer = managed_file_importer
 
     async def execute(self, **kwargs: Any) -> Any:
         return await self.execute_scoped(None, **kwargs)
 
     async def execute_scoped(self, scope: Any, **kwargs: Any) -> Any:
-        del scope
         from knoa_agent_contracts import InteractionRequested
         from knoa_platform.agent_runtime.tool_step import current_tool_step_context
 
@@ -996,7 +999,25 @@ class MCPTool(ToolBase):
             raise
         except Exception:  # noqa: BLE001 - remote provider failures become tool results
             return {"error": "MCP tool call failed"}
-        return _render_mcp_result(result)
+        rendered = _render_mcp_result(result)
+        structured = rendered.get("structured_content")
+        descriptor = (
+            structured.get("managed_file")
+            if isinstance(structured, dict)
+            else None
+        )
+        if descriptor is not None:
+            if self._managed_file_importer is None or scope is None:
+                return {"error": "MCP managed-file delivery is not configured"}
+            try:
+                artifact = self._managed_file_importer(
+                    str(scope.session_handle),
+                    descriptor,
+                )
+            except Exception:  # noqa: BLE001 - untrusted MCP descriptor
+                return {"error": "MCP managed-file validation failed"}
+            rendered["artifact"] = artifact
+        return rendered
 
     def definition(self) -> dict[str, Any]:
         return {
@@ -1016,6 +1037,8 @@ class MCPServerProvider(ExtensionProvider):
         client_factory: Callable[[MCPServerConfig], MCPClientPort] | None = None,
         private_environment_loader: Callable[[], dict[str, str]] | None = None,
         expected_inventory_digest: str = "",
+        managed_file_root: str | Path | None = None,
+        artifact_store: Any | None = None,
     ) -> None:
         if (config is None) == (config_loader is None):
             raise ValueError("MCP provider requires exactly one configuration source")
@@ -1026,6 +1049,12 @@ class MCPServerProvider(ExtensionProvider):
         self._client_factory = client_factory
         self._private_environment_loader = private_environment_loader
         self._expected_inventory_digest = expected_inventory_digest.strip()
+        self._managed_file_root = (
+            Path(managed_file_root).expanduser().resolve()
+            if managed_file_root is not None
+            else None
+        )
+        self._artifact_store = artifact_store
         self._descriptor = ExtensionDescriptor(
             extension_id=f"mcp:{server_id}",
             kind=ExtensionKind.MCP,
@@ -1097,6 +1126,21 @@ class MCPServerProvider(ExtensionProvider):
                 if self._private_environment_loader is not None
                 else None
             )
+            if self._managed_file_root is not None:
+                self._managed_file_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+                private_environment = {
+                    **(private_environment or {}),
+                    "KNOA_MCP_MANAGED_FILE_ROOT": str(self._managed_file_root),
+                }
+                if "KNOA_MCP_MANAGED_FILE_ROOT" not in config.optional_env:
+                    config = config.model_copy(
+                        update={
+                            "optional_env": (
+                                *config.optional_env,
+                                "KNOA_MCP_MANAGED_FILE_ROOT",
+                            )
+                        }
+                    )
             client = (
                 create_mcp_client(
                     config,
@@ -1138,6 +1182,16 @@ class MCPServerProvider(ExtensionProvider):
                     input_schema=definition.input_schema,
                     policy=policy,
                     client=client,
+                    managed_file_importer=(
+                        None
+                        if self._managed_file_root is None
+                        or self._artifact_store is None
+                        else lambda session_id, descriptor: self._artifact_store.import_managed_file(
+                            session_id,
+                            self._managed_file_root,
+                            descriptor,
+                        )
+                    ),
                 )
             )
         return tuple(tools)
@@ -1153,6 +1207,8 @@ def build_mcp_providers(
     *,
     secret_root: str | Path | None = None,
     inventory_digests: dict[str, str] | None = None,
+    managed_file_root: str | Path | None = None,
+    artifact_store: Any | None = None,
 ) -> tuple[MCPServerProvider, ...]:
     from knoa_platform.extensions.mcp_secrets import mcp_private_environment_loader
 
@@ -1165,6 +1221,12 @@ def build_mcp_providers(
                 server_id,
             ),
             expected_inventory_digest=(inventory_digests or {}).get(server_id, ""),
+            managed_file_root=(
+                Path(managed_file_root) / server_id
+                if managed_file_root is not None
+                else None
+            ),
+            artifact_store=artifact_store,
         )
         for server_id, config in configs.items()
         if config.enabled
