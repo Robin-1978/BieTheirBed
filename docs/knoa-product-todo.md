@@ -191,7 +191,7 @@
 
 ## 发布门禁
 
-- [ ] Python 全量测试通过。
+- [~] Python 全量测试通过。（本机 Windows 环境存在既有失败：POSIX 路径/进程组/chmod 类约 77 项；`test_restart_pauses_interrupted_task_until_explicit_resume` 存在与本次改动无关的既有竞态 flaky，待专项修复）
 - [ ] Mobile 类型检查和测试通过。
 - [ ] Android 签名构建、版本号、SHA256 和下载地址一致。
 - [ ] Windows/Linux 更新重复执行不会留下孤儿进程、端口占用或无限重启。
