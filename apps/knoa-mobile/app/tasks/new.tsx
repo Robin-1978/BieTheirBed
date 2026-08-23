@@ -25,6 +25,8 @@ import { TASK_TEMPLATES } from "@/taskTemplates";
 import { enqueueOfflineTask } from "@/storage/offlineTaskQueue";
 import { requestTaskNotificationPermission } from "@/notifications/taskNotifications";
 import { presentNodeName } from "@/presentation/nodePresentation";
+import { MAX_ATTACHMENTS, pickAttachments, type PickedAttachment } from "@/media/attachmentPicker";
+import { uploadSessionAttachments } from "@/api/uploadAttachments";
 
 export default function NewTaskScreen() {
   const gateway = useGateway();
@@ -43,7 +45,17 @@ export default function NewTaskScreen() {
   const [selectedTemplate, setSelectedTemplate] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState(gateway.nodeId || params.nodeId || "");
   const [switchingNode, setSwitchingNode] = useState(false);
+  const [attachments, setAttachments] = useState<PickedAttachment[]>([]);
   const requestIdentity = useRef<{ fingerprint: string; requestId: string } | null>(null);
+
+  async function chooseAttachments() {
+    try {
+      const prepared = await pickAttachments(attachments.length);
+      if (prepared.length) setAttachments((current) => [...current, ...prepared].slice(0, MAX_ATTACHMENTS));
+    } catch {
+      setError(t("taskNew.attachmentPickFailed"));
+    }
+  }
 
   useEffect(() => {
     if (!gateway.client) return;
@@ -93,9 +105,24 @@ export default function NewTaskScreen() {
       if (notifyCompleted || notifyFailed || notifyApproval) {
         void requestTaskNotificationPermission();
       }
+      let uploadedAttachments: Awaited<ReturnType<typeof uploadSessionAttachments>>["uploaded"] = [];
+      if (attachments.length) {
+        // Attachments live in a conversation session; tasks reference the
+        // uploaded artifact ids. Offline queues cannot carry file bytes yet.
+        const sessionHandle = await gateway.ensureConversation();
+        const result = await gateway.runAuthenticated(
+          (client) => uploadSessionAttachments(client, sessionHandle, attachments),
+        );
+        if (result.failed) {
+          setError(t("taskNew.attachmentUploadFailed"));
+          return;
+        }
+        uploadedAttachments = result.uploaded;
+      }
       const input = {
         title: title.trim(),
         goal: normalizedGoal,
+        attachments: uploadedAttachments,
         notificationPolicy: {
           completed: notifyCompleted,
           failed: notifyFailed,
@@ -120,6 +147,10 @@ export default function NewTaskScreen() {
       // A disconnected Node must not make the user retype a long task.  Keep
       // the exact idempotency key so reconnect/retry cannot create duplicates.
       if (gateway.status !== "ready") {
+        if (attachments.length) {
+          setError(t("taskNew.attachmentOffline"));
+          return;
+        }
         await enqueueOfflineTask({
           title: title.trim(),
           goal: normalizedGoal,
@@ -227,6 +258,31 @@ export default function NewTaskScreen() {
             style={styles.goalInput}
             textAlignVertical="top"
           />
+          <Text style={styles.label}>{t("taskNew.attachments")}</Text>
+          <View style={styles.attachmentRow}>
+            <AppPressable
+              accessibilityLabel={t("taskNew.addAttachment")}
+              disabled={attachments.length >= MAX_ATTACHMENTS || saving}
+              onPress={() => void chooseAttachments()}
+              style={styles.attachmentButton}
+            >
+              <Text style={styles.attachmentButtonText}>{t("taskNew.addAttachment")}</Text>
+            </AppPressable>
+            <Text style={styles.templateMeta}>{t("taskNew.attachmentCount", { count: attachments.length, max: MAX_ATTACHMENTS })}</Text>
+          </View>
+          {attachments.map((item, index) => (
+            <View key={`${item.uri}:${index}`} style={styles.attachmentRow}>
+              <Text style={styles.attachmentName} numberOfLines={1}>{item.name}</Text>
+              <AppPressable
+                accessibilityLabel={t("taskNew.removeAttachment")}
+                disabled={saving}
+                onPress={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                style={styles.attachmentRemove}
+              >
+                <Text style={styles.attachmentRemoveText}>{t("taskNew.removeAttachment")}</Text>
+              </AppPressable>
+            </View>
+          ))}
           <AgentSelector
             agents={gateway.agents}
             selectedAgentId={agentId}
@@ -292,6 +348,12 @@ const styles = StyleSheet.create({
   launchTitle: { color: colors.ink, fontWeight: "700" },
   launchText: { color: colors.muted, lineHeight: 20 },
   notificationCard: { marginTop: 6, padding: 14, borderRadius: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, gap: 8 },
+  attachmentRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  attachmentButton: { minHeight: 38, paddingHorizontal: 13, alignItems: "center", justifyContent: "center", borderRadius: 11, borderWidth: 1, borderColor: colors.accent },
+  attachmentButtonText: { color: colors.accent, fontWeight: "800" },
+  attachmentName: { color: colors.ink, flex: 1, minWidth: 0 },
+  attachmentRemove: { minHeight: 32, paddingHorizontal: 11, alignItems: "center", justifyContent: "center", borderRadius: 10, borderWidth: 1, borderColor: colors.line },
+  attachmentRemoveText: { color: colors.muted, fontWeight: "700", fontSize: 12 },
   toggle: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   toggleLabel: { color: colors.ink },
   error: { color: colors.danger },

@@ -1,4 +1,3 @@
-import * as DocumentPicker from "expo-document-picker";
 import * as Crypto from "expo-crypto";
 import {
   RecordingPresets,
@@ -54,7 +53,7 @@ import { useGateway } from "@/state/GatewayProvider";
 import { shouldResetConversation } from "@/state/conversationTransition";
 import { loadConversationCache, storeConversationCache } from "@/storage/conversationCache";
 import { mergeConversationTurns } from "@/storage/conversationMerge";
-import { prepareImageAttachment } from "@/media/prepareImageAttachment";
+import { MAX_ATTACHMENTS, pickAttachments } from "@/media/attachmentPicker";
 import { agentImageSupport } from "@/media/agentImageSupport";
 import { colors } from "@/theme";
 
@@ -299,20 +298,8 @@ export default function ChatScreen() {
   ], [pendingTurn, turns]);
 
   async function chooseFile() {
-    const picked = await DocumentPicker.getDocumentAsync({
-      multiple: true,
-      copyToCacheDirectory: true,
-    });
-    if (picked.canceled) return;
-    const available = Math.max(0, 8 - attachments.length);
-    const prepared = await Promise.all(picked.assets.slice(0, available).map(async (asset) => {
-      const mediaType = asset.mimeType ?? "application/octet-stream";
-      if (!mediaType.startsWith("image/")) {
-        return { uri: asset.uri, name: asset.name, mediaType };
-      }
-      return prepareImageAttachment(asset.uri, asset.name);
-    }));
-    setAttachments((current) => [...current, ...prepared].slice(0, 8));
+    const prepared = await pickAttachments(attachments.length);
+    if (prepared.length) setAttachments((current) => [...current, ...prepared].slice(0, MAX_ATTACHMENTS));
   }
 
   async function submitPendingTurn(pending: PendingChatTurn) {
