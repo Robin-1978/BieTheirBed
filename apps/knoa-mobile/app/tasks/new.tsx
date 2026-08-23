@@ -143,7 +143,7 @@ export default function NewTaskScreen() {
         clientRequestId: requestIdentity.current!.requestId,
       }));
       router.replace(`/tasks/${result.task.task_id}`);
-    } catch {
+    } catch (caught) {
       // A disconnected Node must not make the user retype a long task.  Keep
       // the exact idempotency key so reconnect/retry cannot create duplicates.
       if (gateway.status !== "ready") {
@@ -165,7 +165,9 @@ export default function NewTaskScreen() {
         });
         setError(t("taskNew.queuedOffline"));
       } else {
-        setError(t("taskNew.createFailed"));
+        // The server preflights create-and-run; its message (e.g. blocked
+        // preflight details) is already user-facing.
+        setError(caught instanceof Error && caught.message ? caught.message : t("taskNew.createFailed"));
       }
     } finally {
       setSaving(false);

@@ -230,6 +230,44 @@ async def test_immediate_definition_creates_one_execution_and_retries_idempotent
 
 
 @pytest.mark.asyncio
+async def test_immediate_definition_without_auto_launch_waits_for_explicit_execute(
+    tmp_path: Path,
+) -> None:
+    service, _repository, scope = _components(tmp_path, _Runtime())
+    await service.start()
+    try:
+        definition, execution = await service.create_definition(
+            scope,
+            client_request_id="definition-request-deferred",
+            title="Check weather",
+            goal="Check today's weather",
+            launch_policy=TaskLaunchPolicy(kind=TaskLaunchKind.IMMEDIATE),
+            auto_launch=False,
+        )
+
+        assert execution is None
+        assert await service.list_executions(
+            scope.principal_id,
+            definition.task_id,
+        ) == ()
+
+        started = await service.execute_definition(
+            scope.principal_id,
+            definition.task_id,
+            launch_reason=TaskLaunchReason.CREATED,
+        )
+
+        assert started.task_id == definition.task_id
+        listed = await service.list_executions(
+            scope.principal_id,
+            definition.task_id,
+        )
+        assert [item.execution_id for item in listed] == [started.execution_id]
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
 async def test_completed_definition_accepts_human_follow_up_as_new_execution(
     tmp_path: Path,
 ) -> None:

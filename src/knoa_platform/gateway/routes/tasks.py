@@ -23,7 +23,7 @@ from knoa_platform.gateway.protocol import (
     UpdateProductTaskRequest,
 )
 from knoa_platform.runtime import RuntimePaths
-from knoa_platform.tasks import TaskDefinitionState
+from knoa_platform.tasks import TaskDefinitionState, TaskLaunchKind
 
 logger = logging.getLogger(__name__)
 _MAX_BODY_BYTES = 16 * 1024
@@ -38,14 +38,18 @@ class TaskRoutes:
         parsed = await self._parse_body(request, CreateProductTaskRequest)
         if isinstance(parsed, JSONResponse):
             return parsed
+        principal_id = authenticated.device.principal_id
+        immediate = parsed.launch_policy.kind is TaskLaunchKind.IMMEDIATE
         try:
             session_handle = await self._core.create_session(
-                authenticated.device.principal_id,
+                principal_id,
                 activate=False,
                 agent_id=parsed.agent_id,
             )
+            # Create-and-run must not bypass preflight: the definition is
+            # created without launching, checked, and only then started.
             result = await self._core.create_product_task(
-                authenticated.device.principal_id,
+                principal_id,
                 session_handle,
                 parsed.goal,
                 client_request_id=parsed.client_request_id,
@@ -56,17 +60,68 @@ class TaskRoutes:
                 launch_policy=parsed.launch_policy,
                 notification_policy=parsed.notification_policy or None,
                 agent_id=parsed.agent_id,
+                auto_launch=not immediate,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        if not immediate:
+            return JSONResponse(
+                {
+                    "task": result.task.model_dump(mode="json"),
+                    "execution": (
+                        None
+                        if result.execution is None
+                        else result.execution.model_dump(mode="json")
+                    ),
+                },
+                status_code=201,
+            )
+        try:
+            existing = await self._core.list_product_task_executions(
+                principal_id,
+                result.task.task_id,
+                limit=1,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        if existing:
+            # Idempotent replay of a create whose execution already started
+            # (e.g. the first response was lost in transit).
+            return JSONResponse(
+                {
+                    "task": result.task.model_dump(mode="json"),
+                    "execution": existing[0].model_dump(mode="json"),
+                },
+                status_code=201,
+            )
+        preflight = await self._preflight_task_response(principal_id, result.task.task_id)
+        if preflight.status_code != 200:
+            return preflight
+        preflight_body = json.loads(preflight.body)
+        if not preflight_body.get("ready", False):
+            # The definition stays so the user can fix the environment and
+            # start it from the task page once preflight passes.
+            return JSONResponse(
+                {
+                    "error": "preflight_blocked",
+                    "message": "任务已创建，但执行前检查未通过",
+                    "preflight": preflight_body,
+                    "task": result.task.model_dump(mode="json"),
+                },
+                status_code=409,
+            )
+        try:
+            execution = await self._core.execute_product_task(
+                principal_id,
+                result.task.task_id,
+                launch_reason="created",
             )
         except Exception as exc:
             return self._core_error(exc)
         return JSONResponse(
             {
                 "task": result.task.model_dump(mode="json"),
-                "execution": (
-                    None
-                    if result.execution is None
-                    else result.execution.model_dump(mode="json")
-                ),
+                "execution": execution.model_dump(mode="json"),
             },
             status_code=201,
         )
@@ -117,9 +172,19 @@ class TaskRoutes:
         task_id = self._path_identifier(request, "task_id")
         if task_id is None:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
+        return await self._preflight_task_response(
+            authenticated.device.principal_id,
+            task_id,
+        )
+
+    async def _preflight_task_response(
+        self,
+        principal_id: str,
+        task_id: str,
+    ) -> JSONResponse:
         try:
             task = await self._core.get_product_task(
-                authenticated.device.principal_id,
+                principal_id,
                 task_id,
             )
         except Exception as exc:
@@ -165,7 +230,7 @@ class TaskRoutes:
 
         try:
             revision, control, _generations = await self._core.get_config_current(
-                authenticated.device.principal_id,
+                principal_id,
             )
             agent = revision.document.agents.agents.get(task.agent_id)
             if agent is None:
@@ -317,7 +382,7 @@ class TaskRoutes:
         runtime_detail = "Agent Runtime 当前不可用，请检查 Node 状态后重试"
         try:
             runtime = await self._core.status(
-                authenticated.device.principal_id,
+                principal_id,
                 task.session_handle,
             )
             runtime_ready = bool(runtime.connected)
@@ -334,7 +399,7 @@ class TaskRoutes:
         if task.tools_enabled and runtime_ready:
             try:
                 tools = await self._core.list_tools(
-                    authenticated.device.principal_id,
+                    principal_id,
                     task.session_handle,
                 )
                 if tools.tools:

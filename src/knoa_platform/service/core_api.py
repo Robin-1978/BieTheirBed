@@ -795,6 +795,9 @@ class CreateProductTaskRequest(CoreModel):
     tools_enabled: bool = True
     priority: int = Field(default=0, ge=0, le=9)
     launch_policy: TaskLaunchPolicy = Field(default_factory=TaskLaunchPolicy)
+    # False lets the Gateway run preflight between creating the definition and
+    # starting the execution (create-and-run must not bypass preflight).
+    auto_launch: bool = True
     notification_policy: dict[str, bool] = Field(default_factory=dict)
     agent_id: Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]{0,63}$")] | None = None
 
@@ -850,6 +853,9 @@ class ExecuteProductTaskRequest(CoreModel):
     request_id: RequestId
     method: Literal["product_task_execute"] = "product_task_execute"
     task_id: TaskId
+    # Preserves the true provenance when the Gateway starts an execution it
+    # just created (e.g. immediate create-after-preflight).
+    launch_reason: TaskLaunchReason = TaskLaunchReason.MANUAL
 
 
 class GetProductTaskExecutionRequest(CoreModel):

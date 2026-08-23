@@ -324,6 +324,9 @@ class _Core:
         self.calls = []
         self.closed = False
         self.config = config or AppConfig()
+        # Mirrors the real Core: executions appear only after an explicit
+        # execute (the Gateway's create-and-run no longer auto-launches).
+        self.launched_executions = []
 
     async def close(self):
         self.closed = True
@@ -393,16 +396,16 @@ class _Core:
     async def create_product_task(
         self, principal_id, session_handle, goal, *, title, attachments,
         client_request_id, tools_enabled, priority, launch_policy, notification_policy,
-        agent_id=None,
+        agent_id=None, auto_launch=True,
     ):
         self.calls.append((
             "create_product_task", principal_id, session_handle, goal, title,
             client_request_id, attachments, tools_enabled, priority, launch_policy,
-            notification_policy, agent_id,
+            notification_policy, agent_id, auto_launch,
         ))
         return SimpleNamespace(
             task=_product_task_snapshot(),
-            execution=_product_execution_snapshot(),
+            execution=_product_execution_snapshot() if auto_launch else None,
         )
 
     async def get_product_task(self, principal_id, task_id):
@@ -424,13 +427,14 @@ class _Core:
     async def delete_product_task(self, principal_id, task_id):
         self.calls.append(("delete_product_task", principal_id, task_id))
 
-    async def execute_product_task(self, principal_id, task_id):
-        self.calls.append(("execute_product_task", principal_id, task_id))
+    async def execute_product_task(self, principal_id, task_id, *, launch_reason="manual"):
+        self.calls.append(("execute_product_task", principal_id, task_id, launch_reason))
+        self.launched_executions.append(launch_reason)
         return _product_execution_snapshot()
 
     async def list_product_task_executions(self, principal_id, task_id, *, limit):
         self.calls.append(("list_product_task_executions", principal_id, task_id, limit))
-        return (_product_execution_snapshot(),)
+        return tuple(_product_execution_snapshot() for _ in self.launched_executions)
 
     async def get_product_task_execution(self, principal_id, execution_id):
         self.calls.append(("get_product_task_execution", principal_id, execution_id))
@@ -1061,7 +1065,50 @@ async def test_gateway_selects_explicit_agent_for_background_task(tmp_path) -> N
         "personal:owner",
         {"activate": False, "agent_id": "codex"},
     )
-    assert core.calls[1][-1] == "codex"
+    create = core.calls[1]
+    assert create[-2] == "codex"
+    assert create[-1] is False  # create-and-run defers launch for preflight
+    assert "execute_product_task" in {call[0] for call in core.calls}
+    assert ("execute_product_task", "personal:owner", "task-a", "created") in core.calls
+
+
+@pytest.mark.asyncio
+async def test_gateway_create_and_run_blocked_by_preflight_keeps_definition(tmp_path) -> None:
+    class _ArchivedTaskCore(_Core):
+        async def get_product_task(self, principal_id, task_id):
+            return _product_task_snapshot(TaskDefinitionState.ARCHIVED)
+
+    core = _ArchivedTaskCore()
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=_Authentication(),
+        core=core,
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://gateway.local",
+    ) as http:
+        response = await http.post(
+            "/v1/tasks",
+            headers=headers,
+            json={
+                "client_request_id": "task-request-blocked",
+                "goal": "整理资料",
+            },
+        )
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["error"] == "preflight_blocked"
+    assert body["task"]["task_id"] == "task-a"
+    assert any(
+        check["status"] == "blocked" for check in body["preflight"]["checks"]
+    )
+    # The definition survives so the user can fix the environment and start
+    # the task from its page; nothing was executed.
+    assert core.launched_executions == []
 
 
 @pytest.mark.asyncio

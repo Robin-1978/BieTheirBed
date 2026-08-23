@@ -175,7 +175,9 @@ class GatewayCoreClient(Protocol):
     ) -> ProductTaskSnapshot: ...
 
     async def delete_product_task(self, task_id: str) -> None: ...
-    async def execute_product_task(self, task_id: str) -> ProductTaskExecutionSnapshot: ...
+    async def execute_product_task(
+        self, task_id: str, *, launch_reason: str = "manual"
+    ) -> ProductTaskExecutionSnapshot: ...
     async def get_product_task_execution(self, execution_id: str) -> ProductTaskExecutionSnapshot: ...
     async def list_product_task_executions(
         self, task_id: str, *, limit: int = 100
@@ -507,6 +509,7 @@ class GatewayCoreBridge:
         launch_policy: TaskLaunchPolicy | None = None,
         notification_policy: dict[str, bool] | None = None,
         agent_id: str | None = None,
+        auto_launch: bool = True,
     ) -> ProductTaskMessage:
         return await (await self._client_for(principal_id)).create_product_task(
             session_handle,
@@ -519,6 +522,7 @@ class GatewayCoreBridge:
             launch_policy=launch_policy,
             notification_policy=notification_policy,
             agent_id=agent_id,
+            auto_launch=auto_launch,
         )
 
     async def get_product_task(
@@ -571,8 +575,12 @@ class GatewayCoreBridge:
         self,
         principal_id: str,
         task_id: str,
+        *,
+        launch_reason: str = "manual",
     ) -> ProductTaskExecutionSnapshot:
-        return await (await self._client_for(principal_id)).execute_product_task(task_id)
+        return await (
+            await self._client_for(principal_id)
+        ).execute_product_task(task_id, launch_reason=launch_reason)
 
     async def get_product_task_execution(
         self,
