@@ -252,6 +252,7 @@ class ResourceTicketRequest(_Request):
 
 
 class NodeControlStateRequest(_Request):
+    audience: Literal["knoa-node-control-state-v1"]
     node_id: str = Field(min_length=1, max_length=128)
     timestamp: float
     nonce: str = Field(min_length=16, max_length=256)
@@ -259,6 +260,7 @@ class NodeControlStateRequest(_Request):
 
 
 class NodeModelShareRequest(NodeControlStateRequest):
+    audience: Literal["knoa-node-model-share-v1"]
     deployment_id: str = Field(min_length=1, max_length=128)
     resource_id: str = Field(min_length=1, max_length=128)
     display_name: str = Field(min_length=1, max_length=120)
