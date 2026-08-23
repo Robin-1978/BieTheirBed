@@ -1,0 +1,64 @@
+schema_version: 1
+id: browser
+version: 1.0.0
+display_name: 浏览器操作
+description: 使用隔离的临时浏览器会话安全地读取、操作网页并下载证据
+compatibility:
+  platform: ">=0.2.0"
+  operating_systems: [linux, windows, darwin]
+components:
+  mcp: ["."]
+requested_tools:
+  - name: browser.session_open
+    effect: local_write
+    capabilities: [mcp]
+    risk: medium
+  - name: browser.navigate
+    effect: read_only
+    capabilities: [mcp, network]
+    risk: medium
+  - name: browser.snapshot
+    effect: read_only
+    capabilities: [mcp]
+    risk: medium
+  - name: browser.screenshot
+    effect: local_write
+    capabilities: [mcp, host_write]
+    risk: medium
+  - name: browser.download
+    effect: local_write
+    capabilities: [mcp, network, host_write]
+    risk: medium
+  - name: browser.session_close
+    effect: local_write
+    capabilities: [mcp]
+    risk: low
+  - name: browser.click
+    effect: external_side_effect
+    capabilities: [mcp, network]
+    risk: medium
+  - name: browser.fill
+    effect: external_side_effect
+    capabilities: [mcp, network]
+    risk: high
+  - name: browser.submit
+    effect: external_side_effect
+    capabilities: [mcp, network]
+    risk: high
+  - name: browser.wait_for
+    effect: read_only
+    capabilities: [mcp]
+    risk: low
+setup_inputs: []
+health_checks:
+  - kind: required_command
+    value: google-chrome
+  - kind: mcp_inventory
+    component: browser_mcp_server
+  - kind: disk_budget
+    max_bytes: 268435456
+entry_points:
+  - title: 阅读并总结网页
+    mode: immediate_or_background
+  - title: 下载网页证据
+    mode: background

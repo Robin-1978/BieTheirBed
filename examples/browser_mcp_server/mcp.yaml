@@ -1,0 +1,53 @@
+enabled: true
+transport: stdio
+command: python3
+args: [server.py]
+working_directory: .
+inherit_env: []
+optional_env:
+  - KNOA_BROWSER_CHROME
+  - KNOA_BROWSER_STATE_ROOT
+  - KNOA_BROWSER_DOWNLOAD_ROOT
+  - KNOA_BROWSER_ALLOW_PRIVATE_ORIGINS
+timeout_seconds: 120
+tools:
+  browser.session_open:
+    effect: local_write
+    capabilities: [mcp]
+    risk: medium
+  browser.navigate:
+    effect: read_only
+    capabilities: [mcp, network]
+    risk: medium
+  browser.snapshot:
+    effect: read_only
+    capabilities: [mcp]
+    risk: medium
+  browser.screenshot:
+    effect: local_write
+    capabilities: [mcp, host_write]
+    risk: medium
+  browser.download:
+    effect: local_write
+    capabilities: [mcp, network, host_write]
+    risk: medium
+  browser.session_close:
+    effect: local_write
+    capabilities: [mcp]
+    risk: low
+  browser.click:
+    effect: external_side_effect
+    capabilities: [mcp, network]
+    risk: medium
+  browser.fill:
+    effect: external_side_effect
+    capabilities: [mcp, network]
+    risk: high
+  browser.submit:
+    effect: external_side_effect
+    capabilities: [mcp, network]
+    risk: high
+  browser.wait_for:
+    effect: read_only
+    capabilities: [mcp]
+    risk: low
