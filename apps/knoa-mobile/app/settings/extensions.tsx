@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 
 import { AppPressable } from "@/components/AppPressable";
-import type { CapabilityInstallPlan, CapabilityInstallation, ExtensionImportResult, ManagedConfig } from "@/api/models";
+import type { CapabilityCatalogEntry, CapabilityInstallPlan, CapabilityInstallation, ExtensionImportResult, ManagedConfig } from "@/api/models";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
@@ -24,15 +24,18 @@ export default function ExtensionCenterScreen() {
   const [draftId, setDraftId] = useState("");
   const [installations, setInstallations] = useState<CapabilityInstallation[]>([]);
   const [installPlan, setInstallPlan] = useState<CapabilityInstallPlan | null>(null);
+  const [catalog, setCatalog] = useState<CapabilityCatalogEntry[]>([]);
 
   const load = useCallback(async () => {
     try {
-      const [current, installed] = await gateway.runAuthenticated((client) => Promise.all([
+      const [current, installed, entries] = await gateway.runAuthenticated((client) => Promise.all([
         client.getConfigCurrent(),
         client.listCapabilityInstallations(),
+        client.listCapabilityCatalog(),
       ]));
       setDocument(current.revision.document);
       setInstallations(installed);
+      setCatalog(entries);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : t("settings.extensions.loadFailed"));
     }
@@ -103,6 +106,19 @@ export default function ExtensionCenterScreen() {
     }
   }
 
+  async function prepareCatalog(item: CapabilityCatalogEntry) {
+    setWorking(true);
+    setMessage("");
+    try {
+      setInstallPlan(await gateway.runAuthenticated((client) => client.prepareCatalogCapability(
+        item.id, item.selection.mode, item.selection.version,
+      )));
+      setMessage(t("settings.extensions.planReady"));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t("settings.extensions.importFailed"));
+    } finally { setWorking(false); }
+  }
+
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <View style={styles.section}>
@@ -138,6 +154,23 @@ export default function ExtensionCenterScreen() {
         {!Object.keys(document?.mcp_servers ?? {}).length && !Object.keys(document?.skills ?? {}).length
           ? <Text style={styles.hint}>{t("settings.extensions.empty")}</Text>
           : null}
+      </View>
+      <View style={styles.section}>
+        <Text style={styles.title}>{t("settings.extensions.catalogTitle")}</Text>
+        <Text style={styles.hint}>{t("settings.extensions.catalogHint")}</Text>
+        {catalog.map((item) => (
+          <View key={`${item.id}:${item.version}`} style={styles.capabilityItem}>
+            <View style={styles.flex}>
+              <Text style={styles.itemTitle}>{item.display_name} · v{item.version}</Text>
+              <Text style={styles.hint}>{item.description}</Text>
+              <Text style={styles.hint}>{item.permission_summary.join(" · ")}</Text>
+              {item.revoked ? <Text style={styles.warning}>{t("settings.extensions.revoked")}</Text> : null}
+            </View>
+            <AppPressable style={styles.smallButton} disabled={working || item.revoked} onPress={() => void prepareCatalog(item)}>
+              <Text style={styles.choiceText}>{t("settings.extensions.catalogInstall")}</Text>
+            </AppPressable>
+          </View>
+        ))}
       </View>
       {installPlan ? (
         <View style={styles.section}>

@@ -11,6 +11,7 @@ from knoa_platform.gateway.protocol import (
     AgentAvailabilityResponse,
     AgentListResponse,
     AndroidReleaseResponse,
+    ApproveImprovementCandidateRequest,
     ApplyFleetCandidateRequest,
     ApprovalResolvedResponse,
     ArtifactResponse,
@@ -22,6 +23,11 @@ from knoa_platform.gateway.protocol import (
     AuthCompleteRequest,
     AuthCompleteResponse,
     CancelTaskRequest,
+    CapabilityCatalogResponse,
+    CapabilityInstallationListResponse,
+    CapabilityInstallationResponse,
+    CapabilityInstallPlanResponse,
+    CatalogSelectionResponse,
     ChallengeResponse,
     ChatApprovalResolvedResponse,
     ChatTurnListResponse,
@@ -36,16 +42,30 @@ from knoa_platform.gateway.protocol import (
     ConversationSessionResponse,
     CreateChatTurnRequest,
     CreateProductTaskRequest,
+    CreateEventSourceRequest,
+    CreateEvaluationCaseRequest,
+    CreateImprovementCandidateRequest,
     DeletedResponse,
     DeviceRevokedResponse,
     ErrorResponse,
     ExtensionImportResponse,
     ExtensionPackageListResponse,
+    EvaluationCaseResponse,
+    EventSourceEventListResponse,
+    EventSourceEventResponse,
+    EventSourceListResponse,
+    EventSourceResponse,
+    FinishImprovementCanaryRequest,
     HealthResponse,
     HumanInteractionResolvedResponse,
     ImportLocalMCPRequest,
     ImportRemoteMCPRequest,
     ImportSkillRequest,
+    ImprovementCandidateListResponse,
+    ImprovementCandidateResponse,
+    ImprovementEvidenceResponse,
+    ImprovementPromotionResponse,
+    ImprovementReplayResponse,
     InvocationPolicyPreviewResponse,
     MCPResourceCatalogResponse,
     NodeDescriptorResponse,
@@ -60,6 +80,7 @@ from knoa_platform.gateway.protocol import (
     P2PAnswerResponse,
     P2POfferRequest,
     PreviewInvocationPolicyRequest,
+    PrepareCapabilityRequest,
     PrincipalTaskEventListResponse,
     ProductTaskExecutionListResponse,
     ProductTaskExecutionResponse,
@@ -68,6 +89,7 @@ from knoa_platform.gateway.protocol import (
     TaskPreflightBlockedResponse,
     TaskPreflightResponse,
     PublishConfigDraftRequest,
+    RecordImprovementEvidenceRequest,
     ReplaceConfigDraftRequest,
     ResolveApprovalRequest,
     ResolveHumanInteractionRequest,
@@ -77,15 +99,22 @@ from knoa_platform.gateway.protocol import (
     ResourceInvocationResponse,
     ResourceP2POfferRequest,
     ResumeTaskRequest,
+    ReplayImprovementCandidateRequest,
     RuntimeStatusResponse,
     SecretStatusResponse,
+    SelectCatalogCapabilityRequest,
+    SetCapabilityStateRequest,
+    SetEventSourceStateRequest,
     SessionCreatedResponse,
     SessionResponse,
     TaskEventListResponse,
     ToolListResponse,
+    TestEventSourceRequest,
     UpdateConversationSessionRequest,
     UpdateProductTaskRequest,
     WriteSecretRequest,
+    WebhookSecretRotationResponse,
+    ConfirmCapabilityRequest,
 )
 
 _MODELS: tuple[type[BaseModel], ...] = (
@@ -101,10 +130,39 @@ _MODELS: tuple[type[BaseModel], ...] = (
     NodeHubStatusResponse,
     ExtensionPackageListResponse,
     ExtensionImportResponse,
+    CapabilityInstallationListResponse,
+    CapabilityInstallPlanResponse,
+    CapabilityInstallationResponse,
+    CapabilityCatalogResponse,
+    CatalogSelectionResponse,
+    EventSourceListResponse,
+    EventSourceResponse,
+    EventSourceEventResponse,
+    EventSourceEventListResponse,
+    WebhookSecretRotationResponse,
+    ImprovementEvidenceResponse,
+    EvaluationCaseResponse,
+    ImprovementCandidateResponse,
+    ImprovementCandidateListResponse,
+    ImprovementReplayResponse,
+    ImprovementPromotionResponse,
     SecretStatusResponse,
     ImportSkillRequest,
     ImportLocalMCPRequest,
     ImportRemoteMCPRequest,
+    PrepareCapabilityRequest,
+    ConfirmCapabilityRequest,
+    SetCapabilityStateRequest,
+    SelectCatalogCapabilityRequest,
+    CreateEventSourceRequest,
+    SetEventSourceStateRequest,
+    TestEventSourceRequest,
+    RecordImprovementEvidenceRequest,
+    CreateEvaluationCaseRequest,
+    CreateImprovementCandidateRequest,
+    ReplayImprovementCandidateRequest,
+    ApproveImprovementCandidateRequest,
+    FinishImprovementCanaryRequest,
     ApplyFleetCandidateRequest,
     WriteSecretRequest,
     PairChallengeRequest,
@@ -1245,6 +1303,343 @@ def gateway_openapi_schema() -> dict[str, Any]:
                             },
                         },
                         **_errors("400", "404", "416"),
+                    },
+                }
+            },
+            "/v1/capabilities/installations": {
+                "get": {
+                    "operationId": "listCapabilityInstallations",
+                    "security": bearer,
+                    "responses": {
+                        "200": _json_response(
+                            "Installed capabilities", CapabilityInstallationListResponse
+                        ),
+                        **_errors("401", "403", "429"),
+                    },
+                }
+            },
+            "/v1/capabilities/prepare": {
+                "post": {
+                    "operationId": "prepareCapabilityInstallation",
+                    "security": bearer,
+                    "requestBody": _json_body(PrepareCapabilityRequest),
+                    "responses": {
+                        "201": _json_response(
+                            "Capability installation plan", CapabilityInstallPlanResponse
+                        ),
+                        **_errors("400", "401", "403", "415", "422", "429"),
+                    },
+                }
+            },
+            "/v1/capabilities/confirm": {
+                "post": {
+                    "operationId": "confirmCapabilityInstallation",
+                    "security": bearer,
+                    "requestBody": _json_body(ConfirmCapabilityRequest),
+                    "responses": {
+                        "200": _json_response(
+                            "Installed capability", CapabilityInstallationResponse
+                        ),
+                        **_errors("400", "401", "403", "409", "415", "429"),
+                    },
+                }
+            },
+            "/v1/capabilities/{capability_id}/state": {
+                "patch": {
+                    "operationId": "setCapabilityState",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "capability_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                    }],
+                    "requestBody": _json_body(SetCapabilityStateRequest),
+                    "responses": {
+                        "200": _json_response(
+                            "Updated capability", CapabilityInstallationResponse
+                        ),
+                        **_errors("400", "401", "403", "404", "415", "429"),
+                    },
+                }
+            },
+            "/v1/capabilities/{capability_id}/rollback": {
+                "post": {
+                    "operationId": "rollbackCapability",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "capability_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                    }],
+                    "responses": {
+                        "200": _json_response(
+                            "Rolled back capability", CapabilityInstallationResponse
+                        ),
+                        **_errors("401", "403", "404", "409", "429"),
+                    },
+                }
+            },
+            "/v1/capability-catalog": {
+                "get": {
+                    "operationId": "listCapabilityCatalog",
+                    "security": bearer,
+                    "responses": {
+                        "200": _json_response(
+                            "Verified capability catalog", CapabilityCatalogResponse
+                        ),
+                        **_errors("401", "403", "422", "429"),
+                    },
+                }
+            },
+            "/v1/capability-catalog/{capability_id}/selection": {
+                "put": {
+                    "operationId": "selectCatalogCapabilityVersion",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "capability_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                    }],
+                    "requestBody": _json_body(SelectCatalogCapabilityRequest),
+                    "responses": {
+                        "200": _json_response(
+                            "Saved catalog selection", CatalogSelectionResponse
+                        ),
+                        **_errors("400", "401", "403", "415", "422", "429"),
+                    },
+                }
+            },
+            "/v1/capability-catalog/{capability_id}/prepare": {
+                "post": {
+                    "operationId": "prepareCatalogCapability",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "capability_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                    }],
+                    "requestBody": _json_body(SelectCatalogCapabilityRequest),
+                    "responses": {
+                        "201": _json_response(
+                            "Catalog capability installation plan", CapabilityInstallPlanResponse
+                        ),
+                        **_errors("400", "401", "403", "415", "422", "429"),
+                    },
+                }
+            },
+            "/v1/event-sources": {
+                "get": {
+                    "operationId": "listEventSources",
+                    "security": bearer,
+                    "responses": {
+                        "200": _json_response("Event sources", EventSourceListResponse),
+                        **_errors("401", "429"),
+                    },
+                },
+                "post": {
+                    "operationId": "createEventSource",
+                    "security": bearer,
+                    "requestBody": _json_body(CreateEventSourceRequest),
+                    "responses": {
+                        "201": _json_response("Created event source", EventSourceResponse),
+                        **_errors("400", "401", "415", "429"),
+                    },
+                },
+            },
+            "/v1/event-sources/{source_id}": {
+                "get": {
+                    "operationId": "getEventSource",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "source_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                    }],
+                    "responses": {
+                        "200": _json_response("Event source", EventSourceResponse),
+                        **_errors("400", "401", "404", "429"),
+                    },
+                },
+                "delete": {
+                    "operationId": "deleteEventSource",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "source_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                    }],
+                    "responses": {
+                        "200": _json_response("Deleted event source", DeletedResponse),
+                        **_errors("400", "401", "404", "429"),
+                    },
+                },
+            },
+            "/v1/event-sources/{source_id}/state": {
+                "patch": {
+                    "operationId": "setEventSourceState",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "source_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                    }],
+                    "requestBody": _json_body(SetEventSourceStateRequest),
+                    "responses": {
+                        "200": _json_response("Updated event source", EventSourceResponse),
+                        **_errors("400", "401", "404", "415", "429"),
+                    },
+                }
+            },
+            "/v1/event-sources/{source_id}/test": {
+                "post": {
+                    "operationId": "testEventSource",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "source_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                    }],
+                    "requestBody": _json_body(TestEventSourceRequest),
+                    "responses": {
+                        "202": _json_response("Accepted test event", EventSourceEventResponse),
+                        **_errors("400", "401", "404", "415", "429"),
+                    },
+                }
+            },
+            "/v1/event-sources/{source_id}/rotate-secret": {
+                "post": {
+                    "operationId": "rotateEventSourceSecret",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "source_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                    }],
+                    "responses": {
+                        "200": _json_response(
+                            "Rotated webhook secret", WebhookSecretRotationResponse
+                        ),
+                        **_errors("400", "401", "404", "422", "429"),
+                    },
+                }
+            },
+            "/v1/event-sources/{source_id}/events": {
+                "get": {
+                    "operationId": "listEventSourceEvents",
+                    "security": bearer,
+                    "parameters": [
+                        {
+                            "name": "source_id", "in": "path", "required": True,
+                            "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                        },
+                        _query("limit", {"type": "integer", "minimum": 1, "maximum": 200}),
+                    ],
+                    "responses": {
+                        "200": _json_response("Recent source events", EventSourceEventListResponse),
+                        **_errors("400", "401", "404", "429"),
+                    },
+                }
+            },
+            "/v1/improvements/evidence": {
+                "post": {
+                    "operationId": "recordImprovementEvidence",
+                    "security": bearer,
+                    "requestBody": _json_body(RecordImprovementEvidenceRequest),
+                    "responses": {
+                        "201": _json_response(
+                            "Recorded improvement evidence", ImprovementEvidenceResponse
+                        ),
+                        **_errors("400", "401", "403", "415", "429"),
+                    },
+                }
+            },
+            "/v1/improvements/cases": {
+                "post": {
+                    "operationId": "createImprovementEvaluationCase",
+                    "security": bearer,
+                    "requestBody": _json_body(CreateEvaluationCaseRequest),
+                    "responses": {
+                        "201": _json_response("Created evaluation case", EvaluationCaseResponse),
+                        **_errors("400", "401", "403", "415", "429"),
+                    },
+                }
+            },
+            "/v1/improvements/candidates": {
+                "get": {
+                    "operationId": "listImprovementCandidates",
+                    "security": bearer,
+                    "responses": {
+                        "200": _json_response(
+                            "Improvement candidates", ImprovementCandidateListResponse
+                        ),
+                        **_errors("401", "403", "429"),
+                    },
+                },
+                "post": {
+                    "operationId": "createImprovementCandidate",
+                    "security": bearer,
+                    "requestBody": _json_body(CreateImprovementCandidateRequest),
+                    "responses": {
+                        "201": _json_response(
+                            "Created improvement candidate", ImprovementCandidateResponse
+                        ),
+                        **_errors("400", "401", "403", "415", "422", "429"),
+                    },
+                },
+            },
+            "/v1/improvements/candidates/{candidate_id}/replay": {
+                "post": {
+                    "operationId": "replayImprovementCandidate",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "candidate_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                    }],
+                    "requestBody": _json_body(ReplayImprovementCandidateRequest),
+                    "responses": {
+                        "200": _json_response("Offline replay result", ImprovementReplayResponse),
+                        **_errors("400", "401", "403", "415", "422", "429"),
+                    },
+                }
+            },
+            "/v1/improvements/candidates/{candidate_id}/approve": {
+                "post": {
+                    "operationId": "approveImprovementCandidate",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "candidate_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                    }],
+                    "requestBody": _json_body(ApproveImprovementCandidateRequest),
+                    "responses": {
+                        "200": _json_response(
+                            "Approved candidate canary", ImprovementPromotionResponse
+                        ),
+                        **_errors("400", "401", "403", "415", "422", "429"),
+                    },
+                }
+            },
+            "/v1/improvements/candidates/{candidate_id}/canary": {
+                "post": {
+                    "operationId": "finishImprovementCanary",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "candidate_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                    }],
+                    "requestBody": _json_body(FinishImprovementCanaryRequest),
+                    "responses": {
+                        "200": _json_response(
+                            "Finished candidate canary", ImprovementCandidateResponse
+                        ),
+                        **_errors("400", "401", "403", "415", "422", "429"),
+                    },
+                }
+            },
+            "/v1/improvements/candidates/{candidate_id}/rollback": {
+                "post": {
+                    "operationId": "rollbackImprovementCandidate",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "candidate_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+                    }],
+                    "responses": {
+                        "200": _json_response(
+                            "Rolled back improvement candidate", ImprovementCandidateResponse
+                        ),
+                        **_errors("401", "403", "404", "422", "429"),
                     },
                 }
             },

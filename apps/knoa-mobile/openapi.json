@@ -6419,6 +6419,2016 @@
         }
       }
     },
+    "/v1/capabilities/installations": {
+      "get": {
+        "operationId": "listCapabilityInstallations",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Installed capabilities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilityInstallationListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/capabilities/prepare": {
+      "post": {
+        "operationId": "prepareCapabilityInstallation",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrepareCapabilityRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Capability installation plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilityInstallPlanResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/capabilities/confirm": {
+      "post": {
+        "operationId": "confirmCapabilityInstallation",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmCapabilityRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Installed capability",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilityInstallationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/capabilities/{capability_id}/state": {
+      "patch": {
+        "operationId": "setCapabilityState",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "capability_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCapabilityStateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated capability",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilityInstallationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/capabilities/{capability_id}/rollback": {
+      "post": {
+        "operationId": "rollbackCapability",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "capability_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rolled back capability",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilityInstallationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/capability-catalog": {
+      "get": {
+        "operationId": "listCapabilityCatalog",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verified capability catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilityCatalogResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/capability-catalog/{capability_id}/selection": {
+      "put": {
+        "operationId": "selectCatalogCapabilityVersion",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "capability_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectCatalogCapabilityRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved catalog selection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogSelectionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/capability-catalog/{capability_id}/prepare": {
+      "post": {
+        "operationId": "prepareCatalogCapability",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "capability_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectCatalogCapabilityRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Catalog capability installation plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilityInstallPlanResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/event-sources": {
+      "get": {
+        "operationId": "listEventSources",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event sources",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventSourceListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createEventSource",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEventSourceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created event source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventSourceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/event-sources/{source_id}": {
+      "get": {
+        "operationId": "getEventSource",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventSourceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteEventSource",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted event source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/event-sources/{source_id}/state": {
+      "patch": {
+        "operationId": "setEventSourceState",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetEventSourceStateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated event source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventSourceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/event-sources/{source_id}/test": {
+      "post": {
+        "operationId": "testEventSource",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestEventSourceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted test event",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventSourceEventResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/event-sources/{source_id}/rotate-secret": {
+      "post": {
+        "operationId": "rotateEventSourceSecret",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rotated webhook secret",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSecretRotationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/event-sources/{source_id}/events": {
+      "get": {
+        "operationId": "listEventSourceEvents",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent source events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventSourceEventListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/improvements/evidence": {
+      "post": {
+        "operationId": "recordImprovementEvidence",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordImprovementEvidenceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Recorded improvement evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementEvidenceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/improvements/cases": {
+      "post": {
+        "operationId": "createImprovementEvaluationCase",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEvaluationCaseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created evaluation case",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationCaseResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/improvements/candidates": {
+      "get": {
+        "operationId": "listImprovementCandidates",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Improvement candidates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementCandidateListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createImprovementCandidate",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateImprovementCandidateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created improvement candidate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementCandidateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/improvements/candidates/{candidate_id}/replay": {
+      "post": {
+        "operationId": "replayImprovementCandidate",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "candidate_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplayImprovementCandidateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Offline replay result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementReplayResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/improvements/candidates/{candidate_id}/approve": {
+      "post": {
+        "operationId": "approveImprovementCandidate",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "candidate_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveImprovementCandidateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Approved candidate canary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementPromotionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/improvements/candidates/{candidate_id}/canary": {
+      "post": {
+        "operationId": "finishImprovementCanary",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "candidate_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinishImprovementCanaryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Finished candidate canary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementCandidateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/improvements/candidates/{candidate_id}/rollback": {
+      "post": {
+        "operationId": "rollbackImprovementCandidate",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "candidate_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rolled back improvement candidate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementCandidateResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/device/audit": {
       "get": {
         "operationId": "listDeviceAudit",
@@ -6798,6 +8808,25 @@
         "title": "ApprovalState",
         "type": "string"
       },
+      "ApproveImprovementCandidateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "canary_scope": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Canary Scope",
+            "type": "array"
+          }
+        },
+        "required": [
+          "canary_scope"
+        ],
+        "title": "ApproveImprovementCandidateRequest",
+        "type": "object"
+      },
       "ArtifactInputRef": {
         "additionalProperties": false,
         "properties": {
@@ -7123,6 +9152,515 @@
           }
         },
         "title": "CancelTaskRequest",
+        "type": "object"
+      },
+      "CapabilityCatalogResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogEntryResponse"
+            },
+            "title": "Entries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "title": "CapabilityCatalogResponse",
+        "type": "object"
+      },
+      "CapabilityInstallPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "operation_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "capability_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+            "title": "Capability Id",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "package_id": {
+            "title": "Package Id",
+            "type": "string"
+          },
+          "package_digest": {
+            "title": "Package Digest",
+            "type": "string"
+          },
+          "component_packages": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Component Packages",
+            "type": "object"
+          },
+          "requested_tools": {
+            "items": {
+              "$ref": "#/components/schemas/CapabilityRequestedTool"
+            },
+            "title": "Requested Tools",
+            "type": "array"
+          },
+          "withheld_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Withheld Tools",
+            "type": "array"
+          },
+          "setup_inputs": {
+            "items": {
+              "$ref": "#/components/schemas/CapabilitySetupInput"
+            },
+            "title": "Setup Inputs",
+            "type": "array"
+          },
+          "checks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "draft_id": {
+            "title": "Draft Id",
+            "type": "string"
+          },
+          "draft_version": {
+            "title": "Draft Version",
+            "type": "integer"
+          },
+          "previous_revision_id": {
+            "title": "Previous Revision Id",
+            "type": "string"
+          },
+          "plan_digest": {
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "awaiting_confirmation",
+              "installing",
+              "installed",
+              "failed"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "capability_id",
+          "version",
+          "display_name",
+          "package_id",
+          "package_digest",
+          "component_packages",
+          "requested_tools",
+          "withheld_tools",
+          "setup_inputs",
+          "checks",
+          "draft_id",
+          "draft_version",
+          "previous_revision_id",
+          "plan_digest",
+          "state"
+        ],
+        "title": "CapabilityInstallPlan",
+        "type": "object"
+      },
+      "CapabilityInstallPlanResponse": {
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/CapabilityInstallPlan"
+          }
+        },
+        "required": [
+          "plan"
+        ],
+        "title": "CapabilityInstallPlanResponse",
+        "type": "object"
+      },
+      "CapabilityInstallation": {
+        "additionalProperties": false,
+        "properties": {
+          "capability_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+            "title": "Capability Id",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "package_id": {
+            "title": "Package Id",
+            "type": "string"
+          },
+          "component_packages": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Component Packages",
+            "type": "object"
+          },
+          "component_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Component Ids",
+            "type": "array"
+          },
+          "active_revision_id": {
+            "title": "Active Revision Id",
+            "type": "string"
+          },
+          "previous_revision_id": {
+            "title": "Previous Revision Id",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "health": {
+            "enum": [
+              "healthy",
+              "failed",
+              "disabled"
+            ],
+            "title": "Health",
+            "type": "string"
+          },
+          "installed_at": {
+            "title": "Installed At",
+            "type": "number"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "capability_id",
+          "version",
+          "display_name",
+          "package_id",
+          "component_packages",
+          "component_ids",
+          "active_revision_id",
+          "previous_revision_id",
+          "enabled",
+          "health",
+          "installed_at",
+          "updated_at"
+        ],
+        "title": "CapabilityInstallation",
+        "type": "object"
+      },
+      "CapabilityInstallationListResponse": {
+        "properties": {
+          "installations": {
+            "items": {
+              "$ref": "#/components/schemas/CapabilityInstallation"
+            },
+            "title": "Installations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "installations"
+        ],
+        "title": "CapabilityInstallationListResponse",
+        "type": "object"
+      },
+      "CapabilityInstallationResponse": {
+        "properties": {
+          "installation": {
+            "$ref": "#/components/schemas/CapabilityInstallation"
+          }
+        },
+        "required": [
+          "installation"
+        ],
+        "title": "CapabilityInstallationResponse",
+        "type": "object"
+      },
+      "CapabilityRequestedTool": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "effect": {
+            "enum": [
+              "read_only",
+              "internal_write",
+              "local_write",
+              "external_side_effect",
+              "desktop_control"
+            ],
+            "title": "Effect",
+            "type": "string"
+          },
+          "capabilities": {
+            "default": [],
+            "items": {
+              "enum": [
+                "host_read",
+                "host_write",
+                "shell",
+                "network",
+                "desktop_observe",
+                "desktop_control",
+                "memory_read",
+                "memory_write",
+                "mcp",
+                "task_management"
+              ],
+              "type": "string"
+            },
+            "title": "Capabilities",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "risk": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "title": "Risk",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "effect",
+          "risk"
+        ],
+        "title": "CapabilityRequestedTool",
+        "type": "object"
+      },
+      "CapabilitySetupInput": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "kind": {
+            "const": "secret",
+            "default": "secret",
+            "title": "Kind",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "description": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CapabilitySetupInput",
+        "type": "object"
+      },
+      "CatalogEntryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "version": {
+            "maxLength": 64,
+            "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$",
+            "title": "Version",
+            "type": "string"
+          },
+          "display_name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "platform": {
+            "pattern": "^>=\\d+\\.\\d+\\.\\d+$",
+            "title": "Platform",
+            "type": "string"
+          },
+          "operating_systems": {
+            "default": [],
+            "items": {
+              "enum": [
+                "linux",
+                "windows",
+                "darwin"
+              ],
+              "type": "string"
+            },
+            "title": "Operating Systems",
+            "type": "array"
+          },
+          "architectures": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Architectures",
+            "type": "array"
+          },
+          "package_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Package Digest",
+            "type": "string"
+          },
+          "source": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "permission_summary": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Permission Summary",
+            "type": "array"
+          },
+          "revoked": {
+            "default": false,
+            "title": "Revoked",
+            "type": "boolean"
+          },
+          "revocation_severity": {
+            "default": "none",
+            "enum": [
+              "none",
+              "warning",
+              "critical"
+            ],
+            "title": "Revocation Severity",
+            "type": "string"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/CatalogSelection"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "display_name",
+          "description",
+          "platform",
+          "package_digest",
+          "source",
+          "selection"
+        ],
+        "title": "CatalogEntryResponse",
+        "type": "object"
+      },
+      "CatalogSelection": {
+        "properties": {
+          "mode": {
+            "enum": [
+              "pinned",
+              "latest_compatible",
+              "explicit"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "version"
+        ],
+        "title": "CatalogSelection",
+        "type": "object"
+      },
+      "CatalogSelectionResponse": {
+        "properties": {
+          "capability_id": {
+            "title": "Capability Id",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "pinned",
+              "latest_compatible",
+              "explicit"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "resolved_version": {
+            "title": "Resolved Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "capability_id",
+          "mode",
+          "version",
+          "resolved_version"
+        ],
+        "title": "CatalogSelectionResponse",
         "type": "object"
       },
       "ChallengeResponse": {
@@ -7833,6 +10371,27 @@
         "title": "ConfigValidationResult",
         "type": "object"
       },
+      "ConfirmCapabilityRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "operation_id": {
+            "pattern": "^capop-[0-9a-f]{24}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "plan_digest"
+        ],
+        "title": "ConfirmCapabilityRequest",
+        "type": "object"
+      },
       "ContinueProductTaskRequest": {
         "additionalProperties": false,
         "properties": {
@@ -8025,6 +10584,200 @@
         "title": "CreateChatTurnRequest",
         "type": "object"
       },
+      "CreateEvaluationCaseRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "sanitized_input": {
+            "maxLength": 100000,
+            "minLength": 1,
+            "title": "Sanitized Input",
+            "type": "string"
+          },
+          "expected_invariants": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Expected Invariants",
+            "type": "array"
+          },
+          "fixture_results": {
+            "additionalProperties": true,
+            "title": "Fixture Results",
+            "type": "object"
+          },
+          "dataset_version": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Dataset Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sanitized_input",
+          "expected_invariants",
+          "dataset_version"
+        ],
+        "title": "CreateEvaluationCaseRequest",
+        "type": "object"
+      },
+      "CreateEventSourceRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "client_request_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Client Request Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "webhook",
+              "mcp_resource"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "goal": {
+            "maxLength": 200000,
+            "minLength": 1,
+            "title": "Goal",
+            "type": "string"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Agent Id"
+          },
+          "tools_enabled": {
+            "default": true,
+            "title": "Tools Enabled",
+            "type": "boolean"
+          },
+          "priority": {
+            "default": 0,
+            "maximum": 9,
+            "minimum": 0,
+            "title": "Priority",
+            "type": "integer"
+          },
+          "notification_policy": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Notification Policy",
+            "type": "object"
+          },
+          "mcp_server_id": {
+            "default": "",
+            "maxLength": 128,
+            "title": "Mcp Server Id",
+            "type": "string"
+          },
+          "resource_uri_prefix": {
+            "default": "",
+            "maxLength": 2048,
+            "title": "Resource Uri Prefix",
+            "type": "string"
+          },
+          "include_root": {
+            "default": true,
+            "title": "Include Root",
+            "type": "boolean"
+          },
+          "include_descendants": {
+            "default": false,
+            "title": "Include Descendants",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "client_request_id",
+          "kind",
+          "title",
+          "goal"
+        ],
+        "title": "CreateEventSourceRequest",
+        "type": "object"
+      },
+      "CreateImprovementCandidateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "prompt",
+              "skill"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "target_ref": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Target Ref",
+            "type": "string"
+          },
+          "base_version": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Base Version",
+            "type": "string"
+          },
+          "proposed_version": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Proposed Version",
+            "type": "string"
+          },
+          "proposed_content": {
+            "maxLength": 500000,
+            "minLength": 1,
+            "title": "Proposed Content",
+            "type": "string"
+          },
+          "rationale": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Evidence Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "target_ref",
+          "base_version",
+          "proposed_version",
+          "proposed_content",
+          "rationale",
+          "evidence_ids"
+        ],
+        "title": "CreateImprovementCandidateRequest",
+        "type": "object"
+      },
       "CreateProductTaskRequest": {
         "additionalProperties": false,
         "properties": {
@@ -8202,6 +10955,233 @@
         "title": "ErrorResponse",
         "type": "object"
       },
+      "EvaluationCase": {
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+            "title": "Case Id",
+            "type": "string"
+          },
+          "principal_id": {
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "sanitized_input": {
+            "maxLength": 100000,
+            "minLength": 1,
+            "title": "Sanitized Input",
+            "type": "string"
+          },
+          "expected_invariants": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Expected Invariants",
+            "type": "array"
+          },
+          "fixture_results": {
+            "additionalProperties": true,
+            "title": "Fixture Results",
+            "type": "object"
+          },
+          "dataset_version": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Dataset Version",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "case_id",
+          "principal_id",
+          "sanitized_input",
+          "expected_invariants",
+          "dataset_version",
+          "created_at"
+        ],
+        "title": "EvaluationCase",
+        "type": "object"
+      },
+      "EvaluationCaseResponse": {
+        "properties": {
+          "case": {
+            "$ref": "#/components/schemas/EvaluationCase"
+          }
+        },
+        "required": [
+          "case"
+        ],
+        "title": "EvaluationCaseResponse",
+        "type": "object"
+      },
+      "EventSourceEventListResponse": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/TriggerEventSnapshot"
+            },
+            "title": "Events",
+            "type": "array"
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "title": "EventSourceEventListResponse",
+        "type": "object"
+      },
+      "EventSourceEventResponse": {
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/TriggerEventSnapshot"
+          }
+        },
+        "required": [
+          "event"
+        ],
+        "title": "EventSourceEventResponse",
+        "type": "object"
+      },
+      "EventSourceListResponse": {
+        "properties": {
+          "event_sources": {
+            "items": {
+              "$ref": "#/components/schemas/EventSourceSnapshot"
+            },
+            "title": "Event Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "event_sources"
+        ],
+        "title": "EventSourceListResponse",
+        "type": "object"
+      },
+      "EventSourceResponse": {
+        "properties": {
+          "event_source": {
+            "$ref": "#/components/schemas/EventSourceSnapshot"
+          }
+        },
+        "required": [
+          "event_source"
+        ],
+        "title": "EventSourceResponse",
+        "type": "object"
+      },
+      "EventSourceSnapshot": {
+        "properties": {
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "webhook",
+              "mcp_resource"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TaskDefinitionState"
+          },
+          "health": {
+            "title": "Health",
+            "type": "string"
+          },
+          "last_event_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Last Event At"
+          },
+          "event_count": {
+            "minimum": 0,
+            "title": "Event Count",
+            "type": "integer"
+          },
+          "public_url": {
+            "default": "",
+            "title": "Public Url",
+            "type": "string"
+          },
+          "route_id": {
+            "default": "",
+            "title": "Route Id",
+            "type": "string"
+          },
+          "secret_version": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Secret Version",
+            "type": "integer"
+          },
+          "source_config": {
+            "additionalProperties": true,
+            "title": "Source Config",
+            "type": "object"
+          },
+          "secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Secret"
+          },
+          "signing_example": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Signing Example"
+          }
+        },
+        "required": [
+          "source_id",
+          "kind",
+          "display_name",
+          "task_id",
+          "state",
+          "health",
+          "event_count"
+        ],
+        "title": "EventSourceSnapshot",
+        "type": "object"
+      },
       "ExtensionImportResponse": {
         "properties": {
           "result": {
@@ -8282,6 +11262,27 @@
           "state"
         ],
         "title": "ExtensionStatusRecord",
+        "type": "object"
+      },
+      "FinishImprovementCanaryRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "promote": {
+            "title": "Promote",
+            "type": "boolean"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Metrics",
+            "type": "object"
+          }
+        },
+        "required": [
+          "promote"
+        ],
+        "title": "FinishImprovementCanaryRequest",
         "type": "object"
       },
       "HealthResponse": {
@@ -8484,6 +11485,226 @@
           "source_path"
         ],
         "title": "ImportSkillRequest",
+        "type": "object"
+      },
+      "ImprovementCandidate": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "principal_id": {
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "prompt",
+              "skill"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "target_ref": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Target Ref",
+            "type": "string"
+          },
+          "base_version": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Base Version",
+            "type": "string"
+          },
+          "proposed_version": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Proposed Version",
+            "type": "string"
+          },
+          "proposed_content": {
+            "maxLength": 500000,
+            "minLength": 1,
+            "title": "Proposed Content",
+            "type": "string"
+          },
+          "rationale": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "state": {
+            "enum": [
+              "draft",
+              "evaluated",
+              "awaiting_approval",
+              "canary",
+              "promoted",
+              "rejected",
+              "rolled_back"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "author": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Author",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "number"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "candidate_id",
+          "principal_id",
+          "kind",
+          "target_ref",
+          "base_version",
+          "proposed_version",
+          "proposed_content",
+          "rationale",
+          "evidence_ids",
+          "state",
+          "author",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ImprovementCandidate",
+        "type": "object"
+      },
+      "ImprovementCandidateListResponse": {
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/ImprovementCandidate"
+            },
+            "title": "Candidates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "candidates"
+        ],
+        "title": "ImprovementCandidateListResponse",
+        "type": "object"
+      },
+      "ImprovementCandidateResponse": {
+        "properties": {
+          "candidate": {
+            "$ref": "#/components/schemas/ImprovementCandidate"
+          }
+        },
+        "required": [
+          "candidate"
+        ],
+        "title": "ImprovementCandidateResponse",
+        "type": "object"
+      },
+      "ImprovementEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "principal_id": {
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "explicit_feedback",
+              "failed_execution",
+              "recovery_result",
+              "metric_regression"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "subject_ref": {
+            "maxLength": 256,
+            "title": "Subject Ref",
+            "type": "string"
+          },
+          "summary": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Summary",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "evidence_id",
+          "principal_id",
+          "kind",
+          "subject_ref",
+          "summary",
+          "created_at"
+        ],
+        "title": "ImprovementEvidence",
+        "type": "object"
+      },
+      "ImprovementEvidenceResponse": {
+        "properties": {
+          "evidence": {
+            "$ref": "#/components/schemas/ImprovementEvidence"
+          }
+        },
+        "required": [
+          "evidence"
+        ],
+        "title": "ImprovementEvidenceResponse",
+        "type": "object"
+      },
+      "ImprovementPromotionResponse": {
+        "properties": {
+          "promotion": {
+            "additionalProperties": true,
+            "title": "Promotion",
+            "type": "object"
+          }
+        },
+        "required": [
+          "promotion"
+        ],
+        "title": "ImprovementPromotionResponse",
+        "type": "object"
+      },
+      "ImprovementReplayResponse": {
+        "properties": {
+          "replay": {
+            "$ref": "#/components/schemas/ReplayResult"
+          }
+        },
+        "required": [
+          "replay"
+        ],
+        "title": "ImprovementReplayResponse",
         "type": "object"
       },
       "InvocationLimits": {
@@ -9811,6 +13032,22 @@
         "title": "PauseTaskRequest",
         "type": "object"
       },
+      "PrepareCapabilityRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "source_path": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Source Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_path"
+        ],
+        "title": "PrepareCapabilityRequest",
+        "type": "object"
+      },
       "PreviewInvocationPolicyRequest": {
         "additionalProperties": false,
         "properties": {
@@ -10474,6 +13711,39 @@
         "title": "PublishConfigDraftRequest",
         "type": "object"
       },
+      "RecordImprovementEvidenceRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "explicit_feedback",
+              "failed_execution",
+              "recovery_result",
+              "metric_regression"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "subject_ref": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Subject Ref",
+            "type": "string"
+          },
+          "summary": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "summary"
+        ],
+        "title": "RecordImprovementEvidenceRequest",
+        "type": "object"
+      },
       "ReplaceConfigDraftRequest": {
         "additionalProperties": false,
         "properties": {
@@ -10491,6 +13761,104 @@
           "expected_version"
         ],
         "title": "ReplaceConfigDraftRequest",
+        "type": "object"
+      },
+      "ReplayImprovementCandidateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "dataset_version": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Dataset Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_version"
+        ],
+        "title": "ReplayImprovementCandidateRequest",
+        "type": "object"
+      },
+      "ReplayResult": {
+        "additionalProperties": false,
+        "properties": {
+          "replay_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+            "title": "Replay Id",
+            "type": "string"
+          },
+          "candidate_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "dataset_version": {
+            "title": "Dataset Version",
+            "type": "string"
+          },
+          "case_count": {
+            "title": "Case Count",
+            "type": "integer"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "quality_score": {
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Quality Score",
+            "type": "number"
+          },
+          "safety_violations": {
+            "minimum": 0,
+            "title": "Safety Violations",
+            "type": "integer"
+          },
+          "estimated_cost": {
+            "minimum": 0,
+            "title": "Estimated Cost",
+            "type": "number"
+          },
+          "latency_ms": {
+            "minimum": 0,
+            "title": "Latency Ms",
+            "type": "number"
+          },
+          "recovery_success_rate": {
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Recovery Success Rate",
+            "type": "number"
+          },
+          "details": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Details",
+            "type": "array"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "replay_id",
+          "candidate_id",
+          "dataset_version",
+          "case_count",
+          "passed",
+          "quality_score",
+          "safety_violations",
+          "estimated_cost",
+          "latency_ms",
+          "recovery_success_rate",
+          "details",
+          "created_at"
+        ],
+        "title": "ReplayResult",
         "type": "object"
       },
       "ResolveApprovalRequest": {
@@ -10834,6 +14202,29 @@
         "title": "SecretStatusResponse",
         "type": "object"
       },
+      "SelectCatalogCapabilityRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "default": "latest_compatible",
+            "enum": [
+              "pinned",
+              "latest_compatible",
+              "explicit"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "version": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "title": "SelectCatalogCapabilityRequest",
+        "type": "object"
+      },
       "SessionCreatedResponse": {
         "properties": {
           "session_handle": {
@@ -10873,6 +14264,38 @@
           "expires_at"
         ],
         "title": "SessionResponse",
+        "type": "object"
+      },
+      "SetCapabilityStateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "SetCapabilityStateRequest",
+        "type": "object"
+      },
+      "SetEventSourceStateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "enum": [
+              "active",
+              "paused"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "SetEventSourceStateRequest",
         "type": "object"
       },
       "TaskApprovalSnapshot": {
@@ -11484,6 +14907,24 @@
         "title": "TaskTraceEntry",
         "type": "object"
       },
+      "TestEventSourceRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "external_event_id": {
+            "default": "",
+            "maxLength": 256,
+            "title": "External Event Id",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          }
+        },
+        "title": "TestEventSourceRequest",
+        "type": "object"
+      },
       "ToolDescriptorRecord": {
         "additionalProperties": false,
         "properties": {
@@ -11603,6 +15044,64 @@
         },
         "title": "ToolListResult",
         "type": "object"
+      },
+      "TriggerEventSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "trigger_event_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Trigger Event Id",
+            "type": "string"
+          },
+          "trigger_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Trigger Id",
+            "type": "string"
+          },
+          "external_event_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "External Event Id",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TriggerEventState"
+          },
+          "task_id": {
+            "default": "",
+            "maxLength": 128,
+            "title": "Task Id",
+            "type": "string"
+          },
+          "received_at": {
+            "minimum": 0.0,
+            "title": "Received At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "trigger_event_id",
+          "trigger_id",
+          "external_event_id",
+          "state",
+          "received_at"
+        ],
+        "title": "TriggerEventSnapshot",
+        "type": "object"
+      },
+      "TriggerEventState": {
+        "enum": [
+          "baselined",
+          "received",
+          "claimed",
+          "retry_wait",
+          "task_created",
+          "dead"
+        ],
+        "title": "TriggerEventState",
+        "type": "string"
       },
       "UpdateConversationSessionRequest": {
         "additionalProperties": false,
@@ -11827,6 +15326,35 @@
           "recommended_action"
         ],
         "title": "UserWorkStatusInfo",
+        "type": "object"
+      },
+      "WebhookSecretRotationResponse": {
+        "properties": {
+          "route_id": {
+            "title": "Route Id",
+            "type": "string"
+          },
+          "secret": {
+            "title": "Secret",
+            "type": "string"
+          },
+          "secret_version": {
+            "minimum": 1,
+            "title": "Secret Version",
+            "type": "integer"
+          },
+          "previous_secret_expires_at": {
+            "title": "Previous Secret Expires At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "route_id",
+          "secret",
+          "secret_version",
+          "previous_secret_expires_at"
+        ],
+        "title": "WebhookSecretRotationResponse",
         "type": "object"
       },
       "WriteSecretRequest": {

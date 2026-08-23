@@ -90,12 +90,16 @@ include = [
 
 [tool.hatch.build.targets.wheel.force-include]
 "config/default.yaml" = "knoa_platform/resources/default.yaml"
+"catalog/capabilities.json" = "knoa_platform/resources/capability_catalog.json"
+"examples/browser_mcp_server" = "knoa_platform/resources/examples/browser_mcp_server"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "live: tests requiring an explicitly enabled external LLM service",
+    "windows_contract: platform adapter contract that must pass on Windows",
+    "posix_contract: behavior owned by the POSIX adapter",
 ]
 
 [tool.ruff.lint]

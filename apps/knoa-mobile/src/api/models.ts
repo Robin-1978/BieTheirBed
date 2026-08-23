@@ -72,6 +72,22 @@ export type CapabilityInstallation = {
   updated_at: number;
 };
 
+export type CapabilityCatalogEntry = {
+  id: string;
+  version: string;
+  display_name: string;
+  description: string;
+  platform: string;
+  operating_systems: string[];
+  architectures: string[];
+  package_digest: string;
+  source: string;
+  permission_summary: string[];
+  revoked: boolean;
+  revocation_severity: "none" | "warning" | "critical";
+  selection: { mode: "pinned" | "latest_compatible" | "explicit"; version: string };
+};
+
 export type ExtensionImportResult = {
   package: ExtensionPackage | null;
   inspection: {

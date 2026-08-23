@@ -20,7 +20,9 @@ from knoa_platform.extensions.capability_bundle import (
     CapabilityInstaller,
 )
 from knoa_platform.extensions.package_store import PackageStore
+from knoa_platform.extensions.capability_catalog import CapabilityCatalogService, OFFICIAL_CATALOG_TRUST_ROOTS
 from knoa_platform.events import EventSourceRepository
+from knoa_platform.improvement import ImprovementService
 from knoa_platform.fleet import FleetCandidateService
 from knoa_platform.gateway.audit import GatewayAuditRepository
 from knoa_platform.gateway.auth import (
@@ -40,6 +42,7 @@ from knoa_platform.gateway.routes import (
     DeviceRoutes,
     ExtensionRoutes,
     EventSourceRoutes,
+    GovernanceRoutes,
     FleetRoutes,
     P2PRoutes,
     RemoteResourceRoutes,
@@ -104,6 +107,7 @@ class SecureGatewayAdapter(
     ConfigurationRoutes,
     ExtensionRoutes,
     EventSourceRoutes,
+    GovernanceRoutes,
     FleetRoutes,
     P2PRoutes,
     SecretRoutes,
@@ -184,6 +188,21 @@ class SecureGatewayAdapter(
             inspector=self._extension_imports,
         )
         self._event_sources = EventSourceRepository(database)
+        self._improvements = ImprovementService(database)
+        repository_root = Path(__file__).resolve().parents[3]
+        catalog_path = repository_root / "catalog" / "capabilities.json"
+        catalog_source_root = repository_root
+        if not catalog_path.is_file():
+            catalog_source_root = Path(__file__).resolve().parents[1] / "resources"
+            catalog_path = catalog_source_root / "capability_catalog.json"
+        self._capability_catalog = CapabilityCatalogService(
+            catalog_path,
+            trust_roots=OFFICIAL_CATALOG_TRUST_ROOTS,
+            source_root=catalog_source_root,
+            database=database,
+            packages=package_store,
+            installer=self._capability_installer,
+        )
         self._fleet_candidates = FleetCandidateService(
             self._node_identity,
             identities,
@@ -296,6 +315,9 @@ class SecureGatewayAdapter(
                 Route("/v1/capabilities/installations", self._capability_installations, methods=["GET"]),
                 Route("/v1/capabilities/prepare", self._capability_prepare, methods=["POST"]),
                 Route("/v1/capabilities/confirm", self._capability_confirm, methods=["POST"]),
+                Route("/v1/capability-catalog", self._catalog_entries, methods=["GET"]),
+                Route("/v1/capability-catalog/{capability_id:str}/selection", self._catalog_select, methods=["PUT"]),
+                Route("/v1/capability-catalog/{capability_id:str}/prepare", self._catalog_prepare, methods=["POST"]),
                 Route(
                     "/v1/capabilities/{capability_id:str}/state",
                     self._capability_state,
@@ -307,6 +329,14 @@ class SecureGatewayAdapter(
                     methods=["POST"],
                 ),
                 Route("/v1/fleet/candidates/apply", self._fleet_apply, methods=["POST"]),
+                Route("/v1/improvements/evidence", self._improvement_evidence, methods=["POST"]),
+                Route("/v1/improvements/cases", self._improvement_case, methods=["POST"]),
+                Route("/v1/improvements/candidates", self._improvement_candidates, methods=["GET"]),
+                Route("/v1/improvements/candidates", self._improvement_candidate, methods=["POST"]),
+                Route("/v1/improvements/candidates/{candidate_id:str}/replay", self._improvement_replay, methods=["POST"]),
+                Route("/v1/improvements/candidates/{candidate_id:str}/approve", self._improvement_approve, methods=["POST"]),
+                Route("/v1/improvements/candidates/{candidate_id:str}/canary", self._improvement_finish, methods=["POST"]),
+                Route("/v1/improvements/candidates/{candidate_id:str}/rollback", self._improvement_rollback, methods=["POST"]),
                 Route("/v1/secrets/{reference:str}", self._secret, methods=["GET", "PUT"]),
                 Route("/v1/config/current", self._config_current, methods=["GET"]),
                 Route("/v1/config/drafts", self._config_drafts, methods=["POST"]),

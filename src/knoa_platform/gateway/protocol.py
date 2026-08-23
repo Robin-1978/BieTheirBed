@@ -14,6 +14,17 @@ from knoa_platform.agent_runtime.contracts import (
 from knoa_platform.agent_runtime.model_step import ProviderCallRequest, ProviderChunk
 from knoa_platform.agents.definitions import ResolvedInvocationPolicy
 from knoa_platform.artifacts import ArtifactRef
+from knoa_platform.extensions.capability_bundle import (
+    CapabilityInstallation,
+    CapabilityInstallPlan,
+)
+from knoa_platform.extensions.capability_catalog import CapabilityCatalogEntry
+from knoa_platform.improvement.service import (
+    EvaluationCase,
+    ImprovementCandidate,
+    ImprovementEvidence,
+    ReplayResult,
+)
 from knoa_platform.configuration import (
     ConfigControlState,
     ConfigDraft,
@@ -31,6 +42,7 @@ from knoa_platform.service.core_api import (
     ProductTaskExecutionSnapshot,
     ProductTaskSnapshot,
     TaskSnapshot,
+    TriggerEventSnapshot,
 )
 from knoa_platform.tasks import (
     ApprovalState,
@@ -262,6 +274,47 @@ class ConfirmCapabilityRequest(GatewayRequest):
 
 class SetCapabilityStateRequest(GatewayRequest):
     enabled: bool
+
+
+class SelectCatalogCapabilityRequest(GatewayRequest):
+    mode: Literal["pinned", "latest_compatible", "explicit"] = "latest_compatible"
+    version: str = Field(default="", max_length=64)
+
+
+class RecordImprovementEvidenceRequest(GatewayRequest):
+    kind: Literal["explicit_feedback", "failed_execution", "recovery_result", "metric_regression"]
+    subject_ref: str = Field(default="", max_length=256)
+    summary: str = Field(min_length=1, max_length=4000)
+
+
+class CreateEvaluationCaseRequest(GatewayRequest):
+    sanitized_input: str = Field(min_length=1, max_length=100_000)
+    expected_invariants: tuple[str, ...] = Field(min_length=1, max_length=100)
+    fixture_results: dict[str, Any] = Field(default_factory=dict)
+    dataset_version: str = Field(min_length=1, max_length=128)
+
+
+class CreateImprovementCandidateRequest(GatewayRequest):
+    kind: Literal["prompt", "skill"]
+    target_ref: str = Field(min_length=1, max_length=256)
+    base_version: str = Field(min_length=1, max_length=128)
+    proposed_version: str = Field(min_length=1, max_length=128)
+    proposed_content: str = Field(min_length=1, max_length=500_000)
+    rationale: str = Field(min_length=1, max_length=4000)
+    evidence_ids: tuple[str, ...] = Field(min_length=1, max_length=100)
+
+
+class ReplayImprovementCandidateRequest(GatewayRequest):
+    dataset_version: str = Field(min_length=1, max_length=128)
+
+
+class ApproveImprovementCandidateRequest(GatewayRequest):
+    canary_scope: tuple[str, ...] = Field(min_length=1, max_length=100)
+
+
+class FinishImprovementCanaryRequest(GatewayRequest):
+    promote: bool
+    metrics: dict[str, float] = Field(default_factory=dict)
 
 
 class ApplyFleetCandidateRequest(GatewayRequest):
@@ -574,6 +627,102 @@ class ProductTaskResponse(BaseModel):
 
 class ProductTaskListResponse(BaseModel):
     tasks: tuple[ProductTaskSnapshot, ...]
+
+
+class EventSourceSnapshot(BaseModel):
+    source_id: str
+    kind: Literal["webhook", "mcp_resource"]
+    display_name: str
+    task_id: str
+    state: TaskDefinitionState
+    health: str
+    last_event_at: float | None = None
+    event_count: int = Field(ge=0)
+    public_url: str = ""
+    route_id: str = ""
+    secret_version: int = Field(default=0, ge=0)
+    source_config: dict[str, Any] = Field(default_factory=dict)
+    secret: str | None = None
+    signing_example: dict[str, Any] | None = None
+
+
+class EventSourceResponse(BaseModel):
+    event_source: EventSourceSnapshot
+
+
+class EventSourceListResponse(BaseModel):
+    event_sources: tuple[EventSourceSnapshot, ...]
+
+
+class EventSourceEventResponse(BaseModel):
+    event: TriggerEventSnapshot
+
+
+class EventSourceEventListResponse(BaseModel):
+    events: tuple[TriggerEventSnapshot, ...]
+
+
+class WebhookSecretRotationResponse(BaseModel):
+    route_id: str
+    secret: str
+    secret_version: int = Field(ge=1)
+    previous_secret_expires_at: float
+
+
+class CapabilityInstallPlanResponse(BaseModel):
+    plan: CapabilityInstallPlan
+
+
+class CapabilityInstallationResponse(BaseModel):
+    installation: CapabilityInstallation
+
+
+class CapabilityInstallationListResponse(BaseModel):
+    installations: tuple[CapabilityInstallation, ...]
+
+
+class CatalogSelection(BaseModel):
+    mode: Literal["pinned", "latest_compatible", "explicit"]
+    version: str
+
+
+class CatalogEntryResponse(CapabilityCatalogEntry):
+    selection: CatalogSelection
+
+
+class CapabilityCatalogResponse(BaseModel):
+    entries: tuple[CatalogEntryResponse, ...]
+
+
+class CatalogSelectionResponse(BaseModel):
+    capability_id: str
+    mode: Literal["pinned", "latest_compatible", "explicit"]
+    version: str
+    resolved_version: str
+
+
+class ImprovementEvidenceResponse(BaseModel):
+    evidence: ImprovementEvidence
+
+
+class EvaluationCaseResponse(BaseModel):
+    case: EvaluationCase
+
+
+class ImprovementCandidateResponse(BaseModel):
+    candidate: ImprovementCandidate
+
+
+class ImprovementCandidateListResponse(BaseModel):
+    candidates: tuple[ImprovementCandidate, ...]
+
+
+class ImprovementReplayResponse(BaseModel):
+    replay: ReplayResult
+
+
+class ImprovementPromotionResponse(BaseModel):
+    promotion: dict[str, Any]
 
 
 class TaskPreflightCheck(BaseModel):

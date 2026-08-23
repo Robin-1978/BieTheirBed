@@ -24,6 +24,7 @@ import type {
   EventSourceEvent,
   CapabilityInstallPlan,
   CapabilityInstallation,
+  CapabilityCatalogEntry,
   PairingPayload,
   PrincipalTaskEvent,
   Task,
@@ -200,6 +201,23 @@ export class GatewayClient {
       { method: "POST" },
     );
     return response.installation;
+  }
+
+  async listCapabilityCatalog(): Promise<CapabilityCatalogEntry[]> {
+    const response = await this.json<{ entries: CapabilityCatalogEntry[] }>("/v1/capability-catalog");
+    return response.entries;
+  }
+
+  async prepareCatalogCapability(
+    capabilityId: string,
+    mode: "pinned" | "latest_compatible" | "explicit" = "latest_compatible",
+    version = "",
+  ): Promise<CapabilityInstallPlan> {
+    const response = await this.json<{ plan: CapabilityInstallPlan }>(
+      `/v1/capability-catalog/${encodeURIComponent(capabilityId)}/prepare`,
+      { method: "POST", body: { mode, version } },
+    );
+    return response.plan;
   }
 
   async secretStatus(reference: string): Promise<{
