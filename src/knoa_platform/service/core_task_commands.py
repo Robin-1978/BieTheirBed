@@ -25,6 +25,7 @@ from knoa_platform.service.core_api import (
     HealthMessage,
     HealthRequest,
     ListProductTaskExecutionsRequest,
+    ListNotificationIntentsRequest,
     ListProductTasksRequest,
     ListTasksRequest,
     PauseTaskRequest,
@@ -35,6 +36,9 @@ from knoa_platform.service.core_api import (
     ProductTaskListMessage,
     ProductTaskMessage,
     ProductTaskPreflightMessage,
+    NotificationIntentListMessage,
+    NotificationIntentMessage,
+    MarkNotificationIntentProjectedRequest,
     ProductTaskSnapshot,
     RerunProductTaskExecutionRequest,
     ResolveApprovalRequest,
@@ -161,6 +165,26 @@ class TaskCommandHandler:
             await send(ProductTaskPreflightMessage(
                 request_id=request.request_id,
                 result=result,
+            ))
+        elif isinstance(request, ListNotificationIntentsRequest):
+            intents = await self._tasks.list_notification_intents(
+                principal,
+                after_sequence=request.after_sequence,
+                limit=request.limit,
+                pending_only=request.pending_only,
+            )
+            await send(NotificationIntentListMessage(
+                request_id=request.request_id,
+                intents=intents,
+            ))
+        elif isinstance(request, MarkNotificationIntentProjectedRequest):
+            intent = await self._tasks.mark_notification_intent_projected(
+                principal,
+                request.intent_id,
+            )
+            await send(NotificationIntentMessage(
+                request_id=request.request_id,
+                intent=intent,
             ))
         elif isinstance(request, ListProductTasksRequest):
             tasks = await self._tasks.list_definitions(

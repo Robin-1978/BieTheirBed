@@ -6,11 +6,20 @@ between App, Feishu, and future channels.
 """
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 NotificationIntentKind = Literal["result", "decision", "recovery"]
+NotificationCategory = Literal[
+    "completed",
+    "failed",
+    "cancelled",
+    "approval_required",
+    "interaction_required",
+    "node_offline",
+    "update_required",
+]
 
 
 class NotificationIntent(BaseModel):
@@ -19,6 +28,31 @@ class NotificationIntent(BaseModel):
     event_type: str
     kind: NotificationIntentKind
     policy_key: Literal["completed", "failed", "cancelled", "waiting_approval"]
+
+
+class NotificationIntentRecord(BaseModel):
+    """Minimal durable user notification fact owned by Node Core."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    intent_id: str
+    principal_id: str
+    workspace_id: str = ""
+    node_id: str = ""
+    category: NotificationCategory
+    work_kind: Literal["task", "conversation", "node", "release"]
+    work_id: str
+    execution_id: str = ""
+    semantic_code: str
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    deep_link: dict[str, Any] = Field(default_factory=dict)
+    dedupe_key: str
+    priority: Literal["normal", "urgent"] = "normal"
+    expires_at: float
+    state: Literal["pending", "projected", "cancelled", "expired"]
+    source_sequence: int
+    created_at: float
+    updated_at: float
 
 
 def notification_intent_for_event(event_type: str) -> NotificationIntent | None:
@@ -37,4 +71,10 @@ def notification_intent_for_event(event_type: str) -> NotificationIntent | None:
     return None
 
 
-__all__ = ["NotificationIntent", "NotificationIntentKind", "notification_intent_for_event"]
+__all__ = [
+    "NotificationCategory",
+    "NotificationIntent",
+    "NotificationIntentKind",
+    "NotificationIntentRecord",
+    "notification_intent_for_event",
+]

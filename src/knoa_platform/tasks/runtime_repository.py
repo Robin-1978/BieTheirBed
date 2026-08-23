@@ -6,6 +6,7 @@ import binascii
 import json
 import math
 import sqlite3
+import hashlib
 
 from knoa_platform.agent_runtime.contracts import ArtifactAttachment, RuntimeScope
 from knoa_platform.tasks.errors import (
@@ -27,6 +28,10 @@ from knoa_platform.tasks.models import (
     TaskRecord,
     TaskState,
     TaskToolStepState,
+)
+from knoa_platform.notification_intent import (
+    NotificationIntentRecord,
+    notification_intent_for_event,
 )
 
 _MAX_EVENT_BYTES = 512 * 1024
@@ -104,12 +109,200 @@ class TaskRuntimeRepositoryMixin:
                     occurred_at,
                 ),
             )
+        cls._append_notification_intent(
+            db,
+            row,
+            event_type,
+            payload,
+            occurred_at,
+        )
         return TaskEvent(
             task_id=str(row["task_id"]),
             event_seq=event_seq,
             event_type=event_type,
             payload=payload,
             occurred_at=occurred_at,
+        )
+
+    @classmethod
+    def _append_notification_intent(
+        cls,
+        db: sqlite3.Connection,
+        row: sqlite3.Row,
+        event_type: TaskEventType,
+        payload: TaskEventPayload,
+        occurred_at: float,
+    ) -> None:
+        semantic = notification_intent_for_event(event_type)
+        if semantic is None:
+            return
+        execution_id = str(row["task_id"])
+        definition = db.execute(
+            """SELECT task.task_id, task.title, task.goal,
+                      task.notification_policy_json
+               FROM task_executions AS execution
+               JOIN tasks AS task ON task.task_id=execution.task_id
+               WHERE execution.execution_id=?""",
+            (execution_id,),
+        ).fetchone()
+        work_id = str(definition["task_id"]) if definition is not None else execution_id
+        title = (
+            str(definition["title"] or definition["goal"])[:200]
+            if definition is not None
+            else "Background task"
+        )
+        if definition is not None:
+            try:
+                policy = json.loads(str(definition["notification_policy_json"]))
+            except json.JSONDecodeError:
+                policy = {}
+            if policy.get(semantic.policy_key, True) is False:
+                return
+        category = {
+            "completed": "completed",
+            "failed": "failed",
+            "cancelled": "cancelled",
+            "approval_requested": "approval_required",
+            "interaction_requested": "interaction_required",
+        }[event_type]
+        action_id = payload.approval_id or payload.interaction_id
+        dedupe_key = f"execution:{execution_id}:{event_type}:{action_id}"
+        intent_id = "ni_" + hashlib.sha256(
+            f"{row['principal_id']}:{dedupe_key}".encode()
+        ).hexdigest()[:32]
+        sequence = int(db.execute(
+            "SELECT next_sequence FROM notification_intent_sequence WHERE singleton=1"
+        ).fetchone()[0])
+        db.execute(
+            "UPDATE notification_intent_sequence SET next_sequence=? WHERE singleton=1",
+            (sequence + 1,),
+        )
+        expires_at = occurred_at + (
+            24 * 60 * 60
+            if category in {"approval_required", "interaction_required"}
+            else 7 * 24 * 60 * 60
+        )
+        db.execute(
+            """INSERT OR IGNORE INTO notification_intents(
+                   intent_id, principal_id, workspace_id, node_id, category,
+                   work_kind, work_id, execution_id, semantic_code,
+                   parameters_json, deep_link_json, dedupe_key, priority,
+                   expires_at, state, source_sequence, created_at, updated_at
+               ) VALUES (?, ?, '', '', ?, 'task', ?, ?, ?, ?, ?, ?, ?, ?,
+                         'pending', ?, ?, ?)""",
+            (
+                intent_id,
+                str(row["principal_id"]),
+                category,
+                work_id,
+                execution_id,
+                f"task.{category}",
+                json.dumps({"title": title}, ensure_ascii=False, separators=(",", ":")),
+                json.dumps(
+                    {
+                        "route": "task_execution",
+                        "task_id": work_id,
+                        "execution_id": execution_id,
+                        **(
+                            {"approval_id": payload.approval_id}
+                            if payload.approval_id
+                            else {}
+                        ),
+                        **(
+                            {"interaction_id": payload.interaction_id}
+                            if payload.interaction_id
+                            else {}
+                        ),
+                    },
+                    separators=(",", ":"),
+                ),
+                dedupe_key,
+                "urgent" if category in {"approval_required", "interaction_required"} else "normal",
+                expires_at,
+                sequence,
+                occurred_at,
+                occurred_at,
+            ),
+        )
+
+    def list_notification_intents(
+        self,
+        principal_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 100,
+        pending_only: bool = False,
+    ) -> tuple[NotificationIntentRecord, ...]:
+        principal = self._normalize_identifier(
+            principal_id, label="principal_id", limit=256
+        )
+        if after_sequence < 0 or not 1 <= limit <= 500:
+            raise ValueError("Notification intent query is invalid")
+        clauses = ["principal_id=?", "source_sequence>?"]
+        values: list[object] = [principal, after_sequence]
+        if pending_only:
+            clauses.append("state='pending'")
+        with self._connect() as db:
+            db.execute(
+                "UPDATE notification_intents SET state='expired', updated_at=? "
+                "WHERE state IN ('pending','projected') AND expires_at<=?",
+                (self._clock(), self._clock()),
+            )
+            rows = db.execute(
+                "SELECT * FROM notification_intents WHERE "
+                + " AND ".join(clauses)
+                + " ORDER BY source_sequence LIMIT ?",
+                (*values, limit),
+            ).fetchall()
+        return tuple(self._notification_intent_record(item) for item in rows)
+
+    def mark_notification_intent_projected(
+        self,
+        principal_id: str,
+        intent_id: str,
+    ) -> NotificationIntentRecord:
+        principal = self._normalize_identifier(
+            principal_id, label="principal_id", limit=256
+        )
+        normalized = self._normalize_identifier(
+            intent_id, label="intent_id", limit=128
+        )
+        now = self._clock()
+        with self._connect() as db:
+            updated = db.execute(
+                "UPDATE notification_intents SET state='projected', updated_at=? "
+                "WHERE principal_id=? AND intent_id=? AND state='pending'",
+                (now, principal, normalized),
+            )
+            row = db.execute(
+                "SELECT * FROM notification_intents WHERE principal_id=? AND intent_id=?",
+                (principal, normalized),
+            ).fetchone()
+        if row is None:
+            raise LookupError("Notification intent not found")
+        return self._notification_intent_record(row)
+
+    @staticmethod
+    def _notification_intent_record(row: sqlite3.Row) -> NotificationIntentRecord:
+        return NotificationIntentRecord(
+            intent_id=str(row["intent_id"]),
+            principal_id=str(row["principal_id"]),
+            workspace_id=str(row["workspace_id"]),
+            node_id=str(row["node_id"]),
+            category=str(row["category"]),
+            work_kind=str(row["work_kind"]),
+            work_id=str(row["work_id"]),
+            execution_id=str(row["execution_id"]),
+            semantic_code=str(row["semantic_code"]),
+            parameters=json.loads(str(row["parameters_json"])),
+            deep_link=json.loads(str(row["deep_link_json"])),
+            dedupe_key=str(row["dedupe_key"]),
+            priority=str(row["priority"]),
+            expires_at=float(row["expires_at"]),
+            state=str(row["state"]),
+            source_sequence=int(row["source_sequence"]),
+            created_at=float(row["created_at"]),
+            updated_at=float(row["updated_at"]),
         )
 
     @staticmethod

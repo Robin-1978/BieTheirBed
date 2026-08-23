@@ -42,6 +42,28 @@ export type HubConnection = {
   deploymentMode: "self_hosted" | "hosted_single_node" | "hosted";
 };
 
+export type HubNotificationIntent = {
+  inbox_cursor: number;
+  intent_id: string;
+  category: "completed" | "failed" | "cancelled" | "approval_required" | "interaction_required" | "node_offline" | "update_required";
+  work_kind: "task" | "conversation" | "node" | "release";
+  work_id: string;
+  execution_id: string;
+  semantic_code: string;
+  parameters: Record<string, unknown>;
+  deep_link: {
+    route?: "task" | "task_execution" | "conversation" | "node" | "update";
+    task_id?: string;
+    execution_id?: string;
+    conversation_id?: string;
+    node_id?: string;
+  };
+  priority: "normal" | "urgent";
+  expires_at: number;
+  received_at: number;
+  acknowledged_at: number | null;
+};
+
 export type HostedWorkspace = {
   workspaceId: string;
   displayName: string;
@@ -268,11 +290,74 @@ export async function logoutHostedAccount(): Promise<void> {
   const connection = await loadHubConnection();
   try {
     if (connection?.accountId) {
+      await unregisterPushToken().catch(() => undefined);
       await request(connection.rootUrl, connection.token, "/v1/hosted/session", { method: "DELETE" });
     }
   } finally {
     await SecureStore.deleteItemAsync(HUB_CONNECTION);
   }
+}
+
+export async function registerPushToken(input: {
+  token: string;
+  locale: string;
+  appVersion: string;
+}): Promise<void> {
+  const connection = await requiredHubConnection();
+  const installationId = await loadOrCreateInstallationId();
+  await request(
+    connection.url,
+    connection.token,
+    `/v1/mobile/installations/${encodeURIComponent(installationId)}/push-token`,
+    {
+      method: "PUT",
+      body: {
+        provider: "fcm",
+        token: input.token,
+        locale: input.locale,
+        app_version: input.appVersion,
+      },
+    },
+  );
+}
+
+export async function unregisterPushToken(): Promise<void> {
+  const connection = await loadHubConnection();
+  if (!connection) return;
+  const installationId = await loadOrCreateInstallationId();
+  await request(
+    connection.url,
+    connection.token,
+    `/v1/mobile/installations/${encodeURIComponent(installationId)}/push-token`,
+    { method: "DELETE" },
+  );
+}
+
+export async function listHubNotifications(
+  cursor: number,
+  limit = 100,
+): Promise<{ notifications: HubNotificationIntent[]; nextCursor: number }> {
+  const connection = await requiredHubConnection();
+  const query = new URLSearchParams({ cursor: String(cursor), limit: String(limit) });
+  const result = await request<{
+    notifications: HubNotificationIntent[];
+    next_cursor: string;
+  }>(connection.url, connection.token, `/v1/notifications?${query.toString()}`);
+  const nextCursor = Number(result.next_cursor);
+  if (!Number.isSafeInteger(nextCursor) || nextCursor < cursor) {
+    throw new Error("Hub 通知游标无效");
+  }
+  return { notifications: result.notifications, nextCursor };
+}
+
+export async function acknowledgeHubNotification(intentId: string): Promise<void> {
+  const connection = await requiredHubConnection();
+  await request(
+    connection.url,
+    connection.token,
+    `/v1/notifications/${encodeURIComponent(intentId)}/ack`,
+    { method: "POST" },
+  );
 }
 
 export async function resolveAndroidRelease(

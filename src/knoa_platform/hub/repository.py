@@ -195,6 +195,52 @@ class HubRepository:
                     observed_at REAL NOT NULL,
                     PRIMARY KEY(invocation_id, reporting_node_id, report_seq)
                 );
+                CREATE TABLE IF NOT EXISTS push_installations(
+                    installation_id TEXT PRIMARY KEY,
+                    account_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    token_ciphertext TEXT NOT NULL,
+                    token_fingerprint TEXT NOT NULL,
+                    locale TEXT NOT NULL,
+                    app_version TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    registered_at REAL NOT NULL,
+                    last_seen_at REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS notification_inbox(
+                    intent_id TEXT PRIMARY KEY,
+                    account_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    work_kind TEXT NOT NULL,
+                    work_id TEXT NOT NULL,
+                    execution_id TEXT NOT NULL,
+                    semantic_code TEXT NOT NULL,
+                    parameters_json TEXT NOT NULL,
+                    deep_link_json TEXT NOT NULL,
+                    priority TEXT NOT NULL,
+                    expires_at REAL NOT NULL,
+                    source_sequence INTEGER NOT NULL,
+                    received_at REAL NOT NULL,
+                    acknowledged_at REAL,
+                    UNIQUE(node_id, source_sequence)
+                );
+                CREATE TABLE IF NOT EXISTS notification_deliveries(
+                    intent_id TEXT NOT NULL,
+                    installation_id TEXT NOT NULL,
+                    attempt INTEGER NOT NULL,
+                    state TEXT NOT NULL,
+                    provider_message_id TEXT NOT NULL,
+                    next_attempt_at REAL NOT NULL,
+                    last_error_code TEXT NOT NULL,
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY(intent_id, installation_id)
+                );
+                CREATE INDEX IF NOT EXISTS notification_inbox_account_received
+                    ON notification_inbox(account_id, received_at);
+                CREATE INDEX IF NOT EXISTS notification_deliveries_pending
+                    ON notification_deliveries(state, next_attempt_at);
                 """
             )
             columns = {
@@ -270,6 +316,211 @@ class HubRepository:
         if row is None:
             raise LookupError("App installation not found")
         return dict(row)
+
+    def put_push_installation(
+        self,
+        account_id: str,
+        installation_id: str,
+        *,
+        provider: str,
+        token_ciphertext: str,
+        token_fingerprint: str,
+        locale: str,
+        app_version: str,
+    ) -> dict:
+        installation = self.installation(installation_id)
+        if installation["subject_id"] != account_id:
+            raise PermissionError("Push installation belongs to another account")
+        now = self._clock()
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO push_installations VALUES(
+                       ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?
+                   ) ON CONFLICT(installation_id) DO UPDATE SET
+                       provider=excluded.provider,
+                       token_ciphertext=excluded.token_ciphertext,
+                       token_fingerprint=excluded.token_fingerprint,
+                       locale=excluded.locale,
+                       app_version=excluded.app_version,
+                       state='active', last_seen_at=excluded.last_seen_at""",
+                (
+                    installation_id, account_id, provider, token_ciphertext,
+                    token_fingerprint, locale, app_version, now, now,
+                ),
+            )
+            inbox = db.execute(
+                "SELECT intent_id FROM notification_inbox "
+                "WHERE account_id=? AND expires_at>?",
+                (account_id, now),
+            ).fetchall()
+            for intent in inbox:
+                db.execute(
+                    """INSERT OR IGNORE INTO notification_deliveries VALUES(
+                           ?, ?, 0, 'pending', '', ?, '', ?
+                       )""",
+                    (intent["intent_id"], installation_id, now, now),
+                )
+            row = db.execute(
+                "SELECT * FROM push_installations WHERE installation_id=?",
+                (installation_id,),
+            ).fetchone()
+        return dict(row)
+
+    def disable_push_installation(self, account_id: str, installation_id: str) -> bool:
+        with self._connect() as db:
+            updated = db.execute(
+                "UPDATE push_installations SET state='disabled', last_seen_at=? "
+                "WHERE account_id=? AND installation_id=? AND state='active'",
+                (self._clock(), account_id, installation_id),
+            )
+        return updated.rowcount == 1
+
+    def put_notification_intent(
+        self,
+        account_id: str,
+        node_id: str,
+        item: dict,
+    ) -> dict:
+        self.node(node_id)
+        now = self._clock()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                """INSERT OR IGNORE INTO notification_inbox(
+                       intent_id, account_id, workspace_id, node_id, category,
+                       work_kind, work_id, execution_id, semantic_code,
+                       parameters_json, deep_link_json, priority, expires_at,
+                       source_sequence, received_at, acknowledged_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
+                (
+                    item["intent_id"], account_id, self.hub_id, node_id,
+                    item["category"], item["work_kind"], item["work_id"],
+                    item.get("execution_id", ""), item["semantic_code"],
+                    json.dumps(item.get("parameters", {}), ensure_ascii=False, separators=(",", ":")),
+                    json.dumps(item.get("deep_link", {}), separators=(",", ":")),
+                    item.get("priority", "normal"), item["expires_at"],
+                    item["source_sequence"], now,
+                ),
+            )
+            installations = db.execute(
+                "SELECT installation_id FROM push_installations "
+                "WHERE account_id=? AND state='active'",
+                (account_id,),
+            ).fetchall()
+            for installation in installations:
+                db.execute(
+                    """INSERT OR IGNORE INTO notification_deliveries VALUES(
+                           ?, ?, 0, 'pending', '', ?, '', ?
+                       )""",
+                    (item["intent_id"], installation["installation_id"], now, now),
+                )
+            row = db.execute(
+                "SELECT rowid AS inbox_cursor, * FROM notification_inbox WHERE intent_id=?",
+                (item["intent_id"],),
+            ).fetchone()
+        return self._decode_notification(row)
+
+    def list_notifications(
+        self,
+        account_id: str,
+        *,
+        after_cursor: int = 0,
+        limit: int = 100,
+    ) -> tuple[dict, ...]:
+        if after_cursor < 0 or not 1 <= limit <= 200:
+            raise ValueError("Notification cursor query is invalid")
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT rowid AS inbox_cursor, * FROM notification_inbox
+                   WHERE account_id=? AND rowid>? AND expires_at>?
+                   ORDER BY rowid LIMIT ?""",
+                (account_id, after_cursor, self._clock(), limit),
+            ).fetchall()
+        return tuple(self._decode_notification(row) for row in rows)
+
+    def acknowledge_notification(self, account_id: str, intent_id: str) -> dict:
+        with self._connect() as db:
+            db.execute(
+                "UPDATE notification_inbox SET acknowledged_at=COALESCE(acknowledged_at, ?) "
+                "WHERE account_id=? AND intent_id=?",
+                (self._clock(), account_id, intent_id),
+            )
+            row = db.execute(
+                "SELECT rowid AS inbox_cursor, * FROM notification_inbox "
+                "WHERE account_id=? AND intent_id=?",
+                (account_id, intent_id),
+            ).fetchone()
+        if row is None:
+            raise LookupError("Notification not found")
+        return self._decode_notification(row)
+
+    def pending_notification_deliveries(self, *, limit: int = 100) -> tuple[dict, ...]:
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT delivery.*, installation.provider,
+                          installation.token_ciphertext, installation.locale,
+                          installation.account_id, inbox.category,
+                          inbox.semantic_code, inbox.parameters_json,
+                          inbox.deep_link_json, inbox.priority, inbox.expires_at
+                   FROM notification_deliveries AS delivery
+                   JOIN push_installations AS installation
+                     ON installation.installation_id=delivery.installation_id
+                   JOIN notification_inbox AS inbox
+                     ON inbox.intent_id=delivery.intent_id
+                   WHERE delivery.state IN ('pending','retry')
+                     AND delivery.next_attempt_at<=?
+                     AND installation.state='active' AND inbox.expires_at>?
+                   ORDER BY delivery.next_attempt_at LIMIT ?""",
+                (self._clock(), self._clock(), limit),
+            ).fetchall()
+        return tuple(dict(row) for row in rows)
+
+    def record_notification_delivery(
+        self,
+        intent_id: str,
+        installation_id: str,
+        *,
+        state: str,
+        provider_message_id: str = "",
+        error_code: str = "",
+        permanent_token_failure: bool = False,
+    ) -> None:
+        now = self._clock()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT attempt FROM notification_deliveries "
+                "WHERE intent_id=? AND installation_id=?",
+                (intent_id, installation_id),
+            ).fetchone()
+            if row is None:
+                raise LookupError("Notification delivery not found")
+            attempt = int(row["attempt"]) + 1
+            next_attempt = now + min(3600, 5 * (2 ** min(attempt, 9)))
+            db.execute(
+                """UPDATE notification_deliveries SET attempt=?, state=?,
+                       provider_message_id=?, next_attempt_at=?,
+                       last_error_code=?, updated_at=?
+                   WHERE intent_id=? AND installation_id=?""",
+                (
+                    attempt, state, provider_message_id,
+                    0 if state == "delivered" else next_attempt,
+                    error_code, now, intent_id, installation_id,
+                ),
+            )
+            if permanent_token_failure:
+                db.execute(
+                    "UPDATE push_installations SET state='invalid', last_seen_at=? "
+                    "WHERE installation_id=?",
+                    (now, installation_id),
+                )
+
+    @staticmethod
+    def _decode_notification(row: sqlite3.Row) -> dict:
+        item = dict(row)
+        item["parameters"] = json.loads(str(item.pop("parameters_json")))
+        item["deep_link"] = json.loads(str(item.pop("deep_link_json")))
+        return item
 
     def create_enrollment_grant(self, ttl_seconds: int = 600) -> EnrollmentGrant:
         if not 60 <= ttl_seconds <= 3600:

@@ -8,6 +8,7 @@ const native = vi.hoisted(() => ({
 }));
 
 vi.mock("react-native", () => ({ Platform: { OS: "android" } }));
+vi.mock("expo-application", () => ({ nativeApplicationVersion: "0.2.85" }));
 vi.mock("expo-notifications", () => ({
   AndroidImportance: { DEFAULT: 3 },
   setNotificationHandler: vi.fn(),
@@ -20,10 +21,13 @@ vi.mock("expo-notifications", () => ({
     return { remove: vi.fn() };
   },
   getLastNotificationResponseAsync: vi.fn(async () => null),
+  getDevicePushTokenAsync: vi.fn(async () => ({ type: "fcm", data: "device-fcm-token" })),
+  addPushTokenListener: vi.fn(() => ({ remove: vi.fn() })),
 }));
 
 import {
   presentTaskReminderNotification,
+  loadNativePushRegistration,
   requestTaskNotificationPermission,
   sendTestTaskNotification,
 } from "./taskNotifications";
@@ -71,5 +75,14 @@ describe("task notifications", () => {
       body: "任务已完成",
     })).resolves.toBe(false);
     expect(native.schedule).not.toHaveBeenCalled();
+  });
+
+  it("loads the native FCM token only after notification permission is granted", async () => {
+    await expect(loadNativePushRegistration()).resolves.toBeNull();
+    native.granted = true;
+    await expect(loadNativePushRegistration()).resolves.toEqual({
+      token: "device-fcm-token",
+      appVersion: "0.2.85",
+    });
   });
 });

@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
+import * as Application from "expo-application";
 
 export const TASK_NOTIFICATION_CHANNEL = "knoa-task-events";
 
@@ -52,6 +53,35 @@ export async function hasTaskNotificationPermission(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export async function loadNativePushRegistration(): Promise<{
+  token: string;
+  appVersion: string;
+} | null> {
+  if (Platform.OS !== "android") return null;
+  try {
+    await configureTaskNotifications();
+    if (!(await Notifications.getPermissionsAsync()).granted) return null;
+    const token = await Notifications.getDevicePushTokenAsync();
+    if (token.type !== "fcm" || typeof token.data !== "string" || !token.data.trim()) return null;
+    return {
+      token: token.data,
+      appVersion: Application.nativeApplicationVersion ?? "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function subscribeNativePushToken(
+  listener: (token: string) => void,
+): { remove(): void } {
+  return Notifications.addPushTokenListener((token) => {
+    if (token.type === "fcm" && typeof token.data === "string" && token.data.trim()) {
+      listener(token.data);
+    }
+  });
 }
 
 export async function presentTaskReminderNotification(input: {

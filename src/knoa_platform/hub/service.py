@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
 )
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from knoa_platform.hub.repository import HubRepository
 from knoa_platform.private_files import (
@@ -214,6 +215,66 @@ class HubService:
             str(payload["installation_id"]),
         )
         return payload
+
+    def encrypt_push_token(self, token: str) -> tuple[str, str]:
+        normalized = token.strip()
+        if not 16 <= len(normalized) <= 4096:
+            raise ValueError("Push token length is invalid")
+        private = self._signing_key.private_bytes(
+            serialization.Encoding.Raw,
+            serialization.PrivateFormat.Raw,
+            serialization.NoEncryption(),
+        )
+        key = hashlib.sha256(b"knoa-hub-push-token-v1\x00" + private).digest()
+        nonce = os.urandom(12)
+        ciphertext = AESGCM(key).encrypt(nonce, normalized.encode(), self.hub_id.encode())
+        return _encode(nonce + ciphertext), hashlib.sha256(normalized.encode()).hexdigest()[:16]
+
+    def decrypt_push_token(self, ciphertext: str) -> str:
+        raw = _decode(ciphertext)
+        if len(raw) < 29:
+            raise ValueError("Push token ciphertext is invalid")
+        private = self._signing_key.private_bytes(
+            serialization.Encoding.Raw,
+            serialization.PrivateFormat.Raw,
+            serialization.NoEncryption(),
+        )
+        key = hashlib.sha256(b"knoa-hub-push-token-v1\x00" + private).digest()
+        return AESGCM(key).decrypt(raw[:12], raw[12:], self.hub_id.encode()).decode()
+
+    def register_push_token(
+        self,
+        account_id: str,
+        installation_id: str,
+        *,
+        provider: str,
+        token: str,
+        locale: str,
+        app_version: str,
+    ) -> dict:
+        if provider != "fcm":
+            raise ValueError("Push provider is not supported")
+        encrypted, fingerprint = self.encrypt_push_token(token)
+        return self.repository.put_push_installation(
+            account_id,
+            installation_id,
+            provider=provider,
+            token_ciphertext=encrypted,
+            token_fingerprint=fingerprint,
+            locale=locale[:32],
+            app_version=app_version[:64],
+        )
+
+    def publish_notification_intent(self, request: dict) -> dict:
+        node = self._verify_node_control(
+            request,
+            "knoa-notification-intent-v1",
+        )
+        return self.repository.put_notification_intent(
+            self.owner_subject_id,
+            str(node["node_id"]),
+            request,
+        )
 
     def verify_node_signed_request(
         self,

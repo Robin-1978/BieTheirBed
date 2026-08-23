@@ -161,6 +161,8 @@ class GatewayCoreClient(Protocol):
 
     async def get_product_task(self, task_id: str) -> ProductTaskSnapshot: ...
     async def preflight_product_task(self, task_id: str) -> TaskPreflightResult: ...
+    async def list_notification_intents(self, *, after_sequence: int = 0, limit: int = 100, pending_only: bool = False): ...
+    async def mark_notification_intent_projected(self, intent_id: str): ...
 
     async def list_product_tasks(
         self,
@@ -542,6 +544,31 @@ class GatewayCoreBridge:
         return await (
             await self._client_for(principal_id)
         ).preflight_product_task(task_id)
+
+    async def list_notification_intents(
+        self,
+        principal_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 100,
+        pending_only: bool = False,
+    ):
+        return await (
+            await self._client_for(principal_id)
+        ).list_notification_intents(
+            after_sequence=after_sequence,
+            limit=limit,
+            pending_only=pending_only,
+        )
+
+    async def mark_notification_intent_projected(
+        self,
+        principal_id: str,
+        intent_id: str,
+    ):
+        return await (
+            await self._client_for(principal_id)
+        ).mark_notification_intent_projected(intent_id)
 
     async def list_product_tasks(
         self,

@@ -617,11 +617,59 @@ class NodeRelayManager:
                             )
                             response.raise_for_status()
                     await self._publish_work_projections(client, enrollment)
+                    await self._publish_notification_intents(client, enrollment)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Deployment observation publish failed: %s", exc)
             await asyncio.sleep(30)
+
+    async def _publish_notification_intents(
+        self,
+        client: httpx.AsyncClient,
+        enrollment: NodeHubEnrollment,
+    ) -> None:
+        if self._core is None:
+            return
+        for principal_id in self._identities.principal_ids():
+            intents = await self._core.list_notification_intents(
+                principal_id,
+                after_sequence=0,
+                limit=100,
+                pending_only=True,
+            )
+            for intent in intents:
+                payload = {
+                    "audience": "knoa-notification-intent-v1",
+                    "workspace_id": enrollment.workspace_id,
+                    "node_id": self._identity.node_id,
+                    "nonce": secrets.token_urlsafe(24),
+                    "timestamp": float(self._clock()),
+                    "intent_id": intent.intent_id,
+                    "principal_id": intent.principal_id,
+                    "category": intent.category,
+                    "work_kind": intent.work_kind,
+                    "work_id": intent.work_id,
+                    "execution_id": intent.execution_id,
+                    "semantic_code": intent.semantic_code,
+                    "parameters": intent.parameters,
+                    "deep_link": intent.deep_link,
+                    "dedupe_key": intent.dedupe_key,
+                    "priority": intent.priority,
+                    "expires_at": intent.expires_at,
+                    "source_sequence": intent.source_sequence,
+                    "created_at": intent.created_at,
+                }
+                payload["signature"] = self._identity.sign(canonical_json(payload))
+                response = await client.post(
+                    f"{enrollment.hub_url}/v1/notification-intents",
+                    json=payload,
+                )
+                response.raise_for_status()
+                await self._core.mark_notification_intent_projected(
+                    principal_id,
+                    intent.intent_id,
+                )
 
     async def workspace_resource_state(self) -> dict[str, Any]:
         return await self._control.control_state()

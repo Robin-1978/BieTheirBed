@@ -11,6 +11,7 @@ from knoa_platform.agent_runtime.contracts import (
     RuntimeScope,
 )
 from knoa_platform.interactions import HumanInteractionService
+from knoa_platform.notification_intent import NotificationIntentRecord
 from knoa_platform.tasks.approval import DurableApprovalService
 from knoa_platform.tasks.errors import (
     TaskAlreadyActiveError,
@@ -141,6 +142,33 @@ class TaskService:
 
     async def health_check(self) -> HealthStatus:
         return await self._executor.health_check()
+
+    async def list_notification_intents(
+        self,
+        principal_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 100,
+        pending_only: bool = False,
+    ) -> tuple[NotificationIntentRecord, ...]:
+        return await asyncio.to_thread(
+            self._repository.list_notification_intents,
+            principal_id,
+            after_sequence=after_sequence,
+            limit=limit,
+            pending_only=pending_only,
+        )
+
+    async def mark_notification_intent_projected(
+        self,
+        principal_id: str,
+        intent_id: str,
+    ) -> NotificationIntentRecord:
+        return await asyncio.to_thread(
+            self._repository.mark_notification_intent_projected,
+            principal_id,
+            intent_id,
+        )
 
     async def create(
         self,

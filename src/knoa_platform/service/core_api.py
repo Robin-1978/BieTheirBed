@@ -40,6 +40,7 @@ from knoa_platform.configuration.models import (
 )
 from knoa_platform.approvals.display import approval_display
 from knoa_platform.interactions import HumanInteraction
+from knoa_platform.notification_intent import NotificationIntentRecord
 from knoa_platform.automation import (
     ScheduleRecord,
     ScheduleSpec,
@@ -817,6 +818,22 @@ class PreflightProductTaskRequest(CoreModel):
     task_id: TaskId
 
 
+class ListNotificationIntentsRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["notification_intent_list"] = "notification_intent_list"
+    after_sequence: int = Field(default=0, ge=0)
+    limit: int = Field(default=100, ge=1, le=500)
+    pending_only: bool = False
+
+
+class MarkNotificationIntentProjectedRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["notification_intent_projected"] = "notification_intent_projected"
+    intent_id: TaskId
+
+
 class ListProductTasksRequest(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
@@ -1222,6 +1239,8 @@ CoreRequest: TypeAlias = Annotated[
     | CreateProductTaskRequest
     | GetProductTaskRequest
     | PreflightProductTaskRequest
+    | ListNotificationIntentsRequest
+    | MarkNotificationIntentProjectedRequest
     | ListProductTasksRequest
     | UpdateProductTaskRequest
     | SetProductTaskStateRequest
@@ -1469,6 +1488,20 @@ class ProductTaskPreflightMessage(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
     result: TaskPreflightResult
+
+
+class NotificationIntentListMessage(CoreModel):
+    message_type: Literal["notification_intent_list"] = "notification_intent_list"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    intents: tuple[NotificationIntentRecord, ...]
+
+
+class NotificationIntentMessage(CoreModel):
+    message_type: Literal["notification_intent"] = "notification_intent"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    intent: NotificationIntentRecord
 
 
 class ProductTaskExecutionMessage(CoreModel):
@@ -1752,6 +1785,8 @@ CoreServerMessage: TypeAlias = Annotated[
     | ProductTaskMessage
     | ProductTaskListMessage
     | ProductTaskPreflightMessage
+    | NotificationIntentListMessage
+    | NotificationIntentMessage
     | ProductTaskExecutionMessage
     | ProductTaskExecutionListMessage
     | ProductTaskDeletedMessage

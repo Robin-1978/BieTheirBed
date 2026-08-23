@@ -9,7 +9,10 @@ import time
 import uuid
 
 from knoa_platform.branding import ASSISTANT_NAME
-from knoa_platform.notification_intent import notification_intent_for_event
+from knoa_platform.notification_intent import (
+    NotificationIntentRecord,
+    notification_intent_for_event,
+)
 from knoa_platform.channels.feishu_cards import (
     _ActiveTaskPresentation,
     _StreamingCardState,
@@ -156,6 +159,35 @@ class FeishuTaskMixin:
         temporary.replace(path)
         path.chmod(0o600)
 
+    def _load_notification_intent_cursors(self) -> None:
+        try:
+            data = json.loads(
+                self._notification_intent_cursors_path.read_text(encoding="utf-8")
+            )
+            if isinstance(data, dict):
+                self._notification_intent_cursors = {
+                    str(open_id): int(cursor)
+                    for open_id, cursor in data.items()
+                    if str(open_id) and int(cursor) >= 0
+                }
+        except FileNotFoundError:
+            return
+        except Exception:
+            logger.warning("Ignoring invalid notification intent cursors", exc_info=True)
+
+    def _save_notification_intent_cursors(self) -> None:
+        path = self._notification_intent_cursors_path
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path.parent.chmod(0o700)
+        temporary = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
+        temporary.write_text(
+            json.dumps(self._notification_intent_cursors, sort_keys=True),
+            encoding="utf-8",
+        )
+        temporary.chmod(0o600)
+        temporary.replace(path)
+        path.chmod(0o600)
+
     def _ensure_principal_watcher(self, open_id: str) -> None:
         if not self._running:
             return
@@ -175,6 +207,13 @@ class FeishuTaskMixin:
         while self._running:
             try:
                 client = await self._client_for(open_id)
+                if callable(getattr(client, "list_notification_intents", None)):
+                    await self._watch_notification_intents(
+                        open_id,
+                        client,
+                        started_at=started_at,
+                    )
+                    continue
                 cursor = self._notification_cursors.get(open_id, 0)
                 async for feed_event in client.principal_task_events(
                     after_id=cursor
@@ -209,6 +248,123 @@ class FeishuTaskMixin:
                 )
                 if self._running:
                     await asyncio.sleep(_PRINCIPAL_WATCH_RETRY_SECONDS)
+
+    async def _watch_notification_intents(
+        self,
+        open_id: str,
+        client: CoreClient,
+        *,
+        started_at: float,
+    ) -> None:
+        bootstrap = open_id not in self._notification_intent_cursors
+        while self._running:
+            cursor = self._notification_intent_cursors.get(open_id, 0)
+            intents = await client.list_notification_intents(
+                after_sequence=cursor,
+                limit=100,
+            )
+            if not intents:
+                await asyncio.sleep(_PRINCIPAL_WATCH_RETRY_SECONDS)
+                continue
+            for intent in intents:
+                if not self._running:
+                    return
+                cursor = intent.source_sequence
+                if bootstrap and intent.created_at < started_at:
+                    self._notification_intent_cursors[open_id] = cursor
+                    continue
+                bootstrap = False
+                while self._running:
+                    if await self._deliver_notification_intent(open_id, client, intent):
+                        break
+                    await asyncio.sleep(_PRINCIPAL_WATCH_RETRY_SECONDS)
+                self._notification_intent_cursors[open_id] = cursor
+                self._save_notification_intent_cursors()
+
+    async def _event_for_notification_intent(
+        self,
+        client: CoreClient,
+        intent: NotificationIntentRecord,
+    ) -> TaskEvent | None:
+        expected = {
+            "approval_required": "approval_requested",
+            "interaction_required": "interaction_requested",
+        }.get(intent.category)
+        if expected is None:
+            return None
+        action_key = "approval_id" if expected == "approval_requested" else "interaction_id"
+        expected_action = str(intent.deep_link.get(action_key) or "")
+        stream = client.task_events(intent.execution_id)
+        try:
+            async for event in stream:
+                if event.event_type != expected:
+                    continue
+                actual = getattr(event.payload, action_key)
+                if not expected_action or actual == expected_action:
+                    return event
+                if event.event_seq >= intent.source_sequence:
+                    return None
+        finally:
+            await stream.aclose()
+        return None
+
+    async def _deliver_notification_intent(
+        self,
+        open_id: str,
+        client: CoreClient,
+        intent: NotificationIntentRecord,
+    ) -> bool:
+        execution_id = intent.execution_id
+        if intent.category in {"approval_required", "interaction_required"}:
+            if execution_id in self._foreground_task_ids:
+                return True
+            event = await self._event_for_notification_intent(client, intent)
+            if event is None:
+                return True
+            if intent.category == "approval_required":
+                return await self._deliver_background_approval(open_id, client, event)
+            return await self._deliver_background_interaction_notice(open_id, client, event)
+        if intent.category not in {"completed", "failed", "cancelled"}:
+            return True
+        if execution_id in self._foreground_task_ids:
+            self._foreground_task_ids.discard(execution_id)
+            return True
+        try:
+            snapshot = await client.get_task(execution_id)
+        except Exception:
+            logger.warning(
+                "Channel notification Task lookup failed task_id=%s",
+                execution_id,
+                exc_info=True,
+            )
+            return False
+        title_value = str(intent.parameters.get("title") or "").strip()[:80]
+        if intent.category == "completed":
+            text = _compact_background_result(snapshot.final_summary or "已完成")
+            template = "blue"
+            title = f"已完成 · {title_value}" if title_value else ASSISTANT_NAME
+        elif intent.category == "cancelled":
+            text, template = "已停止", "grey"
+            title = f"已停止 · {title_value}" if title_value else "已停止"
+        else:
+            reason = snapshot.final_summary or snapshot.failure_code or "任务未完成"
+            text, template = f"× {_compact_background_result(reason)}", "red"
+            title = f"处理出错 · {title_value}" if title_value else "处理出错"
+        try:
+            return await asyncio.to_thread(
+                self._send_card,
+                open_id,
+                text,
+                template,
+                title,
+            )
+        except Exception:
+            logger.warning(
+                "Channel notification delivery failed task_id=%s",
+                execution_id,
+                exc_info=True,
+            )
+            return False
 
     async def _deliver_principal_task_event(
         self,
