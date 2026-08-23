@@ -55,6 +55,22 @@ def test_node_console_owns_configuration_and_secret_management() -> None:
         assert f'data-console-panel="{tab}"' in page
 
 
+def test_node_console_overview_leads_with_three_state_summary() -> None:
+    page = node_console_html("csrf-token")
+
+    # The default status answers with the three user-facing classes and keeps
+    # transport/runtime detail collapsed in the advanced section.
+    assert "状态：${summary}" in page
+    assert "正常：Node 已连接" in page
+    assert "需要处理：" in page
+    assert "阻塞：" in page
+    assert 'id="statusAdvanced"' in page
+    assert 'id="statusDetail"' in page
+    assert "连接与链路技术细节" in page
+    # Raw identifiers are not part of the default status line anymore.
+    assert 'body.node.display_name||body.node.node_id' not in page
+
+
 def test_node_console_script_only_references_rendered_elements() -> None:
     page = node_console_html("csrf-token")
     rendered_ids = set(re.findall(r'\bid="([A-Za-z0-9_-]+)"', page))
