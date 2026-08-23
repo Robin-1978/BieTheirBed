@@ -296,3 +296,17 @@ class TriggerService:
             trigger_id,
             events,
         )
+
+    async def list_events(
+        self,
+        principal_id: str,
+        trigger_id: str,
+        *,
+        limit: int = 50,
+    ) -> tuple[TriggerEventRecord, ...]:
+        return await asyncio.to_thread(
+            self._repository.list_events,
+            principal_id,
+            trigger_id,
+            limit=limit,
+        )

@@ -40,6 +40,8 @@ from knoa_platform.service.core_api import (
     TaskResumedMessage,
     TaskSnapshot,
     HumanInteractionResolvedMessage,
+    TriggerEventSnapshot,
+    TriggerSnapshot,
 )
 from knoa_platform.service.core_client import CoreClient
 from knoa_platform.service.credentials import (
@@ -196,6 +198,10 @@ class GatewayCoreClient(Protocol):
         *,
         client_request_id: str,
     ) -> ProductTaskExecutionSnapshot: ...
+
+    async def list_triggers(self, *, state=None, limit: int = 50) -> tuple[TriggerSnapshot, ...]: ...
+    async def fire_trigger(self, trigger_id: str, external_event_id: str, payload=None) -> TriggerEventSnapshot: ...
+    async def list_trigger_events(self, trigger_id: str, *, limit: int = 50) -> tuple[TriggerEventSnapshot, ...]: ...
 
     async def cancel_task(
         self,
@@ -639,6 +645,33 @@ class GatewayCoreBridge:
         return await (
             await self._client_for(principal_id)
         ).list_product_task_executions(task_id, limit=limit)
+
+    async def list_triggers(self, principal_id: str, *, state=None, limit: int = 50):
+        return await (await self._client_for(principal_id)).list_triggers(
+            state=state, limit=limit
+        )
+
+    async def fire_trigger(
+        self,
+        principal_id: str,
+        trigger_id: str,
+        external_event_id: str,
+        payload=None,
+    ):
+        return await (await self._client_for(principal_id)).fire_trigger(
+            trigger_id, external_event_id, payload
+        )
+
+    async def list_trigger_events(
+        self,
+        principal_id: str,
+        trigger_id: str,
+        *,
+        limit: int = 50,
+    ):
+        return await (await self._client_for(principal_id)).list_trigger_events(
+            trigger_id, limit=limit
+        )
 
     async def delete_product_task_execution(
         self,

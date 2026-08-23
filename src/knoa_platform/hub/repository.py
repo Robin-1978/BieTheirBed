@@ -241,6 +241,37 @@ class HubRepository:
                     ON notification_inbox(account_id, received_at);
                 CREATE INDEX IF NOT EXISTS notification_deliveries_pending
                     ON notification_deliveries(state, next_attempt_at);
+                CREATE TABLE IF NOT EXISTS webhook_routes(
+                    route_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    account_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    principal_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    trigger_id TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    secret_ciphertext TEXT NOT NULL,
+                    previous_secret_ciphertext TEXT NOT NULL,
+                    previous_secret_expires_at REAL,
+                    secret_version INTEGER NOT NULL,
+                    state TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    UNIQUE(node_id, task_id)
+                );
+                CREATE TABLE IF NOT EXISTS webhook_ingress_outbox(
+                    ingress_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    route_id TEXT NOT NULL,
+                    external_event_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    received_at REAL NOT NULL,
+                    delivery_count INTEGER NOT NULL,
+                    last_delivered_at REAL,
+                    acknowledged_at REAL,
+                    UNIQUE(route_id, external_event_id)
+                );
+                CREATE INDEX IF NOT EXISTS webhook_outbox_pending
+                    ON webhook_ingress_outbox(route_id, acknowledged_at, ingress_id);
                 """
             )
             columns = {
@@ -1209,6 +1240,153 @@ class HubRepository:
             item["usage_summary"] = json.loads(item["usage_summary"])
             items.append(item)
         return tuple(items)
+
+    def put_webhook_route(self, item: dict) -> dict:
+        now = self._clock()
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO webhook_routes VALUES(?,?,?,?,?,?,?,?,?,?,NULL,1,'active',?,?)
+                   ON CONFLICT(node_id, task_id) DO NOTHING""",
+                (
+                    item["route_id"], self.hub_id, item["account_id"], item["node_id"],
+                    item["principal_id"], item["task_id"], item["trigger_id"],
+                    item["display_name"], item["secret_ciphertext"], "", now, now,
+                ),
+            )
+            row = db.execute(
+                "SELECT * FROM webhook_routes WHERE node_id=? AND task_id=?",
+                (item["node_id"], item["task_id"]),
+            ).fetchone()
+        assert row is not None
+        return dict(row)
+
+    def webhook_route(self, route_id: str) -> dict:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT * FROM webhook_routes WHERE route_id=?", (route_id,)
+            ).fetchone()
+        if row is None:
+            raise LookupError("Webhook route not found")
+        return dict(row)
+
+    def rotate_webhook_secret(
+        self,
+        route_id: str,
+        *,
+        secret_ciphertext: str,
+        overlap_until: float,
+    ) -> dict:
+        with self._connect() as db:
+            cursor = db.execute(
+                """UPDATE webhook_routes SET
+                     previous_secret_ciphertext=secret_ciphertext,
+                     previous_secret_expires_at=?, secret_ciphertext=?,
+                     secret_version=secret_version+1, updated_at=?
+                   WHERE route_id=? AND state='active'""",
+                (overlap_until, secret_ciphertext, self._clock(), route_id),
+            )
+        if cursor.rowcount != 1:
+            raise LookupError("Webhook route not found")
+        return self.webhook_route(route_id)
+
+    def delete_webhook_route(self, node_id: str, route_id: str) -> None:
+        with self._connect() as db:
+            cursor = db.execute(
+                """UPDATE webhook_routes SET state='deleted', updated_at=?
+                   WHERE route_id=? AND node_id=?""",
+                (self._clock(), route_id, node_id),
+            )
+        if cursor.rowcount != 1:
+            raise LookupError("Webhook route not found")
+
+    def enqueue_webhook_event(
+        self,
+        route_id: str,
+        external_event_id: str,
+        payload: dict,
+        *,
+        max_pending: int = 1000,
+    ) -> tuple[dict, bool]:
+        now = self._clock()
+        payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            existing = db.execute(
+                """SELECT * FROM webhook_ingress_outbox
+                   WHERE route_id=? AND external_event_id=?""",
+                (route_id, external_event_id),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["payload_json"]) != payload_json:
+                    raise ValueError("Webhook event ID conflicts with another payload")
+                item = dict(existing)
+                item["payload"] = json.loads(item.pop("payload_json"))
+                return item, False
+            pending = db.execute(
+                """SELECT COUNT(*) FROM webhook_ingress_outbox
+                   WHERE route_id=? AND acknowledged_at IS NULL""",
+                (route_id,),
+            ).fetchone()[0]
+            if int(pending) >= max_pending:
+                raise OverflowError("Webhook ingress outbox is full")
+            db.execute(
+                """INSERT INTO webhook_ingress_outbox
+                   (route_id, external_event_id, payload_json, received_at,
+                    delivery_count, last_delivered_at, acknowledged_at)
+                   VALUES(?,?,?,?,0,NULL,NULL)""",
+                (route_id, external_event_id, payload_json, now),
+            )
+            row = db.execute(
+                """SELECT * FROM webhook_ingress_outbox
+                   WHERE route_id=? AND external_event_id=?""",
+                (route_id, external_event_id),
+            ).fetchone()
+        assert row is not None
+        item = dict(row)
+        item["payload"] = json.loads(item.pop("payload_json"))
+        return item, True
+
+    def pull_webhook_events(self, node_id: str, *, limit: int = 50) -> tuple[dict, ...]:
+        now = self._clock()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute(
+                """SELECT ingress.*, route.trigger_id, route.principal_id,
+                          route.task_id, route.route_id
+                   FROM webhook_ingress_outbox AS ingress
+                   JOIN webhook_routes AS route ON route.route_id=ingress.route_id
+                   WHERE route.node_id=? AND route.state='active'
+                     AND ingress.acknowledged_at IS NULL
+                     AND (ingress.last_delivered_at IS NULL OR ingress.last_delivered_at<=?)
+                   ORDER BY ingress.ingress_id LIMIT ?""",
+                (node_id, now - 15.0, max(1, min(limit, 100))),
+            ).fetchall()
+            ids = [int(row["ingress_id"]) for row in rows]
+            if ids:
+                placeholders = ",".join("?" for _ in ids)
+                db.execute(
+                    f"UPDATE webhook_ingress_outbox SET delivery_count=delivery_count+1, last_delivered_at=? WHERE ingress_id IN ({placeholders})",
+                    (now, *ids),
+                )
+        items = []
+        for row in rows:
+            item = dict(row)
+            item["payload"] = json.loads(item.pop("payload_json"))
+            items.append(item)
+        return tuple(items)
+
+    def acknowledge_webhook_events(self, node_id: str, ingress_ids: tuple[int, ...]) -> int:
+        if not ingress_ids:
+            return 0
+        placeholders = ",".join("?" for _ in ingress_ids)
+        with self._connect() as db:
+            cursor = db.execute(
+                f"""UPDATE webhook_ingress_outbox SET acknowledged_at=COALESCE(acknowledged_at, ?)
+                    WHERE ingress_id IN ({placeholders}) AND route_id IN
+                    (SELECT route_id FROM webhook_routes WHERE node_id=?)""",
+                (self._clock(), *ingress_ids, node_id),
+            )
+        return cursor.rowcount
 
 
 __all__ = ["EnrollmentGrant", "HubRepository"]

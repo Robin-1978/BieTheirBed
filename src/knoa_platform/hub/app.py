@@ -180,6 +180,45 @@ class NotificationIntentProjectionRequest(_Request):
     signature: str = Field(min_length=80, max_length=128)
 
 
+class WebhookRouteProvisionRequest(_Request):
+    audience: Literal["knoa-webhook-route-provision-v1"]
+    node_id: str = Field(min_length=1, max_length=128)
+    nonce: str = Field(min_length=16, max_length=256)
+    timestamp: float
+    principal_id: str = Field(min_length=1, max_length=256)
+    task_id: str = Field(min_length=1, max_length=128)
+    trigger_id: str = Field(min_length=1, max_length=128)
+    display_name: str = Field(min_length=1, max_length=200)
+    signature: str = Field(min_length=80, max_length=128)
+
+
+class WebhookRouteControlRequest(_Request):
+    audience: Literal["knoa-webhook-secret-rotate-v1", "knoa-webhook-route-delete-v1"]
+    node_id: str = Field(min_length=1, max_length=128)
+    nonce: str = Field(min_length=16, max_length=256)
+    timestamp: float
+    route_id: str = Field(min_length=1, max_length=128)
+    signature: str = Field(min_length=80, max_length=128)
+
+
+class WebhookEventPullRequest(_Request):
+    audience: Literal["knoa-webhook-event-pull-v1"]
+    node_id: str = Field(min_length=1, max_length=128)
+    nonce: str = Field(min_length=16, max_length=256)
+    timestamp: float
+    limit: int = Field(default=50, ge=1, le=100)
+    signature: str = Field(min_length=80, max_length=128)
+
+
+class WebhookEventAckRequest(_Request):
+    audience: Literal["knoa-webhook-event-ack-v1"]
+    node_id: str = Field(min_length=1, max_length=128)
+    nonce: str = Field(min_length=16, max_length=256)
+    timestamp: float
+    ingress_ids: tuple[int, ...] = Field(min_length=1, max_length=100)
+    signature: str = Field(min_length=80, max_length=128)
+
+
 class ResourceGrantRequest(_Request):
     grant_id: str = Field(min_length=1, max_length=128)
     caller_node_id: str = Field(min_length=1, max_length=128)
@@ -282,6 +321,12 @@ class HubApplication:
                     self.notification_intents,
                     methods=["POST"],
                 ),
+                Route("/hooks/v1/{route_id:str}", self.webhook_ingress, methods=["POST"]),
+                Route("/v1/webhook-routes", self.webhook_routes, methods=["POST"]),
+                Route("/v1/webhook-routes/{route_id:str}/rotate-secret", self.webhook_rotate, methods=["POST"]),
+                Route("/v1/webhook-routes/{route_id:str}", self.webhook_delete, methods=["DELETE"]),
+                Route("/v1/webhook-events/pull", self.webhook_pull, methods=["POST"]),
+                Route("/v1/webhook-events/ack", self.webhook_ack, methods=["POST"]),
                 Route("/v1/nodes", self.nodes, methods=["GET"]),
                 Route(
                     "/v1/node-enrollment-grants",
@@ -547,6 +592,99 @@ class HubApplication:
             "source_sequence": item["source_sequence"],
             "accepted": True,
         }, status_code=202)
+
+    async def webhook_routes(self, request: Request) -> JSONResponse:
+        parsed = await self._parse(request, WebhookRouteProvisionRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            item = self.service.provision_webhook_route(parsed.model_dump(mode="json"))
+        except PermissionError:
+            return JSONResponse({"error": "rejected"}, status_code=401)
+        except (KeyError, LookupError, ValueError):
+            return JSONResponse({"error": "invalid_request"}, status_code=422)
+        return JSONResponse(item, status_code=201)
+
+    async def webhook_rotate(self, request: Request) -> JSONResponse:
+        parsed = await self._parse(request, WebhookRouteControlRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        if parsed.route_id != str(request.path_params["route_id"]) or parsed.audience != "knoa-webhook-secret-rotate-v1":
+            return JSONResponse({"error": "rejected"}, status_code=401)
+        try:
+            return JSONResponse(self.service.rotate_webhook_secret(parsed.model_dump(mode="json")))
+        except PermissionError:
+            return JSONResponse({"error": "rejected"}, status_code=401)
+        except (KeyError, LookupError, ValueError):
+            return JSONResponse({"error": "not_found"}, status_code=404)
+
+    async def webhook_delete(self, request: Request) -> JSONResponse:
+        parsed = await self._parse(request, WebhookRouteControlRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        if parsed.route_id != str(request.path_params["route_id"]) or parsed.audience != "knoa-webhook-route-delete-v1":
+            return JSONResponse({"error": "rejected"}, status_code=401)
+        try:
+            self.service.delete_webhook_route(parsed.model_dump(mode="json"))
+        except PermissionError:
+            return JSONResponse({"error": "rejected"}, status_code=401)
+        except LookupError:
+            return JSONResponse({"error": "not_found"}, status_code=404)
+        return JSONResponse({"deleted": True})
+
+    async def webhook_ingress(self, request: Request) -> JSONResponse:
+        route_id = str(request.path_params.get("route_id", ""))
+        event_id = request.headers.get("X-Knoa-Event-Id", "").strip()
+        timestamp = request.headers.get("X-Knoa-Timestamp", "").strip()
+        signature = request.headers.get("X-Knoa-Signature", "").strip().lower()
+        if (
+            not route_id or not event_id or len(event_id) > 256
+            or len(timestamp) > 32 or len(signature) != 64
+        ):
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        bounded = bytearray()
+        async for chunk in request.stream():
+            bounded.extend(chunk)
+            if len(bounded) > 256 * 1024:
+                return JSONResponse({"error": "payload_too_large"}, status_code=413)
+        body = bytes(bounded)
+        try:
+            payload = json.loads(body)
+            if not isinstance(payload, dict):
+                raise ValueError
+            item, created = self.service.accept_webhook(
+                route_id, event_id=event_id, timestamp_text=timestamp,
+                signature=signature, body=body, payload=payload,
+            )
+        except LookupError:
+            return JSONResponse({"error": "not_found"}, status_code=404)
+        except PermissionError:
+            return JSONResponse({"error": "rejected"}, status_code=401)
+        except OverflowError:
+            return JSONResponse({"error": "outbox_full"}, status_code=429)
+        except (ValueError, json.JSONDecodeError):
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        return JSONResponse({"accepted": True, "duplicate": not created, "ingress_id": item["ingress_id"]}, status_code=202)
+
+    async def webhook_pull(self, request: Request) -> JSONResponse:
+        parsed = await self._parse(request, WebhookEventPullRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            events = self.service.pull_webhook_events(parsed.model_dump(mode="json"))
+        except PermissionError:
+            return JSONResponse({"error": "rejected"}, status_code=401)
+        return JSONResponse({"events": list(events)})
+
+    async def webhook_ack(self, request: Request) -> JSONResponse:
+        parsed = await self._parse(request, WebhookEventAckRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            count = self.service.acknowledge_webhook_events(parsed.model_dump(mode="json"))
+        except PermissionError:
+            return JSONResponse({"error": "rejected"}, status_code=401)
+        return JSONResponse({"acknowledged": count})
 
     async def nodes(self, request: Request) -> JSONResponse:
         authenticated = self._member(request)

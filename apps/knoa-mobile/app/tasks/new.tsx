@@ -27,6 +27,7 @@ import { requestTaskNotificationPermission } from "@/notifications/taskNotificat
 import { presentNodeName } from "@/presentation/nodePresentation";
 import { MAX_ATTACHMENTS, pickAttachments, type PickedAttachment } from "@/media/attachmentPicker";
 import { uploadSessionAttachments } from "@/api/uploadAttachments";
+import { pickFolderSnapshot, uploadFolderSnapshot, type FolderSelection } from "@/media/folderManifest";
 
 export default function NewTaskScreen() {
   const gateway = useGateway();
@@ -46,6 +47,8 @@ export default function NewTaskScreen() {
   const [selectedNodeId, setSelectedNodeId] = useState(gateway.nodeId || params.nodeId || "");
   const [switchingNode, setSwitchingNode] = useState(false);
   const [attachments, setAttachments] = useState<PickedAttachment[]>([]);
+  const [folder, setFolder] = useState<FolderSelection | null>(null);
+  const [folderProgress, setFolderProgress] = useState(0);
   const requestIdentity = useRef<{ fingerprint: string; requestId: string } | null>(null);
 
   async function chooseAttachments() {
@@ -54,6 +57,16 @@ export default function NewTaskScreen() {
       if (prepared.length) setAttachments((current) => [...current, ...prepared].slice(0, MAX_ATTACHMENTS));
     } catch {
       setError(t("taskNew.attachmentPickFailed"));
+    }
+  }
+
+  async function chooseFolder() {
+    try {
+      setFolder(await pickFolderSnapshot());
+      setFolderProgress(0);
+    } catch (caught) {
+      if (caught instanceof RangeError) setError(folderErrorMessage(caught.message, t));
+      else setError(t("taskNew.folderPickFailed"));
     }
   }
 
@@ -119,6 +132,16 @@ export default function NewTaskScreen() {
         }
         uploadedAttachments = result.uploaded;
       }
+      if (folder) {
+        const sessionHandle = await gateway.ensureConversation();
+        const manifest = await gateway.runAuthenticated(
+          (client) => uploadFolderSnapshot(
+            client, sessionHandle, folder,
+            (completed) => setFolderProgress(completed),
+          ),
+        );
+        uploadedAttachments = [...uploadedAttachments, manifest];
+      }
       const input = {
         title: title.trim(),
         goal: normalizedGoal,
@@ -147,7 +170,7 @@ export default function NewTaskScreen() {
       // A disconnected Node must not make the user retype a long task.  Keep
       // the exact idempotency key so reconnect/retry cannot create duplicates.
       if (gateway.status !== "ready") {
-        if (attachments.length) {
+        if (attachments.length || folder) {
           setError(t("taskNew.attachmentOffline"));
           return;
         }
@@ -272,6 +295,27 @@ export default function NewTaskScreen() {
             </AppPressable>
             <Text style={styles.templateMeta}>{t("taskNew.attachmentCount", { count: attachments.length, max: MAX_ATTACHMENTS })}</Text>
           </View>
+          <View style={styles.attachmentRow}>
+            <AppPressable
+              accessibilityLabel={t("taskNew.addFolder")}
+              disabled={Boolean(folder) || attachments.length >= MAX_ATTACHMENTS || saving}
+              onPress={() => void chooseFolder()}
+              style={styles.attachmentButton}
+            >
+              <Text style={styles.attachmentButtonText}>{t("taskNew.addFolder")}</Text>
+            </AppPressable>
+            <Text style={styles.templateMeta}>{t("taskNew.folderHint")}</Text>
+          </View>
+          {folder ? (
+            <View style={styles.folderCard}>
+              <Text style={styles.attachmentName} numberOfLines={1}>{folder.rootName}</Text>
+              <Text style={styles.templateMeta}>{t("taskNew.folderStats", { count: folder.files.length, size: formatBytes(folder.totalBytes) })}</Text>
+              {saving && folderProgress ? <Text style={styles.templateMeta}>{t("taskNew.folderProgress", { completed: folderProgress, total: folder.files.length })}</Text> : null}
+              <AppPressable disabled={saving} onPress={() => setFolder(null)} style={styles.attachmentRemove}>
+                <Text style={styles.attachmentRemoveText}>{t("taskNew.removeAttachment")}</Text>
+              </AppPressable>
+            </View>
+          ) : null}
           {attachments.map((item, index) => (
             <View key={`${item.uri}:${index}`} style={styles.attachmentRow}>
               <Text style={styles.attachmentName} numberOfLines={1}>{item.name}</Text>
@@ -321,6 +365,22 @@ function Toggle({ label, value, onChange }: { label: string; value: boolean; onC
   return <View style={styles.toggle}><Text style={styles.toggleLabel}>{label}</Text><Switch value={value} onValueChange={onChange} trackColor={{ true: colors.accentSoft }} thumbColor={value ? colors.accent : colors.line} /></View>;
 }
 
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function folderErrorMessage(code: string, t: ReturnType<typeof useI18n>["t"]): string {
+  return ({
+    folder_empty: t("taskNew.folder_empty"),
+    folder_file_count_exceeded: t("taskNew.folder_file_count_exceeded"),
+    folder_total_size_exceeded: t("taskNew.folder_total_size_exceeded"),
+    folder_file_size_exceeded: t("taskNew.folder_file_size_exceeded"),
+    folder_path_invalid: t("taskNew.folder_path_invalid"),
+  } as Record<string, string>)[code] ?? t("taskNew.folderPickFailed");
+}
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   container: { padding: 16, paddingBottom: 48 },
@@ -356,6 +416,7 @@ const styles = StyleSheet.create({
   attachmentName: { color: colors.ink, flex: 1, minWidth: 0 },
   attachmentRemove: { minHeight: 32, paddingHorizontal: 11, alignItems: "center", justifyContent: "center", borderRadius: 10, borderWidth: 1, borderColor: colors.line },
   attachmentRemoveText: { color: colors.muted, fontWeight: "700", fontSize: 12 },
+  folderCard: { padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.line, gap: 5 },
   toggle: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   toggleLabel: { color: colors.ink },
   error: { color: colors.danger },

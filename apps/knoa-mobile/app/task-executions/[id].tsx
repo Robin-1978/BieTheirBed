@@ -25,6 +25,7 @@ import { AppMarkdown } from "@/components/AppMarkdown";
 import { ApprovalRequestDetails } from "@/components/ApprovalRequestDetails";
 import { ArtifactViewer } from "@/components/ArtifactViewer";
 import { InteractionCard } from "@/components/InteractionCard";
+import { WorkResultSummary } from "@/components/WorkResultSummary";
 import { mergeTaskTimeline, type TaskTimelineItem } from "@/components/taskTimeline";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
@@ -260,20 +261,7 @@ export default function TaskExecutionDetailScreen() {
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {message ? <Text style={styles.message}>{message}</Text> : null}
 
-      {execution.final_result ? (
-        <View style={styles.final}>
-          <Text style={styles.sectionTitle}>{t("execution.result")}</Text>
-          <AppMarkdown value={execution.final_result} style={styles.markdown} />
-        </View>
-      ) : null}
-      {execution.failure_code ? (
-        <View style={styles.failure}>
-          <Text style={styles.failureTitle}>{t("execution.incomplete")}</Text>
-          <Text style={styles.failureText}>{t("execution.incompleteHelp")}</Text>
-          {execution.work_status?.side_effect === "unknown" ? <Text style={styles.failureImpact}>{t("execution.sideEffectUnknown")}</Text> : null}
-          {execution.work_status?.side_effect === "possible" ? <Text style={styles.failureImpact}>{t("execution.sideEffectPossible")}</Text> : null}
-        </View>
-      ) : null}
+      <WorkResultSummary execution={execution} />
 
       {approvals.map((approval, index) => (
         <View key={approval.approval_id} style={styles.approval}>

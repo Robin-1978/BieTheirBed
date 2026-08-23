@@ -148,6 +148,11 @@ def test_external_event_id_deduplicates_same_payload(tmp_path: Path) -> None:
             payload={"issue": "KNOA-2"},
         )
 
+    history = repository.list_events(scope.principal_id, trigger.trigger_id)
+    assert [item.external_event_id for item in history] == ["jira-event-1"]
+    with pytest.raises(TriggerNotFoundError):
+        repository.list_events("principal-b", trigger.trigger_id)
+
 
 def test_trigger_baseline_suppresses_retained_inventory_but_not_future_events(
     tmp_path: Path,
