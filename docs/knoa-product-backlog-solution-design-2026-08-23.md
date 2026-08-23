@@ -1,6 +1,6 @@
 # 小诺产品剩余 Backlog 方案设计
 
-> 状态：已实施；全量代码门禁通过，进入 2026-08-24 发布
+> 状态：已实施并于 2026-08-24 发布
 >
 > 日期：2026-08-23
 >
@@ -12,7 +12,9 @@
 
 本方案 Phase A-F 已按独立提交完成：可靠启动边界、持久通知 Intent、通用 Capability Bundle、Browser MCP 参考包、Event Source/Webhook 工作流，以及受控改进与签名 Capability Catalog 均已落地。Browser 作为标准第三方 MCP 能力包安装，不在 Core 引入浏览器特例。
 
-发布前全量门禁结果：Python `1021 passed`，Mobile Vitest `131 passed`，Python compileall、Mobile TypeScript 和 OpenAPI 契约生成通过。真实 FCM 系统通知仍以 Hosted Hub 配置有效 Service Account 和 Android Firebase 配置为运行前提；缺少生产凭据时只表示投递链路已实现，不能视为真实设备推送已验收。
+最终全量门禁结果：Python `1022 passed`，Mobile Vitest `131 passed`，Python compileall、Mobile TypeScript 和 OpenAPI 契约生成通过。Platform `0.2.45`（`4d2c309`）已部署，Mobile `0.2.85 (96)` 已签名发布，公网 APK SHA-256 为 `5b4b31eeec1de2733830c35affa61baf2b0017363086181af76ef08cda5a714e`。
+
+真实 FCM 系统通知仍以 Hosted Hub 配置有效 Service Account 和 Android Firebase 配置为运行前提；本次生产环境未配置这两项，因此投递链路已发布，但真实设备远程推送仍未完成运维验收。
 
 ## 1. 决策摘要
 
