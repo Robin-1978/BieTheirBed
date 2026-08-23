@@ -241,6 +241,7 @@ export default function NewTaskScreen() {
             <Toggle label={t("taskNew.completed")} value={notifyCompleted} onChange={setNotifyCompleted} />
             <Toggle label={t("taskNew.failed")} value={notifyFailed} onChange={setNotifyFailed} />
             <Toggle label={t("taskNew.approval")} value={notifyApproval} onChange={setNotifyApproval} />
+            <Text style={styles.launchText}>{t("taskNew.notifyScopeHint")}</Text>
           </View>
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <AppPressable
