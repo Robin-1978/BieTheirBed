@@ -79,6 +79,7 @@ from knoa_platform.service.core_api import (
     GetHistoryRequest,
     GetProductTaskExecutionRequest,
     GetProductTaskRequest,
+    PreflightProductTaskRequest,
     GetStatusRequest,
     GetTaskRequest,
     HealthMessage,
@@ -109,6 +110,7 @@ from knoa_platform.service.core_api import (
     ProductTaskExecutionSnapshot,
     ProductTaskListMessage,
     ProductTaskMessage,
+    ProductTaskPreflightMessage,
     ProductTaskSnapshot,
     PublishConfigDraftRequest,
     RerunProductTaskExecutionRequest,
@@ -1082,6 +1084,17 @@ class CoreClient(CoreArtifactClientMixin, CoreAutomationClientMixin):
         if not isinstance(response, ProductTaskMessage):
             raise RuntimeError("CoreServer returned an invalid product Task snapshot")
         return response.task
+
+    async def preflight_product_task(self, task_id: str):
+        response = await self._request(
+            PreflightProductTaskRequest(
+                request_id=self._request_id(),
+                task_id=task_id,
+            )
+        )
+        if not isinstance(response, ProductTaskPreflightMessage):
+            raise RuntimeError("CoreServer returned an invalid Task preflight")
+        return response.result
 
     async def list_product_tasks(
         self,

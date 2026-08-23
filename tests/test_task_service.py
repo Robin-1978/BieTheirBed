@@ -22,6 +22,8 @@ from knoa_platform.tasks import (
     TaskLaunchKind,
     TaskLaunchPolicy,
     TaskLaunchReason,
+    TaskPreflightBlockedError,
+    TaskPreflightCheck,
     TaskRepository,
     TaskService,
     TaskState,
@@ -40,8 +42,11 @@ class _Runtime:
         self.request_confirmation = request_confirmation
         self.unknown_outcome = unknown_outcome
         self.requests = []
+        self.entered = asyncio.Event()
+
     async def execute_turn(self, request):
         self.requests.append(request)
+        self.entered.set()
         base = {
             "runtime_session_ref": "agent-session-a",
             "runtime_turn_ref": request.turn_id,
@@ -265,6 +270,65 @@ async def test_immediate_definition_without_auto_launch_waits_for_explicit_execu
         assert [item.execution_id for item in listed] == [started.execution_id]
     finally:
         await service.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider_kind", "launch_reason"),
+    (
+        ("schedule", TaskLaunchReason.SCHEDULED),
+        ("event", TaskLaunchReason.EVENT),
+    ),
+)
+async def test_bound_launches_cannot_bypass_core_preflight(
+    tmp_path: Path,
+    provider_kind: str,
+    launch_reason: TaskLaunchReason,
+) -> None:
+    service, repository, scope = _components(tmp_path, _Runtime())
+    definition, execution = await service.create_definition(
+        scope,
+        client_request_id="definition-preflight-a",
+        title="Blocked automation",
+        goal="Run only after configuration is repaired",
+        auto_launch=False,
+    )
+    assert execution is None
+    await service.bind_launch(
+        scope.principal_id,
+        definition.task_id,
+        provider_kind=provider_kind,
+        provider_id=f"{provider_kind}-a",
+    )
+
+    async def blocked(_definition):
+        return (TaskPreflightCheck(
+            check_id="runtime",
+            status="blocked",
+            detail="Agent Runtime 当前不可用，请检查 Node 状态后重试",
+            recommended_action="retry",
+        ),)
+
+    service.configure_preflight(blocked)
+    with pytest.raises(TaskPreflightBlockedError) as captured:
+        await service.execute_bound_launch(
+            scope.principal_id,
+            provider_kind=provider_kind,
+            provider_id=f"{provider_kind}-a",
+            client_request_id=f"{provider_kind}:delivery-a",
+            launch_reason=launch_reason,
+        )
+
+    assert captured.value.result.ready is False
+    assert captured.value.result.checks[-1].check_id == "runtime"
+    assert await service.list_executions(
+        scope.principal_id,
+        definition.task_id,
+    ) == ()
+    assert repository.get_task_definition(
+        scope.principal_id,
+        definition.task_id,
+    ).execution_count == 0
 
 
 @pytest.mark.asyncio
@@ -501,12 +565,10 @@ async def test_restart_pauses_interrupted_task_until_explicit_resume(
         client_request_id="request-a",
         goal="finish report",
     )
-    for _ in range(100):
-        if first_repository.get(scope.principal_id, task.task_id).state is (
-            TaskState.RUNNING
-        ):
-            break
-        await asyncio.sleep(0.01)
+    await asyncio.wait_for(first_runtime.entered.wait(), timeout=2)
+    assert first_repository.get(scope.principal_id, task.task_id).state is (
+        TaskState.RUNNING
+    )
     await first.stop()
 
     second_runtime = _Runtime()

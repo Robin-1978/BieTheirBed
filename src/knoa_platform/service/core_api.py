@@ -68,6 +68,7 @@ from knoa_platform.tasks import (
     TaskLaunchReason,
     TaskOrigin,
     TaskPauseResult,
+    TaskPreflightResult,
     TaskRecord,
     TaskState,
 )
@@ -809,6 +810,13 @@ class GetProductTaskRequest(CoreModel):
     task_id: TaskId
 
 
+class PreflightProductTaskRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["product_task_preflight"] = "product_task_preflight"
+    task_id: TaskId
+
+
 class ListProductTasksRequest(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
@@ -1213,6 +1221,7 @@ CoreRequest: TypeAlias = Annotated[
     | ListTasksRequest
     | CreateProductTaskRequest
     | GetProductTaskRequest
+    | PreflightProductTaskRequest
     | ListProductTasksRequest
     | UpdateProductTaskRequest
     | SetProductTaskStateRequest
@@ -1453,6 +1462,13 @@ class ProductTaskListMessage(CoreModel):
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
     tasks: tuple[ProductTaskSnapshot, ...]
+
+
+class ProductTaskPreflightMessage(CoreModel):
+    message_type: Literal["product_task_preflight"] = "product_task_preflight"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    result: TaskPreflightResult
 
 
 class ProductTaskExecutionMessage(CoreModel):
@@ -1735,6 +1751,7 @@ CoreServerMessage: TypeAlias = Annotated[
     | TaskListMessage
     | ProductTaskMessage
     | ProductTaskListMessage
+    | ProductTaskPreflightMessage
     | ProductTaskExecutionMessage
     | ProductTaskExecutionListMessage
     | ProductTaskDeletedMessage

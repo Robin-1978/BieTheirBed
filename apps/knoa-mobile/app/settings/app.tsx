@@ -1,7 +1,7 @@
 import * as Application from "expo-application";
 import { router } from "expo-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Linking, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
@@ -11,7 +11,13 @@ import { colors } from "@/theme";
 import { hasTaskNotificationPermission, requestTaskNotificationPermission, sendTestTaskNotification } from "@/notifications/taskNotifications";
 import { appCacheSummary, clearAppCache, emptyAppCacheSummary, formatCacheBytes, type AppCacheSummary, type CacheKind } from "@/storage/appCache";
 import { formatRelativeTime } from "@/ui/formatRelativeTime";
-import { summarizeTransportProbes } from "@/api/transportDiagnostics";
+import {
+  clearTransportDiagnostics,
+  recentTransportStages,
+  recentTransportSwitches,
+  summarizeTransportProbes,
+  transportDiagnosticSummaryText,
+} from "@/api/transportDiagnostics";
 import { transportLabelKey } from "@/api/transportPresentation";
 
 const CACHE_KINDS: Exclude<CacheKind, "all">[] = ["conversation", "workspace", "task", "artifact"];
@@ -24,6 +30,7 @@ export default function AppSettingsScreen() {
   const [notificationTesting, setNotificationTesting] = useState(false);
   const [cache, setCache] = useState<AppCacheSummary>(() => emptyAppCacheSummary());
   const [cacheWorking, setCacheWorking] = useState(false);
+  const [diagnosticRevision, setDiagnosticRevision] = useState(0);
 
   useEffect(() => {
     void hasTaskNotificationPermission().then(setNotificationsEnabled);
@@ -128,9 +135,31 @@ export default function AppSettingsScreen() {
                 </Text>
               ))}
               <Text style={styles.detail}>{i18n.t("settings.transportAverage", { ms: summary.averageMs })}</Text>
+              {recentTransportStages().slice(-8).map((event, index) => (
+                <Text key={`${event.attemptId}-${event.stage}-${index}`} style={styles.detail}>
+                  {i18n.t("settings.transportStageLine", {
+                    stage: event.stage,
+                    outcome: event.outcome,
+                    ms: event.endedAt - event.startedAt,
+                  })}
+                </Text>
+              ))}
+              {recentTransportSwitches().slice(-3).map((event, index) => (
+                <Text key={`${event.attemptId}-${event.at}-${index}`} style={styles.detail}>
+                  {i18n.t("settings.transportSwitchLine", { from: event.from, to: event.to, reason: event.reasonCode })}
+                </Text>
+              ))}
             </>
           );
         })()}
+        <View style={styles.notificationActions} key={diagnosticRevision}>
+          <AppPressable onPress={() => void Share.share({ message: transportDiagnosticSummaryText() })} style={styles.settingsButton}>
+            <Text style={styles.settingsButtonText}>{i18n.t("settings.transportCopy")}</Text>
+          </AppPressable>
+          <AppPressable onPress={() => { clearTransportDiagnostics(); setDiagnosticRevision((value) => value + 1); }} style={styles.settingsButton}>
+            <Text style={styles.settingsButtonText}>{i18n.t("settings.transportClear")}</Text>
+          </AppPressable>
+        </View>
       </Section>
 
       <Section title={i18n.t("settings.cache")} detail={i18n.t("settings.cacheDetail")}>

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from knoa_platform.agent_runtime.contracts import (
     ArtifactAttachment,
@@ -12,7 +12,11 @@ from knoa_platform.agent_runtime.contracts import (
 )
 from knoa_platform.interactions import HumanInteractionService
 from knoa_platform.tasks.approval import DurableApprovalService
-from knoa_platform.tasks.errors import TaskAlreadyActiveError, TaskTransitionError
+from knoa_platform.tasks.errors import (
+    TaskAlreadyActiveError,
+    TaskPreflightBlockedError,
+    TaskTransitionError,
+)
 from knoa_platform.tasks.event_hub import TaskEventHub
 from knoa_platform.tasks.executor import TaskExecutor
 from knoa_platform.tasks.models import (
@@ -30,6 +34,8 @@ from knoa_platform.tasks.models import (
     TaskLaunchReason,
     TaskOrigin,
     TaskPauseResult,
+    TaskPreflightCheck,
+    TaskPreflightResult,
     TaskRecord,
     TaskState,
 )
@@ -52,6 +58,79 @@ class TaskService:
         self._approvals = approvals
         self._events = events
         self._interactions = interactions
+        self._preflight_evaluator: Callable[
+            [TaskDefinitionRecord],
+            Awaitable[tuple[TaskPreflightCheck, ...]],
+        ] | None = None
+
+    def configure_preflight(
+        self,
+        evaluator: Callable[
+            [TaskDefinitionRecord],
+            Awaitable[tuple[TaskPreflightCheck, ...]],
+        ],
+    ) -> None:
+        """Configure operational checks after the configuration control plane exists."""
+
+        self._preflight_evaluator = evaluator
+
+    async def preflight_definition(
+        self,
+        principal_id: str,
+        task_id: str,
+    ) -> TaskPreflightResult:
+        definition = await self.get_definition(principal_id, task_id)
+        checks = [
+            TaskPreflightCheck(
+                check_id="task_state",
+                status=(
+                    "ready"
+                    if definition.state is TaskDefinitionState.ACTIVE
+                    else "blocked"
+                ),
+                detail=(
+                    "任务可以执行"
+                    if definition.state is TaskDefinitionState.ACTIVE
+                    else (
+                        "任务当前未启用，请先恢复任务"
+                        if definition.state is TaskDefinitionState.PAUSED
+                        else "任务已归档，请先恢复任务"
+                    )
+                ),
+                recommended_action=(
+                    "none"
+                    if definition.state is TaskDefinitionState.ACTIVE
+                    else "resume"
+                ),
+            ),
+            TaskPreflightCheck(
+                check_id="goal",
+                status="ready" if definition.goal.strip() else "blocked",
+                detail=(
+                    "执行目标已设置"
+                    if definition.goal.strip()
+                    else "执行目标为空，请先编辑任务"
+                ),
+                recommended_action=("none" if definition.goal.strip() else "configure"),
+            ),
+        ]
+        if self._preflight_evaluator is not None:
+            checks.extend(await self._preflight_evaluator(definition))
+        result_checks = tuple(checks)
+        return TaskPreflightResult(
+            task_id=definition.task_id,
+            ready=not any(check.status == "blocked" for check in result_checks),
+            checks=result_checks,
+        )
+
+    async def _require_preflight(
+        self,
+        principal_id: str,
+        task_id: str,
+    ) -> None:
+        result = await self.preflight_definition(principal_id, task_id)
+        if not result.ready:
+            raise TaskPreflightBlockedError(result)
 
     async def start(self) -> None:
         await self._executor.start()
@@ -308,6 +387,7 @@ class TaskService:
         snapshot: TaskExecutionRecord | None = None,
         goal_override: str = "",
     ) -> TaskExecutionRecord:
+        await self._require_preflight(principal_id, task_id)
         definition = await self.get_definition(principal_id, task_id)
         active = tuple(
             execution
@@ -465,6 +545,7 @@ class TaskService:
         normalized_input = input.strip()
         if not normalized_input and not attachments:
             raise ValueError("Task follow-up requires input or an attachment")
+        await self._require_preflight(principal_id, task_id)
         definition = await self.get_definition(principal_id, task_id)
         active = tuple(
             execution

@@ -51,6 +51,7 @@ from knoa_platform.tasks import (
     TaskDefinitionState,
     TaskEvent,
     TaskLaunchPolicy,
+    TaskPreflightResult,
     TaskOrigin,
     TaskState,
 )
@@ -159,6 +160,7 @@ class GatewayCoreClient(Protocol):
     ) -> ProductTaskMessage: ...
 
     async def get_product_task(self, task_id: str) -> ProductTaskSnapshot: ...
+    async def preflight_product_task(self, task_id: str) -> TaskPreflightResult: ...
 
     async def list_product_tasks(
         self,
@@ -531,6 +533,15 @@ class GatewayCoreBridge:
         task_id: str,
     ) -> ProductTaskSnapshot:
         return await (await self._client_for(principal_id)).get_product_task(task_id)
+
+    async def preflight_product_task(
+        self,
+        principal_id: str,
+        task_id: str,
+    ) -> TaskPreflightResult:
+        return await (
+            await self._client_for(principal_id)
+        ).preflight_product_task(task_id)
 
     async def list_product_tasks(
         self,

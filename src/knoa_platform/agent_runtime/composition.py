@@ -140,6 +140,7 @@ from knoa_platform.tasks import (
     TaskRepository,
     TaskService,
 )
+from knoa_platform.tasks.preflight import TaskLaunchPreflightEvaluator
 from knoa_platform.tools.artifact_prepare import ArtifactPrepareTool
 from knoa_platform.tools.base import ToolCapability, ToolEffect, ToolRisk
 from knoa_platform.tools.clipboard import ClipboardTool
@@ -1342,6 +1343,16 @@ def build_core_runtime(
         applier=apply_configuration,
         normalizer=lambda candidate: _freeze_skill_digests(candidate, packages),
     )
+    task_service.configure_preflight(TaskLaunchPreflightEvaluator(
+        current_configuration=configuration.current,
+        configuration_state=configuration.state,
+        provider_secret_status=provider_secrets.status,
+        runtime_health=task_service.health_check,
+        tool_count=lambda scope: len(
+            registry.list_for(capabilities_for_scope(scope))
+        ),
+        runtime_root=config.runtime_root,
+    ))
     schedule_dispatcher = ScheduleDispatcher(schedules, task_service)
     schedule_service = ScheduleService(schedules, schedule_dispatcher)
     trigger_dispatcher = TriggerDispatcher(triggers, task_service)
