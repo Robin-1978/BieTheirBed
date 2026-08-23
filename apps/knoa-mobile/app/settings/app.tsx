@@ -9,18 +9,22 @@ import { useI18n, type LanguageMode } from "@/i18n";
 import { useThemePreference, type ThemeMode } from "@/state/ThemeProvider";
 import { colors } from "@/theme";
 import { hasTaskNotificationPermission, requestTaskNotificationPermission } from "@/notifications/taskNotifications";
-import { appCacheSummary, clearAppCache, formatCacheBytes, type AppCacheSummary } from "@/storage/appCache";
+import { appCacheSummary, clearAppCache, emptyAppCacheSummary, formatCacheBytes, type AppCacheSummary, type CacheKind } from "@/storage/appCache";
+import { formatRelativeTime } from "@/ui/formatRelativeTime";
+
+const CACHE_KINDS: Exclude<CacheKind, "all">[] = ["conversation", "workspace", "task", "artifact"];
 
 export default function AppSettingsScreen() {
   const theme = useThemePreference();
   const i18n = useI18n();
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationWorking, setNotificationWorking] = useState(false);
-  const [cache, setCache] = useState<AppCacheSummary>(() => appCacheSummary());
+  const [cache, setCache] = useState<AppCacheSummary>(() => emptyAppCacheSummary());
   const [cacheWorking, setCacheWorking] = useState(false);
 
   useEffect(() => {
     void hasTaskNotificationPermission().then(setNotificationsEnabled);
+    void appCacheSummary().then(setCache);
   }, []);
 
   async function enableNotifications() {
@@ -29,25 +33,29 @@ export default function AppSettingsScreen() {
     setNotificationWorking(false);
   }
 
-  function confirmClearCache() {
-    Alert.alert(i18n.t("settings.cacheClearTitle"), i18n.t("settings.cacheClearBody"), [
-      { text: i18n.t("common.cancel"), style: "cancel" },
-      {
-        text: i18n.t("settings.cacheClear"),
-        style: "destructive",
-        onPress: () => {
-          setCacheWorking(true);
-          const result = clearAppCache("all");
-          setCache(appCacheSummary());
-          setCacheWorking(false);
-          if (result.failed) {
-            Alert.alert(i18n.t("settings.cacheClearFailed", { count: result.failed }));
-          } else {
-            Alert.alert(i18n.t("settings.cacheCleared", { count: result.removed }));
-          }
+  function confirmClearCache(kind: CacheKind) {
+    Alert.alert(
+      kind === "all" ? i18n.t("settings.cacheClearTitle") : i18n.t("settings.cacheClearKindTitle"),
+      kind === "all" ? i18n.t("settings.cacheClearBody") : i18n.t("settings.cacheClearKindBody"),
+      [
+        { text: i18n.t("common.cancel"), style: "cancel" },
+        {
+          text: i18n.t("settings.cacheClear"),
+          style: "destructive",
+          onPress: () => {
+            setCacheWorking(true);
+            const result = clearAppCache(kind);
+            void appCacheSummary().then((next) => setCache(next));
+            setCacheWorking(false);
+            if (result.failed) {
+              Alert.alert(i18n.t("settings.cacheClearFailed", { count: result.failed }));
+            } else {
+              Alert.alert(i18n.t("settings.cacheCleared", { count: result.removed }));
+            }
+          },
         },
-      },
-    ]);
+      ],
+    );
   }
 
   return (
@@ -85,9 +93,29 @@ export default function AppSettingsScreen() {
       </Section>
 
       <Section title={i18n.t("settings.cache")} detail={i18n.t("settings.cacheDetail")}>
-        <Text style={styles.detail}>{i18n.t("settings.cacheUsage", { size: formatCacheBytes(cache.bytes), files: cache.files })}</Text>
-        <AppPressable disabled={cacheWorking} onPress={confirmClearCache} style={styles.settingsButton}>
-          <Text style={styles.settingsButtonText}>{cacheWorking ? i18n.t("settings.cacheClearWorking") : i18n.t("settings.cacheClear")}</Text>
+        <Text style={styles.detail}>
+          {i18n.t("settings.cacheUsage", { size: formatCacheBytes(cache.bytes), files: cache.files })}
+          {cache.updatedAt ? `\n${i18n.t("settings.cacheUpdated", { time: formatRelativeTime(cache.updatedAt, i18n.locale) })}` : ""}
+        </Text>
+        {CACHE_KINDS.map((kind) => (
+          <View key={kind} style={styles.cacheKindRow}>
+            <View style={styles.flex}>
+              <Text style={styles.cacheKindLabel}>{i18n.t(`settings.cacheKind.${kind}` as never)}</Text>
+              <Text style={styles.detail}>
+                {i18n.t("settings.cacheKindUsage", { size: formatCacheBytes(cache.byKind[kind].bytes), files: cache.byKind[kind].files })}
+              </Text>
+            </View>
+            <AppPressable
+              disabled={cacheWorking || !cache.byKind[kind].files}
+              onPress={() => confirmClearCache(kind)}
+              style={styles.cacheKindClear}
+            >
+              <Text style={styles.settingsButtonText}>{i18n.t("settings.cacheClear")}</Text>
+            </AppPressable>
+          </View>
+        ))}
+        <AppPressable disabled={cacheWorking} onPress={() => confirmClearCache("all")} style={styles.settingsButton}>
+          <Text style={styles.settingsButtonText}>{cacheWorking ? i18n.t("settings.cacheClearWorking") : i18n.t("settings.cacheClearAll")}</Text>
         </AppPressable>
       </Section>
 
@@ -170,4 +198,7 @@ const styles = StyleSheet.create({
   notificationActions: { gap: 8 },
   settingsButton: { minHeight: 42, alignItems: "center", justifyContent: "center", borderRadius: 13, borderWidth: 1, borderColor: colors.line },
   settingsButtonText: { color: colors.accent, fontWeight: "800" },
+  cacheKindRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  cacheKindLabel: { color: colors.ink, fontWeight: "700" },
+  cacheKindClear: { minHeight: 36, paddingHorizontal: 13, alignItems: "center", justifyContent: "center", borderRadius: 11, borderWidth: 1, borderColor: colors.line },
 });

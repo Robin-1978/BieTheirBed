@@ -1,4 +1,5 @@
 import { Directory, File, Paths } from "expo-file-system";
+import { getInfoAsync } from "expo-file-system/legacy";
 
 export type CacheKind = "conversation" | "workspace" | "task" | "artifact" | "all";
 
@@ -16,33 +17,48 @@ const ENTRIES: CacheEntry[] = [
 export type AppCacheSummary = {
   files: number;
   bytes: number;
+  /** Newest modification time across cache files, in milliseconds. */
+  updatedAt: number | null;
   byKind: Record<Exclude<CacheKind, "all">, { files: number; bytes: number }>;
 };
 
-export function appCacheSummary(): AppCacheSummary {
-  const byKind = {
-    conversation: { files: 0, bytes: 0 },
-    workspace: { files: 0, bytes: 0 },
-    task: { files: 0, bytes: 0 },
-    artifact: { files: 0, bytes: 0 },
+export function emptyAppCacheSummary(): AppCacheSummary {
+  return {
+    files: 0,
+    bytes: 0,
+    updatedAt: null,
+    byKind: {
+      conversation: { files: 0, bytes: 0 },
+      workspace: { files: 0, bytes: 0 },
+      task: { files: 0, bytes: 0 },
+      artifact: { files: 0, bytes: 0 },
+    },
   };
-  let files = 0;
-  let bytes = 0;
+}
+
+export async function appCacheSummary(): Promise<AppCacheSummary> {
+  const summary = emptyAppCacheSummary();
   try {
     for (const item of new Directory(Paths.document).list()) {
       if (!(item instanceof File)) continue;
       const entry = ENTRIES.find((candidate) => item.name.startsWith(candidate.prefix));
       if (!entry) continue;
       const size = item.size || 0;
-      files += 1;
-      bytes += size;
-      byKind[entry.kind].files += 1;
-      byKind[entry.kind].bytes += size;
+      summary.files += 1;
+      summary.bytes += size;
+      summary.byKind[entry.kind].files += 1;
+      summary.byKind[entry.kind].bytes += size;
+      // The legacy info call is the only API exposing modification times;
+      // it reports seconds since epoch.
+      const info = await getInfoAsync(item.uri);
+      if (info.exists && info.modificationTime) {
+        summary.updatedAt = Math.max(summary.updatedAt ?? 0, info.modificationTime * 1000);
+      }
     }
   } catch {
     // Cache diagnostics must never block the rest of Settings.
   }
-  return { files, bytes, byKind };
+  return summary;
 }
 
 export function clearAppCache(kind: CacheKind): { removed: number; failed: number } {
