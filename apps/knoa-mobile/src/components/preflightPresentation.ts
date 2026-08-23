@@ -16,3 +16,8 @@ export function preflightCheckMessage(check: TaskPreflightCheck): string {
 export function blockedPreflightMessages(checks: TaskPreflightCheck[]): string[] {
   return checks.filter((check) => check.status === "blocked").map(preflightCheckMessage);
 }
+
+/** Warnings do not block execution, but the user should acknowledge them first. */
+export function warningPreflightMessages(checks: TaskPreflightCheck[]): string[] {
+  return checks.filter((check) => check.status === "warning").map(preflightCheckMessage);
+}
