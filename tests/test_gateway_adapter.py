@@ -4,6 +4,7 @@ import base64
 import copy
 import ipaddress
 import os
+import shutil
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -48,6 +49,8 @@ from knoa_platform.tasks import (
     TaskLaunchPolicy,
     TaskLaunchReason,
     TaskPauseResult,
+    TaskPreflightCheck,
+    TaskPreflightResult,
     TaskState,
 )
 
@@ -162,6 +165,11 @@ async def test_node_console_is_loopback_only_and_csrf_protected(tmp_path) -> Non
             "/v1/console/diagnostics",
             headers={"X-Knoa-Console": adapter._console_csrf_token},
         )
+        unconfirmed_repair = await http.post(
+            "/v1/console/diagnostics/repair",
+            headers={"X-Knoa-Console": adapter._console_csrf_token},
+            json={"repair_action_id": "restart_node", "confirmed": False},
+        )
         invalid = await http.post(
             "/v1/console/hub/enroll",
             headers={"X-Knoa-Console": adapter._console_csrf_token},
@@ -219,6 +227,16 @@ async def test_node_console_is_loopback_only_and_csrf_protected(tmp_path) -> Non
         "node", "mdns", "app_lan_discovery", "p2p", "relay", "config", "codex", "vision",
     }
     assert accepted.json()["runtime_version"]
+    assert accepted.json()["versions"]["runtime_platform_version"] == accepted.json()["runtime_version"]
+    assert accepted.json()["versions"]["config_revision"] == "revision-a"
+    assert isinstance(accepted.json()["versions"]["component_generations"], list)
+    relay_check = next(
+        item for item in diagnostics.json()["checks"] if item["id"] == "relay"
+    )
+    assert relay_check["repair_action_id"] == "retry_relay"
+    assert relay_check["repair"]["effect"] == "network_write"
+    assert unconfirmed_repair.status_code == 409
+    assert unconfirmed_repair.json()["error"] == "confirmation_required"
     assert invalid.status_code == 400
     assert invalid.json() == {"error": "invalid_enrollment_code"}
     assert pairing.status_code == 409
@@ -411,6 +429,77 @@ class _Core:
     async def get_product_task(self, principal_id, task_id):
         self.calls.append(("get_product_task", principal_id, task_id))
         return _product_task_snapshot()
+
+    async def preflight_product_task(self, principal_id, task_id):
+        self.calls.append(("preflight_product_task", principal_id, task_id))
+        task = await self.get_product_task(principal_id, task_id)
+        runtime = await self.status(principal_id, task.session_handle)
+        revision, _control, _generations = await self.get_config_current(principal_id)
+        checks = [
+            TaskPreflightCheck(
+                check_id="task_state",
+                status=(
+                    "ready"
+                    if task.state is TaskDefinitionState.ACTIVE
+                    else "blocked"
+                ),
+                detail=(
+                    "任务可以执行"
+                    if task.state is TaskDefinitionState.ACTIVE
+                    else "任务当前未启用，请先恢复任务"
+                ),
+                recommended_action=(
+                    "none"
+                    if task.state is TaskDefinitionState.ACTIVE
+                    else "resume"
+                ),
+            ),
+            TaskPreflightCheck(
+                check_id="goal",
+                status="ready",
+                detail="执行目标已设置",
+            ),
+            TaskPreflightCheck(
+                check_id="agent_config",
+                status="ready",
+                detail="任务使用的 Agent 已配置",
+            ),
+            TaskPreflightCheck(
+                check_id="config",
+                status="ready",
+                detail="Node 配置已应用",
+            ),
+            TaskPreflightCheck(
+                check_id="runtime",
+                status="ready" if runtime.connected else "blocked",
+                detail=(
+                    "Agent Runtime 可用"
+                    if runtime.connected
+                    else "Agent Runtime 当前不可用，请检查 Node 状态后重试"
+                ),
+                recommended_action="none" if runtime.connected else "retry",
+            ),
+        ]
+        agent = revision.document.agents.agents.get(task.agent_id)
+        if agent is not None and agent.kind == "codex":
+            executable = agent.command[0] if agent.command else ""
+            ready = bool(executable and shutil.which(executable))
+            checks.append(TaskPreflightCheck(
+                check_id="runtime_binary",
+                status="ready" if ready else "blocked",
+                detail=(
+                    "Codex Runtime 命令可用"
+                    if ready
+                    else "找不到 Codex Runtime 命令，请在 Node 上安装或修正 Agent 配置"
+                ),
+                recommended_action="none" if ready else "configure",
+            ))
+        result_checks = tuple(checks)
+        return TaskPreflightResult(
+            task_id=task.task_id,
+            ready=not any(check.status == "blocked" for check in result_checks),
+            checks=result_checks,
+        )
 
     async def list_product_tasks(self, principal_id, **kwargs):
         self.calls.append(("list_product_tasks", principal_id, kwargs))

@@ -135,7 +135,12 @@ class TaskExecutor:
                 )
                 if task is None:
                     break
-                execution = asyncio.create_task(self._execute(task))
+                # claim_next() has already made the Task externally visible as
+                # RUNNING. Register its cancellation latch synchronously before
+                # yielding to the event loop so stop/pause/cancel cannot miss it.
+                cancellation = asyncio.Event()
+                self._active[task.task_id] = cancellation
+                execution = asyncio.create_task(self._execute(task, cancellation))
                 self._executions.add(execution)
                 execution.add_done_callback(lambda _task: self._wake.set())
             await self._wake.wait()
@@ -241,9 +246,11 @@ class TaskExecutor:
         await self._events.publish(event)
         return updated
 
-    async def _execute(self, task: TaskRecord) -> None:
-        cancellation = asyncio.Event()
-        self._active[task.task_id] = cancellation
+    async def _execute(
+        self,
+        task: TaskRecord,
+        cancellation: asyncio.Event,
+    ) -> None:
         existing_trace = await asyncio.to_thread(
             self._repository.get_trace,
             task.principal_id,
@@ -436,4 +443,5 @@ class TaskExecutor:
                     await self._save_trace(task, entries, final_output)
                 except Exception:
                     logger.exception("Task execution trace could not be persisted")
-            self._active.pop(task.task_id, None)
+            if self._active.get(task.task_id) is cancellation:
+                self._active.pop(task.task_id, None)

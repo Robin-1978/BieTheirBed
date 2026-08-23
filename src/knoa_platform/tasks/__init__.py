@@ -7,6 +7,7 @@ from knoa_platform.tasks.errors import (
     TaskIdempotencyConflictError,
     TaskNotFoundError,
     TaskTransitionError,
+    TaskPreflightBlockedError,
 )
 from knoa_platform.tasks.event_hub import (
     TaskEventHub,
@@ -34,6 +35,8 @@ from knoa_platform.tasks.models import (
     TaskLaunchReason,
     TaskOrigin,
     TaskPauseResult,
+    TaskPreflightCheck,
+    TaskPreflightResult,
     TaskRecord,
     TaskState,
     TaskToolStepRecord,
@@ -72,6 +75,9 @@ __all__ = [
     "TaskIdempotencyConflictError",
     "TaskNotFoundError",
     "TaskPauseResult",
+    "TaskPreflightBlockedError",
+    "TaskPreflightCheck",
+    "TaskPreflightResult",
     "TaskOrigin",
     "TaskRecord",
     "TaskRepository",

@@ -29,6 +29,26 @@ from knoa_platform.gateway.protocol import NodeHubEnrollmentRequest, WriteSecret
 from knoa_platform.model_adapter.profiles import resolve_profile
 
 
+_REPAIR_ACTIONS: dict[str, dict[str, object]] = {
+    "retry_relay": {
+        "impact": "重新建立 Node 到 Hub 的出站 Relay 连接",
+        "effect": "network_write",
+        "risk": "low",
+        "requires_restart": False,
+        "requires_confirmation": False,
+        "recheck_id": "relay",
+    },
+    "restart_node": {
+        "impact": "重启 Node 服务；正在运行的工作会进入可恢复的暂停状态",
+        "effect": "service_restart",
+        "risk": "medium",
+        "requires_restart": True,
+        "requires_confirmation": True,
+        "recheck_id": "node",
+    },
+}
+
+
 def _port_listener_details(port: int) -> tuple[str, ...]:
     """Return best-effort listener details for a local TCP port.
 
@@ -120,10 +140,47 @@ class ConsoleRoutes:
             return error
         from knoa_platform.desktop_companion import desktop_companion_status
 
+        versions: dict[str, object] = {
+            "installed_platform_version": __version__,
+            "runtime_platform_version": __version__,
+            "source_commit": "",
+            "config_revision": "",
+            "component_generations": [],
+            "consistent": True,
+            "update_mode": "unknown",
+        }
+        if self._host_lifecycle is not None:
+            try:
+                lifecycle = await asyncio.to_thread(self._host_lifecycle.status)
+                versions["update_mode"] = str(lifecycle.get("update_mode") or "unknown")
+                source = lifecycle.get("source_update")
+                if isinstance(source, dict):
+                    versions["source_commit"] = str(source.get("current_commit") or "")
+                elif lifecycle.get("current_release"):
+                    versions["installed_platform_version"] = str(
+                        lifecycle["current_release"]
+                    )
+            except RuntimeError:
+                versions["consistent"] = False
+        try:
+            revision, control, generations = await self._core.get_config_current(
+                self._config.owner_principal_id
+            )
+            versions["config_revision"] = revision.revision_id
+            versions["component_generations"] = list(generations)
+            versions["consistent"] = bool(
+                versions["consistent"]
+                and control.applied_revision_id == revision.revision_id
+                and versions["installed_platform_version"] == __version__
+            )
+        except Exception:
+            versions["consistent"] = False
+
         return JSONResponse(
             {
                 "node": self._node_identity.descriptor(),
                 "runtime_version": __version__,
+                "versions": versions,
                 "hub": self._node_relay.status,
                 "p2p": self._p2p.status(),
                 "mdns": (
@@ -173,16 +230,30 @@ class ConsoleRoutes:
         if (error := self._console_authorize(request)) is not None:
             return error
 
-        checks: list[dict[str, str]] = []
+        checks: list[dict[str, object]] = []
 
         def add(check_id: str, label: str, status: str, detail: str, action: str = "") -> None:
-            checks.append({
+            check: dict[str, object] = {
                 "id": check_id,
                 "label": label,
                 "status": status,
                 "detail": detail,
                 "action": ("无需处理" if status == "ok" else action or "打开 Node Console 的诊断和日志，按建议处理后重试"),
-            })
+            }
+            repair_action_id = {
+                "relay": "retry_relay",
+                "hub": "retry_relay",
+                "core_port": "restart_node",
+                "gateway_port": "restart_node",
+                "mcp_port": "restart_node",
+                "mdns": "restart_node",
+                "p2p": "restart_node",
+                "codex": "restart_node",
+            }.get(check_id)
+            if status != "ok" and repair_action_id:
+                check["repair_action_id"] = repair_action_id
+                check["repair"] = _REPAIR_ACTIONS[repair_action_id]
+            checks.append(check)
 
         async def probe_http(
             check_id: str,
@@ -407,6 +478,52 @@ class ConsoleRoutes:
             {"status": status, "checks": checks},
             headers={"Cache-Control": "no-store"},
         )
+
+    async def _console_diagnostic_repair(self, request: Request) -> JSONResponse:
+        """Execute only a fixed, audited repair action and then recheck."""
+        if (error := self._console_authorize(request)) is not None:
+            return error
+        raw = await request.body()
+        if len(raw) > 4096:
+            return JSONResponse({"error": "payload_too_large"}, status_code=413)
+        try:
+            payload = json.loads(raw)
+            action_id = str(payload.get("repair_action_id") or "")
+            confirmed = payload.get("confirmed") is True
+        except (json.JSONDecodeError, AttributeError):
+            return JSONResponse({"error": "invalid_action"}, status_code=400)
+        spec = _REPAIR_ACTIONS.get(action_id)
+        if spec is None:
+            return JSONResponse({"error": "repair_action_not_allowed"}, status_code=400)
+        if spec["requires_confirmation"] and not confirmed:
+            return JSONResponse(
+                {"error": "confirmation_required", "repair": spec},
+                status_code=409,
+            )
+        try:
+            if action_id == "retry_relay":
+                await self._node_relay.restart()
+            elif action_id == "restart_node":
+                if self._host_lifecycle is None:
+                    return JSONResponse(
+                        {"error": "lifecycle_not_installed"},
+                        status_code=503,
+                    )
+                await asyncio.to_thread(
+                    self._host_lifecycle.action,
+                    {"action": "restart", "role": "node"},
+                )
+        except (RuntimeError, OSError):
+            return JSONResponse(
+                {"error": "repair_failed", "repair_action_id": action_id},
+                status_code=503,
+            )
+        diagnostics = await self._console_diagnostics(request)
+        return JSONResponse({
+            "repair_action_id": action_id,
+            "completed": True,
+            "recheck": json.loads(diagnostics.body),
+        })
 
     async def _console_hub_enroll(self, request: Request) -> JSONResponse:
         if (error := self._console_authorize(request)) is not None:

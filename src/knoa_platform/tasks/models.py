@@ -61,6 +61,19 @@ class TaskToolStepState(str, Enum):
     OUTCOME_UNKNOWN = "outcome_unknown"
 
 
+class TaskPreflightCheck(TaskModel):
+    check_id: Annotated[NonEmpty, StringConstraints(max_length=64)]
+    status: Literal["ready", "warning", "blocked"]
+    detail: Annotated[NonEmpty, StringConstraints(max_length=2000)]
+    recommended_action: Literal["none", "resume", "configure", "retry"] = "none"
+
+
+class TaskPreflightResult(TaskModel):
+    task_id: Identifier
+    ready: bool
+    checks: tuple[TaskPreflightCheck, ...]
+
+
 TERMINAL_TASK_STATES = frozenset(
     {
         TaskState.COMPLETED,

@@ -201,6 +201,11 @@ class SecureGatewayAdapter(
                     methods=["GET"],
                 ),
                 Route(
+                    "/v1/console/diagnostics/repair",
+                    self._console_diagnostic_repair,
+                    methods=["POST"],
+                ),
+                Route(
                     "/v1/console/hub/enroll",
                     self._console_hub_enroll,
                     methods=["POST"],

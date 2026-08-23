@@ -20,6 +20,7 @@ from knoa_platform.service.core_api import (
     ExecuteProductTaskRequest,
     GetProductTaskExecutionRequest,
     GetProductTaskRequest,
+    PreflightProductTaskRequest,
     GetTaskRequest,
     HealthMessage,
     HealthRequest,
@@ -33,6 +34,7 @@ from knoa_platform.service.core_api import (
     ProductTaskExecutionSnapshot,
     ProductTaskListMessage,
     ProductTaskMessage,
+    ProductTaskPreflightMessage,
     ProductTaskSnapshot,
     RerunProductTaskExecutionRequest,
     ResolveApprovalRequest,
@@ -150,6 +152,15 @@ class TaskCommandHandler:
             await send(ProductTaskMessage(
                 request_id=request.request_id,
                 task=ProductTaskSnapshot.from_record(task),
+            ))
+        elif isinstance(request, PreflightProductTaskRequest):
+            result = await self._tasks.preflight_definition(
+                principal,
+                request.task_id,
+            )
+            await send(ProductTaskPreflightMessage(
+                request_id=request.request_id,
+                result=result,
             ))
         elif isinstance(request, ListProductTasksRequest):
             tasks = await self._tasks.list_definitions(

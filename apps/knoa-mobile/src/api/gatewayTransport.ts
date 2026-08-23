@@ -18,7 +18,12 @@ import {
   type NodeDeviceBinding,
 } from "@/security/deviceIdentity";
 import { DirectFetchTransport, type GatewayTransport } from "./gatewayTransportBase";
-import { recordTransportProbe } from "./transportDiagnostics";
+import {
+  configureTransportDiagnosticScope,
+  recordTransportDiagnostic,
+  recordTransportProbe,
+  recordTransportSwitch,
+} from "./transportDiagnostics";
 import {
   canonicalString,
   deriveSessionKeys,
@@ -85,6 +90,8 @@ export class ConnectionResolverTransport implements GatewayTransport {
   private p2pAttemptStartedAt = 0;
   private lanAttemptStartedAt = 0;
   private relayAttemptStartedAt = 0;
+  private lastAttemptId = "";
+  private lastRequestId = "";
 
   constructor(
     private readonly binding: NodeDeviceBinding,
@@ -92,7 +99,9 @@ export class ConnectionResolverTransport implements GatewayTransport {
     private readonly onP2PDiagnostic?: (diagnostic: P2PDiagnostic) => void,
     private readonly onLanDiagnostic?: (diagnostic: LanDiagnostic) => void,
     private readonly onRelayDiagnostic?: (diagnostic: RelayDiagnostic) => void,
-  ) {}
+  ) {
+    void configureTransportDiagnosticScope(binding.nodeId);
+  }
 
   mode(): "direct" | "p2p" | "relay" {
     return this.active;
@@ -100,13 +109,34 @@ export class ConnectionResolverTransport implements GatewayTransport {
 
   async request(baseUrl: string, path: string, init: RequestInit): Promise<Response> {
     const startedAt = Date.now();
+    const attemptId = Crypto.randomUUID();
+    const requestId = new Headers(init.headers).get("X-Request-ID") ?? "";
+    this.lastAttemptId = attemptId;
+    this.lastRequestId = requestId;
     try {
       const response = await this.requestInner(baseUrl, path, init);
-      recordTransportProbe({ at: startedAt, mode: this.active, path, durationMs: Date.now() - startedAt, ok: response.ok });
+      const endedAt = Date.now();
+      recordTransportProbe({ at: startedAt, mode: this.active, path, durationMs: endedAt - startedAt, ok: response.ok, attemptId });
+      recordTransportDiagnostic({ attemptId, requestId, transport: this.active, stage: "business", startedAt, endedAt, outcome: response.ok ? "ok" : "failed", reasonCode: response.ok ? "http_ok" : `http_${response.status}` });
+      this.recordOpaqueDirectStages(attemptId, requestId, startedAt);
       return response;
     } catch (error) {
-      recordTransportProbe({ at: startedAt, mode: this.active, path, durationMs: Date.now() - startedAt, ok: false });
+      const endedAt = Date.now();
+      recordTransportProbe({ at: startedAt, mode: this.active, path, durationMs: endedAt - startedAt, ok: false, attemptId });
+      recordTransportDiagnostic({ attemptId, requestId, transport: this.active, stage: "business", startedAt, endedAt, outcome: "failed", reasonCode: errorCode(error) });
+      this.recordOpaqueDirectStages(attemptId, requestId, startedAt);
       throw error;
+    }
+  }
+
+  private recordOpaqueDirectStages(attemptId: string, requestId: string, at: number): void {
+    if (this.active !== "direct") return;
+    for (const stage of ["dns", "tcp", "tls"] as const) {
+      recordTransportDiagnostic({
+        attemptId, requestId, transport: "direct", stage,
+        startedAt: at, endedAt: at, outcome: "unavailable",
+        reasonCode: "react_native_fetch_not_observable",
+      });
     }
   }
 
@@ -264,13 +294,17 @@ export class ConnectionResolverTransport implements GatewayTransport {
     if (this.lanGatewayUrl || this.lanDiscovery || Date.now() < this.lanDiscoveryRetryAfter) return;
     this.setLanDiagnostic("scanning");
     if (!this.lanDiscovery) {
+      const attemptId = Crypto.randomUUID();
+      const startedAt = Date.now();
       this.lanDiscovery = discoverNodeOnLan(this.binding).then((url) => {
         if (!url) {
+          recordTransportDiagnostic({ attemptId, requestId: "", transport: "mdns", stage: "mdns", startedAt, endedAt: Date.now(), outcome: "failed", reasonCode: "not_found" });
           this.lanDiscoveryRetryAfter = Date.now() + LAN_DISCOVERY_RETRY_DELAY_MS;
           this.setLanDiagnostic("cooldown", "not_found", this.lanDiscoveryRetryAfter);
           return;
         }
         this.lanGatewayUrl = url;
+        recordTransportDiagnostic({ attemptId, requestId: "", transport: "mdns", stage: "mdns", startedAt, endedAt: Date.now(), outcome: "ok", reasonCode: "endpoint_verified" });
         this.lanDiscoveryRetryAfter = 0;
         this.setLanDiagnostic("found", "", 0, url);
         // Keep P2P and Relay warm. New requests prefer this verified LAN
@@ -279,6 +313,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
         this.relayPreferredUntil = 0;
         this.setActive("direct");
       }).catch((error) => {
+        recordTransportDiagnostic({ attemptId, requestId: "", transport: "mdns", stage: "mdns", startedAt, endedAt: Date.now(), outcome: "failed", reasonCode: errorCode(error) });
         this.lanDiscoveryRetryAfter = Date.now() + LAN_DISCOVERY_RETRY_DELAY_MS;
         this.setLanDiagnostic("cooldown", errorText(error), this.lanDiscoveryRetryAfter);
       }).finally(() => { this.lanDiscovery = null; });
@@ -348,6 +383,8 @@ export class ConnectionResolverTransport implements GatewayTransport {
       || !new Headers(init.headers).get("authorization")) return;
     this.setP2PDiagnostic("connecting");
     const pending = (async () => {
+      const attemptId = Crypto.randomUUID();
+      const startedAt = Date.now();
       const p2p = new WebRtcGatewayTransport();
       try {
         await p2p.connect(async (offer) => {
@@ -365,6 +402,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
           if (!payload.answer?.sdp || payload.answer.type !== "answer") throw new Error("Node P2P answer invalid");
           return { type: "answer" as const, sdp: payload.answer.sdp };
         });
+        recordTransportDiagnostic({ attemptId, requestId: this.lastRequestId, transport: "p2p", stage: "ice", startedAt, endedAt: Date.now(), outcome: "ok", reasonCode: "data_channel_ready" });
         this.setP2PDiagnostic("ready");
         const probe = await p2p.request(baseUrl, "/v1/session", {
           method: "GET",
@@ -372,6 +410,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
         });
         if (!probe.ok) throw new Error(`P2P 探测被 Node 拒绝（HTTP ${probe.status}）`);
       } catch (error) {
+        recordTransportDiagnostic({ attemptId, requestId: this.lastRequestId, transport: "p2p", stage: "ice", startedAt, endedAt: Date.now(), outcome: "failed", reasonCode: errorCode(error) });
         p2p.close();
         throw error;
       }
@@ -405,7 +444,17 @@ export class ConnectionResolverTransport implements GatewayTransport {
 
   private setActive(mode: "direct" | "p2p" | "relay"): void {
     if (this.active === mode) return;
+    const previous = this.active;
     this.active = mode;
+    recordTransportSwitch({
+      at: Date.now(),
+      from: previous,
+      to: mode,
+      reasonCode: "preferred_ready_transport_changed",
+      attemptId: this.lastAttemptId,
+      failedStage: "",
+      nextRequestId: this.lastRequestId,
+    });
     this.onModeChange?.(mode);
   }
 
@@ -1189,4 +1238,14 @@ function withPromiseTimeout<T>(promise: Promise<T>, milliseconds: number, messag
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "连接失败";
+}
+
+function errorCode(error: unknown): string {
+  const message = errorText(error).toLowerCase();
+  if (message.includes("timeout") || message.includes("超时")) return "timeout";
+  if (message.includes("cancel") || message.includes("取消")) return "cancelled";
+  if (message.includes("ticket") || message.includes("票据")) return "ticket_rejected";
+  if (message.includes("identity") || message.includes("身份")) return "identity_rejected";
+  if (message.includes("network") || message.includes("连接")) return "connection_failed";
+  return "transport_failed";
 }
