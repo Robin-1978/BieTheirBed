@@ -110,6 +110,9 @@ class DingTalkChannel(FeishuChannel):
         self._notification_cursors_path = (
             self._paths.data / "dingtalk_notification_cursors.json"
         )
+        self._notification_intent_cursors_path = (
+            self._paths.data / "dingtalk_notification_intent_cursors.json"
+        )
         self._outbox = self._paths.cache / "dingtalk-outbox"
         self._stream_client: Any = None
         self._stream_thread: threading.Thread | None = None
@@ -127,6 +130,7 @@ class DingTalkChannel(FeishuChannel):
         self._main_loop = asyncio.get_running_loop()
         self._load_sessions()
         self._load_notification_cursors()
+        self._load_notification_intent_cursors()
         self._running = True
         self._stream_stop.clear()
         for principal in self._sessions:

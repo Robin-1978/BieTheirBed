@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 
@@ -17,6 +20,10 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from knoa_platform.hub.relay import RelayBroker, RelayFrame
 from knoa_platform.hub.repository import HubRepository
 from knoa_platform.hub.service import HubService
+from knoa_platform.hub.push import (
+    FCMHTTPv1PushDelivery,
+    PushDeliveryPort,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -30,6 +37,13 @@ class InstallationRequest(_Request):
     installation_id: str = Field(min_length=1, max_length=128)
     public_key: str = Field(min_length=40, max_length=64)
     display_name: str = Field(min_length=1, max_length=80)
+
+
+class PushTokenRequest(_Request):
+    provider: Literal["fcm"] = "fcm"
+    token: str = Field(min_length=16, max_length=4096)
+    locale: str = Field(default="", max_length=32)
+    app_version: str = Field(default="", max_length=64)
 
 
 class EnrollmentGrantRequest(_Request):
@@ -140,6 +154,32 @@ class WorkProjectionReconcileRequest(_Request):
     signature: str = Field(min_length=80, max_length=128)
 
 
+class NotificationIntentProjectionRequest(_Request):
+    audience: Literal["knoa-notification-intent-v1"]
+    workspace_id: str = Field(min_length=1, max_length=128)
+    node_id: str = Field(min_length=1, max_length=128)
+    nonce: str = Field(min_length=16, max_length=256)
+    timestamp: float
+    intent_id: str = Field(min_length=1, max_length=128)
+    principal_id: str = Field(min_length=1, max_length=256)
+    category: Literal[
+        "completed", "failed", "cancelled", "approval_required",
+        "interaction_required", "node_offline", "update_required",
+    ]
+    work_kind: Literal["task", "conversation", "node", "release"]
+    work_id: str = Field(min_length=1, max_length=256)
+    execution_id: str = Field(default="", max_length=128)
+    semantic_code: str = Field(min_length=1, max_length=128)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    deep_link: dict[str, Any] = Field(default_factory=dict)
+    dedupe_key: str = Field(min_length=1, max_length=512)
+    priority: Literal["normal", "urgent"] = "normal"
+    expires_at: float = Field(gt=0)
+    source_sequence: int = Field(ge=1)
+    created_at: float = Field(ge=0)
+    signature: str = Field(min_length=80, max_length=128)
+
+
 class ResourceGrantRequest(_Request):
     grant_id: str = Field(min_length=1, max_length=128)
     caller_node_id: str = Field(min_length=1, max_length=128)
@@ -211,15 +251,37 @@ class HubApplication:
         service: HubService,
         *,
         deployment_mode: str = "self_hosted",
+        push_delivery: PushDeliveryPort | None = None,
     ) -> None:
         self.service = service
         self.deployment_mode = deployment_mode
         self.relay = RelayBroker()
+        self._push_delivery = (
+            push_delivery
+            if push_delivery is not None
+            else FCMHTTPv1PushDelivery.from_environment()
+        )
         self.app = Starlette(
             routes=[
                 Route("/health", self.health, methods=["GET"]),
                 Route("/v1/hub", self.hub, methods=["GET"]),
                 Route("/v1/installations", self.installations, methods=["POST"]),
+                Route(
+                    "/v1/mobile/installations/{installation_id:str}/push-token",
+                    self.push_token,
+                    methods=["PUT", "DELETE"],
+                ),
+                Route("/v1/notifications", self.notifications, methods=["GET"]),
+                Route(
+                    "/v1/notifications/{intent_id:str}/ack",
+                    self.notification_ack,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/notification-intents",
+                    self.notification_intents,
+                    methods=["POST"],
+                ),
                 Route("/v1/nodes", self.nodes, methods=["GET"]),
                 Route(
                     "/v1/node-enrollment-grants",
@@ -293,8 +355,74 @@ class HubApplication:
                 WebSocketRoute("/v1/relay/node", self.relay_node),
                 WebSocketRoute("/v1/relay/client", self.relay_client),
                 WebSocketRoute("/v1/relay/resource-client", self.relay_resource_client),
-            ]
+            ],
+            lifespan=self._lifespan,
         )
+
+    @asynccontextmanager
+    async def _lifespan(self, _app):
+        worker = asyncio.create_task(
+            self._push_delivery_loop(),
+            name="knoa-hub-push-delivery",
+        )
+        try:
+            yield
+        finally:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+
+    async def _push_delivery_loop(self) -> None:
+        while True:
+            try:
+                await self._deliver_pending_notifications()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Push delivery loop failed")
+            await asyncio.sleep(10)
+
+    async def _deliver_pending_notifications(self) -> None:
+        if self._push_delivery is None:
+            return
+        for delivery in self.service.repository.pending_notification_deliveries():
+            parameters = json.loads(delivery["parameters_json"])
+            deep_link = json.loads(delivery["deep_link_json"])
+            locale = str(delivery.get("locale") or "")
+            category = str(delivery["category"])
+            body = {
+                "completed": "任务已完成" if locale.startswith("zh") else "Task completed",
+                "failed": "任务执行失败，可查看并恢复" if locale.startswith("zh") else "Task failed; open to recover",
+                "cancelled": "任务已取消" if locale.startswith("zh") else "Task cancelled",
+                "approval_required": "任务需要你的确认" if locale.startswith("zh") else "Task needs your approval",
+                "interaction_required": "任务需要你的输入" if locale.startswith("zh") else "Task needs your input",
+            }.get(category, "小诺有一条新通知" if locale.startswith("zh") else "New Knoa notification")
+            data = {
+                "intent_id": str(delivery["intent_id"]),
+                "category": category,
+                "route": str(deep_link.get("route") or ""),
+                "task_id": str(deep_link.get("task_id") or ""),
+                "execution_id": str(deep_link.get("execution_id") or ""),
+            }
+            token = self.service.decrypt_push_token(str(delivery["token_ciphertext"]))
+            result = await self._push_delivery.deliver(token, {
+                "notification": {
+                    "title": str(parameters.get("title") or "Knoa")[:200],
+                    "body": body,
+                },
+                "data": data,
+                "android": {
+                    "priority": "high" if delivery["priority"] == "urgent" else "normal",
+                    "notification": {"channel_id": "knoa-task-events"},
+                },
+            })
+            self.service.repository.record_notification_delivery(
+                str(delivery["intent_id"]),
+                str(delivery["installation_id"]),
+                state="delivered" if result.delivered else "retry",
+                provider_message_id=result.provider_message_id,
+                error_code=result.error_code,
+                permanent_token_failure=result.permanent_token_failure,
+            )
 
     async def health(self, _request: Request) -> JSONResponse:
         return JSONResponse({"status": "ok", "hub_id": self.service.hub_id})
@@ -330,6 +458,95 @@ class HubApplication:
         except PermissionError:
             return JSONResponse({"error": "rejected"}, status_code=403)
         return JSONResponse(record, status_code=201)
+
+    async def push_token(self, request: Request) -> JSONResponse:
+        authenticated = self._member(request)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        installation_id = str(request.path_params["installation_id"])
+        if request.method == "DELETE":
+            disabled = self.service.repository.disable_push_installation(
+                authenticated,
+                installation_id,
+            )
+            return JSONResponse({"disabled": disabled})
+        parsed = await self._parse(request, PushTokenRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            record = self.service.register_push_token(
+                authenticated,
+                installation_id,
+                provider=parsed.provider,
+                token=parsed.token,
+                locale=parsed.locale,
+                app_version=parsed.app_version,
+            )
+        except LookupError:
+            return JSONResponse({"error": "installation_not_found"}, status_code=404)
+        except PermissionError:
+            return JSONResponse({"error": "forbidden"}, status_code=403)
+        except ValueError:
+            return JSONResponse({"error": "invalid_push_token"}, status_code=400)
+        await self._deliver_pending_notifications()
+        return JSONResponse({
+            "installation_id": record["installation_id"],
+            "provider": record["provider"],
+            "token_fingerprint": record["token_fingerprint"],
+            "state": record["state"],
+        })
+
+    async def notifications(self, request: Request) -> JSONResponse:
+        authenticated = self._member(request)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        try:
+            cursor = int(request.query_params.get("cursor", "0"))
+            limit = int(request.query_params.get("limit", "100"))
+            items = self.service.repository.list_notifications(
+                authenticated,
+                after_cursor=cursor,
+                limit=limit,
+            )
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "invalid_cursor"}, status_code=400)
+        next_cursor = items[-1]["inbox_cursor"] if items else cursor
+        return JSONResponse({
+            "notifications": list(items),
+            "next_cursor": str(next_cursor),
+        })
+
+    async def notification_ack(self, request: Request) -> JSONResponse:
+        authenticated = self._member(request)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        try:
+            item = self.service.repository.acknowledge_notification(
+                authenticated,
+                str(request.path_params["intent_id"]),
+            )
+        except LookupError:
+            return JSONResponse({"error": "not_found"}, status_code=404)
+        return JSONResponse({"intent_id": item["intent_id"], "acknowledged": True})
+
+    async def notification_intents(self, request: Request) -> JSONResponse:
+        parsed = await self._parse(request, NotificationIntentProjectionRequest)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        try:
+            item = self.service.publish_notification_intent(
+                parsed.model_dump(mode="json")
+            )
+        except PermissionError:
+            return JSONResponse({"error": "rejected"}, status_code=401)
+        except (KeyError, LookupError, ValueError):
+            return JSONResponse({"error": "invalid_intent"}, status_code=422)
+        await self._deliver_pending_notifications()
+        return JSONResponse({
+            "intent_id": item["intent_id"],
+            "source_sequence": item["source_sequence"],
+            "accepted": True,
+        }, status_code=202)
 
     async def nodes(self, request: Request) -> JSONResponse:
         authenticated = self._member(request)

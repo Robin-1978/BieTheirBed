@@ -91,6 +91,7 @@ from knoa_platform.service.core_api import (
     ListMemoryRequest,
     ListMCPResourcesRequest,
     ListProductTaskExecutionsRequest,
+    ListNotificationIntentsRequest,
     ListProductTasksRequest,
     ListTasksRequest,
     ListToolsRequest,
@@ -111,6 +112,9 @@ from knoa_platform.service.core_api import (
     ProductTaskListMessage,
     ProductTaskMessage,
     ProductTaskPreflightMessage,
+    NotificationIntentListMessage,
+    NotificationIntentMessage,
+    MarkNotificationIntentProjectedRequest,
     ProductTaskSnapshot,
     PublishConfigDraftRequest,
     RerunProductTaskExecutionRequest,
@@ -1095,6 +1099,32 @@ class CoreClient(CoreArtifactClientMixin, CoreAutomationClientMixin):
         if not isinstance(response, ProductTaskPreflightMessage):
             raise RuntimeError("CoreServer returned an invalid Task preflight")
         return response.result
+
+    async def list_notification_intents(
+        self,
+        *,
+        after_sequence: int = 0,
+        limit: int = 100,
+        pending_only: bool = False,
+    ):
+        response = await self._request(ListNotificationIntentsRequest(
+            request_id=self._request_id(),
+            after_sequence=after_sequence,
+            limit=limit,
+            pending_only=pending_only,
+        ))
+        if not isinstance(response, NotificationIntentListMessage):
+            raise RuntimeError("CoreServer returned invalid NotificationIntents")
+        return response.intents
+
+    async def mark_notification_intent_projected(self, intent_id: str):
+        response = await self._request(MarkNotificationIntentProjectedRequest(
+            request_id=self._request_id(),
+            intent_id=intent_id,
+        ))
+        if not isinstance(response, NotificationIntentMessage):
+            raise RuntimeError("CoreServer returned invalid NotificationIntent")
+        return response.intent
 
     async def list_product_tasks(
         self,

@@ -158,6 +158,17 @@ def test_claim_and_transitions_append_gap_free_events(tmp_path: Path) -> None:
     assert len(attempts) == 1
     assert attempts[0].state.value == "completed"
     assert terminal.event_type == "completed"
+    intents = repository.list_notification_intents(scope.principal_id)
+    assert len(intents) == 1
+    assert intents[0].category == "completed"
+    assert intents[0].execution_id == task.task_id
+    assert intents[0].state == "pending"
+    assert intents[0].deep_link["execution_id"] == task.task_id
+    projected = repository.mark_notification_intent_projected(
+        scope.principal_id,
+        intents[0].intent_id,
+    )
+    assert projected.state == "projected"
     events = repository.list_events(scope.principal_id, task.task_id)
     assert [event.event_seq for event in events] == [1, 2, 3, 4]
     assert [event.event_type for event in events] == [

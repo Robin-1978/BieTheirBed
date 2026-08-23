@@ -232,10 +232,40 @@ class TaskSchemaMixin:
                     PRIMARY KEY(provider_kind, provider_id),
                     UNIQUE(task_id, provider_kind)
                 );
+                CREATE TABLE IF NOT EXISTS notification_intents (
+                    intent_id TEXT PRIMARY KEY,
+                    principal_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    work_kind TEXT NOT NULL,
+                    work_id TEXT NOT NULL,
+                    execution_id TEXT NOT NULL,
+                    semantic_code TEXT NOT NULL,
+                    parameters_json TEXT NOT NULL,
+                    deep_link_json TEXT NOT NULL,
+                    dedupe_key TEXT NOT NULL,
+                    priority TEXT NOT NULL,
+                    expires_at REAL NOT NULL,
+                    state TEXT NOT NULL,
+                    source_sequence INTEGER NOT NULL UNIQUE,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    UNIQUE(principal_id, dedupe_key)
+                );
+                CREATE TABLE IF NOT EXISTS notification_intent_sequence (
+                    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                    next_sequence INTEGER NOT NULL
+                );
+                INSERT OR IGNORE INTO notification_intent_sequence VALUES (1, 1);
                 CREATE INDEX IF NOT EXISTS tasks_by_owner_state
                     ON tasks(principal_id, state, updated_at DESC, task_id DESC);
                 CREATE INDEX IF NOT EXISTS task_executions_by_task
                     ON task_executions(task_id, created_at DESC, execution_id DESC);
+                CREATE INDEX IF NOT EXISTS notification_intents_pending
+                    ON notification_intents(state, source_sequence);
+                CREATE INDEX IF NOT EXISTS notification_intents_owner
+                    ON notification_intents(principal_id, source_sequence);
                 """
             )
             require_exact_table(

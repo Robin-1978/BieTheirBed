@@ -118,6 +118,9 @@ class FeishuChannel(
         self._notification_cursors_path = (
             self._paths.data / "feishu_notification_cursors.json"
         )
+        self._notification_intent_cursors_path = (
+            self._paths.data / "feishu_notification_intent_cursors.json"
+        )
         self._outbox = self._paths.cache / "feishu-outbox"
         self._clients: dict[str, CoreClient] = {}
         self._client_locks: dict[str, asyncio.Lock] = {}
@@ -129,6 +132,7 @@ class FeishuChannel(
         self._sessions: dict[str, str] = {}
         self._session_users: dict[str, str] = {}
         self._notification_cursors: dict[str, int] = {}
+        self._notification_intent_cursors: dict[str, int] = {}
         self._principal_watchers: dict[str, asyncio.Task[None]] = {}
         self._principal_watcher_started_at: dict[str, float] = {}
         self._foreground_task_ids: set[str] = set()
@@ -152,6 +156,7 @@ class FeishuChannel(
         self._main_loop = asyncio.get_running_loop()
         self._load_sessions()
         self._load_notification_cursors()
+        self._load_notification_intent_cursors()
         # Import and initialize the SDK before the WebSocket thread starts.
         # Concurrent first imports from REST and WS paths can deadlock inside
         # Python's module locks in lark-oapi 1.6.x.
