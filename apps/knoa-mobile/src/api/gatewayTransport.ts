@@ -18,6 +18,7 @@ import {
   type NodeDeviceBinding,
 } from "@/security/deviceIdentity";
 import { DirectFetchTransport, type GatewayTransport } from "./gatewayTransportBase";
+import { recordTransportProbe } from "./transportDiagnostics";
 import {
   canonicalString,
   deriveSessionKeys,
@@ -98,6 +99,18 @@ export class ConnectionResolverTransport implements GatewayTransport {
   }
 
   async request(baseUrl: string, path: string, init: RequestInit): Promise<Response> {
+    const startedAt = Date.now();
+    try {
+      const response = await this.requestInner(baseUrl, path, init);
+      recordTransportProbe({ at: startedAt, mode: this.active, path, durationMs: Date.now() - startedAt, ok: response.ok });
+      return response;
+    } catch (error) {
+      recordTransportProbe({ at: startedAt, mode: this.active, path, durationMs: Date.now() - startedAt, ok: false });
+      throw error;
+    }
+  }
+
+  private async requestInner(baseUrl: string, path: string, init: RequestInit): Promise<Response> {
     // LAN discovery is opportunistic.  It must never sit in front of Relay
     // or P2P connection establishment.  Once a verified LAN endpoint appears,
     // the next request will prefer it.
