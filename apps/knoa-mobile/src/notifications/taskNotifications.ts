@@ -79,6 +79,22 @@ export async function presentTaskReminderNotification(input: {
   }
 }
 
+/** Test notification carries no task payload so tapping it never deep-links. */
+export async function sendTestTaskNotification(title: string, body: string): Promise<boolean> {
+  try {
+    await configureTaskNotifications();
+    const permissions = await Notifications.getPermissionsAsync();
+    if (!permissions.granted) return false;
+    await Notifications.scheduleNotificationAsync({
+      content: { title, body, sound: "default" },
+      trigger: Platform.OS === "android" ? { channelId: TASK_NOTIFICATION_CHANNEL } : null,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function subscribeTaskNotificationResponses(
   listener: (data: { taskId?: string; executionId?: string }) => void,
 ): { remove(): void } {

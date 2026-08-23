@@ -8,7 +8,7 @@ import { AppPressable } from "@/components/AppPressable";
 import { useI18n, type LanguageMode } from "@/i18n";
 import { useThemePreference, type ThemeMode } from "@/state/ThemeProvider";
 import { colors } from "@/theme";
-import { hasTaskNotificationPermission, requestTaskNotificationPermission } from "@/notifications/taskNotifications";
+import { hasTaskNotificationPermission, requestTaskNotificationPermission, sendTestTaskNotification } from "@/notifications/taskNotifications";
 import { appCacheSummary, clearAppCache, emptyAppCacheSummary, formatCacheBytes, type AppCacheSummary, type CacheKind } from "@/storage/appCache";
 import { formatRelativeTime } from "@/ui/formatRelativeTime";
 import { summarizeTransportProbes } from "@/api/transportDiagnostics";
@@ -21,6 +21,7 @@ export default function AppSettingsScreen() {
   const i18n = useI18n();
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationWorking, setNotificationWorking] = useState(false);
+  const [notificationTesting, setNotificationTesting] = useState(false);
   const [cache, setCache] = useState<AppCacheSummary>(() => emptyAppCacheSummary());
   const [cacheWorking, setCacheWorking] = useState(false);
 
@@ -33,6 +34,16 @@ export default function AppSettingsScreen() {
     setNotificationWorking(true);
     setNotificationsEnabled(await requestTaskNotificationPermission());
     setNotificationWorking(false);
+  }
+
+  async function sendTestNotification() {
+    setNotificationTesting(true);
+    const delivered = await sendTestTaskNotification(
+      i18n.t("settings.notificationsTestTitle"),
+      i18n.t("settings.notificationsTestBody"),
+    );
+    setNotificationTesting(false);
+    Alert.alert(i18n.t(delivered ? "settings.notificationsTestSent" : "settings.notificationsTestFailed"));
   }
 
   function confirmClearCache(kind: CacheKind) {
@@ -82,6 +93,13 @@ export default function AppSettingsScreen() {
         <Text style={notificationsEnabled ? styles.enabled : styles.disabled}>
           {notificationsEnabled ? i18n.t("settings.notificationsEnabled") : i18n.t("settings.notificationsDisabled")}
         </Text>
+        {notificationsEnabled ? (
+          <View style={styles.notificationActions}>
+            <AppPressable disabled={notificationTesting} onPress={() => void sendTestNotification()} style={styles.updateButton}>
+              <Text style={styles.updateText}>{i18n.t("settings.notificationsTest")}</Text>
+            </AppPressable>
+          </View>
+        ) : null}
         {!notificationsEnabled ? (
           <View style={styles.notificationActions}>
             <AppPressable disabled={notificationWorking} onPress={() => void enableNotifications()} style={styles.updateButton}>
