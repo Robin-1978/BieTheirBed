@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, ActivityIndicator, Animated, Easing, StyleSheet, Text, View } from "react-native";
+import { AccessibilityInfo, Animated, Easing, StyleSheet, Text, View } from "react-native";
 import { AppPressable } from "@/components/AppPressable";
 
 import {
@@ -70,7 +70,7 @@ export default function Index() {
         <AppPressable onPress={retry} style={styles.retry}>
           <Text style={styles.retryText}>{t("common.reconnect")}</Text>
         </AppPressable>
-      ) : <ActivityIndicator color={colors.accent} />}
+      ) : null}
     </View>
   );
 }

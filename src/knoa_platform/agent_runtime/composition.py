@@ -98,6 +98,7 @@ from knoa_platform.extensions.mcp import MCPServerProvider, build_mcp_providers
 from knoa_platform.extensions.mcp_onboarding import MCPOnboardingService
 from knoa_platform.extensions.mcp_package import (
     MCPPackageService,
+    build_mcp_package_providers,
     load_mcp_package,
 )
 from knoa_platform.extensions.mcp_resource_tasks import MCPResourceTaskBridge
@@ -827,11 +828,21 @@ def build_core_runtime(
     registry.register(ImageInspectTool(vision_broker))
     skills = SkillCatalog()
     skill_providers = _managed_skill_providers(managed, skills, packages)
-    mcp_providers = _managed_mcp_providers(
+    configured_mcp_providers = _managed_mcp_providers(
         managed,
         secret_root=paths.mcp_secrets,
         packages=packages,
     )
+    # Imported local packages are user-owned capabilities, not one-shot
+    # processes. Discover them on every Core start so a package such as Jira
+    # or GitLab remains enabled after Node restart without requiring the user
+    # to repeat an install command. Explicitly configured servers win by ID.
+    package_mcp_providers = build_mcp_package_providers(
+        paths.mcp,
+        excluded_ids=frozenset(managed.mcp_servers),
+        secret_root=paths.mcp_secrets,
+    )
+    mcp_providers = (*configured_mcp_providers, *package_mcp_providers)
     extensions = ExtensionManager(
         registry,
         (
