@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from knoa_platform.hub.app import (
+    NodeControlStateRequest,
+    NodeModelShareRequest,
     WebhookEventPullRequest,
     WebhookRouteProvisionRequest,
 )
@@ -65,6 +67,47 @@ def test_node_webhook_control_payload_includes_the_signed_audience(tmp_path: Pat
     )
     assert WebhookEventPullRequest.model_validate(pull_payload).audience == (
         "knoa-webhook-event-pull-v1"
+    )
+
+
+def test_node_control_models_accept_the_signed_audience(tmp_path: Path) -> None:
+    identity = NodeIdentityStore(tmp_path / "node-identity.json").load_or_create()
+    enrollment = NodeHubEnrollment(
+        hub_url="https://hub.example/workspaces/workspace-a",
+        hub_id="hub-a",
+        hub_signing_public_key=identity.signing_public_key,
+        enrolled_at=900.0,
+    )
+    node = NodeHubService(
+        NodeHubStore(tmp_path / "node-hub.json"),
+        identity,
+        clock=lambda: 1_000.0,
+    )
+
+    state_payload = node._signed_control_payload(
+        enrollment,
+        "knoa-node-control-state-v1",
+        {},
+    )
+    model_share_payload = node._signed_control_payload(
+        enrollment,
+        "knoa-node-model-share-v1",
+        {
+            "deployment_id": "deployment-a",
+            "resource_id": "resource-a",
+            "display_name": "Model A",
+            "model_identity": "model-a",
+            "provider_protocol": "openai_compatible",
+            "materialized_digest": "a" * 64,
+            "max_remote_concurrency": 1,
+        },
+    )
+
+    assert NodeControlStateRequest.model_validate(state_payload).audience == (
+        "knoa-node-control-state-v1"
+    )
+    assert NodeModelShareRequest.model_validate(model_share_payload).audience == (
+        "knoa-node-model-share-v1"
     )
 
 
