@@ -12,6 +12,7 @@ import { useGateway } from "@/state/GatewayProvider";
 import { loadWorkspaceCache, mergeWorkspaceCache, type WorkspaceCacheSnapshot } from "@/storage/workspaceCache";
 import { colors } from "@/theme";
 import { userFacingError } from "@/ui/userFacingError";
+import { presentHubNodeName } from "@/presentation/nodePresentation";
 
 export default function WorkspaceWorkScreen() {
   const params = useLocalSearchParams<{ workspaceId: string; workspaceName?: string }>();
@@ -120,7 +121,7 @@ export default function WorkspaceWorkScreen() {
               <AppIcon name={item.entity_kind === "conversation" ? "chat" : "tasks"} color={colors.accent} size={22} />
               <View style={styles.flex}>
                 <Text style={styles.itemTitle}>{item.title || item.entity_id}</Text>
-                <Text style={styles.meta}>{kindLabel} · {statusLabel} · {node?.display_name ?? item.node_id}</Text>
+                <Text style={styles.meta}>{kindLabel} · {statusLabel} · {presentHubNodeName(node, t("common.unnamedComputer"))}</Text>
               </View>
               {working === item.entity_id
                 ? <ActivityIndicator color={colors.accent} size="small" />

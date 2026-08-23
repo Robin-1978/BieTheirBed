@@ -1,5 +1,6 @@
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { useState } from "react";
 
 import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
@@ -7,6 +8,7 @@ import { transportLabelKey } from "@/api/transportPresentation";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
+import { presentNodeName } from "@/presentation/nodePresentation";
 
 export default function NodeMenuScreen() {
   const gateway = useGateway();
@@ -16,6 +18,8 @@ export default function NodeMenuScreen() {
   const workspaceName = stringParam(params.workspaceName) || t("nav.workspace");
   const nodeId = stringParam(params.nodeId) || gateway.nodeId;
   const node = gateway.nodes.find((item) => item.nodeId === nodeId);
+  const nodeName = presentNodeName(node, t("common.unnamedComputer"));
+  const [advanced, setAdvanced] = useState(false);
   function returnToWorkspace() {
     if (workspaceId) router.replace({ pathname: "/workspaces/[workspaceId]", params: { workspaceId, workspaceName } });
     else router.replace("/account");
@@ -23,11 +27,11 @@ export default function NodeMenuScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: node?.displayName || t("nav.node") }} />
+      <Stack.Screen options={{ title: nodeName }} />
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.hero}>
           <View style={styles.nodeIcon}><AppIcon name="node" color={colors.accent} size={31} /></View>
-          <Text style={styles.title}>{node?.displayName || nodeId || t("nav.node")}</Text>
+          <Text style={styles.title}>{nodeName}</Text>
           <Text style={styles.meta}>{workspaceName}</Text>
           <View style={styles.statusRow}>
             <Text style={gateway.status === "ready" ? styles.online : styles.offline}>
@@ -48,13 +52,18 @@ export default function NodeMenuScreen() {
 
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>{t("nodeMenu.connection")}</Text>
-          <Text style={styles.detail}>{t("common.nodeId")}</Text>
-          <Text style={styles.mono} selectable>{nodeId || "—"}</Text>
-          <Text style={styles.detail}>{t("common.gateway")}</Text>
-          <Text style={styles.mono} selectable>{gateway.gatewayUrl || "—"}</Text>
           <AppPressable onPress={() => void gateway.reconnect()} style={styles.secondary}>
             <Text style={styles.secondaryText}>{t("nodeMenu.reconnect")}</Text>
           </AppPressable>
+          <AppPressable onPress={() => setAdvanced((value) => !value)} style={styles.advancedToggle}>
+            <Text style={styles.secondaryText}>{advanced ? t("settings.collapseAdvanced") : t("settings.expandAdvanced")}</Text>
+          </AppPressable>
+          {advanced ? <View style={styles.advanced}>
+            <Text style={styles.detail}>{t("common.nodeId")}</Text>
+            <Text style={styles.mono} selectable>{nodeId || "—"}</Text>
+            <Text style={styles.detail}>{t("common.gateway")}</Text>
+            <Text style={styles.mono} selectable>{gateway.gatewayUrl || "—"}</Text>
+          </View> : null}
         </View>
 
         <AppPressable onPress={returnToWorkspace} style={styles.leave}>
@@ -99,6 +108,8 @@ const styles = StyleSheet.create({
   mono: { color: colors.ink, fontFamily: "monospace", fontSize: 12 },
   secondary: { alignItems: "center", padding: 13, marginVertical: 12, borderRadius: 13, borderWidth: 1, borderColor: colors.accent },
   secondaryText: { color: colors.accent, fontWeight: "800" },
+  advancedToggle: { alignItems: "center", paddingVertical: 10 },
+  advanced: { gap: 3, paddingTop: 5 },
   leave: { alignItems: "center", padding: 14 },
   leaveText: { color: colors.accent, fontWeight: "800" },
 });

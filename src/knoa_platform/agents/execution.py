@@ -64,6 +64,11 @@ class ExecuteAgentTurn:
     attachments: tuple[ArtifactAttachment, ...]
     tools_enabled: bool
     cancellation: asyncio.Event
+    # Durable task executions may run more than once (approval recovery,
+    # resume, or explicit rerun). Keep the product turn/run identity stable
+    # for grants and audit, but give the runtime an attempt-scoped idempotency
+    # key so a recovered attempt is not rejected as a duplicate turn.
+    operation_id: str = ""
     agent_id: str | None = None
     invocation_kind: str = "user"
     caller_id: str = ""
@@ -270,7 +275,7 @@ class AgentExecutionService:
                     turn = await runtime.start_turn(
                         RuntimeTurnRequest(
                             session=session,
-                            operation_id=request.turn_id,
+                            operation_id=request.operation_id or request.turn_id,
                             input=self._input_parts(request),
                             mcp=endpoint,
                             context=turn_context,

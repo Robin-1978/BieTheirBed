@@ -17,6 +17,7 @@ import { updateNodeDirectGatewayUrl } from "@/security/deviceIdentity";
 import { useGateway } from "@/state/GatewayProvider";
 import { loadWorkspaceCache, mergeWorkspaceCache, type WorkspaceCacheSnapshot } from "@/storage/workspaceCache";
 import { colors } from "@/theme";
+import { presentHubNodeName } from "@/presentation/nodePresentation";
 import { userFacingError } from "@/ui/userFacingError";
 
 export default function WorkspaceResourcesScreen() {
@@ -124,7 +125,7 @@ export default function WorkspaceResourcesScreen() {
   }
 
   function nodeName(nodeId: string) {
-    return nodes.find((item) => item.node_id === nodeId)?.display_name || t("resources.unknownNode");
+    return presentHubNodeName(nodes.find((item) => item.node_id === nodeId), t("common.unnamedComputer"));
   }
 
   function healthLabel(node: HubNode | undefined, observation: WorkspaceResourceState["observations"][number] | undefined) {
@@ -172,7 +173,7 @@ export default function WorkspaceResourcesScreen() {
               const grantNames = grants.map((grant) => nodeName(grant.caller_node_id)).join("、");
               return (
                 <View key={deployment.deployment_id} style={styles.endpoint}>
-                  <Text style={styles.rowTitle}>{node?.display_name || t("resources.unknownNode")}</Text>
+                  <Text style={styles.rowTitle}>{presentHubNodeName(node, t("common.unnamedComputer"))}</Text>
                   <Text style={observation?.health === "healthy" && node?.online ? styles.healthy : styles.warning}>
                     {healthLabel(node, observation)}
                   </Text>

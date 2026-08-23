@@ -24,6 +24,7 @@ import { AppIcon } from "@/components/AppIcon";
 import { TASK_TEMPLATES } from "@/taskTemplates";
 import { enqueueOfflineTask } from "@/storage/offlineTaskQueue";
 import { requestTaskNotificationPermission } from "@/notifications/taskNotifications";
+import { presentNodeName } from "@/presentation/nodePresentation";
 
 export default function NewTaskScreen() {
   const gateway = useGateway();
@@ -170,7 +171,7 @@ export default function NewTaskScreen() {
                   disabled={switchingNode}
                 >
                   <AppIcon name="node" color={selectedNodeId === node.nodeId ? colors.accent : colors.muted} size={17} />
-                  <Text style={[styles.nodeChoiceText, selectedNodeId === node.nodeId && styles.nodeChoiceTextSelected]} numberOfLines={1}>{node.displayName}</Text>
+                  <Text style={[styles.nodeChoiceText, selectedNodeId === node.nodeId && styles.nodeChoiceTextSelected]} numberOfLines={1}>{presentNodeName(node, t("common.unnamedComputer"))}</Text>
                   <Text style={styles.nodeChoiceStatus}>{node.nodeId === gateway.nodeId && gateway.status === "ready" ? t("taskNew.nodeReady") : t("taskNew.nodeAvailable")}</Text>
                 </AppPressable>
               ))}

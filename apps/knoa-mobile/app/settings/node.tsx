@@ -8,6 +8,7 @@ import { transportDetailKey, transportLabelKey } from "@/api/transportPresentati
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
+import { presentNodeName } from "@/presentation/nodePresentation";
 
 type RuntimeDiagnostic = {
   modelCalls: unknown;
@@ -64,13 +65,14 @@ export default function NodeSettingsScreen() {
   }
 
   const node = gateway.nodes.find((item) => item.nodeId === gateway.nodeId);
+  const nodeName = presentNodeName(node, t("common.unnamedComputer"));
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.card}>
         <View style={styles.header}>
           <View style={styles.icon}><AppIcon name="node" color={colors.accent} size={25} /></View>
           <View style={styles.flex}>
-            <Text style={styles.title}>{node?.displayName || t("nav.node")}</Text>
+            <Text style={styles.title}>{nodeName}</Text>
             <Text style={gateway.status === "ready" ? styles.online : styles.offline}>
               {gateway.status === "ready" ? t("nodeSettings.connected") : t("nodeHeader.connecting")}
             </Text>
@@ -90,7 +92,6 @@ export default function NodeSettingsScreen() {
         {gateway.relayElapsedMs > 0 ? <Metric label={t("settings.node.relayElapsed")} value={`${gateway.relayElapsedMs} ms`} /> : null}
         {gateway.relayLastError ? <Text selectable style={styles.p2pError}>{t("settings.node.relayLastError", { error: gateway.relayLastError })}</Text> : null}
         <Metric label={t("common.gateway")} value={gateway.gatewayUrl || "—"} />
-        <Metric label={t("common.nodeId")} value={gateway.nodeId || "—"} compact />
       </View>
 
       <View style={styles.card}>

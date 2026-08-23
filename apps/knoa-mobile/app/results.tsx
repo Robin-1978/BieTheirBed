@@ -11,6 +11,7 @@ import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 import { shareResultJson, shareResultPdf, shareResultText } from "@/api/shareResult";
 import { loadTaskCache, storeTaskCache } from "@/storage/taskCache";
+import { presentNodeName } from "@/presentation/nodePresentation";
 
 export default function ResultsScreen() {
   const gateway = useGateway();
@@ -95,7 +96,7 @@ export default function ResultsScreen() {
         <View style={styles.filters}>
           {(["all", "7d", "30d"] as const).map((value) => <AppPressable key={value} style={[styles.filter, timeFilter === value && styles.filterActive]} onPress={() => setTimeFilter(value)}><Text style={[styles.filterText, timeFilter === value && styles.filterTextActive]}>{t(`results.time.${value}` as never)}</Text></AppPressable>)}
         </View>
-        <Text style={styles.nodeScope}>{t("results.nodeScope", { node: gateway.nodes.find((item) => item.nodeId === gateway.nodeId)?.displayName || gateway.nodeId || t("nav.node") })}</Text>
+        <Text style={styles.nodeScope}>{t("results.nodeScope", { node: presentNodeName(gateway.nodes.find((item) => item.nodeId === gateway.nodeId), t("common.unnamedComputer")) })}</Text>
       </View>
       {loading ? <AsyncStateView state="loading" /> : null}
       {error ? <AsyncStateView state="error" message={error} retryLabel={t("results.retry")} onRetry={() => void refresh(true)} /> : null}

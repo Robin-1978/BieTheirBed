@@ -10,6 +10,7 @@ import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 import { loadCapabilityCache, storeCapabilityCache } from "@/storage/capabilityCache";
 import { TASK_TEMPLATES } from "@/taskTemplates";
+import { presentNodeName } from "@/presentation/nodePresentation";
 
 export default function NodeResourcesScreen() {
   const gateway = useGateway();
@@ -68,7 +69,7 @@ export default function NodeResourcesScreen() {
       <View style={styles.hero}>
         <View style={styles.heroIcon}><AppIcon name="node" color={colors.accent} size={28} /></View>
         <View style={styles.flex}>
-          <Text style={styles.title}>{node?.displayName || t("capabilities.currentNode")}</Text>
+          <Text style={styles.title}>{presentNodeName(node, t("common.unnamedComputer"))}</Text>
           <Text style={styles.meta}>{t("capabilities.heroDetail")}</Text>
         </View>
         <AppPressable accessibilityLabel={t("common.refresh")} onPress={() => void load()} style={styles.iconButton}>

@@ -39,6 +39,7 @@ import {
 import { useGateway } from "@/state/GatewayProvider";
 import { useI18n, type MessageKey } from "@/i18n";
 import { colors } from "@/theme";
+import { presentHubNodeName } from "@/presentation/nodePresentation";
 
 type Editor = ModelEditorValue & { secret: string; originalAlias: string };
 
@@ -91,7 +92,7 @@ export default function ModelsScreen() {
   useEffect(() => { void load(); }, [load]);
 
   const nodeName = useMemo(
-    () => nodes.find((node) => node.node_id === gateway.nodeId)?.display_name || t("capabilities.currentNode"),
+    () => presentHubNodeName(nodes.find((node) => node.node_id === gateway.nodeId), t("common.unnamedComputer")),
     [gateway.nodeId, nodes, t],
   );
 
@@ -279,7 +280,7 @@ export default function ModelsScreen() {
                 <View style={[styles.modelIcon, styles.modelIconShared]}><AppIcon name="share" color={colors.accent} size={23} /></View>
                 <View style={styles.flex}>
                   <Text style={styles.cardTitle}>{item.resource.display_name}</Text>
-                  <Text style={styles.meta}>{t("settings.models.fromNodeAuthorized", { node: item.providerNode?.display_name || t("settings.models.anotherNode") })}</Text>
+                  <Text style={styles.meta}>{t("settings.models.fromNodeAuthorized", { node: presentHubNodeName(item.providerNode, t("common.unnamedComputer")) })}</Text>
                 </View>
               </View>
               <Text style={item.health === "healthy" && item.providerNode?.online ? styles.healthy : styles.meta}>
@@ -386,7 +387,7 @@ function ShareEditor({ alias, shared, nodes, allowedNodeIds, setAllowedNodeIds, 
     <View style={styles.editor}>
       <Text style={styles.title}>{shared ? t("settings.models.manageShareTitle") : t("settings.models.shareTitle")}</Text>
       <Text style={styles.hint}>{t("settings.models.shareHint", { alias })}</Text>
-      {nodes.map((node) => <Toggle key={node.node_id} label={node.display_name} detail={node.online ? t("nodes.online") : t("settings.models.offlineGrantHint")} value={allowedNodeIds.includes(node.node_id)} onChange={(enabled) => setAllowedNodeIds(enabled ? [...allowedNodeIds, node.node_id] : allowedNodeIds.filter((id) => id !== node.node_id))} />)}
+      {nodes.map((node) => <Toggle key={node.node_id} label={presentHubNodeName(node, t("common.unnamedComputer"))} detail={node.online ? t("nodes.online") : t("settings.models.offlineGrantHint")} value={allowedNodeIds.includes(node.node_id)} onChange={(enabled) => setAllowedNodeIds(enabled ? [...allowedNodeIds, node.node_id] : allowedNodeIds.filter((id) => id !== node.node_id))} />)}
       {!nodes.length ? <Text style={styles.meta}>{t("settings.models.noOtherNodes")}</Text> : null}
       <Text style={styles.label}>{t("settings.models.maxRemoteConcurrency")}</Text>
       <View style={styles.choices}>{[1, 2, 4].map((value) => <AppPressable key={value} style={[styles.choice, concurrency === value && styles.choiceSelected]} onPress={() => setConcurrency(value)}><Text style={concurrency === value ? styles.choiceTextSelected : styles.choiceText}>{value}</Text></AppPressable>)}</View>

@@ -18,6 +18,7 @@ import { updateNodeDirectGatewayUrl } from "@/security/deviceIdentity";
 import { loadWorkspaceCache, mergeWorkspaceCache, type WorkspaceCacheSnapshot } from "@/storage/workspaceCache";
 import { colors } from "@/theme";
 import { userFacingError } from "@/ui/userFacingError";
+import { presentHubNodeName } from "@/presentation/nodePresentation";
 
 export default function WorkspaceNodesScreen() {
   const params = useLocalSearchParams<{ workspaceId: string; workspaceName?: string }>();
@@ -158,7 +159,7 @@ export default function WorkspaceNodesScreen() {
               <View style={styles.row}>
                 <AppIcon name="node" color={node.online ? colors.accent : colors.muted} size={24} />
                 <View style={styles.flex}>
-                  <Text style={styles.nodeName}>{node.display_name}</Text>
+                  <Text style={styles.nodeName}>{presentHubNodeName(node, t("common.unnamedComputer"))}</Text>
                   <Text style={styles.meta}>
                     {node.platform} {node.version} · {count} {t("nodes.deployments")} · {bound ? t("nodes.appPaired") : t("nodes.appUnpaired")}
                   </Text>

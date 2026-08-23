@@ -7,6 +7,7 @@ import { transportCompactLabelKey } from "@/api/transportPresentation";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 import { useI18n } from "@/i18n";
+import { presentNodeName } from "@/presentation/nodePresentation";
 
 export function NodeHeaderTitle() {
   const gateway = useGateway();
@@ -18,7 +19,7 @@ export function NodeHeaderTitle() {
     : t("nodeHeader.connecting");
   return (
     <View style={styles.titleWrap}>
-      <Text style={styles.node} numberOfLines={1}>{node?.displayName || t("nav.node")}</Text>
+      <Text style={styles.node} numberOfLines={1}>{presentNodeName(node, t("common.unnamedComputer"))}</Text>
       <Text style={styles.workspace} numberOfLines={1}>
         {stringParam(params.workspaceName) || t("nav.workspace")} · {statusLabel}
       </Text>
