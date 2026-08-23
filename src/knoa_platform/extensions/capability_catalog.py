@@ -22,6 +22,7 @@ from knoa_platform.sqlite_connection import connect_sqlite, initialize_wal
 SafeId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")]
 OFFICIAL_CATALOG_TRUST_ROOTS = {
     "knoa-release-2026": "65u2mVs9l5AUiChK5-itivKtKih9PepniYsxjAYIH3U",
+    "knoa-release-2026-08-24": "rOeteWh-Qr6fkOPrH5P5HficbzGBVlokn7yOOHGqVkU",
 }
 
 
