@@ -227,6 +227,19 @@ class ImportRemoteMCPRequest(GatewayRequest):
     allow_private_network: bool = False
 
 
+class PrepareCapabilityRequest(GatewayRequest):
+    source_path: str = Field(min_length=1, max_length=4096)
+
+
+class ConfirmCapabilityRequest(GatewayRequest):
+    operation_id: str = Field(pattern=r"^capop-[0-9a-f]{24}$")
+    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class SetCapabilityStateRequest(GatewayRequest):
+    enabled: bool
+
+
 class ApplyFleetCandidateRequest(GatewayRequest):
     rollout_id: str = Field(min_length=1, max_length=128)
     envelope: dict[str, Any]

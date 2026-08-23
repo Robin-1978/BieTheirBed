@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-PackageKind = Literal["skill", "mcp"]
+PackageKind = Literal["skill", "mcp", "capability"]
 _MAX_FILES = 4096
 _MAX_FILE_BYTES = 32 * 1024 * 1024
 _MAX_PACKAGE_BYTES = 128 * 1024 * 1024
@@ -151,7 +151,7 @@ class PackageStore:
 
     def list(self) -> tuple[PackageRecord, ...]:
         records: list[PackageRecord] = []
-        for kind in ("skill", "mcp"):
+        for kind in ("skill", "mcp", "capability"):
             parent = self.root / kind
             if not parent.is_dir():
                 continue
@@ -166,6 +166,8 @@ class PackageStore:
             kind: PackageKind = "skill"
         elif package_id.startswith("mcp-"):
             kind = "mcp"
+        elif package_id.startswith("capability-"):
+            kind = "capability"
         else:
             raise LookupError("Package ID is invalid")
         digest = package_id.removeprefix(f"{kind}-")

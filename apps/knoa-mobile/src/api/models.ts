@@ -21,7 +21,7 @@ export type NodeDescriptor = {
 
 export type ExtensionPackage = {
   package_id: string;
-  kind: "skill" | "mcp";
+  kind: "skill" | "mcp" | "capability";
   content_digest: string;
   source_type: string;
   source_locator: string;
@@ -29,6 +29,47 @@ export type ExtensionPackage = {
   imported_at: number;
   file_count: number;
   size_bytes: number;
+};
+
+export type CapabilityRequestedTool = {
+  name: string;
+  effect: "read_only" | "internal_write" | "local_write" | "external_side_effect" | "desktop_control";
+  capabilities: string[];
+  risk: "low" | "medium" | "high";
+};
+
+export type CapabilityInstallPlan = {
+  operation_id: string;
+  capability_id: string;
+  version: string;
+  display_name: string;
+  package_id: string;
+  package_digest: string;
+  component_packages: Record<string, string>;
+  requested_tools: CapabilityRequestedTool[];
+  withheld_tools: string[];
+  setup_inputs: Array<{ name: string; kind: "secret"; required: boolean; description: string }>;
+  checks: Array<Record<string, unknown>>;
+  draft_id: string;
+  draft_version: number;
+  previous_revision_id: string;
+  plan_digest: string;
+  state: "awaiting_confirmation" | "installing" | "installed" | "failed";
+};
+
+export type CapabilityInstallation = {
+  capability_id: string;
+  version: string;
+  display_name: string;
+  package_id: string;
+  component_packages: Record<string, string>;
+  component_ids: string[];
+  active_revision_id: string;
+  previous_revision_id: string;
+  enabled: boolean;
+  health: "healthy" | "failed" | "disabled";
+  installed_at: number;
+  updated_at: number;
 };
 
 export type ExtensionImportResult = {

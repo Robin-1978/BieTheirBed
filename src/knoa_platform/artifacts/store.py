@@ -518,6 +518,65 @@ class ArtifactStore:
         )
         return self.public_ref(session_id, entry.artifact_id)
 
+    def import_managed_file(
+        self,
+        session_id: str,
+        managed_root: str | Path,
+        descriptor: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Validate and copy a generic MCP managed-file descriptor."""
+        if descriptor.get("kind") != "managed_file":
+            raise ValueError("MCP file descriptor kind is invalid")
+        root = Path(managed_root).expanduser().resolve()
+        relative = Path(str(descriptor.get("relative_handle") or ""))
+        if relative.is_absolute() or not relative.parts or any(
+            part in {"", ".", ".."} for part in relative.parts
+        ):
+            raise ValueError("MCP managed-file handle is invalid")
+        source = (root / relative).resolve()
+        try:
+            source.relative_to(root)
+        except ValueError as exc:
+            raise ValueError("MCP managed-file escapes its provider root") from exc
+        if source.is_symlink() or not source.is_file():
+            raise ValueError("MCP managed-file is unavailable")
+        expected_size = int(descriptor.get("size_bytes") or -1)
+        if expected_size != source.stat().st_size or not 1 <= expected_size <= self._max_bytes:
+            raise ValueError("MCP managed-file size does not match")
+        expected_digest = str(descriptor.get("sha256") or "")
+        if len(expected_digest) != 64 or any(
+            character not in "0123456789abcdef" for character in expected_digest
+        ):
+            raise ValueError("MCP managed-file digest is invalid")
+        digest = hashlib.sha256()
+        with source.open("rb") as stream:
+            while chunk := stream.read(1024 * 1024):
+                digest.update(chunk)
+        if digest.hexdigest() != expected_digest:
+            raise ValueError("MCP managed-file digest does not match")
+        directory = self.root / self._session_key(session_id) / "generated"
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        directory.chmod(0o700)
+        safe_name = self._safe_name(str(descriptor.get("name") or source.name))
+        destination = directory / f"{uuid.uuid4().hex}{Path(safe_name).suffix or '.bin'}"
+        temporary = destination.with_name(f".{destination.name}.tmp")
+        shutil.copyfile(source, temporary, follow_symlinks=False)
+        temporary.chmod(0o600)
+        temporary.replace(destination)
+        entry = self._register(
+            session_id,
+            destination,
+            direction="outbound",
+            ownership="generated",
+            retention="temporary",
+            media_type=str(
+                descriptor.get("media_type") or "application/octet-stream"
+            )[:128],
+            name=safe_name,
+            content_sha256=expected_digest,
+        )
+        return self.public_ref(session_id, entry.artifact_id)
+
     def create_generated_text(
         self,
         session_id: str,

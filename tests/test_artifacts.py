@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import hashlib
 
 import pytest
 
@@ -184,3 +185,39 @@ def test_user_screenshot_schema_has_no_parameters(tmp_path):
     store = ArtifactStore(tmp_path / "attachments")
     tool = ScreenshotTool(store, tmp_path / "attachments" / "screenshots")
     assert tool.definition()["inputSchema"]["properties"] == {}
+
+
+def test_generic_mcp_managed_file_is_digest_checked_and_copied(tmp_path):
+    managed_root = tmp_path / "mcp-managed"
+    source = managed_root / "invocation" / "evidence.txt"
+    source.parent.mkdir(parents=True)
+    source.write_text("verified evidence", encoding="utf-8")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    store = ArtifactStore(tmp_path / "attachments")
+
+    ref = store.import_managed_file("session-a", managed_root, {
+        "kind": "managed_file",
+        "relative_handle": "invocation/evidence.txt",
+        "name": "evidence.txt",
+        "media_type": "text/plain",
+        "size_bytes": source.stat().st_size,
+        "sha256": digest,
+    })
+
+    assert ref["direction"] == "outbound"
+    assert ref["visibility"] == "user"
+    source.write_text("changed after import", encoding="utf-8")
+    assert ref["size"] == len("verified evidence")
+    assert store.read_data_url(
+        "session-a", ref["artifact_id"], max_bytes=100,
+    ).endswith("dmVyaWZpZWQgZXZpZGVuY2U=")
+
+    with pytest.raises(ValueError, match="digest"):
+        store.import_managed_file("session-a", managed_root, {
+            "kind": "managed_file",
+            "relative_handle": "invocation/evidence.txt",
+            "name": "evidence.txt",
+            "media_type": "text/plain",
+            "size_bytes": source.stat().st_size,
+            "sha256": "0" * 64,
+        })

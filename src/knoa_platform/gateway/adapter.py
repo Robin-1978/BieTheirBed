@@ -15,6 +15,10 @@ from starlette.routing import Route
 
 from knoa_platform.config import AppConfig
 from knoa_platform.extensions.import_service import ExtensionImportService
+from knoa_platform.extensions.capability_bundle import (
+    CapabilityInstallationRepository,
+    CapabilityInstaller,
+)
 from knoa_platform.extensions.package_store import PackageStore
 from knoa_platform.fleet import FleetCandidateService
 from knoa_platform.gateway.audit import GatewayAuditRepository
@@ -165,9 +169,16 @@ class SecureGatewayAdapter(
             identity=self._node_identity,
             hub_store=self._node_hub_store,
         )
+        package_store = PackageStore(paths.packages)
         self._extension_imports = ExtensionImportService(
-            PackageStore(paths.packages),
+            package_store,
             self._core,
+        )
+        self._capability_installer = CapabilityInstaller(
+            package_store,
+            self._core,
+            CapabilityInstallationRepository(database),
+            inspector=self._extension_imports,
         )
         self._fleet_candidates = FleetCandidateService(
             self._node_identity,
@@ -278,6 +289,19 @@ class SecureGatewayAdapter(
                 Route("/v1/extensions/import/skill", self._extension_import_skill, methods=["POST"]),
                 Route("/v1/extensions/import/mcp/local", self._extension_import_local_mcp, methods=["POST"]),
                 Route("/v1/extensions/import/mcp/remote", self._extension_import_remote_mcp, methods=["POST"]),
+                Route("/v1/capabilities/installations", self._capability_installations, methods=["GET"]),
+                Route("/v1/capabilities/prepare", self._capability_prepare, methods=["POST"]),
+                Route("/v1/capabilities/confirm", self._capability_confirm, methods=["POST"]),
+                Route(
+                    "/v1/capabilities/{capability_id:str}/state",
+                    self._capability_state,
+                    methods=["PATCH"],
+                ),
+                Route(
+                    "/v1/capabilities/{capability_id:str}/rollback",
+                    self._capability_rollback,
+                    methods=["POST"],
+                ),
                 Route("/v1/fleet/candidates/apply", self._fleet_apply, methods=["POST"]),
                 Route("/v1/secrets/{reference:str}", self._secret, methods=["GET", "PUT"]),
                 Route("/v1/config/current", self._config_current, methods=["GET"]),
