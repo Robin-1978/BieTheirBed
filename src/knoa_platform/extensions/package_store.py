@@ -18,6 +18,8 @@ _MAX_FILES = 4096
 _MAX_FILE_BYTES = 32 * 1024 * 1024
 _MAX_PACKAGE_BYTES = 128 * 1024 * 1024
 _METADATA = ".knoa-package.json"
+_IGNORED_DIRECTORIES = frozenset({"__pycache__"})
+_IGNORED_SUFFIXES = frozenset({".pyc", ".pyo"})
 
 
 @dataclass(frozen=True)
@@ -189,8 +191,13 @@ class PackageStore:
                 candidate = current_path / name
                 if candidate.is_symlink():
                     raise ValueError("Packages must not contain symlinks")
+            directories[:] = [
+                name for name in directories if name not in _IGNORED_DIRECTORIES
+            ]
             for name in names:
                 if exclude_metadata and current_path == root and name == _METADATA:
+                    continue
+                if Path(name).suffix.casefold() in _IGNORED_SUFFIXES:
                     continue
                 candidate = current_path / name
                 metadata = candidate.lstat()
