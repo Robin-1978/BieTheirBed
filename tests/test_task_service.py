@@ -39,7 +39,9 @@ class _Runtime:
         self.hold = hold
         self.request_confirmation = request_confirmation
         self.unknown_outcome = unknown_outcome
+        self.requests = []
     async def execute_turn(self, request):
+        self.requests.append(request)
         base = {
             "runtime_session_ref": "agent-session-a",
             "runtime_turn_ref": request.turn_id,
@@ -450,9 +452,10 @@ async def test_restart_pauses_interrupted_task_until_explicit_resume(
     tmp_path: Path,
 ) -> None:
     release = asyncio.Event()
+    first_runtime = _Runtime(hold=release)
     first, first_repository, scope = _components(
         tmp_path,
-        _Runtime(hold=release),
+        first_runtime,
     )
     await first.start()
     task = await first.create(
@@ -468,9 +471,10 @@ async def test_restart_pauses_interrupted_task_until_explicit_resume(
         await asyncio.sleep(0.01)
     await first.stop()
 
+    second_runtime = _Runtime()
     second, second_repository, _ = _components(
         tmp_path,
-        _Runtime(),
+        second_runtime,
         task_id="task-b",
     )
     await second.start()
@@ -496,6 +500,9 @@ async def test_restart_pauses_interrupted_task_until_explicit_resume(
             TaskState.COMPLETED
         )
         assert second_repository.get(scope.principal_id, task.task_id).attempt_count == 2
+        assert first_runtime.requests[0].operation_id == f"{task.task_id}:attempt:1"
+        assert second_runtime.requests[0].operation_id == f"{task.task_id}:attempt:2"
+        assert second_runtime.requests[0].turn_id == task.task_id
         assert any(
             event.event_type == "state_changed"
             and event.payload.state is TaskState.PAUSED

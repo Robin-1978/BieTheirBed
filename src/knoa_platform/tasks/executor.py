@@ -263,6 +263,7 @@ class TaskExecutor:
                 ExecuteAgentTurn(
                     scope=scope,
                     turn_id=task.task_id,
+                    operation_id=f"{task.task_id}:attempt:{task.attempt_count}",
                     client_request_id=task.client_request_id,
                     input=task.goal,
                     attachments=task.attachments,
