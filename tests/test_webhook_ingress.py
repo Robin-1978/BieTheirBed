@@ -7,8 +7,14 @@ from pathlib import Path
 
 import pytest
 
+from knoa_platform.hub.app import (
+    WebhookEventPullRequest,
+    WebhookRouteProvisionRequest,
+)
 from knoa_platform.hub.repository import HubRepository
 from knoa_platform.hub.service import HubService
+from knoa_platform.node_hub import NodeHubEnrollment, NodeHubService, NodeHubStore
+from knoa_platform.node_identity import NodeIdentityStore
 
 
 class _Clock:
@@ -22,6 +28,44 @@ class _Clock:
 def _signature(secret: str, event_id: str, timestamp: str, body: bytes) -> str:
     transcript = event_id.encode() + b"\n" + timestamp.encode() + b"\n" + body
     return hmac.new(secret.encode(), transcript, hashlib.sha256).hexdigest()
+
+
+def test_node_webhook_control_payload_includes_the_signed_audience(tmp_path: Path) -> None:
+    identity = NodeIdentityStore(tmp_path / "node-identity.json").load_or_create()
+    enrollment = NodeHubEnrollment(
+        hub_url="https://hub.example/workspaces/workspace-a",
+        hub_id="hub-a",
+        hub_signing_public_key=identity.signing_public_key,
+        enrolled_at=900.0,
+    )
+    node = NodeHubService(
+        NodeHubStore(tmp_path / "node-hub.json"),
+        identity,
+        clock=lambda: 1_000.0,
+    )
+
+    route_payload = node._signed_control_payload(
+        enrollment,
+        "knoa-webhook-route-provision-v1",
+        {
+            "principal_id": "principal-a",
+            "task_id": "task-a",
+            "trigger_id": "trigger-a",
+            "display_name": "Build event",
+        },
+    )
+    pull_payload = node._signed_control_payload(
+        enrollment,
+        "knoa-webhook-event-pull-v1",
+        {"limit": 50},
+    )
+
+    assert WebhookRouteProvisionRequest.model_validate(route_payload).audience == (
+        "knoa-webhook-route-provision-v1"
+    )
+    assert WebhookEventPullRequest.model_validate(pull_payload).audience == (
+        "knoa-webhook-event-pull-v1"
+    )
 
 
 def test_webhook_ingress_verifies_hmac_deduplicates_and_waits_for_node_ack(

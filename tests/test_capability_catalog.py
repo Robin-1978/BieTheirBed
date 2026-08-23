@@ -19,7 +19,7 @@ from knoa_platform.extensions.package_store import PackageStore
 class _Installer:
     async def prepare(self, _principal_id, _source):
         return SimpleNamespace(
-            package_digest="871ca99e5ed6a18acd40e5d1d289f3a7ef01628ddd972c8ebb831f80ad208285",
+            package_digest="a7552853cf35d1f66222f09fa56b9a13ff2d0badf3fccacf9f77db0f6d2b68f7",
             version="1.0.0",
             capability_id="browser",
         )

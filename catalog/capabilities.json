@@ -1,7 +1,7 @@
 {
   "schema": "knoa-capability-catalog-v1",
   "catalog_id": "knoa-official",
-  "generated_at": 1787505000.0,
+  "generated_at": 1787508808.0,
   "entries": [
     {
       "id": "knoa.browser",
@@ -11,7 +11,7 @@
       "platform": ">=0.2.0",
       "operating_systems": ["linux", "windows", "darwin"],
       "architectures": [],
-      "package_digest": "871ca99e5ed6a18acd40e5d1d289f3a7ef01628ddd972c8ebb831f80ad208285",
+      "package_digest": "a7552853cf35d1f66222f09fa56b9a13ff2d0badf3fccacf9f77db0f6d2b68f7",
       "source": "relative://examples/browser_mcp_server",
       "permission_summary": [
         "MCP process",
@@ -25,6 +25,6 @@
   ],
   "signature": {
     "key_id": "knoa-release-2026-08-24",
-    "value": "9z3nT-rIJXi-Z7bZgIys7EB0-2e4VxI6LhaJCb5byjriiDuGngm0bUxrZ2lGBiRSgWOgIW4uToWeUGv4bHXrCA"
+    "value": "Cduw8K31nwuuNaLC5QE_PSJtQkGPt2Wta0ZAt5hKs5DUE0b2uxbFw7qm211EH_CBSPUgF_zQAmg5kXKfOVoXBQ"
   }
 }

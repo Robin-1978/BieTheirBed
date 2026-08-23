@@ -244,3 +244,53 @@ def test_push_token_registration_is_account_scoped(tmp_path: Path) -> None:
         pass
     else:
         raise AssertionError("cross-account push token registration must fail")
+
+
+def test_notification_delivery_survives_restart_expires_and_logout_disables_token(
+    tmp_path: Path,
+) -> None:
+    repository, hub, node = _components(tmp_path)
+    hub.register_push_token(
+        "subject_owner",
+        "installation-a",
+        provider="fcm",
+        token="fcm-token-value-that-is-secret",
+        locale="zh-CN",
+        app_version="1",
+    )
+    hub.publish_notification_intent(_intent(node))
+
+    restarted_repository = HubRepository(
+        tmp_path / "hub.db",
+        hub_id="workspace-1",
+        clock=lambda: 1000.0,
+    )
+    restarted_hub = HubService(
+        restarted_repository,
+        tmp_path / "hub.key",
+        owner_token="o" * 43,
+        clock=lambda: 1000.0,
+    )
+    pending = restarted_repository.pending_notification_deliveries()
+    assert [item["intent_id"] for item in pending] == ["ni_a"]
+    assert restarted_hub.decrypt_push_token(pending[0]["token_ciphertext"]) == (
+        "fcm-token-value-that-is-secret"
+    )
+
+    expired_repository = HubRepository(
+        tmp_path / "hub.db",
+        hub_id="workspace-1",
+        clock=lambda: 2001.0,
+    )
+    assert expired_repository.list_notifications("subject_owner") == ()
+    assert expired_repository.pending_notification_deliveries() == ()
+
+    assert restarted_repository.disable_push_installation(
+        "subject_owner", "installation-a"
+    )
+    with restarted_repository._connect() as db:
+        state = db.execute(
+            "SELECT state FROM push_installations WHERE installation_id='installation-a'"
+        ).fetchone()["state"]
+    assert state == "disabled"
+    assert restarted_repository.pending_notification_deliveries() == ()

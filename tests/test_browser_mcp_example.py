@@ -89,6 +89,29 @@ async def test_browser_session_navigation_snapshot_download_and_cleanup(
     assert not tuple((tmp_path / "profiles").glob("session-*"))
 
 
+@pytest.mark.asyncio
+async def test_browser_mcp_shutdown_reaps_chromium_profiles_and_downloads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KNOA_BROWSER_STATE_ROOT", str(tmp_path / "profiles"))
+    monkeypatch.setenv("KNOA_BROWSER_DOWNLOAD_ROOT", str(tmp_path / "downloads"))
+    browser = _module("browser_reference_client_shutdown", "browser_client.py")
+    manager = browser.BrowserManager()
+    opened = await manager.open()
+    session = manager.get(opened["browser_session_id"])
+    process = session.process
+    profile = session.profile
+    downloads = session.download_directory
+
+    await manager.shutdown()
+
+    assert process.returncode is not None
+    assert not profile.exists()
+    assert not downloads.exists()
+    assert manager.sessions == {}
+
+
 def test_browser_rejects_local_metadata_and_dangerous_schemes() -> None:
     browser = _module("browser_reference_client_safety", "browser_client.py")
     for url in (
