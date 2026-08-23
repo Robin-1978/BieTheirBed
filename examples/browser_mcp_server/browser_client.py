@@ -17,7 +17,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 import websockets
@@ -367,29 +367,64 @@ class BrowserManager:
         cookies_result = await session.command("Network.getAllCookies")
         cookies = {str(item["name"]): str(item["value"]) for item in cookies_result.get("cookies", [])}
         async with httpx.AsyncClient(timeout=30, follow_redirects=False, cookies=cookies) as client:
-            response = None
             for _ in range(6):
-                response = await client.get(current)
-                if response.is_redirect:
-                    current = _safe_url(str(response.next_request.url), session.allow_private_origins)
-                    continue
-                break
-            if response is None or response.is_redirect:
-                raise RuntimeError("Download has too many redirects")
-            response.raise_for_status()
-            if len(response.content) > MAX_DOWNLOAD_BYTES:
-                raise ValueError("Download exceeds the managed-file limit")
-        suggested = filename.strip() or Path(urlsplit(current).path).name or "download.bin"
-        safe_name = "".join(char for char in suggested if char.isalnum() or char in "._-")[:160]
-        if not safe_name or safe_name in {".", ".."}:
-            safe_name = "download.bin"
-        path = session.download_directory / safe_name
-        if path.exists():
-            path = session.download_directory / f"{uuid.uuid4().hex[:8]}-{safe_name}"
-        path.write_bytes(response.content)
-        path.chmod(0o600)
-        media_type = response.headers.get("content-type", "").split(";", 1)[0] or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        return {"browser_session_id": session_id, "managed_file": _managed_file(path, self.download_root, media_type)}
+                async with client.stream("GET", current) as response:
+                    if response.is_redirect:
+                        location = response.headers.get("location", "").strip()
+                        if not location:
+                            raise RuntimeError("Download redirect has no destination")
+                        current = _safe_url(
+                            urljoin(current, location), session.allow_private_origins
+                        )
+                        continue
+                    response.raise_for_status()
+                    length_text = response.headers.get("content-length", "").strip()
+                    if length_text:
+                        try:
+                            declared_length = int(length_text)
+                        except ValueError as exc:
+                            raise ValueError("Download Content-Length is invalid") from exc
+                        if declared_length < 0 or declared_length > MAX_DOWNLOAD_BYTES:
+                            raise ValueError("Download exceeds the managed-file limit")
+                    suggested = (
+                        filename.strip()
+                        or Path(urlsplit(current).path).name
+                        or "download.bin"
+                    )
+                    safe_name = "".join(
+                        char for char in suggested if char.isalnum() or char in "._-"
+                    )[:160]
+                    if not safe_name or safe_name in {".", ".."}:
+                        safe_name = "download.bin"
+                    path = session.download_directory / safe_name
+                    if path.exists():
+                        path = session.download_directory / f"{uuid.uuid4().hex[:8]}-{safe_name}"
+                    size = 0
+                    try:
+                        with path.open("xb") as stream:
+                            async for chunk in response.aiter_bytes():
+                                size += len(chunk)
+                                if size > MAX_DOWNLOAD_BYTES:
+                                    raise ValueError(
+                                        "Download exceeds the managed-file limit"
+                                    )
+                                stream.write(chunk)
+                    except BaseException:
+                        path.unlink(missing_ok=True)
+                        raise
+                    path.chmod(0o600)
+                    media_type = (
+                        response.headers.get("content-type", "").split(";", 1)[0]
+                        or mimetypes.guess_type(path.name)[0]
+                        or "application/octet-stream"
+                    )
+                    return {
+                        "browser_session_id": session_id,
+                        "managed_file": _managed_file(
+                            path, self.download_root, media_type
+                        ),
+                    }
+        raise RuntimeError("Download has too many redirects")
 
     async def close(self, session_id: str) -> dict[str, Any]:
         session = self.sessions.pop(session_id, None)

@@ -3,7 +3,7 @@ import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-import type { EventSource, EventSourceEvent } from "@/api/models";
+import type { EventSource, EventSourceEvent, MCPResourceCatalogItem } from "@/api/models";
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { useI18n } from "@/i18n";
@@ -14,6 +14,7 @@ export default function EventSourcesScreen() {
   const gateway = useGateway();
   const { t } = useI18n();
   const [sources, setSources] = useState<EventSource[]>([]);
+  const [mcpResources, setMcpResources] = useState<MCPResourceCatalogItem[]>([]);
   const [events, setEvents] = useState<Record<string, EventSourceEvent[]>>({});
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState("");
@@ -21,14 +22,18 @@ export default function EventSourcesScreen() {
   const [kind, setKind] = useState<"webhook" | "mcp_resource">("webhook");
   const [title, setTitle] = useState("");
   const [goal, setGoal] = useState("");
-  const [serverId, setServerId] = useState("");
-  const [resourceUri, setResourceUri] = useState("");
+  const [selectedResourceKey, setSelectedResourceKey] = useState("");
   const [oneTimeSecret, setOneTimeSecret] = useState("");
 
   const refresh = useCallback(async () => {
     if (!gateway.client) return;
     try {
-      setSources(await gateway.runAuthenticated((client) => client.listEventSources()));
+      const [nextSources, nextResources] = await Promise.all([
+        gateway.runAuthenticated((client) => client.listEventSources()),
+        gateway.runAuthenticated((client) => client.listMcpResources()),
+      ]);
+      setSources(nextSources);
+      setMcpResources(nextResources);
       setError("");
     } catch {
       setError(t("eventSources.loadFailed"));
@@ -39,17 +44,19 @@ export default function EventSourcesScreen() {
 
   async function create() {
     if (!title.trim() || !goal.trim() || busy) return;
+    const selectedResource = mcpResources.find((item) => resourceKey(item) === selectedResourceKey);
+    if (kind === "mcp_resource" && !selectedResource) return;
     setBusy("create");
     try {
       const source = await gateway.runAuthenticated((client) => client.createEventSource({
         clientRequestId: Crypto.randomUUID(), kind, title: title.trim(), goal: goal.trim(),
         agentId: gateway.defaultAgentId || undefined,
-        mcpServerId: kind === "mcp_resource" ? serverId.trim() : undefined,
-        resourceUriPrefix: kind === "mcp_resource" ? resourceUri.trim() : undefined,
+        mcpServerId: selectedResource?.server_id,
+        resourceUriPrefix: selectedResource?.uri,
       }));
       setSources((current) => [source, ...current]);
       setOneTimeSecret(source.secret ?? "");
-      setTitle(""); setGoal(""); setServerId(""); setResourceUri("");
+      setTitle(""); setGoal(""); setSelectedResourceKey("");
       setCreating(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t("eventSources.createFailed"));
@@ -106,8 +113,21 @@ export default function EventSourcesScreen() {
           </View>
           <TextInput value={title} onChangeText={setTitle} placeholder={t("eventSources.name")} placeholderTextColor={colors.muted} style={styles.input} />
           <TextInput multiline value={goal} onChangeText={setGoal} placeholder={t("eventSources.goal")} placeholderTextColor={colors.muted} style={[styles.input, styles.goal]} />
-          {kind === "mcp_resource" ? <><TextInput autoCapitalize="none" value={serverId} onChangeText={setServerId} placeholder={t("eventSources.serverId")} placeholderTextColor={colors.muted} style={styles.input} /><TextInput autoCapitalize="none" value={resourceUri} onChangeText={setResourceUri} placeholder={t("eventSources.resourceUri")} placeholderTextColor={colors.muted} style={styles.input} /></> : null}
-          <AppPressable disabled={Boolean(busy) || !title.trim() || !goal.trim() || (kind === "mcp_resource" && (!serverId.trim() || !resourceUri.trim()))} onPress={() => void create()} style={styles.primary}>{busy === "create" ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>{t("eventSources.createAction")}</Text>}</AppPressable>
+          {kind === "mcp_resource" ? (
+            <View style={styles.resourceList}>
+              <Text style={styles.label}>{t("eventSources.chooseResource")}</Text>
+              {mcpResources.length ? mcpResources.map((resource) => (
+                <ResourceChoice
+                  key={resourceKey(resource)}
+                  label={resource.name || t("eventSources.resourceFallback")}
+                  detail={resource.description || resource.mime_type || t("eventSources.resourceReady")}
+                  selected={selectedResourceKey === resourceKey(resource)}
+                  onPress={() => setSelectedResourceKey(resourceKey(resource))}
+                />
+              )) : <Text style={styles.warning}>{t("eventSources.noResources")}</Text>}
+            </View>
+          ) : null}
+          <AppPressable disabled={Boolean(busy) || !title.trim() || !goal.trim() || (kind === "mcp_resource" && !selectedResourceKey)} onPress={() => void create()} style={styles.primary}>{busy === "create" ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>{t("eventSources.createAction")}</Text>}</AppPressable>
         </View>
       ) : null}
       {sources.map((source) => (
@@ -130,8 +150,13 @@ export default function EventSourcesScreen() {
 }
 
 function Choice({ selected, label, onPress }: { selected: boolean; label: string; onPress(): void }) { return <AppPressable onPress={onPress} style={[styles.choice, selected && styles.choiceActive]}><Text style={[styles.choiceText, selected && styles.choiceTextActive]}>{label}</Text></AppPressable>; }
+function ResourceChoice({ selected, label, detail, onPress }: { selected: boolean; label: string; detail: string; onPress(): void }) { return <AppPressable accessibilityRole="radio" accessibilityState={{ checked: selected }} onPress={onPress} style={[styles.resourceChoice, selected && styles.resourceChoiceActive]}><Text style={[styles.cardTitle, selected && styles.resourceChoiceText]}>{label}</Text><Text numberOfLines={2} style={styles.hint}>{detail}</Text></AppPressable>; }
 function Small({ label, onPress, danger = false }: { label: string; onPress(): void; danger?: boolean }) { return <AppPressable onPress={onPress} style={styles.small}><Text style={[styles.smallText, danger && styles.danger]}>{label}</Text></AppPressable>; }
 
+function resourceKey(resource: MCPResourceCatalogItem): string {
+  return `${resource.server_id}\n${resource.uri}`;
+}
+
 const styles = StyleSheet.create({
-  container: { padding: 16, paddingBottom: 48, gap: 12 }, header: { flexDirection: "row", alignItems: "center", gap: 10 }, headerCopy: { flex: 1 }, heading: { color: colors.ink, fontSize: 23, fontWeight: "800" }, hint: { color: colors.muted, lineHeight: 19 }, iconButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center" }, primaryIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" }, card: { padding: 15, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, gap: 9 }, secret: { padding: 15, borderRadius: 16, backgroundColor: colors.warningSoft, gap: 7 }, secretValue: { color: colors.ink, fontFamily: "monospace" }, cardTitle: { color: colors.ink, fontWeight: "800", fontSize: 16 }, input: { minHeight: 44, borderWidth: 1, borderColor: colors.line, borderRadius: 11, padding: 11, color: colors.ink }, goal: { minHeight: 100, textAlignVertical: "top" }, row: { flexDirection: "row", gap: 8 }, between: { flexDirection: "row", justifyContent: "space-between", gap: 10 }, wrap: { flexDirection: "row", flexWrap: "wrap", gap: 7 }, choice: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: colors.line }, choiceActive: { borderColor: colors.accent, backgroundColor: colors.accentSoft }, choiceText: { color: colors.muted }, choiceTextActive: { color: colors.accent, fontWeight: "700" }, primary: { minHeight: 45, borderRadius: 12, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" }, primaryText: { color: colors.white, fontWeight: "800" }, small: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: colors.line }, smallText: { color: colors.accent, fontWeight: "700", fontSize: 12 }, danger: { color: colors.danger }, state: { color: colors.accent, fontWeight: "700" }, warning: { color: colors.warning }, url: { color: colors.ink, fontSize: 12 }, event: { color: colors.muted, fontSize: 12 }, error: { color: colors.danger },
+  container: { padding: 16, paddingBottom: 48, gap: 12 }, header: { flexDirection: "row", alignItems: "center", gap: 10 }, headerCopy: { flex: 1 }, heading: { color: colors.ink, fontSize: 23, fontWeight: "800" }, hint: { color: colors.muted, lineHeight: 19 }, iconButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center" }, primaryIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" }, card: { padding: 15, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, gap: 9 }, secret: { padding: 15, borderRadius: 16, backgroundColor: colors.warningSoft, gap: 7 }, secretValue: { color: colors.ink, fontFamily: "monospace" }, cardTitle: { color: colors.ink, fontWeight: "800", fontSize: 16 }, label: { color: colors.ink, fontWeight: "700" }, input: { minHeight: 44, borderWidth: 1, borderColor: colors.line, borderRadius: 11, padding: 11, color: colors.ink }, goal: { minHeight: 100, textAlignVertical: "top" }, row: { flexDirection: "row", gap: 8 }, between: { flexDirection: "row", justifyContent: "space-between", gap: 10 }, wrap: { flexDirection: "row", flexWrap: "wrap", gap: 7 }, resourceList: { gap: 7 }, resourceChoice: { padding: 11, borderRadius: 11, borderWidth: 1, borderColor: colors.line, gap: 3 }, resourceChoiceActive: { borderColor: colors.accent, backgroundColor: colors.accentSoft }, resourceChoiceText: { color: colors.accent }, choice: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: colors.line }, choiceActive: { borderColor: colors.accent, backgroundColor: colors.accentSoft }, choiceText: { color: colors.muted }, choiceTextActive: { color: colors.accent, fontWeight: "700" }, primary: { minHeight: 45, borderRadius: 12, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" }, primaryText: { color: colors.white, fontWeight: "800" }, small: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: colors.line }, smallText: { color: colors.accent, fontWeight: "700", fontSize: 12 }, danger: { color: colors.danger }, state: { color: colors.accent, fontWeight: "700" }, warning: { color: colors.warning }, url: { color: colors.ink, fontSize: 12 }, event: { color: colors.muted, fontSize: 12 }, error: { color: colors.danger },
 });

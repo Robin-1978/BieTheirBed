@@ -12,9 +12,21 @@ export function TaskLaunchEditor({ policy, onChange, mcpResources = [] }: { poli
   const { t } = useI18n();
   const [advanced, setAdvanced] = useState(policy.kind === "event" || isAdvancedCron(policy.cron));
   const [preset, setPreset] = useState<SchedulePreset>(() => schedulePreset(policy));
-  const selectedServer = mcpServerId(policy);
-  const serverIds = [...new Set(mcpResources.map((item) => item.server_id))].sort();
-  const visibleResources = mcpResources.filter((item) => item.server_id === selectedServer);
+  const selectedResource = mcpResources.find(
+    (item) => item.server_id === mcpServerId(policy) && item.uri === resourceUri(policy),
+  );
+
+  function selectMcpResource(resource: MCPResourceCatalogItem) {
+    onChange({
+      ...policy,
+      event_source: `mcp:${resource.server_id}`,
+      source_config: {
+        resource_uri_prefix: resource.uri,
+        include_root: true,
+        include_descendants: false,
+      },
+    });
+  }
 
   function selectKind(kind: TaskLaunchKind) {
     if (kind === "immediate") onChange(immediatePolicy());
@@ -116,36 +128,28 @@ export function TaskLaunchEditor({ policy, onChange, mcpResources = [] }: { poli
           <Text style={styles.label}>{t("taskLaunch.eventType")}</Text>
           <View style={styles.options}>
             <Choice label={t("taskLaunch.webhook")} selected={!isMcpEvent(policy)} onPress={() => onChange({ ...policy, event_source: "webhook", source_config: {} })} />
-            <Choice label={t("taskLaunch.mcpResource")} selected={isMcpEvent(policy)} onPress={() => onChange({ ...policy, event_source: mcpServerId(policy) ? `mcp:${mcpServerId(policy)}` : "mcp:", source_config: { resource_uri_prefix: resourceUri(policy), include_root: true, include_descendants: false } })} />
+            <Choice label={t("taskLaunch.mcpResource")} selected={isMcpEvent(policy)} onPress={() => {
+              const first = selectedResource ?? mcpResources[0];
+              if (first) selectMcpResource(first);
+              else onChange({ ...policy, event_source: "mcp:", source_config: {} });
+            }} />
           </View>
-          {!isMcpEvent(policy) ? (
+          {isMcpEvent(policy) ? (
             <>
-              <Text style={styles.label}>{t("taskLaunch.eventSource")}</Text>
-              <TextInput accessibilityLabel={t("taskLaunch.eventSource")} autoCapitalize="none" placeholder={t("taskLaunch.eventPlaceholder")} placeholderTextColor={colors.muted} style={styles.input} value={policy.event_source} onChangeText={(event_source) => onChange({ ...policy, event_source })} />
-            </>
-          ) : (
-            <>
-              <Text style={styles.label}>{t("taskLaunch.mcpServer")}</Text>
-              {serverIds.length ? (
+              <Text style={styles.label}>{t("taskLaunch.selectResource")}</Text>
+              {mcpResources.length ? (
                 <View style={styles.catalogList}>
-                  {serverIds.map((server) => (
-                    <CatalogChoice key={server} label={server} detail={t("taskLaunch.discoveredServer")} selected={server === selectedServer} onPress={() => {
-                      const first = mcpResources.find((item) => item.server_id === server);
-                      onChange({ ...policy, event_source: `mcp:${server}`, source_config: first ? { resource_uri_prefix: first.uri, include_root: true, include_descendants: false } : {} });
-                    }} />
+                  {mcpResources.map((resource) => (
+                    <CatalogChoice
+                      key={`${resource.server_id}\n${resource.uri}`}
+                      label={resource.name || t("taskLaunch.resourceFallback")}
+                      detail={resource.description || resource.mime_type || t("taskLaunch.discoveredResource")}
+                      selected={resource === selectedResource}
+                      onPress={() => selectMcpResource(resource)}
+                    />
                   ))}
                 </View>
-              ) : null}
-              <TextInput accessibilityLabel={t("taskLaunch.mcpServer")} autoCapitalize="none" placeholder={t("taskLaunch.mcpServerPlaceholder")} placeholderTextColor={colors.muted} style={styles.input} value={mcpServerId(policy)} onChangeText={(server) => onChange({ ...policy, event_source: `mcp:${server.trim()}` })} />
-              <Text style={styles.label}>{t("taskLaunch.mcpResourceUri")}</Text>
-              {visibleResources.length ? (
-                <View style={styles.catalogList}>
-                  {visibleResources.map((resource) => (
-                    <CatalogChoice key={resource.uri} label={resource.name || resource.uri} detail={resource.uri} selected={resource.uri === resourceUri(policy)} onPress={() => onChange({ ...policy, source_config: { resource_uri_prefix: resource.uri, include_root: true, include_descendants: false } })} />
-                  ))}
-                </View>
-              ) : null}
-              <TextInput accessibilityLabel={t("taskLaunch.mcpResourceUri")} autoCapitalize="none" placeholder={t("taskLaunch.mcpResourceUriPlaceholder")} placeholderTextColor={colors.muted} style={styles.input} value={resourceUri(policy)} onChangeText={(uri) => onChange({ ...policy, source_config: { resource_uri_prefix: uri.trim(), include_root: true, include_descendants: Boolean(policy.source_config?.include_descendants) } })} />
+              ) : <Text style={styles.help}>{t("taskLaunch.noResources")}</Text>}
               <View style={styles.options}>
                 <Choice label={t("taskLaunch.resourceOnly")} selected={!Boolean(policy.source_config?.include_descendants)} onPress={() => onChange({ ...policy, source_config: { ...policy.source_config, include_root: true, include_descendants: false } })} />
                 <Choice label={t("taskLaunch.resourceTree")} selected={Boolean(policy.source_config?.include_descendants) && Boolean(policy.source_config?.include_root ?? true)} onPress={() => onChange({ ...policy, source_config: { ...policy.source_config, include_root: true, include_descendants: true } })} />
@@ -153,13 +157,13 @@ export function TaskLaunchEditor({ policy, onChange, mcpResources = [] }: { poli
               </View>
               <Text style={styles.help}>{t("taskLaunch.mcpResourceHelp")}</Text>
             </>
-          )}
+          ) : null}
           <Text style={styles.help}>{t("taskLaunch.eventHelp")}</Text>
         </View>
       ) : null}
       <View style={styles.summary}>
         <Text style={styles.summaryLabel}>{t("taskLaunch.summary")}</Text>
-        <Text style={styles.summaryText}>{policySummary(policy, preset, t)}</Text>
+        <Text style={styles.summaryText}>{policySummary(policy, preset, t, mcpResources)}</Text>
       </View>
       <AppPressable accessibilityRole="button" onPress={() => setAdvanced((value) => !value)} style={styles.advanced}>
         <Text style={styles.advancedText}>{advanced ? t("taskLaunch.hideAdvanced") : t("taskLaunch.showAdvanced")}</Text>
@@ -241,11 +245,17 @@ function formatLocalTime(value: number | null): string {
   return `${date.getFullYear()}-${part(date.getMonth() + 1)}-${part(date.getDate())} ${part(date.getHours())}:${part(date.getMinutes())}`;
 }
 
-function policySummary(policy: TaskLaunchPolicy, preset: SchedulePreset, t: ReturnType<typeof useI18n>["t"]): string {
+function policySummary(policy: TaskLaunchPolicy, preset: SchedulePreset, t: ReturnType<typeof useI18n>["t"], mcpResources: MCPResourceCatalogItem[]): string {
   if (policy.kind === "immediate") return t("taskLaunch.summaryImmediate");
-  if (policy.kind === "event") return isMcpEvent(policy)
-    ? t("taskLaunch.summaryMcpEvent", { server: mcpServerId(policy), uri: resourceUri(policy) || "—" })
-    : t("taskLaunch.summaryEvent", { source: policy.event_source || "—" });
+  if (policy.kind === "event") {
+    if (!isMcpEvent(policy)) return t("taskLaunch.summaryEvent");
+    const resource = mcpResources.find(
+      (item) => item.server_id === mcpServerId(policy) && item.uri === resourceUri(policy),
+    );
+    return t("taskLaunch.summaryMcpEvent", {
+      resource: resource?.name || t("taskLaunch.resourceFallback"),
+    });
+  }
   if (preset === "one_time") return policy.run_at
     ? t("taskLaunch.summaryOnce", { time: new Date(policy.run_at * 1000).toLocaleString() })
     : t("taskLaunch.summaryInvalid");

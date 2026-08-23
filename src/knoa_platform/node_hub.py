@@ -324,6 +324,7 @@ class NodeHubService:
             **payload,
         }
         return {
+            "audience": audience,
             **payload,
             "signature": self.identity.sign(canonical_json(transcript)),
         }

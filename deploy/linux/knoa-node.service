@@ -2,6 +2,8 @@
 Description=Knoa Node Runtime
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -14,8 +16,6 @@ ExecStart=%h/.local/share/knoa/runtime/venv/bin/python -m knoa_platform.service 
 WorkingDirectory=%h/.local/share/knoa/workspace
 Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=3
 KillMode=control-group
 TimeoutStopSec=30
 SendSIGKILL=yes
