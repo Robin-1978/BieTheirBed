@@ -208,23 +208,27 @@ class CodexAgentRuntime(AgentRuntime):
                 )
             await self._verify_mcp(client, upstream_thread_ref)
             inputs = await self._inputs(client, request, upstream_thread_ref)
-            result = await client.request(
-                "turn/start",
-                {
-                    "threadId": upstream_thread_ref,
-                    "input": inputs,
-                    "approvalPolicy": self._approval_policy,
-                    "sandboxPolicy": self._sandbox_policy(request.options),
-                    "collaborationMode": {
-                        "mode": "default",
-                        "settings": {
-                            "model": self._model,
-                            "developer_instructions": self._instructions,
+            turn_params: dict[str, Any] = {
+                "threadId": upstream_thread_ref,
+                "input": inputs,
+                "approvalPolicy": self._approval_policy,
+                "sandboxPolicy": self._sandbox_policy(request.options),
+            }
+            # A runtime-owned model is deliberately represented by an empty
+            # binding in Platform configuration.  Codex's collaboration-mode
+            # schema, however, requires a non-empty model.  Omitting both
+            # fields lets App Server select its configured default.
+            if self._model:
+                turn_params.update(
+                    {
+                        "model": self._model,
+                        "collaborationMode": {
+                            "mode": "default",
+                            "settings": {"model": self._model},
                         },
-                    },
-                    **({"model": self._model} if self._model else {}),
-                },
-            )
+                    }
+                )
+            result = await client.request("turn/start", turn_params)
             turn = result.get("turn")
             if not isinstance(turn, dict) or not str(turn.get("id") or "").strip():
                 raise RuntimeError("Codex turn/start returned no Turn ID")
@@ -568,6 +572,7 @@ class CodexAgentRuntime(AgentRuntime):
             "approvalPolicy": self._approval_policy,
             "sandbox": self._sandbox,
             "serviceName": "knoa-platform",
+            "developerInstructions": self._instructions,
             **({"model": self._model} if self._model else {}),
         }
 

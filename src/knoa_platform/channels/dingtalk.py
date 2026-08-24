@@ -189,6 +189,7 @@ class DingTalkChannel(FeishuChannel):
         self._stream_thread: threading.Thread | None = None
         self._stream_stop = threading.Event()
         self._card_recipients: dict[str, str] = {}
+        self._card_actions: dict[str, dict[str, dict[str, str]]] = {}
         self._interactive_cards: set[str] = set()
         self._fallback_cards: set[str] = set()
         self._fallback_approval_delivered: set[str] = set()
@@ -394,6 +395,22 @@ class DingTalkChannel(FeishuChannel):
             except json.JSONDecodeError:
                 private_data = {}
         private_data = _as_dict(private_data)
+        action_ids: Any = (
+            private_data.get("actionIds")
+            or private_data.get("action_ids")
+            or content.get("actionIds")
+            or content.get("action_ids")
+            or payload.get("actionIds")
+            or payload.get("action_ids")
+        )
+        if isinstance(action_ids, str):
+            try:
+                decoded_action_ids = json.loads(action_ids)
+            except json.JSONDecodeError:
+                decoded_action_ids = [action_ids]
+            action_ids = decoded_action_ids
+        if not isinstance(action_ids, (list, tuple)):
+            action_ids = []
         params: Any = (
             private_data.get("params")
             or content.get("params")
@@ -405,21 +422,37 @@ class DingTalkChannel(FeishuChannel):
             except json.JSONDecodeError:
                 params = {}
         params = _as_dict(params)
-        action = str(params.get("action") or "").strip().lower()
-        if action not in {"confirm", "cancel"}:
-            logger.warning("Ignored DingTalk card callback with unknown action=%s", action)
-            return False
-
         card_instance_id = _nested(
             payload,
             "outTrackId",
             "cardInstanceId",
             "card_instance_id",
         )
+        logger.info(
+            "DingTalk card callback received card=%s action_ids=%s",
+            card_instance_id[:12],
+            [str(value)[:32] for value in action_ids[:3]],
+        )
+        # The SDK's built-in Markdown button template reports the pressed
+        # request button through cardPrivateData.actionIds.  Bind that ID back
+        # to the action captured when this exact card instance was rendered.
+        if not params:
+            actions = self._card_actions.get(card_instance_id, {})
+            for action_id in action_ids:
+                matched = actions.get(str(action_id))
+                if matched is not None:
+                    params = matched
+                    break
+        action = str(params.get("action") or "").strip().lower()
+        if action not in {"confirm", "cancel"}:
+            logger.warning("Ignored DingTalk card callback with unknown action=%s", action)
+            return False
+
         expected_recipient = self._card_recipients.get(card_instance_id, "")
         open_id = _nested(payload, "userId", "user_id") or expected_recipient
         if (
-            not open_id
+            not expected_recipient
+            or not open_id
             or (expected_recipient and open_id != expected_recipient)
             or not self._save_binding(open_id)
         ):
@@ -589,6 +622,7 @@ class DingTalkChannel(FeishuChannel):
         interactive_id = self._create_interactive_card(open_id, card)
         if interactive_id:
             self._card_recipients[interactive_id] = open_id
+            self._card_actions[interactive_id] = self._interactive_card_action_map(card)
             self._interactive_cards.add(interactive_id)
             self._trim_card_state()
             return interactive_id
@@ -615,6 +649,11 @@ class DingTalkChannel(FeishuChannel):
         if message_id in self._interactive_cards and self._update_interactive_card(
             message_id, card
         ):
+            actions = self._interactive_card_action_map(card)
+            if actions:
+                self._card_actions[message_id] = actions
+            else:
+                self._card_actions.pop(message_id, None)
             return True
         if message_id in self._interactive_cards:
             self._interactive_cards.discard(message_id)
@@ -659,6 +698,7 @@ class DingTalkChannel(FeishuChannel):
         while len(self._card_recipients) > 1000:
             oldest = next(iter(self._card_recipients))
             self._card_recipients.pop(oldest, None)
+            self._card_actions.pop(oldest, None)
             self._interactive_cards.discard(oldest)
             self._fallback_cards.discard(oldest)
             self._fallback_approval_delivered.discard(oldest)
@@ -795,7 +835,9 @@ class DingTalkChannel(FeishuChannel):
         }
 
     @staticmethod
-    def _interactive_card_buttons(card: dict[str, Any]) -> list[dict[str, Any]]:
+    def _interactive_card_action_map(
+        card: dict[str, Any],
+    ) -> dict[str, dict[str, str]]:
         actions: dict[str, dict[str, str]] = {}
 
         def visit(value: Any) -> None:
@@ -806,7 +848,7 @@ class DingTalkChannel(FeishuChannel):
                     approval_id = str(callback.get("approval_id") or "").strip()
                     resource_id = str(callback.get("resource_id") or "").strip()
                     if action in {"confirm", "cancel"} and approval_id and resource_id:
-                        actions[action] = {
+                        actions[f"knoa_{action}"] = {
                             "action": action,
                             "approval_id": approval_id,
                             "resource_id": resource_id,
@@ -818,18 +860,24 @@ class DingTalkChannel(FeishuChannel):
                     visit(nested)
 
         visit(card)
+        return actions
+
+    @classmethod
+    def _interactive_card_buttons(cls, card: dict[str, Any]) -> list[dict[str, Any]]:
+        actions = cls._interactive_card_action_map(card)
         buttons: list[dict[str, Any]] = []
         for action, text, color in (
             ("confirm", "确认", "blue"),
             ("cancel", "取消", "gray"),
         ):
-            if action in actions:
+            action_id = f"knoa_{action}"
+            if action_id in actions:
                 buttons.append(
                     {
                         "text": text,
                         "color": color,
-                        "actionType": "callback",
-                        "params": actions[action],
+                        "id": action_id,
+                        "request": True,
                     }
                 )
         return buttons
