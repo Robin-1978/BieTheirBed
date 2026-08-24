@@ -397,6 +397,10 @@ class DingTalkChannel(FeishuChannel):
             except json.JSONDecodeError:
                 private_data = {}
         private_data = _as_dict(private_data)
+        callback_user_id = _nested(payload, "userId", "user_id")
+        per_user_private_data = _as_dict(private_data.get(callback_user_id))
+        if per_user_private_data:
+            private_data = per_user_private_data
         action_ids: Any = (
             private_data.get("actionIds")
             or private_data.get("action_ids")
@@ -813,7 +817,7 @@ class DingTalkChannel(FeishuChannel):
                 "cardTemplateId": _AI_MARKDOWN_CARD_TEMPLATE_ID,
                 "outTrackId": card_instance_id,
                 "cardData": {"cardParamMap": card_params},
-                "privateData": self._interactive_card_private_data(card),
+                "privateData": self._interactive_card_private_data(open_id, card),
                 "callbackType": "STREAM",
                 "imGroupOpenSpaceModel": {"supportForward": True},
                 "imRobotOpenSpaceModel": {"supportForward": True},
@@ -879,6 +883,7 @@ class DingTalkChannel(FeishuChannel):
         card: dict[str, Any],
     ) -> bool:
         card_params = self._interactive_card_params(card)
+        recipient = self._card_recipients.get(card_instance_id, "")
         response = httpx.put(
             f"{_DINGTALK_API}/v1.0/card/instances",
             headers={
@@ -888,7 +893,7 @@ class DingTalkChannel(FeishuChannel):
             json={
                 "outTrackId": card_instance_id,
                 "cardData": {"cardParamMap": card_params},
-                "privateData": self._interactive_card_private_data(card),
+                "privateData": self._interactive_card_private_data(recipient, card),
             },
             timeout=15,
         )
@@ -971,14 +976,20 @@ class DingTalkChannel(FeishuChannel):
         return actions
 
     @classmethod
-    def _interactive_card_private_data(cls, card: dict[str, Any]) -> dict[str, Any]:
+    def _interactive_card_private_data(
+        cls,
+        open_id: str,
+        card: dict[str, Any],
+    ) -> dict[str, Any]:
         actions = cls._interactive_card_action_map(card)
         action = next(iter(actions.values()), None) if len(actions) == 1 else None
         return {
-            "cardParamMap": {
-                "knoa_action": json.dumps(
-                    action or {}, ensure_ascii=False, separators=(",", ":")
-                )
+            open_id: {
+                "cardParamMap": {
+                    "knoa_action": json.dumps(
+                        action or {}, ensure_ascii=False, separators=(",", ":")
+                    )
+                }
             }
         }
 
