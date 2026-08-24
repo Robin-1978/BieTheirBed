@@ -1,6 +1,6 @@
 schema_version: 1
 id: browser
-version: 1.0.0
+version: 1.0.1
 display_name: 浏览器操作
 description: 使用隔离的临时浏览器会话安全地读取、操作网页并下载证据
 compatibility:
@@ -14,7 +14,7 @@ requested_tools:
     capabilities: [mcp]
     risk: medium
   - name: browser.navigate
-    effect: read_only
+    effect: local_write
     capabilities: [mcp, network]
     risk: medium
   - name: browser.snapshot

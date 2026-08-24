@@ -138,7 +138,14 @@ fi
 if [ ! -x "$VENV_ROOT/bin/python" ]; then
     "$PYTHON_EXECUTABLE" -m venv "$VENV_ROOT"
 fi
-"$VENV_ROOT/bin/python" -m pip install --upgrade "$SOURCE_PATH"
+package_spec="$SOURCE_PATH"
+if [ "$install_node" -eq 1 ]; then
+    package_spec="$SOURCE_PATH[semantic]"
+fi
+"$VENV_ROOT/bin/python" -m pip install --upgrade "$package_spec"
+if [ "$install_node" -eq 1 ]; then
+    "$VENV_ROOT/bin/python" -m knoa_agent.semantic_health --provision
+fi
 
 if [ "$install_hub" -eq 1 ]; then
     install -d -m 700 "$HUB_ROOT"

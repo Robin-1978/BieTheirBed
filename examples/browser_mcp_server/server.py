@@ -54,10 +54,6 @@ class BrowserMCPApplication:
             read_only_hint=True, destructive_hint=False,
             idempotent_hint=True, open_world_hint=False,
         )
-        network_read = types.ToolAnnotations(
-            read_only_hint=True, destructive_hint=False,
-            idempotent_hint=True, open_world_hint=True,
-        )
         local_write = types.ToolAnnotations(
             read_only_hint=False, destructive_hint=False,
             idempotent_hint=False, open_world_hint=False,
@@ -75,49 +71,90 @@ class BrowserMCPApplication:
         tools = (
             types.Tool(
                 name="browser.session_open",
-                description="Open an isolated temporary browser session, or an explicitly named persistent profile.",
+                description=(
+                    "Open an isolated temporary browser session, or an explicitly "
+                    "named persistent profile. 打开隔离的浏览器会话。"
+                ),
                 input_schema=_schema({"profile_name": {"type": "string", "maxLength": 64}}, []),
                 annotations=local_write,
             ),
             types.Tool(
-                name="browser.navigate", description="Navigate to one explicit safe http/https URL.",
-                input_schema=_schema({**session, "url": {"type": "string", "maxLength": 4096}}, ["browser_session_id", "url"]),
-                annotations=network_read,
+                name="browser.navigate",
+                description=(
+                    "Navigate to one explicit safe http/https URL. If no session "
+                    "is supplied, open an isolated temporary session automatically. "
+                    "打开浏览器并访问安全的网页网址。"
+                ),
+                input_schema=_schema(
+                    {**session, "url": {"type": "string", "maxLength": 4096}},
+                    ["url"],
+                ),
+                annotations=network_local_write,
             ),
             types.Tool(
-                name="browser.snapshot", description="Read a bounded accessibility snapshot with stable short-lived element refs.",
+                name="browser.snapshot",
+                description=(
+                    "Read a bounded accessibility snapshot with stable short-lived "
+                    "element refs. 读取网页结构、按钮、链接和输入框。"
+                ),
                 input_schema=_schema(session, ["browser_session_id"]), annotations=read_only,
             ),
             types.Tool(
-                name="browser.screenshot", description="Capture the current viewport as a managed-file descriptor.",
+                name="browser.screenshot",
+                description=(
+                    "Capture the current viewport as a managed-file descriptor. "
+                    "截取当前网页画面。"
+                ),
                 input_schema=_schema(session, ["browser_session_id"]), annotations=local_write,
             ),
             types.Tool(
-                name="browser.download", description="Download one explicitly selected safe URL into the Node-managed download root.",
+                name="browser.download",
+                description=(
+                    "Download one explicitly selected safe URL into the Node-managed "
+                    "download root. 下载网页文件。"
+                ),
                 input_schema=_schema({
                     **session, "url": {"type": "string", "maxLength": 4096},
                     "filename": {"type": "string", "maxLength": 160},
                 }, ["browser_session_id", "url"]), annotations=network_local_write,
             ),
             types.Tool(
-                name="browser.session_close", description="Close a session and remove its temporary profile.",
+                name="browser.session_close",
+                description=(
+                    "Close a session and remove its temporary profile. "
+                    "关闭浏览器会话并清理临时数据。"
+                ),
                 input_schema=_schema(session, ["browser_session_id"]), annotations=local_write,
             ),
             types.Tool(
-                name="browser.click", description="Activate one element ref from the latest snapshot.",
+                name="browser.click",
+                description=(
+                    "Activate one element ref from the latest snapshot. 点击网页元素。"
+                ),
                 input_schema=_schema(element, ["browser_session_id", "element_ref"]), annotations=external_write,
             ),
             types.Tool(
-                name="browser.fill", description="Replace a field value using an element ref. This may trigger page network activity.",
+                name="browser.fill",
+                description=(
+                    "Replace a field value using an element ref. This may trigger "
+                    "page network activity. 填写网页表单字段。"
+                ),
                 input_schema=_schema({**element, "text": {"type": "string", "maxLength": 20000}}, ["browser_session_id", "element_ref", "text"]),
                 annotations=external_write,
             ),
             types.Tool(
-                name="browser.submit", description="Explicitly submit the form owning an element ref.",
+                name="browser.submit",
+                description=(
+                    "Explicitly submit the form owning an element ref. 提交网页表单。"
+                ),
                 input_schema=_schema(element, ["browser_session_id", "element_ref"]), annotations=external_write,
             ),
             types.Tool(
-                name="browser.wait_for", description="Wait for an explicit URL substring or visible accessibility text.",
+                name="browser.wait_for",
+                description=(
+                    "Wait for an explicit URL substring or visible accessibility "
+                    "text. 等待网页跳转或文字出现。"
+                ),
                 input_schema=_schema({
                     **session,
                     "url_contains": {"type": "string", "maxLength": 1024},
@@ -135,7 +172,9 @@ class BrowserMCPApplication:
             if name == "browser.session_open":
                 result = await self.manager.open(profile_name=str(args.get("profile_name") or ""))
             elif name == "browser.navigate":
-                result = await self.manager.navigate(str(args["browser_session_id"]), str(args["url"]))
+                result = await self.manager.navigate(
+                    str(args.get("browser_session_id") or ""), str(args["url"])
+                )
             elif name == "browser.snapshot":
                 result = await self.manager.snapshot(str(args["browser_session_id"]))
             elif name == "browser.screenshot":

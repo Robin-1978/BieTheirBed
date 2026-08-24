@@ -19,8 +19,8 @@ from knoa_platform.extensions.package_store import PackageStore
 class _Installer:
     async def prepare(self, _principal_id, _source):
         return SimpleNamespace(
-            package_digest="a7552853cf35d1f66222f09fa56b9a13ff2d0badf3fccacf9f77db0f6d2b68f7",
-            version="1.0.0",
+            package_digest="8b7e57a5f7344efd638e6055a77626925d7aabeb260880dd7fe16d3a111b4aa3",
+            version="1.0.1",
             capability_id="browser",
         )
 
@@ -42,7 +42,7 @@ async def test_official_catalog_is_signed_and_browser_digest_matches_reference_p
     entry = service.resolve("knoa.browser")
     package = packages.import_directory("capability", service.source_path(entry), imported_by="principal-a")
     assert package.content_digest == entry.package_digest
-    assert service.select("principal-a", "knoa.browser", mode="pinned", version="1.0.0")["resolved_version"] == "1.0.0"
+    assert service.select("principal-a", "knoa.browser", mode="pinned", version="1.0.1")["resolved_version"] == "1.0.1"
     plan = await service.prepare("principal-a", "knoa.browser")
     assert plan.capability_id == "browser"
 
@@ -80,3 +80,11 @@ def test_catalog_rejects_tampering_and_revoked_versions(tmp_path: Path) -> None:
     catalog.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(PermissionError, match="signature"):
         service.load()
+
+
+def test_sdist_contains_catalog_and_browser_reference_package() -> None:
+    root = Path(__file__).resolve().parents[1]
+    pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert '"/catalog/capabilities.json"' in pyproject
+    assert '"/examples/browser_mcp_server"' in pyproject

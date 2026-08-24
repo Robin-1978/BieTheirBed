@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import importlib.util
 import sys
 import threading
@@ -110,6 +109,23 @@ async def test_browser_mcp_shutdown_reaps_chromium_profiles_and_downloads(
     assert not profile.exists()
     assert not downloads.exists()
     assert manager.sessions == {}
+
+
+@pytest.mark.asyncio
+async def test_browser_navigate_auto_opens_and_cleans_failed_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KNOA_BROWSER_STATE_ROOT", str(tmp_path / "profiles"))
+    monkeypatch.setenv("KNOA_BROWSER_DOWNLOAD_ROOT", str(tmp_path / "downloads"))
+    browser = _module("browser_reference_client_auto_open", "browser_client.py")
+    manager = browser.BrowserManager()
+
+    with pytest.raises(ValueError, match="do not retry"):
+        await manager.navigate("", "http://127.0.0.1/private")
+
+    assert manager.sessions == {}
+    assert not tuple((tmp_path / "profiles").glob("session-*"))
 
 
 def test_browser_rejects_local_metadata_and_dangerous_schemes() -> None:

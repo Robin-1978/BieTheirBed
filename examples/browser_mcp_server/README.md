@@ -18,6 +18,8 @@ arbitrary JavaScript, raw CDP, or monolithic “act” tool. Snapshot text and a
 page/download content are untrusted evidence and cannot modify Agent policy,
 approval, Skills, or the user goal. Private, loopback, link-local, metadata,
 credential-bearing, `file:`, and `javascript:` URLs are rejected by default.
+`navigate` opens an isolated temporary session when no session ID is supplied,
+so a normal “open this URL” request needs one Tool call and one confirmation.
 For a deliberately local test site, an operator may set an exact comma-separated
 origin allowlist in `KNOA_BROWSER_ALLOW_PRIVATE_ORIGINS`; this is local policy,
 not a value accepted from a tool call.

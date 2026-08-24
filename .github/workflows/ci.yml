@@ -138,6 +138,25 @@ jobs:
           tests/test_hosted_hub_simulation.py
           tests/test_cli_entry.py
 
+  semantic-runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.14"
+      - name: Install Node semantic runtime
+        run: uv sync --locked --extra semantic --python 3.14
+      - name: Provision model and execute real BGE inference
+        run: uv run --no-sync python -m knoa_agent.semantic_health --provision
+
   mobile:
     runs-on: ubuntu-latest
     steps:

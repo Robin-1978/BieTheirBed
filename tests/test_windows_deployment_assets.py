@@ -109,6 +109,11 @@ def test_windows_source_update_reconciles_new_runtime_dependencies() -> None:
 
     assert "pip install --no-deps" not in script
     assert "--upgrade-strategy only-if-needed" in script
+    assert '$packageSpec = "${resolvedPackage}[semantic]"' in script
+    assert "-m knoa_agent.semantic_health --provision" in script
+    assert '$env:KNOA_BGE_PRELOAD = "1"' in _read(
+        "deploy/windows/Run-KnoaNode.ps1"
+    )
 
 
 def test_windows_enrollment_restarts_service_and_prints_pairing_qr() -> None:

@@ -16,7 +16,7 @@ tools:
     capabilities: [mcp]
     risk: medium
   browser.navigate:
-    effect: read_only
+    effect: local_write
     capabilities: [mcp, network]
     risk: medium
   browser.snapshot:
