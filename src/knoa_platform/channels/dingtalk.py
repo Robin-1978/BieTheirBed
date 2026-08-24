@@ -24,9 +24,9 @@ from typing import Any, Mapping
 
 import httpx
 
-from knoa_platform.branding import ASSISTANT_NAME
 from knoa_platform.channels.feishu import FeishuChannel
-from knoa_platform.channels.feishu_cards import _principal_for_log, _render_card_markdown
+from knoa_platform.channels.dingtalk_cards import project_dingtalk_card
+from knoa_platform.channels.feishu_cards import _principal_for_log
 from knoa_platform.channels.contracts import ChannelMessage
 from knoa_platform.config import AppConfig
 
@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 _DINGTALK_API = "https://api.dingtalk.com"
 _TEXT_LIMIT = 4000
+_MARKDOWN_CARD_TEMPLATE_ID = "589420e2-c1e2-46ef-a5ed-b8728e654da9.schema"
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -118,6 +119,8 @@ class DingTalkChannel(FeishuChannel):
         self._stream_thread: threading.Thread | None = None
         self._stream_stop = threading.Event()
         self._card_recipients: dict[str, str] = {}
+        self._interactive_cards: set[str] = set()
+        self._conversation_contexts: dict[str, tuple[str, str]] = {}
         self._token_lock = threading.RLock()
         self._access_token = ""
         self._access_token_expires_at = 0.0
@@ -225,6 +228,20 @@ class DingTalkChannel(FeishuChannel):
                 _principal_for_log(principal),
             )
             return False
+        conversation_type = _nested(
+            payload,
+            "conversationType",
+            "conversation_type",
+        )
+        conversation_id = _nested(
+            payload,
+            "conversationId",
+            "conversation_id",
+        )
+        self._conversation_contexts[principal] = (
+            conversation_type or "1",
+            conversation_id,
+        )
         text = _nested(payload, "text.content", "text.content_text", "content.text", "text")
         msg_type = _nested(payload, "msgtype", "messageType", "message_type", "type").lower()
         media_key = _nested(
@@ -360,37 +377,157 @@ class DingTalkChannel(FeishuChannel):
         return True
 
     def _send_card_returning_id(self, open_id: str, card: dict[str, Any]) -> str | None:
+        interactive_id = self._create_interactive_card(open_id, card)
+        if interactive_id:
+            self._card_recipients[interactive_id] = open_id
+            self._interactive_cards.add(interactive_id)
+            self._trim_card_state()
+            return interactive_id
+
         message_id = uuid.uuid4().hex
         if not self._send_text(open_id, self._render_dingtalk_card(card)):
             return None
         self._card_recipients[message_id] = open_id
-        if len(self._card_recipients) > 1000:
-            self._card_recipients.pop(next(iter(self._card_recipients)))
+        self._trim_card_state()
         return message_id
 
     def _update_card(self, message_id: str, card: dict[str, Any]) -> bool:
-        # DingTalk Stream does not guarantee interactive-card patch support
-        # for every robot version. Send the updated state as a normal message
-        # so the initial "正在处理" card never hides the final result.
         recipient = self._card_recipients.get(message_id)
         if not recipient:
             return False
+        if message_id in self._interactive_cards and self._update_interactive_card(
+            message_id, card
+        ):
+            return True
+        # Preserve the final result when the account has not granted the card
+        # APIs or DingTalk rejects an update for a particular conversation.
+        # Text fallback is deliberately last-resort instead of the normal path.
         return self._send_text(recipient, self._render_dingtalk_card(card))
+
+    def _trim_card_state(self) -> None:
+        while len(self._card_recipients) > 1000:
+            oldest = next(iter(self._card_recipients))
+            self._card_recipients.pop(oldest, None)
+            self._interactive_cards.discard(oldest)
+
+    def _create_interactive_card(
+        self,
+        open_id: str,
+        card: dict[str, Any],
+    ) -> str | None:
+        if self._stream_client is None:
+            return None
+        title, markdown = self._interactive_card_content(card)
+        card_instance_id = uuid.uuid4().hex
+        headers = {
+            "x-acs-dingtalk-access-token": self._access_token_value(),
+            "Content-Type": "application/json",
+        }
+        create = httpx.post(
+            f"{_DINGTALK_API}/v1.0/card/instances",
+            headers=headers,
+            json={
+                "cardTemplateId": _MARKDOWN_CARD_TEMPLATE_ID,
+                "outTrackId": card_instance_id,
+                "cardData": {
+                    "cardParamMap": {"title": title, "markdown": markdown}
+                },
+                "callbackType": "STREAM",
+                "imGroupOpenSpaceModel": {"supportForward": True},
+                "imRobotOpenSpaceModel": {"supportForward": True},
+            },
+            timeout=15,
+        )
+        if create.is_error:
+            logger.warning(
+                "DingTalk interactive card create failed status=%s body=%s; falling back to text",
+                create.status_code,
+                create.text[:300],
+            )
+            return None
+
+        conversation_type, conversation_id = self._conversation_contexts.get(
+            open_id, ("1", "")
+        )
+        deliver: dict[str, Any] = {
+            "outTrackId": card_instance_id,
+            "userIdType": 1,
+        }
+        if conversation_type == "2" and conversation_id:
+            deliver.update(
+                {
+                    "openSpaceId": f"dtv1.card//IM_GROUP.{conversation_id}",
+                    "imGroupOpenDeliverModel": {
+                        "robotCode": self._dingtalk_config.dingtalk_robot_code
+                        or self._app_id
+                    },
+                }
+            )
+        else:
+            deliver.update(
+                {
+                    "openSpaceId": f"dtv1.card//IM_ROBOT.{open_id}",
+                    "imRobotOpenDeliverModel": {"spaceType": "IM_ROBOT"},
+                }
+            )
+        response = httpx.post(
+            f"{_DINGTALK_API}/v1.0/card/instances/deliver",
+            headers=headers,
+            json=deliver,
+            timeout=15,
+        )
+        if response.is_error:
+            logger.warning(
+                "DingTalk interactive card delivery failed status=%s body=%s; falling back to text",
+                response.status_code,
+                response.text[:300],
+            )
+            return None
+        return card_instance_id
+
+    def _update_interactive_card(
+        self,
+        card_instance_id: str,
+        card: dict[str, Any],
+    ) -> bool:
+        title, markdown = self._interactive_card_content(card)
+        response = httpx.put(
+            f"{_DINGTALK_API}/v1.0/card/instances",
+            headers={
+                "x-acs-dingtalk-access-token": self._access_token_value(),
+                "Content-Type": "application/json",
+            },
+            json={
+                "outTrackId": card_instance_id,
+                "cardData": {
+                    "cardParamMap": {"title": title, "markdown": markdown}
+                },
+            },
+            timeout=15,
+        )
+        if response.is_error:
+            logger.warning(
+                "DingTalk interactive card update failed status=%s body=%s; falling back to text",
+                response.status_code,
+                response.text[:300],
+            )
+            self._interactive_cards.discard(card_instance_id)
+            return False
+        return True
+
+    @classmethod
+    def _interactive_card_content(cls, card: dict[str, Any]) -> tuple[str, str]:
+        projected = project_dingtalk_card(card)
+        return projected.title, projected.markdown
 
     @staticmethod
     def _render_dingtalk_card(card: dict[str, Any]) -> str:
-        title = str(card.get("header", {}).get("title", {}).get("content") or ASSISTANT_NAME)
-        elements = card.get("body", {}).get("elements", [])
-        body = "\n\n".join(
-            str(element.get("content") or "")
-            for element in elements
-            if isinstance(element, Mapping)
-        )
-        rendered = _render_card_markdown(body)
+        projected = project_dingtalk_card(card)
+        rendered = projected.as_text()
         approval_hint = ""
         if any(marker in rendered for marker in ("确认", "批准", "confirm", "approve")):
             approval_hint = "\n\n回复“确认”/“取消”（或 confirm/cancel）即可处理审批。"
-        return f"{title}\n\n{rendered}{approval_hint}"
+        return f"{rendered}{approval_hint}"
 
     def _send_image(self, open_id: str, path: Path, name: str = "") -> bool:
         return self._send_media(open_id, path, name or path.name, "sampleImageMsg")
