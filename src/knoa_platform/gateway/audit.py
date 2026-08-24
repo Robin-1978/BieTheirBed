@@ -1,4 +1,5 @@
 """Gateway-owned, secret-free device security audit journal."""
+
 from __future__ import annotations
 
 import hashlib
@@ -144,6 +145,38 @@ class GatewayAuditRepository:
                 (principal, device, after_id, limit),
             ).fetchall()
         return tuple(self._event(row) for row in rows)
+
+    def prune(
+        self,
+        *,
+        retention_seconds: float = 30 * 24 * 60 * 60,
+        max_events: int = 50_000,
+    ) -> int:
+        """Retain a time-bounded journal with a hard row-count ceiling."""
+        if retention_seconds < 24 * 60 * 60:
+            raise ValueError("Gateway audit retention must be at least one day")
+        if not 1 <= max_events <= 1_000_000:
+            raise ValueError("Gateway audit event limit is invalid")
+        cutoff = float(self._clock()) - retention_seconds
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            expired = connection.execute(
+                "DELETE FROM gateway_device_audit WHERE occurred_at < ?",
+                (cutoff,),
+            )
+            threshold = connection.execute(
+                """SELECT event_id FROM gateway_device_audit
+                   ORDER BY event_id DESC LIMIT 1 OFFSET ?""",
+                (max_events - 1,),
+            ).fetchone()
+            overflow = 0
+            if threshold is not None:
+                deleted = connection.execute(
+                    "DELETE FROM gateway_device_audit WHERE event_id < ?",
+                    (int(threshold["event_id"]),),
+                )
+                overflow = int(deleted.rowcount)
+            return int(expired.rowcount) + overflow
 
     @staticmethod
     def hash_remote_address(value: str) -> str:

@@ -175,6 +175,36 @@ class ConfigRegistry:
             ).fetchall()
         return tuple(self._revision(row) for row in rows)
 
+    def prune_history(self, *, retain: int = 200) -> int:
+        """Bound immutable history while preserving every live reference."""
+        if not 2 <= retain <= 500:
+            raise ValueError(
+                "Configuration history retention must be between 2 and 500"
+            )
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            protected = {
+                str(row[0])
+                for row in db.execute(
+                    """SELECT desired_revision_id FROM config_control_state
+                       UNION SELECT applied_revision_id FROM config_control_state
+                       UNION SELECT base_revision_id FROM config_drafts"""
+                ).fetchall()
+            }
+            protected.update(
+                str(row[0])
+                for row in db.execute(
+                    "SELECT revision_id FROM config_revisions ORDER BY created_at DESC LIMIT ?",
+                    (retain,),
+                ).fetchall()
+            )
+            placeholders = ",".join("?" for _ in protected)
+            deleted = db.execute(
+                f"DELETE FROM config_revisions WHERE revision_id NOT IN ({placeholders})",
+                tuple(sorted(protected)),
+            )
+            return int(deleted.rowcount)
+
     def create_draft(self, *, actor: str) -> ConfigDraft:
         current = self.desired()
         draft = ConfigDraft(

@@ -1,4 +1,5 @@
 """Safe data-only Skill packages and deterministic selective activation."""
+
 from __future__ import annotations
 
 import hashlib
@@ -184,8 +185,17 @@ def load_skill_package(package_root: str | Path) -> SkillPackage:
 
 
 def skill_package_digest(package: SkillPackage) -> str:
+    manifest = package.manifest.model_dump(mode="json")
+    # Pydantic serializes frozensets as arrays whose order follows the
+    # process hash seed.  Sort set-backed fields before hashing so restarting
+    # the service cannot manufacture a new managed Config revision for
+    # unchanged Skill content.
+    manifest["required_tools"] = sorted(package.manifest.required_tools)
+    manifest["required_capabilities"] = sorted(
+        capability.value for capability in package.manifest.required_capabilities
+    )
     payload = {
-        "manifest": package.manifest.model_dump(mode="json"),
+        "manifest": manifest,
         "instructions": package.instructions,
         "resources": [
             {"path": resource.path, "content": resource.content}
@@ -325,9 +335,13 @@ def build_skill_providers(
         resolved = root.expanduser().resolve()
         if not resolved.is_dir():
             continue
-        for package_root in sorted(path for path in resolved.iterdir() if path.is_dir()):
+        for package_root in sorted(
+            path for path in resolved.iterdir() if path.is_dir()
+        ):
             try:
                 providers.append(SkillPackageProvider(package_root, catalog))
             except ValueError as exc:
-                logger.warning("Ignoring invalid Skill directory %s: %s", package_root, exc)
+                logger.warning(
+                    "Ignoring invalid Skill directory %s: %s", package_root, exc
+                )
     return tuple(providers)

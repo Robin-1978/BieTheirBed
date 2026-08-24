@@ -15,6 +15,7 @@ from knoa_platform.agent_runtime.composition import (
 )
 from knoa_platform.branding import ASSISTANT_NAME
 from knoa_platform.config import AppConfig, load_config
+from knoa_platform.database_maintenance import maintain_sqlite_database
 from knoa_platform.log_rotation import compressed_rotating_file_handler
 from knoa_platform.private_files import prepare_private_file
 from knoa_platform.runtime import RuntimePaths, load_service_environment
@@ -64,6 +65,7 @@ class CoreDaemon:
             await composition.extensions.stop()
             raise
         self._composition = composition
+        await self._run_database_maintenance(composition)
         self._cleanup_task = asyncio.create_task(self._cleanup_loop())
         logger.info("Core service ready (pid %d)", os.getpid())
 
@@ -104,6 +106,23 @@ class CoreDaemon:
                 await asyncio.to_thread(composition.artifacts.cleanup_expired)
                 await composition.task_service.compact_expired_traces()
                 await composition.conversation_service.compact_expired_details()
+                await self._run_database_maintenance(composition)
+
+    async def _run_database_maintenance(
+        self,
+        composition: CoreRuntimeComposition,
+    ) -> None:
+        try:
+            await asyncio.to_thread(self._maintain_database, composition)
+        except Exception:
+            logger.warning("Core database maintenance failed", exc_info=True)
+
+    @staticmethod
+    def _maintain_database(composition: CoreRuntimeComposition) -> None:
+        pruned = composition.config_registry.prune_history()
+        maintain_sqlite_database(composition.paths.data / "assistant.db")
+        if pruned:
+            logger.info("Pruned %d stale Config revisions", pruned)
 
     def _write_pid(self, path: Path) -> None:
         _prepare_private_file(path)

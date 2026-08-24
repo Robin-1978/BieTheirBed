@@ -60,6 +60,15 @@ class _Delegations:
         self.recovered = True
 
 
+class _ConfigRegistry:
+    def __init__(self) -> None:
+        self.pruned = 0
+
+    def prune_history(self) -> int:
+        self.pruned += 1
+        return 0
+
+
 @pytest.mark.asyncio
 async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     tmp_path,
@@ -75,6 +84,7 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     interactions = _Interactions()
     capability_mcp_host = _Host()
     delegations = _Delegations()
+    config_registry = _ConfigRegistry()
     pid = tmp_path / "service.pid"
     composition = SimpleNamespace(
         host=host,
@@ -87,8 +97,9 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
         interactions=interactions,
         capability_mcp_host=capability_mcp_host,
         delegations=delegations,
-        paths=SimpleNamespace(pid=pid),
+        paths=SimpleNamespace(pid=pid, data=tmp_path / "data"),
         artifacts=SimpleNamespace(cleanup_expired=lambda: None),
+        config_registry=config_registry,
     )
     monkeypatch.setattr(
         "knoa_platform.service.core_daemon.build_core_runtime",
@@ -111,6 +122,7 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     assert interactions.started
     assert capability_mcp_host.started
     assert delegations.recovered
+    assert config_registry.pruned == 1
     assert pid.exists()
     assert str(tmp_path / "service.log") in pid.read_text(encoding="utf-8")
     assert stat.S_IMODE(pid.stat().st_mode) == 0o600
