@@ -170,3 +170,25 @@ async def test_mdns_responder_ignores_own_address() -> None:
     assert publisher._send_nowait.call_count == 2
     publisher._send_nowait.assert_any_call(packet, ("224.0.0.251", 5353))
     publisher._send_nowait.assert_any_call(packet, ("192.168.1.55", 5353))
+
+
+@pytest.mark.asyncio
+async def test_mdns_uses_one_bound_socket_for_advertising_and_responses() -> None:
+    sock = MagicMock()
+    publisher = MdnsPublisher(
+        node_id="node_test-1",
+        port=9541,
+        version="0.2.65",
+        signing_public_key="public-key",
+        addresses=["192.168.1.20"],
+    )
+
+    with patch("knoa_platform.mdns.socket.socket", return_value=sock) as create_socket:
+        assert await publisher.start() is True
+        assert create_socket.call_count == 1
+        assert publisher._socket is sock
+        assert publisher._listener is sock
+        sock.bind.assert_called_once_with(("", 5353))
+        await publisher.stop()
+
+    sock.close.assert_called_once()
