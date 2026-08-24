@@ -20,24 +20,24 @@
     "@noble/ciphers": "^2.3.0",
     "@noble/curves": "^2.0.1",
     "@noble/hashes": "^2.3.0",
-    "expo": "~57.0.14",
+    "expo": "~57.0.16",
     "expo-application": "~57.0.2",
     "expo-asset": "~57.0.12",
-    "expo-audio": "^57.0.3",
-    "expo-camera": "57.0.3",
+    "expo-audio": "~57.0.4",
+    "expo-camera": "~57.0.4",
     "expo-constants": "~57.0.12",
-    "expo-crypto": "57.0.1",
+    "expo-crypto": "~57.0.2",
     "expo-document-picker": "57.0.1",
     "expo-file-system": "~57.0.4",
     "expo-font": "~57.0.1",
-    "expo-image-manipulator": "^57.0.10",
+    "expo-image-manipulator": "~57.0.13",
     "expo-intent-launcher": "~57.0.1",
-    "expo-linking": "~57.0.6",
+    "expo-linking": "~57.0.7",
     "expo-media-library": "~57.0.4",
-    "expo-notifications": "~57.0.13",
-    "expo-router": "~57.0.14",
+    "expo-notifications": "~57.0.14",
+    "expo-router": "~57.0.16",
     "expo-secure-store": "57.0.1",
-    "expo-sharing": "~57.0.13",
+    "expo-sharing": "~57.0.15",
     "expo-status-bar": "57.0.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -70,6 +70,11 @@
     "doctor": {
       "appConfigFieldsNotSyncedCheck": {
         "enabled": false
+      },
+      "reactNativeDirectoryCheck": {
+        "exclude": [
+          "react-native-webrtc"
+        ]
       }
     }
   }

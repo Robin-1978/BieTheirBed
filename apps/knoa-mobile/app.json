@@ -11,14 +11,15 @@
       "supportsTablet": true,
       "bundleIdentifier": "dev.knoa.mobile",
       "infoPlist": {
-        "NSBonjourServices": ["_knoa-node._tcp."],
+        "NSBonjourServices": [
+          "_knoa-node._tcp."
+        ],
         "NSLocalNetworkUsageDescription": "允许小诺发现同一局域网内已配对的 Node，以优先建立局域网直连。"
       }
     },
     "android": {
       "package": "dev.knoa.mobile",
       "versionCode": 101,
-      "usesCleartextTraffic": true,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "REQUEST_INSTALL_PACKAGES",
@@ -55,7 +56,8 @@
         {
           "cameraPermission": "允许小诺扫描本地服务生成的配对二维码"
         }
-      ]
+      ],
+      "expo-sharing"
     ]
   }
 }

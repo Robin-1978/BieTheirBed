@@ -269,7 +269,7 @@ class TaskRuntimeRepositoryMixin:
         )
         now = self._clock()
         with self._connect() as db:
-            updated = db.execute(
+            db.execute(
                 "UPDATE notification_intents SET state='projected', updated_at=? "
                 "WHERE principal_id=? AND intent_id=? AND state='pending'",
                 (now, principal, normalized),
