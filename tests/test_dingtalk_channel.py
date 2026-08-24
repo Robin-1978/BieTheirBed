@@ -272,11 +272,32 @@ def test_dingtalk_approval_card_projects_native_callback_buttons(tmp_path) -> No
     )
 
     buttons = json.loads(params["sys_full_json_obj"])["msgButtons"]
-    assert [(button["text"], button["actionType"]) for button in buttons] == [
-        ("确认", "callback"),
-        ("取消", "callback"),
+    assert [(button["text"], button["id"], button["request"]) for button in buttons] == [
+        ("确认", "knoa_confirm", True),
+        ("取消", "knoa_cancel", True),
     ]
-    assert buttons[0]["params"] == {
+    assert "actionType" not in buttons[0]
+    assert "params" not in buttons[0]
+    assert channel._interactive_card_action_map(
+        {
+            "body": {
+                "elements": [
+                    {
+                        "behaviors": [
+                            {
+                                "type": "callback",
+                                "value": {
+                                    "action": "confirm",
+                                    "approval_id": "approval-1",
+                                    "resource_id": "turn-1",
+                                },
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    )["knoa_confirm"] == {
         "action": "confirm",
         "approval_id": "approval-1",
         "resource_id": "turn-1",
@@ -288,6 +309,13 @@ def test_dingtalk_approval_card_projects_native_callback_buttons(tmp_path) -> No
 def test_dingtalk_card_callback_resolves_only_the_bound_recipient(tmp_path) -> None:
     channel = _channel(tmp_path)
     channel._card_recipients["card-1"] = "staff-1"
+    channel._card_actions["card-1"] = {
+        "knoa_confirm": {
+            "action": "confirm",
+            "approval_id": "approval-1",
+            "resource_id": "turn-1",
+        }
+    }
     resolved: list[tuple] = []
     pending = object()
 
@@ -303,11 +331,7 @@ def test_dingtalk_card_callback_resolves_only_the_bound_recipient(tmp_path) -> N
             "content": json.dumps(
                 {
                     "cardPrivateData": {
-                        "params": {
-                            "action": "confirm",
-                            "approval_id": "approval-1",
-                            "resource_id": "turn-1",
-                        }
+                        "actionIds": ["knoa_confirm"],
                     }
                 }
             ),
@@ -320,6 +344,34 @@ def test_dingtalk_card_callback_resolves_only_the_bound_recipient(tmp_path) -> N
     callback["data"]["userId"] = "staff-2"
     assert channel.ingest_card_callback(callback) is False
     assert len(resolved) == 1
+
+
+def test_dingtalk_card_callback_accepts_sdk_normalized_object(tmp_path) -> None:
+    channel = _channel(tmp_path)
+    channel._card_recipients["card-sdk"] = "staff-1"
+    channel._card_actions["card-sdk"] = {
+        "knoa_cancel": {
+            "action": "cancel",
+            "approval_id": "approval-2",
+            "resource_id": "turn-2",
+        }
+    }
+    resolved: list[tuple] = []
+    channel._resolve_confirmation = (
+        lambda open_id, approval_id, approved, *, resource_id="": resolved.append(
+            (open_id, approval_id, approved, resource_id)
+        )
+        or object()
+    )
+
+    callback = SimpleNamespace(
+        user_id="staff-1",
+        card_instance_id="card-sdk",
+        content={"cardPrivateData": {"actionIds": ["knoa_cancel"]}},
+    )
+
+    assert channel.ingest_card_callback(callback)
+    assert resolved == [("staff-1", "approval-2", False, "turn-2")]
 
 
 def test_dingtalk_text_confirmation_accepts_advertised_english_commands(tmp_path) -> None:

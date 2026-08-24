@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 
@@ -34,6 +35,7 @@ from knoa_platform.approvals import (
     ApprovalReviewRequest,
     ApprovalReviewResult,
 )
+
 from knoa_platform.artifacts import ArtifactRef, artifact_refs_from_tool_output
 from knoa_platform.conversation.models import (
     TERMINAL_CHAT_TURN_STATES,
@@ -53,6 +55,9 @@ from knoa_platform.conversation.repository import (
 from knoa_platform.interactions import HumanInteractionService, ScopedInteractionPort
 from knoa_platform.tasks.identity import task_tool_step_id
 from knoa_platform.tools.base import ToolPolicy
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -728,6 +733,11 @@ class ConversationService:
             )
             raise
         except Exception:  # noqa: BLE001 - Runtime failure becomes durable Turn state
+            logger.exception(
+                "Conversation runtime failed turn=%s session=%s",
+                turn.turn_id,
+                turn.session_handle,
+            )
             await asyncio.to_thread(
                 self._repository.checkpoint,
                 turn.principal_id,

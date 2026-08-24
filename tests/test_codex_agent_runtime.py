@@ -195,8 +195,52 @@ async def test_codex_runtime_maps_thread_turn_and_stream_events(tmp_path: Path) 
     started = next(params for method, params in client.requests if method == "thread/start")
     assert started["config"]["mcp_servers"]["knoa_platform"]["required"] is True
     assert started["config"]["apps"]["_default"]["enabled"] is False
+    assert started["developerInstructions"] == "Test coder profile"
+    assert "model" not in started
+    turn_started = next(
+        params for method, params in client.requests if method == "turn/start"
+    )
+    assert "model" not in turn_started
+    assert "collaborationMode" not in turn_started
     record = runtime._sessions.get(session.runtime_session_ref)
     assert record.upstream_thread_ref == "thread-a"
+
+
+@pytest.mark.asyncio
+async def test_codex_runtime_sends_collaboration_mode_only_for_pinned_model(
+    tmp_path: Path,
+) -> None:
+    factory = ClientFactory()
+    runtime = CodexAgentRuntime(
+        session_repository(tmp_path),
+        instructions="Pinned coder profile",
+        cwd=tmp_path,
+        model="gpt-5.2-codex",
+        client_factory=factory,
+    )
+    session = await runtime.create_session(
+        CreateRuntimeSession(operation_id="bind-a", binding_epoch=1)
+    )
+
+    await runtime.start_turn(
+        RuntimeTurnRequest(
+            session=session,
+            operation_id="operation-pinned",
+            input=(TextPart(text="hello"),),
+            mcp=grant(),
+        )
+    )
+
+    requests = factory.clients[-1].requests
+    thread_started = next(params for method, params in requests if method == "thread/start")
+    turn_started = next(params for method, params in requests if method == "turn/start")
+    assert thread_started["model"] == "gpt-5.2-codex"
+    assert thread_started["developerInstructions"] == "Pinned coder profile"
+    assert turn_started["model"] == "gpt-5.2-codex"
+    assert turn_started["collaborationMode"] == {
+        "mode": "default",
+        "settings": {"model": "gpt-5.2-codex"},
+    }
 
 
 @pytest.mark.asyncio
