@@ -453,22 +453,25 @@ class DingTalkChannel(FeishuChannel):
             card_state_id[:12],
             [str(value)[:32] for value in action_ids[:3]],
         )
-        # The SDK's built-in Markdown button template reports the pressed
-        # request button through cardPrivateData.actionIds.  Bind that ID back
-        # to the action captured when this exact card instance was rendered.
-        if not params:
-            actions = self._card_actions.get(card_state_id, {})
-            for action_id in action_ids:
-                matched = actions.get(str(action_id))
-                if matched is not None:
-                    params = matched
-                    break
-            # DingTalk's built-in AI Card V2 template rewrites the request
-            # component ID.  Approval cards deliberately render exactly one
-            # native request action, so an authenticated callback for that
-            # card can be resolved without trusting the rewritten ID.
-            if not params and action_ids and len(actions) == 1:
-                params = next(iter(actions.values()))
+        # Treat the server-side outTrackId binding as the source of truth.
+        # Card V2 can include non-empty internal ``params`` that do not contain
+        # our action at all; allowing those values to suppress this lookup made
+        # real button callbacks fall through as ``unknown action``.
+        actions = self._card_actions.get(card_state_id, {})
+        mapped_params: dict[str, str] = {}
+        for action_id in action_ids:
+            matched = actions.get(str(action_id))
+            if matched is not None:
+                mapped_params = matched
+                break
+        # DingTalk's built-in AI Card V2 template rewrites the request
+        # component ID.  Approval cards deliberately render exactly one
+        # native request action, so an authenticated callback for that card can
+        # be resolved without trusting either the rewritten ID or its params.
+        if not mapped_params and action_ids and len(actions) == 1:
+            mapped_params = next(iter(actions.values()))
+        if mapped_params:
+            params = mapped_params
         action = str(params.get("action") or "").strip().lower()
         if action not in {"confirm", "cancel"}:
             logger.warning("Ignored DingTalk card callback with unknown action=%s", action)
