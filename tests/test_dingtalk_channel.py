@@ -486,6 +486,7 @@ def test_dingtalk_v2_callback_accepts_unique_out_track_id_prefix(tmp_path) -> No
                 "outTrackId": "card-v2-full-callback-id",
                 "content": json.dumps(
                     {
+                        "params": {"card_v2_internal": "not-our-action"},
                         "cardPrivateData": {
                             "actionIds": ["single_button_node_dynamic"],
                         }
