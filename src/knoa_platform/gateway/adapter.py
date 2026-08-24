@@ -36,6 +36,7 @@ from knoa_platform.gateway.identity import (
 )
 from knoa_platform.gateway.routes import (
     ArtifactRoutes,
+    ChannelRoutes,
     ConfigurationRoutes,
     ConsoleRoutes,
     ConversationRoutes,
@@ -100,6 +101,7 @@ class _EmbeddedUvicornServer(uvicorn.Server):
 
 class SecureGatewayAdapter(
     ConsoleRoutes,
+    ChannelRoutes,
     ConversationRoutes,
     TaskRoutes,
     ArtifactRoutes,
@@ -130,6 +132,7 @@ class SecureGatewayAdapter(
         audit: GatewayAuditRepository | None = None,
         release_repository: AndroidReleaseRepository | None = None,
         event_heartbeat_seconds: float = 15.0,
+        channel_controller: object | None = None,
     ) -> None:
         if not config.gateway_enabled:
             raise ValueError("SecureGatewayAdapter requires gateway_enabled")
@@ -149,6 +152,7 @@ class SecureGatewayAdapter(
         elif not is_loopback_host(config.gateway_host):
             raise ValueError("Secure Gateway must bind to loopback before TLS")
         self._config = config
+        self._channel_controller = channel_controller
         self._transport_health = TransportHealth()
         paths = RuntimePaths.from_root(config.runtime_root)
         database = paths.data / "gateway.db"
@@ -245,6 +249,11 @@ class SecureGatewayAdapter(
                     methods=["POST"],
                 ),
                 Route(
+                    "/v1/console/node",
+                    self._console_node_profile,
+                    methods=["PUT"],
+                ),
+                Route(
                     "/v1/console/pairing",
                     self._console_pairing,
                     methods=["POST"],
@@ -297,7 +306,12 @@ class SecureGatewayAdapter(
                     methods=["POST"],
                 ),
                 Route("/v1/session", self._session, methods=["GET"]),
-                Route("/v1/node", self._node, methods=["GET"]),
+                Route("/v1/node", self._node, methods=["GET", "PUT"]),
+                Route(
+                    "/v1/channels/dingtalk",
+                    self._dingtalk_channel,
+                    methods=["GET", "PUT"],
+                ),
                 Route("/v1/hub", self._hub_status, methods=["GET"]),
                 Route("/v1/hub/enroll", self._hub_enroll, methods=["POST"]),
                 Route("/v1/hub", self._hub_remove, methods=["DELETE"]),

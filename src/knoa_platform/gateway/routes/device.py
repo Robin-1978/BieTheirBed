@@ -23,6 +23,7 @@ from knoa_platform.gateway.protocol import (
     PairChallengeRequest,
     PairCompleteRequest,
     RuntimeQuery,
+    UpdateNodeProfileRequest,
 )
 from knoa_platform.mobile_releases import android_release_payload
 
@@ -52,7 +53,36 @@ class DeviceRoutes:
         authenticated = self._authorize(request, limit=120)
         if isinstance(authenticated, JSONResponse):
             return authenticated
-        return JSONResponse(self._node_identity.descriptor())
+        if request.method == "PUT":
+            parsed = await self._body(request, UpdateNodeProfileRequest, limit=20)
+            if isinstance(parsed, JSONResponse):
+                return parsed
+            try:
+                self._node_hub.update_display_name(parsed.display_name)
+                asyncio.create_task(
+                    self._restart_relay_after_profile_update(),
+                    name="knoa-node-profile-relay-sync",
+                )
+            except LookupError:
+                return JSONResponse({"error": "node_not_enrolled"}, status_code=409)
+            except ValueError:
+                return JSONResponse({"error": "invalid_display_name"}, status_code=422)
+        return JSONResponse(self._node_descriptor())
+
+    async def _restart_relay_after_profile_update(self) -> None:
+        # A remote profile update may itself be travelling through Relay.
+        # Give the response time to flush before replacing that connection.
+        await asyncio.sleep(0.25)
+        try:
+            await self._node_relay.restart()
+        except Exception:
+            logger.warning("Node name Relay synchronization failed", exc_info=True)
+
+    def _node_descriptor(self) -> dict[str, object]:
+        descriptor = self._node_identity.descriptor()
+        enrollment = self._node_hub_store.load()
+        descriptor["display_name"] = "" if enrollment is None else enrollment.display_name
+        return descriptor
 
     async def _agents(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=60)
@@ -152,7 +182,7 @@ class DeviceRoutes:
             {
                 "device_id": device.device_id,
                 "principal_id": device.principal_id,
-                "node": self._node_identity.descriptor(),
+                "node": self._node_descriptor(),
             },
             status_code=201,
         )

@@ -41,6 +41,17 @@ const LONG_REQUEST_TIMEOUT_MS = 120_000;
 
 type Json = Record<string, unknown>;
 
+export type DingTalkChannelStatus = {
+  enabled: boolean;
+  client_id: string;
+  robot_code: string;
+  receive_id: string;
+  client_secret_configured: boolean;
+  client_secret_rotated_at: number;
+  running: boolean;
+  updated_at: number;
+};
+
 export class GatewayError extends Error {
   readonly retryable: boolean;
 
@@ -101,6 +112,32 @@ export class GatewayClient {
 
   async nodeDescriptor(): Promise<NodeDescriptor> {
     return this.json("/v1/node");
+  }
+
+  async updateNodeProfile(displayName: string): Promise<NodeDescriptor> {
+    return this.json("/v1/node", {
+      method: "PUT",
+      body: { display_name: displayName },
+    });
+  }
+
+  async dingtalkChannel(): Promise<DingTalkChannelStatus> {
+    const response = await this.json<{ channel: DingTalkChannelStatus }>("/v1/channels/dingtalk");
+    return response.channel;
+  }
+
+  async configureDingTalkChannel(input: {
+    enabled: boolean;
+    client_id: string;
+    client_secret: string;
+    robot_code: string;
+    receive_id: string;
+  }): Promise<DingTalkChannelStatus> {
+    const response = await this.json<{ channel: DingTalkChannelStatus }>("/v1/channels/dingtalk", {
+      method: "PUT",
+      body: input,
+    });
+    return response.channel;
   }
 
   async hubStatus(): Promise<{

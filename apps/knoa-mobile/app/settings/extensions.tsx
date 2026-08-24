@@ -4,6 +4,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Switch, Text, TextInput, Vie
 
 import { AppPressable } from "@/components/AppPressable";
 import type { CapabilityCatalogEntry, CapabilityInstallPlan, CapabilityInstallation, ExtensionImportResult, ManagedConfig } from "@/api/models";
+import type { DingTalkChannelStatus } from "@/api/gatewayClient";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
@@ -25,6 +26,12 @@ export default function ExtensionCenterScreen() {
   const [installations, setInstallations] = useState<CapabilityInstallation[]>([]);
   const [installPlan, setInstallPlan] = useState<CapabilityInstallPlan | null>(null);
   const [catalog, setCatalog] = useState<CapabilityCatalogEntry[]>([]);
+  const [dingtalk, setDingtalk] = useState<DingTalkChannelStatus | null>(null);
+  const [dingtalkEnabled, setDingtalkEnabled] = useState(false);
+  const [dingtalkClientId, setDingtalkClientId] = useState("");
+  const [dingtalkClientSecret, setDingtalkClientSecret] = useState("");
+  const [dingtalkRobotCode, setDingtalkRobotCode] = useState("");
+  const [dingtalkReceiveId, setDingtalkReceiveId] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -42,6 +49,41 @@ export default function ExtensionCenterScreen() {
   }, [gateway.runAuthenticated, t]);
 
   useEffect(() => { void load(); }, [load]);
+
+  async function loadDingTalk() {
+    setWorking(true);
+    setMessage("");
+    try {
+      const status = await gateway.runAuthenticated((client) => client.dingtalkChannel());
+      setDingtalk(status);
+      setDingtalkEnabled(status.enabled);
+      setDingtalkClientId(status.client_id);
+      setDingtalkRobotCode(status.robot_code);
+      setDingtalkReceiveId(status.receive_id);
+      setDingtalkClientSecret("");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t("connections.dingtalkLoadFailed"));
+    } finally { setWorking(false); }
+  }
+
+  async function saveDingTalk() {
+    setWorking(true);
+    setMessage("");
+    try {
+      const status = await gateway.runAuthenticated((client) => client.configureDingTalkChannel({
+        enabled: dingtalkEnabled,
+        client_id: dingtalkClientId.trim(),
+        client_secret: dingtalkClientSecret,
+        robot_code: dingtalkRobotCode.trim(),
+        receive_id: dingtalkReceiveId.trim(),
+      }));
+      setDingtalk(status);
+      setDingtalkClientSecret("");
+      setMessage(status.enabled ? t("connections.dingtalkSaved") : t("connections.dingtalkDisabled"));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t("connections.dingtalkSaveFailed"));
+    } finally { setWorking(false); }
+  }
 
   async function inspectAndCreateDraft() {
     if (!source.trim() || (kind !== "skill" && kind !== "capability" && !serverId.trim())) return;
@@ -208,13 +250,29 @@ export default function ExtensionCenterScreen() {
         <Text style={styles.label}>{t("connections.title")}</Text>
         <View style={styles.choices}>
           {BUSINESS_CONNECTIONS.map((connection) => (
-            <AppPressable key={connection.kind} style={[styles.choice, connectionKind === connection.kind && styles.selected]} onPress={() => { setConnectionKind(connection.kind); if (connection.defaultServerId) setServerId(connection.defaultServerId); }}>
+            <AppPressable key={connection.kind} style={[styles.choice, connectionKind === connection.kind && styles.selected]} onPress={() => { setConnectionKind(connection.kind); if (connection.defaultServerId) setServerId(connection.defaultServerId); if (connection.kind === "dingtalk") void loadDingTalk(); }}>
               <Text style={connectionKind === connection.kind ? styles.selectedText : styles.choiceText}>{t(connection.titleKey as never)}</Text>
             </AppPressable>
           ))}
         </View>
         <Text style={styles.hint}>{t(connectionDescriptor(connectionKind).detailKey as never)}</Text>
         {connectionDescriptor(connectionKind).capabilities.length ? <Text style={styles.hint}>{t("connections.capabilities", { items: connectionDescriptor(connectionKind).capabilities.join("、") })}</Text> : null}
+        {connectionKind === "dingtalk" ? <View style={styles.channelForm}>
+          <View style={styles.row}><Text style={styles.label}>{t("connections.dingtalkEnabled")}</Text><Switch value={dingtalkEnabled} onValueChange={setDingtalkEnabled} /></View>
+          <Text style={styles.label}>{t("connections.dingtalkClientId")}</Text>
+          <TextInput value={dingtalkClientId} onChangeText={setDingtalkClientId} placeholder="ding..." placeholderTextColor={colors.muted} style={styles.input} autoCapitalize="none" />
+          <Text style={styles.label}>{t("connections.dingtalkClientSecret")}</Text>
+          <TextInput value={dingtalkClientSecret} onChangeText={setDingtalkClientSecret} placeholder={dingtalk?.client_secret_configured ? t("connections.secretConfigured") : t("connections.secretRequired")} placeholderTextColor={colors.muted} style={styles.input} autoCapitalize="none" secureTextEntry />
+          <Text style={styles.label}>{t("connections.dingtalkRobotCode")}</Text>
+          <TextInput value={dingtalkRobotCode} onChangeText={setDingtalkRobotCode} placeholder={t("connections.dingtalkRobotCodeHint")} placeholderTextColor={colors.muted} style={styles.input} autoCapitalize="none" />
+          <Text style={styles.label}>{t("connections.dingtalkReceiveId")}</Text>
+          <TextInput value={dingtalkReceiveId} onChangeText={setDingtalkReceiveId} placeholder={t("connections.dingtalkReceiveIdHint")} placeholderTextColor={colors.muted} style={styles.input} autoCapitalize="none" />
+          <Text style={styles.hint}>{t("connections.dingtalkOwnerHint")}</Text>
+          {dingtalk ? <Text style={dingtalk.running ? styles.enabled : styles.hint}>{dingtalk.running ? t("connections.dingtalkRunning") : t("connections.dingtalkStopped")}</Text> : null}
+          <AppPressable style={styles.primary} disabled={working || (dingtalkEnabled && (!dingtalkClientId.trim() || (!dingtalkClientSecret && !dingtalk?.client_secret_configured)))} onPress={() => void saveDingTalk()}>
+            {working ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>{t("connections.dingtalkSave")}</Text>}
+          </AppPressable>
+        </View> : <>
         <View style={styles.choices}>
           {(["capability", "remote_mcp", "local_mcp", "skill"] as const).map((value) => (
             <AppPressable key={value} style={[styles.choice, kind === value && styles.selected]} onPress={() => setKind(value)}>
@@ -239,6 +297,7 @@ export default function ExtensionCenterScreen() {
         <AppPressable style={styles.primary} disabled={working} onPress={() => void inspectAndCreateDraft()}>
           {working ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>{t("settings.extensions.inspectAndDraft")}</Text>}
         </AppPressable>
+        </>}
         {message ? <Text style={styles.error}>{message}</Text> : null}
       </View>
     </ScrollView>
@@ -256,6 +315,7 @@ const styles = StyleSheet.create({
   choiceText: { color: colors.ink, fontWeight: "700" },
   selectedText: { color: "#fff", fontWeight: "800" },
   input: { backgroundColor: colors.background, color: colors.ink, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 12, borderWidth: 1, borderColor: colors.line },
+  channelForm: { gap: 10 },
   row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   label: { color: colors.ink, fontWeight: "600" },
   primary: { minHeight: 46, backgroundColor: colors.accent, borderRadius: 13, alignItems: "center", justifyContent: "center" },

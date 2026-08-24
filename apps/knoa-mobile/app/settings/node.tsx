@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
@@ -22,6 +22,7 @@ export default function NodeSettingsScreen() {
   const [diagnostic, setDiagnostic] = useState<RuntimeDiagnostic | null>(null);
   const [working, setWorking] = useState("");
   const [message, setMessage] = useState("");
+  const [nodeDisplayName, setNodeDisplayName] = useState("");
 
   const load = useCallback(async () => {
     if (!gateway.sessionHandle) return;
@@ -66,6 +67,7 @@ export default function NodeSettingsScreen() {
 
   const node = gateway.nodes.find((item) => item.nodeId === gateway.nodeId);
   const nodeName = presentNodeName(node, t("common.unnamedComputer"));
+  useEffect(() => { setNodeDisplayName(node?.displayName || ""); }, [node?.displayName]);
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.card}>
@@ -92,6 +94,22 @@ export default function NodeSettingsScreen() {
         {gateway.relayElapsedMs > 0 ? <Metric label={t("settings.node.relayElapsed")} value={`${gateway.relayElapsedMs} ms`} /> : null}
         {gateway.relayLastError ? <Text selectable style={styles.p2pError}>{t("settings.node.relayLastError", { error: gateway.relayLastError })}</Text> : null}
         <Metric label={t("common.gateway")} value={gateway.gatewayUrl || "—"} />
+        <Text style={styles.fieldLabel}>{t("settings.node.displayName")}</Text>
+        <TextInput
+          value={nodeDisplayName}
+          onChangeText={setNodeDisplayName}
+          maxLength={80}
+          placeholder={t("settings.node.displayNamePlaceholder")}
+          placeholderTextColor={colors.muted}
+          style={styles.input}
+        />
+        <AppPressable
+          disabled={working === "rename" || !nodeDisplayName.trim()}
+          style={styles.save}
+          onPress={() => void run("rename", () => gateway.renameNode(nodeDisplayName), t("settings.node.renameSuccess"))}
+        >
+          {working === "rename" ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>{t("settings.node.saveName")}</Text>}
+        </AppPressable>
       </View>
 
       <View style={styles.card}>
@@ -184,4 +202,8 @@ const styles = StyleSheet.create({
   remove: { minHeight: 48, alignItems: "center", justifyContent: "center" },
   removeText: { color: colors.danger, fontWeight: "800" },
   message: { color: colors.ink, backgroundColor: colors.accentSoft, borderRadius: 13, padding: 13 },
+  fieldLabel: { color: colors.muted, fontSize: 12, marginTop: 4 },
+  input: { minHeight: 45, borderRadius: 12, borderWidth: 1, borderColor: colors.line, paddingHorizontal: 12, color: colors.ink, backgroundColor: colors.background },
+  save: { minHeight: 45, alignItems: "center", justifyContent: "center", borderRadius: 12, backgroundColor: colors.accent },
+  saveText: { color: "#fff", fontWeight: "800" },
 });

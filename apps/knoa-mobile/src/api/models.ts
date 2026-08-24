@@ -12,6 +12,7 @@ export type PairingPayload = {
 
 export type NodeDescriptor = {
   node_id: string;
+  display_name: string;
   signing_public_key: string;
   signing_key_version: number;
   configuration_public_key: string;

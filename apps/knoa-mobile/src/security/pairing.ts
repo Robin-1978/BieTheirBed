@@ -58,6 +58,7 @@ export async function pairDevice(
     ) throw new Error("节点身份与二维码不一致，已拒绝配对");
     await replaceConnectionIdentity({
       nodeId: payload.node_id,
+      displayName: paired.node.display_name,
       deviceId: paired.device_id,
       gatewayUrl,
       nodeSigningPublicKey: payload.node_signing_public_key,

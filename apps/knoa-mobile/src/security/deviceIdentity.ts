@@ -131,6 +131,40 @@ export async function updateNodeDirectGatewayUrl(
   });
 }
 
+export async function storeNodeDisplayName(nodeId: string, displayName: string): Promise<void> {
+  const normalized = displayName.trim();
+  if (!normalized) return;
+  await queueIdentityMutation(async () => {
+    const vault = await loadVault();
+    const current = vault.nodes[nodeId];
+    if (!current || current.displayName === normalized) return;
+    vault.nodes[nodeId] = { ...current, displayName: normalized };
+    await saveVault(vault);
+  });
+}
+
+export async function storeNodeDisplayNames(
+  nodes: Array<{ node_id: string; display_name: string }>,
+): Promise<void> {
+  const names = new Map(
+    nodes
+      .map((node) => [node.node_id.trim(), node.display_name.trim()] as const)
+      .filter(([nodeId, displayName]) => Boolean(nodeId && displayName)),
+  );
+  if (!names.size) return;
+  await queueIdentityMutation(async () => {
+    const vault = await loadVault();
+    let changed = false;
+    for (const [nodeId, displayName] of names) {
+      const current = vault.nodes[nodeId];
+      if (!current || current.displayName === displayName) continue;
+      vault.nodes[nodeId] = { ...current, displayName };
+      changed = true;
+    }
+    if (changed) await saveVault(vault);
+  });
+}
+
 export async function deselectNode(): Promise<void> {
   await queueIdentityMutation(async () => {
     const vault = await loadVault();

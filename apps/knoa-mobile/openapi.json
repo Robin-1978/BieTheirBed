@@ -373,6 +373,218 @@
             }
           }
         }
+      },
+      "put": {
+        "operationId": "updateNodeProfile",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateNodeProfileRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated Node profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeDescriptorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/channels/dingtalk": {
+      "get": {
+        "operationId": "getDingTalkChannel",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "DingTalk channel settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DingTalkChannelResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "configureDingTalkChannel",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigureDingTalkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated DingTalk channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DingTalkChannelResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/p2p/offer": {
@@ -10371,6 +10583,44 @@
         "title": "ConfigValidationResult",
         "type": "object"
       },
+      "ConfigureDingTalkRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "client_id": {
+            "default": "",
+            "maxLength": 512,
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_secret": {
+            "default": "",
+            "maxLength": 65536,
+            "title": "Client Secret",
+            "type": "string"
+          },
+          "robot_code": {
+            "default": "",
+            "maxLength": 512,
+            "title": "Robot Code",
+            "type": "string"
+          },
+          "receive_id": {
+            "default": "",
+            "maxLength": 512,
+            "title": "Receive Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "ConfigureDingTalkRequest",
+        "type": "object"
+      },
       "ConfirmCapabilityRequest": {
         "additionalProperties": false,
         "properties": {
@@ -10925,6 +11175,66 @@
           "revoked"
         ],
         "title": "DeviceRevokedResponse",
+        "type": "object"
+      },
+      "DingTalkChannelResponse": {
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/DingTalkChannelStatus"
+          }
+        },
+        "required": [
+          "channel"
+        ],
+        "title": "DingTalkChannelResponse",
+        "type": "object"
+      },
+      "DingTalkChannelStatus": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "client_id": {
+            "title": "Client Id",
+            "type": "string"
+          },
+          "robot_code": {
+            "title": "Robot Code",
+            "type": "string"
+          },
+          "receive_id": {
+            "title": "Receive Id",
+            "type": "string"
+          },
+          "client_secret_configured": {
+            "title": "Client Secret Configured",
+            "type": "boolean"
+          },
+          "client_secret_rotated_at": {
+            "title": "Client Secret Rotated At",
+            "type": "number"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "enabled",
+          "client_id",
+          "robot_code",
+          "receive_id",
+          "client_secret_configured",
+          "client_secret_rotated_at",
+          "running",
+          "updated_at"
+        ],
+        "title": "DingTalkChannelStatus",
         "type": "object"
       },
       "ErrorResponse": {
@@ -12684,6 +12994,11 @@
         "properties": {
           "node_id": {
             "title": "Node Id",
+            "type": "string"
+          },
+          "display_name": {
+            "default": "",
+            "title": "Display Name",
             "type": "string"
           },
           "signing_public_key": {
@@ -15151,6 +15466,22 @@
           }
         },
         "title": "UpdateConversationSessionRequest",
+        "type": "object"
+      },
+      "UpdateNodeProfileRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "display_name"
+        ],
+        "title": "UpdateNodeProfileRequest",
         "type": "object"
       },
       "UpdateProductTaskRequest": {

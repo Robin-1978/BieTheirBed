@@ -20,6 +20,7 @@ import {
   replaceConnectionIdentity,
   storeCoreSession,
   storeEventCursor,
+  storeNodeDisplayNames,
   storeSession,
   updateNodeDirectGatewayUrl,
 } from "./deviceIdentity";
@@ -87,5 +88,27 @@ describe("Node binding selection", () => {
         sessionToken: "",
       }),
     ]);
+  });
+
+  it("reconciles every stored Node name from the Workspace directory", async () => {
+    for (const nodeId of ["node_linux", "node_windows"]) {
+      await replaceConnectionIdentity({
+        nodeId,
+        deviceId: `device_${nodeId}`,
+        gatewayUrl: "https://hub.example",
+        nodeSigningPublicKey: "s".repeat(40),
+        nodeConfigurationPublicKey: "c".repeat(40),
+      });
+    }
+
+    await storeNodeDisplayNames([
+      { node_id: "node_linux", display_name: "Company Linux" },
+      { node_id: "node_windows", display_name: "Windows Desktop" },
+    ]);
+
+    await expect(listNodeBindings()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ nodeId: "node_linux", displayName: "Company Linux" }),
+      expect.objectContaining({ nodeId: "node_windows", displayName: "Windows Desktop" }),
+    ]));
   });
 });
