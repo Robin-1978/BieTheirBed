@@ -644,26 +644,46 @@ class ConversationService:
         )
         try:
             terminal: TurnFinished | None = None
-            async for event in self._agents.execute_turn(
-                ExecuteAgentTurn(
-                    scope=scope,
-                    turn_id=turn.turn_id,
-                    client_request_id=turn.client_request_id,
-                    input=turn.user_input,
-                    attachments=turn.attachments,
-                    tools_enabled=turn.tools_enabled,
-                    cancellation=live.cancellation,
-                    agent_id=await asyncio.to_thread(
-                        self._sessions.agent_id, scope
+            selected_agent = await asyncio.to_thread(self._sessions.agent_id, scope)
+            for attempt in range(2):
+                terminal = None
+                retry_safe = True
+                async for event in self._agents.execute_turn(
+                    ExecuteAgentTurn(
+                        scope=scope,
+                        turn_id=turn.turn_id,
+                        client_request_id=turn.client_request_id,
+                        input=turn.user_input,
+                        attachments=turn.attachments,
+                        tools_enabled=turn.tools_enabled,
+                        cancellation=live.cancellation,
+                        operation_id=(
+                            "" if attempt == 0 else f"{turn.turn_id}:recovery:{attempt}"
+                        ),
+                        agent_id=selected_agent,
+                        confirmation=self._approvals,
+                        tool_commit=self._tool_commits,
+                        interaction=self._interaction_port,
                     ),
-                    confirmation=self._approvals,
-                    tool_commit=self._tool_commits,
-                    interaction=self._interaction_port,
-                ),
-            ):
-                await self._apply_event(turn, live, event)
-                if isinstance(event, TurnFinished):
-                    terminal = event
+                ):
+                    if isinstance(event, TurnFinished):
+                        terminal = event
+                        continue
+                    if not isinstance(event, UsageReported):
+                        retry_safe = False
+                    await self._apply_event(turn, live, event)
+                if terminal is None:
+                    raise RuntimeError("Agent execution ended without terminal event")
+                if (
+                    attempt == 0
+                    and retry_safe
+                    and not live.cancellation.is_set()
+                    and terminal.status == "failed"
+                    and terminal.error_code in {"provider_failed", "runtime_failed"}
+                ):
+                    continue
+                await self._apply_event(turn, live, terminal)
+                break
             if terminal is None:
                 raise RuntimeError("Agent execution ended without terminal event")
             if terminal.status == "interrupted" or live.cancellation.is_set():

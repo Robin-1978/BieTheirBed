@@ -354,6 +354,7 @@ export default function ChatScreen() {
         sessionHandle,
         text: pending.userInput,
         attachments: uploadedItems.flatMap((item) => item.uploaded ? [item.uploaded] : []),
+        agentId: gateway.activeAgentId || gateway.selectedAgentId,
       }));
       setTurns((current) => mergeConversationTurns(current, [accepted]));
       setPendingTurn(null);

@@ -25,6 +25,7 @@ import { clearAppCache } from "@/storage/appCache";
 import { clearTaskReminders } from "@/reminders/taskReminders";
 import { installedAndroidVersionCode, isAndroidUpdateAvailable } from "@/update/androidUpdater";
 import { requiresAndroidUpdate } from "@/update/releasePolicy";
+import { requireMatchingConversationAgent, resolveNewConversationAgent } from "./conversationTransition";
 
 type GatewayConnection = { gatewayUrl: string; token: string };
 const CONNECTION_TIMEOUT_MS = 20_000;
@@ -594,11 +595,13 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
   }, [commit, connect]);
 
   const newConversation = useCallback(async (agentId?: string) => {
+    const selected = resolveNewConversationAgent(
+      agentId,
+      stateRef.current.agents.map((agent) => agent.agent_id),
+      stateRef.current.defaultAgentId,
+    );
     provisionalConversationRef.current = null;
     await storeCoreSession("");
-    const selected = agentId && stateRef.current.agents.some((agent) => agent.agent_id === agentId)
-      ? agentId
-      : stateRef.current.defaultAgentId;
     commit({
       sessionHandle: "",
       latestEvent: null,
@@ -611,10 +614,16 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     const current = stateRef.current.sessionHandle;
     if (current) return current;
     if (!provisionalConversationRef.current) {
+      const requestedAgentId = stateRef.current.selectedAgentId;
       provisionalConversationRef.current = runAuthenticated(
-        (client) => client.createSession(stateRef.current.selectedAgentId),
+        async (client) => {
+          const sessionHandle = await client.createSession(requestedAgentId);
+          const session = await client.getConversationSession(sessionHandle);
+          requireMatchingConversationAgent(requestedAgentId, session.agent_id);
+          return sessionHandle;
+        },
       ).then((sessionHandle) => {
-        commit({ activeAgentId: stateRef.current.selectedAgentId });
+        commit({ activeAgentId: requestedAgentId, selectedAgentId: requestedAgentId });
         return sessionHandle;
       }).catch((error) => {
         provisionalConversationRef.current = null;

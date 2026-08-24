@@ -153,12 +153,56 @@ class ApprovalRuntime(ChunkRuntime):
         )
 
 
+class TransientFailureRuntime(ChunkRuntime):
+    def __init__(self) -> None:
+        super().__init__(chunks=0)
+        self.requests = []
+
+    async def execute_turn(self, request):
+        self.requests.append(request)
+        if len(self.requests) == 1:
+            yield TurnFinished(
+                **_base(request),
+                status="failed",
+                error_code="runtime_failed",
+            )
+            return
+        yield AssistantDelta(**_base(request), content="你好！")
+        yield TurnFinished(
+            **_base(request),
+            status="completed",
+            final_output="你好！",
+        )
+
+
 def _service(tmp_path: Path, runtime: ChunkRuntime):
     database = tmp_path / "assistant.db"
     sessions = RuntimeSessionRepository(database, handle_factory=lambda: "session-a")
     scope = sessions.create("principal-a")
     repository = ConversationRepository(database, turn_id_factory=lambda: "turn-a")
     return database, scope, repository, ConversationService(sessions, repository, runtime)
+
+
+@pytest.mark.asyncio
+async def test_transient_empty_runtime_failure_is_retried_once(tmp_path: Path) -> None:
+    runtime = TransientFailureRuntime()
+    _database, scope, repository, service = _service(tmp_path, runtime)
+    await service.start()
+    turn = await service.create_turn(
+        scope,
+        client_request_id="request-a",
+        user_input="你好",
+    )
+
+    snapshots = [signal.turn async for signal in service.updates(scope.principal_id, turn.turn_id)]
+
+    assert snapshots[-1].state is ChatTurnState.COMPLETED
+    assert snapshots[-1].final_output == "你好！"
+    assert len(runtime.requests) == 2
+    assert runtime.requests[0].operation_id == ""
+    assert runtime.requests[1].operation_id == "turn-a:recovery:1"
+    assert repository.get(scope.principal_id, turn.turn_id).failure_code == ""
+    await service.stop()
 
 
 @pytest.mark.asyncio
