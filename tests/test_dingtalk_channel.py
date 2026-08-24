@@ -629,6 +629,49 @@ def test_dingtalk_card_fallback_delivers_approval_and_terminal_once(tmp_path) ->
     assert "文件已发送" in sent[1]
 
 
+def test_dingtalk_card_fallback_delivers_each_distinct_approval(tmp_path) -> None:
+    channel = _channel(tmp_path)
+    sent: list[str] = []
+    channel._send_text = lambda _recipient, text: sent.append(text) or True
+    message_id = channel._send_card_returning_id(
+        "staff-1",
+        {
+            "header": {"title": {"content": "小诺 · 处理中"}},
+            "body": {"elements": [{"content": "正在处理"}]},
+        },
+    )
+
+    def approval(approval_id: str) -> dict:
+        return {
+            "header": {"title": {"content": "小诺 · 等待确认"}},
+            "body": {
+                "elements": [
+                    {"content": f"需要确认 · {approval_id}"},
+                    {
+                        "behaviors": [
+                            {
+                                "type": "callback",
+                                "value": {
+                                    "action": "confirm",
+                                    "approval_id": approval_id,
+                                    "resource_id": "turn-1",
+                                },
+                            }
+                        ]
+                    },
+                ]
+            },
+        }
+
+    assert message_id
+    assert channel._update_card(message_id, approval("approval-1"))
+    assert channel._update_card(message_id, approval("approval-1"))
+    assert channel._update_card(message_id, approval("approval-2"))
+    assert len(sent) == 2
+    assert "approval-1" in sent[0]
+    assert "approval-2" in sent[1]
+
+
 def test_dingtalk_card_permission_denial_is_cached(tmp_path, monkeypatch) -> None:
     channel = _channel(tmp_path)
     channel._stream_client = object()
@@ -952,6 +995,7 @@ def test_dingtalk_interactive_card_is_created_delivered_and_updated(
     assert requests[0][2]["privateData"] == {
         "staff-1": {"cardParamMap": {"knoa_action": "{}"}}
     }
+    assert requests[0][2]["userIdType"] == 1
     assert "<font" not in requests[0][2]["cardData"]["cardParamMap"]["staticMsgContent"]
     assert requests[0][2]["cardData"]["cardParamMap"]["flowStatus"] == "2"
 
@@ -967,6 +1011,7 @@ def test_dingtalk_interactive_card_is_created_delivered_and_updated(
     assert requests[-1][2]["privateData"] == {
         "staff-1": {"cardParamMap": {"knoa_action": "{}"}}
     }
+    assert requests[-1][2]["userIdType"] == 1
     assert sent == []
 
 

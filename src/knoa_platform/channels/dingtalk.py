@@ -663,7 +663,9 @@ class DingTalkChannel(FeishuChannel):
                 self._fallback_cards.discard(message_id)
                 return None
             if self._fallback_card_is_waiting_approval(card):
-                self._fallback_approval_delivered.add(message_id)
+                self._fallback_approval_delivered.add(
+                    self._fallback_approval_delivery_key(message_id, card)
+                )
             else:
                 self._fallback_card_delivered.add(message_id)
         self._trim_card_state()
@@ -693,11 +695,14 @@ class DingTalkChannel(FeishuChannel):
         # This avoids one message per reasoning/model delta when native cards
         # are unavailable without making confirmation impossible.
         if self._fallback_card_is_waiting_approval(card):
-            if message_id in self._fallback_approval_delivered:
+            approval_delivery_key = self._fallback_approval_delivery_key(
+                message_id, card
+            )
+            if approval_delivery_key in self._fallback_approval_delivered:
                 return True
             delivered = self._send_text(recipient, self._render_dingtalk_card(card))
             if delivered:
-                self._fallback_approval_delivered.add(message_id)
+                self._fallback_approval_delivered.add(approval_delivery_key)
             return delivered
         if not self._fallback_card_is_terminal(card):
             return True
@@ -718,6 +723,23 @@ class DingTalkChannel(FeishuChannel):
         return "等待确认" in project_dingtalk_card(card).title
 
     @classmethod
+    def _fallback_approval_delivery_key(
+        cls,
+        message_id: str,
+        card: dict[str, Any],
+    ) -> str:
+        approval_ids = sorted(
+            {
+                action["approval_id"]
+                for action in cls._interactive_card_action_map(card).values()
+                if action.get("approval_id")
+            }
+        )
+        if len(approval_ids) == 1:
+            return f"{message_id}:{approval_ids[0]}"
+        return message_id
+
+    @classmethod
     def _fallback_card_is_immediate(cls, card: dict[str, Any]) -> bool:
         title = project_dingtalk_card(card).title
         return "等待确认" in title or cls._fallback_card_is_terminal(card)
@@ -729,7 +751,11 @@ class DingTalkChannel(FeishuChannel):
             self._card_actions.pop(oldest, None)
             self._interactive_cards.discard(oldest)
             self._fallback_cards.discard(oldest)
-            self._fallback_approval_delivered.discard(oldest)
+            self._fallback_approval_delivered = {
+                key
+                for key in self._fallback_approval_delivered
+                if key != oldest and not key.startswith(f"{oldest}:")
+            }
             self._fallback_card_delivered.discard(oldest)
 
     def _load_card_state(self) -> None:
@@ -818,6 +844,7 @@ class DingTalkChannel(FeishuChannel):
                 "outTrackId": card_instance_id,
                 "cardData": {"cardParamMap": card_params},
                 "privateData": self._interactive_card_private_data(open_id, card),
+                "userIdType": 1,
                 "callbackType": "STREAM",
                 "imGroupOpenSpaceModel": {"supportForward": True},
                 "imRobotOpenSpaceModel": {"supportForward": True},
@@ -894,6 +921,7 @@ class DingTalkChannel(FeishuChannel):
                 "outTrackId": card_instance_id,
                 "cardData": {"cardParamMap": card_params},
                 "privateData": self._interactive_card_private_data(recipient, card),
+                "userIdType": 1,
             },
             timeout=15,
         )
