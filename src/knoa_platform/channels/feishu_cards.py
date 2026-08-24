@@ -1,4 +1,5 @@
 """Feishu adapter that speaks only the public Core WebSocket API."""
+
 from __future__ import annotations
 
 import asyncio
@@ -35,9 +36,7 @@ _PROGRESS_REASONING_CHARS = 700
 _PROGRESS_STEPS_CHARS = 1000
 _PROGRESS_DRAFT_CHARS = 900
 _PROGRESS_TIMELINE_CHARS = (
-    _PROGRESS_REASONING_CHARS
-    + _PROGRESS_STEPS_CHARS
-    + _PROGRESS_DRAFT_CHARS
+    _PROGRESS_REASONING_CHARS + _PROGRESS_STEPS_CHARS + _PROGRESS_DRAFT_CHARS
 )
 _TEXT_MESSAGE_CHARS = 4000
 _MAX_CORE_ARTIFACT_RAW_BYTES = 45 * 1024 * 1024
@@ -134,15 +133,12 @@ def _is_table_separator_line(line: str) -> bool:
         return False
     cells = stripped.split("|")
     return len(cells) >= 2 and all(
-        re.fullmatch(r"\s*:?-{3,}:?\s*", cell) is not None
-        for cell in cells
+        re.fullmatch(r"\s*:?-{3,}:?\s*", cell) is not None for cell in cells
     )
 
 
 def _markdown_table_count(text: str) -> int:
-    return sum(
-        1 for line in text.splitlines() if _is_table_separator_line(line)
-    )
+    return sum(1 for line in text.splitlines() if _is_table_separator_line(line))
 
 
 def _markdown_blocks(text: str) -> tuple[str, ...]:
@@ -651,12 +647,15 @@ class _StreamingCardState:
                 self.add_notice(entry.content)
         for approval in snapshot.approvals:
             self.request_chat_confirmation(approval, snapshot.turn_id)
-        if snapshot.final_output:
-            self.set_final_output(snapshot.final_output)
-        elif snapshot.state is ChatTurnState.FAILED:
+        # A terminal state is authoritative even when the Runtime retained a
+        # partial assistant draft.  Treating that draft as a completed answer
+        # leaves channel cards in their processing phase after cancellation.
+        if snapshot.state is ChatTurnState.FAILED:
             self.set_error(snapshot.failure_code or "处理失败")
         elif snapshot.state is ChatTurnState.CANCELLED:
             self.set_cancelled()
+        elif snapshot.final_output:
+            self.set_final_output(snapshot.final_output)
 
     def resolve_confirmation(
         self,
@@ -692,7 +691,9 @@ class _StreamingCardState:
     def _render_tool(step: _ToolStep) -> str:
         if step.status == "running":
             if step.confirmation_status in {"cancelled", "expired"}:
-                suffix = "已取消" if step.confirmation_status == "cancelled" else "已过期"
+                suffix = (
+                    "已取消" if step.confirmation_status == "cancelled" else "已过期"
+                )
                 return f"× `{step.name}` · {suffix}"
             line = f"… `{step.name}`"
             if step.confirmation_status == "confirmed":
@@ -836,9 +837,7 @@ class _StreamingCardState:
                 }
             )
         if pending_confirmation is not None:
-            elements.extend(
-                self._confirmation_elements(pending_confirmation)
-            )
+            elements.extend(self._confirmation_elements(pending_confirmation))
         if final_chunk is not None:
             if elements:
                 elements.append({"tag": "hr"})
@@ -851,9 +850,7 @@ class _StreamingCardState:
         elif self.error:
             if elements:
                 elements.append({"tag": "hr"})
-            elements.append(
-                {"tag": "markdown", "content": f"× {self.error}"}
-            )
+            elements.append({"tag": "markdown", "content": f"× {self.error}"})
         elif self.phase == "cancelled":
             if elements:
                 elements.append({"tag": "hr"})

@@ -1,4 +1,5 @@
 """Application service composition above independent Core and Channel layers."""
+
 from __future__ import annotations
 
 import asyncio
@@ -8,6 +9,7 @@ import sys
 from pathlib import Path
 
 from knoa_platform.config import AppConfig, load_config
+from knoa_platform.log_rotation import compressed_rotating_file_handler
 from knoa_platform.network_tls import ensure_default_ca_bundle
 from knoa_platform.runtime import RuntimePaths, load_service_environment
 from knoa_platform.service.channel_runtime import ChannelRuntime
@@ -120,7 +122,7 @@ async def _serve(
     config = load_config(config_path) if config_path else load_config()
     _prepare_private_file(log_path)
     handlers: list[logging.Handler] = [
-        logging.FileHandler(str(log_path), mode="a"),
+        compressed_rotating_file_handler(log_path),
     ]
     if not daemon:
         handlers.insert(0, logging.StreamHandler(sys.stderr))
@@ -129,6 +131,9 @@ async def _serve(
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
         handlers=handlers,
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("mcp.server.streamable_http").setLevel(logging.WARNING)
     service = ApplicationDaemon(config, log_path=log_path)
     await service.start()
     await service.serve_forever()

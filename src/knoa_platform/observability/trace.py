@@ -3,14 +3,18 @@
 Writes append-only JSONL files (one line per record) and keeps a small in-memory
 ring so the UI can render recent activity without re-reading files.
 """
+
 from __future__ import annotations
 
 import hashlib
+import gzip
 import json
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from knoa_platform.log_rotation import compressed_generations, rotate_compressed_file
 
 
 def _identity_hash(value: str) -> str:
@@ -20,7 +24,9 @@ def _identity_hash(value: str) -> str:
 class JsonlRecorder:
     """Thread-safe append-only JSONL sink with in-memory ring buffer."""
 
-    def __init__(self, path: str = "logs/traces.jsonl", enabled: bool = True, ring: int = 200) -> None:
+    def __init__(
+        self, path: str = "logs/traces.jsonl", enabled: bool = True, ring: int = 200
+    ) -> None:
         self._path = Path(path)
         self._enabled = enabled
         self._lock = threading.Lock()
@@ -47,6 +53,10 @@ class JsonlRecorder:
             if len(self._ring) > self._ring_max:
                 del self._ring[: len(self._ring) - self._ring_max]
             try:
+                rotate_compressed_file(
+                    self._path,
+                    incoming_bytes=len((line + "\n").encode("utf-8")),
+                )
                 with open(self._path, "a", encoding="utf-8") as fh:
                     fh.write(line + "\n")
             except OSError:
@@ -65,29 +75,33 @@ class JsonlRecorder:
         session_hash = _identity_hash(session_id)
         records: list[dict[str, Any]] = []
         with self._lock:
-            try:
-                with open(self._path, encoding="utf-8") as fh:
-                    for line in fh:
-                        try:
-                            entry = json.loads(line)
-                        except (json.JSONDecodeError, TypeError):
-                            continue
-                        if not isinstance(entry, dict):
-                            continue
-                        if (
-                            entry.get("principal_hash") == principal_hash
-                            and entry.get("session_hash") == session_hash
-                        ):
-                            records.append(entry)
-            except OSError:
-                pass
+            for path in compressed_generations(self._path):
+                try:
+                    opener = gzip.open if path.suffix == ".gz" else open
+                    with opener(path, "rt", encoding="utf-8") as fh:
+                        for line in fh:
+                            try:
+                                entry = json.loads(line)
+                            except (json.JSONDecodeError, TypeError):
+                                continue
+                            if not isinstance(entry, dict):
+                                continue
+                            if (
+                                entry.get("principal_hash") == principal_hash
+                                and entry.get("session_hash") == session_hash
+                            ):
+                                records.append(entry)
+                except OSError:
+                    continue
         return records
 
 
 class LLMTraceRecorder(JsonlRecorder):
     """Records one line per LLM (stream) call."""
 
-    def __init__(self, path: str = "logs/llm_calls.jsonl", enabled: bool = True) -> None:
+    def __init__(
+        self, path: str = "logs/llm_calls.jsonl", enabled: bool = True
+    ) -> None:
         super().__init__(path, enabled=enabled)
 
     def record_call(
@@ -118,36 +132,40 @@ class LLMTraceRecorder(JsonlRecorder):
         tool_selection_hits: int = 0,
         schema_hits: int = 0,
     ) -> None:
-        self.record({
-            "kind": "llm_call",
-            "ts": datetime.now(tz=timezone.utc).isoformat(),
-            "principal_hash": _identity_hash(principal_id),
-            "session_hash": _identity_hash(session_id),
-            "run_hash": _identity_hash(run_id),
-            "client_request_hash": _identity_hash(client_request_id),
-            "model": model,
-            "iteration": iteration,
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "prompt_tokens_estimated": prompt_tokens_estimated,
-            "prompt_tokens_source": prompt_tokens_source,
-            "completion_tokens_source": completion_tokens_source,
-            "cached_tokens": cached_tokens,
-            "total_tokens": prompt_tokens + completion_tokens,
-            "cache_hit_ratio": (cached_tokens / prompt_tokens) if prompt_tokens else 0.0,
-            "latency_ms": round(latency_ms, 1),
-            "ttft_ms": round(ttft_ms, 1),
-            "finish_reason": finish_reason,
-            "tool_calls": tool_calls,
-            "error": error,
-            "requested_max_tokens": requested_max_tokens,
-            "message_budget": message_budget,
-            "schema_tokens": schema_tokens,
-            "failover_used": failover_used,
-            "tool_selection_mode": tool_selection_mode,
-            "tool_selection_hits": tool_selection_hits,
-            "schema_hits": schema_hits,
-        })
+        self.record(
+            {
+                "kind": "llm_call",
+                "ts": datetime.now(tz=timezone.utc).isoformat(),
+                "principal_hash": _identity_hash(principal_id),
+                "session_hash": _identity_hash(session_id),
+                "run_hash": _identity_hash(run_id),
+                "client_request_hash": _identity_hash(client_request_id),
+                "model": model,
+                "iteration": iteration,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "prompt_tokens_estimated": prompt_tokens_estimated,
+                "prompt_tokens_source": prompt_tokens_source,
+                "completion_tokens_source": completion_tokens_source,
+                "cached_tokens": cached_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+                "cache_hit_ratio": (cached_tokens / prompt_tokens)
+                if prompt_tokens
+                else 0.0,
+                "latency_ms": round(latency_ms, 1),
+                "ttft_ms": round(ttft_ms, 1),
+                "finish_reason": finish_reason,
+                "tool_calls": tool_calls,
+                "error": error,
+                "requested_max_tokens": requested_max_tokens,
+                "message_budget": message_budget,
+                "schema_tokens": schema_tokens,
+                "failover_used": failover_used,
+                "tool_selection_mode": tool_selection_mode,
+                "tool_selection_hits": tool_selection_hits,
+                "schema_hits": schema_hits,
+            }
+        )
 
     def session_totals(
         self,
@@ -223,23 +241,25 @@ class TurnRecorder(JsonlRecorder):
         evidence_required: bool = False,
         evidence_satisfied: bool = False,
     ) -> None:
-        self.record({
-            "kind": "turn",
-            "ts": datetime.now(tz=timezone.utc).isoformat(),
-            "principal_hash": _identity_hash(principal_id),
-            "session_hash": _identity_hash(session_id),
-            "run_hash": _identity_hash(run_id),
-            "client_request_hash": _identity_hash(client_request_id),
-            "input_chars": len(user_input),
-            "outcome": outcome,
-            "iterations": iterations,
-            "tool_calls": tool_calls,
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "elapsed_ms": round(elapsed_ms, 1),
-            "evidence_required": evidence_required,
-            "evidence_satisfied": evidence_satisfied,
-        })
+        self.record(
+            {
+                "kind": "turn",
+                "ts": datetime.now(tz=timezone.utc).isoformat(),
+                "principal_hash": _identity_hash(principal_id),
+                "session_hash": _identity_hash(session_id),
+                "run_hash": _identity_hash(run_id),
+                "client_request_hash": _identity_hash(client_request_id),
+                "input_chars": len(user_input),
+                "outcome": outcome,
+                "iterations": iterations,
+                "tool_calls": tool_calls,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "elapsed_ms": round(elapsed_ms, 1),
+                "evidence_required": evidence_required,
+                "evidence_satisfied": evidence_satisfied,
+            }
+        )
 
     def session_totals(
         self,

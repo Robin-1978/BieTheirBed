@@ -140,7 +140,7 @@ node_agents:
     approval_policy: "never"
     sandbox: "read-only"
     native_capability_ceiling: [workspace_read, command_execution]
-    request_timeout_seconds: 120
+    request_timeout_seconds: 600
     max_line_bytes: 4194304
     max_event_queue: 1024
 

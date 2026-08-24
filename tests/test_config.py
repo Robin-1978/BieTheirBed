@@ -21,6 +21,7 @@ class TestAppConfig:
         system = cfg.node_agent_catalog()
         assert system.agents["knoa"].enabled is True
         assert system.agents["codex"].enabled is False
+        assert system.agents["codex"].request_timeout_seconds == 600.0
         assert system.agents["reviewer_agent"].enabled is False
         assert cfg.approval_review.mode == "off"
         assert cfg.approval_review.timeout_seconds == 60.0
@@ -67,7 +68,9 @@ class TestAppConfig:
             },
         )
 
-        assert cfg.node_agent_catalog().agents["researcher"].display_name == "Researcher"
+        assert (
+            cfg.node_agent_catalog().agents["researcher"].display_name == "Researcher"
+        )
 
     def test_reviewer_agent_is_configured_as_a_restricted_system_agent(self):
         base = AppConfig()
@@ -90,9 +93,10 @@ class TestAppConfig:
         )
 
         assert cfg.approval_review.mode == "suggest"
-        assert cfg.node_agent_catalog().agents[
-            "reviewer_agent"
-        ].model_binding.model == "reviewer"
+        assert (
+            cfg.node_agent_catalog().agents["reviewer_agent"].model_binding.model
+            == "reviewer"
+        )
 
     def test_enabled_review_requires_enabled_reviewer_agent(self):
         with pytest.raises(ValueError, match="requires enabled reviewer_agent"):
@@ -100,7 +104,9 @@ class TestAppConfig:
 
     def test_enabled_reviewer_agent_requires_explicit_model(self):
         base = AppConfig()
-        with pytest.raises(ValueError, match="Enabled approval review requires a reviewer model"):
+        with pytest.raises(
+            ValueError, match="Enabled approval review requires a reviewer model"
+        ):
             AppConfig(
                 node_agents={
                     **base.node_agents,
@@ -158,16 +164,18 @@ class TestAppConfig:
             AppConfig(gateway_enabled=True, gateway_remote_enabled=True)
 
     def test_gateway_public_url_requires_https_outside_loopback(self):
-        assert AppConfig(gateway_public_url="http://127.0.0.1:9529/").gateway_public_url == (
-            "http://127.0.0.1:9529"
-        )
+        assert AppConfig(
+            gateway_public_url="http://127.0.0.1:9529/"
+        ).gateway_public_url == ("http://127.0.0.1:9529")
         with pytest.raises(ValueError, match="must use HTTPS"):
             AppConfig(gateway_public_url="http://knoa.example.com")
 
     def test_model_context_window_overrides_global_fallback(self):
         cfg = AppConfig(
             providers={"api": {"driver": "openai_compatible", "api_key": "k"}},
-            models={"main": {"provider": "api", "model": "m", "context_window": 131072}},
+            models={
+                "main": {"provider": "api", "model": "m", "context_window": 131072}
+            },
             default_model="main",
         )
         assert cfg.effective_context_window_budget() == 131072
@@ -175,7 +183,9 @@ class TestAppConfig:
     def test_model_context_window_accepts_comma_formatted_value(self):
         cfg = AppConfig(
             providers={"api": {"driver": "openai_compatible", "api_key": "k"}},
-            models={"main": {"provider": "api", "model": "m", "context_window": "131,072"}},
+            models={
+                "main": {"provider": "api", "model": "m", "context_window": "131,072"}
+            },
             default_model="main",
         )
         assert cfg.models["main"].context_window == 131072

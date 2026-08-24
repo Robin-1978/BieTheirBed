@@ -15,6 +15,7 @@ from knoa_platform.agent_runtime.composition import (
 )
 from knoa_platform.branding import ASSISTANT_NAME
 from knoa_platform.config import AppConfig, load_config
+from knoa_platform.log_rotation import compressed_rotating_file_handler
 from knoa_platform.private_files import prepare_private_file
 from knoa_platform.runtime import RuntimePaths, load_service_environment
 from knoa_platform.service.shutdown import wait_for_shutdown
@@ -147,7 +148,7 @@ async def _serve(
     config = load_config(config_path) if config_path else load_config()
     _prepare_private_file(log_path)
     handlers: list[logging.Handler] = [
-        logging.FileHandler(str(log_path), mode="a"),
+        compressed_rotating_file_handler(log_path),
     ]
     if not daemon:
         handlers.insert(0, logging.StreamHandler(sys.stderr))
@@ -156,6 +157,9 @@ async def _serve(
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
         handlers=handlers,
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("mcp.server.streamable_http").setLevel(logging.WARNING)
     service = CoreDaemon(config, log_path=log_path)
     await service.start()
     await service.serve_forever()
@@ -174,7 +178,9 @@ def daemonize(log_path: Path) -> None:
     if os.fork() > 0:
         raise SystemExit(0)
     sys.stdin.close()
-    sys.stdout = open(str(log_path), "a", encoding="utf-8")  # noqa: SIM115
+    # Application logging owns the bounded service log.  Keeping stdout open
+    # on the same inode would bypass rotation after the first rollover.
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
     sys.stderr = sys.stdout
 
 
