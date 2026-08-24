@@ -39,6 +39,7 @@
 - [Knoa Mobile UI Design](knoa-mobile-ui-design.md)
 - [Knoa Mobile Product Polish Plan](knoa-mobile-product-polish-plan.md)
 - [小诺产品剩余 Backlog 方案设计](knoa-product-backlog-solution-design-2026-08-23.md)
+- [小诺项目功能与 APP 页面设计评审](knoa-mobile-app-design-review-2026-08-24.md)
 
 ## Refactoring Planning
 
