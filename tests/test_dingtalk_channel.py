@@ -318,6 +318,129 @@ def test_dingtalk_markdown_falls_back_to_plain_text(tmp_path, monkeypatch) -> No
     assert json.loads(requests[1]["msgParam"]) == {"content": "**最终结果**"}
 
 
+def test_dingtalk_image_uses_sdk_upload_and_image_message(tmp_path, monkeypatch) -> None:
+    channel = _channel(tmp_path)
+    image = tmp_path / "截图.jpg"
+    image.write_bytes(b"jpeg-data")
+    uploads: list[tuple[bytes, dict]] = []
+    requests: list[dict] = []
+
+    class _StreamClient:
+        def upload_to_dingtalk(self, data, **kwargs):
+            uploads.append((data, kwargs))
+            return "@image-media-id"
+
+    class _Response:
+        is_error = False
+
+    def post(_url, *, json, **_kwargs):
+        requests.append(json)
+        return _Response()
+
+    channel._stream_client = _StreamClient()
+    channel._access_token_value = lambda: "token"
+    monkeypatch.setattr("knoa_platform.channels.dingtalk.httpx.post", post)
+
+    assert channel._send_image("staff-1", image)
+    assert uploads == [
+        (
+            b"jpeg-data",
+            {
+                "filetype": "image",
+                "filename": "截图.jpg",
+                "mimetype": "image/jpeg",
+            },
+        )
+    ]
+    assert requests[0]["msgKey"] == "sampleImageMsg"
+    assert json.loads(requests[0]["msgParam"]) == {"photoURL": "@image-media-id"}
+
+
+def test_dingtalk_file_uses_sdk_upload_and_file_message(tmp_path, monkeypatch) -> None:
+    channel = _channel(tmp_path)
+    attachment = tmp_path / "report.pdf"
+    attachment.write_bytes(b"pdf-data")
+    uploads: list[tuple[bytes, dict]] = []
+    requests: list[dict] = []
+
+    class _StreamClient:
+        def upload_to_dingtalk(self, data, **kwargs):
+            uploads.append((data, kwargs))
+            return "@file-media-id"
+
+    class _Response:
+        is_error = False
+
+    def post(_url, *, json, **_kwargs):
+        requests.append(json)
+        return _Response()
+
+    channel._stream_client = _StreamClient()
+    channel._access_token_value = lambda: "token"
+    monkeypatch.setattr("knoa_platform.channels.dingtalk.httpx.post", post)
+
+    assert channel._send_file("staff-1", attachment, "交付报告.pdf")
+    assert uploads == [
+        (
+            b"pdf-data",
+            {
+                "filetype": "file",
+                "filename": "交付报告.pdf",
+                "mimetype": "application/pdf",
+            },
+        )
+    ]
+    assert requests[0]["msgKey"] == "sampleFile"
+    assert json.loads(requests[0]["msgParam"]) == {
+        "mediaId": "@file-media-id",
+        "fileName": "交付报告.pdf",
+        "fileType": "pdf",
+    }
+
+
+def test_dingtalk_media_download_uses_configured_robot_code(tmp_path, monkeypatch) -> None:
+    channel = DingTalkChannel(
+        AppConfig(
+            runtime_root=str(tmp_path),
+            dingtalk_enabled=True,
+            dingtalk_client_id="client-id",
+            dingtalk_client_secret="client-secret",
+            dingtalk_robot_code="robot-code",
+        )
+    )
+    channel._access_token_value = lambda: "token"
+    requests: list[tuple[str, dict | None]] = []
+
+    class _Response:
+        def __init__(self, *, body=None, content=b"", headers=None):
+            self._body = body or {}
+            self.content = content
+            self.headers = headers or {}
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._body
+
+    def post(url, *, json, **_kwargs):
+        requests.append((url, json))
+        return _Response(body={"downloadUrl": "https://download.example/attachment"})
+
+    def get(url, **_kwargs):
+        requests.append((url, None))
+        return _Response(content=b"attachment", headers={"content-type": "image/png"})
+
+    monkeypatch.setattr("knoa_platform.channels.dingtalk.httpx.post", post)
+    monkeypatch.setattr("knoa_platform.channels.dingtalk.httpx.get", get)
+
+    assert channel._download_media("download-code") == (b"attachment", "image/png")
+    assert requests[0][1] == {
+        "downloadCode": "download-code",
+        "robotCode": "robot-code",
+    }
+
+
 def test_dingtalk_card_projection_removes_feishu_html() -> None:
     projected = project_dingtalk_card(
         {

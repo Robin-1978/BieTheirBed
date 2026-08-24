@@ -691,41 +691,69 @@ class DingTalkChannel(FeishuChannel):
         return f"{rendered}{approval_hint}"
 
     def _send_image(self, open_id: str, path: Path, name: str = "") -> bool:
-        return self._send_media(open_id, path, name or path.name, "sampleImageMsg")
+        return self._send_media(open_id, path, name or path.name, is_image=True)
 
     def _send_file(self, open_id: str, path: Path, name: str = "") -> bool:
-        return self._send_media(open_id, path, name or path.name, "sampleFileMsg")
+        return self._send_media(open_id, path, name or path.name, is_image=False)
 
-    def _send_media(self, open_id: str, path: Path, name: str, msg_key: str) -> bool:
-        data = path.read_bytes()
+    def _send_media(
+        self,
+        open_id: str,
+        path: Path,
+        name: str,
+        *,
+        is_image: bool,
+    ) -> bool:
+        """Upload with DingTalk's SDK, then send the matching robot message."""
+        try:
+            data = path.read_bytes()
+        except OSError:
+            logger.exception("DingTalk media file could not be read path=%s", path)
+            return False
         media_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
-        token = self._access_token_value()
-        response = httpx.post(
-            f"{_DINGTALK_API}/v1.0/robot/messageFiles/upload",
-            headers={"x-acs-dingtalk-access-token": token},
-            data={"robotCode": self._dingtalk_config.dingtalk_robot_code or self._app_id},
-            files={"file": (name, data, media_type)},
-            timeout=30,
-        )
-        if response.is_error:
-            logger.error("DingTalk media upload failed status=%s", response.status_code)
+        uploader = getattr(self._stream_client, "upload_to_dingtalk", None)
+        if not callable(uploader):
+            logger.error("DingTalk media upload unavailable: Stream client is not connected")
             return False
-        payload = response.json()
-        media_id = str(payload.get("mediaId") or payload.get("media_id") or "")
-        download_url = str(payload.get("downloadUrl") or payload.get("download_url") or "")
-        if not media_id and not download_url:
-            logger.error("DingTalk media upload response did not contain media id")
+        try:
+            media_id = str(
+                uploader(
+                    data,
+                    filetype="image" if is_image else "file",
+                    filename=name,
+                    mimetype=media_type,
+                )
+                or ""
+            )
+        except Exception:
+            logger.exception("DingTalk SDK media upload failed name=%s", name)
             return False
-        key = "photoURL" if msg_key == "sampleImageMsg" and download_url else "mediaId"
-        value = download_url if key == "photoURL" else media_id
-        return self._send_robot_message(open_id, msg_key, {key: value}, token=token)
+        if not media_id:
+            logger.error("DingTalk SDK media upload returned no media id name=%s", name)
+            return False
+
+        if is_image:
+            msg_key = "sampleImageMsg"
+            msg_param = {"photoURL": media_id}
+        else:
+            suffix = Path(name).suffix.lstrip(".").lower() or "file"
+            msg_key = "sampleFile"
+            msg_param = {
+                "mediaId": media_id,
+                "fileName": name,
+                "fileType": suffix,
+            }
+        return self._send_robot_message(open_id, msg_key, msg_param)
 
     def _download_media(self, download_code: str) -> tuple[bytes, str]:
         token = self._access_token_value()
         response = httpx.post(
             f"{_DINGTALK_API}/v1.0/robot/messageFiles/download",
             headers={"x-acs-dingtalk-access-token": token},
-            json={"downloadCode": download_code, "robotCode": self._app_id},
+            json={
+                "downloadCode": download_code,
+                "robotCode": self._dingtalk_config.dingtalk_robot_code or self._app_id,
+            },
             timeout=20,
         )
         response.raise_for_status()
