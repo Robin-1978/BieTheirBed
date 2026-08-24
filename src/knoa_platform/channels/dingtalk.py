@@ -517,7 +517,15 @@ class DingTalkChannel(FeishuChannel):
             known_id
             for known_id in self._card_actions
             if callback_id
-            and (known_id.startswith(callback_id) or callback_id.startswith(known_id))
+            and (
+                known_id.startswith(callback_id)
+                or callback_id.startswith(known_id)
+                or (
+                    len(callback_id) >= 12
+                    and len(known_id) >= 12
+                    and known_id[:12] == callback_id[:12]
+                )
+            )
         ]
         return matches[0] if len(matches) == 1 else callback_id
 

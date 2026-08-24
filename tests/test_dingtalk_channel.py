@@ -483,7 +483,7 @@ def test_dingtalk_v2_callback_accepts_unique_out_track_id_prefix(tmp_path) -> No
         {
             "data": {
                 "userId": "staff-1",
-                "outTrackId": "card-v2-full",
+                "outTrackId": "card-v2-full-callback-id",
                 "content": json.dumps(
                     {
                         "cardPrivateData": {
