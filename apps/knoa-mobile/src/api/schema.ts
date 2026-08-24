@@ -108,7 +108,23 @@ export interface paths {
             cookie?: never;
         };
         get: operations["getNodeDescriptor"];
-        put?: never;
+        put: operations["updateNodeProfile"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/channels/dingtalk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getDingTalkChannel"];
+        put: operations["configureDingTalkChannel"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2183,6 +2199,31 @@ export interface components {
              */
             issues: components["schemas"]["ConfigValidationIssue"][];
         };
+        /** ConfigureDingTalkRequest */
+        ConfigureDingTalkRequest: {
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Client Id
+             * @default
+             */
+            client_id: string;
+            /**
+             * Client Secret
+             * @default
+             */
+            client_secret: string;
+            /**
+             * Robot Code
+             * @default
+             */
+            robot_code: string;
+            /**
+             * Receive Id
+             * @default
+             */
+            receive_id: string;
+        };
         /** ConfirmCapabilityRequest */
         ConfirmCapabilityRequest: {
             /** Operation Id */
@@ -2440,6 +2481,29 @@ export interface components {
         DeviceRevokedResponse: {
             /** Revoked */
             revoked: boolean;
+        };
+        /** DingTalkChannelResponse */
+        DingTalkChannelResponse: {
+            channel: components["schemas"]["DingTalkChannelStatus"];
+        };
+        /** DingTalkChannelStatus */
+        DingTalkChannelStatus: {
+            /** Enabled */
+            enabled: boolean;
+            /** Client Id */
+            client_id: string;
+            /** Robot Code */
+            robot_code: string;
+            /** Receive Id */
+            receive_id: string;
+            /** Client Secret Configured */
+            client_secret_configured: boolean;
+            /** Client Secret Rotated At */
+            client_secret_rotated_at: number;
+            /** Running */
+            running: boolean;
+            /** Updated At */
+            updated_at: number;
         };
         /** ErrorResponse */
         ErrorResponse: {
@@ -3324,6 +3388,11 @@ export interface components {
         NodeDescriptorResponse: {
             /** Node Id */
             node_id: string;
+            /**
+             * Display Name
+             * @default
+             */
+            display_name: string;
             /** Signing Public Key */
             signing_public_key: string;
             /** Signing Key Version */
@@ -4397,6 +4466,11 @@ export interface components {
              */
             expected_revision: number | null;
         };
+        /** UpdateNodeProfileRequest */
+        UpdateNodeProfileRequest: {
+            /** Display Name */
+            display_name: string;
+        };
         /** UpdateProductTaskRequest */
         UpdateProductTaskRequest: {
             /**
@@ -4816,6 +4890,191 @@ export interface operations {
             };
             /** @description Request rejected */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    updateNodeProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateNodeProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated Node profile */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeDescriptorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getDingTalkChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description DingTalk channel settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DingTalkChannelResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    configureDingTalkChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfigureDingTalkRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated DingTalk channel */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DingTalkChannelResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

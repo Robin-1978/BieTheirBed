@@ -306,6 +306,7 @@ def test_hub_enrollment_ticket_and_presence_are_separate_trust_steps(
                 hub_id="hub-1",
                 hub_signing_public_key=service.signing_public_key,
                 enrolled_at=1000,
+                display_name="Company Linux",
             ),
             lambda: 1000,
             direct_gateway_url="https://node.example.test",
@@ -317,6 +318,7 @@ def test_hub_enrollment_ticket_and_presence_are_separate_trust_steps(
     assert enrolled["node_id"] == node.node_id
     assert observed["direct_gateway_url"] == "https://node.example.test"
     assert observed["version"] == __version__
+    assert observed["display_name"] == "Company Linux"
     assert claims["node_id"] == node.node_id
     with pytest.raises(PermissionError):
         service.verify_and_consume_ticket(ticket)

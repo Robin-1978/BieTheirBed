@@ -115,6 +115,9 @@ from knoa_platform.gateway.protocol import (
     WriteSecretRequest,
     WebhookSecretRotationResponse,
     ConfirmCapabilityRequest,
+    ConfigureDingTalkRequest,
+    DingTalkChannelResponse,
+    UpdateNodeProfileRequest,
 )
 
 _MODELS: tuple[type[BaseModel], ...] = (
@@ -124,6 +127,9 @@ _MODELS: tuple[type[BaseModel], ...] = (
     ErrorResponse,
     HealthResponse,
     NodeDescriptorResponse,
+    DingTalkChannelResponse,
+    ConfigureDingTalkRequest,
+    UpdateNodeProfileRequest,
     NodeHubEnrollmentRequest,
     NodeHubEnrollmentResponse,
     NodeHubRemovedResponse,
@@ -355,7 +361,35 @@ def gateway_openapi_schema() -> dict[str, Any]:
                         "200": _json_response("Pinned Node identity", NodeDescriptorResponse),
                         **_errors("401", "429"),
                     },
-                }
+                },
+                "put": {
+                    "operationId": "updateNodeProfile",
+                    "security": bearer,
+                    "requestBody": _json_body(UpdateNodeProfileRequest),
+                    "responses": {
+                        "200": _json_response("Updated Node profile", NodeDescriptorResponse),
+                        **_errors("401", "409", "415", "422", "429"),
+                    },
+                },
+            },
+            "/v1/channels/dingtalk": {
+                "get": {
+                    "operationId": "getDingTalkChannel",
+                    "security": bearer,
+                    "responses": {
+                        "200": _json_response("DingTalk channel settings", DingTalkChannelResponse),
+                        **_errors("401", "429", "503"),
+                    },
+                },
+                "put": {
+                    "operationId": "configureDingTalkChannel",
+                    "security": bearer,
+                    "requestBody": _json_body(ConfigureDingTalkRequest),
+                    "responses": {
+                        "200": _json_response("Updated DingTalk channel", DingTalkChannelResponse),
+                        **_errors("401", "415", "422", "429", "503"),
+                    },
+                },
             },
             "/v1/p2p/offer": {
                 "post": {

@@ -140,6 +140,9 @@ class HubService:
             "version": str(request["version"]),
             "direct_gateway_url": str(request.get("direct_gateway_url", "")),
         }
+        display_name = str(request.get("display_name", "")).strip()
+        if display_name:
+            transcript["display_name"] = display_name
         try:
             Ed25519PublicKey.from_public_bytes(
                 _decode(node["signing_public_key"])
@@ -151,6 +154,7 @@ class HubService:
             str(request["nonce"]),
             version=str(request["version"]),
             direct_gateway_url=str(request.get("direct_gateway_url", "")),
+            display_name=display_name,
         )
 
     def issue_ticket(

@@ -77,6 +77,7 @@ class NodeHubEnrollment:
     hub_id: str
     hub_signing_public_key: str
     enrolled_at: float
+    display_name: str = ""
 
     @property
     def workspace_id(self) -> str:
@@ -108,6 +109,7 @@ class NodeHubStore:
             hub_id=_identifier(str(raw["hub_id"]), "Hub ID"),
             hub_signing_public_key=_public_key(str(raw["hub_signing_public_key"])),
             enrolled_at=float(raw["enrolled_at"]),
+            display_name=str(raw.get("display_name") or "").strip(),
         )
 
     def save(
@@ -116,13 +118,33 @@ class NodeHubStore:
         hub_url: str,
         hub_id: str,
         hub_signing_public_key: str,
+        display_name: str = "",
     ) -> NodeHubEnrollment:
         enrollment = NodeHubEnrollment(
             hub_url=_hub_url(hub_url),
             hub_id=_identifier(hub_id, "Hub ID"),
             hub_signing_public_key=_public_key(hub_signing_public_key),
             enrolled_at=float(self._clock()),
+            display_name=_display_name(display_name, allow_empty=True),
         )
+        self._write(enrollment)
+        return enrollment
+
+    def update_display_name(self, display_name: str) -> NodeHubEnrollment:
+        current = self.load()
+        if current is None:
+            raise LookupError("Node is not enrolled")
+        enrollment = NodeHubEnrollment(
+            hub_url=current.hub_url,
+            hub_id=current.hub_id,
+            hub_signing_public_key=current.hub_signing_public_key,
+            enrolled_at=current.enrolled_at,
+            display_name=_display_name(display_name),
+        )
+        self._write(enrollment)
+        return enrollment
+
+    def _write(self, enrollment: NodeHubEnrollment) -> None:
         prepare_private_directory(
             self._path.parent, label="Node Hub enrollment directory"
         )
@@ -142,7 +164,6 @@ class NodeHubStore:
             fsync_directory(self._path.parent)
         finally:
             temporary.unlink(missing_ok=True)
-        return enrollment
 
     def clear(self) -> None:
         self._path.unlink(missing_ok=True)
@@ -204,7 +225,11 @@ class NodeHubService:
             hub_url=hub_url,
             hub_id=request.hub_id,
             hub_signing_public_key=request.hub_signing_public_key,
+            display_name=request.display_name,
         )
+
+    def update_display_name(self, display_name: str) -> NodeHubEnrollment:
+        return self.store.update_display_name(display_name)
 
     async def control_state(self) -> dict[str, Any]:
         enrollment = self.store.load()
@@ -492,6 +517,9 @@ class NodeRelayManager:
                 or ready.get("node_id") != self._identity.node_id
             ):
                 raise PermissionError("Relay rejected Node presence")
+            remote_display_name = str(ready.get("display_name") or "").strip()
+            if not enrollment.display_name and remote_display_name:
+                enrollment = self._store.update_display_name(remote_display_name)
             self._connected = True
             self._last_error = ""
             publisher = asyncio.create_task(
@@ -1128,14 +1156,21 @@ def _presence(
         "version": __version__,
         "direct_gateway_url": direct_gateway_url,
     }
+    if enrollment.display_name:
+        transcript["display_name"] = enrollment.display_name
     return {
-        "node_id": identity.node_id,
-        "timestamp": timestamp,
-        "nonce": nonce,
-        "version": __version__,
-        "direct_gateway_url": direct_gateway_url,
+        **{key: value for key, value in transcript.items() if key not in {"audience", "hub_id"}},
         "signature": identity.sign(canonical_json(transcript)),
     }
+
+
+def _display_name(value: str, *, allow_empty: bool = False) -> str:
+    normalized = str(value).strip()
+    if not normalized and allow_empty:
+        return ""
+    if not normalized or len(normalized) > 80 or any(ord(char) < 32 for char in normalized):
+        raise ValueError("Node display name must contain 1-80 printable characters")
+    return normalized
 
 
 def _hub_url(value: str) -> str:

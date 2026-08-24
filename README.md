@@ -238,8 +238,10 @@ the Task Definition with `event_source=mcp:<server_id>` and a Resource URI
 selector. `mcp_disable` provides
 a confirmation-gated rollback that stops the Provider and persists it disabled.
 
-Enable the independently mounted DingTalk Stream channel in
-`~/.knoa/config/local.yaml`:
+Configure the independently mounted DingTalk Stream channel from **Mobile App →
+Settings → Extensions → DingTalk**. The Node stores the Client Secret in its
+owner-only channel secret store and hot-reloads the adapter without a service
+restart. A YAML bootstrap remains available for unattended installations:
 
 ```yaml
 dingtalk_enabled: true
@@ -253,7 +255,9 @@ not require a public callback URL. Text, images, files, background Task
 notifications, approvals and result delivery share the same Core session and
 idempotency semantics as Feishu. The `dingtalk_stream` SDK is included in the
 runtime dependency lock and is imported lazily so a disabled channel cannot
-affect Node startup.
+affect Node startup. When `dingtalk_receive_id` is left empty, the first valid
+sender is persisted as the sole owner; later senders cannot replace that
+binding.
 
 Enable the independently mounted Feishu channel in
 `~/.knoa/config/local.yaml`:

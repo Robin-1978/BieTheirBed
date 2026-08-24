@@ -73,6 +73,7 @@ class PresenceRequest(_Request):
     nonce: str = Field(min_length=16, max_length=256)
     version: str = Field(min_length=1, max_length=64)
     direct_gateway_url: str = Field(default="", max_length=2048)
+    display_name: str = Field(default="", max_length=80)
     signature: str = Field(min_length=80, max_length=128)
 
 
@@ -1040,10 +1041,14 @@ class HubApplication:
             authentication = PresenceRequest.model_validate(
                 await websocket.receive_json()
             )
-            self.service.record_presence(authentication.model_dump(mode="json"))
+            node = self.service.record_presence(authentication.model_dump(mode="json"))
             node_id = authentication.node_id
             connection = await self.relay.register_node(node_id, websocket)
-            await websocket.send_json({"ready": True, "node_id": node_id})
+            await websocket.send_json({
+                "ready": True,
+                "node_id": node_id,
+                "display_name": node["display_name"],
+            })
             while True:
                 raw = await websocket.receive_json()
                 frame = RelayFrame.model_validate(raw.get("frame"))

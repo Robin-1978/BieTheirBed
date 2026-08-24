@@ -641,6 +641,7 @@ class HubRepository:
         *,
         version: str = "",
         direct_gateway_url: str = "",
+        display_name: str = "",
     ) -> dict:
         now = self._clock()
         try:
@@ -651,9 +652,10 @@ class HubRepository:
                 )
                 db.execute(
                     """UPDATE nodes SET last_seen=?, direct_gateway_url=?,
-                          version=COALESCE(NULLIF(?, ''), version)
+                          version=COALESCE(NULLIF(?, ''), version),
+                          display_name=COALESCE(NULLIF(?, ''), display_name)
                        WHERE node_id=? AND state='active'""",
-                    (now, direct_gateway_url, version, node_id),
+                    (now, direct_gateway_url, version, display_name, node_id),
                 )
                 db.execute("DELETE FROM presence_nonces WHERE observed_at<?", (now - 600,))
         except sqlite3.IntegrityError as exc:

@@ -39,7 +39,10 @@ class ApplicationDaemon:
         if config.gateway_enabled:
             from knoa_platform.gateway import SecureGatewayAdapter
 
-            self._gateway = SecureGatewayAdapter(config)
+            self._gateway = SecureGatewayAdapter(
+                config,
+                channel_controller=self._channels,
+            )
         self._started = False
 
     async def start(self) -> None:

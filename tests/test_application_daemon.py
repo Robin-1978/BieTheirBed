@@ -119,7 +119,7 @@ async def test_application_daemon_mounts_gateway_outside_core(
     )
     monkeypatch.setattr(
         "knoa_platform.gateway.SecureGatewayAdapter",
-        lambda config: gateway,
+        lambda config, **_kwargs: gateway,
     )
     daemon = ApplicationDaemon(
         AppConfig(fallback_enabled=False, gateway_enabled=True),

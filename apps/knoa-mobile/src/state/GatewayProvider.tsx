@@ -10,6 +10,8 @@ import {
   clearConnectionIdentity,
   deselectNode,
   loadConnectionIdentity,
+  storeNodeDisplayName,
+  storeNodeDisplayNames,
   loadSessionToken,
   listNodeBindings,
   selectNode,
@@ -17,7 +19,7 @@ import {
   type NodeDeviceBinding,
 } from "@/security/deviceIdentity";
 import { withAuthenticationRetry } from "./authenticationRecovery";
-import { loadHubConnection, resolveAndroidRelease } from "@/hub/hubClient";
+import { listHubNodes, loadHubConnection, resolveAndroidRelease } from "@/hub/hubClient";
 import { setCacheIdentity } from "@/storage/cacheScope";
 import { clearAppCache } from "@/storage/appCache";
 import { clearTaskReminders } from "@/reminders/taskReminders";
@@ -72,6 +74,7 @@ type GatewayState = {
   activeAgentId: string;
   selectAgent(agentId: string): void;
   pair(encoded: string, displayName: string): Promise<void>;
+  renameNode(displayName: string): Promise<void>;
   reconnect(): Promise<void>;
   reauthenticate(): Promise<void>;
   removeConnection(): Promise<void>;
@@ -90,7 +93,7 @@ type GatewayState = {
 const Context = createContext<GatewayState | null>(null);
 
 export function GatewayProvider({ children }: React.PropsWithChildren) {
-  type StoredState = Omit<GatewayState, "pair" | "reconnect" | "reauthenticate" | "removeConnection" | "disconnectNode" | "switchNode" | "newConversation" | "ensureConversation" | "commitConversation" | "openConversation" | "connection" | "runAuthenticated" | "refreshAgents" | "subscribeEvents" | "selectAgent">;
+  type StoredState = Omit<GatewayState, "pair" | "renameNode" | "reconnect" | "reauthenticate" | "removeConnection" | "disconnectNode" | "switchNode" | "newConversation" | "ensureConversation" | "commitConversation" | "openConversation" | "connection" | "runAuthenticated" | "refreshAgents" | "subscribeEvents" | "selectAgent">;
   const initialState: StoredState = {
     status: "booting",
     client: null,
@@ -147,11 +150,14 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     provisionalConversationRef.current = null;
     commit({ status: "booting", error: "", p2pState: "idle", p2pLastError: "", p2pRetryAt: 0, p2pElapsedMs: 0, lanState: "idle", lanLastError: "", lanRetryAt: 0, lanEndpoint: "", lanElapsedMs: 0, relayState: "idle", relayLastError: "", relayRetryAt: 0, relayElapsedMs: 0 });
     try {
-      const [identity, nodes, hubConnection] = await Promise.all([
+      const [identity, storedNodes, hubConnection, hubNodes] = await Promise.all([
         loadConnectionIdentity(),
         listNodeBindings(),
         loadHubConnection(),
+        listHubNodes().catch(() => []),
       ]);
+      if (hubNodes.length) await storeNodeDisplayNames(hubNodes);
+      const nodes = hubNodes.length ? await listNodeBindings() : storedNodes;
       if (generation !== connectionGenerationRef.current) return;
       if (!identity) {
         setCacheIdentity("");
@@ -231,6 +237,9 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       }
       if (!token) throw new Error("未能建立安全会话");
       if (generation !== connectionGenerationRef.current) return;
+      const descriptor = await withConnectionTimeout(client.nodeDescriptor(), 8_000);
+      if (descriptor.display_name) await storeNodeDisplayName(identity.nodeId, descriptor.display_name);
+      const refreshedNodes = descriptor.display_name ? await listNodeBindings() : nodes;
       const sessionHandle = identity.coreSessionHandle || "";
       connectionRef.current = { gatewayUrl: identity.gatewayUrl, token };
       commit({
@@ -241,7 +250,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         sessionToken: token,
         deviceId: device.deviceId,
         nodeId: identity.nodeId,
-        nodes,
+        nodes: refreshedNodes,
         lastConnectedAt: Date.now() / 1000,
         transportMode: client.transportMode(),
         activeAgentId: "",
@@ -499,6 +508,14 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     await connect();
   }, [commit, connect]);
 
+  const renameNode = useCallback(async (displayName: string) => {
+    const normalized = displayName.trim();
+    if (!normalized) throw new Error("电脑名称不能为空");
+    const descriptor = await runAuthenticated((client) => client.updateNodeProfile(normalized));
+    await storeNodeDisplayName(descriptor.node_id, descriptor.display_name);
+    commit({ nodes: await listNodeBindings() });
+  }, [commit, runAuthenticated]);
+
   const reauthenticate = useCallback(async () => {
     connectionGenerationRef.current += 1;
     provisionalConversationRef.current = null;
@@ -644,6 +661,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     () => ({
       ...state,
       pair,
+      renameNode,
       reconnect: connect,
       reauthenticate,
       removeConnection,
@@ -659,7 +677,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       subscribeEvents,
       selectAgent,
     }),
-    [commitConversation, connect, connection, disconnectNode, ensureConversation, newConversation, openConversation, pair, reauthenticate, refreshAgents, removeConnection, runAuthenticated, selectAgent, state, subscribeEvents, switchNode],
+    [commitConversation, connect, connection, disconnectNode, ensureConversation, newConversation, openConversation, pair, reauthenticate, refreshAgents, removeConnection, renameNode, runAuthenticated, selectAgent, state, subscribeEvents, switchNode],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

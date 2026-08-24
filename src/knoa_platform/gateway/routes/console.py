@@ -25,7 +25,7 @@ from knoa_platform import __version__
 from knoa_platform.console_ui import node_console_html
 from knoa_platform.configuration import ManagedConfig
 from knoa_platform.gateway.pairing import GatewayPairingPayload
-from knoa_platform.gateway.protocol import NodeHubEnrollmentRequest, WriteSecretRequest
+from knoa_platform.gateway.protocol import NodeHubEnrollmentRequest, UpdateNodeProfileRequest, WriteSecretRequest
 from knoa_platform.model_adapter.profiles import resolve_profile
 
 
@@ -178,7 +178,7 @@ class ConsoleRoutes:
 
         return JSONResponse(
             {
-                "node": self._node_identity.descriptor(),
+                "node": self._node_descriptor(),
                 "runtime_version": __version__,
                 "versions": versions,
                 "hub": self._node_relay.status,
@@ -546,6 +546,22 @@ class ConsoleRoutes:
             status_code=201,
             headers={"Cache-Control": "no-store"},
         )
+
+    async def _console_node_profile(self, request: Request) -> JSONResponse:
+        if (error := self._console_authorize(request)) is not None:
+            return error
+        try:
+            raw = await request.body()
+            if len(raw) > 16 * 1024:
+                return JSONResponse({"error": "payload_too_large"}, status_code=413)
+            parsed = UpdateNodeProfileRequest.model_validate_json(raw)
+            self._node_hub.update_display_name(parsed.display_name)
+            await self._node_relay.restart()
+        except ValidationError:
+            return JSONResponse({"error": "invalid_display_name"}, status_code=422)
+        except LookupError:
+            return JSONResponse({"error": "node_not_enrolled"}, status_code=409)
+        return JSONResponse({"node": self._node_descriptor()})
 
     async def _console_pairing(self, request: Request) -> Response:
         if (error := self._console_authorize(request)) is not None:

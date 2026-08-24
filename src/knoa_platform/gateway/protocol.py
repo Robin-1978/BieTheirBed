@@ -114,6 +114,18 @@ class NodeHubEnrollmentRequest(GatewayRequest):
     display_name: str = Field(default="Knoa Node", min_length=1, max_length=80)
 
 
+class UpdateNodeProfileRequest(GatewayRequest):
+    display_name: str = Field(min_length=1, max_length=80)
+
+
+class ConfigureDingTalkRequest(GatewayRequest):
+    enabled: bool
+    client_id: str = Field(default="", max_length=512)
+    client_secret: str = Field(default="", max_length=65_536)
+    robot_code: str = Field(default="", max_length=512)
+    receive_id: str = Field(default="", max_length=512)
+
+
 class CreateTaskRequest(GatewayRequest):
     input: str = Field(default="", max_length=200_000)
     attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
@@ -420,11 +432,27 @@ class HealthResponse(BaseModel):
 
 class NodeDescriptorResponse(BaseModel):
     node_id: str
+    display_name: str = ""
     signing_public_key: str
     signing_key_version: int
     configuration_public_key: str
     configuration_key_version: int
     created_at: float
+
+
+class DingTalkChannelStatus(BaseModel):
+    enabled: bool
+    client_id: str
+    robot_code: str
+    receive_id: str
+    client_secret_configured: bool
+    client_secret_rotated_at: float
+    running: bool
+    updated_at: float
+
+
+class DingTalkChannelResponse(BaseModel):
+    channel: DingTalkChannelStatus
 
 
 class NodeHubDescriptorResponse(BaseModel):

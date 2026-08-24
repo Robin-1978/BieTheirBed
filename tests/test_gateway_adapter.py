@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import asyncio
 import copy
 import ipaddress
 import os
@@ -142,6 +143,103 @@ class _Authentication:
         assert principal_id == "personal:owner"
         assert device_id == "dev-a"
         return SimpleNamespace(device_id=device_id, principal_id=principal_id)
+
+
+class _Channels:
+    def __init__(self) -> None:
+        self.configured = None
+
+    def dingtalk_status(self):
+        return {
+            "enabled": False,
+            "client_id": "",
+            "robot_code": "",
+            "receive_id": "",
+            "client_secret_configured": False,
+            "client_secret_rotated_at": 0,
+            "running": False,
+            "updated_at": 0,
+        }
+
+    async def configure_dingtalk(self, **values):
+        self.configured = values
+        return {
+            **self.dingtalk_status(),
+            "enabled": values["enabled"],
+            "client_id": values["client_id"],
+            "client_secret_configured": bool(values["client_secret"]),
+            "running": values["enabled"],
+            "updated_at": 10,
+        }
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_channel_configuration_is_authenticated_and_secret_free(tmp_path) -> None:
+    channels = _Channels()
+    config = _config(tmp_path)
+    adapter = SecureGatewayAdapter(
+        config,
+        authentication=_Authentication(),
+        core=_Core(config),
+        channel_controller=channels,
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer v1.gws-a." + "t" * 43}
+    async with httpx.AsyncClient(transport=transport, base_url="http://node") as http:
+        rejected = await http.get("/v1/channels/dingtalk")
+        configured = await http.put(
+            "/v1/channels/dingtalk",
+            headers=headers,
+            json={
+                "enabled": True,
+                "client_id": "ding-client",
+                "client_secret": "private-secret",
+                "robot_code": "ding-robot",
+                "receive_id": "",
+            },
+        )
+
+    assert rejected.status_code == 401
+    assert configured.status_code == 200
+    assert configured.json()["channel"]["running"] is True
+    assert channels.configured["client_secret"] == "private-secret"
+    assert "private-secret" not in configured.text
+
+
+@pytest.mark.asyncio
+async def test_node_profile_update_persists_name_and_returns_it_to_the_app(tmp_path) -> None:
+    config = _config(tmp_path)
+    adapter = SecureGatewayAdapter(
+        config,
+        authentication=_Authentication(),
+        core=_Core(config),
+    )
+    adapter._node_hub_store.save(
+        hub_url="https://hub.example.test",
+        hub_id="hub-a",
+        hub_signing_public_key=adapter._node_identity.signing_public_key,
+        display_name="Old Name",
+    )
+    restarts: list[str] = []
+
+    async def restart() -> None:
+        restarts.append("restart")
+
+    adapter._node_relay.restart = restart
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer v1.gws-a." + "t" * 43}
+    async with httpx.AsyncClient(transport=transport, base_url="http://node") as http:
+        updated = await http.put(
+            "/v1/node",
+            headers=headers,
+            json={"display_name": "Company Linux"},
+        )
+        await asyncio.sleep(0.3)
+
+    assert updated.status_code == 200
+    assert updated.json()["display_name"] == "Company Linux"
+    assert adapter._node_hub_store.load().display_name == "Company Linux"
+    assert restarts == ["restart"]
 
 
 @pytest.mark.asyncio
