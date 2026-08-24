@@ -13,6 +13,7 @@ declare module "react-native-zeroconf" {
     removeListener?(event: string, listener: (...args: any[]) => void): void;
     scan(type?: string, protocol?: string, domain?: string, implType?: string): void;
     stop(implType?: string): void;
+    removeDeviceListeners?(): void;
     getServices(): Record<string, ZeroconfService>;
   }
 }

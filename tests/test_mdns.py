@@ -27,6 +27,7 @@ def test_build_announcement_contains_ptr_srv_txt_and_a_records() -> None:
     assert SERVICE_TYPE.encode() not in packet  # DNS names are label encoded.
     assert b"_knoa-node" in packet
     assert b"node_id=node_test-1" in packet
+    assert b"node-test-1" in packet
     assert ipaddress.ip_address("192.168.1.20").packed in packet
     assert struct.pack("!H", 9541) in packet
 

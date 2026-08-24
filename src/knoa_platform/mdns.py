@@ -194,7 +194,9 @@ def build_announcement(
         raise ValueError("mDNS announcement requires at least one IPv4 address")
     safe_id = "".join(char if char.isalnum() or char in "-_" else "-" for char in node_id)
     instance = f"{safe_id}.{SERVICE_TYPE}"
-    host = f"{safe_id}.local."
+    # DNS-SD instance labels may contain underscores, but an SRV target is a
+    # hostname and must not. Android NSD is stricter about this than Avahi.
+    host = f"{safe_id.replace('_', '-')}.local."
     txt = _txt({
         "node_id": node_id,
         "version": version,
