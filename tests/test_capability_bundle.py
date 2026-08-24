@@ -3,7 +3,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-from knoa_platform.extensions.capability_bundle import load_capability_bundle
+from knoa_platform.extensions.capability_bundle import (
+    CapabilityInstaller,
+    CapabilityManifest,
+    load_capability_bundle,
+)
 
 
 def test_capability_manifest_rejects_arbitrary_preflight_and_unsafe_paths(
@@ -62,3 +66,51 @@ def test_capability_package_digest_ignores_generated_python_bytecode(
     assert package.content_digest == clean_digest
     assert not (package.path / "__pycache__").exists()
     assert not (package.path / "orphan.pyc").exists()
+
+
+def test_required_command_accepts_candidates_and_environment_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = tmp_path / "Browser.exe"
+    executable.write_bytes(b"browser")
+    monkeypatch.setenv("KNOA_TEST_BROWSER", str(executable))
+    manifest = CapabilityManifest.model_validate({
+        "schema_version": 1,
+        "id": "browser",
+        "version": "1.0.0",
+        "display_name": "Browser",
+        "description": "Browser capability",
+        "components": {"mcp": ["."]},
+        "health_checks": [{
+            "kind": "required_command",
+            "value": "missing-browser|env:KNOA_TEST_BROWSER",
+        }],
+    })
+
+    checks = CapabilityInstaller.__new__(CapabilityInstaller)._declarative_checks(
+        manifest, tmp_path,
+    )
+
+    assert checks[0]["ready"] is True
+    assert checks[0]["resolved"] == str(executable.resolve())
+
+
+def test_required_command_failure_names_the_missing_candidates(tmp_path: Path) -> None:
+    manifest = CapabilityManifest.model_validate({
+        "schema_version": 1,
+        "id": "browser",
+        "version": "1.0.0",
+        "display_name": "Browser",
+        "description": "Browser capability",
+        "components": {"mcp": ["."]},
+        "health_checks": [{
+            "kind": "required_command",
+            "value": "missing-browser-a|missing-browser-b",
+        }],
+    })
+
+    with pytest.raises(ValueError, match="missing-browser-a, missing-browser-b"):
+        CapabilityInstaller.__new__(CapabilityInstaller)._declarative_checks(
+            manifest, tmp_path,
+        )

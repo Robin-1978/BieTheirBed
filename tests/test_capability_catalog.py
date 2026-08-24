@@ -19,8 +19,8 @@ from knoa_platform.extensions.package_store import PackageStore
 class _Installer:
     async def prepare(self, _principal_id, _source):
         return SimpleNamespace(
-            package_digest="8b7e57a5f7344efd638e6055a77626925d7aabeb260880dd7fe16d3a111b4aa3",
-            version="1.0.1",
+            package_digest="26a28c75d9093723443fee19841eab41f471c551f69d7ff4ed8c3dca4d524239",
+            version="1.0.2",
             capability_id="browser",
         )
 
@@ -42,7 +42,7 @@ async def test_official_catalog_is_signed_and_browser_digest_matches_reference_p
     entry = service.resolve("knoa.browser")
     package = packages.import_directory("capability", service.source_path(entry), imported_by="principal-a")
     assert package.content_digest == entry.package_digest
-    assert service.select("principal-a", "knoa.browser", mode="pinned", version="1.0.1")["resolved_version"] == "1.0.1"
+    assert service.select("principal-a", "knoa.browser", mode="pinned", version="1.0.2")["resolved_version"] == "1.0.2"
     plan = await service.prepare("principal-a", "knoa.browser")
     assert plan.capability_id == "browser"
 

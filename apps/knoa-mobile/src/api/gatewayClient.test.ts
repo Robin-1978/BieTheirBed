@@ -155,6 +155,20 @@ describe("GatewayClient conversation requests", () => {
     });
   });
 
+  it("surfaces capability rejection details instead of a generic state error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      error: "catalog_install_rejected",
+      detail: "找不到 Chrome/Chromium，请先安装浏览器或配置 KNOA_BROWSER_CHROME",
+    }), { status: 422, headers: { "Content-Type": "application/json" } })));
+    const client = new GatewayClient("https://knoa.example.com", "token-a");
+
+    await expect(client.prepareCatalogCapability("knoa.browser")).rejects.toMatchObject({
+      status: 422,
+      code: "catalog_install_rejected",
+      message: "找不到 Chrome/Chromium，请先安装浏览器或配置 KNOA_BROWSER_CHROME",
+    });
+  });
+
   it("binds a newly created task to the selected agent", async () => {
     const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
       task: { task_id: "task-codex" },

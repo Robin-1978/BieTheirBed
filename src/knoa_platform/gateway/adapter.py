@@ -295,6 +295,31 @@ class SecureGatewayAdapter(
                     methods=["POST"],
                 ),
                 Route(
+                    "/v1/console/extensions",
+                    self._console_extensions,
+                    methods=["GET"],
+                ),
+                Route(
+                    "/v1/console/capabilities/{capability_id:str}/prepare",
+                    self._console_capability_prepare,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/console/capabilities/confirm",
+                    self._console_capability_confirm,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/console/capabilities/{capability_id:str}/state",
+                    self._console_capability_state,
+                    methods=["PATCH"],
+                ),
+                Route(
+                    "/v1/console/capabilities/{capability_id:str}/rollback",
+                    self._console_capability_rollback,
+                    methods=["POST"],
+                ),
+                Route(
                     "/v1/console/workspace-resources",
                     self._console_workspace_resources,
                     methods=["GET"],

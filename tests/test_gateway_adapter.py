@@ -286,6 +286,10 @@ async def test_node_console_is_loopback_only_and_csrf_protected(tmp_path) -> Non
             "/v1/console/config",
             headers={"X-Knoa-Console": adapter._console_csrf_token},
         )
+        extensions = await http.get(
+            "/v1/console/extensions",
+            headers={"X-Knoa-Console": adapter._console_csrf_token},
+        )
         invalid_document = copy.deepcopy(
             configuration.json()["revision"]["document"]
         )
@@ -325,6 +329,13 @@ async def test_node_console_is_loopback_only_and_csrf_protected(tmp_path) -> Non
         "node", "mdns", "app_lan_discovery", "p2p", "relay", "config", "codex", "vision",
     }
     assert accepted.json()["runtime_version"]
+    assert extensions.status_code == 200
+    assert {"catalog", "installations", "skills", "mcp_servers"} <= set(
+        extensions.json()
+    )
+    assert any(
+        item["id"] == "knoa.browser" for item in extensions.json()["catalog"]
+    )
     assert accepted.json()["versions"]["runtime_platform_version"] == accepted.json()["runtime_version"]
     assert accepted.json()["versions"]["config_revision"] == "revision-a"
     assert isinstance(accepted.json()["versions"]["component_generations"], list)

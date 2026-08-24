@@ -745,6 +745,129 @@ class ConsoleRoutes:
             headers={"Cache-Control": "no-store"},
         )
 
+    async def _console_extensions(self, request: Request) -> JSONResponse:
+        """Return the owner-scoped extension inventory for the local Console."""
+        if (error := self._console_authorize(request)) is not None:
+            return error
+        principal = self._config.owner_principal_id
+        try:
+            revision, state, _generations = await self._core.get_config_current(
+                principal
+            )
+            entries = self._capability_catalog.list_entries(principal)
+            installations = self._capability_installer.list_installations(principal)
+        except (LookupError, OSError, PermissionError, ValueError) as exc:
+            return JSONResponse(
+                {"error": "extensions_rejected", "detail": str(exc)[:1000]},
+                status_code=422,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return self._core_error(exc)
+        return JSONResponse(
+            {
+                "catalog": list(entries),
+                "installations": [
+                    item.model_dump(mode="json") for item in installations
+                ],
+                "skills": {
+                    item_id: item.model_dump(mode="json")
+                    for item_id, item in revision.document.skills.items()
+                },
+                "mcp_servers": {
+                    item_id: item.model_dump(mode="json")
+                    for item_id, item in revision.document.mcp_servers.items()
+                },
+                "revision_id": revision.revision_id,
+                "apply_status": state.apply_status,
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
+    async def _console_capability_prepare(self, request: Request) -> JSONResponse:
+        if (error := self._console_authorize(request)) is not None:
+            return error
+        try:
+            plan = await self._capability_catalog.prepare(
+                self._config.owner_principal_id,
+                str(request.path_params["capability_id"]),
+            )
+        except (LookupError, OSError, PermissionError, ValueError) as exc:
+            return JSONResponse(
+                {"error": "catalog_install_rejected", "detail": str(exc)[:1000]},
+                status_code=422,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return self._core_error(exc)
+        return JSONResponse(
+            {"plan": plan.model_dump(mode="json")}, status_code=201
+        )
+
+    async def _console_capability_confirm(self, request: Request) -> JSONResponse:
+        if (error := self._console_authorize(request)) is not None:
+            return error
+        try:
+            payload = await request.json()
+            operation_id = str(payload.get("operation_id") or "")
+            plan_digest = str(payload.get("plan_digest") or "")
+            if not operation_id or not plan_digest:
+                raise ValueError("operation_id and plan_digest are required")
+            installation = await self._capability_installer.confirm(
+                self._config.owner_principal_id, operation_id, plan_digest
+            )
+        except (LookupError, PermissionError, TypeError, ValueError) as exc:
+            return JSONResponse(
+                {"error": "capability_confirmation_rejected", "detail": str(exc)[:1000]},
+                status_code=422,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return self._core_error(exc)
+        return JSONResponse(
+            {"installation": installation.model_dump(mode="json")}
+        )
+
+    async def _console_capability_state(self, request: Request) -> JSONResponse:
+        if (error := self._console_authorize(request)) is not None:
+            return error
+        try:
+            payload = await request.json()
+            enabled = payload.get("enabled")
+            if not isinstance(enabled, bool):
+                raise ValueError("enabled must be a boolean")
+            installation = await self._capability_installer.set_enabled(
+                self._config.owner_principal_id,
+                str(request.path_params["capability_id"]),
+                enabled,
+            )
+        except (LookupError, TypeError, ValueError) as exc:
+            return JSONResponse(
+                {"error": "capability_state_rejected", "detail": str(exc)[:1000]},
+                status_code=422,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return self._core_error(exc)
+        return JSONResponse(
+            {"installation": installation.model_dump(mode="json")}
+        )
+
+    async def _console_capability_rollback(self, request: Request) -> JSONResponse:
+        if (error := self._console_authorize(request)) is not None:
+            return error
+        try:
+            installation = await self._capability_installer.rollback(
+                self._config.owner_principal_id,
+                str(request.path_params["capability_id"]),
+            )
+        except (LookupError, TypeError, ValueError) as exc:
+            return JSONResponse(
+                {"error": "capability_rollback_rejected", "detail": str(exc)[:1000]},
+                status_code=422,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return self._core_error(exc)
+        return JSONResponse(
+            {"installation": installation.model_dump(mode="json")}
+        )
+
     async def _console_workspace_resources(self, request: Request) -> JSONResponse:
         if (error := self._console_authorize(request)) is not None:
             return error

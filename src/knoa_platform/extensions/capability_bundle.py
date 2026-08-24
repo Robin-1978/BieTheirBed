@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import platform
 import shutil
 import sqlite3
@@ -411,8 +412,31 @@ class CapabilityInstaller:
         results: list[dict[str, Any]] = []
         for check in manifest.health_checks:
             if check.kind == "required_command":
-                available = bool(check.value and shutil.which(check.value))
-                results.append({"kind": check.kind, "value": check.value, "ready": available})
+                candidates = tuple(
+                    item.strip() for item in check.value.split("|") if item.strip()
+                )
+                resolved = ""
+                for candidate in candidates:
+                    if candidate.startswith("env:"):
+                        candidate = os.environ.get(candidate[4:].strip(), "").strip()
+                        if not candidate:
+                            continue
+                    expanded = os.path.expandvars(os.path.expanduser(candidate))
+                    path = Path(expanded)
+                    if path.is_file():
+                        resolved = str(path.resolve())
+                        break
+                    discovered = shutil.which(expanded)
+                    if discovered:
+                        resolved = discovered
+                        break
+                results.append({
+                    "kind": check.kind,
+                    "value": check.value,
+                    "candidates": list(candidates),
+                    "resolved": resolved,
+                    "ready": bool(resolved),
+                })
             elif check.kind == "disk_budget":
                 free = shutil.disk_usage(root).free
                 results.append({"kind": check.kind, "required_bytes": check.max_bytes, "available_bytes": free, "ready": free >= check.max_bytes})
@@ -420,7 +444,19 @@ class CapabilityInstaller:
                 results.append({"kind": check.kind, "component": check.component, "ready": True})
         blocked = [item for item in results if not item["ready"]]
         if blocked:
-            raise ValueError("Capability declarative preflight failed")
+            missing = next(
+                (item for item in blocked if item["kind"] == "required_command"),
+                None,
+            )
+            if missing is not None:
+                raise ValueError(
+                    "Capability declarative preflight failed: no supported command "
+                    f"was found ({', '.join(missing['candidates'])})"
+                )
+            raise ValueError(
+                "Capability declarative preflight failed: "
+                + ", ".join(str(item["kind"]) for item in blocked)
+            )
         return tuple(results)
 
     async def confirm(self, principal_id: str, operation_id: str, plan_digest: str) -> CapabilityInstallation:

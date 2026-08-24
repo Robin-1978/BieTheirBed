@@ -32,6 +32,8 @@ def test_node_console_owns_configuration_and_secret_management() -> None:
 
     assert "/v1/console/config/publish" in page
     assert "/v1/console/secrets/" in page
+    assert "/v1/console/extensions" in page
+    assert "/v1/console/capabilities/confirm" in page
     assert "校验并热发布" in page
     assert "API Key" in page
     assert "新增自定义 Agent" in page
@@ -50,9 +52,13 @@ def test_node_console_owns_configuration_and_secret_management() -> None:
     assert 'el("shareModelSelect").onchange=renderSharing' in page
     assert "发布高级 JSON 更改" in page
     assert "新增 Provider 草稿" not in page
-    for tab in ("overview", "models", "agents", "sharing", "system"):
+    for tab in ("overview", "models", "agents", "extensions", "sharing", "system"):
         assert f'data-console-tab="{tab}"' in page
         assert f'data-console-panel="{tab}"' in page
+
+    assert "Capability / Skill / MCP" in page
+    assert 'id="skillInventory"' in page
+    assert 'id="mcpInventory"' in page
 
 
 def test_node_console_overview_leads_with_three_state_summary() -> None:

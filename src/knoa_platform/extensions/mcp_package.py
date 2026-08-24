@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import stat
+import sys
 import uuid
 
 import yaml
@@ -34,6 +35,7 @@ _MAX_MANIFEST_BYTES = 64 * 1024
 _MAX_PACKAGE_FILES = 4096
 _MAX_PACKAGE_FILE_BYTES = 32 * 1024 * 1024
 _MAX_PACKAGE_BYTES = 128 * 1024 * 1024
+_KNOA_PYTHON_COMMAND = "@knoa-python"
 
 
 def _read_manifest(package_root: Path) -> str:
@@ -93,6 +95,8 @@ def _load_mcp_package(
         raise ValueError("Local MCP packages must use stdio transport")
     if not config.enabled:
         raise ValueError("Local MCP package must be explicitly enabled")
+    if config.command == _KNOA_PYTHON_COMMAND:
+        config = config.model_copy(update={"command": sys.executable})
     cwd = _working_directory(root, config.working_directory)
     return config.model_copy(update={"working_directory": str(cwd)})
 

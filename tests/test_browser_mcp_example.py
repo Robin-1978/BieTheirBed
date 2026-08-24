@@ -141,6 +141,18 @@ def test_browser_rejects_local_metadata_and_dangerous_schemes() -> None:
             browser._safe_url(url, frozenset())
 
 
+def test_browser_discovers_configured_windows_executable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chrome = tmp_path / "chrome.exe"
+    chrome.write_bytes(b"browser")
+    monkeypatch.setenv("KNOA_BROWSER_CHROME", str(chrome))
+    browser = _module("browser_reference_client_windows_path", "browser_client.py")
+
+    assert browser._browser_executable() == str(chrome.resolve())
+
+
 @pytest.mark.asyncio
 async def test_browser_installs_and_disables_through_generic_capability_transaction(
     tmp_path: Path,

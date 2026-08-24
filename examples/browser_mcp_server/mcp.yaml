@@ -1,6 +1,6 @@
 enabled: true
 transport: stdio
-command: python3
+command: "@knoa-python"
 args: [server.py]
 working_directory: .
 inherit_env: []
