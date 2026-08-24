@@ -285,40 +285,37 @@ class MdnsPublisher:
                 signing_public_key=self.signing_public_key,
             )
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if hasattr(socket, "SO_REUSEPORT"):
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            # RFC 6762 responders must send multicast announcements and query
+            # answers from UDP 5353.  Using a separate unbound send socket gives
+            # replies an ephemeral source port, which Android DNS-SD correctly
+            # discards even though the Node reports that the send succeeded.
+            sock.bind(("", MDNS_PORT))
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 0)
+            for item in self.addresses:
+                try:
+                    sock.setsockopt(
+                        socket.IPPROTO_IP,
+                        socket.IP_ADD_MEMBERSHIP,
+                        socket.inet_aton(MDNS_GROUP) + socket.inet_aton(item),
+                    )
+                except OSError as exc:
+                    logger.debug("mDNS membership skipped for %s: %s", item, exc)
             # Never perform a blocking multicast send on the application's
             # asyncio event loop.  On a congested or unavailable LAN route,
             # the kernel can block sendto() while waiting for buffer space,
             # which would stall every Node HTTP/MCP endpoint.
             sock.setblocking(False)
             self._socket = sock
+            self._listener = sock
             self._task = asyncio.create_task(self._announce(packet), name="knoa-mdns")
-            try:
-                listener = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-                listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                if hasattr(socket, "SO_REUSEPORT"):
-                    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-                listener.bind(("", MDNS_PORT))
-                for item in self.addresses:
-                    try:
-                        listener.setsockopt(
-                            socket.IPPROTO_IP,
-                            socket.IP_ADD_MEMBERSHIP,
-                            socket.inet_aton(MDNS_GROUP) + socket.inet_aton(item),
-                        )
-                    except OSError as exc:
-                        logger.debug("mDNS membership skipped for %s: %s", item, exc)
-                listener.setblocking(False)
-                self._listener = listener
-                self._responder_available = True
-                self._listener_task = asyncio.create_task(
-                    self._answer_queries(packet), name="knoa-mdns-responder"
-                )
-            except OSError as exc:
-                self._responder_available = False
-                self._last_error = f"query_responder_unavailable:{type(exc).__name__}"
-                logger.info("mDNS query responder unavailable; announcements continue: %s", exc)
+            self._responder_available = True
+            self._listener_task = asyncio.create_task(
+                self._answer_queries(packet), name="knoa-mdns-responder"
+            )
             logger.info(
                 "mDNS advertising _knoa-node on %s:%s via %s",
                 self.node_id,
@@ -429,7 +426,7 @@ class MdnsPublisher:
         if listener is not None:
             listener.close()
         sock, self._socket = self._socket, None
-        if sock is not None:
+        if sock is not None and sock is not listener:
             sock.close()
         self._responder_available = False
 
