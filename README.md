@@ -276,8 +276,12 @@ events into one live-updated card, and sends long final answers as lossless
 continuation cards instead of truncating model output. It also follows the
 durable principal Task feed with a persisted cursor, so Schedule and Trigger
 results are delivered proactively without coupling Feishu to Core automation.
-Feishu also exposes `/tasks`, `/task <id>`, and `/stop <id>` for owned durable
-Tasks. New messages can enqueue new Tasks while earlier work continues.
+Feishu and DingTalk expose `/agent` to show the current user-visible Agent,
+`/agent <agent-id>` to switch Agent and start a new conversation, and
+`/new [agent-id]` to start another conversation with the current or specified
+Agent. Switching never changes the Node's global default Agent. The channels
+also expose `/tasks`, `/task <id>`, and `/stop <id>` for owned durable Tasks.
+New messages can enqueue new Tasks while earlier work continues.
 Background approval and terminal notifications are emitted only for Product
 Task Executions and follow that Task's `waiting_approval`, `completed`, and
 `failed` notification policy. Ad-hoc user/CLI Tasks are not mirrored into
