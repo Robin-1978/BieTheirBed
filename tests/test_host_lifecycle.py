@@ -177,6 +177,11 @@ class _FakeSourceManager(SourceHostLifecycleManager):
     def _wait_healthy(self, roles, timeout_seconds=60.0):
         assert all(role in self.active for role in roles)
 
+    def _wait_ports_released(self, ports, timeout_seconds=30.0):
+        # This fake owns no processes.  Do not inspect or terminate the real
+        # host services that use the same product ports during the unit test.
+        assert ports
+
 
 def test_source_manager_status_check_update_and_restart(tmp_path: Path) -> None:
     lifecycle_restarts: list[str] = []

@@ -25,7 +25,7 @@ import { clearAppCache } from "@/storage/appCache";
 import { clearTaskReminders } from "@/reminders/taskReminders";
 import { installedAndroidVersionCode, isAndroidUpdateAvailable } from "@/update/androidUpdater";
 import { requiresAndroidUpdate } from "@/update/releasePolicy";
-import { requireMatchingConversationAgent, resolveNewConversationAgent } from "./conversationTransition";
+import { createProvisionalConversation, resolveNewConversationAgent } from "./conversationTransition";
 
 type GatewayConnection = { gatewayUrl: string; token: string };
 const CONNECTION_TIMEOUT_MS = 20_000;
@@ -616,12 +616,7 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     if (!provisionalConversationRef.current) {
       const requestedAgentId = stateRef.current.selectedAgentId;
       provisionalConversationRef.current = runAuthenticated(
-        async (client) => {
-          const sessionHandle = await client.createSession(requestedAgentId);
-          const session = await client.getConversationSession(sessionHandle);
-          requireMatchingConversationAgent(requestedAgentId, session.agent_id);
-          return sessionHandle;
-        },
+        (client) => createProvisionalConversation(client, requestedAgentId),
       ).then((sessionHandle) => {
         commit({ activeAgentId: requestedAgentId, selectedAgentId: requestedAgentId });
         return sessionHandle;

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
+from types import SimpleNamespace
 
 from knoa_platform.channels.dingtalk import DingTalkChannel
 from knoa_platform.channels.dingtalk_cards import dingtalk_markdown, project_dingtalk_card
@@ -47,6 +49,41 @@ def test_dingtalk_stream_callback_is_normalized_and_owner_bound(tmp_path) -> Non
             "text": {"content": "intruder"},
         }
     ) is False
+
+
+def test_dingtalk_stream_registers_message_and_card_callbacks(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    channel = _channel(tmp_path)
+    registered: list[tuple[str, object]] = []
+
+    class _Client:
+        def __init__(self, _credential):
+            pass
+
+        def register_callback_handler(self, topic, handler):
+            registered.append((topic, handler))
+
+        def start(self):
+            channel._running = False
+
+    fake_sdk = SimpleNamespace(
+        Credential=lambda client_id, client_secret: (client_id, client_secret),
+        DingTalkStreamClient=_Client,
+        ChatbotMessage=SimpleNamespace(TOPIC="/chat/messages"),
+        Card_Callback_Router_Topic="/card/callback",
+    )
+    monkeypatch.setitem(sys.modules, "dingtalk_stream", fake_sdk)
+    channel._running = True
+
+    channel._run_stream()
+
+    assert [topic for topic, _handler in registered] == [
+        "/chat/messages",
+        "/card/callback",
+    ]
+    assert type(registered[1][1]).__name__ == "_CardCallbackHandler"
 
 
 def test_dingtalk_rich_text_file_is_ingested_before_its_text(tmp_path) -> None:
@@ -182,6 +219,141 @@ def test_dingtalk_approval_card_fallback_explains_text_confirmation(tmp_path) ->
     assert sent and "确认" in sent[0] and "confirm/cancel" in sent[0]
 
 
+def test_dingtalk_approval_card_projects_native_callback_buttons(tmp_path) -> None:
+    channel = _channel(tmp_path)
+    params = channel._interactive_card_params(
+        {
+            "header": {"title": {"content": "小诺 · 等待确认"}},
+            "body": {
+                "elements": [
+                    {"tag": "markdown", "content": "需要确认 · 读取桌面文件"},
+                    {
+                        "tag": "column_set",
+                        "columns": [
+                            {
+                                "elements": [
+                                    {
+                                        "tag": "button",
+                                        "behaviors": [
+                                            {
+                                                "type": "callback",
+                                                "value": {
+                                                    "action": "confirm",
+                                                    "resource_id": "turn-1",
+                                                    "approval_id": "approval-1",
+                                                },
+                                            }
+                                        ],
+                                    }
+                                ]
+                            },
+                            {
+                                "elements": [
+                                    {
+                                        "tag": "button",
+                                        "behaviors": [
+                                            {
+                                                "type": "callback",
+                                                "value": {
+                                                    "action": "cancel",
+                                                    "resource_id": "turn-1",
+                                                    "approval_id": "approval-1",
+                                                },
+                                            }
+                                        ],
+                                    }
+                                ]
+                            },
+                        ],
+                    },
+                ]
+            },
+        }
+    )
+
+    buttons = json.loads(params["sys_full_json_obj"])["msgButtons"]
+    assert [(button["text"], button["actionType"]) for button in buttons] == [
+        ("确认", "callback"),
+        ("取消", "callback"),
+    ]
+    assert buttons[0]["params"] == {
+        "action": "confirm",
+        "approval_id": "approval-1",
+        "resource_id": "turn-1",
+    }
+    assert "confirm/cancel" in params["tips"]
+    assert "回复" in params["markdown"]
+
+
+def test_dingtalk_card_callback_resolves_only_the_bound_recipient(tmp_path) -> None:
+    channel = _channel(tmp_path)
+    channel._card_recipients["card-1"] = "staff-1"
+    resolved: list[tuple] = []
+    pending = object()
+
+    def resolve(open_id, approval_id, approved, *, resource_id=""):
+        resolved.append((open_id, approval_id, approved, resource_id))
+        return pending
+
+    channel._resolve_confirmation = resolve
+    callback = {
+        "data": {
+            "userId": "staff-1",
+            "outTrackId": "card-1",
+            "content": json.dumps(
+                {
+                    "cardPrivateData": {
+                        "params": {
+                            "action": "confirm",
+                            "approval_id": "approval-1",
+                            "resource_id": "turn-1",
+                        }
+                    }
+                }
+            ),
+        }
+    }
+
+    assert channel.ingest_card_callback(callback)
+    assert resolved == [("staff-1", "approval-1", True, "turn-1")]
+
+    callback["data"]["userId"] = "staff-2"
+    assert channel.ingest_card_callback(callback) is False
+    assert len(resolved) == 1
+
+
+def test_dingtalk_text_confirmation_accepts_advertised_english_commands(tmp_path) -> None:
+    channel = _channel(tmp_path)
+    channel._add_reaction = lambda *_args: ""
+    channel._remove_reaction = lambda *_args: None
+    sent: list[str] = []
+    resolved: list[tuple[str, bool]] = []
+    channel._send_text = lambda _recipient, text: sent.append(text) or True
+
+    def resolve(_open_id, approval_id, approved, **_kwargs):
+        resolved.append((approval_id, approved))
+        return object()
+
+    channel._resolve_confirmation = resolve
+    channel._pending_confirmations["staff-1"] = SimpleNamespace(
+        approval_id="approval-confirm",
+        resolved=False,
+    )
+    asyncio.run(channel._handle_text("staff-1", "confirm", "message-1"))
+
+    channel._pending_confirmations["staff-1"] = SimpleNamespace(
+        approval_id="approval-cancel",
+        resolved=False,
+    )
+    asyncio.run(channel._handle_text("staff-1", "cancel", "message-2"))
+
+    assert resolved == [
+        ("approval-confirm", True),
+        ("approval-cancel", False),
+    ]
+    assert sent == ["已确认", "已取消"]
+
+
 def test_dingtalk_card_fallback_coalesces_progress_into_one_final_message(tmp_path) -> None:
     channel = _channel(tmp_path)
     sent: list[str] = []
@@ -209,6 +381,39 @@ def test_dingtalk_card_fallback_coalesces_progress_into_one_final_message(tmp_pa
         {"header": {"title": {"content": "小诺"}}, "body": {"elements": [{"content": "结果已交付"}]}},
     )
     assert len(sent) == 1
+
+
+def test_dingtalk_card_fallback_delivers_approval_and_terminal_once(tmp_path) -> None:
+    channel = _channel(tmp_path)
+    sent: list[str] = []
+    channel._send_text = lambda _recipient, text: sent.append(text) or True
+
+    message_id = channel._send_card_returning_id(
+        "staff-1",
+        {
+            "header": {"title": {"content": "小诺 · 处理中"}},
+            "body": {"elements": [{"content": "正在查找文件"}]},
+        },
+    )
+    approval = {
+        "header": {"title": {"content": "小诺 · 等待确认"}},
+        "body": {"elements": [{"content": "需要确认 · 读取桌面文件"}]},
+    }
+    terminal = {
+        "header": {"title": {"content": "小诺 · 已完成"}},
+        "body": {"elements": [{"content": "文件已发送"}]},
+    }
+
+    assert message_id
+    assert sent == []
+    assert channel._update_card(message_id, approval)
+    assert channel._update_card(message_id, approval)
+    assert len(sent) == 1
+    assert "confirm/cancel" in sent[0]
+    assert channel._update_card(message_id, terminal)
+    assert channel._update_card(message_id, terminal)
+    assert len(sent) == 2
+    assert "文件已发送" in sent[1]
 
 
 def test_dingtalk_card_permission_denial_is_cached(tmp_path, monkeypatch) -> None:
@@ -517,6 +722,9 @@ def test_dingtalk_interactive_card_is_created_delivered_and_updated(
     assert message_id
     assert sent == []
     assert requests[0][1].endswith("/v1.0/card/instances")
+    assert requests[0][2]["cardTemplateId"] == (
+        "1366a1eb-bc54-4859-ac88-517c56a9acb1.schema"
+    )
     assert requests[1][1].endswith("/v1.0/card/instances/deliver")
     assert requests[1][2]["openSpaceId"] == "dtv1.card//IM_ROBOT.staff-1"
     assert "<font" not in requests[0][2]["cardData"]["cardParamMap"]["markdown"]

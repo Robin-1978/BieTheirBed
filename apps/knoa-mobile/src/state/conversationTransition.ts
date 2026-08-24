@@ -20,11 +20,12 @@ export function resolveNewConversationAgent(
   return requestedAgentId;
 }
 
-export function requireMatchingConversationAgent(
+export async function createProvisionalConversation(
+  client: { createSession(agentId?: string): Promise<string> },
   requestedAgentId: string,
-  actualAgentId: string,
-): void {
-  if (requestedAgentId !== actualAgentId) {
-    throw new Error(`会话 Agent 绑定不一致：请求 ${requestedAgentId}，实际 ${actualAgentId}`);
-  }
+): Promise<string> {
+  // POST /v1/sessions creates the runtime session, while the durable
+  // conversation is materialized by the first turn.  Reading conversation
+  // metadata here will therefore always return 404 and block that first turn.
+  return client.createSession(requestedAgentId);
 }
