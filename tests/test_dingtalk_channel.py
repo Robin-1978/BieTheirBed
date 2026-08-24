@@ -274,7 +274,6 @@ def test_dingtalk_approval_card_projects_native_callback_buttons(tmp_path) -> No
     buttons = json.loads(params["sys_full_json_obj"])["msgButtons"]
     assert [(button["text"], button["id"], button["request"]) for button in buttons] == [
         ("确认", "knoa_confirm", True),
-        ("取消", "knoa_cancel", True),
     ]
     assert "actionType" not in buttons[0]
     assert "params" not in buttons[0]
@@ -302,8 +301,9 @@ def test_dingtalk_approval_card_projects_native_callback_buttons(tmp_path) -> No
         "approval_id": "approval-1",
         "resource_id": "turn-1",
     }
-    assert "confirm/cancel" in params["tips"]
-    assert "回复" in params["markdown"]
+    assert params["flowStatus"] == "3"
+    assert "回复" in params["staticMsgContent"]
+    assert "cancel" in params["staticMsgContent"]
 
 
 def test_dingtalk_card_callback_resolves_only_the_bound_recipient(tmp_path) -> None:
@@ -350,8 +350,8 @@ def test_dingtalk_card_callback_accepts_sdk_normalized_object(tmp_path) -> None:
     channel = _channel(tmp_path)
     channel._card_recipients["card-sdk"] = "staff-1"
     channel._card_actions["card-sdk"] = {
-        "knoa_cancel": {
-            "action": "cancel",
+        "knoa_confirm": {
+            "action": "confirm",
             "approval_id": "approval-2",
             "resource_id": "turn-2",
         }
@@ -367,11 +367,11 @@ def test_dingtalk_card_callback_accepts_sdk_normalized_object(tmp_path) -> None:
     callback = SimpleNamespace(
         user_id="staff-1",
         card_instance_id="card-sdk",
-        content={"cardPrivateData": {"actionIds": ["knoa_cancel"]}},
+        content={"cardPrivateData": {"actionIds": ["dynamic_v2_component_id"]}},
     )
 
     assert channel.ingest_card_callback(callback)
-    assert resolved == [("staff-1", "approval-2", False, "turn-2")]
+    assert resolved == [("staff-1", "approval-2", True, "turn-2")]
 
 
 def test_dingtalk_text_confirmation_accepts_advertised_english_commands(tmp_path) -> None:
@@ -404,6 +404,25 @@ def test_dingtalk_text_confirmation_accepts_advertised_english_commands(tmp_path
         ("approval-cancel", False),
     ]
     assert sent == ["已确认", "已取消"]
+
+
+def test_dingtalk_text_confirmation_without_pending_action_is_not_a_new_turn(
+    tmp_path,
+) -> None:
+    channel = _channel(tmp_path)
+    channel._add_reaction = lambda *_args: ""
+    channel._remove_reaction = lambda *_args: None
+    sent: list[str] = []
+    channel._send_text = lambda _recipient, text: sent.append(text) or True
+
+    async def unexpected_run(*_args, **_kwargs):
+        raise AssertionError("confirmation command must not start an Agent turn")
+
+    channel._run_text = unexpected_run
+
+    asyncio.run(channel._handle_text("staff-1", "/confirm", "message-1"))
+
+    assert sent == ["当前没有待确认的操作。"]
 
 
 def test_dingtalk_card_fallback_coalesces_progress_into_one_final_message(tmp_path) -> None:
@@ -775,11 +794,12 @@ def test_dingtalk_interactive_card_is_created_delivered_and_updated(
     assert sent == []
     assert requests[0][1].endswith("/v1.0/card/instances")
     assert requests[0][2]["cardTemplateId"] == (
-        "1366a1eb-bc54-4859-ac88-517c56a9acb1.schema"
+        "382e4302-551d-4880-bf29-a30acfab2e71.schema"
     )
     assert requests[1][1].endswith("/v1.0/card/instances/deliver")
     assert requests[1][2]["openSpaceId"] == "dtv1.card//IM_ROBOT.staff-1"
-    assert "<font" not in requests[0][2]["cardData"]["cardParamMap"]["markdown"]
+    assert "<font" not in requests[0][2]["cardData"]["cardParamMap"]["staticMsgContent"]
+    assert requests[0][2]["cardData"]["cardParamMap"]["flowStatus"] == "2"
 
     assert channel._update_card(
         message_id,

@@ -792,6 +792,16 @@ class ConversationRepository:
                     principal_id,
                 ),
             )
+            if finished:
+                # A terminal turn can no longer execute a pending side effect.
+                # Expire any racing/duplicate approval before a late channel
+                # confirmation can move the durable turn back to "running".
+                db.execute(
+                    """UPDATE conversation_approvals SET state='expired',
+                           resolved_at=?, resolved_by='turn_finished'
+                       WHERE turn_id=? AND state='pending'""",
+                    (now, turn_id),
+                )
             return self._turn(db, self._owned_turn(db, principal_id, turn_id))
 
     def request_cancel(self, principal_id: str, turn_id: str) -> ChatTurn:
