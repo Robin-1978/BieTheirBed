@@ -245,10 +245,35 @@ class FeishuConversationMixin:
         command, _separator, argument = stripped.partition(" ")
         command = command.lower()
         argument = argument.strip()
-        if command == "/new" and not argument:
-            session = await client.create_session()
+
+        if command in {"/agent", "/new"}:
+            current_agent = await self._current_agent_id(open_id, client)
+            if command == "/agent" and not argument:
+                await asyncio.to_thread(
+                    self._send_text,
+                    open_id,
+                    self._agent_help(current_agent),
+                )
+                return
+            requested_agent = argument or current_agent
+            selectable = self._selectable_agents()
+            if requested_agent not in selectable:
+                available = "、".join(f"`{agent_id}`" for agent_id in selectable)
+                await asyncio.to_thread(
+                    self._send_text,
+                    open_id,
+                    f"Agent `{requested_agent}` 不可用。可选：{available or '暂无'}。",
+                )
+                return
+            session = await client.create_session(agent_id=requested_agent)
             self._bind_session(open_id, session)
-            await asyncio.to_thread(self._send_text, open_id, "已创建新会话")
+            display_name = selectable[requested_agent]
+            message = (
+                f"已切换到 **{display_name}**（`{requested_agent}`），并开始新对话。"
+                if command == "/agent"
+                else f"已使用 **{display_name}**（`{requested_agent}`）开始新对话。"
+            )
+            await asyncio.to_thread(self._send_text, open_id, message)
             return
 
         if command == "/tasks" and not argument:
@@ -949,6 +974,46 @@ class FeishuConversationMixin:
         session = await (await self._client_for(open_id)).create_session()
         self._bind_session(open_id, session)
         return session
+
+    def _selectable_agents(self) -> dict[str, str]:
+        return {
+            agent_id: agent.display_name
+            for agent_id, agent in self._config.node_agents.items()
+            if agent.enabled and agent.visibility == "user"
+        }
+
+    async def _current_agent_id(self, open_id: str, client: CoreClient) -> str:
+        session = self._sessions.get(open_id)
+        if not session:
+            return self._config.default_agent
+        try:
+            snapshot = await client.get_conversation_session(session)
+        except CoreRequestError as exc:
+            if exc.code != "session_not_found":
+                raise
+            return self._config.default_agent
+        return snapshot.agent_id
+
+    def _agent_help(self, current_agent: str) -> str:
+        selectable = self._selectable_agents()
+        current_name = selectable.get(current_agent, current_agent)
+        lines = [
+            f"当前 Agent：**{current_name}**（`{current_agent}`）",
+            "",
+            "可选 Agent：",
+        ]
+        lines.extend(
+            f"- **{display_name}**：`{agent_id}`"
+            for agent_id, display_name in selectable.items()
+        )
+        lines.extend(
+            [
+                "",
+                "使用 `/agent <Agent ID>` 切换并开始新对话；"
+                "使用 `/new` 继续用当前 Agent 开始新对话。",
+            ]
+        )
+        return "\n".join(lines)
 
     def _bind_session(self, open_id: str, session: str) -> None:
         previous = self._sessions.get(open_id)

@@ -47,14 +47,23 @@ from knoa_platform.tasks import (
 class _CoreClient:
     def __init__(self) -> None:
         self.created = 0
+        self.created_agents = []
+        self.session_agents = {}
         self.cancelled = 0
         self.runs = []
         self.uploads = []
         self.is_connected = True
 
-    async def create_session(self, **_kwargs) -> str:
+    async def create_session(self, **kwargs) -> str:
         self.created += 1
-        return f"session-{self.created}"
+        agent_id = kwargs.get("agent_id") or "knoa"
+        session = f"session-{self.created}"
+        self.created_agents.append(agent_id)
+        self.session_agents[session] = agent_id
+        return session
+
+    async def get_conversation_session(self, session):
+        return SimpleNamespace(agent_id=self.session_agents.get(session, "knoa"))
 
     async def status(self, _session) -> RuntimeStatus:
         return RuntimeStatus(
@@ -203,6 +212,15 @@ def _config(tmp_path) -> AppConfig:
         feishu_app_id="app-id",
         feishu_app_secret="app-secret",
     )
+
+
+def _config_with_codex(tmp_path) -> AppConfig:
+    config = _config(tmp_path)
+    agents = dict(config.node_agents)
+    agents["codex"] = agents["codex"].model_copy(
+        update={"enabled": True, "visibility": "user"}
+    )
+    return config.model_copy(update={"node_agents": agents})
 
 
 def test_feishu_owner_binding_is_first_writer_only(tmp_path) -> None:
@@ -387,6 +405,49 @@ async def test_feishu_lists_inspects_and_stops_owned_tasks(tmp_path) -> None:
     assert "进行中" in cards[1][1]
     assert texts == [("ou-user", "正在停止任务。")]
     assert client.cancelled_task_id == "task-a"
+
+
+@pytest.mark.asyncio
+async def test_feishu_switches_agent_without_changing_global_default(tmp_path) -> None:
+    channel = FeishuChannel(_config_with_codex(tmp_path))
+    client = _CoreClient()
+    channel._clients["ou-user"] = client
+    sent: list[str] = []
+    channel._send_text = lambda _open_id, text: sent.append(text) or True
+
+    await channel._run_text("ou-user", "/agent")
+    assert "当前 Agent：**Knoa Agent**（`knoa`）" in sent[-1]
+    assert "`codex`" in sent[-1]
+    assert client.created == 0
+
+    await channel._run_text("ou-user", "/agent codex")
+    assert client.created_agents == ["codex"]
+    assert channel._sessions["ou-user"] == "session-1"
+    assert "已切换到 **Codex Agent**" in sent[-1]
+    assert channel._config.default_agent == "knoa"
+
+    await channel._run_text("ou-user", "/new")
+    assert client.created_agents == ["codex", "codex"]
+    assert "已使用 **Codex Agent**" in sent[-1]
+
+    await channel._run_text("ou-user", "/new knoa")
+    assert client.created_agents == ["codex", "codex", "knoa"]
+    assert "已使用 **Knoa Agent**" in sent[-1]
+
+
+@pytest.mark.asyncio
+async def test_feishu_rejects_non_user_agent_switch(tmp_path) -> None:
+    channel = FeishuChannel(_config_with_codex(tmp_path))
+    client = _CoreClient()
+    channel._clients["ou-user"] = client
+    sent: list[str] = []
+    channel._send_text = lambda _open_id, text: sent.append(text) or True
+
+    await channel._run_text("ou-user", "/agent reviewer_agent")
+
+    assert client.created == 0
+    assert "不可用" in sent[-1]
+    assert "reviewer_agent" in sent[-1]
 
 
 @pytest.mark.asyncio
