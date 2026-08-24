@@ -455,40 +455,37 @@ class DingTalkChannel(FeishuChannel):
         token = token or self._access_token_value()
         robot_code = self._dingtalk_config.dingtalk_robot_code or self._app_id
         headers = {"x-acs-dingtalk-access-token": token}
-        body = {
-            "robotCode": robot_code,
-            "openConversationId": open_id,
-            "msgKey": msg_key,
-            "msgParam": json.dumps(msg_param, ensure_ascii=False),
-        }
+        conversation_type, conversation_id = self._conversation_contexts.get(
+            open_id, ("1", "")
+        )
+        if conversation_type == "2" and conversation_id:
+            endpoint = "groupMessages/send"
+            body = {
+                "robotCode": robot_code,
+                "openConversationId": conversation_id,
+                "msgKey": msg_key,
+                "msgParam": json.dumps(msg_param, ensure_ascii=False),
+            }
+        else:
+            endpoint = "oToMessages/batchSend"
+            body = {
+                "robotCode": robot_code,
+                "userIds": [open_id],
+                "msgKey": msg_key,
+                "msgParam": json.dumps(msg_param, ensure_ascii=False),
+            }
         response = httpx.post(
-            f"{_DINGTALK_API}/v1.0/robot/groupMessages/send",
+            f"{_DINGTALK_API}/v1.0/robot/{endpoint}",
             headers=headers,
             json=body,
             timeout=15,
         )
-        if not response.is_error:
-            return True
-        # Some Stream callbacks are one-to-one conversations.  The group
-        # endpoint rejects those; retry with the documented batch endpoint.
-        fallback = {
-            "robotCode": robot_code,
-            "userIds": [open_id],
-            "msgKey": msg_key,
-            "msgParam": json.dumps(msg_param, ensure_ascii=False),
-        }
-        second = httpx.post(
-            f"{_DINGTALK_API}/v1.0/robot/oToMessages/batchSend",
-            headers=headers,
-            json=fallback,
-            timeout=15,
-        )
-        if second.is_error:
+        if response.is_error:
             logger.error(
-                "DingTalk message send failed status=%s/%s body=%s",
+                "DingTalk message send failed endpoint=%s status=%s body=%s",
+                endpoint,
                 response.status_code,
-                second.status_code,
-                second.text[:300],
+                response.text[:300],
             )
             return False
         return True

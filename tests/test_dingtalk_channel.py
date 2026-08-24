@@ -236,6 +236,50 @@ def test_dingtalk_card_permission_denial_is_cached(tmp_path, monkeypatch) -> Non
     assert len(requests) == 1
 
 
+def test_dingtalk_direct_text_uses_one_to_one_endpoint(tmp_path, monkeypatch) -> None:
+    channel = _channel(tmp_path)
+    channel._conversation_contexts["staff-1"] = ("1", "conversation-1")
+    requests: list[tuple[str, dict]] = []
+
+    class _Response:
+        is_error = False
+        status_code = 200
+        text = "{}"
+
+    def post(url, *, json, **_kwargs):
+        requests.append((url, json))
+        return _Response()
+
+    monkeypatch.setattr("knoa_platform.channels.dingtalk.httpx.post", post)
+
+    assert channel._send_robot_message("staff-1", "sampleText", {"content": "你好"}, token="token")
+    assert len(requests) == 1
+    assert requests[0][0].endswith("/v1.0/robot/oToMessages/batchSend")
+    assert requests[0][1]["userIds"] == ["staff-1"]
+
+
+def test_dingtalk_group_text_uses_callback_conversation_id(tmp_path, monkeypatch) -> None:
+    channel = _channel(tmp_path)
+    channel._conversation_contexts["staff-1"] = ("2", "conversation-group")
+    requests: list[tuple[str, dict]] = []
+
+    class _Response:
+        is_error = False
+        status_code = 200
+        text = "{}"
+
+    def post(url, *, json, **_kwargs):
+        requests.append((url, json))
+        return _Response()
+
+    monkeypatch.setattr("knoa_platform.channels.dingtalk.httpx.post", post)
+
+    assert channel._send_robot_message("staff-1", "sampleText", {"content": "大家好"}, token="token")
+    assert len(requests) == 1
+    assert requests[0][0].endswith("/v1.0/robot/groupMessages/send")
+    assert requests[0][1]["openConversationId"] == "conversation-group"
+
+
 def test_dingtalk_card_projection_removes_feishu_html() -> None:
     projected = project_dingtalk_card(
         {
