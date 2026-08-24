@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 from knoa_platform.channels.dingtalk import DingTalkChannel
 from knoa_platform.channels.dingtalk_cards import dingtalk_markdown, project_dingtalk_card
@@ -238,7 +239,9 @@ def test_dingtalk_card_permission_denial_is_cached(tmp_path, monkeypatch) -> Non
 
 def test_dingtalk_direct_text_uses_one_to_one_endpoint(tmp_path, monkeypatch) -> None:
     channel = _channel(tmp_path)
+    channel._stream_client = object()
     channel._conversation_contexts["staff-1"] = ("1", "conversation-1")
+    channel._access_token_value = lambda: "token"
     requests: list[tuple[str, dict]] = []
 
     class _Response:
@@ -252,15 +255,22 @@ def test_dingtalk_direct_text_uses_one_to_one_endpoint(tmp_path, monkeypatch) ->
 
     monkeypatch.setattr("knoa_platform.channels.dingtalk.httpx.post", post)
 
-    assert channel._send_robot_message("staff-1", "sampleText", {"content": "你好"}, token="token")
+    assert channel._send_text("staff-1", "**你好** <font color='grey'>世界</font>")
     assert len(requests) == 1
     assert requests[0][0].endswith("/v1.0/robot/oToMessages/batchSend")
     assert requests[0][1]["userIds"] == ["staff-1"]
+    assert requests[0][1]["msgKey"] == "sampleMarkdown"
+    assert json.loads(requests[0][1]["msgParam"]) == {
+        "title": "小诺",
+        "text": "**你好** > 世界",
+    }
 
 
 def test_dingtalk_group_text_uses_callback_conversation_id(tmp_path, monkeypatch) -> None:
     channel = _channel(tmp_path)
+    channel._stream_client = object()
     channel._conversation_contexts["staff-1"] = ("2", "conversation-group")
+    channel._access_token_value = lambda: "token"
     requests: list[tuple[str, dict]] = []
 
     class _Response:
@@ -274,10 +284,38 @@ def test_dingtalk_group_text_uses_callback_conversation_id(tmp_path, monkeypatch
 
     monkeypatch.setattr("knoa_platform.channels.dingtalk.httpx.post", post)
 
-    assert channel._send_robot_message("staff-1", "sampleText", {"content": "大家好"}, token="token")
+    assert channel._send_text("staff-1", "## 大家好")
     assert len(requests) == 1
     assert requests[0][0].endswith("/v1.0/robot/groupMessages/send")
     assert requests[0][1]["openConversationId"] == "conversation-group"
+    assert requests[0][1]["msgKey"] == "sampleMarkdown"
+
+
+def test_dingtalk_markdown_falls_back_to_plain_text(tmp_path, monkeypatch) -> None:
+    channel = _channel(tmp_path)
+    channel._stream_client = object()
+    channel._access_token_value = lambda: "token"
+    requests: list[dict] = []
+
+    class _Response:
+        status_code = 200
+        text = "{}"
+
+        def __init__(self, is_error: bool) -> None:
+            self.is_error = is_error
+
+    def post(_url, *, json, **_kwargs):
+        requests.append(json)
+        return _Response(is_error=len(requests) == 1)
+
+    monkeypatch.setattr("knoa_platform.channels.dingtalk.httpx.post", post)
+
+    assert channel._send_text("staff-1", "**最终结果**")
+    assert [request["msgKey"] for request in requests] == [
+        "sampleMarkdown",
+        "sampleText",
+    ]
+    assert json.loads(requests[1]["msgParam"]) == {"content": "**最终结果**"}
 
 
 def test_dingtalk_card_projection_removes_feishu_html() -> None:
