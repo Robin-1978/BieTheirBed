@@ -210,6 +210,65 @@ async def test_execution_service_rejects_agent_switch_after_session_binding(
 
 
 @pytest.mark.asyncio
+async def test_execution_service_binds_system_agent_with_system_lease(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "platform.db"
+    sessions = RuntimeSessionRepository(database, handle_factory=lambda: "review-scope")
+    scope = sessions.create("principal-a", activate=False, agent_id="reviewer_agent")
+    artifacts = ArtifactStore(tmp_path / "attachments", db_path=database)
+    registry = ToolRegistry()
+    gateway = CapabilityGateway(
+        registry,
+        ToolStep(registry, ToolArgumentPolicy(tmp_path)),
+        artifacts,
+    )
+    runtime = KnoaAgentRuntime(
+        Provider(),
+        ContextCheckpointRepository(
+            tmp_path / "reviewer" / "context.db",
+            session_id_factory=lambda: "reviewer-runtime-session",
+        ),
+        GatewayMCPConnector(gateway),
+        system_prompt="restricted reviewer",
+        health_probe=healthy,
+        agent_id="reviewer_agent",
+        display_name="Reviewer",
+    )
+    user_runtime = KnoaAgentRuntime(
+        Provider(),
+        ContextCheckpointRepository(tmp_path / "user" / "context.db"),
+        GatewayMCPConnector(gateway),
+        system_prompt="system",
+        health_probe=healthy,
+    )
+    bindings = AgentSessionBindingRepository(database)
+    execution = AgentExecutionService(
+        AgentManager(
+            {"knoa": user_runtime, "reviewer_agent": runtime},
+            default_agent="knoa",
+            enabled={"knoa": True, "reviewer_agent": True},
+            system_agents=frozenset({"reviewer_agent"}),
+        ),
+        bindings,
+        gateway,
+        artifacts,
+        capabilities_for=lambda _scope: frozenset(),
+        resolver_for=resolver,
+    )
+
+    binding = await execution._ensure_binding(
+        scope,
+        "reviewer_agent",
+        "reviewer-digest",
+        invocation_kind="system",
+    )
+
+    assert binding.agent_id == "reviewer_agent"
+    assert binding.runtime_session_ref == "reviewer-runtime-session"
+
+
+@pytest.mark.asyncio
 async def test_execution_service_serializes_turns_for_one_platform_session(
     tmp_path: Path,
 ) -> None:

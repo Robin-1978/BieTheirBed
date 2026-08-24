@@ -6,6 +6,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import logging
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -46,6 +47,8 @@ from knoa_agent_contracts import (
     TurnFinished,
     UsageReported,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class AgentModelRequest(BaseModel):
@@ -509,6 +512,10 @@ class KnoaAgentRuntime(AgentRuntime):
             cancellation.set()
             raise
         except Exception:
+            logger.exception(
+                "Knoa runtime turn failed runtime_turn_ref=%s",
+                runtime_turn_ref,
+            )
             if not terminal_emitted:
                 yield TurnFinished(
                     **self._event_base(request, runtime_turn_ref),

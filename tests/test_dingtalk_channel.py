@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from knoa_platform.channels.dingtalk import DingTalkChannel
 from knoa_platform.channels.dingtalk_cards import dingtalk_markdown, project_dingtalk_card
 from knoa_platform.config import AppConfig
@@ -46,6 +48,115 @@ def test_dingtalk_stream_callback_is_normalized_and_owner_bound(tmp_path) -> Non
     ) is False
 
 
+def test_dingtalk_rich_text_file_is_ingested_before_its_text(tmp_path) -> None:
+    channel = _channel(tmp_path)
+    scheduled = []
+    events: list[tuple[str, ...]] = []
+
+    channel._submit = scheduled.append
+
+    async def handle_file(principal, message_id, download_code, file_name):
+        events.append(("file", principal, message_id, download_code, file_name))
+
+    async def handle_text(principal, text, message_id):
+        events.append(("text", principal, message_id, text))
+
+    channel._handle_file = handle_file
+    channel._handle_text = handle_text
+
+    assert channel.ingest_callback(
+        {
+            "msgId": "message-rich-file",
+            "senderStaffId": "staff-1",
+            "msgtype": "richText",
+            "content": {
+                "richText": [
+                    {"type": "text", "text": "请看这份设计"},
+                    {
+                        "type": "file",
+                        "downloadCode": "download-code",
+                        "fileName": "设计.md",
+                    },
+                ]
+            },
+        }
+    ) is True
+
+    asyncio.run(scheduled[0])
+    assert events == [
+        ("file", "staff-1", "message-rich-file", "download-code", "设计.md"),
+        ("text", "staff-1", "message-rich-file", "请看这份设计"),
+    ]
+
+
+def test_dingtalk_rich_text_supports_multiple_media_and_derived_ids(tmp_path) -> None:
+    channel = _channel(tmp_path)
+    scheduled = []
+    events: list[tuple[str, ...]] = []
+
+    channel._submit = scheduled.append
+
+    async def handle_file(principal, message_id, download_code, file_name):
+        events.append(("file", principal, message_id, download_code, file_name))
+
+    async def handle_image(principal, message_id, download_code):
+        events.append(("image", principal, message_id, download_code))
+
+    channel._handle_file = handle_file
+    channel._handle_image = handle_image
+
+    assert channel.ingest_callback(
+        {
+            "msgId": "message-rich-media",
+            "senderStaffId": "staff-1",
+            "msgtype": "richText",
+            "content": {
+                "richText": [
+                    {
+                        "type": "picture",
+                        "downloadCode": "image-code",
+                        "fileName": "preview.png",
+                    },
+                    {
+                        "downloadCode": "file-code",
+                        "fileName": "notes.md",
+                    },
+                ]
+            },
+        }
+    ) is True
+
+    asyncio.run(scheduled[0])
+    assert events == [
+        ("image", "staff-1", "message-rich-media:0", "image-code"),
+        ("file", "staff-1", "message-rich-media:1", "file-code", "notes.md"),
+    ]
+
+
+def test_dingtalk_direct_file_callback_remains_supported(tmp_path) -> None:
+    channel = _channel(tmp_path)
+    scheduled = []
+    events: list[tuple[str, ...]] = []
+    channel._submit = scheduled.append
+
+    async def handle_file(principal, message_id, download_code, file_name):
+        events.append((principal, message_id, download_code, file_name))
+
+    channel._handle_file = handle_file
+
+    assert channel.ingest_callback(
+        {
+            "msgId": "message-file",
+            "senderStaffId": "staff-1",
+            "msgtype": "file",
+            "content": {"downloadCode": "direct-code", "fileName": "direct.md"},
+        }
+    ) is True
+
+    asyncio.run(scheduled[0])
+    assert events == [("staff-1", "message-file", "direct-code", "direct.md")]
+
+
 def test_dingtalk_message_contract_uses_channel_neutral_shape(tmp_path) -> None:
     message = _channel(tmp_path).message_contract("staff-1", "m-1", text="hello")
     assert message.channel == "dingtalk"
@@ -70,21 +181,59 @@ def test_dingtalk_approval_card_fallback_explains_text_confirmation(tmp_path) ->
     assert sent and "确认" in sent[0] and "confirm/cancel" in sent[0]
 
 
-def test_dingtalk_card_updates_deliver_final_state_as_text(tmp_path) -> None:
+def test_dingtalk_card_fallback_coalesces_progress_into_one_final_message(tmp_path) -> None:
     channel = _channel(tmp_path)
     sent: list[str] = []
     channel._send_text = lambda _recipient, text: sent.append(text) or True
 
     message_id = channel._send_card_returning_id(
         "staff-1",
-        {"header": {"title": {"content": "小诺"}}, "body": {"elements": [{"content": "正在处理"}]}},
+        {"header": {"title": {"content": "小诺 · 处理中"}}, "body": {"elements": [{"content": "正在处理"}]}},
     )
     assert message_id
+    assert sent == []
+    assert channel._update_card(
+        message_id,
+        {"header": {"title": {"content": "小诺 · 处理中"}}, "body": {"elements": [{"content": "仍在处理"}]}},
+    )
+    assert sent == []
     assert channel._update_card(
         message_id,
         {"header": {"title": {"content": "小诺 · 已完成"}}, "body": {"elements": [{"content": "结果已交付"}]}},
     )
-    assert "结果已交付" in sent[-1]
+    assert len(sent) == 1
+    assert "结果已交付" in sent[0]
+    assert channel._update_card(
+        message_id,
+        {"header": {"title": {"content": "小诺"}}, "body": {"elements": [{"content": "结果已交付"}]}},
+    )
+    assert len(sent) == 1
+
+
+def test_dingtalk_card_permission_denial_is_cached(tmp_path, monkeypatch) -> None:
+    channel = _channel(tmp_path)
+    channel._stream_client = object()
+    channel._access_token_value = lambda: "token"
+    requests = []
+
+    class _Response:
+        is_error = True
+        status_code = 403
+        text = "missing Card.Instance.Write"
+
+    def post(url, **_kwargs):
+        requests.append(url)
+        return _Response()
+
+    monkeypatch.setattr("knoa_platform.channels.dingtalk.httpx.post", post)
+    card = {
+        "header": {"title": {"content": "小诺 · 处理中"}},
+        "body": {"elements": [{"content": "正在处理"}]},
+    }
+
+    assert channel._send_card_returning_id("staff-1", card)
+    assert channel._send_card_returning_id("staff-1", card)
+    assert len(requests) == 1
 
 
 def test_dingtalk_card_projection_removes_feishu_html() -> None:

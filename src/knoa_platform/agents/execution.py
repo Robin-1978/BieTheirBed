@@ -450,6 +450,7 @@ class AgentExecutionService:
             request.scope,
             policy.agent_id,
             policy.node_agent_digest,
+            invocation_kind=policy.invocation_kind,
         )
         return (
             resolver,
@@ -491,11 +492,17 @@ class AgentExecutionService:
         scope: RuntimeScope,
         requested_agent_id: str,
         agent_config_digest: str,
+        *,
+        invocation_kind: str = "user",
     ) -> AgentSessionBinding:
+        selected_agent_id = (
+            self._manager.resolve_system_agent_id(requested_agent_id)
+            if invocation_kind == "system"
+            else self._manager.resolve_agent_id(requested_agent_id)
+        )
         existing = await asyncio.to_thread(self._bindings.get, scope)
         if existing is not None:
-            selected = self._manager.resolve_agent_id(requested_agent_id)
-            if existing.agent_id != selected:
+            if existing.agent_id != selected_agent_id:
                 raise ValueError("Session is already bound to a different Agent")
             if existing.agent_config_digest == agent_config_digest:
                 return existing
@@ -503,14 +510,14 @@ class AgentExecutionService:
         async with lock:
             existing = await asyncio.to_thread(self._bindings.get, scope)
             if existing is not None:
-                if existing.agent_id != requested_agent_id:
+                if existing.agent_id != selected_agent_id:
                     raise ValueError("Session is already bound to a different Agent")
                 if existing.agent_config_digest == agent_config_digest:
                     return existing
                 binding_epoch = existing.binding_epoch + 1
             else:
                 binding_epoch = 1
-            agent_id = self._manager.resolve_agent_id(requested_agent_id)
+            agent_id = selected_agent_id
             runtime_lease = (
                 self._manager.lease_system(agent_id)
                 if self._manager.is_system_agent(agent_id)

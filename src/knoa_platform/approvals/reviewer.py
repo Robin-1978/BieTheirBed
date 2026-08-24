@@ -118,13 +118,18 @@ class KnoaReviewerAgent:
     async def review(self, request: ApprovalReviewRequest) -> ApprovalReviewResult:
         try:
             return await asyncio.wait_for(self._review(request), self._timeout)
+        except asyncio.TimeoutError:
+            reason = "Reviewer timed out; human review is required"
+        except (json.JSONDecodeError, TypeError, ValueError):
+            reason = "Reviewer returned invalid output; human review is required"
         except Exception as exc:  # noqa: BLE001 - reviewer fails closed to human
-            return ApprovalReviewResult(
-                decision=ApprovalReviewDecision.ESCALATE,
-                reason=f"Reviewer unavailable or returned invalid output: {type(exc).__name__}",
-                reviewer_id=self._agent_id,
-                model=self._model,
-            )
+            reason = f"Reviewer unavailable ({type(exc).__name__}); human review is required"
+        return ApprovalReviewResult(
+            decision=ApprovalReviewDecision.ESCALATE,
+            reason=reason,
+            reviewer_id=self._agent_id,
+            model=self._model,
+        )
 
     async def _review(self, request: ApprovalReviewRequest) -> ApprovalReviewResult:
         operation = f"review:{uuid.uuid4().hex}"
@@ -182,6 +187,8 @@ class KnoaReviewerAgent:
     @staticmethod
     def _parse_json(content: str) -> dict[str, Any]:
         candidate = content.strip()
+        if not candidate:
+            raise ValueError("reviewer output is empty")
         fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", candidate, re.DOTALL | re.IGNORECASE)
         if fenced:
             candidate = fenced.group(1)

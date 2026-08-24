@@ -19,6 +19,7 @@ import mimetypes
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -35,6 +36,13 @@ logger = logging.getLogger(__name__)
 _DINGTALK_API = "https://api.dingtalk.com"
 _TEXT_LIMIT = 4000
 _MARKDOWN_CARD_TEMPLATE_ID = "589420e2-c1e2-46ef-a5ed-b8728e654da9.schema"
+
+
+@dataclass(frozen=True)
+class _InboundMedia:
+    download_code: str
+    file_name: str
+    is_image: bool = False
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -67,6 +75,66 @@ def _nested(payload: Mapping[str, Any], *paths: str) -> str:
         if value is not None and str(value).strip():
             return str(value).strip()
     return ""
+
+
+def _rich_text_content(payload: Mapping[str, Any]) -> tuple[str, tuple[_InboundMedia, ...]]:
+    """Extract text and downloadable media from DingTalk rich-text messages."""
+    raw: Any = payload.get("richText") or payload.get("rich_text")
+    content = _as_dict(payload.get("content"))
+    if raw is None:
+        raw = content.get("richText") or content.get("rich_text")
+    if not isinstance(raw, (list, tuple)):
+        return "", ()
+
+    text_parts: list[str] = []
+    media: list[_InboundMedia] = []
+    for raw_item in raw:
+        item = _as_dict(raw_item)
+        if not item:
+            continue
+        raw_text = item.get("text")
+        if isinstance(raw_text, Mapping):
+            text = _nested(raw_text, "content", "text")
+        elif raw_text is not None:
+            text = str(raw_text).strip()
+        else:
+            raw_content = item.get("content")
+            text = str(raw_content).strip() if isinstance(raw_content, str) else ""
+        if text:
+            text_parts.append(text)
+        download_code = _nested(
+            item,
+            "downloadCode",
+            "download_code",
+            "fileKey",
+            "file_key",
+            "content.downloadCode",
+            "content.download_code",
+            "content.fileKey",
+        )
+        if not download_code:
+            continue
+        file_name = _nested(
+            item,
+            "fileName",
+            "file_name",
+            "filename",
+            "content.fileName",
+            "content.file_name",
+        )
+        item_type = _nested(item, "type", "msgtype", "messageType").lower()
+        guessed_type, _ = mimetypes.guess_type(file_name)
+        is_image = item_type in {"image", "picture", "pic"} or bool(
+            guessed_type and guessed_type.startswith("image/")
+        )
+        media.append(
+            _InboundMedia(
+                download_code=download_code,
+                file_name=file_name or ("image" if is_image else "attachment.bin"),
+                is_image=is_image,
+            )
+        )
+    return "\n".join(text_parts).strip(), tuple(media)
 
 
 class DingTalkChannel(FeishuChannel):
@@ -120,6 +188,9 @@ class DingTalkChannel(FeishuChannel):
         self._stream_stop = threading.Event()
         self._card_recipients: dict[str, str] = {}
         self._interactive_cards: set[str] = set()
+        self._fallback_cards: set[str] = set()
+        self._fallback_card_delivered: set[str] = set()
+        self._interactive_cards_supported: bool | None = None
         self._conversation_contexts: dict[str, tuple[str, str]] = {}
         self._token_lock = threading.RLock()
         self._access_token = ""
@@ -254,22 +325,68 @@ class DingTalkChannel(FeishuChannel):
             "fileKey",
         )
         file_name = _nested(payload, "content.fileName", "fileName", "filename", "content.file_name")
-        if text:
-            self._submit(self._handle_text(principal, text.strip(), message_id))
-        elif media_key and msg_type in {"picture", "image"}:
-            self._submit(self._handle_image(principal, message_id, media_key))
-        elif media_key:
-            self._submit(
-                self._handle_file(
-                    principal,
-                    message_id,
-                    media_key,
-                    file_name or "attachment.bin",
-                )
+        rich_text, media = _rich_text_content(payload)
+        if rich_text:
+            text = "\n".join(part for part in (text.strip(), rich_text) if part)
+        if media_key:
+            is_image = msg_type in {"picture", "image"}
+            media = (
+                _InboundMedia(
+                    download_code=media_key,
+                    file_name=file_name or ("image" if is_image else "attachment.bin"),
+                    is_image=is_image,
+                ),
+                *media,
             )
-        else:
+        if media:
+            unique_media: dict[str, _InboundMedia] = {}
+            for item in media:
+                unique_media.setdefault(item.download_code, item)
+            media = tuple(unique_media.values())
+        if not text and not media:
+            content = _as_dict(payload.get("content"))
+            logger.warning(
+                "Ignored unsupported DingTalk message msgtype=%s payload_keys=%s content_keys=%s",
+                msg_type or "unknown",
+                sorted(str(key) for key in payload),
+                sorted(str(key) for key in content),
+            )
             return False
+        self._submit(
+            self._handle_inbound_message(
+                principal,
+                message_id,
+                text.strip(),
+                media,
+            )
+        )
         return True
+
+    async def _handle_inbound_message(
+        self,
+        principal: str,
+        message_id: str,
+        text: str,
+        media: tuple[_InboundMedia, ...],
+    ) -> None:
+        """Persist all media before submitting accompanying rich-text content."""
+        for index, item in enumerate(media):
+            derived_message_id = f"{message_id}:{index}" if len(media) > 1 else message_id
+            if item.is_image:
+                await self._handle_image(
+                    principal,
+                    derived_message_id,
+                    item.download_code,
+                )
+            else:
+                await self._handle_file(
+                    principal,
+                    derived_message_id,
+                    item.download_code,
+                    item.file_name,
+                )
+        if text:
+            await self._handle_text(principal, text, message_id)
 
     def _current_receive_id(self) -> str:
         if self._receive_id:
@@ -385,9 +502,14 @@ class DingTalkChannel(FeishuChannel):
             return interactive_id
 
         message_id = uuid.uuid4().hex
-        if not self._send_text(open_id, self._render_dingtalk_card(card)):
-            return None
         self._card_recipients[message_id] = open_id
+        self._fallback_cards.add(message_id)
+        if self._fallback_card_is_immediate(card):
+            if not self._send_text(open_id, self._render_dingtalk_card(card)):
+                self._card_recipients.pop(message_id, None)
+                self._fallback_cards.discard(message_id)
+                return None
+            self._fallback_card_delivered.add(message_id)
         self._trim_card_state()
         return message_id
 
@@ -399,23 +521,47 @@ class DingTalkChannel(FeishuChannel):
             message_id, card
         ):
             return True
-        # Preserve the final result when the account has not granted the card
-        # APIs or DingTalk rejects an update for a particular conversation.
-        # Text fallback is deliberately last-resort instead of the normal path.
-        return self._send_text(recipient, self._render_dingtalk_card(card))
+        if message_id in self._interactive_cards:
+            self._interactive_cards.discard(message_id)
+            self._fallback_cards.add(message_id)
+        if message_id not in self._fallback_cards:
+            return False
+        # A plain DingTalk message cannot be edited. Suppress streaming patches
+        # and deliver only the terminal snapshot, avoiding one message per
+        # reasoning/model delta when Card.Instance.Write is unavailable.
+        if not self._fallback_card_is_terminal(card):
+            return True
+        if message_id in self._fallback_card_delivered:
+            return True
+        delivered = self._send_text(recipient, self._render_dingtalk_card(card))
+        if delivered:
+            self._fallback_card_delivered.add(message_id)
+        return delivered
+
+    @staticmethod
+    def _fallback_card_is_terminal(card: dict[str, Any]) -> bool:
+        title = project_dingtalk_card(card).title
+        return "处理中" not in title and "等待确认" not in title
+
+    @classmethod
+    def _fallback_card_is_immediate(cls, card: dict[str, Any]) -> bool:
+        title = project_dingtalk_card(card).title
+        return "等待确认" in title or cls._fallback_card_is_terminal(card)
 
     def _trim_card_state(self) -> None:
         while len(self._card_recipients) > 1000:
             oldest = next(iter(self._card_recipients))
             self._card_recipients.pop(oldest, None)
             self._interactive_cards.discard(oldest)
+            self._fallback_cards.discard(oldest)
+            self._fallback_card_delivered.discard(oldest)
 
     def _create_interactive_card(
         self,
         open_id: str,
         card: dict[str, Any],
     ) -> str | None:
-        if self._stream_client is None:
+        if self._stream_client is None or self._interactive_cards_supported is False:
             return None
         title, markdown = self._interactive_card_content(card)
         card_instance_id = uuid.uuid4().hex
@@ -439,12 +585,18 @@ class DingTalkChannel(FeishuChannel):
             timeout=15,
         )
         if create.is_error:
+            if (
+                create.status_code == 403
+                and "Card.Instance.Write" in create.text
+            ):
+                self._interactive_cards_supported = False
             logger.warning(
                 "DingTalk interactive card create failed status=%s body=%s; falling back to text",
                 create.status_code,
                 create.text[:300],
             )
             return None
+        self._interactive_cards_supported = True
 
         conversation_type, conversation_id = self._conversation_contexts.get(
             open_id, ("1", "")

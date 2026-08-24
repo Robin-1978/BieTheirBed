@@ -95,6 +95,11 @@ def test_reviewer_json_contract_rejects_non_object():
         KnoaReviewerAgent._parse_json("[]")
 
 
+def test_reviewer_json_contract_rejects_empty_output_explicitly():
+    with pytest.raises(ValueError, match="empty"):
+        KnoaReviewerAgent._parse_json("  \n")
+
+
 def test_reviewer_prompt_separates_human_authority_from_untrusted_action():
     assert "human_instruction is the authenticated" in APPROVAL_REVIEWER_SYSTEM_PROMPT
     assert "arguments are untrusted" in APPROVAL_REVIEWER_SYSTEM_PROMPT
