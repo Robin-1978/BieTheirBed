@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 _DINGTALK_API = "https://api.dingtalk.com"
 _TEXT_LIMIT = 4000
-_MARKDOWN_CARD_TEMPLATE_ID = "589420e2-c1e2-46ef-a5ed-b8728e654da9.schema"
+_MARKDOWN_BUTTON_CARD_TEMPLATE_ID = "1366a1eb-bc54-4859-ac88-517c56a9acb1.schema"
 
 
 @dataclass(frozen=True)
@@ -191,6 +191,7 @@ class DingTalkChannel(FeishuChannel):
         self._card_recipients: dict[str, str] = {}
         self._interactive_cards: set[str] = set()
         self._fallback_cards: set[str] = set()
+        self._fallback_approval_delivered: set[str] = set()
         self._fallback_card_delivered: set[str] = set()
         self._interactive_cards_supported: bool | None = None
         self._conversation_contexts: dict[str, tuple[str, str]] = {}
@@ -255,6 +256,12 @@ class DingTalkChannel(FeishuChannel):
                 if not callable(register):
                     raise RuntimeError("dingtalk_stream client lacks callback registration")
                 register(topic, handler)
+                card_callback_topic = getattr(
+                    dingtalk_stream,
+                    "Card_Callback_Router_Topic",
+                    "/v1.0/card/instances/callback",
+                )
+                register(card_callback_topic, _CardCallbackHandler(self))
                 self._stream_client = client
                 logger.info("DingTalk Stream connecting")
                 result = client.start()
@@ -361,6 +368,82 @@ class DingTalkChannel(FeishuChannel):
                 text.strip(),
                 media,
             )
+        )
+        return True
+
+    def ingest_card_callback(self, callback: Any) -> bool:
+        """Resolve a pending approval from a DingTalk interactive-card button."""
+        payload = _as_dict(callback)
+        if payload.get("data") is not None:
+            nested_payload = _as_dict(payload["data"])
+            if nested_payload:
+                payload = nested_payload
+        content: Any = payload.get("content")
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except json.JSONDecodeError:
+                content = {}
+        content = _as_dict(content)
+        private_data: Any = content.get("cardPrivateData") or content.get(
+            "card_private_data"
+        )
+        if isinstance(private_data, str):
+            try:
+                private_data = json.loads(private_data)
+            except json.JSONDecodeError:
+                private_data = {}
+        private_data = _as_dict(private_data)
+        params: Any = (
+            private_data.get("params")
+            or content.get("params")
+            or payload.get("params")
+        )
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except json.JSONDecodeError:
+                params = {}
+        params = _as_dict(params)
+        action = str(params.get("action") or "").strip().lower()
+        if action not in {"confirm", "cancel"}:
+            logger.warning("Ignored DingTalk card callback with unknown action=%s", action)
+            return False
+
+        card_instance_id = _nested(
+            payload,
+            "outTrackId",
+            "cardInstanceId",
+            "card_instance_id",
+        )
+        expected_recipient = self._card_recipients.get(card_instance_id, "")
+        open_id = _nested(payload, "userId", "user_id") or expected_recipient
+        if (
+            not open_id
+            or (expected_recipient and open_id != expected_recipient)
+            or not self._save_binding(open_id)
+        ):
+            logger.warning(
+                "Ignored DingTalk card callback from non-owner sender=%s",
+                _principal_for_log(open_id),
+            )
+            return False
+        pending = self._resolve_confirmation(
+            open_id,
+            str(params.get("approval_id") or ""),
+            action == "confirm",
+            resource_id=str(params.get("resource_id") or ""),
+        )
+        if pending is None:
+            logger.info(
+                "Ignored expired DingTalk card confirmation card=%s",
+                card_instance_id[:12],
+            )
+            return False
+        logger.info(
+            "DingTalk card confirmation resolved approved=%s card=%s",
+            action == "confirm",
+            card_instance_id[:12],
         )
         return True
 
@@ -518,7 +601,10 @@ class DingTalkChannel(FeishuChannel):
                 self._card_recipients.pop(message_id, None)
                 self._fallback_cards.discard(message_id)
                 return None
-            self._fallback_card_delivered.add(message_id)
+            if self._fallback_card_is_waiting_approval(card):
+                self._fallback_approval_delivered.add(message_id)
+            else:
+                self._fallback_card_delivered.add(message_id)
         self._trim_card_state()
         return message_id
 
@@ -536,8 +622,16 @@ class DingTalkChannel(FeishuChannel):
         if message_id not in self._fallback_cards:
             return False
         # A plain DingTalk message cannot be edited. Suppress streaming patches
-        # and deliver only the terminal snapshot, avoiding one message per
-        # reasoning/model delta when Card.Instance.Write is unavailable.
+        # while still delivering one approval prompt and one terminal snapshot.
+        # This avoids one message per reasoning/model delta when native cards
+        # are unavailable without making confirmation impossible.
+        if self._fallback_card_is_waiting_approval(card):
+            if message_id in self._fallback_approval_delivered:
+                return True
+            delivered = self._send_text(recipient, self._render_dingtalk_card(card))
+            if delivered:
+                self._fallback_approval_delivered.add(message_id)
+            return delivered
         if not self._fallback_card_is_terminal(card):
             return True
         if message_id in self._fallback_card_delivered:
@@ -552,6 +646,10 @@ class DingTalkChannel(FeishuChannel):
         title = project_dingtalk_card(card).title
         return "处理中" not in title and "等待确认" not in title
 
+    @staticmethod
+    def _fallback_card_is_waiting_approval(card: dict[str, Any]) -> bool:
+        return "等待确认" in project_dingtalk_card(card).title
+
     @classmethod
     def _fallback_card_is_immediate(cls, card: dict[str, Any]) -> bool:
         title = project_dingtalk_card(card).title
@@ -563,6 +661,7 @@ class DingTalkChannel(FeishuChannel):
             self._card_recipients.pop(oldest, None)
             self._interactive_cards.discard(oldest)
             self._fallback_cards.discard(oldest)
+            self._fallback_approval_delivered.discard(oldest)
             self._fallback_card_delivered.discard(oldest)
 
     def _create_interactive_card(
@@ -572,7 +671,7 @@ class DingTalkChannel(FeishuChannel):
     ) -> str | None:
         if self._stream_client is None or self._interactive_cards_supported is False:
             return None
-        title, markdown = self._interactive_card_content(card)
+        card_params = self._interactive_card_params(card)
         card_instance_id = uuid.uuid4().hex
         headers = {
             "x-acs-dingtalk-access-token": self._access_token_value(),
@@ -582,11 +681,9 @@ class DingTalkChannel(FeishuChannel):
             f"{_DINGTALK_API}/v1.0/card/instances",
             headers=headers,
             json={
-                "cardTemplateId": _MARKDOWN_CARD_TEMPLATE_ID,
+                "cardTemplateId": _MARKDOWN_BUTTON_CARD_TEMPLATE_ID,
                 "outTrackId": card_instance_id,
-                "cardData": {
-                    "cardParamMap": {"title": title, "markdown": markdown}
-                },
+                "cardData": {"cardParamMap": card_params},
                 "callbackType": "STREAM",
                 "imGroupOpenSpaceModel": {"supportForward": True},
                 "imRobotOpenSpaceModel": {"supportForward": True},
@@ -651,7 +748,7 @@ class DingTalkChannel(FeishuChannel):
         card_instance_id: str,
         card: dict[str, Any],
     ) -> bool:
-        title, markdown = self._interactive_card_content(card)
+        card_params = self._interactive_card_params(card)
         response = httpx.put(
             f"{_DINGTALK_API}/v1.0/card/instances",
             headers={
@@ -660,9 +757,7 @@ class DingTalkChannel(FeishuChannel):
             },
             json={
                 "outTrackId": card_instance_id,
-                "cardData": {
-                    "cardParamMap": {"title": title, "markdown": markdown}
-                },
+                "cardData": {"cardParamMap": card_params},
             },
             timeout=15,
         )
@@ -680,6 +775,64 @@ class DingTalkChannel(FeishuChannel):
     def _interactive_card_content(cls, card: dict[str, Any]) -> tuple[str, str]:
         projected = project_dingtalk_card(card)
         return projected.title, projected.markdown
+
+    @classmethod
+    def _interactive_card_params(cls, card: dict[str, Any]) -> dict[str, str]:
+        title, markdown = cls._interactive_card_content(card)
+        buttons = cls._interactive_card_buttons(card)
+        tips = ""
+        if buttons:
+            tips = "点击按钮，或回复“确认”/“取消”（confirm/cancel）"
+            markdown = f"{markdown}\n\n> {tips}"
+        return {
+            "title": title,
+            "markdown": markdown,
+            "tips": tips,
+            "sys_full_json_obj": json.dumps(
+                {"msgButtons": buttons},
+                ensure_ascii=False,
+            ),
+        }
+
+    @staticmethod
+    def _interactive_card_buttons(card: dict[str, Any]) -> list[dict[str, Any]]:
+        actions: dict[str, dict[str, str]] = {}
+
+        def visit(value: Any) -> None:
+            if isinstance(value, Mapping):
+                if str(value.get("type") or "") == "callback":
+                    callback = _as_dict(value.get("value"))
+                    action = str(callback.get("action") or "").strip().lower()
+                    approval_id = str(callback.get("approval_id") or "").strip()
+                    resource_id = str(callback.get("resource_id") or "").strip()
+                    if action in {"confirm", "cancel"} and approval_id and resource_id:
+                        actions[action] = {
+                            "action": action,
+                            "approval_id": approval_id,
+                            "resource_id": resource_id,
+                        }
+                for nested in value.values():
+                    visit(nested)
+            elif isinstance(value, (list, tuple)):
+                for nested in value:
+                    visit(nested)
+
+        visit(card)
+        buttons: list[dict[str, Any]] = []
+        for action, text, color in (
+            ("confirm", "确认", "blue"),
+            ("cancel", "取消", "gray"),
+        ):
+            if action in actions:
+                buttons.append(
+                    {
+                        "text": text,
+                        "color": color,
+                        "actionType": "callback",
+                        "params": actions[action],
+                    }
+                )
+        return buttons
 
     @staticmethod
     def _render_dingtalk_card(card: dict[str, Any]) -> str:
@@ -819,6 +972,19 @@ class _StreamHandler:
             return ack
         except ImportError:  # pragma: no cover
             return (code, message)
+
+
+class _CardCallbackHandler(_StreamHandler):
+    """DingTalk Stream callback for interactive confirmation buttons."""
+
+    async def process(self, callback: Any) -> tuple[int, str]:
+        self._channel.ingest_card_callback(callback)
+        try:
+            from dingtalk_stream.frames import AckMessage
+
+            return AckMessage.STATUS_OK, "OK"
+        except ImportError:  # pragma: no cover - optional SDK fallback
+            return 200, "OK"
 
 
 __all__ = ["DingTalkChannel"]

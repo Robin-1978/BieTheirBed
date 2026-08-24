@@ -34,6 +34,33 @@ from knoa_platform.tasks import (
 
 logger = logging.getLogger(__name__)
 _CONFIRM_TIMEOUT_SECONDS = 110.0
+_CONFIRM_WORDS = frozenset(
+    {
+        "确认",
+        "批准",
+        "yes",
+        "y",
+        "ok",
+        "confirm",
+        "/confirm",
+        "approve",
+        "/approve",
+    }
+)
+_REJECT_WORDS = frozenset(
+    {
+        "取消",
+        "拒绝",
+        "no",
+        "n",
+        "cancel",
+        "/cancel",
+        "deny",
+        "/deny",
+        "reject",
+        "/reject",
+    }
+)
 _MARKDOWN_IMAGE = re.compile(r"!\[([^\]\n]*)\]\([^\n)]*\)")
 _STREAM_PATCH_INTERVAL_SECONDS = 0.6
 _CARD_MARKDOWN_CHARS = 3500
@@ -141,13 +168,10 @@ class FeishuConversationMixin:
         try:
             self._save_binding(open_id)
             normalized = text.strip().lower()
-            if normalized in {"/stop", "/cancel"}:
-                await self._cancel_active_task(open_id)
-                return
             with self._pending_confirmation_lock:
                 confirmation = self._pending_confirmations.get(open_id)
             if confirmation is not None and not confirmation.resolved:
-                if normalized in {"确认", "批准", "yes", "y", "ok"}:
+                if normalized in _CONFIRM_WORDS:
                     self._resolve_confirmation(
                         open_id,
                         confirmation.approval_id,
@@ -159,7 +183,7 @@ class FeishuConversationMixin:
                         "已确认",
                     )
                     return
-                if normalized in {"取消", "拒绝", "no", "n"}:
+                if normalized in _REJECT_WORDS:
                     self._resolve_confirmation(
                         open_id,
                         confirmation.approval_id,
@@ -176,6 +200,10 @@ class FeishuConversationMixin:
                     open_id,
                     "当前有操作等待确认，请在卡片中选择“确认”或“取消”。",
                 )
+                return
+
+            if normalized in {"/stop", "/cancel"}:
+                await self._cancel_active_task(open_id)
                 return
 
             try:

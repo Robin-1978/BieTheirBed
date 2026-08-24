@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  requireMatchingConversationAgent,
+  createProvisionalConversation,
   resolveNewConversationAgent,
   shouldResetConversation,
 } from "./conversationTransition";
@@ -26,12 +26,22 @@ describe("conversation agent selection", () => {
       .toThrow(/codex.*不可用/);
   });
 
-  it("accepts and verifies an explicit Codex session binding", () => {
+  it("accepts an explicit Codex session binding", () => {
     expect(resolveNewConversationAgent("codex", ["knoa", "codex"], "knoa"))
       .toBe("codex");
-    expect(() => requireMatchingConversationAgent("codex", "knoa"))
-      .toThrow(/绑定不一致/);
-    expect(() => requireMatchingConversationAgent("codex", "codex"))
-      .not.toThrow();
+  });
+
+  it("does not read durable conversation metadata before the first turn", async () => {
+    const calls: string[] = [];
+    const client = {
+      async createSession(agentId?: string): Promise<string> {
+        calls.push(`create:${agentId}`);
+        return "session-codex";
+      },
+    };
+
+    await expect(createProvisionalConversation(client, "codex"))
+      .resolves.toBe("session-codex");
+    expect(calls).toEqual(["create:codex"]);
   });
 });
