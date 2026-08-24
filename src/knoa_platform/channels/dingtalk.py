@@ -843,7 +843,13 @@ class DingTalkChannel(FeishuChannel):
                 "cardTemplateId": _AI_MARKDOWN_CARD_TEMPLATE_ID,
                 "outTrackId": card_instance_id,
                 "cardData": {"cardParamMap": card_params},
-                "privateData": self._interactive_card_private_data(open_id, card),
+                # Do not attach per-user privateData here.  DingTalk validates
+                # its keys as tenant user IDs, while Stream message callbacks
+                # can expose a senderStaffId that is valid for IM_ROBOT
+                # delivery but rejected by Card V2 as
+                # ``param.userIdNotExist``.  The approval binding is already
+                # persisted server-side by outTrackId, and Card V2 reports the
+                # pressed component ID in the callback.
                 "userIdType": 1,
                 "callbackType": "STREAM",
                 "imGroupOpenSpaceModel": {"supportForward": True},
@@ -910,7 +916,6 @@ class DingTalkChannel(FeishuChannel):
         card: dict[str, Any],
     ) -> bool:
         card_params = self._interactive_card_params(card)
-        recipient = self._card_recipients.get(card_instance_id, "")
         response = httpx.put(
             f"{_DINGTALK_API}/v1.0/card/instances",
             headers={
@@ -920,7 +925,6 @@ class DingTalkChannel(FeishuChannel):
             json={
                 "outTrackId": card_instance_id,
                 "cardData": {"cardParamMap": card_params},
-                "privateData": self._interactive_card_private_data(recipient, card),
                 "userIdType": 1,
             },
             timeout=15,
