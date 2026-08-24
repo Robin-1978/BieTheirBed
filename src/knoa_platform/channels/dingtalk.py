@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 _DINGTALK_API = "https://api.dingtalk.com"
 _TEXT_LIMIT = 4000
-_MARKDOWN_BUTTON_CARD_TEMPLATE_ID = "1366a1eb-bc54-4859-ac88-517c56a9acb1.schema"
+_AI_MARKDOWN_CARD_TEMPLATE_ID = "382e4302-551d-4880-bf29-a30acfab2e71.schema"
 
 
 @dataclass(frozen=True)
@@ -443,6 +443,12 @@ class DingTalkChannel(FeishuChannel):
                 if matched is not None:
                     params = matched
                     break
+            # DingTalk's built-in AI Card V2 template rewrites the request
+            # component ID.  Approval cards deliberately render exactly one
+            # native request action, so an authenticated callback for that
+            # card can be resolved without trusting the rewritten ID.
+            if not params and action_ids and len(actions) == 1:
+                params = next(iter(actions.values()))
         action = str(params.get("action") or "").strip().lower()
         if action not in {"confirm", "cancel"}:
             logger.warning("Ignored DingTalk card callback with unknown action=%s", action)
@@ -721,7 +727,7 @@ class DingTalkChannel(FeishuChannel):
             f"{_DINGTALK_API}/v1.0/card/instances",
             headers=headers,
             json={
-                "cardTemplateId": _MARKDOWN_BUTTON_CARD_TEMPLATE_ID,
+                "cardTemplateId": _AI_MARKDOWN_CARD_TEMPLATE_ID,
                 "outTrackId": card_instance_id,
                 "cardData": {"cardParamMap": card_params},
                 "callbackType": "STREAM",
@@ -822,14 +828,31 @@ class DingTalkChannel(FeishuChannel):
         buttons = cls._interactive_card_buttons(card)
         tips = ""
         if buttons:
-            tips = "点击按钮，或回复“确认”/“取消”（confirm/cancel）"
+            tips = "点击“确认”，或回复“取消”（cancel）"
             markdown = f"{markdown}\n\n> {tips}"
+        failed = any(marker in title for marker in ("失败", "错误", "已取消"))
+        flow_status = (
+            "5"
+            if failed
+            else "3"
+            if buttons or cls._fallback_card_is_terminal(card)
+            else "2"
+        )
         return {
-            "title": title,
-            "markdown": markdown,
-            "tips": tips,
+            "msgTitle": title,
+            "msgContent": "",
+            "staticMsgContent": markdown,
+            "flowStatus": flow_status,
             "sys_full_json_obj": json.dumps(
-                {"msgButtons": buttons},
+                {
+                    "order": [
+                        "msgTitle",
+                        "msgContent",
+                        "staticMsgContent",
+                        "msgButtons",
+                    ],
+                    "msgButtons": buttons,
+                },
                 ensure_ascii=False,
             ),
         }
@@ -847,7 +870,7 @@ class DingTalkChannel(FeishuChannel):
                     action = str(callback.get("action") or "").strip().lower()
                     approval_id = str(callback.get("approval_id") or "").strip()
                     resource_id = str(callback.get("resource_id") or "").strip()
-                    if action in {"confirm", "cancel"} and approval_id and resource_id:
+                    if action == "confirm" and approval_id and resource_id:
                         actions[f"knoa_{action}"] = {
                             "action": action,
                             "approval_id": approval_id,
@@ -866,10 +889,7 @@ class DingTalkChannel(FeishuChannel):
     def _interactive_card_buttons(cls, card: dict[str, Any]) -> list[dict[str, Any]]:
         actions = cls._interactive_card_action_map(card)
         buttons: list[dict[str, Any]] = []
-        for action, text, color in (
-            ("confirm", "确认", "blue"),
-            ("cancel", "取消", "gray"),
-        ):
+        for action, text, color in (("confirm", "确认", "blue"),):
             action_id = f"knoa_{action}"
             if action_id in actions:
                 buttons.append(
@@ -1025,14 +1045,22 @@ class _StreamHandler:
 class _CardCallbackHandler(_StreamHandler):
     """DingTalk Stream callback for interactive confirmation buttons."""
 
-    async def process(self, callback: Any) -> tuple[int, str]:
-        self._channel.ingest_card_callback(callback)
+    async def process(self, callback: Any) -> tuple[int, Any]:
+        handled = self._channel.ingest_card_callback(callback)
+        response = (
+            {
+                "cardData": {"cardParamMap": {"flowStatus": "4"}},
+                "privateData": {},
+            }
+            if handled
+            else {}
+        )
         try:
             from dingtalk_stream.frames import AckMessage
 
-            return AckMessage.STATUS_OK, "OK"
+            return AckMessage.STATUS_OK, response
         except ImportError:  # pragma: no cover - optional SDK fallback
-            return 200, "OK"
+            return 200, response
 
 
 __all__ = ["DingTalkChannel"]

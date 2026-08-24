@@ -206,6 +206,14 @@ class FeishuConversationMixin:
                 await self._cancel_active_task(open_id)
                 return
 
+            if normalized in _CONFIRM_WORDS | _REJECT_WORDS:
+                await asyncio.to_thread(
+                    self._send_text,
+                    open_id,
+                    "当前没有待确认的操作。",
+                )
+                return
+
             try:
                 await self._run_text(open_id, text)
             except Exception as exc:

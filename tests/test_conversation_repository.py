@@ -188,6 +188,44 @@ def test_recovery_fails_interrupted_turn_and_expires_approval(tmp_path: Path) ->
     assert recovered[0].approvals[0].state == "expired"
 
 
+def test_terminal_checkpoint_expires_racing_approval_and_rejects_late_resolution(
+    tmp_path: Path,
+) -> None:
+    _database, scope, repository = _repository(tmp_path)
+    turn, _ = repository.create(
+        scope,
+        client_request_id="request-a",
+        user_input="send a file",
+    )
+    approval, _ = repository.request_approval(
+        scope.principal_id,
+        turn.turn_id,
+        step_id="step-a",
+        call=ProposedToolCall(call_id="call-a", name="attach", arguments={}),
+        reason="external_side_effect:high",
+    )
+    repository.checkpoint(
+        scope.principal_id,
+        turn.turn_id,
+        state=ChatTurnState.COMPLETED,
+        final_output="done",
+        finished=True,
+    )
+
+    resolved, changed, _turn_id = repository.resolve_approval(
+        scope.principal_id,
+        approval.approval_id,
+        approved=True,
+        resolved_by="late_channel_callback",
+    )
+
+    assert changed is False
+    assert resolved.state == "expired"
+    stored = repository.get(scope.principal_id, turn.turn_id)
+    assert stored.state is ChatTurnState.COMPLETED
+    assert stored.approvals[0].resolved_by == "turn_finished"
+
+
 def test_expired_turn_details_are_compacted_without_deleting_final_history(
     tmp_path: Path,
 ) -> None:
