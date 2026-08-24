@@ -992,9 +992,7 @@ def test_dingtalk_interactive_card_is_created_delivered_and_updated(
     )
     assert requests[1][1].endswith("/v1.0/card/instances/deliver")
     assert requests[1][2]["openSpaceId"] == "dtv1.card//IM_ROBOT.staff-1"
-    assert requests[0][2]["privateData"] == {
-        "staff-1": {"cardParamMap": {"knoa_action": "{}"}}
-    }
+    assert "privateData" not in requests[0][2]
     assert requests[0][2]["userIdType"] == 1
     assert "<font" not in requests[0][2]["cardData"]["cardParamMap"]["staticMsgContent"]
     assert requests[0][2]["cardData"]["cardParamMap"]["flowStatus"] == "2"
@@ -1008,9 +1006,7 @@ def test_dingtalk_interactive_card_is_created_delivered_and_updated(
     )
     assert requests[-1][0] == "PUT"
     assert requests[-1][2]["outTrackId"] == message_id
-    assert requests[-1][2]["privateData"] == {
-        "staff-1": {"cardParamMap": {"knoa_action": "{}"}}
-    }
+    assert "privateData" not in requests[-1][2]
     assert requests[-1][2]["userIdType"] == 1
     assert sent == []
 
