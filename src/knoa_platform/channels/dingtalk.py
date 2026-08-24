@@ -25,10 +25,12 @@ from typing import Any, Mapping
 
 import httpx
 
-from knoa_platform.channels.feishu import FeishuChannel
-from knoa_platform.channels.dingtalk_cards import project_dingtalk_card
-from knoa_platform.channels.feishu_cards import _principal_for_log
+from knoa_platform.branding import ASSISTANT_NAME
 from knoa_platform.channels.contracts import ChannelMessage
+from knoa_platform.channels.dingtalk_cards import dingtalk_markdown
+from knoa_platform.channels.dingtalk_cards import project_dingtalk_card
+from knoa_platform.channels.feishu import FeishuChannel
+from knoa_platform.channels.feishu_cards import _principal_for_log
 from knoa_platform.config import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -422,7 +424,7 @@ class DingTalkChannel(FeishuChannel):
             return self._access_token
 
     def _send_text(self, open_id: str, text: str) -> bool:
-        text = str(text)
+        text = dingtalk_markdown(str(text))
         # Test/deployment integrations can provide a sender without requiring
         # the optional SDK's internal client shape.
         sender = getattr(self._stream_client, "send_text", None)
@@ -435,12 +437,22 @@ class DingTalkChannel(FeishuChannel):
         token = self._access_token_value()
         succeeded = True
         for chunk in chunks:
-            succeeded = self._send_robot_message(
+            delivered = self._send_robot_message(
                 open_id,
-                "sampleText",
-                {"content": chunk},
+                "sampleMarkdown",
+                {"title": ASSISTANT_NAME, "text": chunk or " "},
                 token=token,
-            ) and succeeded
+            )
+            if not delivered:
+                # Keep a final plain-text escape hatch for tenants where the
+                # Markdown robot message type has not been enabled.
+                delivered = self._send_robot_message(
+                    open_id,
+                    "sampleText",
+                    {"content": chunk},
+                    token=token,
+                )
+            succeeded = delivered and succeeded
         return succeeded
 
     def _send_robot_message(
