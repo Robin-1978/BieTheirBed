@@ -446,16 +446,18 @@ class DingTalkChannel(FeishuChannel):
             "cardInstanceId",
             "card_instance_id",
         )
+        card_state_id = self._callback_card_state_id(card_instance_id)
         logger.info(
-            "DingTalk card callback received card=%s action_ids=%s",
+            "DingTalk card callback received card=%s state_card=%s action_ids=%s",
             card_instance_id[:12],
+            card_state_id[:12],
             [str(value)[:32] for value in action_ids[:3]],
         )
         # The SDK's built-in Markdown button template reports the pressed
         # request button through cardPrivateData.actionIds.  Bind that ID back
         # to the action captured when this exact card instance was rendered.
         if not params:
-            actions = self._card_actions.get(card_instance_id, {})
+            actions = self._card_actions.get(card_state_id, {})
             for action_id in action_ids:
                 matched = actions.get(str(action_id))
                 if matched is not None:
@@ -472,7 +474,7 @@ class DingTalkChannel(FeishuChannel):
             logger.warning("Ignored DingTalk card callback with unknown action=%s", action)
             return False
 
-        expected_recipient = self._card_recipients.get(card_instance_id, "")
+        expected_recipient = self._card_recipients.get(card_state_id, "")
         open_id = _nested(payload, "userId", "user_id") or expected_recipient
         if (
             not expected_recipient
@@ -502,9 +504,22 @@ class DingTalkChannel(FeishuChannel):
             action == "confirm",
             card_instance_id[:12],
         )
-        self._card_actions.pop(card_instance_id, None)
+        self._card_actions.pop(card_state_id, None)
         self._save_card_state()
         return True
+
+    def _callback_card_state_id(self, callback_id: str) -> str:
+        """Match Card V2 callback IDs to a unique persisted outTrackId."""
+
+        if callback_id in self._card_actions:
+            return callback_id
+        matches = [
+            known_id
+            for known_id in self._card_actions
+            if callback_id
+            and (known_id.startswith(callback_id) or callback_id.startswith(known_id))
+        ]
+        return matches[0] if len(matches) == 1 else callback_id
 
     async def _handle_inbound_message(
         self,
