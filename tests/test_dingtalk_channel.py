@@ -321,6 +321,34 @@ def test_dingtalk_approval_card_projects_native_callback_buttons(tmp_path) -> No
         "approval_id": "approval-1",
         "resource_id": "turn-1",
     }
+    private_data = channel._interactive_card_private_data(
+        "staff-1",
+        {
+            "body": {
+                "elements": [
+                    {
+                        "behaviors": [
+                            {
+                                "type": "callback",
+                                "value": {
+                                    "action": "confirm",
+                                    "approval_id": "approval-1",
+                                    "resource_id": "turn-1",
+                                },
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+    )
+    assert json.loads(
+        private_data["staff-1"]["cardParamMap"]["knoa_action"]
+    ) == {
+        "action": "confirm",
+        "approval_id": "approval-1",
+        "resource_id": "turn-1",
+    }
     assert params["flowStatus"] == "3"
     assert "回复" in params["staticMsgContent"]
     assert "cancel" in params["staticMsgContent"]
@@ -454,9 +482,11 @@ def test_dingtalk_v2_callback_reads_card_private_data(tmp_path) -> None:
             "content": json.dumps(
                 {
                     "cardPrivateData": {
-                        "actionIds": ["single_button_node_dynamic"],
-                        "cardParamMap": {
-                            "knoa_action": json.dumps(action),
+                        "staff-1": {
+                            "actionIds": ["single_button_node_dynamic"],
+                            "cardParamMap": {
+                                "knoa_action": json.dumps(action),
+                            },
                         },
                     }
                 }
@@ -919,6 +949,9 @@ def test_dingtalk_interactive_card_is_created_delivered_and_updated(
     )
     assert requests[1][1].endswith("/v1.0/card/instances/deliver")
     assert requests[1][2]["openSpaceId"] == "dtv1.card//IM_ROBOT.staff-1"
+    assert requests[0][2]["privateData"] == {
+        "staff-1": {"cardParamMap": {"knoa_action": "{}"}}
+    }
     assert "<font" not in requests[0][2]["cardData"]["cardParamMap"]["staticMsgContent"]
     assert requests[0][2]["cardData"]["cardParamMap"]["flowStatus"] == "2"
 
@@ -931,6 +964,9 @@ def test_dingtalk_interactive_card_is_created_delivered_and_updated(
     )
     assert requests[-1][0] == "PUT"
     assert requests[-1][2]["outTrackId"] == message_id
+    assert requests[-1][2]["privateData"] == {
+        "staff-1": {"cardParamMap": {"knoa_action": "{}"}}
+    }
     assert sent == []
 
 
