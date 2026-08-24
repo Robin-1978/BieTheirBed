@@ -7,11 +7,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from knoa_platform.log_rotation import compressed_rotating_file_handler
+
 
 class _JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         log_entry: dict[str, Any] = {
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "timestamp": datetime.fromtimestamp(
+                record.created, tz=timezone.utc
+            ).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -68,7 +72,7 @@ def _setup_root_logger() -> None:
 
     log_path = _ensure_log_dir(log_file)
 
-    file_handler = logging.FileHandler(str(log_path), encoding="utf-8")
+    file_handler = compressed_rotating_file_handler(log_path)
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(_JsonFormatter())
     root.addHandler(file_handler)
@@ -92,7 +96,9 @@ def _setup_root_logger() -> None:
 
 def get_logger(name: str) -> logging.Logger:
     _setup_root_logger()
-    full_name = f"knoa_platform.{name}" if not name.startswith("knoa_platform.") else name
+    full_name = (
+        f"knoa_platform.{name}" if not name.startswith("knoa_platform.") else name
+    )
     if full_name in _loggers:
         return _loggers[full_name]
     logger = logging.getLogger(full_name)

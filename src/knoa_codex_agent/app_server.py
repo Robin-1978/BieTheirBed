@@ -25,7 +25,7 @@ class CodexAppServerClient:
         *,
         cwd: str | None = None,
         env: Mapping[str, str] | None = None,
-        request_timeout_seconds: float = 120.0,
+        request_timeout_seconds: float = 600.0,
         max_line_bytes: int = 4 * 1024 * 1024,
         max_event_queue: int = 1024,
     ) -> None:
@@ -155,9 +155,12 @@ class CodexAppServerClient:
         process = self._process
         if process is None or process.stdin is None or process.returncode is not None:
             raise AppServerProtocolError("Codex App Server is unavailable")
-        encoded = json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode(
-            "utf-8"
-        ) + b"\n"
+        encoded = (
+            json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode(
+                "utf-8"
+            )
+            + b"\n"
+        )
         if len(encoded) > self._max_line_bytes:
             raise AppServerProtocolError("Codex App Server request exceeds line limit")
         async with self._write_lock:

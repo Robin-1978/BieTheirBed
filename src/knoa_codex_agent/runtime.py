@@ -90,7 +90,7 @@ class CodexAgentRuntime(AgentRuntime):
         model: str = "",
         approval_policy: str = "never",
         sandbox: str = "read-only",
-        request_timeout_seconds: float = 120.0,
+        request_timeout_seconds: float = 600.0,
         max_line_bytes: int = 4 * 1024 * 1024,
         max_event_queue: int = 1024,
         clock: Callable[[], float] = time.time,
@@ -157,7 +157,9 @@ class CodexAgentRuntime(AgentRuntime):
             self._sessions.find_by_operation, request.operation_id
         )
         if existing is not None:
-            return self._runtime_session(existing.runtime_session_ref, existing.binding_epoch)
+            return self._runtime_session(
+                existing.runtime_session_ref, existing.binding_epoch
+            )
         record = await asyncio.to_thread(
             self._sessions.create,
             operation_id=request.operation_id,
@@ -167,9 +169,7 @@ class CodexAgentRuntime(AgentRuntime):
 
     async def resume_session(self, request: ResumeRuntimeSession) -> RuntimeSession:
         self._require_session(request.session)
-        await asyncio.to_thread(
-            self._sessions.get, request.session.runtime_session_ref
-        )
+        await asyncio.to_thread(self._sessions.get, request.session.runtime_session_ref)
         return request.session
 
     async def start_turn(self, request: RuntimeTurnRequest) -> RuntimeTurn:
@@ -290,7 +290,9 @@ class CodexAgentRuntime(AgentRuntime):
                     usage = params.get("tokenUsage")
                     yield UsageReported(
                         **base,
-                        usage=self._flatten_usage(usage if isinstance(usage, dict) else {}),
+                        usage=self._flatten_usage(
+                            usage if isinstance(usage, dict) else {}
+                        ),
                     )
                 elif method in {"item/started", "item/completed"}:
                     event = self._item_event(method, params, base)
@@ -326,11 +328,17 @@ class CodexAgentRuntime(AgentRuntime):
                     else:
                         await active.client.respond(
                             message["id"],
-                            error={"code": -32601, "message": "Unsupported client request"},
+                            error={
+                                "code": -32601,
+                                "message": "Unsupported client request",
+                            },
                         )
                 elif method == "turn/completed":
                     turn = params.get("turn")
-                    if not isinstance(turn, dict) or str(turn.get("id") or "") != turn_id:
+                    if (
+                        not isinstance(turn, dict)
+                        or str(turn.get("id") or "") != turn_id
+                    ):
                         continue
                     status = str(turn.get("status") or "failed")
                     final_output = self._final_output(turn) or "".join(final_parts)
@@ -419,9 +427,7 @@ class CodexAgentRuntime(AgentRuntime):
         request_id, method, _epoch = pending
         try:
             result = self._interaction_result(method, command.value)
-            await active.client.respond(
-                request_id, result=result
-            )
+            await active.client.respond(request_id, result=result)
         except ValueError as exc:
             return RuntimeCommandResult(status="rejected", code=str(exc))
         except Exception:
@@ -470,7 +476,10 @@ class CodexAgentRuntime(AgentRuntime):
             for turn in reversed(turns):
                 if not isinstance(turn, dict):
                     continue
-                if request.runtime_turn_ref and str(turn.get("id") or "") != request.runtime_turn_ref:
+                if (
+                    request.runtime_turn_ref
+                    and str(turn.get("id") or "") != request.runtime_turn_ref
+                ):
                     continue
                 state = str(turn.get("status") or "")
                 mapped = {
@@ -488,7 +497,9 @@ class CodexAgentRuntime(AgentRuntime):
 
     async def release_session(self, session: RuntimeSession) -> None:
         self._require_session(session)
-        record = await asyncio.to_thread(self._sessions.get, session.runtime_session_ref)
+        record = await asyncio.to_thread(
+            self._sessions.get, session.runtime_session_ref
+        )
         if record.upstream_thread_ref is None:
             return
         client = self._client_factory({})
@@ -505,12 +516,16 @@ class CodexAgentRuntime(AgentRuntime):
         async with self._guard:
             if any(active.session == session for active in self._active.values()):
                 raise RuntimeError("turn_active")
-        record = await asyncio.to_thread(self._sessions.get, session.runtime_session_ref)
+        record = await asyncio.to_thread(
+            self._sessions.get, session.runtime_session_ref
+        )
         if record.upstream_thread_ref is not None:
             client = self._client_factory({})
             await client.start()
             try:
-                await client.request("thread/delete", {"threadId": record.upstream_thread_ref})
+                await client.request(
+                    "thread/delete", {"threadId": record.upstream_thread_ref}
+                )
             finally:
                 await client.close()
         await asyncio.to_thread(self._sessions.delete, session.runtime_session_ref)
@@ -718,9 +733,7 @@ class CodexAgentRuntime(AgentRuntime):
         options: dict[str, bool | int | float | str] | None = None,
     ) -> dict[str, Any]:
         requested = str((options or {}).get("native_capabilities") or "")
-        capabilities = frozenset(
-            item for item in requested.split(",") if item
-        )
+        capabilities = frozenset(item for item in requested.split(",") if item)
         if capabilities:
             read_only = frozenset({"workspace_read", "command_execution"})
             workspace_write = frozenset(
@@ -867,7 +880,9 @@ class CodexAgentRuntime(AgentRuntime):
             tool_name=str(tool_name),
             status=mapped,
             code=status,
-            output=item.get("result") or item.get("aggregatedOutput") or item.get("changes"),
+            output=item.get("result")
+            or item.get("aggregatedOutput")
+            or item.get("changes"),
         )
 
     def _interaction_event(
@@ -946,7 +961,9 @@ class CodexAgentRuntime(AgentRuntime):
                     if not label or len(label) > 256 or label in labels:
                         raise ValueError("Codex user-input option is invalid")
                     labels.append(label)
-                    options.append({"value": label, "label": label, "description": description})
+                    options.append(
+                        {"value": label, "label": label, "description": description}
+                    )
             allow_other = bool(raw.get("isOther"))
             field_schema: dict[str, Any] = {
                 "type": "string",

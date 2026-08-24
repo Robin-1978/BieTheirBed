@@ -256,10 +256,13 @@ async def test_feishu_core_client_uses_canonical_owner_principal(
 
     await channel._client_for("ou-owner")
 
-    assert credentials.verify_principal_credential(
-        "local-signing-key",
-        captured["credential"],
-    ) == "personal:owner"
+    assert (
+        credentials.verify_principal_credential(
+            "local-signing-key",
+            captured["credential"],
+        )
+        == "personal:owner"
+    )
 
 
 def _approval_event(
@@ -351,21 +354,20 @@ async def test_feishu_routes_text_through_core_client(tmp_path) -> None:
     created_cards = []
     updated_cards = []
     reactions = []
-    channel._send_text = lambda recipient, text: sent_text.append((recipient, text)) or True
-    channel._send_card_returning_id = (
-        lambda recipient, card: created_cards.append((recipient, card)) or "card-a"
+    channel._send_text = lambda recipient, text: (
+        sent_text.append((recipient, text)) or True
     )
-    channel._update_card = (
-        lambda message_id, card: updated_cards.append((message_id, card)) or True
+    channel._send_card_returning_id = lambda recipient, card: (
+        created_cards.append((recipient, card)) or "card-a"
     )
-    channel._add_reaction = (
-        lambda message_id, emoji: reactions.append(("add", message_id, emoji))
-        or "reaction-a"
+    channel._update_card = lambda message_id, card: (
+        updated_cards.append((message_id, card)) or True
     )
-    channel._remove_reaction = (
-        lambda message_id, reaction_id: reactions.append(
-            ("remove", message_id, reaction_id)
-        )
+    channel._add_reaction = lambda message_id, emoji: (
+        reactions.append(("add", message_id, emoji)) or "reaction-a"
+    )
+    channel._remove_reaction = lambda message_id, reaction_id: reactions.append(
+        ("remove", message_id, reaction_id)
     )
 
     await channel._handle_text("ou-user", "你好", "message-a")
@@ -497,13 +499,9 @@ async def test_feishu_new_message_is_not_blocked_by_running_task(tmp_path) -> No
     channel._add_reaction = lambda *_args: "reaction-a"
     channel._remove_reaction = lambda *_args: True
 
-    first = asyncio.create_task(
-        channel._handle_text("ou-user", "第一项", "message-1")
-    )
+    first = asyncio.create_task(channel._handle_text("ou-user", "第一项", "message-1"))
     await asyncio.sleep(0)
-    second = asyncio.create_task(
-        channel._handle_text("ou-user", "第二项", "message-2")
-    )
+    second = asyncio.create_task(channel._handle_text("ou-user", "第二项", "message-2"))
     await asyncio.wait_for(client.both_started.wait(), timeout=1.0)
 
     assert client.started == ["第一项", "第二项"]
@@ -540,9 +538,7 @@ async def test_feishu_file_is_registered_as_pending_core_artifact(tmp_path) -> N
         "name": "notes.txt",
         "caption": "notes.txt",
     }
-    assert channel._pending_attachments["ou-user"][0].artifact_id == (
-        "artifact-file"
-    )
+    assert channel._pending_attachments["ou-user"][0].artifact_id == ("artifact-file")
     assert sent == [("ou-user", "文件已收到：notes.txt\n请继续发送任务。")]
 
 
@@ -624,9 +620,7 @@ async def test_feishu_audio_keeps_artifact_when_transcription_is_unavailable(
 
     await channel._handle_audio("ou-user", "message-audio", "audio-key")
 
-    assert channel._pending_attachments["ou-user"][0].artifact_id == (
-        "artifact-file"
-    )
+    assert channel._pending_attachments["ou-user"][0].artifact_id == ("artifact-file")
     assert sent == [("ou-user", "语音已收到；尚未配置转写能力。")]
 
 
@@ -711,13 +705,11 @@ async def test_feishu_long_result_uses_preview_and_delivers_full_artifact(
     created_cards = []
     updated_cards = []
     delivered = []
-    channel._send_card_returning_id = (
-        lambda recipient, card: created_cards.append((recipient, card))
-        or "card-long"
+    channel._send_card_returning_id = lambda recipient, card: (
+        created_cards.append((recipient, card)) or "card-long"
     )
-    channel._update_card = (
-        lambda message_id, card: updated_cards.append((message_id, card))
-        or True
+    channel._update_card = lambda message_id, card: (
+        updated_cards.append((message_id, card)) or True
     )
 
     async def deliver(open_id, session, artifact_id):
@@ -781,13 +773,11 @@ async def test_feishu_confirmation_updates_the_single_streaming_card(
     channel._session_users["session-a"] = "ou-user"
     created_cards = []
     updated_cards = []
-    channel._send_card_returning_id = (
-        lambda recipient, card: created_cards.append((recipient, card))
-        or "card-a"
+    channel._send_card_returning_id = lambda recipient, card: (
+        created_cards.append((recipient, card)) or "card-a"
     )
-    channel._update_card = (
-        lambda message_id, card: updated_cards.append((message_id, card))
-        or True
+    channel._update_card = lambda message_id, card: (
+        updated_cards.append((message_id, card)) or True
     )
 
     class ConfirmingClient:
@@ -854,8 +844,7 @@ async def test_feishu_confirmation_updates_the_single_streaming_card(
     while "ou-user" not in channel._pending_confirmations:
         await asyncio.sleep(0)
     while not any(
-        "behaviors" in json.dumps(card, ensure_ascii=False)
-        for _, card in updated_cards
+        "behaviors" in json.dumps(card, ensure_ascii=False) for _, card in updated_cards
     ):
         await asyncio.sleep(0)
 
@@ -952,8 +941,7 @@ def test_feishu_streaming_card_uses_native_v2_confirmation_buttons() -> None:
         "cancel",
     ]
     assert all(
-        button["behaviors"][0]["value"]["resource_id"] == "task-a"
-        for button in buttons
+        button["behaviors"][0]["value"]["resource_id"] == "task-a" for button in buttons
     )
 
 
@@ -984,6 +972,37 @@ def test_feishu_cancelled_card_is_neutral() -> None:
     assert "已停止" in rendered
     assert '"template": "grey"' in rendered
     assert "处理出错" not in rendered
+
+
+def test_cancelled_chat_snapshot_overrides_partial_final_output() -> None:
+    state = _StreamingCardState()
+
+    state.load_chat_snapshot(
+        _chat_snapshot(
+            state=ChatTurnState.CANCELLED,
+            final_output="任务取消前产生的局部内容",
+        )
+    )
+
+    card = state.build_card()
+    assert card["header"]["title"]["content"] == "已停止"
+    assert card["header"]["template"] == "grey"
+
+
+def test_failed_chat_snapshot_overrides_partial_final_output() -> None:
+    state = _StreamingCardState()
+
+    state.load_chat_snapshot(
+        _chat_snapshot(
+            state=ChatTurnState.FAILED,
+            final_output="失败前产生的局部内容",
+            failure_code="runtime_failed",
+        )
+    )
+
+    card = state.build_card()
+    assert card["header"]["title"]["content"] == "处理出错"
+    assert card["header"]["template"] == "red"
 
 
 def test_feishu_reasoning_is_muted_but_final_answer_is_not() -> None:
@@ -1020,9 +1039,9 @@ def test_feishu_progress_timeline_preserves_event_order() -> None:
     state.append_draft("最终答案", iteration=2)
     state.set_final_output("最终答案", iteration=2)
 
-    timeline, divider, final = state.build_card(
-        final_chunk="最终答案"
-    )["body"]["elements"]
+    timeline, divider, final = state.build_card(final_chunk="最终答案")["body"][
+        "elements"
+    ]
     rendered = timeline["content"]
 
     assert rendered.index("› 先分析") < rendered.index("› 我先查询天气")
@@ -1093,18 +1112,14 @@ def test_feishu_tool_success_uses_plain_check_without_completion_copy() -> None:
 def test_feishu_long_card_output_is_split_without_data_loss(tmp_path) -> None:
     channel = FeishuChannel(_config(tmp_path))
     cards = []
-    channel._send_card_returning_id = (
-        lambda recipient, card: cards.append((recipient, card))
-        or f"card-{len(cards)}"
+    channel._send_card_returning_id = lambda recipient, card: (
+        cards.append((recipient, card)) or f"card-{len(cards)}"
     )
     text = "第一段。\n\n" + ("完整输出内容 " * 1200)
 
     assert channel._send_card("ou-user", text)
 
-    contents = [
-        card["body"]["elements"][0]["content"]
-        for _recipient, card in cards
-    ]
+    contents = [card["body"]["elements"][0]["content"] for _recipient, card in cards]
     assert len(contents) > 1
     assert "".join(contents) == _render_card_markdown(text)
 
@@ -1143,10 +1158,7 @@ def test_feishu_card_failure_retries_smaller_markdown_chunks(tmp_path) -> None:
 
     channel._send_card_returning_id = send
     channel._send_long_text = lambda *args: plain_text.append(args) or True
-    text = (
-        "| A | B |\n|---|---|\n| 1 | 2 |\n\n"
-        "| C | D |\n|---|---|\n| 3 | 4 |\n"
-    )
+    text = "| A | B |\n|---|---|\n| 1 | 2 |\n\n| C | D |\n|---|---|\n| 3 | 4 |\n"
 
     assert channel._send_card("ou-user", text)
     assert len(attempted) == 3
@@ -1179,9 +1191,7 @@ async def test_feishu_principal_feed_notifies_background_task_and_saves_cursor(
 
         async def get_product_task(self, task_id):
             assert task_id == "product-task-a"
-            return SimpleNamespace(
-                notification_policy={"completed": True}
-            )
+            return SimpleNamespace(notification_policy={"completed": True})
 
         async def principal_task_events(self, *, after_id=0):
             assert after_id == 0
@@ -1212,9 +1222,7 @@ async def test_feishu_principal_feed_notifies_background_task_and_saves_cursor(
     watcher.cancel()
     await asyncio.gather(watcher, return_exceptions=True)
 
-    assert cards == [
-        ("ou-user", "后台工作已处理完毕。", "blue", "小诺")
-    ]
+    assert cards == [("ou-user", "后台工作已处理完毕。", "blue", "小诺")]
     assert channel._notification_cursors == {"ou-user": 9}
     persisted = json.loads(
         (tmp_path / "data" / "feishu_notification_cursors.json").read_text()
@@ -1437,13 +1445,11 @@ async def test_feishu_principal_feed_resolves_background_approval_in_card(
     channel = FeishuChannel(_config(tmp_path))
     created_cards = []
     updated_cards = []
-    channel._send_card_returning_id = (
-        lambda recipient, card: created_cards.append((recipient, card))
-        or "card-background"
+    channel._send_card_returning_id = lambda recipient, card: (
+        created_cards.append((recipient, card)) or "card-background"
     )
-    channel._update_card = (
-        lambda message_id, card: updated_cards.append((message_id, card))
-        or True
+    channel._update_card = lambda message_id, card: (
+        updated_cards.append((message_id, card)) or True
     )
     event = _approval_event(task_id="task-background")
     feed_event = PrincipalTaskEvent(
@@ -1463,9 +1469,7 @@ async def test_feishu_principal_feed_resolves_background_approval_in_card(
 
         async def get_product_task(self, task_id):
             assert task_id == "product-task-a"
-            return SimpleNamespace(
-                notification_policy={"waiting_approval": True}
-            )
+            return SimpleNamespace(notification_policy={"waiting_approval": True})
 
         async def get_task(self, task_id):
             assert task_id == "task-background"
