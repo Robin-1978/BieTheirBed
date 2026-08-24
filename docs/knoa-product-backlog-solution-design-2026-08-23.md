@@ -16,7 +16,7 @@
 
 生产 Event Source 已完成真实 HTTPS Webhook 验收：临时设备配对和鉴权、HMAC、重复事件去重、暂停/恢复、Secret Rotation、Node 拉取、2 个事件和 2 次 Task execution 均通过。部署复核同时发现并关闭了两个仅在生产状态下暴露的缺口：Node 控制请求的签名 `audience` 与 Hub 严格模型不一致（`ba64f32`），以及已请求取消的执行在重启恢复为 paused 后不能完成取消（`2b0ca96`）。临时 Event Source、Task、Execution、Session 均已通过公开 API 删除，临时设备均已撤销。
 
-Browser MCP `1.0.0` 已通过签名 Catalog 的显式 `prepare/confirm` 事务安装，Catalog key id 为 `knoa-release-2026-08-24`，Catalog 与安装包 digest 均为 `a7552853cf35d1f66222f09fa56b9a13ff2d0badf3fccacf9f77db0f6d2b68f7`。安装状态为 enabled/healthy，活动配置和重启后的实时 inventory 均包含 10 条 Browser Tool Policy/10 个 Browser MCP Tool；既有 GitLab 5 个、Jira 11 个 MCP Tool 也已迁移为受管配置并在重启后保持可用。
+Browser MCP `1.0.1` 已通过签名 Catalog 的显式 `prepare/confirm` 事务安装；它支持单次 `navigate` 自动建立临时会话并保留 SSRF/DNS-rebinding 防护。Catalog key id 为 `knoa-release-2026-08-24`。安装状态为 enabled/healthy，活动配置和重启后的实时 inventory 均包含 10 条 Browser Tool Policy/10 个 Browser MCP Tool；既有 GitLab 5 个、Jira 11 个 MCP Tool 也已迁移为受管配置并在重启后保持可用。
 
 真实 FCM 系统通知仍以 Hosted Hub 配置有效 Service Account 和 Android Firebase 配置为运行前提；本次生产 Hub 未配置 `KNOA_FCM_SERVICE_ACCOUNT_FILE`，Android 工程也没有 `google-services.json`，因此不能伪造真实 killed-App 投递通过。领域 Intent、加密 Token、inbox、重试/永久失效、Token refresh、多设备、退出禁用、过期过滤、重启持久化和 App reconciliation 已由自动化测试覆盖，真实设备远程推送仍是唯一外部运维验收项。
 

@@ -7,6 +7,7 @@ StartLimitBurst=3
 
 [Service]
 Type=simple
+Environment=KNOA_BGE_PRELOAD=1
 Environment=KNOA_RUNTIME_ROOT=%h/.knoa
 Environment=KNOA_RUNTIME_DIR=%h/.knoa/run
 Environment=KNOA_LIFECYCLE_TOKEN_FILE=%h/.config/knoa/lifecycle.token

@@ -393,6 +393,83 @@ def test_dingtalk_card_callback_accepts_sdk_normalized_object(tmp_path) -> None:
     assert resolved == [("staff-1", "approval-2", True, "turn-2")]
 
 
+def test_dingtalk_v2_dynamic_button_uses_persisted_private_action(tmp_path) -> None:
+    channel = _channel(tmp_path)
+    channel._card_recipients["card-v2"] = "staff-1"
+    channel._card_actions["card-v2"] = {
+        "knoa_confirm": {
+            "action": "confirm",
+            "approval_id": "approval-v2",
+            "resource_id": "turn-v2",
+        }
+    }
+    channel._interactive_cards.add("card-v2")
+    channel._save_card_state()
+
+    restored = _channel(tmp_path)
+    restored._load_card_state()
+    resolved: list[tuple[str, str, bool, str]] = []
+    restored._resolve_confirmation = (
+        lambda open_id, approval_id, approved, *, resource_id="": (
+            resolved.append((open_id, approval_id, approved, resource_id)) or object()
+        )
+    )
+    callback = {
+        "data": {
+            "userId": "staff-1",
+            "outTrackId": "card-v2",
+            "content": json.dumps(
+                {
+                    "cardPrivateData": {
+                        "actionIds": ["single_button_node_dynamic"],
+                    }
+                }
+            ),
+        }
+    }
+
+    assert restored.ingest_card_callback(callback)
+    assert resolved == [("staff-1", "approval-v2", True, "turn-v2")]
+    assert "card-v2" not in restored._card_actions
+
+
+def test_dingtalk_v2_callback_reads_card_private_data(tmp_path) -> None:
+    channel = _channel(tmp_path)
+    channel._card_recipients["card-private"] = "staff-1"
+    resolved: list[tuple[str, str, bool, str]] = []
+    channel._resolve_confirmation = (
+        lambda open_id, approval_id, approved, *, resource_id="": (
+            resolved.append((open_id, approval_id, approved, resource_id)) or object()
+        )
+    )
+    action = {
+        "action": "confirm",
+        "approval_id": "approval-private",
+        "resource_id": "turn-private",
+    }
+    callback = {
+        "data": {
+            "userId": "staff-1",
+            "outTrackId": "card-private",
+            "content": json.dumps(
+                {
+                    "cardPrivateData": {
+                        "actionIds": ["single_button_node_dynamic"],
+                        "cardParamMap": {
+                            "knoa_action": json.dumps(action),
+                        },
+                    }
+                }
+            ),
+        }
+    }
+
+    assert channel.ingest_card_callback(callback)
+    assert resolved == [
+        ("staff-1", "approval-private", True, "turn-private")
+    ]
+
+
 def test_dingtalk_text_confirmation_accepts_advertised_english_commands(
     tmp_path,
 ) -> None:

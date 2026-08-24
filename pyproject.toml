@@ -37,7 +37,7 @@ dependencies = [
 
 [project.optional-dependencies]
 semantic = [
-    "sentence-transformers>=5.0,<6",
+    "fastembed>=0.8,<1",
 ]
 dev = [
     "build>=1.2",
@@ -82,7 +82,9 @@ include = [
     "/scripts/check_release_manifest.py",
     "/scripts/check_release_role.py",
     "/config/default.yaml",
+    "/catalog/capabilities.json",
     "/deploy",
+    "/examples/browser_mcp_server",
     "/docs/knoa-deployment-architecture.md",
     "/README.md",
     "/pyproject.toml",

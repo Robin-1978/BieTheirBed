@@ -7,10 +7,16 @@ optional local embedding runtime is unavailable.
 
 from __future__ import annotations
 
+import logging
+import math
 import os
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -66,9 +72,21 @@ class BgeToolSelector:
             model = self._load_model()
             with self._lock:
                 self._model = model
-        except (ImportError, ModuleNotFoundError, OSError, RuntimeError, ValueError):
+            logger.info("BGE tool selector ready model=%s", self._model_name)
+        except (
+            ImportError,
+            ModuleNotFoundError,
+            OSError,
+            RuntimeError,
+            ValueError,
+        ) as exc:
             with self._lock:
                 self._unavailable = True
+            logger.warning(
+                "BGE tool selector unavailable model=%s error=%s",
+                self._model_name,
+                type(exc).__name__,
+            )
         finally:
             with self._lock:
                 self._loading = False
@@ -91,17 +109,11 @@ class BgeToolSelector:
 
             if candidates != self._corpus_key:
                 corpus = [self._document(name, description) for name, description in candidates]
-                self._embeddings = model.encode(
-                    corpus,
-                    normalize_embeddings=True,
-                    show_progress_bar=False,
-                )
+                self._embeddings = np.asarray(list(model.embed(corpus)))
                 self._corpus_key = candidates
-            query_embedding = model.encode(
-                ["为这个句子生成表示以用于检索相关工具：" + query[:2000]],
-                normalize_embeddings=True,
-                show_progress_bar=False,
-            )[0]
+            query_embedding = np.asarray(
+                list(model.query_embed(query[:2000]))[0]
+            )
             scores = np.dot(self._embeddings, query_embedding)
             ranked = sorted(
                 zip(candidates, scores, strict=True),
@@ -119,11 +131,13 @@ class BgeToolSelector:
             return SemanticSelection()
 
     def _load_model(self) -> Any:
-        from sentence_transformers import SentenceTransformer
+        os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
+        from fastembed import TextEmbedding
 
-        return SentenceTransformer(
-            self._model_name,
-            device="cpu",
+        return TextEmbedding(
+            model_name=self._model_name,
+            cache_dir=str(_model_cache()),
+            providers=["CPUExecutionProvider"],
             local_files_only=True,
         )
 
@@ -159,4 +173,56 @@ def default_tool_selector() -> BgeToolSelector:
     with _DEFAULT_SELECTOR_LOCK:
         if _DEFAULT_SELECTOR is None:
             _DEFAULT_SELECTOR = BgeToolSelector()
+            _DEFAULT_SELECTOR.start_loading()
         return _DEFAULT_SELECTOR
+
+
+def verify_semantic_runtime(*, provision: bool = False) -> dict[str, Any]:
+    """Load BGE and execute a bounded inference probe used by installers/CI."""
+
+    import numpy as np
+
+    os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
+    from fastembed import TextEmbedding
+
+    model_name = os.environ.get("KNOA_BGE_MODEL", "BAAI/bge-small-zh-v1.5")
+    try:
+        model = TextEmbedding(
+            model_name=model_name,
+            cache_dir=str(_model_cache()),
+            providers=["CPUExecutionProvider"],
+            local_files_only=True,
+        )
+    except (OSError, RuntimeError, ValueError):
+        if not provision:
+            raise
+        model = TextEmbedding(
+            model_name=model_name,
+            cache_dir=str(_model_cache()),
+            providers=["CPUExecutionProvider"],
+        )
+    documents = (
+        "browser navigate. Navigate to an explicit safe web URL. "
+        "打开浏览器并访问安全的网页网址。",
+        "jira issue search. Search and inspect Jira work items.",
+    )
+    query = np.asarray(list(model.query_embed("打开浏览器并访问网页"))[0])
+    browser = np.asarray(list(model.embed([documents[0]]))[0])
+    score = float(np.dot(query, browser))
+    if not math.isfinite(score) or score < 0.55:
+        raise RuntimeError("BGE inference smoke test did not recall the Browser tool")
+    return {
+        "status": "ready",
+        "model": model_name,
+        "dimensions": int(len(query)),
+        "browser_similarity": round(score, 6),
+    }
+
+
+def _model_cache() -> Path:
+    configured = os.environ.get("KNOA_BGE_CACHE", "").strip()
+    return (
+        Path(configured).expanduser().resolve()
+        if configured
+        else Path.home() / ".cache" / "knoa" / "fastembed"
+    )

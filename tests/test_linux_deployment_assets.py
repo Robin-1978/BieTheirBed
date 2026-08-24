@@ -21,6 +21,11 @@ def test_linux_installer_has_independent_roles() -> None:
     assert "systemctl --user disable --now knoa.service" in script
     assert "legacy_pids=" in script
     assert "sudo loginctl enable-linger" in script
+    assert 'package_spec="$SOURCE_PATH[semantic]"' in script
+    assert "-m knoa_agent.semantic_health --provision" in script
+    assert "Environment=KNOA_BGE_PRELOAD=1" in _read(
+        "deploy/linux/knoa-node.service"
+    )
 
 
 def test_linux_services_keep_hub_and_node_processes_separate() -> None:

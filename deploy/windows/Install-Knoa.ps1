@@ -396,17 +396,23 @@ $pythonIdentity = ($pythonIdentityLines -join "`n").Trim()
 if ($pythonIdentity -ne "${PythonVersion}:64:0") {
     throw "Knoa requires standard CPython $PythonVersion x64; found $pythonIdentity. Use -RecreateVenv after installing it."
 }
+$packageSpec = $resolvedPackage
+if ($installNode) { $packageSpec = "${resolvedPackage}[semantic]" }
 if ($WheelhousePath) {
     $wheelhouse = (Resolve-Path -LiteralPath $WheelhousePath).Path
-    & $python -m pip install --no-index --find-links $wheelhouse --force-reinstall $resolvedPackage
+    & $python -m pip install --no-index --find-links $wheelhouse --force-reinstall $packageSpec
 } elseif ($sourceInstall -and $existingEnvironment) {
     # A source update can introduce new runtime dependencies. Let pip reconcile
     # them instead of replacing only Knoa and leaving a half-updated service.
-    & $python -m pip install --upgrade --upgrade-strategy only-if-needed $resolvedPackage
+    & $python -m pip install --upgrade --upgrade-strategy only-if-needed $packageSpec
 } else {
-    & $python -m pip install --force-reinstall $resolvedPackage
+    & $python -m pip install --force-reinstall $packageSpec
 }
 if ($LASTEXITCODE -ne 0) { throw "Knoa wheel installation failed" }
+if ($installNode) {
+    & $python -m knoa_agent.semantic_health --provision
+    if ($LASTEXITCODE -ne 0) { throw "Knoa semantic tool recall health check failed" }
+}
 if ($installNode) {
     Install-KnoaP2PFirewallRule $python
     Install-KnoaMdnsFirewallRules

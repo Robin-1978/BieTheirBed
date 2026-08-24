@@ -178,6 +178,7 @@ class DingTalkChannel(FeishuChannel):
         self._receive_id = config.dingtalk_receive_id.strip()
         self._binding_path = self._paths.data / "dingtalk_open_id"
         self._sessions_path = self._paths.data / "dingtalk_sessions.json"
+        self._card_state_path = self._paths.data / "dingtalk_card_actions.json"
         self._notification_cursors_path = (
             self._paths.data / "dingtalk_notification_cursors.json"
         )
@@ -207,6 +208,7 @@ class DingTalkChannel(FeishuChannel):
             raise ValueError("DingTalk client_id and client_secret are required")
         self._main_loop = asyncio.get_running_loop()
         self._load_sessions()
+        self._load_card_state()
         self._load_notification_cursors()
         self._load_notification_intent_cursors()
         self._running = True
@@ -422,6 +424,18 @@ class DingTalkChannel(FeishuChannel):
             except json.JSONDecodeError:
                 params = {}
         params = _as_dict(params)
+        if not params:
+            private_params = _as_dict(
+                private_data.get("cardParamMap")
+                or private_data.get("card_param_map")
+            )
+            encoded_action = private_params.get("knoa_action")
+            if isinstance(encoded_action, str):
+                try:
+                    encoded_action = json.loads(encoded_action)
+                except json.JSONDecodeError:
+                    encoded_action = {}
+            params = _as_dict(encoded_action)
         card_instance_id = _nested(
             payload,
             "outTrackId",
@@ -484,6 +498,8 @@ class DingTalkChannel(FeishuChannel):
             action == "confirm",
             card_instance_id[:12],
         )
+        self._card_actions.pop(card_instance_id, None)
+        self._save_card_state()
         return True
 
     async def _handle_inbound_message(
@@ -631,6 +647,7 @@ class DingTalkChannel(FeishuChannel):
             self._card_actions[interactive_id] = self._interactive_card_action_map(card)
             self._interactive_cards.add(interactive_id)
             self._trim_card_state()
+            self._save_card_state()
             return interactive_id
 
         message_id = uuid.uuid4().hex
@@ -660,6 +677,7 @@ class DingTalkChannel(FeishuChannel):
                 self._card_actions[message_id] = actions
             else:
                 self._card_actions.pop(message_id, None)
+            self._save_card_state()
             return True
         if message_id in self._interactive_cards:
             self._interactive_cards.discard(message_id)
@@ -710,6 +728,71 @@ class DingTalkChannel(FeishuChannel):
             self._fallback_approval_delivered.discard(oldest)
             self._fallback_card_delivered.discard(oldest)
 
+    def _load_card_state(self) -> None:
+        """Restore exact approval/card bindings so callbacks survive restarts."""
+
+        try:
+            raw = json.loads(self._card_state_path.read_text(encoding="utf-8"))
+            cards = _as_dict(raw.get("cards")) if isinstance(raw, Mapping) else {}
+            for card_id, raw_binding in list(cards.items())[-1000:]:
+                binding = _as_dict(raw_binding)
+                recipient = str(binding.get("recipient") or "").strip()
+                actions: dict[str, dict[str, str]] = {}
+                for action_id, raw_action in _as_dict(
+                    binding.get("actions")
+                ).items():
+                    action = _as_dict(raw_action)
+                    if (
+                        action.get("action") == "confirm"
+                        and action.get("approval_id")
+                        and action.get("resource_id")
+                    ):
+                        actions[str(action_id)] = {
+                            "action": "confirm",
+                            "approval_id": str(action["approval_id"]),
+                            "resource_id": str(action["resource_id"]),
+                        }
+                if recipient and actions:
+                    normalized_id = str(card_id)
+                    self._card_recipients[normalized_id] = recipient
+                    self._card_actions[normalized_id] = actions
+                    self._interactive_cards.add(normalized_id)
+        except FileNotFoundError:
+            return
+        except Exception:
+            logger.warning("Ignoring invalid DingTalk card action state", exc_info=True)
+
+    def _save_card_state(self) -> None:
+        try:
+            cards = {
+                card_id: {
+                    "recipient": self._card_recipients.get(card_id, ""),
+                    "actions": actions,
+                }
+                for card_id, actions in list(self._card_actions.items())[-1000:]
+                if actions and self._card_recipients.get(card_id)
+            }
+            self._card_state_path.parent.mkdir(
+                mode=0o700, parents=True, exist_ok=True
+            )
+            self._card_state_path.parent.chmod(0o700)
+            temporary = self._card_state_path.with_suffix(
+                f".{uuid.uuid4().hex}.tmp"
+            )
+            temporary.write_text(
+                json.dumps(
+                    {"schema_version": 1, "cards": cards},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+            temporary.chmod(0o600)
+            temporary.replace(self._card_state_path)
+            self._card_state_path.chmod(0o600)
+        except OSError:
+            logger.warning("Could not persist DingTalk card action state", exc_info=True)
+
     def _create_interactive_card(
         self,
         open_id: str,
@@ -730,6 +813,7 @@ class DingTalkChannel(FeishuChannel):
                 "cardTemplateId": _AI_MARKDOWN_CARD_TEMPLATE_ID,
                 "outTrackId": card_instance_id,
                 "cardData": {"cardParamMap": card_params},
+                "privateData": self._interactive_card_private_data(card),
                 "callbackType": "STREAM",
                 "imGroupOpenSpaceModel": {"supportForward": True},
                 "imRobotOpenSpaceModel": {"supportForward": True},
@@ -804,6 +888,7 @@ class DingTalkChannel(FeishuChannel):
             json={
                 "outTrackId": card_instance_id,
                 "cardData": {"cardParamMap": card_params},
+                "privateData": self._interactive_card_private_data(card),
             },
             timeout=15,
         )
@@ -884,6 +969,18 @@ class DingTalkChannel(FeishuChannel):
 
         visit(card)
         return actions
+
+    @classmethod
+    def _interactive_card_private_data(cls, card: dict[str, Any]) -> dict[str, Any]:
+        actions = cls._interactive_card_action_map(card)
+        action = next(iter(actions.values()), None) if len(actions) == 1 else None
+        return {
+            "cardParamMap": {
+                "knoa_action": json.dumps(
+                    action or {}, ensure_ascii=False, separators=(",", ":")
+                )
+            }
+        }
 
     @classmethod
     def _interactive_card_buttons(cls, card: dict[str, Any]) -> list[dict[str, Any]]:

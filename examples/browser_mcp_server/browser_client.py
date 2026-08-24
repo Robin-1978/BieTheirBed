@@ -51,7 +51,11 @@ def _safe_url(value: str, allow_private_origins: frozenset[str]) -> str:
     except socket.gaierror as exc:
         raise ValueError("URL host could not be resolved") from exc
     if any(not ipaddress.ip_address(item[4][0]).is_global for item in addresses):
-        raise ValueError("Private, loopback, link-local and metadata addresses are blocked")
+        raise ValueError(
+            "URL host has a non-public DNS result and was blocked to prevent "
+            "DNS-rebinding/SSRF; do not retry the same URL. An operator may "
+            "allow an exact trusted origin with KNOA_BROWSER_ALLOW_PRIVATE_ORIGINS"
+        )
     return normalized
 
 
@@ -246,18 +250,32 @@ class BrowserManager:
         return session
 
     async def navigate(self, session_id: str, url: str) -> dict[str, Any]:
+        auto_opened = not session_id
+        if auto_opened:
+            opened = await self.open()
+            session_id = str(opened["browser_session_id"])
         session = self.get(session_id)
-        safe = _safe_url(url, session.allow_private_origins)
-        result = await session.command("Page.navigate", {"url": safe})
-        if result.get("errorText"):
-            raise RuntimeError(str(result["errorText"]))
-        await session.ready()
-        location = await session.command("Runtime.evaluate", {
-            "expression": "location.href", "returnByValue": True,
-        })
-        final_url = str(((location.get("result") or {}).get("value") or ""))
-        _safe_url(final_url, session.allow_private_origins)
-        return {"browser_session_id": session_id, "url": final_url}
+        try:
+            safe = _safe_url(url, session.allow_private_origins)
+            result = await session.command("Page.navigate", {"url": safe})
+            if result.get("errorText"):
+                raise RuntimeError(str(result["errorText"]))
+            await session.ready()
+            location = await session.command(
+                "Runtime.evaluate",
+                {"expression": "location.href", "returnByValue": True},
+            )
+            final_url = str(((location.get("result") or {}).get("value") or ""))
+            _safe_url(final_url, session.allow_private_origins)
+            return {
+                "browser_session_id": session_id,
+                "url": final_url,
+                "auto_opened": auto_opened,
+            }
+        except BaseException:
+            if auto_opened:
+                await self.close(session_id)
+            raise
 
     async def snapshot(self, session_id: str) -> dict[str, Any]:
         session = self.get(session_id)

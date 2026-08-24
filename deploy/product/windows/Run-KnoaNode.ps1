@@ -10,6 +10,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$env:KNOA_BGE_PRELOAD = "1"
 $env:KNOA_RUNTIME_ROOT = $NodeRoot
 $env:KNOA_RUNTIME_DIR = Join-Path $NodeRoot "run"
 $env:KNOA_LIFECYCLE_TOKEN_FILE = $LifecycleTokenFile
