@@ -2,12 +2,14 @@ import { Platform } from "react-native";
 import Zeroconf from "react-native-zeroconf";
 
 import type { NodeDeviceBinding } from "@/security/deviceIdentity";
+import { mdnsImplementationOrder, type AndroidMdnsImplementation } from "./mdnsDiscoveryPolicy";
 
 // react-native-zeroconf expects the bare service name and adds the leading
 // underscore plus `._tcp` itself on Android and iOS.
 export const KNOA_MDNS_SERVICE_TYPE = "knoa-node";
-export const MDNS_DISCOVERY_TIMEOUT_MS = 2_500;
+export const MDNS_DISCOVERY_TIMEOUT_MS = 4_000;
 export const MDNS_HEALTH_TIMEOUT_MS = 1_200;
+const MDNS_BACKEND_SWITCH_DELAY_MS = 350;
 
 export type MdnsNodeEndpoint = {
   nodeId: string;
@@ -64,18 +66,21 @@ async function verifyLanEndpoint(
   }
 }
 
-export async function discoverNodeOnLan(
+async function discoverWithImplementation(
   binding: Pick<NodeDeviceBinding, "nodeId" | "nodeSigningPublicKey">,
-  timeoutMs = MDNS_DISCOVERY_TIMEOUT_MS,
+  implementation: AndroidMdnsImplementation,
+  timeoutMs: number,
 ): Promise<string | null> {
-  if (Platform.OS === "web") return null;
   const zeroconf = new Zeroconf();
   return new Promise((resolve) => {
     let settled = false;
+    let verificationStarted = false;
     const finish = (value: string | null) => {
       if (settled) return;
       settled = true;
-      try { zeroconf.stop("DNSSD"); } catch { /* optional native implementation */ }
+      clearTimeout(timer);
+      try { zeroconf.stop(implementation); } catch { /* optional native implementation */ }
+      try { zeroconf.removeDeviceListeners?.(); } catch { /* best-effort native cleanup */ }
       resolve(value);
     };
     const timer = setTimeout(() => finish(null), timeoutMs);
@@ -88,6 +93,12 @@ export async function discoverNodeOnLan(
       const hosts = listMdnsHostAddresses(service);
       const port = Number(service.port);
       if (!hosts.length || !Number.isInteger(port) || port <= 0 || port > 65535) return;
+      if (verificationStarted) return;
+      verificationStarted = true;
+      // Discovery has succeeded. Give endpoint verification its own bounded
+      // budget instead of letting the discovery timer expire midway through
+      // the multi-NIC address list.
+      clearTimeout(timer);
       void (async () => {
         for (const host of hosts) {
           const url = `http://${host}:${port}`;
@@ -97,14 +108,36 @@ export async function discoverNodeOnLan(
             return;
           }
         }
+        finish(null);
       })();
     });
-    zeroconf.on("error", () => { clearTimeout(timer); finish(null); });
+    zeroconf.on("error", () => finish(null));
     try {
-      zeroconf.scan(KNOA_MDNS_SERVICE_TYPE, "tcp", "local.", "DNSSD");
+      zeroconf.scan(KNOA_MDNS_SERVICE_TYPE, "tcp", "local.", implementation);
     } catch {
-      clearTimeout(timer);
       finish(null);
     }
   });
+}
+
+export async function discoverNodeOnLan(
+  binding: Pick<NodeDeviceBinding, "nodeId" | "nodeSigningPublicKey">,
+  timeoutMs = MDNS_DISCOVERY_TIMEOUT_MS,
+): Promise<string | null> {
+  if (Platform.OS === "web") return null;
+  const implementations = mdnsImplementationOrder(Platform.OS);
+  for (let index = 0; index < implementations.length; index += 1) {
+    const implementation = implementations[index];
+    if (!implementation) continue;
+    const endpoint = await discoverWithImplementation(
+      binding,
+      implementation,
+      timeoutMs,
+    );
+    if (endpoint) return endpoint;
+    if (index + 1 < implementations.length) {
+      await new Promise((resolve) => setTimeout(resolve, MDNS_BACKEND_SWITCH_DELAY_MS));
+    }
+  }
+  return null;
 }
