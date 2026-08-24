@@ -1,8 +1,8 @@
 {
   "contracts": {
     "agent_runtime_schema_sha256": "07cc817459aacfec88e7245abec212409e8ae36777adb2eda7ce1529428e6102",
-    "gateway_openapi_sha256": "3d16ffd1ecab5143040faca81f4c66cedf1b95fa04c46bceb0543b34660b4995",
-    "managed_config_schema_sha256": "efd3141d88d5f412d788b44e5a74e05b614325d80414020de5e03b2f2ea9c0a0",
+    "gateway_openapi_sha256": "6c1fea5c635b68a57e64e67c9eec915660612c654c32a1f94408c8e9125e52b0",
+    "managed_config_schema_sha256": "cc51833a30ea2fde67fab9b296a4a0de05352b7376d9441c3ccb2c9aed01e053",
     "relay_transcripts_sha256": "24af599688e7a3f8805d91e565fd9322c81b839246a1b527117b8d933da2cbf5"
   },
   "relay_transcripts": {
@@ -40,9 +40,9 @@
   "schema_version": 1,
   "sqlite_schema_sha256": {
     "hosted_control": "193528417bbdaa866612f69ef9830bb2aab7529cb2cb609790490440f62fca67",
-    "node_authority": "304513acc639290099286c6a188ccd8d16f4ecb88bf6edf2cb335ccca27f6e76",
+    "node_authority": "8f5c06694d487f510a46d3f38cc78bf494d15675700d26c3a5be2c0dc420f6e1",
     "node_gateway": "4d414f84fb6fae098ba0033a8997e3c752e7b4e6fe7450de84b0154d32ae128d",
-    "self_hosted_hub": "5af4792e84e955e5334e60fa4135462e60247bfdbb787ae1aaa3cd37404037cb"
+    "self_hosted_hub": "b08796898d0f52954777bb092e76fd3336a6261808d6b8d819e1973829f6f5e9"
   },
   "sqlite_schemas": {
     "hosted_control": [
@@ -160,6 +160,18 @@
         "name": "memories_lookup",
         "sql": "CREATE INDEX memories_lookup ON memories(principal_id, importance, category, updated_at DESC)",
         "table": "memories",
+        "type": "index"
+      },
+      {
+        "name": "notification_intents_owner",
+        "sql": "CREATE INDEX notification_intents_owner ON notification_intents(principal_id, source_sequence)",
+        "table": "notification_intents",
+        "type": "index"
+      },
+      {
+        "name": "notification_intents_pending",
+        "sql": "CREATE INDEX notification_intents_pending ON notification_intents(state, source_sequence)",
+        "table": "notification_intents",
         "type": "index"
       },
       {
@@ -328,6 +340,18 @@
         "name": "memories",
         "sql": "CREATE TABLE memories ( principal_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, category TEXT NOT NULL, importance TEXT NOT NULL CHECK (importance IN ('core', 'relevant')), confidence REAL NOT NULL, source TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_used_at TEXT, access_count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (principal_id, key) )",
         "table": "memories",
+        "type": "table"
+      },
+      {
+        "name": "notification_intent_sequence",
+        "sql": "CREATE TABLE notification_intent_sequence ( singleton INTEGER PRIMARY KEY CHECK(singleton=1), next_sequence INTEGER NOT NULL )",
+        "table": "notification_intent_sequence",
+        "type": "table"
+      },
+      {
+        "name": "notification_intents",
+        "sql": "CREATE TABLE notification_intents ( intent_id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, workspace_id TEXT NOT NULL, node_id TEXT NOT NULL, category TEXT NOT NULL, work_kind TEXT NOT NULL, work_id TEXT NOT NULL, execution_id TEXT NOT NULL, semantic_code TEXT NOT NULL, parameters_json TEXT NOT NULL, deep_link_json TEXT NOT NULL, dedupe_key TEXT NOT NULL, priority TEXT NOT NULL, expires_at REAL NOT NULL, state TEXT NOT NULL, source_sequence INTEGER NOT NULL UNIQUE, created_at REAL NOT NULL, updated_at REAL NOT NULL, UNIQUE(principal_id, dedupe_key) )",
+        "table": "notification_intents",
         "type": "table"
       },
       {
@@ -503,6 +527,24 @@
         "type": "index"
       },
       {
+        "name": "notification_deliveries_pending",
+        "sql": "CREATE INDEX notification_deliveries_pending ON notification_deliveries(state, next_attempt_at)",
+        "table": "notification_deliveries",
+        "type": "index"
+      },
+      {
+        "name": "notification_inbox_account_received",
+        "sql": "CREATE INDEX notification_inbox_account_received ON notification_inbox(account_id, received_at)",
+        "table": "notification_inbox",
+        "type": "index"
+      },
+      {
+        "name": "webhook_outbox_pending",
+        "sql": "CREATE INDEX webhook_outbox_pending ON webhook_ingress_outbox(route_id, acknowledged_at, ingress_id)",
+        "table": "webhook_ingress_outbox",
+        "type": "index"
+      },
+      {
         "name": "work_projections_by_workspace",
         "sql": "CREATE INDEX work_projections_by_workspace ON work_projections(workspace_id, entity_kind, source_updated_at DESC)",
         "table": "work_projections",
@@ -575,9 +617,27 @@
         "type": "table"
       },
       {
+        "name": "notification_deliveries",
+        "sql": "CREATE TABLE notification_deliveries( intent_id TEXT NOT NULL, installation_id TEXT NOT NULL, attempt INTEGER NOT NULL, state TEXT NOT NULL, provider_message_id TEXT NOT NULL, next_attempt_at REAL NOT NULL, last_error_code TEXT NOT NULL, updated_at REAL NOT NULL, PRIMARY KEY(intent_id, installation_id) )",
+        "table": "notification_deliveries",
+        "type": "table"
+      },
+      {
+        "name": "notification_inbox",
+        "sql": "CREATE TABLE notification_inbox( intent_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, workspace_id TEXT NOT NULL, node_id TEXT NOT NULL, category TEXT NOT NULL, work_kind TEXT NOT NULL, work_id TEXT NOT NULL, execution_id TEXT NOT NULL, semantic_code TEXT NOT NULL, parameters_json TEXT NOT NULL, deep_link_json TEXT NOT NULL, priority TEXT NOT NULL, expires_at REAL NOT NULL, source_sequence INTEGER NOT NULL, received_at REAL NOT NULL, acknowledged_at REAL, UNIQUE(node_id, source_sequence) )",
+        "table": "notification_inbox",
+        "type": "table"
+      },
+      {
         "name": "presence_nonces",
         "sql": "CREATE TABLE presence_nonces( node_id TEXT NOT NULL, nonce TEXT NOT NULL, observed_at REAL NOT NULL, PRIMARY KEY(node_id, nonce) )",
         "table": "presence_nonces",
+        "type": "table"
+      },
+      {
+        "name": "push_installations",
+        "sql": "CREATE TABLE push_installations( installation_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, provider TEXT NOT NULL, token_ciphertext TEXT NOT NULL, token_fingerprint TEXT NOT NULL, locale TEXT NOT NULL, app_version TEXT NOT NULL, state TEXT NOT NULL, registered_at REAL NOT NULL, last_seen_at REAL NOT NULL )",
+        "table": "push_installations",
         "type": "table"
       },
       {
@@ -590,6 +650,18 @@
         "name": "resource_invocation_tickets",
         "sql": "CREATE TABLE resource_invocation_tickets( ticket_id TEXT PRIMARY KEY, invocation_id TEXT NOT NULL, workspace_id TEXT NOT NULL, caller_node_id TEXT NOT NULL, target_deployment_id TEXT NOT NULL, issued_at REAL NOT NULL, expires_at REAL NOT NULL, issuance_state TEXT NOT NULL )",
         "table": "resource_invocation_tickets",
+        "type": "table"
+      },
+      {
+        "name": "webhook_ingress_outbox",
+        "sql": "CREATE TABLE webhook_ingress_outbox( ingress_id INTEGER PRIMARY KEY AUTOINCREMENT, route_id TEXT NOT NULL, external_event_id TEXT NOT NULL, payload_json TEXT NOT NULL, received_at REAL NOT NULL, delivery_count INTEGER NOT NULL, last_delivered_at REAL, acknowledged_at REAL, UNIQUE(route_id, external_event_id) )",
+        "table": "webhook_ingress_outbox",
+        "type": "table"
+      },
+      {
+        "name": "webhook_routes",
+        "sql": "CREATE TABLE webhook_routes( route_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, account_id TEXT NOT NULL, node_id TEXT NOT NULL, principal_id TEXT NOT NULL, task_id TEXT NOT NULL, trigger_id TEXT NOT NULL, display_name TEXT NOT NULL, secret_ciphertext TEXT NOT NULL, previous_secret_ciphertext TEXT NOT NULL, previous_secret_expires_at REAL, secret_version INTEGER NOT NULL, state TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, UNIQUE(node_id, task_id) )",
+        "table": "webhook_routes",
         "type": "table"
       },
       {

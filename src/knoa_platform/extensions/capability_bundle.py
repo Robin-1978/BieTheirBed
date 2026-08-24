@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import platform
 import shutil
 import sqlite3
@@ -23,7 +22,6 @@ from knoa_platform import __version__
 from knoa_platform.configuration import (
     ConfigDraft,
     ConfigPublishResult,
-    ConfigRevision,
     ConfigValidationResult,
     ManagedConfig,
     ManagedMCPConfig,
@@ -32,7 +30,7 @@ from knoa_platform.configuration import (
 )
 from knoa_platform.extensions.import_service import ExtensionImportService
 from knoa_platform.extensions.mcp_package import load_mcp_package
-from knoa_platform.extensions.package_store import PackageRecord, PackageStore
+from knoa_platform.extensions.package_store import PackageStore
 from knoa_platform.extensions.skill import load_skill_package, skill_package_digest
 from knoa_platform.sqlite_connection import connect_sqlite, initialize_wal
 
