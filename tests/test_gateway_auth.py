@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import sqlite3
 
 import pytest
 
@@ -74,6 +75,34 @@ def _pair(service, identities, private_key):
         signature=_signature(private_key, payload),
     )
     return device
+
+
+def test_gateway_auth_cleanup_removes_only_stale_records(tmp_path) -> None:
+    now = [200_000.0]
+    database = tmp_path / "data" / "gateway.db"
+    repository = GatewayAuthRepository(database, clock=lambda: now[0])
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """INSERT INTO gateway_auth_challenges VALUES
+               ('old', 'pair', 'owner', ?, 1, 10, NULL),
+               ('recent', 'pair', 'owner', ?, 100000, 150000, NULL)""",
+            ("a" * 64, "b" * 64),
+        )
+        connection.execute(
+            """INSERT INTO gateway_sessions VALUES
+               ('old', 'device', 'owner', ?, 1, 10, NULL),
+               ('recent', 'device', 'owner', ?, 100000, 150000, NULL)""",
+            ("c" * 64, "d" * 64),
+        )
+
+    assert repository.cleanup_expired(retention_seconds=86_400) == 2
+    with sqlite3.connect(database) as connection:
+        assert connection.execute(
+            "SELECT challenge_id FROM gateway_auth_challenges"
+        ).fetchall() == [("recent",)]
+        assert connection.execute(
+            "SELECT session_id FROM gateway_sessions"
+        ).fetchall() == [("recent",)]
 
 
 def test_pairing_requires_ed25519_private_key_proof(tmp_path) -> None:

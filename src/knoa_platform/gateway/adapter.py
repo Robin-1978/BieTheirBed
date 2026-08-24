@@ -1,4 +1,5 @@
 """Fail-closed HTTP/TLS surface for Secure Gateway mobile access."""
+
 from __future__ import annotations
 
 import asyncio
@@ -14,13 +15,17 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 
 from knoa_platform.config import AppConfig
+from knoa_platform.database_maintenance import maintain_sqlite_database
 from knoa_platform.extensions.import_service import ExtensionImportService
 from knoa_platform.extensions.capability_bundle import (
     CapabilityInstallationRepository,
     CapabilityInstaller,
 )
 from knoa_platform.extensions.package_store import PackageStore
-from knoa_platform.extensions.capability_catalog import CapabilityCatalogService, OFFICIAL_CATALOG_TRUST_ROOTS
+from knoa_platform.extensions.capability_catalog import (
+    CapabilityCatalogService,
+    OFFICIAL_CATALOG_TRUST_ROOTS,
+)
 from knoa_platform.events import EventSourceRepository
 from knoa_platform.improvement import ImprovementService
 from knoa_platform.fleet import FleetCandidateService
@@ -158,22 +163,28 @@ class SecureGatewayAdapter(
         database = paths.data / "gateway.db"
         identities = GatewayIdentityRepository(database)
         self._identities = identities
+        self._auth_repository: GatewayAuthRepository | None = None
         if authentication is None:
+            self._auth_repository = GatewayAuthRepository(database)
             authentication = GatewayAuthenticationService(
                 identities,
-                GatewayAuthRepository(database),
+                self._auth_repository,
             )
         self._authentication = authentication
         self._audit = audit or GatewayAuditRepository(database)
+        self._database = database
+        self._maintenance_interval = max(
+            60,
+            config.attachment_cleanup_interval_seconds,
+        )
+        self._maintenance_task: asyncio.Task[None] | None = None
         self._core = core or GatewayCoreBridge(config)
         self._node_identity = NodeIdentityStore(
             paths.data / "node-identity.json"
         ).load_or_create()
         self._node_hub_store = NodeHubStore(paths.data / "node-hub.json")
         self._remote_models = RemoteModelEndpoint(
-            RemoteModelInvocationRepository(
-                paths.data / "remote-model-invocations.db"
-            ),
+            RemoteModelInvocationRepository(paths.data / "remote-model-invocations.db"),
             core=self._core,
             bootstrap=config,
             paths=paths,
@@ -321,17 +332,53 @@ class SecureGatewayAdapter(
                     methods=["POST", "DELETE"],
                 ),
                 Route("/v1/agents", self._agents, methods=["GET"]),
-                Route("/v1/agents/availability", self._agent_availability, methods=["GET"]),
-                Route("/v1/extensions/packages", self._extension_packages, methods=["GET"]),
-                Route("/v1/extensions/import/skill", self._extension_import_skill, methods=["POST"]),
-                Route("/v1/extensions/import/mcp/local", self._extension_import_local_mcp, methods=["POST"]),
-                Route("/v1/extensions/import/mcp/remote", self._extension_import_remote_mcp, methods=["POST"]),
-                Route("/v1/capabilities/installations", self._capability_installations, methods=["GET"]),
-                Route("/v1/capabilities/prepare", self._capability_prepare, methods=["POST"]),
-                Route("/v1/capabilities/confirm", self._capability_confirm, methods=["POST"]),
+                Route(
+                    "/v1/agents/availability", self._agent_availability, methods=["GET"]
+                ),
+                Route(
+                    "/v1/extensions/packages", self._extension_packages, methods=["GET"]
+                ),
+                Route(
+                    "/v1/extensions/import/skill",
+                    self._extension_import_skill,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/extensions/import/mcp/local",
+                    self._extension_import_local_mcp,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/extensions/import/mcp/remote",
+                    self._extension_import_remote_mcp,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/capabilities/installations",
+                    self._capability_installations,
+                    methods=["GET"],
+                ),
+                Route(
+                    "/v1/capabilities/prepare",
+                    self._capability_prepare,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/capabilities/confirm",
+                    self._capability_confirm,
+                    methods=["POST"],
+                ),
                 Route("/v1/capability-catalog", self._catalog_entries, methods=["GET"]),
-                Route("/v1/capability-catalog/{capability_id:str}/selection", self._catalog_select, methods=["PUT"]),
-                Route("/v1/capability-catalog/{capability_id:str}/prepare", self._catalog_prepare, methods=["POST"]),
+                Route(
+                    "/v1/capability-catalog/{capability_id:str}/selection",
+                    self._catalog_select,
+                    methods=["PUT"],
+                ),
+                Route(
+                    "/v1/capability-catalog/{capability_id:str}/prepare",
+                    self._catalog_prepare,
+                    methods=["POST"],
+                ),
                 Route(
                     "/v1/capabilities/{capability_id:str}/state",
                     self._capability_state,
@@ -342,16 +389,50 @@ class SecureGatewayAdapter(
                     self._capability_rollback,
                     methods=["POST"],
                 ),
-                Route("/v1/fleet/candidates/apply", self._fleet_apply, methods=["POST"]),
-                Route("/v1/improvements/evidence", self._improvement_evidence, methods=["POST"]),
-                Route("/v1/improvements/cases", self._improvement_case, methods=["POST"]),
-                Route("/v1/improvements/candidates", self._improvement_candidates, methods=["GET"]),
-                Route("/v1/improvements/candidates", self._improvement_candidate, methods=["POST"]),
-                Route("/v1/improvements/candidates/{candidate_id:str}/replay", self._improvement_replay, methods=["POST"]),
-                Route("/v1/improvements/candidates/{candidate_id:str}/approve", self._improvement_approve, methods=["POST"]),
-                Route("/v1/improvements/candidates/{candidate_id:str}/canary", self._improvement_finish, methods=["POST"]),
-                Route("/v1/improvements/candidates/{candidate_id:str}/rollback", self._improvement_rollback, methods=["POST"]),
-                Route("/v1/secrets/{reference:str}", self._secret, methods=["GET", "PUT"]),
+                Route(
+                    "/v1/fleet/candidates/apply", self._fleet_apply, methods=["POST"]
+                ),
+                Route(
+                    "/v1/improvements/evidence",
+                    self._improvement_evidence,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/improvements/cases", self._improvement_case, methods=["POST"]
+                ),
+                Route(
+                    "/v1/improvements/candidates",
+                    self._improvement_candidates,
+                    methods=["GET"],
+                ),
+                Route(
+                    "/v1/improvements/candidates",
+                    self._improvement_candidate,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/improvements/candidates/{candidate_id:str}/replay",
+                    self._improvement_replay,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/improvements/candidates/{candidate_id:str}/approve",
+                    self._improvement_approve,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/improvements/candidates/{candidate_id:str}/canary",
+                    self._improvement_finish,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/improvements/candidates/{candidate_id:str}/rollback",
+                    self._improvement_rollback,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/secrets/{reference:str}", self._secret, methods=["GET", "PUT"]
+                ),
                 Route("/v1/config/current", self._config_current, methods=["GET"]),
                 Route("/v1/config/drafts", self._config_drafts, methods=["POST"]),
                 Route(
@@ -382,7 +463,11 @@ class SecureGatewayAdapter(
                 ),
                 Route("/v1/mcp/resources", self._list_mcp_resources, methods=["GET"]),
                 Route("/v1/sessions", self._create_session, methods=["POST"]),
-                Route("/v1/conversations/sessions", self._list_conversation_sessions, methods=["GET"]),
+                Route(
+                    "/v1/conversations/sessions",
+                    self._list_conversation_sessions,
+                    methods=["GET"],
+                ),
                 Route(
                     "/v1/conversations/sessions/{session_handle:str}",
                     self._conversation_session,
@@ -432,12 +517,36 @@ class SecureGatewayAdapter(
                 Route("/v1/tasks", self._list_tasks, methods=["GET"]),
                 Route("/v1/event-sources", self._list_event_sources, methods=["GET"]),
                 Route("/v1/event-sources", self._create_event_source, methods=["POST"]),
-                Route("/v1/event-sources/{source_id:str}", self._get_event_source, methods=["GET"]),
-                Route("/v1/event-sources/{source_id:str}", self._delete_event_source, methods=["DELETE"]),
-                Route("/v1/event-sources/{source_id:str}/state", self._set_event_source_state, methods=["PATCH"]),
-                Route("/v1/event-sources/{source_id:str}/test", self._test_event_source, methods=["POST"]),
-                Route("/v1/event-sources/{source_id:str}/rotate-secret", self._rotate_event_source_secret, methods=["POST"]),
-                Route("/v1/event-sources/{source_id:str}/events", self._event_source_events, methods=["GET"]),
+                Route(
+                    "/v1/event-sources/{source_id:str}",
+                    self._get_event_source,
+                    methods=["GET"],
+                ),
+                Route(
+                    "/v1/event-sources/{source_id:str}",
+                    self._delete_event_source,
+                    methods=["DELETE"],
+                ),
+                Route(
+                    "/v1/event-sources/{source_id:str}/state",
+                    self._set_event_source_state,
+                    methods=["PATCH"],
+                ),
+                Route(
+                    "/v1/event-sources/{source_id:str}/test",
+                    self._test_event_source,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/event-sources/{source_id:str}/rotate-secret",
+                    self._rotate_event_source_secret,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/event-sources/{source_id:str}/events",
+                    self._event_source_events,
+                    methods=["GET"],
+                ),
                 Route("/v1/events", self._events, methods=["GET"]),
                 Route("/v1/events/poll", self._events_poll, methods=["GET"]),
                 Route("/v1/artifacts", self._search_artifacts, methods=["GET"]),
@@ -593,6 +702,7 @@ class SecureGatewayAdapter(
     async def start(self) -> None:
         if self._server_task is not None:
             raise RuntimeError("SecureGatewayAdapter is already started")
+        await self._run_database_maintenance()
         server = _EmbeddedUvicornServer(
             uvicorn.Config(
                 self.app,
@@ -621,6 +731,10 @@ class SecureGatewayAdapter(
                         self.bound_port,
                     )
                     await self._node_relay.start()
+                    self._maintenance_task = asyncio.create_task(
+                        self._maintenance_loop(),
+                        name="knoa-gateway-database-maintenance",
+                    )
                     if self._config.gateway_lan_enabled:
                         try:
                             lan_server = _EmbeddedUvicornServer(
@@ -636,13 +750,18 @@ class SecureGatewayAdapter(
                             lan_task = asyncio.create_task(
                                 lan_server.serve(), name="knoa-lan-gateway"
                             )
-                            self._lan_server, self._lan_server_task = lan_server, lan_task
+                            self._lan_server, self._lan_server_task = (
+                                lan_server,
+                                lan_task,
+                            )
                             for _ in range(500):
                                 if lan_server.started:
                                     break
                                 if lan_task.done():
                                     await lan_task
-                                    raise RuntimeError("LAN Gateway stopped during startup")
+                                    raise RuntimeError(
+                                        "LAN Gateway stopped during startup"
+                                    )
                                 await asyncio.sleep(0.01)
                             if not lan_server.started:
                                 raise TimeoutError("LAN Gateway startup timed out")
@@ -650,7 +769,8 @@ class SecureGatewayAdapter(
 
                             self._mdns = MdnsPublisher(
                                 node_id=self._node_identity.node_id,
-                                port=self.lan_bound_port or self._config.gateway_lan_port,
+                                port=self.lan_bound_port
+                                or self._config.gateway_lan_port,
                                 version=__version__,
                                 signing_public_key=self._node_identity.signing_public_key,
                             )
@@ -676,6 +796,10 @@ class SecureGatewayAdapter(
             raise
 
     async def stop(self) -> None:
+        maintenance, self._maintenance_task = self._maintenance_task, None
+        if maintenance is not None:
+            maintenance.cancel()
+            await asyncio.gather(maintenance, return_exceptions=True)
         if self._mdns is not None:
             await self._mdns.stop()
             self._mdns = None
@@ -706,3 +830,22 @@ class SecureGatewayAdapter(
                 lan_task.cancel()
                 await asyncio.gather(lan_task, return_exceptions=True)
         await self._core.close()
+
+    async def _maintenance_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self._maintenance_interval)
+            await self._run_database_maintenance()
+
+    async def _run_database_maintenance(self) -> None:
+        try:
+            await asyncio.to_thread(self._maintain_database)
+        except Exception:
+            logger.warning("Gateway database maintenance failed", exc_info=True)
+
+    def _maintain_database(self) -> None:
+        pruned = self._audit.prune()
+        if self._auth_repository is not None:
+            pruned += self._auth_repository.cleanup_expired()
+        maintain_sqlite_database(self._database)
+        if pruned:
+            logger.info("Pruned %d stale Gateway database records", pruned)

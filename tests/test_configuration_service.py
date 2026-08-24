@@ -108,6 +108,28 @@ def test_registry_rejects_stale_draft_updates(tmp_path) -> None:
         )
 
 
+def test_registry_prunes_history_but_preserves_live_references(tmp_path) -> None:
+    registry = ConfigRegistry(tmp_path / "config.db")
+    initial = registry.initialize(_managed(), actor="owner")
+    draft = registry.create_draft(actor="owner")
+    for iterations in range(33, 39):
+        current = registry.current()
+        changed = current.document.model_copy(
+            update={
+                "operational": current.document.operational.model_copy(
+                    update={"max_iterations": iterations}
+                )
+            }
+        )
+        registry.adopt(changed, actor="owner", summary=f"revision-{iterations}")
+
+    assert registry.prune_history(retain=2) == 4
+    assert len(registry.history()) == 3
+    assert registry.current().document.operational.max_iterations == 38
+    assert registry.draft(draft.draft_id).base_revision_id == initial.revision_id
+    assert registry.revision(initial.revision_id).revision_id == initial.revision_id
+
+
 def test_registry_reinitializes_only_configuration_data_on_schema_change(
     tmp_path,
 ) -> None:

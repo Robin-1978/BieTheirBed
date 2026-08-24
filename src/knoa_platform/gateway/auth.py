@@ -1,4 +1,5 @@
 """Ed25519 device proof and revocable opaque Secure Gateway sessions."""
+
 from __future__ import annotations
 
 import base64
@@ -287,9 +288,7 @@ class GatewayAuthRepository:
         ttl_seconds: int = 15 * 60,
     ) -> IssuedGatewaySession:
         if device.state != "active":
-            raise GatewayAuthenticationRejectedError(
-                "Gateway authentication rejected"
-            )
+            raise GatewayAuthenticationRejectedError("Gateway authentication rejected")
         if not _MIN_SESSION_TTL_SECONDS <= ttl_seconds <= _MAX_SESSION_TTL_SECONDS:
             raise ValueError("Gateway session TTL must be between 60 and 3600 seconds")
         session_id = self._identifier(self._session_id_factory(), "Session ID")
@@ -325,9 +324,7 @@ class GatewayAuthRepository:
     def authenticate_session(self, token: str) -> GatewaySessionIdentity:
         parts = token.strip().split(".")
         if len(parts) != 3 or parts[0] != "v1":
-            raise GatewayAuthenticationRejectedError(
-                "Gateway authentication rejected"
-            )
+            raise GatewayAuthenticationRejectedError("Gateway authentication rejected")
         try:
             session_id = self._identifier(parts[1], "Session ID")
         except ValueError as exc:
@@ -354,9 +351,7 @@ class GatewayAuthRepository:
             and float(row["expires_at"]) > now
         )
         if not valid:
-            raise GatewayAuthenticationRejectedError(
-                "Gateway authentication rejected"
-            )
+            raise GatewayAuthenticationRejectedError("Gateway authentication rejected")
         return GatewaySessionIdentity(
             session_id=str(row["session_id"]),
             device_id=str(row["device_id"]),
@@ -392,6 +387,24 @@ class GatewayAuthRepository:
             )
             return int(updated.rowcount)
 
+    def cleanup_expired(self, *, retention_seconds: float = 24 * 60 * 60) -> int:
+        """Remove stale proof/session material after a short audit grace."""
+        if retention_seconds < 60:
+            raise ValueError("Gateway auth retention must be at least 60 seconds")
+        cutoff = float(self._clock()) - retention_seconds
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            challenges = connection.execute(
+                "DELETE FROM gateway_auth_challenges WHERE expires_at < ?",
+                (cutoff,),
+            )
+            sessions = connection.execute(
+                """DELETE FROM gateway_sessions
+                   WHERE expires_at < ? OR (revoked_at IS NOT NULL AND revoked_at < ?)""",
+                (cutoff, cutoff),
+            )
+            return int(challenges.rowcount) + int(sessions.rowcount)
+
     @staticmethod
     def _hash(value: str) -> str:
         return hashlib.sha256(value.encode("utf-8")).hexdigest()
@@ -399,8 +412,10 @@ class GatewayAuthRepository:
     @staticmethod
     def _identifier(value: str, label: str) -> str:
         normalized = value.strip()
-        if not normalized or len(normalized) > 128 or any(
-            character.isspace() for character in normalized
+        if (
+            not normalized
+            or len(normalized) > 128
+            or any(character.isspace() for character in normalized)
         ):
             raise ValueError(f"{label} must contain 1-128 non-space characters")
         return normalized
@@ -562,9 +577,9 @@ class GatewayAuthenticationService:
         normalized = [field.strip() for field in fields]
         if any(not field or "\n" in field or "\r" in field for field in normalized):
             raise ValueError("Gateway proof fields must be non-empty single lines")
-        return ("KNOA-GATEWAY-PROOF-V1\n" + purpose + "\n" + "\n".join(normalized)).encode(
-            "utf-8"
-        )
+        return (
+            "KNOA-GATEWAY-PROOF-V1\n" + purpose + "\n" + "\n".join(normalized)
+        ).encode("utf-8")
 
     @staticmethod
     def _public_key(value: str) -> tuple[str, bytes]:
@@ -602,7 +617,5 @@ class GatewayAuthenticationService:
                 "Gateway authentication rejected"
             ) from exc
         if len(raw) != expected_bytes:
-            raise GatewayAuthenticationRejectedError(
-                "Gateway authentication rejected"
-            )
+            raise GatewayAuthenticationRejectedError("Gateway authentication rejected")
         return raw

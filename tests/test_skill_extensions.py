@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -69,6 +72,32 @@ def test_skill_loader_confines_and_loads_text_resources(tmp_path: Path) -> None:
     assert package.instructions == "Use <evidence> carefully."
     assert package.resources[0].path == "references/checklist.md"
     assert package.resources[0].content == "verify every source"
+
+
+def test_skill_digest_is_stable_across_python_hash_seeds(tmp_path: Path) -> None:
+    package_root = _write_skill(
+        tmp_path,
+        "research",
+        manifest_updates={
+            "required_tools": ["web_search", "write_file", "attach"],
+            "required_capabilities": ["network", "host_write", "host_read"],
+        },
+    )
+    program = (
+        "from knoa_platform.extensions.skill import load_skill_package, "
+        "skill_package_digest; "
+        f"print(skill_package_digest(load_skill_package({str(package_root)!r})))"
+    )
+    digests = {
+        subprocess.check_output(
+            [sys.executable, "-c", program],
+            env={**os.environ, "PYTHONHASHSEED": seed},
+            text=True,
+        ).strip()
+        for seed in ("1", "2", "random")
+    }
+
+    assert len(digests) == 1
 
 
 def test_skill_loader_rejects_escape_and_symlink_escape(tmp_path: Path) -> None:
@@ -208,7 +237,9 @@ async def test_builtin_skill_reaches_model_only_for_matching_personal_run(
     assert events[-1].event_type == "completed"
     provider = _CaptureProvider.instance
     assert provider is not None
-    rendered = "\n".join(str(message["content"]) for message in provider.requests[0].messages)
+    rendered = "\n".join(
+        str(message["content"]) for message in provider.requests[0].messages
+    )
     assert '<skill id="research_report"' in rendered
     assert "Search for multiple relevant sources" in rendered
     skill_status = next(status for status in statuses if status.kind == "skill")
