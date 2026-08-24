@@ -1,17 +1,17 @@
 {
   "schema": "knoa-capability-catalog-v1",
   "catalog_id": "knoa-official",
-  "generated_at": 1787578528.0,
+  "generated_at": 1787585494.5839884,
   "entries": [
     {
       "id": "knoa.browser",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "display_name": "Browser MCP",
       "description": "Independent browser session MCP and third-party Capability Bundle reference.",
       "platform": ">=0.2.0",
       "operating_systems": ["linux", "windows", "darwin"],
       "architectures": [],
-      "package_digest": "8b7e57a5f7344efd638e6055a77626925d7aabeb260880dd7fe16d3a111b4aa3",
+      "package_digest": "26a28c75d9093723443fee19841eab41f471c551f69d7ff4ed8c3dca4d524239",
       "source": "relative://examples/browser_mcp_server",
       "permission_summary": [
         "MCP process",
@@ -25,6 +25,6 @@
   ],
   "signature": {
     "key_id": "knoa-release-2026-08-24",
-    "value": "gd6Dia99W9OzqXOtYrKJv_oGW65oMKDHpic3kpkRtSBtFjDzIQKKitaYJEDY5mv438cVtPpptuG3Id4o5BpFAg"
+    "value": "Mu_L87wh3EVPeLK9mDWvnI9Q0l7RSTMg88HCACb0LQZEZnfvrTuG6E7DvPyI8OSqetT9WrRrK9hbpbjaWYIBAw"
   }
 }

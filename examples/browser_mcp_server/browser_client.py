@@ -29,6 +29,46 @@ MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
 SESSION_TTL_SECONDS = 30 * 60
 
 
+def _browser_executable() -> str:
+    """Resolve a supported Chromium browser across Knoa's desktop platforms."""
+
+    configured = os.environ.get("KNOA_BROWSER_CHROME", "").strip().strip('"')
+    command_candidates = (
+        configured,
+        "google-chrome",
+        "chromium",
+        "chromium-browser",
+        "chrome",
+        "chrome.exe",
+        "msedge",
+        "msedge.exe",
+    )
+    for candidate in command_candidates:
+        if not candidate:
+            continue
+        expanded = os.path.expandvars(os.path.expanduser(candidate))
+        if Path(expanded).is_file():
+            return str(Path(expanded).resolve())
+        discovered = shutil.which(expanded)
+        if discovered:
+            return discovered
+
+    path_candidates = (
+        r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe",
+        r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe",
+        r"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe",
+        r"%PROGRAMFILES%\Microsoft\Edge\Application\msedge.exe",
+        r"%PROGRAMFILES(X86)%\Microsoft\Edge\Application\msedge.exe",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    )
+    for candidate in path_candidates:
+        expanded = Path(os.path.expandvars(candidate)).expanduser()
+        if expanded.is_file():
+            return str(expanded.resolve())
+    return ""
+
+
 def _safe_url(value: str, allow_private_origins: frozenset[str]) -> str:
     normalized = value.strip()
     if len(normalized) > 4096 or "\x00" in normalized:
@@ -159,7 +199,7 @@ class BrowserManager:
         self.download_root = Path(downloads).expanduser().resolve() if downloads else Path(tempfile.gettempdir()) / "knoa-browser-downloads"
         self.state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.download_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.chrome = os.environ.get("KNOA_BROWSER_CHROME", "").strip() or shutil.which("google-chrome") or shutil.which("chromium") or ""
+        self.chrome = _browser_executable()
         allowed = os.environ.get("KNOA_BROWSER_ALLOW_PRIVATE_ORIGINS", "")
         self.allow_private_origins = frozenset(item.strip().lower().rstrip("/") for item in allowed.split(",") if item.strip())
         self.sessions: dict[str, BrowserSession] = {}
@@ -177,7 +217,10 @@ class BrowserManager:
     async def open(self, *, profile_name: str = "") -> dict[str, Any]:
         await self.cleanup_expired()
         if not self.chrome:
-            raise RuntimeError("A supported Chrome/Chromium executable is required")
+            raise RuntimeError(
+                "Chrome, Chromium, or Microsoft Edge is required; install one or "
+                "set KNOA_BROWSER_CHROME to its executable path"
+            )
         if profile_name and not profile_name.replace("-", "").replace("_", "").isalnum():
             raise ValueError("Persistent profile names use only letters, numbers, '-' and '_'")
         async with self._lock:

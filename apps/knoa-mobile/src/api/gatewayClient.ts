@@ -900,6 +900,7 @@ export class GatewayClient {
         const payload = (await response.json()) as {
           error?: string;
           message?: string;
+          detail?: string;
           preflight?: { checks?: Array<{ status?: string; detail?: string }> };
         };
         code = payload.error ?? code;
@@ -907,7 +908,7 @@ export class GatewayClient {
           ?.filter((check) => check.status === "blocked" && check.detail)
           .map((check) => check.detail as string)
           .join("；");
-        message = blocked || payload.message || "";
+        message = blocked || payload.detail || payload.message || "";
       } catch {
         // The status remains sufficient when the peer did not return JSON.
       }

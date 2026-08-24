@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 import pytest
 import yaml
@@ -65,6 +66,14 @@ def test_local_mcp_package_loads_and_resolves_cwd(tmp_path: Path) -> None:
     assert config.transport == "stdio"
     assert config.working_directory == str(package.resolve())
     assert "monitor.list_observations" in config.tools
+
+
+def test_local_mcp_package_resolves_knoa_python_portably(tmp_path: Path) -> None:
+    package = _write_package(tmp_path, "portable", command="@knoa-python")
+
+    config = load_mcp_package(package)
+
+    assert config.command == sys.executable
 
 
 def test_private_mcp_environment_is_server_scoped_and_requires_0600(

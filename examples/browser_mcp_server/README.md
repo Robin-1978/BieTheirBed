@@ -35,6 +35,9 @@ Third-party package authors should retain the same structure:
   allowlisted health checks, setup inputs, and product entry points.
 - `mcp.yaml` declares only process startup and local Tool policy. Server MCP
   annotations are useful inspection metadata but never grant permission.
+- `@knoa-python` is a portable package command resolved by Knoa to the exact
+  Python executable running the Node; packages therefore do not depend on a
+  platform-specific `python3` command being present on `PATH`.
 - secrets are named setup inputs/private environment references and must never
   be placed in manifests, logs, tool results, or catalog metadata.
 - installation freezes bytes in PackageStore, shows the exact plan, requires a

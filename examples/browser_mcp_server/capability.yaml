@@ -1,6 +1,6 @@
 schema_version: 1
 id: browser
-version: 1.0.1
+version: 1.0.2
 display_name: 浏览器操作
 description: 使用隔离的临时浏览器会话安全地读取、操作网页并下载证据
 compatibility:
@@ -52,7 +52,8 @@ requested_tools:
 setup_inputs: []
 health_checks:
   - kind: required_command
-    value: google-chrome
+    value: >-
+      env:KNOA_BROWSER_CHROME|google-chrome|chromium|chromium-browser|chrome|chrome.exe|msedge|msedge.exe|%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe|%PROGRAMFILES%\Google\Chrome\Application\chrome.exe|%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe|%PROGRAMFILES%\Microsoft\Edge\Application\msedge.exe|%PROGRAMFILES(X86)%\Microsoft\Edge\Application\msedge.exe|/Applications/Google Chrome.app/Contents/MacOS/Google Chrome|/Applications/Chromium.app/Contents/MacOS/Chromium
   - kind: mcp_inventory
     component: browser_mcp_server
   - kind: disk_budget

@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 
 import { AppPressable } from "@/components/AppPressable";
@@ -13,6 +13,8 @@ import { BUSINESS_CONNECTIONS, connectionDescriptor, type BusinessConnectionKind
 export default function ExtensionCenterScreen() {
   const gateway = useGateway();
   const { t } = useI18n();
+  const scrollRef = useRef<ScrollView>(null);
+  const installPlanY = useRef(0);
   const [kind, setKind] = useState<"capability" | "skill" | "local_mcp" | "remote_mcp">("capability");
   const [connectionKind, setConnectionKind] = useState<BusinessConnectionKind>("custom");
   const [source, setSource] = useState("");
@@ -138,11 +140,14 @@ export default function ExtensionCenterScreen() {
 
   async function capabilityAction(capabilityId: string, action: "toggle" | "rollback", enabled = false) {
     setWorking(true);
+    setMessage("");
     try {
       await gateway.runAuthenticated((client) => action === "rollback"
         ? client.rollbackCapability(capabilityId)
         : client.setCapabilityEnabled(capabilityId, enabled));
       await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t("settings.extensions.importFailed"));
     } finally {
       setWorking(false);
     }
@@ -162,7 +167,7 @@ export default function ExtensionCenterScreen() {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <ScrollView ref={scrollRef} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <View style={styles.section}>
         <Text style={styles.title}>{t("settings.extensions.currentNode")}</Text>
         {installations.map((item) => (
@@ -214,8 +219,15 @@ export default function ExtensionCenterScreen() {
           </View>
         ))}
       </View>
+      {message ? <Text accessibilityLiveRegion="polite" style={styles.feedback}>{message}</Text> : null}
       {installPlan ? (
-        <View style={styles.section}>
+        <View
+          style={styles.section}
+          onLayout={(event) => {
+            installPlanY.current = event.nativeEvent.layout.y;
+            scrollRef.current?.scrollTo({ y: Math.max(0, installPlanY.current - 12), animated: true });
+          }}
+        >
           <Text style={styles.title}>{installPlan.display_name} · v{installPlan.version}</Text>
           <Text style={styles.hint}>{t("settings.extensions.permissionDelta", { count: installPlan.requested_tools.length })}</Text>
           {installPlan.requested_tools.map((tool) => (
@@ -298,7 +310,6 @@ export default function ExtensionCenterScreen() {
           {working ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>{t("settings.extensions.inspectAndDraft")}</Text>}
         </AppPressable>
         </>}
-        {message ? <Text style={styles.error}>{message}</Text> : null}
       </View>
     </ScrollView>
   );
@@ -321,6 +332,7 @@ const styles = StyleSheet.create({
   primary: { minHeight: 46, backgroundColor: colors.accent, borderRadius: 13, alignItems: "center", justifyContent: "center" },
   primaryText: { color: "#fff", fontWeight: "800" },
   error: { color: colors.danger, fontSize: 13 },
+  feedback: { color: colors.ink, backgroundColor: colors.surface, borderRadius: 12, padding: 12, fontSize: 13, lineHeight: 19 },
   warning: { color: colors.warning, fontSize: 13, lineHeight: 19 },
   item: { minHeight: 58, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
   capabilityItem: { gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, paddingTop: 12 },
