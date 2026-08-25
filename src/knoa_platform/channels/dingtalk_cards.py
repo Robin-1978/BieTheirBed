@@ -25,6 +25,7 @@ _EM_OPEN = re.compile(r"<(?:em|i)\b[^>]*>", re.IGNORECASE)
 _EM_CLOSE = re.compile(r"</(?:em|i)\s*>", re.IGNORECASE)
 _HTML_TAG = re.compile(r"</?[a-z][^>\n]*>", re.IGNORECASE)
 _EXCESS_BLANKS = re.compile(r"\n{3,}")
+_TABLE_SEPARATOR = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
 
 
 @dataclass(frozen=True)
@@ -54,7 +55,13 @@ def _muted(match: re.Match[str]) -> str:
 
 
 def dingtalk_markdown(value: str) -> str:
-    """Translate supported rich text and remove HTML outside fenced code."""
+    """Translate supported rich text and remove unsupported HTML/table syntax.
+
+    The built-in DingTalk AI Card V2 template accepts a small Markdown subset
+    and can render an empty body when a GitLab-style table is passed through.
+    Convert tables to bullets at the channel boundary so notification cards
+    remain readable instead of relying on template-specific table support.
+    """
     rendered: list[str] = []
     plain: list[str] = []
     fence = ""
@@ -80,7 +87,37 @@ def dingtalk_markdown(value: str) -> str:
         else:
             plain.append(line)
     flush_plain()
-    return _EXCESS_BLANKS.sub("\n\n", "".join(rendered)).strip()
+    normalized = _EXCESS_BLANKS.sub("\n\n", "".join(rendered)).strip()
+    return _tables_to_bullets(normalized)
+
+
+def _tables_to_bullets(value: str) -> str:
+    lines = value.splitlines()
+    output: list[str] = []
+    index = 0
+    while index < len(lines):
+        if (
+            index + 1 < len(lines)
+            and "|" in lines[index]
+            and _TABLE_SEPARATOR.match(lines[index + 1])
+        ):
+            headers = [part.strip() for part in lines[index].strip().strip("|").split("|")]
+            index += 2
+            rows: list[str] = []
+            while index < len(lines) and "|" in lines[index] and lines[index].strip():
+                cells = [part.strip() for part in lines[index].strip().strip("|").split("|")]
+                if len(cells) < len(headers):
+                    cells.extend([""] * (len(headers) - len(cells)))
+                pairs = [f"{header}: {cell}" for header, cell in zip(headers, cells) if cell]
+                if pairs:
+                    rows.append("- " + "；".join(pairs))
+                index += 1
+            if rows:
+                output.extend(rows)
+            continue
+        output.append(lines[index])
+        index += 1
+    return "\n".join(output)
 
 
 def project_dingtalk_card(card: Mapping[str, Any]) -> DingTalkCardProjection:

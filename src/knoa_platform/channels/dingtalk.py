@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 _DINGTALK_API = "https://api.dingtalk.com"
 _TEXT_LIMIT = 4000
+_MARKDOWN_BUTTON_CARD_TEMPLATE_ID = "1366a1eb-bc54-4859-ac88-517c56a9acb1.schema"
 _AI_MARKDOWN_CARD_TEMPLATE_ID = "382e4302-551d-4880-bf29-a30acfab2e71.schema"
 
 
@@ -906,7 +907,28 @@ class DingTalkChannel(
     ) -> str | None:
         if self._stream_client is None or self._interactive_cards_supported is False:
             return None
-        card_params = self._interactive_card_params(card)
+        is_static = (
+            self._fallback_card_is_terminal(card)
+            and not self._interactive_card_buttons(card)
+        )
+        card_params = (
+            self._static_card_params(card)
+            if is_static
+            else self._interactive_card_params(card)
+        )
+        template_id = (
+            _MARKDOWN_BUTTON_CARD_TEMPLATE_ID
+            if is_static
+            else _AI_MARKDOWN_CARD_TEMPLATE_ID
+        )
+        title = card_params.get("title") or card_params.get("msgTitle", "")
+        content = card_params.get("markdown") or card_params.get("msgContent", "")
+        logger.info(
+            "DingTalk interactive card create template=%s title=%s chars=%d",
+            "markdown" if is_static else "ai",
+            title[:80],
+            len(content),
+        )
         card_instance_id = uuid.uuid4().hex
         headers = {
             "x-acs-dingtalk-access-token": self._access_token_value(),
@@ -916,7 +938,7 @@ class DingTalkChannel(
             f"{_DINGTALK_API}/v1.0/card/instances",
             headers=headers,
             json={
-                "cardTemplateId": _AI_MARKDOWN_CARD_TEMPLATE_ID,
+                "cardTemplateId": template_id,
                 "outTrackId": card_instance_id,
                 "cardData": {"cardParamMap": card_params},
                 # Do not attach per-user privateData here.  DingTalk validates
@@ -992,6 +1014,13 @@ class DingTalkChannel(
         card: dict[str, Any],
     ) -> bool:
         card_params = self._interactive_card_params(card)
+        logger.info(
+            "DingTalk interactive card update id=%s title=%s chars=%d tables=%d",
+            card_instance_id,
+            card_params.get("msgTitle", "")[:80],
+            len(card_params.get("msgContent", "")),
+            card_params.get("msgContent", "").count("|") // 2,
+        )
         response = httpx.put(
             f"{_DINGTALK_API}/v1.0/card/instances",
             headers={
@@ -1019,6 +1048,19 @@ class DingTalkChannel(
     def _interactive_card_content(cls, card: dict[str, Any]) -> tuple[str, str]:
         projected = project_dingtalk_card(card)
         return projected.title, projected.markdown
+
+    @classmethod
+    def _static_card_params(cls, card: dict[str, Any]) -> dict[str, str]:
+        title, markdown = cls._interactive_card_content(card)
+        return {
+            "title": title,
+            "markdown": markdown,
+            "tips": "",
+            "sys_full_json_obj": json.dumps(
+                {"msgButtons": []},
+                ensure_ascii=False,
+            ),
+        }
 
     @classmethod
     def _interactive_card_params(cls, card: dict[str, Any]) -> dict[str, str]:
