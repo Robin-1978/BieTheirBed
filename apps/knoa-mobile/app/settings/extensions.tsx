@@ -7,7 +7,7 @@ import type { CapabilityCatalogEntry, CapabilityInstallPlan, CapabilityInstallat
 import type { DingTalkChannelStatus } from "@/api/gatewayClient";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { BUSINESS_CONNECTIONS, connectionDescriptor, type BusinessConnectionKind } from "@/models/connectionWizard";
 
 export default function ExtensionCenterScreen() {
@@ -238,7 +238,7 @@ export default function ExtensionCenterScreen() {
           {installPlan.withheld_tools.length ? <Text style={styles.warning}>{t("settings.extensions.inspectionWithheld", { items: installPlan.withheld_tools.join("、") })}</Text> : null}
           <Text style={styles.hint}>{t("settings.extensions.healthChecks", { count: installPlan.checks.length })}</Text>
           <AppPressable style={styles.primary} disabled={working} onPress={() => void confirmInstall()}>
-            {working ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>{t("settings.extensions.confirmInstall")}</Text>}
+            {working ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.primaryText}>{t("settings.extensions.confirmInstall")}</Text>}
           </AppPressable>
         </View>
       ) : null}
@@ -282,7 +282,7 @@ export default function ExtensionCenterScreen() {
           <Text style={styles.hint}>{t("connections.dingtalkOwnerHint")}</Text>
           {dingtalk ? <Text style={dingtalk.running ? styles.enabled : styles.hint}>{dingtalk.running ? t("connections.dingtalkRunning") : t("connections.dingtalkStopped")}</Text> : null}
           <AppPressable style={styles.primary} disabled={working || (dingtalkEnabled && (!dingtalkClientId.trim() || (!dingtalkClientSecret && !dingtalk?.client_secret_configured)))} onPress={() => void saveDingTalk()}>
-            {working ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>{t("connections.dingtalkSave")}</Text>}
+            {working ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.primaryText}>{t("connections.dingtalkSave")}</Text>}
           </AppPressable>
         </View> : <>
         <View style={styles.choices}>
@@ -307,7 +307,7 @@ export default function ExtensionCenterScreen() {
           <View style={styles.row}><Text style={styles.label}>{t("settings.extensions.allowPrivateNetwork")}</Text><Switch value={allowPrivate} onValueChange={setAllowPrivate} /></View>
         ) : null}
         <AppPressable style={styles.primary} disabled={working} onPress={() => void inspectAndCreateDraft()}>
-          {working ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>{t("settings.extensions.inspectAndDraft")}</Text>}
+          {working ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.primaryText}>{t("settings.extensions.inspectAndDraft")}</Text>}
         </AppPressable>
         </>}
       </View>
@@ -316,29 +316,29 @@ export default function ExtensionCenterScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 18, gap: 16, backgroundColor: colors.background },
-  section: { backgroundColor: colors.surface, borderRadius: 18, padding: 16, gap: 12, borderWidth: 1, borderColor: colors.line },
+  container: { padding: spacing.xlarge, gap: spacing.large, backgroundColor: colors.background },
+  section: { backgroundColor: colors.surface, borderRadius: radii.large, padding: spacing.large, gap: spacing.medium, borderWidth: 1, borderColor: colors.line , ...shadows.card },
   title: { color: colors.ink, fontSize: 18, fontWeight: "800" },
-  hint: { color: colors.muted, fontSize: 13, lineHeight: 19 },
-  choices: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  choice: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 12, backgroundColor: colors.background },
+  hint: { color: colors.muted, ...typography.caption, lineHeight: 19 },
+  choices: { flexDirection: "row", gap: spacing.small, flexWrap: "wrap" },
+  choice: { paddingHorizontal: spacing.medium, paddingVertical: spacing.small, borderRadius: radii.medium, backgroundColor: colors.background },
   selected: { backgroundColor: colors.accent },
   choiceText: { color: colors.ink, fontWeight: "700" },
-  selectedText: { color: "#fff", fontWeight: "800" },
-  input: { backgroundColor: colors.background, color: colors.ink, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 12, borderWidth: 1, borderColor: colors.line },
-  channelForm: { gap: 10 },
+  selectedText: { color: colors.onAccent, fontWeight: "800" },
+  input: { backgroundColor: colors.background, color: colors.ink, borderRadius: radii.medium, paddingHorizontal: spacing.medium, paddingVertical: spacing.medium, borderWidth: 1, borderColor: colors.line },
+  channelForm: { gap: spacing.medium },
   row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   label: { color: colors.ink, fontWeight: "600" },
-  primary: { minHeight: 46, backgroundColor: colors.accent, borderRadius: 13, alignItems: "center", justifyContent: "center" },
-  primaryText: { color: "#fff", fontWeight: "800" },
+  primary: { minHeight: 46, backgroundColor: colors.accent, borderRadius: radii.medium, alignItems: "center", justifyContent: "center" },
+  primaryText: { color: colors.onAccent, fontWeight: "800" },
   error: { color: colors.danger, fontSize: 13 },
-  feedback: { color: colors.ink, backgroundColor: colors.surface, borderRadius: 12, padding: 12, fontSize: 13, lineHeight: 19 },
-  warning: { color: colors.warning, fontSize: 13, lineHeight: 19 },
-  item: { minHeight: 58, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
-  capabilityItem: { gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, paddingTop: 12 },
+  feedback: { color: colors.ink, backgroundColor: colors.surface, borderRadius: radii.medium, padding: spacing.medium, ...typography.caption, lineHeight: 19 },
+  warning: { color: colors.warning, ...typography.caption, lineHeight: 19 },
+  item: { minHeight: 58, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.medium, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
+  capabilityItem: { gap: spacing.medium, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, paddingTop: spacing.medium },
   flex: { flex: 1 },
-  smallButton: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, backgroundColor: colors.background },
+  smallButton: { paddingHorizontal: spacing.medium, paddingVertical: spacing.small, borderRadius: radii.small, backgroundColor: colors.background },
   itemTitle: { color: colors.ink, fontWeight: "800" },
-  enabled: { color: colors.accent, fontSize: 12, fontWeight: "800" },
-  disabled: { color: colors.muted, fontSize: 12, fontWeight: "700" },
+  enabled: { color: colors.accent, ...typography.small, fontWeight: "800" },
+  disabled: { color: colors.muted, ...typography.small, fontWeight: "700" },
 });

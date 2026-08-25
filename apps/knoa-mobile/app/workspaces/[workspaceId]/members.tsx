@@ -4,6 +4,7 @@ import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, View
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { AsyncStateView } from "@/components/AsyncStateView";
 import {
   addHostedWorkspaceMember,
   listHostedWorkspaceMembers,
@@ -12,7 +13,7 @@ import {
   type HostedWorkspaceMember,
 } from "@/hub/hubClient";
 import { useI18n } from "@/i18n";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 
 export default function WorkspaceMembersScreen() {
   const params = useLocalSearchParams<{ workspaceId: string }>();
@@ -120,9 +121,12 @@ export default function WorkspaceMembersScreen() {
         </View>
       ) : null}
 
-      {loading ? <ActivityIndicator color={colors.accent} /> : null}
+      {loading ? <AsyncStateView state="loading" /> : null}
+      {error && !loading ? (
+        <AsyncStateView state="error" message={error} retryLabel={t("common.refresh")} onRetry={() => void refresh()} />
+      ) : null}
 
-      {members.map((member) => (
+      {!loading && !error ? members.map((member) => (
         <View key={member.accountId} style={styles.card}>
           <View style={styles.row}>
             <View style={styles.flex}>
@@ -138,28 +142,25 @@ export default function WorkspaceMembersScreen() {
             )}
           </View>
         </View>
-      ))}
-
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      )) : null}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 17, gap: 13, paddingBottom: 52 },
-  header: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  icon: { width: 48, height: 48, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
+  container: { padding: spacing.large, gap: spacing.medium, paddingBottom: 52 },
+  header: { flexDirection: "row", alignItems: "center", gap: spacing.medium, padding: spacing.large, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line , ...shadows.card },
+  icon: { width: 48, height: 48, borderRadius: radii.large, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
   flex: { flex: 1, minWidth: 0 },
-  title: { color: colors.ink, fontSize: 19, fontWeight: "800" },
-  meta: { color: colors.muted, fontSize: 12, lineHeight: 18 },
-  card: { padding: 15, gap: 11, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  sectionTitle: { color: colors.ink, fontSize: 17, fontWeight: "800" },
-  input: { minHeight: 46, borderRadius: 12, borderWidth: 1, borderColor: colors.line, color: colors.ink, paddingHorizontal: 12 },
-  primary: { minHeight: 46, alignItems: "center", justifyContent: "center", borderRadius: 13, backgroundColor: colors.accent },
+  title: { color: colors.ink, ...typography.heading },
+  meta: { color: colors.muted, ...typography.small, lineHeight: 18 },
+  card: { padding: spacing.large, gap: spacing.medium, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line , ...shadows.card },
+  sectionTitle: { color: colors.ink, ...typography.subheading, fontWeight: "800" },
+  input: { minHeight: 46, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line, color: colors.ink, paddingHorizontal: spacing.medium },
+  primary: { minHeight: 46, alignItems: "center", justifyContent: "center", borderRadius: radii.medium, backgroundColor: colors.accent },
   primaryText: { color: colors.white, fontWeight: "800" },
-  row: { flexDirection: "row", alignItems: "center", gap: 12 },
-  memberName: { color: colors.ink, fontSize: 16, fontWeight: "800" },
+  row: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
+  memberName: { color: colors.ink, ...typography.subheading, fontWeight: "800" },
   remove: { color: colors.danger, fontWeight: "800" },
-  owner: { color: colors.accent, fontSize: 12, fontWeight: "800" },
-  error: { color: colors.danger, lineHeight: 20 },
+  owner: { color: colors.accent, ...typography.small, fontWeight: "800" },
 });

@@ -6,9 +6,10 @@ import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, View
 import type { EventSource, EventSourceEvent, MCPResourceCatalogItem } from "@/api/models";
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { AsyncStateView } from "@/components/AsyncStateView";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
-import { colors } from "@/theme";
+import { colors, radii, shadows, spacing, typography } from "@/theme";
 
 export default function EventSourcesScreen() {
   const gateway = useGateway();
@@ -17,6 +18,7 @@ export default function EventSourcesScreen() {
   const [mcpResources, setMcpResources] = useState<MCPResourceCatalogItem[]>([]);
   const [events, setEvents] = useState<Record<string, EventSourceEvent[]>>({});
   const [creating, setCreating] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [kind, setKind] = useState<"webhook" | "mcp_resource">("webhook");
@@ -26,7 +28,13 @@ export default function EventSourcesScreen() {
   const [oneTimeSecret, setOneTimeSecret] = useState("");
 
   const refresh = useCallback(async () => {
-    if (!gateway.client) return;
+    if (!gateway.client) {
+      setLoading(false);
+      setError(t("chat.reconnecting"));
+      return;
+    }
+    setLoading(true);
+    setError("");
     try {
       const [nextSources, nextResources] = await Promise.all([
         gateway.runAuthenticated((client) => client.listEventSources()),
@@ -34,9 +42,10 @@ export default function EventSourcesScreen() {
       ]);
       setSources(nextSources);
       setMcpResources(nextResources);
-      setError("");
     } catch {
       setError(t("eventSources.loadFailed"));
+    } finally {
+      setLoading(false);
     }
   }, [gateway.client, gateway.runAuthenticated, t]);
 
@@ -61,6 +70,17 @@ export default function EventSourcesScreen() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t("eventSources.createFailed"));
     } finally { setBusy(""); }
+  }
+
+  function confirmDelete(source: EventSource) {
+    Alert.alert(t("eventSources.deleteTitle"), t("eventSources.deleteMessage"), [
+      { text: t("common.cancel"), style: "cancel" },
+      {
+        text: t("eventSources.deleteConfirm"),
+        style: "destructive",
+        onPress: () => void command(source, "delete"),
+      },
+    ]);
   }
 
   async function command(source: EventSource, action: "state" | "test" | "rotate" | "events" | "delete") {
@@ -100,9 +120,8 @@ export default function EventSourcesScreen() {
       <View style={styles.header}>
         <AppPressable onPress={() => router.back()} style={styles.iconButton}><AppIcon name="chevron-left" color={colors.ink} /></AppPressable>
         <View style={styles.headerCopy}><Text style={styles.heading}>{t("eventSources.title")}</Text><Text style={styles.hint}>{t("eventSources.description")}</Text></View>
-        <AppPressable onPress={() => setCreating((value) => !value)} style={styles.primaryIcon}><AppIcon name="plus" color={colors.white} /></AppPressable>
+        <AppPressable onPress={() => setCreating((value) => !value)} style={styles.primaryIcon}><AppIcon name="plus" color={colors.onAccent} /></AppPressable>
       </View>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
       {oneTimeSecret ? <View style={styles.secret}><Text style={styles.cardTitle}>{t("eventSources.secretTitle")}</Text><Text selectable style={styles.secretValue}>{oneTimeSecret}</Text><Text style={styles.hint}>{t("eventSources.secretOnce")}</Text></View> : null}
       {creating ? (
         <View style={styles.card}>
@@ -127,8 +146,13 @@ export default function EventSourcesScreen() {
               )) : <Text style={styles.warning}>{t("eventSources.noResources")}</Text>}
             </View>
           ) : null}
-          <AppPressable disabled={Boolean(busy) || !title.trim() || !goal.trim() || (kind === "mcp_resource" && !selectedResourceKey)} onPress={() => void create()} style={styles.primary}>{busy === "create" ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>{t("eventSources.createAction")}</Text>}</AppPressable>
+          <AppPressable disabled={Boolean(busy) || !title.trim() || !goal.trim() || (kind === "mcp_resource" && !selectedResourceKey)} onPress={() => void create()} style={styles.primary}>{busy === "create" ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.primaryText}>{t("eventSources.createAction")}</Text>}</AppPressable>
         </View>
+      ) : null}
+      {loading ? <AsyncStateView state="loading" /> : null}
+      {error ? <AsyncStateView state="error" message={error} retryLabel={t("common.refresh")} onRetry={() => void refresh()} /> : null}
+      {!loading && !error && !sources.length ? (
+        <AsyncStateView state="empty" title={t("eventSources.emptyTitle")} message={t("eventSources.emptyDetail")} />
       ) : null}
       {sources.map((source) => (
         <View key={source.source_id} style={styles.card}>
@@ -140,7 +164,7 @@ export default function EventSourcesScreen() {
             <Small label={t("eventSources.test")} onPress={() => void command(source, "test")} />
             <Small label={t("eventSources.history")} onPress={() => void command(source, "events")} />
             {source.kind === "webhook" && source.route_id ? <Small label={t("eventSources.rotate")} onPress={() => void command(source, "rotate")} /> : null}
-            <Small danger label={t("common.delete")} onPress={() => void command(source, "delete")} />
+            <Small danger label={t("common.delete")} onPress={() => confirmDelete(source)} />
           </View>
           {events[source.source_id]?.map((event) => <Text key={event.trigger_event_id} style={styles.event}>{event.external_event_id} · {event.state}</Text>)}
         </View>
@@ -158,5 +182,38 @@ function resourceKey(resource: MCPResourceCatalogItem): string {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 16, paddingBottom: 48, gap: 12 }, header: { flexDirection: "row", alignItems: "center", gap: 10 }, headerCopy: { flex: 1 }, heading: { color: colors.ink, fontSize: 23, fontWeight: "800" }, hint: { color: colors.muted, lineHeight: 19 }, iconButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center" }, primaryIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" }, card: { padding: 15, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, gap: 9 }, secret: { padding: 15, borderRadius: 16, backgroundColor: colors.warningSoft, gap: 7 }, secretValue: { color: colors.ink, fontFamily: "monospace" }, cardTitle: { color: colors.ink, fontWeight: "800", fontSize: 16 }, label: { color: colors.ink, fontWeight: "700" }, input: { minHeight: 44, borderWidth: 1, borderColor: colors.line, borderRadius: 11, padding: 11, color: colors.ink }, goal: { minHeight: 100, textAlignVertical: "top" }, row: { flexDirection: "row", gap: 8 }, between: { flexDirection: "row", justifyContent: "space-between", gap: 10 }, wrap: { flexDirection: "row", flexWrap: "wrap", gap: 7 }, resourceList: { gap: 7 }, resourceChoice: { padding: 11, borderRadius: 11, borderWidth: 1, borderColor: colors.line, gap: 3 }, resourceChoiceActive: { borderColor: colors.accent, backgroundColor: colors.accentSoft }, resourceChoiceText: { color: colors.accent }, choice: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: colors.line }, choiceActive: { borderColor: colors.accent, backgroundColor: colors.accentSoft }, choiceText: { color: colors.muted }, choiceTextActive: { color: colors.accent, fontWeight: "700" }, primary: { minHeight: 45, borderRadius: 12, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" }, primaryText: { color: colors.white, fontWeight: "800" }, small: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: colors.line }, smallText: { color: colors.accent, fontWeight: "700", fontSize: 12 }, danger: { color: colors.danger }, state: { color: colors.accent, fontWeight: "700" }, warning: { color: colors.warning }, url: { color: colors.ink, fontSize: 12 }, event: { color: colors.muted, fontSize: 12 }, error: { color: colors.danger },
+  container: { padding: spacing.large, paddingBottom: spacing.xlarge * 2, gap: spacing.medium },
+  header: { flexDirection: "row", alignItems: "center", gap: spacing.small },
+  headerCopy: { flex: 1 },
+  heading: { color: colors.ink, fontSize: 23, fontWeight: "800" },
+  hint: { color: colors.muted, lineHeight: 19 },
+  iconButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
+  primaryIcon: { width: 42, height: 42, borderRadius: radii.medium, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
+  card: { padding: spacing.medium, borderRadius: radii.large, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, gap: spacing.small, ...shadows.card },
+  secret: { padding: spacing.medium, borderRadius: radii.large, backgroundColor: colors.warningSoft, gap: spacing.small },
+  secretValue: { color: colors.ink, fontFamily: "monospace" },
+  cardTitle: { color: colors.ink, fontWeight: "800", fontSize: 16 },
+  label: { color: colors.ink, ...typography.subheading },
+  input: { minHeight: 44, borderWidth: 1, borderColor: colors.line, borderRadius: radii.medium, padding: spacing.medium, color: colors.ink },
+  goal: { minHeight: 100, textAlignVertical: "top" },
+  row: { flexDirection: "row", gap: spacing.small },
+  between: { flexDirection: "row", justifyContent: "space-between", gap: spacing.small },
+  wrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.small },
+  resourceList: { gap: spacing.small },
+  resourceChoice: { padding: spacing.medium, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line, gap: spacing.xsmall },
+  resourceChoiceActive: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
+  resourceChoiceText: { color: colors.accent },
+  choice: { paddingHorizontal: spacing.medium, paddingVertical: spacing.small, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line },
+  choiceActive: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
+  choiceText: { color: colors.muted },
+  choiceTextActive: { color: colors.accent, fontWeight: "700" },
+  primary: { minHeight: 45, borderRadius: radii.medium, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
+  primaryText: { color: colors.onAccent, fontWeight: "800" },
+  small: { paddingHorizontal: spacing.small, paddingVertical: spacing.small, borderRadius: radii.small, borderWidth: 1, borderColor: colors.line },
+  smallText: { color: colors.accent, ...typography.small },
+  danger: { color: colors.danger },
+  state: { color: colors.accent, fontWeight: "700" },
+  warning: { color: colors.warning },
+  url: { color: colors.ink, ...typography.small },
+  event: { color: colors.muted, ...typography.small },
 });

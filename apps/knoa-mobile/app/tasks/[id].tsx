@@ -9,11 +9,12 @@ import {
   View,
 } from "react-native";
 
+import { AsyncStateView } from "@/components/AsyncStateView";
 import type { AgentSummary, Task, TaskExecution, TaskState } from "@/api/models";
 import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { useGateway } from "@/state/GatewayProvider";
 import { useTaskReminders } from "@/state/TaskReminderProvider";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { blockedPreflightMessages, warningPreflightMessages } from "@/components/preflightPresentation";
 import { useI18n } from "@/i18n";
 import { AppPressable } from "@/components/AppPressable";
@@ -147,14 +148,18 @@ export default function TaskDetailScreen() {
   }
 
   if (!task && !error && gateway.status === "ready") {
-    return <View style={styles.loading}><ActivityIndicator color={colors.accent} /></View>;
+    return <View style={styles.loading}><AsyncStateView state="loading" /></View>;
   }
 
   if (!task) {
     return (
       <View style={styles.loading}>
-        <Text style={styles.error}>{error || t("chat.reconnecting")}</Text>
-        <AppPressable onPress={() => void refresh()}><Text style={styles.link}>{t("tasks.reload")}</Text></AppPressable>
+        <AsyncStateView
+          state="error"
+          message={error || t("chat.reconnecting")}
+          retryLabel={t("tasks.reload")}
+          onRetry={() => void refresh()}
+        />
       </View>
     );
   }
@@ -254,45 +259,45 @@ function Action({ icon, label, primary = false, disabled = false, busy = false, 
   return (
     <AppPressable disabled={disabled} style={[styles.action, primary && styles.actionPrimary, disabled && styles.disabled]} onPress={onPress}>
       {busy
-        ? <ActivityIndicator color={primary ? "white" : colors.accent} size="small" />
-        : <><AppIcon name={icon} color={primary ? colors.white : colors.accent} size={18} /><Text style={[styles.actionText, primary && styles.actionPrimaryText]}>{label}</Text></>}
+        ? <ActivityIndicator color={primary ? colors.onAccent : colors.accent} size="small" />
+        : <><AppIcon name={icon} color={primary ? colors.onAccent : colors.accent} size={18} /><Text style={[styles.actionText, primary && styles.actionPrimaryText]}>{label}</Text></>}
     </AppPressable>
   );
 }
 
 const styles = StyleSheet.create({
-  loading: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 24 },
-  container: { padding: 16, gap: 14, paddingBottom: 48 },
-  summary: { backgroundColor: colors.surface, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: colors.line, gap: 8 },
+  loading: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.medium, padding: spacing.xlarge },
+  container: { padding: spacing.large, gap: spacing.large, paddingBottom: 48 },
+  summary: { backgroundColor: colors.surface, borderRadius: radii.large, padding: spacing.xlarge, borderWidth: 1, borderColor: colors.line, gap: spacing.small , ...shadows.card },
   summaryHeader: { flexDirection: "row", justifyContent: "space-between" },
   state: { color: colors.accent, fontWeight: "700" },
   revision: { color: colors.muted, fontSize: 12 },
   title: { color: colors.ink, fontSize: 21, lineHeight: 28, fontWeight: "700" },
   goal: { color: colors.ink, fontSize: 16, lineHeight: 24 },
-  policy: { color: colors.muted, marginTop: 4 },
-  actions: { flexDirection: "row", gap: 10 },
-  action: { flex: 1, minHeight: 44, flexDirection: "row", gap: 7, alignItems: "center", justifyContent: "center", borderRadius: 13, backgroundColor: colors.accentSoft },
+  policy: { color: colors.muted, marginTop: spacing.xsmall },
+  actions: { flexDirection: "row", gap: spacing.medium },
+  action: { flex: 1, minHeight: 44, flexDirection: "row", gap: spacing.small, alignItems: "center", justifyContent: "center", borderRadius: radii.medium, backgroundColor: colors.accentSoft },
   actionPrimary: { backgroundColor: colors.accent },
   actionText: { color: colors.accent, fontWeight: "700" },
-  actionPrimaryText: { color: "white" },
+  actionPrimaryText: { color: colors.onAccent },
   disabled: { opacity: 0.45 },
-  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 8 },
+  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: spacing.small },
   sectionTitle: { color: colors.ink, fontSize: 18, fontWeight: "700" },
   sectionCount: { color: colors.muted },
-  execution: { padding: 16, backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.line, gap: 7 },
+  execution: { padding: spacing.large, backgroundColor: colors.surface, borderRadius: radii.large, borderWidth: 1, borderColor: colors.line, gap: spacing.small , ...shadows.card },
   executionHeader: { flexDirection: "row", justifyContent: "space-between" },
-  executionTitleRow: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 },
+  executionTitleRow: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: spacing.small },
   unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.danger },
   executionTitle: { color: colors.ink, fontWeight: "700" },
   executionState: { color: colors.accent, fontWeight: "600" },
   result: { color: colors.ink, lineHeight: 21 },
   failure: { color: colors.danger },
   time: { color: colors.muted, fontSize: 12 },
-  empty: { padding: 24, borderRadius: 16, backgroundColor: colors.surface, alignItems: "center" },
+  empty: { padding: spacing.xlarge, borderRadius: radii.large, backgroundColor: colors.surface, alignItems: "center" },
   emptyText: { color: colors.muted },
   error: { color: colors.danger, lineHeight: 21 },
   link: { color: colors.accent, fontWeight: "700" },
-  deleteButton: { alignItems: "center", padding: 14, marginTop: 12 },
-  deleteContent: { flexDirection: "row", alignItems: "center", gap: 7 },
+  deleteButton: { alignItems: "center", padding: spacing.large, marginTop: spacing.medium },
+  deleteContent: { flexDirection: "row", alignItems: "center", gap: spacing.small },
   deleteText: { color: colors.danger, fontWeight: "600" },
 });

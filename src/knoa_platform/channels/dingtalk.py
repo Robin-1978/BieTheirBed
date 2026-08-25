@@ -1,9 +1,8 @@
 """DingTalk Stream channel adapter.
 
-The Core conversation/task implementation is deliberately shared with the
-Feishu adapter.  DingTalk is only responsible for translating Stream events
-and the small set of robot message APIs; this keeps task state, approvals,
-attachments and retry semantics identical across channels.
+DingTalk shares session, conversation and background-task logic with other
+channels through the channel mixins.  Transport-specific Stream and card APIs
+live in this module only.
 
 The optional ``dingtalk_stream`` package is imported lazily.  A Node can be
 installed without the optional SDK and still start normally when the channel
@@ -13,6 +12,7 @@ keeps retrying instead of taking down Core.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import mimetypes
@@ -27,11 +27,14 @@ import httpx
 
 from knoa_platform.branding import ASSISTANT_NAME
 from knoa_platform.channels.contracts import ChannelMessage
+from knoa_platform.channels.conversation_mixin import ChannelConversationMixin
 from knoa_platform.channels.dingtalk_cards import dingtalk_markdown
 from knoa_platform.channels.dingtalk_cards import project_dingtalk_card
-from knoa_platform.channels.feishu import FeishuChannel
+from knoa_platform.channels.session_mixin import ChannelSessionMixin
+from knoa_platform.channels.task_mixin import ChannelTaskMixin
 from knoa_platform.channels.feishu_cards import _principal_for_log
 from knoa_platform.config import AppConfig
+from knoa_platform.runtime import RuntimePaths
 
 logger = logging.getLogger(__name__)
 
@@ -139,8 +142,12 @@ def _rich_text_content(payload: Mapping[str, Any]) -> tuple[str, tuple[_InboundM
     return "\n".join(text_parts).strip(), tuple(media)
 
 
-class DingTalkChannel(FeishuChannel):
-    """DingTalk Stream adapter with Feishu-compatible Core semantics."""
+class DingTalkChannel(
+    ChannelSessionMixin,
+    ChannelConversationMixin,
+    ChannelTaskMixin,
+):
+    """DingTalk Stream adapter with shared Core session/task semantics."""
 
     name = "dingtalk"
 
@@ -159,33 +166,16 @@ class DingTalkChannel(FeishuChannel):
         )
 
     def __init__(self, config: AppConfig) -> None:
-        self._dingtalk_config = config
-        # Feishu mixins contain the complete Core/session/task implementation.
-        # Feed them a private mapped view so credentials never leak into a
-        # second implementation or alter the user's configured Feishu channel.
-        mapped = config.model_copy(
-            update={
-                "feishu_enabled": True,
-                "feishu_app_id": config.dingtalk_client_id,
-                "feishu_app_secret": config.dingtalk_client_secret,
-                "feishu_receive_id": config.dingtalk_receive_id,
-            }
-        )
-        super().__init__(mapped)
         self._config = config
+        self._paths = RuntimePaths.from_root(config.runtime_root)
         self._app_id = config.dingtalk_client_id.strip()
         self._app_secret = config.dingtalk_client_secret.get_secret_value().strip()
         self._receive_id = config.dingtalk_receive_id.strip()
-        self._binding_path = self._paths.data / "dingtalk_open_id"
-        self._sessions_path = self._paths.data / "dingtalk_sessions.json"
+        self._init_channel_storage("dingtalk")
+        self._init_channel_runtime_state()
+        self._init_conversation_runtime_state()
+        self._dingtalk_config = config
         self._card_state_path = self._paths.data / "dingtalk_card_actions.json"
-        self._notification_cursors_path = (
-            self._paths.data / "dingtalk_notification_cursors.json"
-        )
-        self._notification_intent_cursors_path = (
-            self._paths.data / "dingtalk_notification_intent_cursors.json"
-        )
-        self._outbox = self._paths.cache / "dingtalk-outbox"
         self._stream_client: Any = None
         self._stream_thread: threading.Thread | None = None
         self._stream_stop = threading.Event()
@@ -226,7 +216,6 @@ class DingTalkChannel(FeishuChannel):
             await asyncio.to_thread(self._send_text, self._receive_id, "已启动")
 
     async def stop(self) -> None:
-        self._running = False
         self._stream_stop.set()
         client, self._stream_client = self._stream_client, None
         if client is not None:
@@ -240,7 +229,7 @@ class DingTalkChannel(FeishuChannel):
                     except Exception:
                         logger.debug("DingTalk Stream client stop failed", exc_info=True)
                     break
-        await super().stop()
+        await self._shutdown_shared_resources()
         logger.info("DingTalkChannel stopped")
 
     def _run_stream(self) -> None:
@@ -669,6 +658,67 @@ class DingTalkChannel(FeishuChannel):
             )
             return False
         return True
+
+    @staticmethod
+    def _text_card(
+        text: str,
+        template: str,
+        title: str,
+    ) -> dict[str, Any]:
+        return {
+            "schema": "2.0",
+            "header": {
+                "template": template,
+                "title": {"tag": "plain_text", "content": title},
+            },
+            "body": {
+                "elements": [{"tag": "markdown", "content": text}],
+            },
+        }
+
+    def _send_card(
+        self,
+        open_id: str,
+        text: str,
+        template: str = "blue",
+        title: str = ASSISTANT_NAME,
+    ) -> bool:
+        card = self._text_card(text, template, title)
+        return self._send_card_returning_id(open_id, card) is not None
+
+    async def _deliver_artifact(
+        self,
+        open_id: str,
+        session: str,
+        artifact_id: str,
+    ) -> None:
+        downloaded = await (await self._client_for(open_id)).download_artifact(
+            session,
+            artifact_id,
+        )
+        _header, encoded = downloaded.data_url.split(",", 1)
+        data = base64.b64decode(encoded, validate=True)
+        suffix = Path(downloaded.artifact.name).suffix
+        if not suffix:
+            suffix = mimetypes.guess_extension(downloaded.artifact.media_type) or ".bin"
+        self._outbox.mkdir(mode=0o700, parents=True, exist_ok=True)
+        target = self._outbox / f"{uuid.uuid4().hex}{suffix}"
+        target.write_bytes(data)
+        target.chmod(0o600)
+        try:
+            sender = (
+                self._send_image
+                if downloaded.artifact.kind == "image"
+                else self._send_file
+            )
+            await asyncio.to_thread(
+                sender,
+                open_id,
+                target,
+                downloaded.artifact.name,
+            )
+        finally:
+            target.unlink(missing_ok=True)
 
     def _send_card_returning_id(self, open_id: str, card: dict[str, Any]) -> str | None:
         interactive_id = self._create_interactive_card(open_id, card)

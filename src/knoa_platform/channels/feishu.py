@@ -12,25 +12,21 @@ from typing import Any
 
 from knoa_platform.channels.feishu_cards import (
     _ActiveTaskPresentation,
-    _PendingConfirmation,
-    _StreamingCardState as _StreamingCardState,
-    _markdown_table_count as _markdown_table_count,
+    _StreamingCardState,
+    _markdown_table_count,
     _patch_ws_card_dispatch,
-    _principal_for_log as _principal_for_log,
-    _render_card_markdown as _render_card_markdown,
-    _service_notice as _service_notice,
-    _split_text as _split_text,
+    _principal_for_log,
+    _render_card_markdown,
+    _service_notice,
+    _split_text,
 )
-from knoa_platform.channels.feishu_conversation import FeishuConversationMixin
-from knoa_platform.channels.feishu_tasks import FeishuTaskMixin
+from knoa_platform.channels.conversation_mixin import ChannelConversationMixin
+from knoa_platform.channels.session_mixin import ChannelSessionMixin
+from knoa_platform.channels.task_mixin import ChannelTaskMixin
 from knoa_platform.channels.feishu_transport import FeishuTransportMixin
 from knoa_platform.channels.contracts import ChannelMessage
 from knoa_platform.config import AppConfig
 from knoa_platform.runtime import RuntimePaths
-from knoa_platform.service.core_api import (
-    ArtifactInputRef,
-)
-from knoa_platform.service.core_client import CoreClient
 from knoa_platform.tasks import (
     TaskState,
 )
@@ -83,8 +79,9 @@ for _proxy_name in ("NO_PROXY", "no_proxy"):
 
 
 class FeishuChannel(
-    FeishuConversationMixin,
-    FeishuTaskMixin,
+    ChannelSessionMixin,
+    ChannelConversationMixin,
+    ChannelTaskMixin,
     FeishuTransportMixin,
 ):
     """Translate Feishu ingress/egress at the CoreClient boundary."""
@@ -112,41 +109,14 @@ class FeishuChannel(
         self._app_id = config.feishu_app_id.strip()
         self._app_secret = config.feishu_app_secret.get_secret_value().strip()
         self._receive_id = config.feishu_receive_id.strip()
-        self._binding_path = self._paths.data / "feishu_open_id"
-        self._binding_lock = threading.RLock()
-        self._sessions_path = self._paths.data / "feishu_sessions.json"
-        self._notification_cursors_path = (
-            self._paths.data / "feishu_notification_cursors.json"
-        )
-        self._notification_intent_cursors_path = (
-            self._paths.data / "feishu_notification_intent_cursors.json"
-        )
-        self._outbox = self._paths.cache / "feishu-outbox"
-        self._clients: dict[str, CoreClient] = {}
-        self._client_locks: dict[str, asyncio.Lock] = {}
+        self._init_channel_storage("feishu")
+        self._init_channel_runtime_state()
+        self._init_conversation_runtime_state()
         self._lark_client: Any = None
         self._lark_lock = threading.RLock()
         self._main_loop: asyncio.AbstractEventLoop | None = None
         self._ws_thread: threading.Thread | None = None
         self._running = False
-        self._sessions: dict[str, str] = {}
-        self._session_users: dict[str, str] = {}
-        self._notification_cursors: dict[str, int] = {}
-        self._notification_intent_cursors: dict[str, int] = {}
-        self._principal_watchers: dict[str, asyncio.Task[None]] = {}
-        self._principal_watcher_started_at: dict[str, float] = {}
-        self._foreground_task_ids: set[str] = set()
-        self._active_chat_turn_ids: dict[str, str] = {}
-        self._background_approval_decisions: dict[str, bool] = {}
-        self._pending_attachments: dict[str, list[ArtifactInputRef]] = {}
-        self._active_task_presentations: dict[str, _ActiveTaskPresentation] = {}
-        self._active_session_presentations: dict[
-            str,
-            _ActiveTaskPresentation,
-        ] = {}
-        self._pending_confirmations: dict[str, _PendingConfirmation] = {}
-        self._pending_confirmation_lock = threading.RLock()
-        self._seen_messages: dict[str, float] = {}
 
     async def start(self) -> None:
         if self._running:
@@ -180,19 +150,8 @@ class FeishuChannel(
             )
 
     async def stop(self) -> None:
-        self._running = False
-        watchers, self._principal_watchers = (
-            tuple(self._principal_watchers.values()),
-            {},
-        )
-        for watcher in watchers:
-            watcher.cancel()
-        await asyncio.gather(*watchers, return_exceptions=True)
-        self._principal_watcher_started_at.clear()
-        self._foreground_task_ids.clear()
-        self._active_chat_turn_ids.clear()
-        self._background_approval_decisions.clear()
         receive_id = self._current_receive_id()
+        await self._shutdown_shared_resources()
         if receive_id:
             try:
                 await asyncio.to_thread(
@@ -205,18 +164,6 @@ class FeishuChannel(
                     "Feishu shutdown notification failed",
                     exc_info=True,
                 )
-        with self._pending_confirmation_lock:
-            pending_confirmations = tuple(self._pending_confirmations.values())
-            self._pending_confirmations.clear()
-            for pending in pending_confirmations:
-                pending.resolved = True
-        for pending in pending_confirmations:
-            self._schedule_confirmation_result(pending, False)
-        clients, self._clients = tuple(self._clients.values()), {}
-        await asyncio.gather(
-            *(client.disconnect() for client in clients),
-            return_exceptions=True,
-        )
         logger.info("FeishuChannel stopped")
 
     @property

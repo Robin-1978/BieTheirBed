@@ -14,7 +14,7 @@ import {
 import type { AndroidRelease } from "@/api/models";
 import { resolveAndroidRelease } from "@/hub/hubClient";
 import { useGateway } from "@/state/GatewayProvider";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { useI18n } from "@/i18n";
 import {
   AndroidUpdateDownload,
@@ -242,14 +242,14 @@ function formatBytes(value: number): string {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
-  container: { padding: 16, gap: 14, paddingBottom: 48 },
-  card: { backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.line, padding: 18, gap: 12 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xlarge },
+  container: { padding: spacing.large, gap: spacing.large, paddingBottom: 48 },
+  card: { backgroundColor: colors.surface, borderRadius: radii.large, borderWidth: 1, borderColor: colors.line, padding: spacing.xlarge, gap: spacing.medium , ...shadows.card },
   title: { color: colors.ink, fontSize: 20, fontWeight: "700" },
-  sectionTitle: { color: colors.ink, fontSize: 17, fontWeight: "700" },
+  sectionTitle: { color: colors.ink, ...typography.subheading },
   releaseHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   releaseName: { color: colors.ink, fontSize: 22, fontWeight: "700" },
-  badge: { color: colors.muted, backgroundColor: colors.background, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 },
+  badge: { color: colors.muted, backgroundColor: colors.background, paddingHorizontal: spacing.medium, paddingVertical: spacing.xsmall, borderRadius: radii.medium },
   badgeActive: { color: colors.accent, backgroundColor: colors.accentSoft, fontWeight: "700" },
   meta: { color: colors.muted, fontSize: 13 },
   message: { color: colors.muted },
@@ -257,8 +257,8 @@ const styles = StyleSheet.create({
   required: { color: colors.danger, fontWeight: "600" },
   track: { height: 8, borderRadius: 4, overflow: "hidden", backgroundColor: colors.background },
   bar: { height: 8, borderRadius: 4, backgroundColor: colors.accent },
-  row: { flexDirection: "row", gap: 10 },
-  button: { flex: 1, alignItems: "center", backgroundColor: colors.accent, padding: 13, borderRadius: 13 },
+  row: { flexDirection: "row", gap: spacing.medium },
+  button: { flex: 1, alignItems: "center", backgroundColor: colors.accent, padding: spacing.medium, borderRadius: radii.medium },
   buttonSecondary: { backgroundColor: colors.accentSoft },
   buttonText: { color: "white", fontWeight: "700" },
   buttonSecondaryText: { color: colors.accent },

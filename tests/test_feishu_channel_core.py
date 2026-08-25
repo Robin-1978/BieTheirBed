@@ -246,11 +246,11 @@ async def test_feishu_core_client_uses_canonical_owner_principal(
         return _CoreClient()
 
     monkeypatch.setattr(
-        "knoa_platform.channels.feishu_transport.resolve_local_service_token",
+        "knoa_platform.channels.session_mixin.resolve_local_service_token",
         lambda _paths: "local-signing-key",
     )
     monkeypatch.setattr(
-        "knoa_platform.channels.feishu_transport.CoreClient.connect",
+        "knoa_platform.channels.session_mixin.CoreClient.connect",
         connect,
     )
 
@@ -1628,3 +1628,132 @@ async def test_feishu_card_io_does_not_block_core_event_consumption(tmp_path) ->
     assert not task.done()
     release_card.set()
     await asyncio.wait_for(task, timeout=2)
+
+
+def test_is_simple_text_interaction_detects_single_string_field() -> None:
+    from knoa_platform.channels.conversation_mixin import _is_simple_text_interaction
+
+    schema = {
+        "type": "object",
+        "properties": {"answer": {"type": "string", "title": "Answer"}},
+        "required": ["answer"],
+        "additionalProperties": False,
+    }
+    assert _is_simple_text_interaction("user_input", schema) == (True, "answer")
+    assert _is_simple_text_interaction("mcp_elicitation", schema) == (False, "")
+    assert _is_simple_text_interaction(
+        "user_input",
+        {
+            **schema,
+            "properties": {
+                "answer": {"type": "string", "enum": ["a", "b"]},
+            },
+        },
+    ) == (False, "")
+
+
+@pytest.mark.asyncio
+async def test_feishu_simple_interaction_prompts_and_resolves_via_text(
+    tmp_path,
+) -> None:
+    from knoa_platform.channels.conversation_mixin import _PendingTextInteraction
+    from knoa_platform.tasks import TaskEvent, TaskEventPayload, TaskState
+
+    channel = FeishuChannel(_config(tmp_path))
+    sent: list[str] = []
+    resolved: list[tuple[str, dict[str, str]]] = []
+
+    class InteractionClient:
+        is_connected = True
+
+        async def resolve_interaction(self, interaction_id, value):
+            resolved.append((interaction_id, value))
+            return SimpleNamespace()
+
+    channel._send_text = lambda _recipient, text: sent.append(text) or True
+    event = TaskEvent(
+        task_id="task-a",
+        event_seq=1,
+        occurred_at=1.0,
+        event_type="interaction_requested",
+        payload=TaskEventPayload(
+            state=TaskState.RUNNING,
+            interaction_id="interaction-a",
+            interaction_kind="user_input",
+            interaction_display={
+                "title": "Need input",
+                "description": "Tell me the project name",
+            },
+            interaction_schema={
+                "type": "object",
+                "properties": {
+                    "project": {"type": "string", "title": "Project"},
+                },
+                "required": ["project"],
+                "additionalProperties": False,
+            },
+        ),
+    )
+
+    assert await channel._deliver_interaction_request(
+        "ou-user",
+        InteractionClient(),
+        event,
+    )
+    assert channel._pending_text_interactions["ou-user"] == _PendingTextInteraction(
+        interaction_id="interaction-a",
+        field_name="project",
+    )
+    assert "Tell me the project name" in sent[-1]
+
+    channel._clients["ou-user"] = InteractionClient()
+    await channel._handle_text("ou-user", "BieTheirBed", "message-a")
+
+    assert resolved == [("interaction-a", {"project": "BieTheirBed"})]
+    assert "ou-user" not in channel._pending_text_interactions
+
+
+@pytest.mark.asyncio
+async def test_feishu_complex_interaction_keeps_open_app_notice(tmp_path) -> None:
+    from knoa_platform.tasks import TaskEvent, TaskEventPayload, TaskState
+
+    channel = FeishuChannel(_config(tmp_path))
+    cards: list[tuple] = []
+    channel._send_card = lambda *args: cards.append(args) or True
+
+    async def task_title(_client, _task_id):
+        return "Background task"
+
+    channel._task_notification_title = task_title
+
+    event = TaskEvent(
+        task_id="task-a",
+        event_seq=1,
+        occurred_at=1.0,
+        event_type="interaction_requested",
+        payload=TaskEventPayload(
+            state=TaskState.RUNNING,
+            interaction_id="interaction-a",
+            interaction_kind="user_input",
+            interaction_display={"description": "Pick two options"},
+            interaction_schema={
+                "type": "object",
+                "properties": {
+                    "first": {"type": "string", "enum": ["a", "b"]},
+                    "second": {"type": "string", "enum": ["c", "d"]},
+                },
+                "required": ["first", "second"],
+                "additionalProperties": False,
+            },
+        ),
+    )
+
+    assert await channel._deliver_interaction_request(
+        "ou-user",
+        SimpleNamespace(),
+        event,
+    )
+    assert len(cards) == 1
+    assert cards[0][3] == "需要你处理 · Background task"
+    assert "Pick two options" in cards[0][1]
+    assert "ou-user" not in channel._pending_text_interactions

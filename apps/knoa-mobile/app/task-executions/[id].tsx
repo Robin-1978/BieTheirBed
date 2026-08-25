@@ -30,7 +30,7 @@ import { mergeTaskTimeline, type TaskTimelineItem } from "@/components/taskTimel
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { useTaskReminders } from "@/state/TaskReminderProvider";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { loadExecutionCache, storeExecutionCache } from "@/storage/executionCache";
 
 export default function TaskExecutionDetailScreen() {
@@ -524,64 +524,64 @@ function Action({ label, primary = false, danger = false, disabled = false, busy
   return (
     <AppPressable disabled={disabled} style={[styles.action, primary && styles.actionPrimary, danger && styles.actionDanger, disabled && styles.disabled]} onPress={onPress}>
       {busy
-        ? <ActivityIndicator color={primary ? "white" : colors.accent} size="small" />
+        ? <ActivityIndicator color={primary ? colors.onAccent : colors.accent} size="small" />
         : <Text style={[styles.actionText, primary && styles.actionPrimaryText, danger && styles.actionDangerText]}>{label}</Text>}
     </AppPressable>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 16, gap: 14, paddingBottom: 48 },
-  summary: { backgroundColor: colors.surface, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: colors.line, gap: 8 },
+  container: { padding: spacing.large, gap: spacing.large, paddingBottom: 48 },
+  summary: { backgroundColor: colors.surface, borderRadius: radii.large, padding: spacing.xlarge, borderWidth: 1, borderColor: colors.line, gap: spacing.small , ...shadows.card },
   summaryHeader: { flexDirection: "row", justifyContent: "space-between" },
   reason: { color: colors.ink, fontWeight: "700" },
   state: { color: colors.accent, fontWeight: "700" },
   goal: { color: colors.ink, fontSize: 18, lineHeight: 27, fontWeight: "600" },
   phase: { color: colors.muted },
   snapshot: { color: colors.muted, fontSize: 12 },
-  final: { backgroundColor: colors.surface, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: colors.line, gap: 8 },
+  final: { backgroundColor: colors.surface, borderRadius: radii.large, padding: spacing.xlarge, borderWidth: 1, borderColor: colors.line, gap: spacing.small , ...shadows.card },
   markdown: { width: "100%", alignSelf: "stretch" },
-  failure: { padding: 18, borderRadius: 18, backgroundColor: colors.dangerSoft, gap: 6 },
+  failure: { padding: spacing.xlarge, borderRadius: radii.large, backgroundColor: colors.dangerSoft, gap: spacing.small },
   failureTitle: { color: colors.danger, fontWeight: "700" },
   failureText: { color: colors.ink },
   failureImpact: { color: colors.warning, lineHeight: 21 },
-  approval: { padding: 18, borderRadius: 18, backgroundColor: colors.warningSoft, borderWidth: 1, borderColor: colors.warning, gap: 8 },
+  approval: { padding: spacing.xlarge, borderRadius: radii.large, backgroundColor: colors.warningSoft, borderWidth: 1, borderColor: colors.warning, gap: spacing.small },
   approvalCount: { color: colors.muted, fontSize: 12, textAlign: "right" },
-  row: { flexDirection: "row", gap: 10 },
-  timeline: { backgroundColor: colors.surface, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: colors.line, gap: 10 },
+  row: { flexDirection: "row", gap: spacing.medium },
+  timeline: { backgroundColor: colors.surface, borderRadius: radii.large, padding: spacing.xlarge, borderWidth: 1, borderColor: colors.line, gap: spacing.medium , ...shadows.card },
   stepsToggle: { minHeight: 30, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  followUpCard: { backgroundColor: colors.surface, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: colors.line, gap: 10 },
+  followUpCard: { backgroundColor: colors.surface, borderRadius: radii.large, padding: spacing.xlarge, borderWidth: 1, borderColor: colors.line, gap: spacing.medium , ...shadows.card },
   followUpHint: { color: colors.muted, lineHeight: 20 },
-  followUpInput: { minHeight: 96, borderWidth: 1, borderColor: colors.line, borderRadius: 13, padding: 12, color: colors.ink, textAlignVertical: "top", backgroundColor: colors.surfaceMuted },
-  followUpFile: { minHeight: 34, flexDirection: "row", alignItems: "center", gap: 8 },
+  followUpInput: { minHeight: 96, borderWidth: 1, borderColor: colors.line, borderRadius: radii.medium, padding: spacing.medium, color: colors.ink, textAlignVertical: "top", backgroundColor: colors.surfaceMuted },
+  followUpFile: { minHeight: 34, flexDirection: "row", alignItems: "center", gap: spacing.small },
   followUpFileName: { color: colors.ink, flex: 1, fontSize: 13 },
-  followUpRemove: { color: colors.danger, fontSize: 12, fontWeight: "600" },
-  sectionTitle: { color: colors.ink, fontWeight: "700", fontSize: 17, marginBottom: 4 },
+  followUpRemove: { color: colors.danger, ...typography.small },
+  sectionTitle: { color: colors.ink, fontWeight: "700", fontSize: 17, marginBottom: spacing.xsmall },
   reasoning: { color: colors.muted, lineHeight: 22 },
-  toolRow: { minHeight: 30, flexDirection: "row", alignItems: "center", gap: 8 },
+  toolRow: { minHeight: 30, flexDirection: "row", alignItems: "center", gap: spacing.small },
   toolName: { color: colors.ink, flex: 1 },
   toolState: { color: colors.muted, fontSize: 12 },
   toolResult: { color: colors.accent, width: 18, textAlign: "center", fontWeight: "800" },
   warning: { color: colors.warning },
   artifact: { color: colors.accent, fontWeight: "600" },
-  artifactRow: { minHeight: 42, flexDirection: "row", alignItems: "center", gap: 8 },
-  artifactAction: { minWidth: 54, minHeight: 36, borderRadius: 9, backgroundColor: colors.accentSoft, alignItems: "center", justifyContent: "center" },
+  artifactRow: { minHeight: 42, flexDirection: "row", alignItems: "center", gap: spacing.small },
+  artifactAction: { minWidth: 54, minHeight: 36, borderRadius: radii.small, backgroundColor: colors.accentSoft, alignItems: "center", justifyContent: "center" },
   artifactActionText: { color: colors.accent, fontWeight: "700", fontSize: 12 },
-  action: { flex: 1, minHeight: 46, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft, borderRadius: 13, paddingHorizontal: 10 },
+  action: { flex: 1, minHeight: 46, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft, borderRadius: radii.medium, paddingHorizontal: spacing.medium },
   actionText: { color: colors.accent, fontWeight: "700", textAlign: "center" },
   actionPrimary: { backgroundColor: colors.accent },
-  actionPrimaryText: { color: "white" },
+  actionPrimaryText: { color: colors.onAccent },
   actionDanger: { backgroundColor: colors.dangerSoft },
   actionDangerText: { color: colors.danger },
   disabled: { opacity: 0.45 },
   error: { color: colors.danger, lineHeight: 21 },
   message: { color: colors.accent, lineHeight: 21 },
-  technicalToggle: { minHeight: 44, paddingHorizontal: 4, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
+  technicalToggle: { minHeight: 44, paddingHorizontal: spacing.xsmall, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.small },
   technicalToggleText: { color: colors.muted, fontWeight: "600" },
-  technicalCard: { padding: 14, borderRadius: 14, backgroundColor: colors.surfaceMuted, gap: 6 },
-  technicalLabel: { color: colors.ink, fontSize: 12, fontWeight: "700", marginTop: 8 },
+  technicalCard: { padding: spacing.large, borderRadius: radii.medium, backgroundColor: colors.surfaceMuted, gap: spacing.small },
+  technicalLabel: { color: colors.ink, ...typography.small, fontWeight: "700", marginTop: spacing.small },
   technicalLine: { color: colors.muted, fontSize: 12, fontFamily: "monospace" },
   technicalPayload: { color: colors.muted, fontSize: 11, fontFamily: "monospace", lineHeight: 16 },
-  deleteButton: { alignItems: "center", padding: 14, marginTop: 8 },
+  deleteButton: { alignItems: "center", padding: spacing.large, marginTop: spacing.small },
   deleteText: { color: colors.danger, fontWeight: "600" },
 });

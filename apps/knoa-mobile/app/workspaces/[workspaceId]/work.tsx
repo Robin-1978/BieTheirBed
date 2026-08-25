@@ -4,13 +4,14 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-nat
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { AsyncStateView } from "@/components/AsyncStateView";
 import { WorkspaceCacheBanner } from "@/components/WorkspaceCacheBanner";
 import { projectionWorkStatus } from "@/components/workProjectionPresentation";
 import { listHubNodes, listWorkspaceWork, type HubNode, type WorkspaceWorkProjection } from "@/hub/hubClient";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { loadWorkspaceCache, mergeWorkspaceCache, type WorkspaceCacheSnapshot } from "@/storage/workspaceCache";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { userFacingError } from "@/ui/userFacingError";
 import { presentHubNodeName } from "@/presentation/nodePresentation";
 
@@ -24,7 +25,8 @@ export default function WorkspaceWorkScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [cacheSnapshot, setCacheSnapshot] = useState<WorkspaceCacheSnapshot | null>(null);
   const [working, setWorking] = useState("");
-  const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [actionError, setActionError] = useState("");
 
   const applyCache = useCallback((snapshot: WorkspaceCacheSnapshot) => {
     setCacheSnapshot(snapshot);
@@ -35,14 +37,14 @@ export default function WorkspaceWorkScreen() {
   const refresh = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
     setRefreshing(true);
-    setError("");
+    setLoadError("");
     try {
       const [work, directory] = await Promise.all([listWorkspaceWork(), listHubNodes()]);
       setItems(work);
       setNodes(directory);
       await mergeWorkspaceCache(params.workspaceId, { work, nodes: directory });
     } catch (caught) {
-      setError(userFacingError(caught, t("work.loadFailed")));
+      setLoadError(userFacingError(caught, t("work.loadFailed")));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -63,11 +65,11 @@ export default function WorkspaceWorkScreen() {
     const node = nodes.find((value) => value.node_id === item.node_id);
     const bound = gateway.nodes.some((value) => value.nodeId === item.node_id);
     if (!node?.online || !bound) {
-      setError(!node?.online ? t("work.offlineProjection") : t("work.pairRequired"));
+      setActionError(!node?.online ? t("work.offlineProjection") : t("work.pairRequired"));
       return;
     }
     setWorking(item.entity_id);
-    setError("");
+    setActionError("");
     try {
       await gateway.switchNode(item.node_id);
       const routeParams = {
@@ -77,14 +79,14 @@ export default function WorkspaceWorkScreen() {
       };
       if (item.entity_kind === "conversation") {
         void gateway.openConversation(item.entity_id).catch((caught) => {
-          setError(userFacingError(caught, t("work.connectFailed")));
+          setActionError(userFacingError(caught, t("work.connectFailed")));
         });
         router.push({ pathname: "/chat", params: routeParams });
       } else {
         router.push({ pathname: "/tasks/[id]", params: { ...routeParams, id: item.entity_id } });
       }
     } catch (caught) {
-      setError(userFacingError(caught, t("work.connectFailed")));
+      setActionError(userFacingError(caught, t("work.connectFailed")));
     } finally {
       setWorking("");
     }
@@ -102,13 +104,13 @@ export default function WorkspaceWorkScreen() {
           <AppIcon name="refresh" color={colors.muted} size={20} />
         </AppPressable>
       </View>
-      <WorkspaceCacheBanner snapshot={cacheSnapshot} loading={refreshing} error={error} onRefresh={() => void refresh()} />
-      {loading ? <ActivityIndicator color={colors.accent} /> : null}
-      {!loading && !items.length ? (
-        <View style={styles.empty}>
-          <Text style={styles.itemTitle}>{t("work.emptyTitle")}</Text>
-          <Text style={styles.meta}>{t("work.emptyDetail")}</Text>
-        </View>
+      <WorkspaceCacheBanner snapshot={cacheSnapshot} loading={refreshing} error={loadError} onRefresh={() => void refresh()} />
+      {loading ? <AsyncStateView state="loading" /> : null}
+      {loadError && !loading && !items.length ? (
+        <AsyncStateView state="error" message={loadError} retryLabel={t("common.refresh")} onRetry={() => void refresh()} />
+      ) : null}
+      {!loading && !loadError && !items.length ? (
+        <AsyncStateView state="empty" title={t("work.emptyTitle")} message={t("work.emptyDetail")} />
       ) : null}
       {items.map((item) => {
         const node = nodes.find((value) => value.node_id === item.node_id);
@@ -132,26 +134,25 @@ export default function WorkspaceWorkScreen() {
           </AppPressable>
         );
       })}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {actionError ? <Text style={styles.error}>{actionError}</Text> : null}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 17, gap: 12, paddingBottom: 48 },
-  header: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  headerIcon: { width: 48, height: 48, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
+  container: { padding: spacing.large, gap: spacing.medium, paddingBottom: 48 },
+  header: { flexDirection: "row", alignItems: "center", gap: spacing.medium, padding: spacing.large, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line , ...shadows.card },
+  headerIcon: { width: 48, height: 48, borderRadius: radii.large, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
   flex: { flex: 1, minWidth: 0 },
-  title: { color: colors.ink, fontSize: 19, fontWeight: "800" },
-  meta: { color: colors.muted, fontSize: 12, lineHeight: 18 },
+  title: { color: colors.ink, ...typography.heading },
+  meta: { color: colors.muted, ...typography.small, lineHeight: 18 },
   iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center" },
-  empty: { padding: 18, gap: 7, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
-  card: { padding: 15, gap: 9, borderRadius: 17, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
-  row: { flexDirection: "row", alignItems: "center", gap: 11 },
-  itemTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" },
+  card: { padding: spacing.large, gap: spacing.small, borderRadius: radii.large, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, ...shadows.card },
+  row: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
+  itemTitle: { color: colors.ink, ...typography.subheading, fontWeight: "800" },
   summary: { color: colors.ink, lineHeight: 20 },
-  approval: { color: colors.warning, fontSize: 12, fontWeight: "700" },
-  online: { color: colors.accent, fontWeight: "800", fontSize: 12 },
-  offline: { color: colors.muted, fontWeight: "700", fontSize: 12 },
+  approval: { color: colors.warning, ...typography.small, fontWeight: "700" },
+  online: { color: colors.accent, ...typography.small, fontWeight: "800" },
+  offline: { color: colors.muted, ...typography.small, fontWeight: "700" },
   error: { color: colors.danger, lineHeight: 20 },
 });

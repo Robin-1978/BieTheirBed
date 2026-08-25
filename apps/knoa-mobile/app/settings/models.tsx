@@ -15,6 +15,7 @@ import {
 import type { ManagedConfig } from "@/api/models";
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { AsyncStateView } from "@/components/AsyncStateView";
 import {
   listHubNodes,
   loadWorkspaceResourceState,
@@ -38,7 +39,7 @@ import {
 } from "@/models/workspaceModelConsumption";
 import { useGateway } from "@/state/GatewayProvider";
 import { useI18n, type MessageKey } from "@/i18n";
-import { colors } from "@/theme";
+import { colors, radii, shadows, spacing, typography } from "@/theme";
 import { presentHubNodeName } from "@/presentation/nodePresentation";
 
 type Editor = ModelEditorValue & { secret: string; originalAlias: string };
@@ -69,10 +70,12 @@ export default function ModelsScreen() {
   const [concurrency, setConcurrency] = useState(1);
   const [working, setWorking] = useState("");
   const [message, setMessage] = useState("");
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const load = useCallback(async () => {
     setWorking("load");
     setMessage("");
+    setLoadFailed(false);
     try {
       const [current, resourceState, directory] = await Promise.all([
         gateway.runAuthenticated((client) => client.getConfigCurrent()),
@@ -83,6 +86,8 @@ export default function ModelsScreen() {
       setWorkspace(resourceState);
       setNodes(directory);
     } catch (error) {
+      setDocument(null);
+      setLoadFailed(true);
       setMessage(error instanceof Error ? error.message : t("settings.models.loadFailed"));
     } finally {
       setWorking("");
@@ -270,8 +275,11 @@ export default function ModelsScreen() {
           <AppPressable accessibilityLabel={t("common.refresh")} onPress={() => void load()} style={styles.iconButton}><AppIcon name="refresh" color={colors.muted} size={20} /></AppPressable>
         </View>
 
-        {working === "load" ? <ActivityIndicator color={colors.accent} /> : null}
-        {availableRemoteModels.length ? <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>{t("settings.models.workspaceAvailable")}</Text><Text style={styles.meta}>{t("settings.models.workspaceAvailableHint")}</Text></View> : null}
+        {working === "load" ? <AsyncStateView state="loading" /> : null}
+        {loadFailed && working !== "load" ? (
+          <AsyncStateView state="error" message={message} retryLabel={t("common.refresh")} onRetry={() => void load()} />
+        ) : null}
+        {!loadFailed && availableRemoteModels.length ? <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>{t("settings.models.workspaceAvailable")}</Text><Text style={styles.meta}>{t("settings.models.workspaceAvailableHint")}</Text></View> : null}
         {availableRemoteModels.map((item) => {
           const busy = working === `attach:${item.deployment.deployment_id}`;
           return (
@@ -293,7 +301,7 @@ export default function ModelsScreen() {
                 </View>
               ) : (
                 <AppPressable disabled={Boolean(working)} style={styles.primary} onPress={() => void attachRemoteModel(item)}>
-                  {busy ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>{t("settings.models.addToNode", { node: nodeName })}</Text>}
+                  {busy ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.primaryText}>{t("settings.models.addToNode", { node: nodeName })}</Text>}
                 </AppPressable>
               )}
             </View>
@@ -335,7 +343,7 @@ export default function ModelsScreen() {
 
         {!editor && !sharingAlias ? (
           <AppPressable style={styles.primary} onPress={beginCreate}>
-            <AppIcon name="plus" color={colors.white} size={20} /><Text style={styles.primaryText}>{t("settings.models.addModel")}</Text>
+            <AppIcon name="plus" color={colors.onAccent} size={20} /><Text style={styles.primaryText}>{t("settings.models.addModel")}</Text>
           </AppPressable>
         ) : null}
 
@@ -358,7 +366,7 @@ export default function ModelsScreen() {
             onCancel={() => setSharingAlias("")}
           />
         ) : null}
-        {message ? <Text style={styles.message}>{message}</Text> : null}
+        {message && !loadFailed ? <Text style={styles.message}>{message}</Text> : null}
       </ScrollView>
   );
 }
@@ -376,7 +384,7 @@ function ModelEditor({ editor, setEditor, working, onSave, onCancel }: { editor:
       {needsSecret ? <Field label={t("settings.models.apiKey")} value={editor.secret} onChange={(secret) => setEditor({ ...editor, secret })} placeholder={editor.originalAlias ? t("settings.models.apiKeyKeepEmpty") : t("settings.models.apiKeyPlaceholder")} secure /> : null}
       <Toggle label={t("settings.models.supportsVision")} detail={t("settings.models.supportsVisionDetail")} value={editor.supportsVision} onChange={(supportsVision) => setEditor({ ...editor, supportsVision })} />
       <Toggle label={t("settings.models.setDefaultModel")} detail={t("settings.models.setDefaultModelDetail")} value={editor.setAsDefault} onChange={(setAsDefault) => setEditor({ ...editor, setAsDefault })} />
-      <View style={styles.actions}><AppPressable style={styles.secondary} onPress={onCancel}><Text style={styles.secondaryText}>{t("common.cancel")}</Text></AppPressable><AppPressable disabled={working} style={styles.primarySmall} onPress={() => void onSave()}>{working ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>{t("settings.common.checkAndSave")}</Text>}</AppPressable></View>
+      <View style={styles.actions}><AppPressable style={styles.secondary} onPress={onCancel}><Text style={styles.secondaryText}>{t("common.cancel")}</Text></AppPressable><AppPressable disabled={working} style={styles.primarySmall} onPress={() => void onSave()}>{working ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.primaryText}>{t("settings.common.checkAndSave")}</Text>}</AppPressable></View>
     </View>
   );
 }
@@ -391,7 +399,7 @@ function ShareEditor({ alias, shared, nodes, allowedNodeIds, setAllowedNodeIds, 
       {!nodes.length ? <Text style={styles.meta}>{t("settings.models.noOtherNodes")}</Text> : null}
       <Text style={styles.label}>{t("settings.models.maxRemoteConcurrency")}</Text>
       <View style={styles.choices}>{[1, 2, 4].map((value) => <AppPressable key={value} style={[styles.choice, concurrency === value && styles.choiceSelected]} onPress={() => setConcurrency(value)}><Text style={concurrency === value ? styles.choiceTextSelected : styles.choiceText}>{value}</Text></AppPressable>)}</View>
-      <View style={styles.actions}><AppPressable style={styles.secondary} onPress={onCancel}><Text style={styles.secondaryText}>{t("common.cancel")}</Text></AppPressable><AppPressable disabled={working} style={styles.primarySmall} onPress={onSave}>{working ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>{t("settings.models.saveShare")}</Text>}</AppPressable></View>
+      <View style={styles.actions}><AppPressable style={styles.secondary} onPress={onCancel}><Text style={styles.secondaryText}>{t("common.cancel")}</Text></AppPressable><AppPressable disabled={working} style={styles.primarySmall} onPress={onSave}>{working ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.primaryText}>{t("settings.models.saveShare")}</Text>}</AppPressable></View>
       {shared ? <AppPressable disabled={working} style={styles.dangerButton} onPress={onStop}><Text style={styles.dangerText}>{t("settings.models.stopShareConfirm")}</Text></AppPressable> : null}
     </View>
   );
@@ -418,40 +426,40 @@ function driverLabel(driver: ModelDriver, t: ReturnType<typeof useI18n>["t"]): s
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 17, gap: 13, paddingBottom: 56 },
-  hero: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  heroIcon: { width: 48, height: 48, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
+  container: { padding: spacing.large, gap: spacing.medium, paddingBottom: 56 },
+  hero: { flexDirection: "row", alignItems: "center", gap: spacing.medium, padding: spacing.large, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, ...shadows.card },
+  heroIcon: { width: 48, height: 48, borderRadius: radii.large, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
   iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center" },
   title: { color: colors.ink, fontSize: 19, fontWeight: "800" },
-  sectionHeader: { gap: 4, paddingHorizontal: 2, paddingTop: 3 },
+  sectionHeader: { gap: spacing.xsmall, paddingHorizontal: 2, paddingTop: spacing.xsmall },
   sectionTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" },
-  hint: { color: colors.muted, fontSize: 13, lineHeight: 19 },
+  hint: { color: colors.muted, ...typography.caption, lineHeight: 19 },
   flex: { flex: 1, minWidth: 0 },
-  card: { padding: 15, gap: 11, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  row: { flexDirection: "row", alignItems: "center", gap: 11 },
-  modelIcon: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceMuted },
+  card: { padding: spacing.medium, gap: spacing.medium, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, ...shadows.card },
+  row: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
+  modelIcon: { width: 44, height: 44, borderRadius: radii.medium, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceMuted },
   modelIconShared: { backgroundColor: colors.accentSoft },
   cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" },
-  meta: { color: colors.muted, fontSize: 12, lineHeight: 18 },
-  badge: { color: colors.accent, backgroundColor: colors.accentSoft, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5, fontSize: 11, fontWeight: "800" },
-  healthy: { color: colors.accent, fontSize: 12, fontWeight: "700" },
-  actions: { flexDirection: "row", gap: 9 },
-  primary: { minHeight: 48, flexDirection: "row", gap: 8, borderRadius: 13, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
-  primarySmall: { flex: 1, minHeight: 46, borderRadius: 12, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
-  primaryText: { color: colors.white, fontWeight: "800" },
-  secondary: { flex: 1, minHeight: 42, borderRadius: 12, borderWidth: 1, borderColor: colors.accent, alignItems: "center", justifyContent: "center" },
+  meta: { color: colors.muted, ...typography.small, lineHeight: 18 },
+  badge: { color: colors.accent, backgroundColor: colors.accentSoft, borderRadius: radii.pill, paddingHorizontal: spacing.small, paddingVertical: spacing.xsmall, ...typography.tiny, fontWeight: "800" },
+  healthy: { color: colors.accent, ...typography.small, fontWeight: "700" },
+  actions: { flexDirection: "row", gap: spacing.small },
+  primary: { minHeight: 48, flexDirection: "row", gap: spacing.small, borderRadius: radii.medium, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
+  primarySmall: { flex: 1, minHeight: 46, borderRadius: radii.medium, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
+  primaryText: { color: colors.onAccent, fontWeight: "800" },
+  secondary: { flex: 1, minHeight: 42, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.accent, alignItems: "center", justifyContent: "center" },
   secondaryText: { color: colors.accent, fontWeight: "800" },
-  editor: { padding: 16, gap: 12, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.accent },
-  choices: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
-  choice: { paddingHorizontal: 11, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.line },
+  editor: { padding: spacing.large, gap: spacing.medium, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.accent, ...shadows.card },
+  choices: { flexDirection: "row", flexWrap: "wrap", gap: spacing.small },
+  choice: { paddingHorizontal: spacing.medium, paddingVertical: spacing.small, borderRadius: radii.pill, borderWidth: 1, borderColor: colors.line },
   choiceSelected: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
-  choiceText: { color: colors.muted, fontSize: 12, fontWeight: "700" },
-  choiceTextSelected: { color: colors.accent, fontSize: 12, fontWeight: "800" },
-  field: { gap: 6 },
+  choiceText: { color: colors.muted, ...typography.small, fontWeight: "700" },
+  choiceTextSelected: { color: colors.accent, ...typography.small, fontWeight: "800" },
+  field: { gap: spacing.small },
   label: { color: colors.ink, fontWeight: "700" },
-  input: { minHeight: 46, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.background, color: colors.ink, paddingHorizontal: 12, paddingVertical: 10 },
-  toggle: { minHeight: 54, flexDirection: "row", alignItems: "center", gap: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, paddingTop: 9 },
+  input: { minHeight: 46, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.background, color: colors.ink, paddingHorizontal: spacing.medium, paddingVertical: spacing.small },
+  toggle: { minHeight: 54, flexDirection: "row", alignItems: "center", gap: spacing.medium, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, paddingTop: spacing.small },
   dangerButton: { minHeight: 44, alignItems: "center", justifyContent: "center" },
   dangerText: { color: colors.danger, fontWeight: "800" },
-  message: { color: colors.ink, backgroundColor: colors.accentSoft, borderRadius: 13, padding: 13, lineHeight: 19 },
+  message: { color: colors.ink, backgroundColor: colors.accentSoft, borderRadius: radii.medium, padding: spacing.medium, lineHeight: 19 },
 });

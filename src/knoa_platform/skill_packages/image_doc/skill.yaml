@@ -1,0 +1,26 @@
+id: image_doc
+version: "1.0.0"
+name: Image & Document / 图像文档处理
+description: OCR, classify, extract structured data from, and compare images or documents; output Markdown reports with source references. / 对图像与文档做 OCR、分类、结构化抽取与对比，输出带来源引用的 Markdown 报告。
+instructions: instructions.md
+triggers:
+  - ocr
+  - scan document
+  - read this image
+  - extract text
+  - compare documents
+  - 识别
+  - 文字识别
+  - 文档识别
+  - 图片识别
+  - 票据识别
+required_tools:
+  - image_inspect
+  - read_file
+  - write_file
+  - attach
+  - screenshot
+required_capabilities:
+  - host_read
+  - host_write
+  - desktop_observe

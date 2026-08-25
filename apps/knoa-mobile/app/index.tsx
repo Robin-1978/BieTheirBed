@@ -13,7 +13,7 @@ import { loadNavigationPreference } from "@/navigation/navigationPreference";
 import { listNodeBindings } from "@/security/deviceIdentity";
 import { useGateway } from "@/state/GatewayProvider";
 import { useI18n } from "@/i18n";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 
 export default function Index() {
   const gateway = useGateway();
@@ -129,18 +129,18 @@ async function restoreLanding(gateway: ReturnType<typeof useGateway>): Promise<v
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: "center", justifyContent: "center", gap: 14, padding: 28, backgroundColor: colors.background },
-  coreWrap: { width: 154, height: 154, alignItems: "center", justifyContent: "center", marginBottom: 8 },
+  container: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.large, padding: spacing.xlarge, backgroundColor: colors.background },
+  coreWrap: { width: 154, height: 154, alignItems: "center", justifyContent: "center", marginBottom: spacing.small },
   orbitOuter: { position: "absolute", width: 146, height: 146, borderRadius: 73, borderWidth: 1, borderColor: colors.accent },
   orbitInner: { position: "absolute", width: 112, height: 112, borderRadius: 56, borderWidth: 1, borderColor: colors.line },
   orbitNode: { position: "absolute", top: -5, left: 50, width: 10, height: 10, borderRadius: 5, backgroundColor: colors.accent },
   orbitNodeSecondary: { position: "absolute", bottom: -3, left: 53, width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent, opacity: 0.45 },
   coreGlow: { position: "absolute", width: 88, height: 88, borderRadius: 30, backgroundColor: colors.accentSoft },
   core: { width: 76, height: 76, borderRadius: 24, alignItems: "center", justifyContent: "center", backgroundColor: colors.accent, shadowColor: colors.accent, shadowOpacity: 0.32, shadowRadius: 18, elevation: 8 },
-  coreText: { color: "white", fontWeight: "800", fontSize: 31 },
+  coreText: { color: colors.onAccent, fontWeight: "800", fontSize: 31 },
   eyebrow: { color: colors.accent, fontSize: 11, letterSpacing: 2.2, fontWeight: "700" },
   title: { color: colors.ink, fontSize: 18, fontWeight: "700" },
   detail: { color: colors.muted, fontSize: 13, textAlign: "center", lineHeight: 20 },
-  retry: { paddingHorizontal: 22, paddingVertical: 12, borderRadius: 13, backgroundColor: colors.accent },
-  retryText: { color: "white", fontWeight: "800" },
+  retry: { paddingHorizontal: spacing.xlarge, paddingVertical: spacing.medium, borderRadius: radii.medium, backgroundColor: colors.accent },
+  retryText: { color: colors.onAccent, fontWeight: "800" },
 });

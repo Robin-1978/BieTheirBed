@@ -19,12 +19,7 @@ from knoa_platform.channels.feishu_cards import (
     _split_text,
 )
 from knoa_platform.service.core_client import CoreClient
-from knoa_platform.service.credentials import (
-    issue_principal_credential,
-    resolve_local_service_token,
-)
 from knoa_platform.tasks import (
-    TaskEvent,
     TaskState,
 )
 
@@ -532,27 +527,3 @@ class FeishuTransportMixin:
         with self._lark_lock:
             sent = self._get_lark_client().im.v1.message.create(request)
         return sent.code == 0
-
-    async def _client_for(self, open_id: str) -> CoreClient:
-        lock = self._client_locks.setdefault(open_id, asyncio.Lock())
-        async with lock:
-            current = self._clients.get(open_id)
-            if current is not None and current.is_connected:
-                return current
-            if current is not None:
-                await current.disconnect()
-            signing_key = resolve_local_service_token(self._paths)
-            principal = self._config.owner_principal_id
-            credential = issue_principal_credential(signing_key, principal)
-
-            async def confirm(message: TaskEvent) -> bool:
-                return await self._confirm_tool(open_id, message)
-
-            client = await CoreClient.connect(
-                f"ws://{self._config.service_host}:{self._config.service_port}",
-                credential,
-                approval_handler=confirm,
-                max_buffered_task_events=4096,
-            )
-            self._clients[open_id] = client
-            return client

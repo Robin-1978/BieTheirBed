@@ -13,11 +13,12 @@ import {
 import type { AgentSummary, ConversationSession } from "@/api/models";
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { AsyncStateView } from "@/components/AsyncStateView";
 import { removeConversationDraft } from "@/security/conversationDrafts";
 import { useGateway } from "@/state/GatewayProvider";
 import { removeConversationCache } from "@/storage/conversationCache";
 import { loadConversationListCache, storeConversationListCache } from "@/storage/conversationListCache";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { useI18n } from "@/i18n";
 import { formatRelativeTime } from "@/ui/formatRelativeTime";
 
@@ -181,19 +182,23 @@ export default function ConversationHistoryScreen() {
         <>
           <View style={styles.headerActions}>
             <AppPressable accessibilityLabel={t("conversations.new")} style={styles.primary} onPress={() => void gateway.newConversation().then(() => router.replace({ pathname: "/chat", params: nodeRouteParams(params) }))}>
-              <AppIcon name="new-topic" color={colors.white} size={21} />
+              <AppIcon name="new-topic" color={colors.onAccent} size={21} />
             </AppPressable>
             <AppPressable style={styles.filter} onPress={() => setShowArchived((value) => !value)}>
               <Text style={styles.filterText}>{showArchived ? t("conversations.hideArchived") : t("conversations.showArchived")}</Text>
             </AppPressable>
           </View>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-          {loading && sessions.length === 0 ? <ActivityIndicator color={colors.accent} style={styles.loading} /> : null}
+          {error && !loading ? (
+            <AsyncStateView state="error" message={error} retryLabel={t("common.refresh")} onRetry={() => void refresh()} />
+          ) : null}
+          {loading && sessions.length === 0 ? <AsyncStateView state="loading" /> : null}
           {!loading && refreshing && sessions.length > 0 ? <Text style={styles.syncing}>{t("conversations.syncing")}</Text> : null}
           {!loading && !refreshing && cachedAt ? <Text style={styles.synced}>{t("conversations.synced", { time: formatRelativeTime(cachedAt, locale) })}</Text> : null}
         </>
       )}
-      ListEmptyComponent={!loading ? <Text style={styles.empty}>{t("conversations.empty")}</Text> : null}
+      ListEmptyComponent={!loading && !error ? (
+        <AsyncStateView state="empty" message={t("conversations.empty")} />
+      ) : null}
       renderItem={({ item: session }) => {
         const isEditing = editing === session.session_handle;
         const isCurrent = gateway.sessionHandle === session.session_handle;
@@ -278,23 +283,20 @@ function agentName(agentId: string, agents: AgentSummary[]): string {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 16, gap: 12, paddingBottom: 48 },
-  headerActions: { flexDirection: "row", gap: 10 },
-  primary: { backgroundColor: colors.accent, borderRadius: 12, width: 44, minHeight: 42, alignItems: "center", justifyContent: "center" },
-  filter: { borderColor: colors.line, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, backgroundColor: colors.surface },
+  container: { padding: spacing.large, gap: spacing.medium, paddingBottom: 48 },
+  headerActions: { flexDirection: "row", gap: spacing.medium },
+  primary: { backgroundColor: colors.accent, borderRadius: radii.medium, width: 44, minHeight: 42, alignItems: "center", justifyContent: "center" },
+  filter: { borderColor: colors.line, borderWidth: 1, borderRadius: radii.medium, paddingHorizontal: spacing.large, paddingVertical: spacing.medium, backgroundColor: colors.surface },
   filterText: { color: colors.accent, fontWeight: "600" },
-  card: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.line, padding: 15, gap: 12 },
+  card: { backgroundColor: colors.surface, borderRadius: radii.large, borderWidth: 1, borderColor: colors.line, padding: spacing.large, gap: spacing.medium , ...shadows.card },
   currentCard: { borderColor: colors.accent, borderWidth: 2 },
-  title: { color: colors.ink, fontSize: 17, fontWeight: "700", marginBottom: 5 },
+  title: { color: colors.ink, ...typography.subheading, marginBottom: spacing.xsmall },
   meta: { color: colors.muted, fontSize: 13 },
-  titleInput: { color: colors.ink, borderWidth: 1, borderColor: colors.accent, borderRadius: 10, padding: 10, backgroundColor: colors.background },
-  actions: { flexDirection: "row", gap: 18, alignItems: "center" },
-  iconAction: { width: 44, height: 44, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: colors.background },
-  loading: { marginTop: 60 },
-  syncing: { color: colors.muted, fontSize: 12 },
-  synced: { color: colors.muted, fontSize: 12 },
-  empty: { color: colors.muted, textAlign: "center", marginTop: 60 },
-  error: { color: colors.danger, lineHeight: 20 },
-  loadMore: { alignItems: "center", paddingVertical: 14 },
+  titleInput: { color: colors.ink, borderWidth: 1, borderColor: colors.accent, borderRadius: radii.small, padding: spacing.medium, backgroundColor: colors.background },
+  actions: { flexDirection: "row", gap: spacing.xlarge, alignItems: "center" },
+  iconAction: { width: 44, height: 44, borderRadius: radii.medium, alignItems: "center", justifyContent: "center", backgroundColor: colors.background },
+  syncing: { color: colors.muted, ...typography.small },
+  synced: { color: colors.muted, ...typography.small },
+  loadMore: { alignItems: "center", paddingVertical: spacing.large },
   loadMoreText: { color: colors.accent, fontWeight: "700" },
 });

@@ -11,7 +11,7 @@ import {
   View,
 } from "react-native";
 
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { useI18n } from "@/i18n";
 import { prepareImageAttachment } from "@/media/prepareImageAttachment";
 
@@ -104,13 +104,13 @@ function stringParam(value: string | string[] | undefined): string {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "black" },
   camera: { flex: 1 },
-  panel: { backgroundColor: colors.background, padding: 16, gap: 12 },
+  panel: { backgroundColor: colors.background, padding: spacing.large, gap: spacing.medium },
   buttonText: { color: "white", fontWeight: "700" },
-  previewActions: { flexDirection: "row", gap: 12 },
-  secondaryButton: { flex: 1, backgroundColor: colors.accentSoft, padding: 14, borderRadius: 14, alignItems: "center" },
+  previewActions: { flexDirection: "row", gap: spacing.medium },
+  secondaryButton: { flex: 1, backgroundColor: colors.accentSoft, padding: spacing.large, borderRadius: radii.medium, alignItems: "center" },
   secondaryText: { color: colors.accent, fontWeight: "700" },
-  button: { backgroundColor: colors.accent, padding: 14, borderRadius: 14, alignItems: "center" },
+  button: { backgroundColor: colors.accent, padding: spacing.large, borderRadius: radii.medium, alignItems: "center" },
   flexAction: { flex: 1 },
-  permission: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 16 },
+  permission: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xlarge, gap: spacing.large },
   permissionText: { color: colors.ink, fontSize: 18 },
 });

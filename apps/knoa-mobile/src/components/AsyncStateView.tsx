@@ -1,7 +1,7 @@
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 import { AppPressable } from "@/components/AppPressable";
-import { colors } from "@/theme";
+import { colors, radii, shadows, spacing, typography } from "@/theme";
 
 type AsyncState = "loading" | "error" | "empty";
 
@@ -39,11 +39,11 @@ export function AsyncStateView({
 }
 
 const styles = StyleSheet.create({
-  loading: { marginTop: 32 },
-  card: { padding: 16, borderRadius: 14, gap: 8 },
+  loading: { marginTop: spacing.xlarge },
+  card: { padding: spacing.large, borderRadius: radii.medium, gap: spacing.small, ...shadows.card },
   errorCard: { backgroundColor: colors.dangerSoft },
   emptyCard: { backgroundColor: colors.surface },
-  title: { color: colors.ink, fontWeight: "700", textAlign: "center" },
+  title: { color: colors.ink, ...typography.subheading, textAlign: "center" },
   message: { color: colors.muted, textAlign: "center" },
   errorMessage: { color: colors.danger, textAlign: "left" },
   retryButton: { alignSelf: "flex-start" },

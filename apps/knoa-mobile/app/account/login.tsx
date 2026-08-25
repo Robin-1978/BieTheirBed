@@ -11,7 +11,7 @@ import {
   resetHostedPassword,
 } from "@/hub/hubClient";
 import { useI18n } from "@/i18n";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 
 type AccountMode = "login" | "register" | "recover";
 const HOSTED_HUB_URL = "https://knoa.tinydotdot.com";
@@ -180,7 +180,7 @@ export default function AccountLoginScreen() {
           style={styles.input}
         />
         <AppPressable style={styles.primary} disabled={working} onPress={() => void submit()}>
-          {working ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>{submitLabel}</Text>}
+          {working ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.primaryText}>{submitLabel}</Text>}
         </AppPressable>
         <AppPressable
           disabled={working}
@@ -200,28 +200,28 @@ export default function AccountLoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flexGrow: 1, justifyContent: "center", padding: 22, gap: 18, backgroundColor: colors.background },
-  hero: { gap: 7 },
+  container: { flexGrow: 1, justifyContent: "center", padding: spacing.xlarge, gap: spacing.xlarge, backgroundColor: colors.background },
+  hero: { gap: spacing.small },
   eyebrow: { color: colors.accent, fontSize: 11, letterSpacing: 2, fontWeight: "800" },
   title: { color: colors.ink, fontSize: 28, fontWeight: "800" },
   hint: { color: colors.muted, lineHeight: 20 },
-  card: { backgroundColor: colors.surface, borderRadius: 20, borderWidth: 1, borderColor: colors.line, padding: 17, gap: 12 },
-  input: { backgroundColor: colors.background, color: colors.ink, borderRadius: 13, paddingHorizontal: 13, paddingVertical: 12, borderWidth: 1, borderColor: colors.line },
+  card: { backgroundColor: colors.surface, borderRadius: radii.large, borderWidth: 1, borderColor: colors.line, padding: spacing.large, gap: spacing.medium , ...shadows.card },
+  input: { backgroundColor: colors.background, color: colors.ink, borderRadius: radii.medium, paddingHorizontal: spacing.medium, paddingVertical: spacing.medium, borderWidth: 1, borderColor: colors.line },
   payload: { minHeight: 76, textAlignVertical: "top" },
-  modeRow: { flexDirection: "row", gap: 7 },
-  mode: { flex: 1, alignItems: "center", paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: colors.line },
+  modeRow: { flexDirection: "row", gap: spacing.small },
+  mode: { flex: 1, alignItems: "center", paddingVertical: spacing.medium, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line },
   modeActive: { backgroundColor: colors.accent, borderColor: colors.accent },
   modeText: { color: colors.muted, fontWeight: "700" },
-  modeTextActive: { color: "white", fontWeight: "800" },
-  primary: { backgroundColor: colors.accent, borderRadius: 13, padding: 14, alignItems: "center" },
-  primaryText: { color: "white", fontWeight: "800" },
-  secondary: { borderWidth: 1, borderColor: colors.accent, borderRadius: 13, padding: 13, alignItems: "center" },
+  modeTextActive: { color: colors.onAccent, fontWeight: "800" },
+  primary: { backgroundColor: colors.accent, borderRadius: radii.medium, padding: spacing.large, alignItems: "center" },
+  primaryText: { color: colors.onAccent, fontWeight: "800" },
+  secondary: { borderWidth: 1, borderColor: colors.accent, borderRadius: radii.medium, padding: spacing.medium, alignItems: "center" },
   secondaryText: { color: colors.accent, fontWeight: "800" },
   error: { color: colors.danger, textAlign: "center" },
   advanced: { minHeight: 42, alignItems: "center", justifyContent: "center" },
   advancedText: { color: colors.muted, fontWeight: "700" },
   scanner: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#000" },
   scanFrame: { width: 260, height: 260, borderWidth: 3, borderColor: "#fff", borderRadius: 22 },
-  scanHint: { color: "#fff", marginTop: 22, paddingHorizontal: 30, textAlign: "center", fontWeight: "700" },
-  cancelScan: { position: "absolute", bottom: 48, backgroundColor: colors.accent, borderRadius: 14, paddingHorizontal: 24, paddingVertical: 13 },
+  scanHint: { color: "#fff", marginTop: spacing.xlarge, paddingHorizontal: 30, textAlign: "center", fontWeight: "700" },
+  cancelScan: { position: "absolute", bottom: 48, backgroundColor: colors.accent, borderRadius: radii.medium, paddingHorizontal: spacing.xlarge, paddingVertical: spacing.medium },
 });

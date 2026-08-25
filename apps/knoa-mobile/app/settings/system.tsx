@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useLocalSearchParams } from "expo-router";
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -21,9 +22,10 @@ import type {
   ManagedConfig,
 } from "@/api/models";
 import { AppIcon } from "@/components/AppIcon";
+import { AsyncStateView } from "@/components/AsyncStateView";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
-import { colors } from "@/theme";
+import { colors, radii, shadows, spacing, typography } from "@/theme";
 
 type Current = {
   revision: ConfigRevision;
@@ -155,8 +157,27 @@ export default function SystemConfigurationScreen() {
     }
   }
 
+  function confirmCancelDraft() {
+    Alert.alert(t("config.cancelDraftTitle"), t("config.cancelDraftMessage"), [
+      { text: t("common.cancel"), style: "cancel" },
+      {
+        text: t("config.cancelDraftConfirm"),
+        style: "destructive",
+        onPress: () => { setDraft(null); setValidation(null); },
+      },
+    ]);
+  }
+
   if (!current && working === "load") {
-    return <View style={styles.center}><ActivityIndicator color={colors.accent} /></View>;
+    return <View style={styles.center}><AsyncStateView state="loading" /></View>;
+  }
+
+  if (!current && message) {
+    return (
+      <View style={styles.center}>
+        <AsyncStateView state="error" message={message} retryLabel={t("common.refresh")} onRetry={() => void load()} />
+      </View>
+    );
   }
 
   const document = draft?.document ?? current?.revision.document;
@@ -308,7 +329,7 @@ export default function SystemConfigurationScreen() {
             <Action label={t("config.publish")} busy={working === "publish"} primary onPress={() => void publish()} />
           </View>
           {validation?.issues.map((issue) => <Text key={`${issue.code}:${issue.path}`} style={styles.error}>{issue.path || "/"}: {issue.message}</Text>)}
-          <Pressable onPress={() => { setDraft(null); setValidation(null); }}><Text style={styles.cancel}>{t("common.cancel")}</Text></Pressable>
+          <Pressable onPress={confirmCancelDraft}><Text style={styles.cancel}>{t("common.cancel")}</Text></Pressable>
         </Section>
       ) : null}
 
@@ -363,7 +384,7 @@ function ToggleRow({ title, detail, value, disabled, onChange }: { title: string
 }
 
 function Action({ label, onPress, busy = false, primary = false }: { label: string; onPress(): void; busy?: boolean; primary?: boolean }) {
-  return <Pressable disabled={busy} onPress={onPress} style={[styles.action, primary && styles.actionPrimary]}>{busy ? <ActivityIndicator color={primary ? colors.white : colors.accent} /> : <><Text style={[styles.actionText, primary && styles.actionTextPrimary]}>{label}</Text><AppIcon name="chevron-right" size={17} color={primary ? colors.white : colors.accent} /></>}</Pressable>;
+  return <Pressable disabled={busy} onPress={onPress} style={[styles.action, primary && styles.actionPrimary]}>{busy ? <ActivityIndicator color={primary ? colors.onAccent : colors.accent} /> : <><Text style={[styles.actionText, primary && styles.actionTextPrimary]}>{label}</Text><AppIcon name="chevron-right" size={17} color={primary ? colors.onAccent : colors.accent} /></>}</Pressable>;
 }
 
 function NumericField({ label, value, disabled, onCommit }: { label: string; value: number; disabled: boolean; onCommit(value: number): void }) {
@@ -376,41 +397,41 @@ function ChoiceRow({ label, value, choices, disabled, onChange }: { label: strin
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background },
-  container: { padding: 16, paddingBottom: 56, gap: 14 },
-  section: { borderRadius: 18, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, padding: 16, gap: 12 },
+  container: { padding: spacing.large, paddingBottom: 56, gap: spacing.medium },
+  section: { borderRadius: radii.large, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, padding: spacing.large, gap: spacing.medium, ...shadows.card },
   sectionTitle: { color: colors.ink, fontSize: 18, fontWeight: "700" },
-  row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
-  flex: { flex: 1, gap: 3 },
+  row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.medium },
+  flex: { flex: 1, gap: spacing.xsmall },
   metric: { color: colors.ink, fontWeight: "700", textAlign: "right" },
-  meta: { color: colors.muted, fontSize: 13 },
-  item: { borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 11, gap: 8 },
+  meta: { color: colors.muted, ...typography.caption },
+  item: { borderTopWidth: 1, borderTopColor: colors.line, paddingTop: spacing.medium, gap: spacing.small },
   itemTitle: { color: colors.ink, fontWeight: "700" },
-  generationGrid: { gap: 8 },
-  generation: { borderRadius: 12, backgroundColor: colors.surfaceMuted, padding: 11, gap: 3 },
+  generationGrid: { gap: spacing.small },
+  generation: { borderRadius: radii.medium, backgroundColor: colors.surfaceMuted, padding: spacing.medium, gap: spacing.xsmall },
   draftBadge: { color: colors.warning, fontWeight: "700" },
-  warning: { color: colors.warning, fontSize: 12 },
+  warning: { color: colors.warning, ...typography.small },
   error: { color: colors.danger, lineHeight: 19 },
-  message: { borderRadius: 14, backgroundColor: colors.accentSoft, color: colors.ink, padding: 13, lineHeight: 20 },
-  inlineButton: { alignSelf: "flex-start", borderRadius: 999, borderWidth: 1, borderColor: colors.line, paddingHorizontal: 10, paddingVertical: 6 },
+  message: { borderRadius: radii.medium, backgroundColor: colors.accentSoft, color: colors.ink, padding: spacing.medium, lineHeight: 20 },
+  inlineButton: { alignSelf: "flex-start", borderRadius: radii.pill, borderWidth: 1, borderColor: colors.line, paddingHorizontal: spacing.small, paddingVertical: spacing.small },
   inlineButtonSelected: { backgroundColor: colors.accentSoft, borderColor: colors.accent },
-  inlineButtonText: { color: colors.muted, fontSize: 12, fontWeight: "600" },
+  inlineButtonText: { color: colors.muted, ...typography.small },
   inlineButtonTextSelected: { color: colors.accent },
-  instructions: { minHeight: 62, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.background, color: colors.ink, padding: 10, textAlignVertical: "top", fontSize: 13 },
-  summaryInput: { borderRadius: 12, borderWidth: 1, borderColor: colors.line, color: colors.ink, paddingHorizontal: 12, paddingVertical: 11 },
-  actions: { gap: 8 },
-  action: { minHeight: 44, borderRadius: 12, borderWidth: 1, borderColor: colors.accent, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  instructions: { minHeight: 62, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.background, color: colors.ink, padding: spacing.small, textAlignVertical: "top", ...typography.caption },
+  summaryInput: { borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line, color: colors.ink, paddingHorizontal: spacing.medium, paddingVertical: spacing.medium },
+  actions: { gap: spacing.small },
+  action: { minHeight: 44, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.accent, paddingHorizontal: spacing.medium, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   actionPrimary: { backgroundColor: colors.accent },
   actionText: { color: colors.accent, fontWeight: "700" },
-  actionTextPrimary: { color: colors.white },
-  cancel: { color: colors.muted, textAlign: "center", padding: 8 },
-  diff: { color: colors.ink, fontFamily: "monospace", fontSize: 12 },
-  fieldGrid: { gap: 8 },
-  numericField: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
-  numericInput: { minWidth: 100, borderRadius: 10, borderWidth: 1, borderColor: colors.line, color: colors.ink, paddingHorizontal: 10, paddingVertical: 7, textAlign: "right" },
-  choiceBlock: { gap: 7 },
-  choiceRow: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
-  choice: { borderRadius: 999, borderWidth: 1, borderColor: colors.line, paddingHorizontal: 11, paddingVertical: 7 },
+  actionTextPrimary: { color: colors.onAccent },
+  cancel: { color: colors.muted, textAlign: "center", padding: spacing.small },
+  diff: { color: colors.ink, fontFamily: "monospace", ...typography.small },
+  fieldGrid: { gap: spacing.small },
+  numericField: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.medium },
+  numericInput: { minWidth: 100, borderRadius: radii.small, borderWidth: 1, borderColor: colors.line, color: colors.ink, paddingHorizontal: spacing.small, paddingVertical: spacing.small, textAlign: "right" },
+  choiceBlock: { gap: spacing.small },
+  choiceRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.small },
+  choice: { borderRadius: radii.pill, borderWidth: 1, borderColor: colors.line, paddingHorizontal: spacing.medium, paddingVertical: spacing.small },
   choiceSelected: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
-  choiceText: { color: colors.muted, fontSize: 12, fontWeight: "600" },
+  choiceText: { color: colors.muted, ...typography.small },
   choiceTextSelected: { color: colors.accent },
 });

@@ -14,7 +14,7 @@ import {
 } from "react-native";
 
 import { useGateway } from "@/state/GatewayProvider";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { immediatePolicy, isLaunchPolicyValid, TaskLaunchEditor } from "@/components/TaskLaunchEditor";
 import { AgentSelector } from "@/components/AgentSelector";
 import type { MCPResourceCatalogItem, TaskLaunchPolicy } from "@/api/models";
@@ -353,7 +353,7 @@ export default function NewTaskScreen() {
             onPress={() => void create()}
             style={[styles.primary, (!goal.trim() || saving || gateway.requiredUpdate || !isLaunchPolicyValid(launchPolicy)) && styles.disabled]}
           >
-            {saving ? <ActivityIndicator color="white" /> : <Text style={styles.primaryText}>{launchPolicy.kind === "immediate" ? t("taskNew.createAndStart") : t("taskNew.create")}</Text>}
+            {saving ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.primaryText}>{launchPolicy.kind === "immediate" ? t("taskNew.createAndStart") : t("taskNew.create")}</Text>}
           </AppPressable>
         </View>
       </ScrollView>
@@ -383,44 +383,44 @@ function folderErrorMessage(code: string, t: ReturnType<typeof useI18n>["t"]): s
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  container: { padding: 16, paddingBottom: 48 },
-  card: { backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.line, padding: 18, gap: 10 },
-  nodeHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
-  nodeRow: { gap: 8, paddingVertical: 2 },
-  nodeChoice: { width: 150, minHeight: 62, padding: 10, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.background, gap: 3 },
+  container: { padding: spacing.large, paddingBottom: 48 },
+  card: { backgroundColor: colors.surface, borderRadius: radii.large, borderWidth: 1, borderColor: colors.line, padding: spacing.xlarge, gap: spacing.medium , ...shadows.card },
+  nodeHeader: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
+  nodeRow: { gap: spacing.small, paddingVertical: 2 },
+  nodeChoice: { width: 150, minHeight: 62, padding: spacing.medium, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.background, gap: spacing.xsmall },
   nodeChoiceSelected: { borderColor: colors.accent, backgroundColor: colors.accentFaint },
-  nodeChoiceText: { color: colors.ink, fontSize: 12, fontWeight: "800" },
+  nodeChoiceText: { color: colors.ink, ...typography.small, fontWeight: "800" },
   nodeChoiceTextSelected: { color: colors.accent },
   nodeChoiceStatus: { color: colors.muted, fontSize: 10 },
-  templateRow: { gap: 9, paddingVertical: 2 },
-  template: { width: 156, minHeight: 78, padding: 11, borderRadius: 13, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.background, gap: 4 },
+  templateRow: { gap: spacing.small, paddingVertical: 2 },
+  template: { width: 156, minHeight: 78, padding: spacing.medium, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.background, gap: spacing.xsmall },
   templateSelected: { borderColor: colors.accent, backgroundColor: colors.accentFaint },
   templateTitle: { color: colors.ink, fontSize: 13, fontWeight: "800" },
   templateSelectedText: { color: colors.accent },
   templateDetail: { color: colors.muted, fontSize: 11, lineHeight: 15 },
-  templateDetails: { marginTop: 4, padding: 12, borderRadius: 12, backgroundColor: colors.accentSoft, gap: 3 },
+  templateDetails: { marginTop: spacing.xsmall, padding: spacing.medium, borderRadius: radii.medium, backgroundColor: colors.accentSoft, gap: spacing.xsmall },
   templateDetailsTitle: { color: colors.ink, fontWeight: "800", marginBottom: 2 },
   templateMeta: { color: colors.muted, fontSize: 11, lineHeight: 16 },
-  updateRequired: { marginBottom: 12, padding: 14, borderRadius: 12, backgroundColor: colors.dangerSoft, gap: 4 },
+  updateRequired: { marginBottom: spacing.medium, padding: spacing.large, borderRadius: radii.medium, backgroundColor: colors.dangerSoft, gap: spacing.xsmall },
   updateRequiredTitle: { color: colors.danger, fontWeight: "700" },
-  label: { color: colors.ink, fontWeight: "700", marginTop: 4 },
-  titleInput: { minHeight: 46, borderWidth: 1, borderColor: colors.line, borderRadius: 12, paddingHorizontal: 12, color: colors.ink, fontSize: 16 },
-  goalInput: { minHeight: 180, borderWidth: 1, borderColor: colors.line, borderRadius: 12, padding: 12, color: colors.ink, fontSize: 16, lineHeight: 23 },
-  launchCard: { marginTop: 6, padding: 14, borderRadius: 12, backgroundColor: colors.accentSoft, gap: 4 },
+  label: { color: colors.ink, fontWeight: "700", marginTop: spacing.xsmall },
+  titleInput: { minHeight: 46, borderWidth: 1, borderColor: colors.line, borderRadius: radii.medium, paddingHorizontal: spacing.medium, color: colors.ink, fontSize: 16 },
+  goalInput: { minHeight: 180, borderWidth: 1, borderColor: colors.line, borderRadius: radii.medium, padding: spacing.medium, color: colors.ink, fontSize: 16, lineHeight: 23 },
+  launchCard: { marginTop: spacing.small, padding: spacing.large, borderRadius: radii.medium, backgroundColor: colors.accentSoft, gap: spacing.xsmall },
   launchTitle: { color: colors.ink, fontWeight: "700" },
   launchText: { color: colors.muted, lineHeight: 20 },
-  notificationCard: { marginTop: 6, padding: 14, borderRadius: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, gap: 8 },
-  attachmentRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  attachmentButton: { minHeight: 38, paddingHorizontal: 13, alignItems: "center", justifyContent: "center", borderRadius: 11, borderWidth: 1, borderColor: colors.accent },
+  notificationCard: { marginTop: spacing.small, padding: spacing.large, borderRadius: radii.medium, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, gap: spacing.small , ...shadows.card },
+  attachmentRow: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
+  attachmentButton: { minHeight: 38, paddingHorizontal: spacing.medium, alignItems: "center", justifyContent: "center", borderRadius: radii.medium, borderWidth: 1, borderColor: colors.accent },
   attachmentButtonText: { color: colors.accent, fontWeight: "800" },
   attachmentName: { color: colors.ink, flex: 1, minWidth: 0 },
-  attachmentRemove: { minHeight: 32, paddingHorizontal: 11, alignItems: "center", justifyContent: "center", borderRadius: 10, borderWidth: 1, borderColor: colors.line },
+  attachmentRemove: { minHeight: 32, paddingHorizontal: spacing.medium, alignItems: "center", justifyContent: "center", borderRadius: radii.small, borderWidth: 1, borderColor: colors.line },
   attachmentRemoveText: { color: colors.muted, fontWeight: "700", fontSize: 12 },
-  folderCard: { padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.line, gap: 5 },
+  folderCard: { padding: spacing.medium, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line, gap: spacing.xsmall },
   toggle: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   toggleLabel: { color: colors.ink },
   error: { color: colors.danger },
-  primary: { marginTop: 8, minHeight: 48, borderRadius: 14, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
+  primary: { marginTop: spacing.small, minHeight: 48, borderRadius: radii.medium, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
   disabled: { opacity: 0.45 },
-  primaryText: { color: "white", fontWeight: "700", fontSize: 16 },
+  primaryText: { color: colors.onAccent, fontWeight: "700", fontSize: 16 },
 });

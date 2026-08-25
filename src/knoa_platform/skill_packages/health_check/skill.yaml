@@ -1,0 +1,22 @@
+id: health_check
+version: "1.0.0"
+name: Health Check / 系统体检
+description: Diagnose disk, CPU, memory, network, services, and updates; apply safe fixes with confirmation and deliver a health report card. / 检查磁盘、CPU、内存、网络、服务与更新，安全修复需确认，并输出健康报告。
+instructions: instructions.md
+triggers:
+  - health check
+  - system check
+  - computer health
+  - diagnose
+  - fix my computer
+  - 体检
+  - 系统检查
+  - 电脑健康
+  - 系统诊断
+  - 清理缓存
+required_tools:
+  - run_command
+  - notify
+required_capabilities:
+  - shell
+  - desktop_control

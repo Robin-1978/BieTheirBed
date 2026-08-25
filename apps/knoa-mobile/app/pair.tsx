@@ -1,7 +1,7 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Linking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -18,11 +18,16 @@ import { AppPressable } from "@/components/AppPressable";
 import { useI18n } from "@/i18n";
 import { loadConnectionIdentity } from "@/security/deviceIdentity";
 import { useGateway } from "@/state/GatewayProvider";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 
 export default function PairScreen() {
   const gateway = useGateway();
-  const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string }>();
+  const params = useLocalSearchParams<{
+    workspaceId?: string;
+    workspaceName?: string;
+    autoScan?: string;
+    onboarding?: string;
+  }>();
   const { t } = useI18n();
   const [permission, requestPermission] = useCameraPermissions();
   const [displayName, setDisplayName] = useState(() => t("pair.defaultDevice"));
@@ -32,6 +37,25 @@ export default function PairScreen() {
   const [working, setWorking] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const [error, setError] = useState("");
+  const onboarding = stringParam(params.onboarding) === "1";
+
+  useEffect(() => {
+    if (stringParam(params.autoScan) !== "1" || scanning || working) return;
+    let active = true;
+    void (async () => {
+      setRequestingCamera(true);
+      try {
+        if (!permission?.granted) {
+          const result = await requestPermission();
+          if (!active || !result.granted) return;
+        }
+        if (active) setScanning(true);
+      } finally {
+        if (active) setRequestingCamera(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [params.autoScan, permission?.granted, requestPermission, scanning, working]);
 
   async function submit(encoded = payload) {
     if (!encoded.trim() || !displayName.trim() || working) return;
@@ -40,10 +64,22 @@ export default function PairScreen() {
     try {
       await gateway.pair(encoded.trim(), displayName.trim());
       const identity = await loadConnectionIdentity();
+      const workspaceId = stringParam(params.workspaceId);
+      if (onboarding && workspaceId) {
+        router.replace({
+          pathname: "/workspaces/[workspaceId]",
+          params: {
+            workspaceId,
+            workspaceName: stringParam(params.workspaceName),
+            connected: "1",
+          },
+        });
+        return;
+      }
       router.replace({
         pathname: "/node",
         params: {
-          workspaceId: stringParam(params.workspaceId),
+          workspaceId,
           workspaceName: stringParam(params.workspaceName),
           nodeId: identity?.nodeId || "",
         },
@@ -120,7 +156,7 @@ export default function PairScreen() {
         }}
       >
         {requestingCamera
-          ? <ActivityIndicator color="white" size="small" />
+          ? <ActivityIndicator color={colors.onAccent} size="small" />
           : <Text style={styles.primaryText}>{t("pair.scan")}</Text>}
       </AppPressable>
       {permission && !permission.granted && !permission.canAskAgain ? (
@@ -161,17 +197,17 @@ function stringParam(value: string | string[] | undefined): string {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 24, gap: 14, justifyContent: "center" },
-  intro: { alignItems: "center", gap: 8, marginBottom: 8 },
-  introIcon: { width: 58, height: 58, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
+  container: { flex: 1, padding: spacing.xlarge, gap: spacing.large, justifyContent: "center" },
+  intro: { alignItems: "center", gap: spacing.small, marginBottom: spacing.small },
+  introIcon: { width: 58, height: 58, borderRadius: radii.large, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
   title: { color: colors.ink, fontSize: 23, fontWeight: "700" },
   lead: { color: colors.ink, fontSize: 16, lineHeight: 24, textAlign: "center" },
   expiryHint: { color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center" },
-  input: { borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, color: colors.ink, borderRadius: 14, padding: 14 },
+  input: { borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, color: colors.ink, borderRadius: radii.medium, padding: spacing.large },
   payload: { minHeight: 120, textAlignVertical: "top", fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" },
-  primary: { backgroundColor: colors.accent, borderRadius: 14, padding: 15, alignItems: "center" },
-  primaryText: { color: "white", fontWeight: "700" },
-  secondary: { backgroundColor: colors.accentSoft, borderRadius: 14, padding: 15, alignItems: "center" },
+  primary: { backgroundColor: colors.accent, borderRadius: radii.medium, padding: spacing.large, alignItems: "center" },
+  primaryText: { color: colors.onAccent, fontWeight: "700" },
+  secondary: { backgroundColor: colors.accentSoft, borderRadius: radii.medium, padding: spacing.large, alignItems: "center" },
   secondaryText: { color: colors.accent, fontWeight: "700" },
   or: { color: colors.muted, textAlign: "center" },
   error: { color: colors.danger, textAlign: "center" },
@@ -179,11 +215,11 @@ const styles = StyleSheet.create({
   settingsLink: { color: colors.accent, textAlign: "center", fontWeight: "700" },
   scanner: { flex: 1, alignItems: "center", justifyContent: "center" },
   scanFrame: { width: 260, height: 260, borderWidth: 2, borderColor: "white", borderRadius: 24 },
-  scanHint: { position: "absolute", bottom: 116, color: "white", backgroundColor: "rgba(0,0,0,0.58)", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16 },
-  cancel: { position: "absolute", bottom: 56, backgroundColor: "rgba(0,0,0,0.65)", paddingHorizontal: 20, paddingVertical: 12, borderRadius: 20 },
+  scanHint: { position: "absolute", bottom: 116, color: "white", backgroundColor: "rgba(0,0,0,0.58)", paddingHorizontal: spacing.large, paddingVertical: spacing.small, borderRadius: radii.large },
+  cancel: { position: "absolute", bottom: 56, backgroundColor: "rgba(0,0,0,0.65)", paddingHorizontal: spacing.xlarge, paddingVertical: spacing.medium, borderRadius: radii.large },
   cancelText: { color: "white", fontWeight: "600" },
-  advancedToggle: { minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
+  advancedToggle: { minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.small },
   advancedText: { color: colors.muted, fontWeight: "600" },
-  advancedCard: { gap: 12, padding: 14, borderRadius: 14, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  command: { color: colors.ink, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 13, backgroundColor: colors.background, borderRadius: 10, padding: 11 },
+  advancedCard: { gap: spacing.medium, padding: spacing.large, borderRadius: radii.medium, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line , ...shadows.card },
+  command: { color: colors.ink, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 13, backgroundColor: colors.background, borderRadius: radii.small, padding: spacing.medium },
 });
