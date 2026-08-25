@@ -1,0 +1,25 @@
+id: file_organizer
+version: "1.0.0"
+name: File Organizer / 文件整理
+description: Scan, categorize, and reorganize local files with a confirmed plan, summary report, and undo log. / 扫描、分类并整理本地文件，先出方案再执行，附带变更摘要与可回滚脚本。
+instructions: instructions.md
+triggers:
+  - organize
+  - clean up
+  - sort files
+  - file organizer
+  - tidy up files
+  - 整理
+  - 清理
+  - 归档
+  - 文件整理
+  - 整理文件
+required_tools:
+  - read_file
+  - write_file
+  - run_command
+  - attach
+required_capabilities:
+  - host_read
+  - host_write
+  - shell

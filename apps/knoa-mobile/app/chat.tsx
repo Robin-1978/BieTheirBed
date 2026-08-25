@@ -1,4 +1,5 @@
 import * as Crypto from "expo-crypto";
+import * as Clipboard from "expo-clipboard";
 import {
   RecordingPresets,
   requestRecordingPermissionsAsync,
@@ -55,7 +56,8 @@ import { loadConversationCache, storeConversationCache } from "@/storage/convers
 import { mergeConversationTurns } from "@/storage/conversationMerge";
 import { MAX_ATTACHMENTS, pickAttachments } from "@/media/attachmentPicker";
 import { agentImageSupport } from "@/media/agentImageSupport";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
+import { formatMessageTimestamp } from "@/ui/formatRelativeTime";
 
 type PendingAttachment = {
   uri: string;
@@ -74,11 +76,12 @@ type PendingChatTurn = {
   attachments: PendingAttachment[];
   state: "sending" | "failed";
   error: string;
+  createdAt: number;
 };
 
 type ChatListItem =
-  | { kind: "turn"; key: string; turn: ChatTurnSnapshot }
-  | { kind: "pending"; key: string; pending: PendingChatTurn };
+  | { kind: "turn"; key: string; turn: ChatTurnSnapshot; showTimestamp: boolean; timestampMs: number }
+  | { kind: "pending"; key: string; pending: PendingChatTurn; showTimestamp: boolean; timestampMs: number };
 
 type Feedback = {
   text: string;
@@ -86,10 +89,11 @@ type Feedback = {
 };
 
 const TERMINAL_STATES = new Set<ChatTurnSnapshot["state"]>(["completed", "failed", "cancelled"]);
+const TIMESTAMP_GROUP_MS = 5 * 60 * 1000;
 
 export default function ChatScreen() {
   const gateway = useGateway();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const insets = useSafeAreaInsets();
   const gatewayRef = useRef(gateway);
   gatewayRef.current = gateway;
@@ -99,6 +103,7 @@ export default function ChatScreen() {
     workspaceId?: string;
     workspaceName?: string;
     nodeId?: string;
+    prefill?: string;
   }>();
   const list = useRef<FlatList<ChatListItem>>(null);
   const followLatest = useRef(true);
@@ -132,6 +137,11 @@ export default function ChatScreen() {
   const showFeedback = useCallback((value: string, tone: Feedback["tone"] = "error") => {
     setFeedback({ text: value, tone });
   }, []);
+  const copyMessage = useCallback(async (text: string) => {
+    if (!text.trim()) return;
+    await Clipboard.setStringAsync(text);
+    showFeedback(t("chat.messageCopied"), "success");
+  }, [showFeedback, t]);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recording = useAudioRecorderState(recorder, 250);
   const [turnWatcher] = useState(() => new ChatTurnWatcher({
@@ -247,13 +257,20 @@ export default function ChatScreen() {
   useEffect(() => {
     let active = true;
     draftReady.current = false;
+    const prefill = stringParam(params.prefill).trim();
+    if (prefill) {
+      setText(prefill);
+      draftReady.current = true;
+      router.setParams({ prefill: "" });
+      return () => { active = false; };
+    }
     void loadConversationDraft(gateway.sessionHandle).then((draft) => {
       if (!active) return;
       setText(draft);
       draftReady.current = true;
     });
     return () => { active = false; };
-  }, [gateway.sessionHandle]);
+  }, [gateway.sessionHandle, params.prefill]);
 
   useEffect(() => {
     if (!draftReady.current) return;
@@ -284,18 +301,39 @@ export default function ChatScreen() {
   const hasComposerContent = Boolean(text.trim() || attachments.length);
   const canSend = Boolean(
     !pendingTurn
-      && !activeTurn
       && !validatingInput
       && gateway.client
       && !gateway.requiredUpdate
       && hasComposerContent,
   );
-  const listItems = useMemo<ChatListItem[]>(() => [
-    ...turns.map((turn) => ({ kind: "turn" as const, key: turn.turn_id, turn })),
-    ...(pendingTurn
-      ? [{ kind: "pending" as const, key: pendingTurn.localId, pending: pendingTurn }]
-      : []),
-  ], [pendingTurn, turns]);
+  const listItems = useMemo<ChatListItem[]>(() => {
+    const base: ChatListItem[] = [
+      ...turns.map((turn) => ({
+        kind: "turn" as const,
+        key: turn.turn_id,
+        turn,
+        timestampMs: turn.created_at * 1000,
+        showTimestamp: false,
+      })),
+      ...(pendingTurn
+        ? [{
+            kind: "pending" as const,
+            key: pendingTurn.localId,
+            pending: pendingTurn,
+            timestampMs: pendingTurn.createdAt,
+            showTimestamp: false,
+          }]
+        : []),
+    ];
+    let previousMs: number | null = null;
+    return base.map((item): ChatListItem => {
+      const showTimestamp = previousMs === null || item.timestampMs - previousMs > TIMESTAMP_GROUP_MS;
+      previousMs = item.timestampMs;
+      return item.kind === "turn"
+        ? { kind: "turn", key: item.key, turn: item.turn, timestampMs: item.timestampMs, showTimestamp }
+        : { kind: "pending", key: item.key, pending: item.pending, timestampMs: item.timestampMs, showTimestamp };
+    });
+  }, [pendingTurn, turns]);
 
   async function chooseFile() {
     const prepared = await pickAttachments(attachments.length);
@@ -407,6 +445,7 @@ export default function ChatScreen() {
       attachments: attachments.map((item) => ({ ...item, status: item.uploaded ? "uploaded" : "pending" })),
       state: "sending",
       error: "",
+      createdAt: Date.now(),
     };
     scrollIntent.current = "smooth";
     followLatest.current = true;
@@ -679,8 +718,9 @@ export default function ChatScreen() {
     showFeedback(t("chat.editedToComposer"), "info");
   }
 
-  const stoppingResponse = Boolean(activeTurn);
-  const primaryDisabled = stoppingResponse
+  const showStopAction = Boolean(activeTurn) && !(inputMode === "text" && hasComposerContent);
+  const stoppingResponse = showStopAction;
+  const primaryDisabled = showStopAction
     ? Boolean(cancelling)
     : inputMode === "text"
       ? !canSend
@@ -857,12 +897,21 @@ export default function ChatScreen() {
         renderItem={({ item }) => item.kind === "pending" ? (
           <PendingTurn
             pending={item.pending}
+            queued={Boolean(activeTurn)}
+            showTimestamp={item.showTimestamp}
+            timestampMs={item.timestampMs}
+            locale={locale}
+            onCopy={copyMessage}
             onRetry={submitPendingTurn}
             onEdit={editPendingTurn}
           />
         ) : (
           <ChatTurn
             turn={item.turn}
+            showTimestamp={item.showTimestamp}
+            timestampMs={item.timestampMs}
+            locale={locale}
+            onCopy={copyMessage}
             resolving={resolving}
             resolvingApproved={resolvingApproved}
             resolvingInteraction={resolvingInteraction}
@@ -952,13 +1001,13 @@ export default function ChatScreen() {
           />
         </View>
         <AppPressable
-          accessibilityLabel={stoppingResponse
+          accessibilityLabel={showStopAction
             ? t("chat.stop")
             : inputMode === "voice"
               ? recording.isRecording ? t("chat.stopRecording") : t("chat.startRecording")
               : t("chat.send")}
           onPress={() => {
-            if (activeTurn) void cancelTurn(activeTurn);
+            if (showStopAction && activeTurn) void cancelTurn(activeTurn);
             else if (inputMode === "voice") void toggleRecording();
             else void send();
           }}
@@ -971,7 +1020,7 @@ export default function ChatScreen() {
           ]}
         >
           {sending || validatingInput || transcribing || cancelling ? (
-            <ActivityIndicator color="white" size="small" />
+            <ActivityIndicator color={colors.onAccent} size="small" />
           ) : stoppingResponse ? (
             <AppIcon name="stop" color="white" size={17} />
           ) : recording.isRecording ? (
@@ -980,9 +1029,9 @@ export default function ChatScreen() {
               <Text style={styles.recordingTime}>{Math.round(recording.durationMillis / 1000)}s</Text>
             </View>
           ) : inputMode === "text" ? (
-            <AppIcon name="send" color="white" size={19} />
+            <AppIcon name="send" color={colors.onAccent} size={19} />
           ) : (
-            <AppIcon name="mic" color="white" />
+            <AppIcon name="mic" color={colors.onAccent} />
           )}
         </AppPressable>
       </View>
@@ -1082,6 +1131,10 @@ function MediaAction({ icon, label, onPress }: { icon: AppIconName; label: strin
   );
 }
 
+function stringParam(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+}
+
 function nodeRouteParams(params: { workspaceId?: string; workspaceName?: string; nodeId?: string }) {
   return {
     workspaceId: params.workspaceId ?? "",
@@ -1092,6 +1145,10 @@ function nodeRouteParams(params: { workspaceId?: string; workspaceName?: string;
 
 const ChatTurn = memo(function ChatTurn({
   turn,
+  showTimestamp,
+  timestampMs,
+  locale,
+  onCopy,
   resolving,
   resolvingApproved,
   resolvingInteraction,
@@ -1104,6 +1161,10 @@ const ChatTurn = memo(function ChatTurn({
   onEdit,
 }: {
   turn: ChatTurnSnapshot;
+  showTimestamp: boolean;
+  timestampMs: number;
+  locale: string;
+  onCopy(text: string): void;
   resolving: string;
   resolvingApproved: boolean | null;
   resolvingInteraction: string;
@@ -1121,15 +1182,26 @@ const ChatTurn = memo(function ChatTurn({
   const approval = turn.approvals.find((item) => item.state === "pending") ?? null;
   const interaction = turn.interactions?.find((item) => item.state === "pending") ?? null;
   const artifactItems = useMemo(() => assistantArtifactItems(turn.artifacts), [turn.artifacts]);
+  const timestampLabel = formatMessageTimestamp(timestampMs, locale, t("chat.messageTimeYesterday"));
   return (
     <View style={styles.turn}>
-      <View style={styles.userBubble}>
+      {showTimestamp ? <Text style={styles.messageTimestamp}>{timestampLabel}</Text> : null}
+      <Pressable
+        accessibilityRole="button"
+        delayLongPress={320}
+        onLongPress={() => onCopy(turn.user_input)}
+        style={styles.userBubble}
+      >
         <Text style={styles.userText}>{turn.user_input}</Text>
         {turn.attachments.length ? <Text style={styles.userMeta}>{t("chat.attachments", { count: turn.attachments.length })}</Text> : null}
-      </View>
+      </Pressable>
       <View style={styles.assistantBubble}>
         <TurnProgress turn={turn} />
-        {response ? <AppMarkdown value={response} style={styles.markdownList} /> : null}
+        {response ? (
+          <Pressable accessibilityRole="button" delayLongPress={320} onLongPress={() => onCopy(response)}>
+            <AppMarkdown value={response} style={styles.markdownList} />
+          </Pressable>
+        ) : null}
         {artifactItems.length ? (
           <View style={styles.generatedArtifacts}>
             {artifactItems.map((item) => (
@@ -1161,7 +1233,7 @@ const ChatTurn = memo(function ChatTurn({
               </AppPressable>
               <AppPressable style={styles.approve} disabled={Boolean(resolving)} onPress={() => onResolve(approval, true)}>
                 {resolving === approval.approval_id && resolvingApproved === true
-                  ? <ActivityIndicator color="white" size="small" />
+                  ? <ActivityIndicator color={colors.onAccent} size="small" />
                   : <Text style={styles.approveText}>{t("execution.allowAction")}</Text>}
               </AppPressable>
             </View>
@@ -1184,17 +1256,34 @@ const ChatTurn = memo(function ChatTurn({
 
 function PendingTurn({
   pending,
+  queued,
+  showTimestamp,
+  timestampMs,
+  locale,
+  onCopy,
   onRetry,
   onEdit,
 }: {
   pending: PendingChatTurn;
+  queued: boolean;
+  showTimestamp: boolean;
+  timestampMs: number;
+  locale: string;
+  onCopy(text: string): void;
   onRetry(pending: PendingChatTurn): void;
   onEdit(pending: PendingChatTurn): void;
 }) {
   const { t } = useI18n();
+  const timestampLabel = formatMessageTimestamp(timestampMs, locale, t("chat.messageTimeYesterday"));
   return (
     <View style={styles.turn}>
-      <View style={styles.userBubble}>
+      {showTimestamp ? <Text style={styles.messageTimestamp}>{timestampLabel}</Text> : null}
+      <Pressable
+        accessibilityRole="button"
+        delayLongPress={320}
+        onLongPress={() => onCopy(pending.userInput)}
+        style={styles.userBubble}
+      >
         <Text style={styles.userText}>{pending.userInput}</Text>
         {pending.attachments.length
           ? <Text style={styles.userMeta}>{t("chat.attachments", { count: pending.attachments.length })}</Text>
@@ -1210,12 +1299,14 @@ function PendingTurn({
             ))}
           </View>
         ) : null}
-      </View>
+      </Pressable>
       <View style={styles.assistantBubble}>
         <View style={styles.activityRow}>
           {pending.state === "sending" ? <ActivityIndicator color={colors.accent} size="small" /> : null}
           <Text style={pending.state === "failed" ? styles.pendingError : styles.activity}>
-            {pending.state === "sending" ? t("chat.sending") : pending.error || t("chat.sendFailed")}
+            {pending.state === "sending"
+              ? (queued ? t("chat.queued") : t("chat.sending"))
+              : pending.error || t("chat.sendFailed")}
           </Text>
         </View>
         {pending.state === "failed" ? (
@@ -1372,117 +1463,118 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   listArea: { flex: 1 },
   list: { flex: 1 },
-  topbar: { paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  subtitle: { color: colors.muted, fontSize: 13, flex: 1, marginRight: 8 },
-  topActions: { flexDirection: "row", gap: 6 },
-  topAction: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 12 },
+  topbar: { paddingHorizontal: spacing.large, paddingVertical: spacing.medium, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  subtitle: { color: colors.muted, fontSize: 13, flex: 1, marginRight: spacing.small },
+  topActions: { flexDirection: "row", gap: spacing.small },
+  topAction: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: radii.medium },
   selectedAgentAction: { backgroundColor: colors.accentSoft },
-  messages: { padding: 16, paddingBottom: 24, gap: 18, flexGrow: 1 },
-  empty: { marginTop: 42, alignSelf: "center", width: "100%", maxWidth: 520, gap: 10 },
+  messages: { padding: spacing.large, paddingBottom: spacing.xlarge, gap: spacing.xlarge, flexGrow: 1 },
+  empty: { marginTop: 42, alignSelf: "center", width: "100%", maxWidth: 520, gap: spacing.medium },
   emptyTitle: { color: colors.ink, textAlign: "center", fontSize: 20, fontWeight: "700" },
-  emptyBody: { color: colors.muted, textAlign: "center", lineHeight: 21, paddingHorizontal: 12 },
-  emptyExamples: { marginTop: 6, gap: 8 },
-  emptyExample: { minHeight: 46, paddingHorizontal: 13, borderRadius: 13, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, flexDirection: "row", alignItems: "center", gap: 8 },
+  emptyBody: { color: colors.muted, textAlign: "center", lineHeight: 21, paddingHorizontal: spacing.medium },
+  emptyExamples: { marginTop: spacing.small, gap: spacing.small },
+  emptyExample: { minHeight: 46, paddingHorizontal: spacing.medium, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, flexDirection: "row", alignItems: "center", gap: spacing.small },
   emptyExampleText: { color: colors.ink, flex: 1, fontWeight: "600", lineHeight: 20 },
-  emptyHint: { color: colors.muted, textAlign: "center", fontSize: 12, lineHeight: 18, paddingHorizontal: 8 },
-  loadOlder: { alignSelf: "center", paddingHorizontal: 14, paddingVertical: 8, marginBottom: 4 },
+  emptyHint: { color: colors.muted, textAlign: "center", ...typography.small, lineHeight: 18, paddingHorizontal: spacing.small },
+  loadOlder: { alignSelf: "center", paddingHorizontal: spacing.large, paddingVertical: spacing.small, marginBottom: spacing.xsmall },
   loadOlderText: { color: colors.accent, fontWeight: "600", fontSize: 13 },
-  jumpLatest: { position: "absolute", right: 16, bottom: 12, minHeight: 40, paddingHorizontal: 13, borderRadius: 20, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.line },
+  jumpLatest: { position: "absolute", right: spacing.large, bottom: spacing.medium, minHeight: 40, paddingHorizontal: spacing.medium, borderRadius: radii.large, flexDirection: "row", alignItems: "center", gap: spacing.small, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.line , ...shadows.card },
   jumpLatestText: { color: colors.accent, fontSize: 13, fontWeight: "700" },
-  turn: { gap: 8 },
-  userBubble: { alignSelf: "flex-end", maxWidth: "84%", backgroundColor: colors.accent, borderRadius: 18, borderBottomRightRadius: 5, paddingHorizontal: 15, paddingVertical: 11 },
-  userText: { color: "white", fontSize: 16, lineHeight: 23 },
-  userMeta: { color: colors.accentSoft, fontSize: 12, marginTop: 5 },
-  pendingAttachments: { marginTop: 7, gap: 5 },
-  pendingAttachmentRow: { minHeight: 24, flexDirection: "row", alignItems: "center", gap: 6 },
-  pendingAttachmentName: { color: "white", flex: 1, fontSize: 12 },
+  turn: { gap: spacing.small },
+  messageTimestamp: { alignSelf: "center", color: colors.muted, fontSize: 11, marginBottom: 2 },
+  userBubble: { alignSelf: "flex-end", maxWidth: "84%", backgroundColor: colors.accent, borderRadius: radii.large, borderBottomRightRadius: 5, paddingHorizontal: spacing.large, paddingVertical: spacing.medium },
+  userText: { color: colors.onAccent, fontSize: 16, lineHeight: 23 },
+  userMeta: { color: colors.accentSoft, fontSize: 12, marginTop: spacing.xsmall },
+  pendingAttachments: { marginTop: spacing.small, gap: spacing.xsmall },
+  pendingAttachmentRow: { minHeight: 24, flexDirection: "row", alignItems: "center", gap: spacing.small },
+  pendingAttachmentName: { color: colors.onAccent, flex: 1, fontSize: 12 },
   pendingAttachmentState: { color: colors.accentSoft, fontSize: 10 },
   pendingAttachmentFailed: { color: "#FFD1CC" },
-  assistantBubble: { alignSelf: "stretch", width: "100%", backgroundColor: colors.surface, borderRadius: 18, borderBottomLeftRadius: 5, padding: 15, borderWidth: 1, borderColor: colors.line },
+  assistantBubble: { alignSelf: "stretch", width: "100%", backgroundColor: colors.surface, borderRadius: radii.large, borderBottomLeftRadius: 5, padding: spacing.large, borderWidth: 1, borderColor: colors.line , ...shadows.card },
   markdownList: { width: "100%", alignSelf: "stretch" },
-  activityRow: { flexDirection: "row", alignItems: "center", gap: 9 },
+  activityRow: { flexDirection: "row", alignItems: "center", gap: spacing.small },
   activity: { color: colors.muted },
   pendingError: { color: colors.danger, flex: 1 },
-  approval: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 12, gap: 10 },
-  approvalActions: { flexDirection: "row", gap: 10 },
-  turnActions: { flexDirection: "row", gap: 10, marginTop: 12 },
-  turnAction: { alignSelf: "flex-start", marginTop: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.line, paddingHorizontal: 12, paddingVertical: 8 },
+  approval: { marginTop: spacing.medium, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: spacing.medium, gap: spacing.medium },
+  approvalActions: { flexDirection: "row", gap: spacing.medium },
+  turnActions: { flexDirection: "row", gap: spacing.medium, marginTop: spacing.medium },
+  turnAction: { alignSelf: "flex-start", marginTop: spacing.medium, borderRadius: radii.small, borderWidth: 1, borderColor: colors.line, paddingHorizontal: spacing.medium, paddingVertical: spacing.small },
   turnActionText: { color: colors.accent, fontWeight: "700" },
-  deny: { flex: 1, alignItems: "center", borderWidth: 1, borderColor: colors.line, borderRadius: 11, padding: 10 },
+  deny: { flex: 1, alignItems: "center", borderWidth: 1, borderColor: colors.line, borderRadius: radii.medium, padding: spacing.medium },
   denyText: { color: colors.ink, fontWeight: "600" },
-  approve: { flex: 1, alignItems: "center", backgroundColor: colors.accent, borderRadius: 11, padding: 10 },
-  approveText: { color: "white", fontWeight: "700" },
-  generatedArtifacts: { marginTop: 12, gap: 10 },
-  generatedImageCard: { overflow: "hidden", borderWidth: 1, borderColor: colors.line, borderRadius: 12, backgroundColor: colors.background },
+  approve: { flex: 1, alignItems: "center", backgroundColor: colors.accent, borderRadius: radii.medium, padding: spacing.medium },
+  approveText: { color: colors.onAccent, fontWeight: "700" },
+  generatedArtifacts: { marginTop: spacing.medium, gap: spacing.medium },
+  generatedImageCard: { overflow: "hidden", borderWidth: 1, borderColor: colors.line, borderRadius: radii.medium, backgroundColor: colors.background },
   generatedImage: { width: "100%", minHeight: 180, maxHeight: 360, aspectRatio: 16 / 9, backgroundColor: colors.background },
-  generatedImageState: { minHeight: 150, alignItems: "center", justifyContent: "center", gap: 9, padding: 16 },
-  generatedArtifactCaption: { minHeight: 42, paddingHorizontal: 11, paddingVertical: 9, flexDirection: "row", alignItems: "center", gap: 8, borderTopWidth: 1, borderTopColor: colors.line },
+  generatedImageState: { minHeight: 150, alignItems: "center", justifyContent: "center", gap: spacing.small, padding: spacing.large },
+  generatedArtifactCaption: { minHeight: 42, paddingHorizontal: spacing.medium, paddingVertical: spacing.small, flexDirection: "row", alignItems: "center", gap: spacing.small, borderTopWidth: 1, borderTopColor: colors.line },
   generatedArtifactName: { color: colors.ink, flex: 1, fontWeight: "600" },
   generatedArtifactHint: { color: colors.muted, fontSize: 13 },
   generatedArtifactError: { color: colors.danger, fontSize: 13 },
-  generatedFile: { minHeight: 54, padding: 10, flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: colors.line, borderRadius: 12, backgroundColor: colors.background },
-  fileAction: { minHeight: 36, minWidth: 48, alignItems: "center", justifyContent: "center", borderRadius: 9, backgroundColor: colors.accentSoft },
-  fileActionText: { color: colors.accent, fontSize: 12, fontWeight: "700" },
-  generatedFileBadge: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6, backgroundColor: colors.accentSoft },
-  generatedFileBadgeText: { color: colors.accent, fontSize: 12, fontWeight: "700" },
-  attachmentStrip: { paddingHorizontal: 12, paddingVertical: 8, flexDirection: "row", gap: 8, borderTopWidth: 1, borderTopColor: colors.line },
-  attachment: { maxWidth: 150, flexDirection: "row", alignItems: "center", gap: 7, backgroundColor: colors.surface, borderRadius: 10, padding: 6, borderWidth: 1, borderColor: colors.line },
+  generatedFile: { minHeight: 54, padding: spacing.medium, flexDirection: "row", alignItems: "center", gap: spacing.medium, borderWidth: 1, borderColor: colors.line, borderRadius: radii.medium, backgroundColor: colors.background },
+  fileAction: { minHeight: 36, minWidth: 48, alignItems: "center", justifyContent: "center", borderRadius: radii.small, backgroundColor: colors.accentSoft },
+  fileActionText: { color: colors.accent, ...typography.small, fontWeight: "700" },
+  generatedFileBadge: { borderRadius: radii.small, paddingHorizontal: spacing.small, paddingVertical: spacing.small, backgroundColor: colors.accentSoft },
+  generatedFileBadgeText: { color: colors.accent, ...typography.small, fontWeight: "700" },
+  attachmentStrip: { paddingHorizontal: spacing.medium, paddingVertical: spacing.small, flexDirection: "row", gap: spacing.small, borderTopWidth: 1, borderTopColor: colors.line },
+  attachment: { maxWidth: 150, flexDirection: "row", alignItems: "center", gap: spacing.small, backgroundColor: colors.surface, borderRadius: radii.small, padding: spacing.small, borderWidth: 1, borderColor: colors.line , ...shadows.card },
   thumbnail: { width: 34, height: 34, borderRadius: 6 },
   attachmentName: { color: colors.ink, fontSize: 12, flexShrink: 1 },
   attachmentCopy: { flex: 1 },
   attachmentStatus: { color: colors.muted, fontSize: 10, marginTop: 2 },
   attachmentFailed: { color: colors.danger },
   remove: { color: colors.muted, fontSize: 18 },
-  removeAction: { width: 40, height: 40, alignItems: "center", justifyContent: "center", borderRadius: 10 },
-  connectionBanner: { marginHorizontal: 16, marginBottom: 8, padding: 13, borderRadius: 14, backgroundColor: colors.warningSoft, flexDirection: "row", alignItems: "center", gap: 12 },
+  removeAction: { width: 40, height: 40, alignItems: "center", justifyContent: "center", borderRadius: radii.small },
+  connectionBanner: { marginHorizontal: spacing.large, marginBottom: spacing.small, padding: spacing.medium, borderRadius: radii.medium, backgroundColor: colors.warningSoft, flexDirection: "row", alignItems: "center", gap: spacing.medium },
   bannerCopy: { flex: 1 },
   connectionTitle: { color: colors.ink, fontWeight: "700" },
-  connectionDetail: { color: colors.muted, fontSize: 12, marginTop: 3 },
-  bannerButton: { paddingHorizontal: 13, paddingVertical: 8, borderRadius: 11, backgroundColor: colors.surface },
+  connectionDetail: { color: colors.muted, fontSize: 12, marginTop: spacing.xsmall },
+  bannerButton: { paddingHorizontal: spacing.medium, paddingVertical: spacing.small, borderRadius: radii.medium, backgroundColor: colors.surface },
   bannerButtonText: { color: colors.accent, fontWeight: "700" },
-  updateBanner: { marginHorizontal: 16, marginBottom: 8, padding: 13, borderRadius: 14, backgroundColor: colors.accentSoft, flexDirection: "row", alignItems: "center", gap: 12 },
-  requiredUpdateBanner: { marginHorizontal: 16, marginBottom: 8, padding: 13, borderRadius: 14, backgroundColor: colors.dangerSoft, gap: 4 },
+  updateBanner: { marginHorizontal: spacing.large, marginBottom: spacing.small, padding: spacing.medium, borderRadius: radii.medium, backgroundColor: colors.accentSoft, flexDirection: "row", alignItems: "center", gap: spacing.medium },
+  requiredUpdateBanner: { marginHorizontal: spacing.large, marginBottom: spacing.small, padding: spacing.medium, borderRadius: radii.medium, backgroundColor: colors.dangerSoft, gap: spacing.xsmall },
   requiredUpdateTitle: { color: colors.danger, fontWeight: "700" },
   updateTitle: { color: colors.ink, fontWeight: "700" },
-  updateDetail: { color: colors.muted, fontSize: 12, marginTop: 3 },
+  updateDetail: { color: colors.muted, fontSize: 12, marginTop: spacing.xsmall },
   updateLink: { color: colors.accent, fontWeight: "700" },
-  feedbackBanner: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: colors.surfaceMuted, borderTopWidth: 1, borderTopColor: colors.line },
+  feedbackBanner: { paddingHorizontal: spacing.large, paddingVertical: spacing.medium, backgroundColor: colors.surfaceMuted, borderTopWidth: 1, borderTopColor: colors.line },
   feedbackWarning: { backgroundColor: colors.warningSoft },
   feedbackError: { backgroundColor: colors.dangerSoft },
   feedbackSuccess: { backgroundColor: colors.accentFaint },
   feedbackText: { color: colors.ink, textAlign: "center", fontSize: 13 },
   feedbackErrorText: { color: colors.danger },
-  composer: { flexDirection: "row", alignItems: "flex-end", gap: 8, padding: 10, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.line },
+  composer: { flexDirection: "row", alignItems: "flex-end", gap: spacing.small, padding: spacing.medium, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.line },
   roundAction: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: colors.background, borderWidth: 1, borderColor: colors.line },
-  inputShell: { flex: 1, minHeight: 42, maxHeight: 120, flexDirection: "row", alignItems: "flex-end", backgroundColor: colors.background, borderRadius: 16 },
+  inputShell: { flex: 1, minHeight: 42, maxHeight: 120, flexDirection: "row", alignItems: "flex-end", backgroundColor: colors.background, borderRadius: radii.large },
   inputMode: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
-  input: { flex: 1, minHeight: 42, maxHeight: 120, color: colors.ink, paddingRight: 13, paddingVertical: 10, textAlignVertical: "top" },
-  primaryAction: { minWidth: 52, height: 42, paddingHorizontal: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.accent, borderRadius: 14 },
+  input: { flex: 1, minHeight: 42, maxHeight: 120, color: colors.ink, paddingRight: spacing.medium, paddingVertical: spacing.medium, textAlignVertical: "top" },
+  primaryAction: { minWidth: 52, height: 42, paddingHorizontal: spacing.medium, alignItems: "center", justifyContent: "center", backgroundColor: colors.accent, borderRadius: radii.medium },
   primaryRecording: { backgroundColor: colors.warning },
   primaryStopping: { backgroundColor: colors.stop },
-  recordingContent: { flexDirection: "row", alignItems: "center", gap: 5 },
-  recordingTime: { color: "white", fontSize: 12, fontWeight: "700" },
+  recordingContent: { flexDirection: "row", alignItems: "center", gap: spacing.xsmall },
+  recordingTime: { color: "white", ...typography.small, fontWeight: "700" },
   sendDisabled: { opacity: 0.45 },
   modalRoot: { flex: 1, justifyContent: "flex-end" },
   backdrop: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: colors.overlay },
-  actionSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 22, paddingTop: 10, paddingBottom: 34, gap: 18 },
+  actionSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: spacing.xlarge, paddingTop: spacing.medium, paddingBottom: 34, gap: spacing.xlarge },
   sheetHandle: { width: 38, height: 4, borderRadius: 2, backgroundColor: colors.line, alignSelf: "center" },
-  sheetTitle: { color: colors.ink, fontSize: 17, fontWeight: "700" },
-  unavailableAgents: { gap: 4, marginTop: 12, padding: 10, borderRadius: 12, backgroundColor: colors.background },
-  unavailableTitle: { color: colors.muted, fontSize: 12, fontWeight: "800" },
+  sheetTitle: { color: colors.ink, ...typography.subheading },
+  unavailableAgents: { gap: spacing.xsmall, marginTop: spacing.medium, padding: spacing.medium, borderRadius: radii.medium, backgroundColor: colors.background },
+  unavailableTitle: { color: colors.muted, ...typography.small, fontWeight: "800" },
   unavailableText: { color: colors.muted, fontSize: 11, lineHeight: 17 },
-  configureUnavailable: { minHeight: 34, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, marginTop: 4, paddingTop: 7 },
-  configureUnavailableText: { color: colors.accent, fontSize: 12, fontWeight: "800" },
-  sheetActions: { flexDirection: "row", gap: 24 },
-  mediaAction: { width: 76, alignItems: "center", gap: 8 },
-  mediaIcon: { width: 58, height: 58, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
+  configureUnavailable: { minHeight: 34, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, marginTop: spacing.xsmall, paddingTop: spacing.small },
+  configureUnavailableText: { color: colors.accent, ...typography.small, fontWeight: "800" },
+  sheetActions: { flexDirection: "row", gap: spacing.xlarge },
+  mediaAction: { width: 76, alignItems: "center", gap: spacing.small },
+  mediaIcon: { width: 58, height: 58, borderRadius: radii.large, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
   mediaLabel: { color: colors.ink, fontWeight: "600" },
   previewRoot: { flex: 1, backgroundColor: "#090B0A" },
-  previewToolbar: { position: "absolute", top: 0, left: 0, right: 0, zIndex: 2, minHeight: 64, paddingHorizontal: 14, paddingBottom: 6, flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "rgba(9, 11, 10, 0.82)" },
-  previewButton: { minHeight: 40, justifyContent: "center", paddingHorizontal: 8 },
+  previewToolbar: { position: "absolute", top: 0, left: 0, right: 0, zIndex: 2, minHeight: 64, paddingHorizontal: spacing.large, paddingBottom: spacing.small, flexDirection: "row", alignItems: "center", gap: spacing.medium, backgroundColor: "rgba(9, 11, 10, 0.82)" },
+  previewButton: { minHeight: 40, justifyContent: "center", paddingHorizontal: spacing.small },
   previewButtonText: { color: "white", fontWeight: "700" },
   previewName: { color: "white", flex: 1, textAlign: "center", fontSize: 13 },
   previewCanvas: { flex: 1, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   previewImage: { width: "100%", height: "100%" },
-  previewHint: { position: "absolute", alignSelf: "center", color: "rgba(255, 255, 255, 0.72)", fontSize: 12, backgroundColor: "rgba(9, 11, 10, 0.62)", borderRadius: 14, paddingHorizontal: 12, paddingVertical: 7 },
+  previewHint: { position: "absolute", alignSelf: "center", color: "rgba(255, 255, 255, 0.72)", fontSize: 12, backgroundColor: "rgba(9, 11, 10, 0.62)", borderRadius: radii.medium, paddingHorizontal: spacing.medium, paddingVertical: spacing.small },
 });

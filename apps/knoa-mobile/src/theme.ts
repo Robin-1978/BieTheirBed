@@ -17,6 +17,7 @@ export const colors = {
   accentPressed: semanticColor("accent_pressed", "#275548", "#96CCBC"),
   accentSoft: semanticColor("accent_soft", "#DCEAE4", "#284038"),
   accentFaint: semanticColor("accent_faint", "#EDF5F1", "#1C3029"),
+  onAccent: semanticColor("on_accent", "#FFFFFF", "#102E24"),
   line: semanticColor("line", "#D9D5CC", "#34413C"),
   lineStrong: semanticColor("line_strong", "#C6C2B9", "#485751"),
   danger: semanticColor("danger", "#9B3E38", "#E59089"),
@@ -31,6 +32,15 @@ export const colors = {
 
 export const radii = { small: 9, medium: 13, large: 17, pill: 999 };
 export const spacing = { xsmall: 4, small: 8, medium: 12, large: 16, xlarge: 24 };
+
+export const typography = {
+  heading: { fontSize: 20, fontWeight: "800" as const },
+  subheading: { fontSize: 17, fontWeight: "700" as const },
+  body: { fontSize: 15, fontWeight: "600" as const },
+  caption: { fontSize: 13, fontWeight: "600" as const },
+  small: { fontSize: 12, fontWeight: "600" as const },
+  tiny: { fontSize: 11, fontWeight: "600" as const },
+};
 
 export const shadows = {
   card: {

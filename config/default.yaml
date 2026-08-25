@@ -75,6 +75,9 @@ audio_transcription:
   tool: ""
   max_bytes: 20971520
 supports_vision: null
+screen_grid_enabled: false
+screen_verify_enabled: false
+ui_backend: "auto"  # auto, atspi, uia, none
 
 # Dynamic MCP capabilities are disabled unless a private local config explicitly
 # enables a server. Tools require local effect/capability/risk policy. Optional

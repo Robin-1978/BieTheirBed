@@ -1,24 +1,25 @@
 import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import type { ManagedConfig } from "@/api/models";
 import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { AsyncStateView } from "@/components/AsyncStateView";
+import { CAPABILITY_SCENARIOS } from "@/capabilityScenarios";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { loadCapabilityCache, storeCapabilityCache } from "@/storage/capabilityCache";
-import { TASK_TEMPLATES } from "@/taskTemplates";
-import { presentNodeName } from "@/presentation/nodePresentation";
 
-export default function NodeResourcesScreen() {
+export default function CapabilitiesScreen() {
   const gateway = useGateway();
   const { t } = useI18n();
   const [document, setDocument] = useState<ManagedConfig | null>(null);
   const [toolCount, setToolCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const capabilityScope = gateway.nodeId || "unselected";
 
   const load = useCallback(async () => {
@@ -34,9 +35,9 @@ export default function NodeResourcesScreen() {
       ]);
       setDocument(current.revision.document);
       const result = inventory.result as { descriptors?: unknown[] };
-      const toolCount = result.descriptors?.length ?? 0;
-      setToolCount(toolCount);
-      void storeCapabilityCache(capabilityScope, { document: current.revision.document, toolCount });
+      const nextToolCount = result.descriptors?.length ?? 0;
+      setToolCount(nextToolCount);
+      void storeCapabilityCache(capabilityScope, { document: current.revision.document, toolCount: nextToolCount });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t("capabilities.loadFailed"));
     } finally {
@@ -57,101 +58,120 @@ export default function NodeResourcesScreen() {
     return () => { active = false; };
   }, [capabilityScope, load]);
 
-  const node = gateway.nodes.find((item) => item.nodeId === gateway.nodeId);
   const agents = document ? Object.entries(document.agents.agents) : [];
   const enabledAgents = agents.filter(([, agent]) => agent.enabled);
   const sharedModels = document
     ? Object.values(document.model_deployments).filter((deployment) => deployment.share_enabled).length
     : 0;
 
+  function openScenario(prompt: string) {
+    router.push({ pathname: "/chat", params: { prefill: prompt } });
+  }
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.hero}>
-        <View style={styles.heroIcon}><AppIcon name="node" color={colors.accent} size={28} /></View>
+        <View style={styles.heroIcon}><AppIcon name="agent" color={colors.accent} size={28} /></View>
         <View style={styles.flex}>
-          <Text style={styles.title}>{presentNodeName(node, t("common.unnamedComputer"))}</Text>
-          <Text style={styles.meta}>{t("capabilities.heroDetail")}</Text>
+          <Text style={styles.title}>{t("capabilities.heroTitle")}</Text>
         </View>
         <AppPressable accessibilityLabel={t("common.refresh")} onPress={() => void load()} style={styles.iconButton}>
           <AppIcon name="refresh" color={colors.muted} size={20} />
         </AppPressable>
       </View>
-      {loading ? <ActivityIndicator color={colors.accent} /> : null}
 
-      <View style={styles.capabilityCard}>
-        <Text style={styles.sectionTitle}>{t("workspace.capabilitiesTitle")}</Text>
-        <Text style={styles.meta}>{t("workspace.capabilitiesDetail")}</Text>
-        <View style={styles.capabilityGrid}>
-          {TASK_TEMPLATES.map((template) => (
+      {loading && !document ? <AsyncStateView state="loading" /> : null}
+      {error && !loading && !document ? (
+        <AsyncStateView state="error" message={error} retryLabel={t("common.refresh")} onRetry={() => void load()} />
+      ) : null}
+
+      <View style={styles.scenarioCard}>
+        <View style={styles.scenarioGrid}>
+          {CAPABILITY_SCENARIOS.map((scenario) => (
             <AppPressable
-              key={template.id}
-              style={styles.capability}
-              onPress={() => router.push({ pathname: "/tasks/new", params: { template: template.id } })}
+              key={scenario.id}
+              style={styles.scenario}
+              onPress={() => openScenario(t(scenario.promptKey))}
             >
-              <AppIcon name={template.id === "computer-health" || template.id === "service-monitor" ? "settings" : template.id === "project-maintenance" ? "agent" : "file"} color={colors.accent} size={19} />
-              <View style={styles.flex}>
-                <Text style={styles.capabilityTitle} numberOfLines={2}>{t(template.titleKey)}</Text>
-                <Text style={styles.capabilityDetail} numberOfLines={2}>{t(template.detailKey)}</Text>
+              <View style={styles.scenarioIcon}>
+                <AppIcon name={scenario.icon} color={colors.accent} size={20} />
               </View>
+              <Text style={styles.scenarioTitle} numberOfLines={2}>{t(scenario.titleKey)}</Text>
+              <Text style={styles.scenarioDetail} numberOfLines={2}>{t(scenario.detailKey)}</Text>
             </AppPressable>
           ))}
         </View>
       </View>
 
-      <View style={styles.card}>
-        <ResourceRow
-          icon="agent"
-          title={t("nav.models")}
-          detail={t("capabilities.modelsDetail", {
-            count: Object.keys(document?.models ?? {}).length,
-            shared: sharedModels,
-          })}
-          onPress={() => router.push("/settings/models")}
-        />
-        <ResourceRow
-          icon="agent"
-          title={t("nav.agents")}
-          detail={t("capabilities.agentsDetail", {
-            enabled: enabledAgents.length,
-            defaultAgent: document?.agents.default_agent || "—",
-          })}
-          onPress={() => router.push("/settings/agents")}
-        />
-        <ResourceRow
-          icon="share"
-          title={t("nav.extensions")}
-          detail={t("capabilities.extensionsDetail", {
-            mcp: Object.keys(document?.mcp_servers ?? {}).length,
-            skills: Object.keys(document?.skills ?? {}).length,
-          })}
-          onPress={() => router.push("/settings/extensions")}
-        />
-        <ResourceRow
-          icon="settings"
-          title="Tool"
-          detail={t("capabilities.toolsDetail", { count: toolCount })}
-        />
+      <View style={styles.advancedCard}>
+        <AppPressable
+          style={styles.advancedToggle}
+          onPress={() => setAdvancedOpen((value) => !value)}
+          accessibilityLabel={advancedOpen ? t("capabilities.advancedHide") : t("capabilities.advancedShow")}
+        >
+          <Text style={styles.advancedTitle}>{t("capabilities.advancedTitle")}</Text>
+          <Text style={styles.advancedHint}>{advancedOpen ? t("capabilities.advancedHide") : t("capabilities.advancedShow")}</Text>
+          <AppIcon name={advancedOpen ? "chevron-down" : "chevron-right"} color={colors.muted} size={18} />
+        </AppPressable>
+
+        {advancedOpen ? (
+          <View style={styles.advancedBody}>
+            <ResourceRow
+              icon="agent"
+              title={t("nav.models")}
+              detail={t("capabilities.modelsDetail", {
+                count: Object.keys(document?.models ?? {}).length,
+                shared: sharedModels,
+              })}
+              onPress={() => router.push("/settings/models")}
+            />
+            <ResourceRow
+              icon="agent"
+              title={t("nav.agents")}
+              detail={t("capabilities.agentsDetail", {
+                enabled: enabledAgents.length,
+                defaultAgent: document?.agents.default_agent || "—",
+              })}
+              onPress={() => router.push("/settings/agents")}
+            />
+            <ResourceRow
+              icon="share"
+              title={t("nav.extensions")}
+              detail={t("capabilities.extensionsDetail", {
+                mcp: Object.keys(document?.mcp_servers ?? {}).length,
+                skills: Object.keys(document?.skills ?? {}).length,
+              })}
+              onPress={() => router.push("/settings/extensions")}
+            />
+            <ResourceRow
+              icon="settings"
+              title="Tool"
+              detail={t("capabilities.toolsDetail", { count: toolCount })}
+            />
+
+            <Text style={styles.sectionTitle}>{t("capabilities.agentSection")}</Text>
+            {agents.length ? agents.map(([id, agent]) => (
+              <View key={id} style={styles.agentRow}>
+                <View style={styles.flex}>
+                  <Text style={styles.rowTitle}>{agent.display_name}</Text>
+                  <Text style={styles.meta}>
+                    {agent.kind === "codex" ? t("capabilities.codexAgent") : t("capabilities.knoaAgent")} · {t("capabilities.modelBinding", {
+                      model: agent.model_binding.model || t("capabilities.modelRuntimeDecided"),
+                    })}
+                  </Text>
+                </View>
+                <Text style={agent.enabled ? styles.enabled : styles.disabled}>
+                  {agent.enabled ? t("capabilities.enabled") : t("capabilities.disabled")}
+                </Text>
+              </View>
+            )) : (
+              <Text style={styles.meta}>{t("capabilities.loadFailed")}</Text>
+            )}
+          </View>
+        ) : null}
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>{t("capabilities.agentSection")}</Text>
-        {agents.map(([id, agent]) => (
-          <View key={id} style={styles.agentRow}>
-            <View style={styles.flex}>
-              <Text style={styles.rowTitle}>{agent.display_name}</Text>
-              <Text style={styles.meta}>
-                {agent.kind === "codex" ? t("capabilities.codexAgent") : t("capabilities.knoaAgent")} · {t("capabilities.modelBinding", {
-                  model: agent.model_binding.model || t("capabilities.modelRuntimeDecided"),
-                })}
-              </Text>
-            </View>
-            <Text style={agent.enabled ? styles.enabled : styles.disabled}>
-              {agent.enabled ? t("capabilities.enabled") : t("capabilities.disabled")}
-            </Text>
-          </View>
-        ))}
-      </View>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error && document ? <Text style={styles.error}>{error}</Text> : null}
     </ScrollView>
   );
 }
@@ -168,24 +188,29 @@ function ResourceRow({ icon, title, detail, onPress }: { icon: AppIconName; titl
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 17, gap: 13, paddingBottom: 52 },
-  hero: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  heroIcon: { width: 50, height: 50, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
+  container: { padding: spacing.large, gap: spacing.medium, paddingBottom: 52 },
+  hero: { flexDirection: "row", alignItems: "center", gap: spacing.medium, padding: spacing.large, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, ...shadows.card },
+  heroIcon: { width: 50, height: 50, borderRadius: radii.large, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
   iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center" },
-  title: { color: colors.ink, fontSize: 20, fontWeight: "800" },
-  meta: { color: colors.muted, fontSize: 12, lineHeight: 18 },
+  title: { color: colors.ink, ...typography.heading },
+  meta: { color: colors.muted, ...typography.small, lineHeight: 18 },
   flex: { flex: 1, minWidth: 0 },
-  card: { paddingHorizontal: 15, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  capabilityCard: { padding: 15, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, gap: 6 },
-  capabilityGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
-  capability: { width: "48%", minHeight: 76, flexDirection: "row", alignItems: "center", gap: 8, padding: 10, borderRadius: 12, backgroundColor: colors.background },
-  capabilityTitle: { color: colors.ink, fontSize: 12, fontWeight: "800" },
-  capabilityDetail: { color: colors.muted, fontSize: 10, lineHeight: 14, marginTop: 2 },
-  sectionTitle: { color: colors.ink, fontSize: 17, fontWeight: "800", marginTop: 13, marginBottom: 3 },
-  row: { minHeight: 66, flexDirection: "row", alignItems: "center", gap: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
+  scenarioCard: { padding: spacing.large, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, ...shadows.card },
+  scenarioGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.small },
+  scenario: { width: "48%", minHeight: 112, padding: spacing.medium, borderRadius: radii.medium, backgroundColor: colors.background, gap: spacing.xsmall },
+  scenarioIcon: { width: 36, height: 36, borderRadius: radii.medium, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
+  scenarioTitle: { color: colors.ink, ...typography.small, fontWeight: "800" },
+  scenarioDetail: { color: colors.muted, fontSize: 11, lineHeight: 15 },
+  advancedCard: { borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, overflow: "hidden", ...shadows.card },
+  advancedToggle: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: spacing.small, paddingHorizontal: spacing.large, paddingVertical: spacing.medium },
+  advancedTitle: { color: colors.ink, fontWeight: "800", fontSize: 16 },
+  advancedHint: { flex: 1, color: colors.muted, ...typography.small, textAlign: "right" },
+  advancedBody: { paddingHorizontal: spacing.large, paddingBottom: spacing.medium, gap: spacing.xsmall },
+  sectionTitle: { color: colors.ink, ...typography.subheading, fontWeight: "800", marginTop: spacing.medium, marginBottom: spacing.xsmall },
+  row: { minHeight: 66, flexDirection: "row", alignItems: "center", gap: spacing.medium, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
   rowTitle: { color: colors.ink, fontWeight: "800" },
-  agentRow: { minHeight: 62, flexDirection: "row", alignItems: "center", gap: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
-  enabled: { color: colors.accent, fontSize: 12, fontWeight: "800" },
-  disabled: { color: colors.muted, fontSize: 12, fontWeight: "700" },
+  agentRow: { minHeight: 62, flexDirection: "row", alignItems: "center", gap: spacing.medium, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
+  enabled: { color: colors.accent, ...typography.small, fontWeight: "800" },
+  disabled: { color: colors.muted, ...typography.small, fontWeight: "700" },
   error: { color: colors.danger, lineHeight: 20 },
 });

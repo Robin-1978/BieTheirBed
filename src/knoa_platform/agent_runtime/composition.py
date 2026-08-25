@@ -161,11 +161,13 @@ from knoa_platform.tools.press_key import PressKeyTool
 from knoa_platform.tools.read_artifact import ReadArtifactTool
 from knoa_platform.tools.read_file import ReadFileTool
 from knoa_platform.tools.registry import ToolRegistry
+from knoa_platform.tools.screen import ScreenTool
 from knoa_platform.tools.screenshot import ScreenshotTool
 from knoa_platform.tools.shell import ShellTool
 from knoa_platform.tools.subagent import SpawnSubagentTool, SubagentTool
 from knoa_platform.tools.task_control import TaskControlTool
 from knoa_platform.tools.type_text import TypeTextTool
+from knoa_platform.tools.ui import UiTool
 from knoa_platform.tools.weather import WeatherTool
 from knoa_platform.tools.web_fetch import WebFetchTool
 from knoa_platform.tools.web_search import WebSearchTool
@@ -508,6 +510,7 @@ def _build_agent_runtime_set(
                 agent_id=agent_id,
                 display_name=agent.display_name,
                 supports_vision=model_config.supports_vision is True,
+                screen_verify_enabled=bootstrap.screen_verify_enabled,
                 tool_inventory=(
                     ToolInventory(semantic_selector=DisabledToolSelector())
                     if not agent.allowed_platform_tools
@@ -576,6 +579,7 @@ def _build_registry(
         TypeTextTool(),
         HotkeyTool(),
         MouseTool(),
+        UiTool(ui_backend=config.ui_backend),
         ScreenshotTool(artifacts, artifacts.root / "screenshots"),
         ArtifactPrepareTool(
             artifacts,
@@ -831,6 +835,14 @@ def build_core_runtime(
             model_alias=vision_config.alias,
         )
     registry.register(ImageInspectTool(vision_broker))
+    registry.register(
+        ScreenTool(
+            vision_broker,
+            artifacts,
+            str(artifacts.root / "screenshots"),
+            grid_enabled=config.screen_grid_enabled,
+        )
+    )
     skills = SkillCatalog()
     skill_providers = _managed_skill_providers(managed, skills, packages)
     configured_mcp_providers = _managed_mcp_providers(

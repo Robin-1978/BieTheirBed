@@ -312,6 +312,9 @@ class AppConfig(BaseModel):
         default_factory=AudioTranscriptionConfig
     )
     supports_vision: bool | None = None
+    screen_grid_enabled: bool = False
+    screen_verify_enabled: bool = False
+    ui_backend: str = "auto"
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     skill_directories: tuple[str, ...] = ()
     source_config_path: str = ""

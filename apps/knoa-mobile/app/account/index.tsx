@@ -4,6 +4,7 @@ import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, View
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { AsyncStateView } from "@/components/AsyncStateView";
 import {
   listHostedWorkspaces,
   createHostedWorkspace,
@@ -24,7 +25,7 @@ import {
 import { useGateway } from "@/state/GatewayProvider";
 import { clearAppCache } from "@/storage/appCache";
 import { clearTaskReminders } from "@/reminders/taskReminders";
-import { colors } from "@/theme";
+import { colors, radii, shadows, spacing, typography } from "@/theme";
 
 export default function AccountHomeScreen() {
   const gateway = useGateway();
@@ -179,14 +180,17 @@ export default function AccountHomeScreen() {
           />
           <AppPressable disabled={working === "create-workspace"} onPress={() => void createWorkspace()} style={styles.primary}>
             {working === "create-workspace"
-              ? <ActivityIndicator color={colors.white} />
+              ? <ActivityIndicator color={colors.onAccent} />
               : <Text style={styles.primaryText}>{t("account.createAndOpen")}</Text>}
           </AppPressable>
         </View>
       ) : null}
 
-      {loading ? <ActivityIndicator color={colors.accent} /> : null}
-      {workspaces.map((workspace) => (
+      {loading ? <AsyncStateView state="loading" /> : null}
+      {error && !loading ? (
+        <AsyncStateView state="error" message={error} retryLabel={t("account.refresh")} onRetry={() => void refresh()} />
+      ) : null}
+      {!loading && !error ? workspaces.map((workspace) => (
         <AppPressable key={workspace.workspaceId} disabled={Boolean(working)} onPress={() => void openWorkspace(workspace)} style={styles.workspaceCard}>
           <View style={styles.workspaceIcon}><AppIcon name="workspace" color={colors.accent} size={23} /></View>
           <View style={styles.flex}>
@@ -200,7 +204,7 @@ export default function AccountHomeScreen() {
             ? <ActivityIndicator color={colors.accent} size="small" />
             : <AppIcon name="chevron-right" color={colors.muted} size={20} />}
         </AppPressable>
-      ))}
+      )) : null}
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>{t("account.landingTitle")}</Text>
@@ -218,7 +222,6 @@ export default function AccountHomeScreen() {
         </View>
       </View>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
       <AppPressable disabled={working === "logout"} onPress={confirmLogout} style={styles.logout}>
         <Text style={styles.logoutText}>{working === "logout" ? t("account.loggingOut") : t("account.logout")}</Text>
       </AppPressable>
@@ -243,34 +246,33 @@ function Row({ icon, title, detail, onPress }: { icon: "refresh" | "settings"; t
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 17, gap: 13, paddingBottom: 48 },
-  accountCard: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  accountIcon: { width: 52, height: 52, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
+  container: { padding: spacing.large, gap: spacing.medium, paddingBottom: spacing.xlarge * 2 },
+  accountCard: { flexDirection: "row", alignItems: "center", gap: spacing.medium, padding: spacing.large, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, ...shadows.card },
+  accountIcon: { width: 52, height: 52, borderRadius: radii.large, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
   accountName: { color: colors.ink, fontSize: 19, fontWeight: "800" },
   flex: { flex: 1, minWidth: 0 },
-  meta: { color: colors.muted, fontSize: 12, marginTop: 2 },
-  iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center", borderRadius: 13 },
-  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 5 },
-  sectionTitle: { color: colors.ink, fontSize: 20, fontWeight: "800" },
-  addButton: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, borderRadius: 12 },
+  meta: { color: colors.muted, ...typography.small, marginTop: 2 },
+  iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center", borderRadius: radii.medium },
+  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: spacing.xsmall },
+  sectionTitle: { color: colors.ink, ...typography.heading },
+  addButton: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: spacing.xsmall, paddingHorizontal: spacing.small, borderRadius: radii.medium },
   addText: { color: colors.accent, fontWeight: "800" },
-  workspaceCard: { flexDirection: "row", alignItems: "center", gap: 12, padding: 15, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  workspaceIcon: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
+  workspaceCard: { flexDirection: "row", alignItems: "center", gap: spacing.medium, padding: spacing.medium, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, ...shadows.card },
+  workspaceIcon: { width: 44, height: 44, borderRadius: radii.medium, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
   workspaceName: { color: colors.ink, fontSize: 16, fontWeight: "800" },
-  card: { padding: 16, gap: 11, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  cardTitle: { color: colors.ink, fontSize: 17, fontWeight: "800" },
-  input: { minHeight: 46, borderRadius: 12, borderWidth: 1, borderColor: colors.line, color: colors.ink, paddingHorizontal: 12 },
-  primary: { minHeight: 46, alignItems: "center", justifyContent: "center", borderRadius: 13, backgroundColor: colors.accent },
-  primaryText: { color: colors.white, fontWeight: "800" },
-  hint: { color: colors.muted, fontSize: 13, lineHeight: 19 },
-  choiceRow: { flexDirection: "row", gap: 7 },
-  choice: { flex: 1, alignItems: "center", paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: colors.line },
+  card: { padding: spacing.large, gap: spacing.medium, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, ...shadows.card },
+  cardTitle: { color: colors.ink, ...typography.subheading, fontWeight: "800" },
+  input: { minHeight: 46, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line, color: colors.ink, paddingHorizontal: spacing.medium },
+  primary: { minHeight: 46, alignItems: "center", justifyContent: "center", borderRadius: radii.medium, backgroundColor: colors.accent },
+  primaryText: { color: colors.onAccent, fontWeight: "800" },
+  hint: { color: colors.muted, ...typography.caption, lineHeight: 19 },
+  choiceRow: { flexDirection: "row", gap: spacing.small },
+  choice: { flex: 1, alignItems: "center", paddingVertical: spacing.small, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line },
   choiceActive: { backgroundColor: colors.accent, borderColor: colors.accent },
-  choiceText: { color: colors.muted, fontSize: 12, fontWeight: "700" },
-  choiceTextActive: { color: "white", fontSize: 12, fontWeight: "800" },
-  row: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
+  choiceText: { color: colors.muted, ...typography.small, fontWeight: "700" },
+  choiceTextActive: { color: colors.onAccent, ...typography.small, fontWeight: "800" },
+  row: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: spacing.medium, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
   rowTitle: { color: colors.ink, fontWeight: "800" },
-  error: { color: colors.danger, textAlign: "center", lineHeight: 20 },
-  logout: { alignItems: "center", padding: 14 },
+  logout: { alignItems: "center", padding: spacing.medium },
   logoutText: { color: colors.danger, fontWeight: "800" },
 });

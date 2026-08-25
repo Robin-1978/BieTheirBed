@@ -1,0 +1,28 @@
+id: monitor
+version: "1.0.0"
+name: Monitor / 监控告警
+description: Set up recurring checks for directories, services, disk space, and websites; collect evidence and notify on anomalies. / 为目录、服务、磁盘与网站建立持续监控，异常时采集证据并通知。
+instructions: instructions.md
+triggers:
+  - monitor
+  - watch folder
+  - alert me
+  - uptime check
+  - 监控
+  - 告警
+  - 监视
+  - 定时检查
+  - 网站监控
+required_tools:
+  - create_task
+  - task
+  - run_command
+  - screenshot
+  - notify
+  - web_fetch
+required_capabilities:
+  - task_management
+  - shell
+  - desktop_observe
+  - desktop_control
+  - network

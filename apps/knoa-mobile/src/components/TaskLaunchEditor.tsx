@@ -290,7 +290,7 @@ const styles = StyleSheet.create({
   choiceCompact: { flex: 0, width: 38, minHeight: 36 },
   choiceSelected: { backgroundColor: colors.accent, borderColor: colors.accent },
   choiceText: { color: colors.muted, fontWeight: "600" },
-  choiceTextSelected: { color: "white" },
+  choiceTextSelected: { color: colors.onAccent },
   fields: { gap: 8 },
   catalogList: { gap: 6 },
   catalogChoice: { padding: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, gap: 3 },

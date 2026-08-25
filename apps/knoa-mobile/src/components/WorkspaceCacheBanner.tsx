@@ -6,7 +6,7 @@ import {
   workspaceCacheFreshness,
   type WorkspaceCacheSnapshot,
 } from "@/storage/workspaceCache";
-import { colors } from "@/theme";
+import { colors, radii, spacing, typography } from "@/theme";
 
 export function WorkspaceCacheBanner({
   snapshot,
@@ -44,10 +44,10 @@ export function WorkspaceCacheBanner({
 }
 
 const styles = StyleSheet.create({
-  banner: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, padding: 11, borderRadius: 12, borderWidth: 1 },
+  banner: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.small, padding: spacing.medium, borderRadius: radii.medium, borderWidth: 1 },
   normal: { backgroundColor: colors.surface, borderColor: colors.line },
   warning: { backgroundColor: colors.warningSoft, borderColor: colors.warning },
   error: { backgroundColor: colors.dangerSoft, borderColor: colors.danger },
-  message: { flex: 1, color: colors.muted, fontSize: 12, lineHeight: 17 },
-  action: { color: colors.accent, fontSize: 12, fontWeight: "800" },
+  message: { flex: 1, color: colors.muted, ...typography.small, lineHeight: 17 },
+  action: { color: colors.accent, ...typography.small, fontWeight: "800" },
 });

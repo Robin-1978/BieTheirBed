@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -14,8 +14,9 @@ import {
 
 import type { MCPResourceCatalogItem, Task, TaskLaunchPolicy } from "@/api/models";
 import { immediatePolicy, isLaunchPolicyValid, TaskLaunchEditor } from "@/components/TaskLaunchEditor";
+import { AsyncStateView } from "@/components/AsyncStateView";
 import { useGateway } from "@/state/GatewayProvider";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { useI18n } from "@/i18n";
 import { AppPressable } from "@/components/AppPressable";
 
@@ -34,16 +35,12 @@ export default function EditTaskScreen() {
   const [notifyApproval, setNotifyApproval] = useState(true);
   const [launchPolicy, setLaunchPolicy] = useState<TaskLaunchPolicy>(immediatePolicy);
   const [mcpResources, setMcpResources] = useState<MCPResourceCatalogItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!gateway.client) return;
-    void gateway.runAuthenticated((client) => client.listMcpResources())
-      .then(setMcpResources)
-      .catch(() => setMcpResources([]));
-  }, [gateway.client, gateway.runAuthenticated]);
-
-  useEffect(() => {
+  const reloadTask = useCallback(() => {
     if (!gateway.client || !taskId) return;
+    setLoading(true);
+    setError("");
     void gateway.runAuthenticated((client) => client.getTask(taskId))
       .then((loaded) => {
         setTask(loaded);
@@ -54,8 +51,20 @@ export default function EditTaskScreen() {
         setNotifyApproval(loaded.notification_policy.waiting_approval ?? true);
         setLaunchPolicy(loaded.launch_policy);
       })
-      .catch(() => setError(t("taskEdit.loadFailed")));
+      .catch(() => setError(t("taskEdit.loadFailed")))
+      .finally(() => setLoading(false));
   }, [gateway.client, gateway.runAuthenticated, t, taskId]);
+
+  useEffect(() => {
+    if (!gateway.client) return;
+    void gateway.runAuthenticated((client) => client.listMcpResources())
+      .then(setMcpResources)
+      .catch(() => setMcpResources([]));
+  }, [gateway.client, gateway.runAuthenticated]);
+
+  useEffect(() => {
+    reloadTask();
+  }, [reloadTask]);
 
   async function save() {
     if (!task || !goal.trim() || saving) return;
@@ -82,7 +91,22 @@ export default function EditTaskScreen() {
     }
   }
 
-  if (!task && !error) return <View style={styles.loading}><ActivityIndicator color={colors.accent} /></View>;
+  if (!task && loading) {
+    return <View style={styles.loading}><AsyncStateView state="loading" /></View>;
+  }
+
+  if (!task) {
+    return (
+      <View style={styles.loading}>
+        <AsyncStateView
+          state="error"
+          message={error || t("taskEdit.loadFailed")}
+          retryLabel={t("tasks.reload")}
+          onRetry={reloadTask}
+        />
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
@@ -126,16 +150,16 @@ function Toggle({ label, value, onChange }: { label: string; value: boolean; onC
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   loading: { flex: 1, alignItems: "center", justifyContent: "center" },
-  container: { padding: 18, gap: 10, paddingBottom: 48 },
-  note: { color: colors.muted, backgroundColor: colors.accentSoft, padding: 14, borderRadius: 12, lineHeight: 21, marginBottom: 4 },
-  label: { color: colors.ink, fontWeight: "700", marginTop: 6 },
-  titleInput: { minHeight: 48, borderWidth: 1, borderColor: colors.line, borderRadius: 12, backgroundColor: colors.surface, paddingHorizontal: 12, color: colors.ink, fontSize: 16 },
-  goalInput: { minHeight: 220, borderWidth: 1, borderColor: colors.line, borderRadius: 12, backgroundColor: colors.surface, padding: 12, color: colors.ink, fontSize: 16, lineHeight: 23 },
-  notificationCard: { marginTop: 6, padding: 14, borderRadius: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, gap: 8 },
+  container: { padding: spacing.xlarge, gap: spacing.medium, paddingBottom: 48 },
+  note: { color: colors.muted, backgroundColor: colors.accentSoft, padding: spacing.large, borderRadius: radii.medium, lineHeight: 21, marginBottom: spacing.xsmall },
+  label: { color: colors.ink, ...typography.caption, fontWeight: "700", marginTop: spacing.small },
+  titleInput: { minHeight: 48, borderWidth: 1, borderColor: colors.line, borderRadius: radii.medium, backgroundColor: colors.surface, paddingHorizontal: spacing.medium, color: colors.ink, fontSize: 16 },
+  goalInput: { minHeight: 220, borderWidth: 1, borderColor: colors.line, borderRadius: radii.medium, backgroundColor: colors.surface, padding: spacing.medium, color: colors.ink, fontSize: 16, lineHeight: 23 },
+  notificationCard: { marginTop: spacing.small, padding: spacing.large, borderRadius: radii.medium, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, gap: spacing.small , ...shadows.card },
   toggle: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   toggleLabel: { color: colors.ink },
   error: { color: colors.danger, lineHeight: 21 },
-  save: { marginTop: 8, minHeight: 48, alignItems: "center", justifyContent: "center", borderRadius: 14, backgroundColor: colors.accent },
-  saveText: { color: "white", fontWeight: "700", fontSize: 16 },
+  save: { marginTop: spacing.small, minHeight: 48, alignItems: "center", justifyContent: "center", borderRadius: radii.medium, backgroundColor: colors.accent },
+  saveText: { color: "white", ...typography.subheading, fontWeight: "700" },
   disabled: { opacity: 0.45 },
 });

@@ -7,7 +7,7 @@ import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { useI18n, type LanguageMode } from "@/i18n";
 import { useThemePreference, type ThemeMode } from "@/state/ThemeProvider";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { hasTaskNotificationPermission, requestTaskNotificationPermission, sendTestTaskNotification } from "@/notifications/taskNotifications";
 import { appCacheSummary, clearAppCache, emptyAppCacheSummary, formatCacheBytes, type AppCacheSummary, type CacheKind } from "@/storage/appCache";
 import { formatRelativeTime } from "@/ui/formatRelativeTime";
@@ -200,7 +200,7 @@ export default function AppSettingsScreen() {
           </View>
         </View>
         <AppPressable onPress={() => router.push("/update")} style={styles.updateButton}>
-          <AppIcon name="refresh" color="white" size={20} />
+          <AppIcon name="refresh" color={colors.onAccent} size={20} />
           <Text style={styles.updateText}>{i18n.t("settings.checkAppUpdate")}</Text>
         </AppPressable>
         <Text style={styles.updateHint}>{i18n.t("settings.checkAppUpdateHint")}</Text>
@@ -244,31 +244,31 @@ function Choice<T extends ThemeMode | LanguageMode>({
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 17, gap: 14, paddingBottom: 48 },
-  card: { padding: 16, gap: 10, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  title: { color: colors.ink, fontSize: 17, fontWeight: "800" },
-  detail: { color: colors.muted, fontSize: 13, lineHeight: 19 },
-  choices: { gap: 7, marginTop: 2 },
-  choice: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 11, paddingHorizontal: 13, borderRadius: 13, borderWidth: 1, borderColor: colors.line },
+  container: { padding: spacing.large, gap: spacing.large, paddingBottom: 48 },
+  card: { padding: spacing.large, gap: spacing.medium, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line , ...shadows.card },
+  title: { color: colors.ink, ...typography.subheading, fontWeight: "800" },
+  detail: { color: colors.muted, ...typography.caption, lineHeight: 19 },
+  choices: { gap: spacing.small, marginTop: 2 },
+  choice: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: spacing.medium, paddingHorizontal: spacing.medium, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line },
   choiceSelected: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
   choiceLabel: { color: colors.ink, fontWeight: "700" },
   choiceLabelSelected: { color: colors.accent, fontWeight: "800" },
-  radio: { width: 20, height: 20, alignItems: "center", justifyContent: "center", borderRadius: 10, borderWidth: 2, borderColor: colors.muted },
+  radio: { width: 20, height: 20, alignItems: "center", justifyContent: "center", borderRadius: radii.small, borderWidth: 2, borderColor: colors.muted },
   radioSelected: { borderColor: colors.accent },
   radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.accent },
   pressed: { opacity: 0.72 },
-  versionRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  versionIcon: { width: 46, height: 46, alignItems: "center", justifyContent: "center", borderRadius: 14, backgroundColor: colors.accentSoft },
+  versionRow: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
+  versionIcon: { width: 46, height: 46, alignItems: "center", justifyContent: "center", borderRadius: radii.medium, backgroundColor: colors.accentSoft },
   flex: { flex: 1, minWidth: 0 },
-  updateButton: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 13, backgroundColor: colors.accent },
-  updateText: { color: "white", fontWeight: "800" },
-  updateHint: { color: colors.muted, fontSize: 12, lineHeight: 18 },
+  updateButton: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.small, borderRadius: radii.medium, backgroundColor: colors.accent },
+  updateText: { color: colors.onAccent, fontWeight: "800" },
+  updateHint: { color: colors.muted, ...typography.small, lineHeight: 18 },
   enabled: { color: colors.accent, fontWeight: "800" },
   disabled: { color: colors.warning, fontWeight: "800" },
-  notificationActions: { gap: 8 },
-  settingsButton: { minHeight: 42, alignItems: "center", justifyContent: "center", borderRadius: 13, borderWidth: 1, borderColor: colors.line },
+  notificationActions: { gap: spacing.small },
+  settingsButton: { minHeight: 42, alignItems: "center", justifyContent: "center", borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line },
   settingsButtonText: { color: colors.accent, fontWeight: "800" },
-  cacheKindRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  cacheKindRow: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
   cacheKindLabel: { color: colors.ink, fontWeight: "700" },
-  cacheKindClear: { minHeight: 36, paddingHorizontal: 13, alignItems: "center", justifyContent: "center", borderRadius: 11, borderWidth: 1, borderColor: colors.line },
+  cacheKindClear: { minHeight: 36, paddingHorizontal: spacing.medium, alignItems: "center", justifyContent: "center", borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line },
 });

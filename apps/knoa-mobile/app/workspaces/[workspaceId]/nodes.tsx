@@ -4,6 +4,7 @@ import { ActivityIndicator, ScrollView, Share, StyleSheet, Text, View } from "re
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { AsyncStateView } from "@/components/AsyncStateView";
 import { WorkspaceCacheBanner } from "@/components/WorkspaceCacheBanner";
 import {
   createNodeEnrollmentCode,
@@ -16,7 +17,7 @@ import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { updateNodeDirectGatewayUrl } from "@/security/deviceIdentity";
 import { loadWorkspaceCache, mergeWorkspaceCache, type WorkspaceCacheSnapshot } from "@/storage/workspaceCache";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { userFacingError } from "@/ui/userFacingError";
 import { presentHubNodeName } from "@/presentation/nodePresentation";
 
@@ -142,7 +143,10 @@ export default function WorkspaceNodesScreen() {
         </View>
         <WorkspaceCacheBanner snapshot={cacheSnapshot} loading={refreshing} error={error} onRefresh={() => void refresh()} />
 
-        {loading ? <ActivityIndicator color={colors.accent} /> : null}
+        {loading && !nodes.length ? <AsyncStateView state="loading" /> : null}
+        {error && !loading && !nodes.length ? (
+          <AsyncStateView state="error" message={error} retryLabel={t("common.refresh")} onRetry={() => void refresh()} />
+        ) : null}
 
         {unboundOnlineNodes.length > 0 ? (
           <View style={styles.callout}>
@@ -171,7 +175,7 @@ export default function WorkspaceNodesScreen() {
               {!node.online ? <Text style={styles.meta}>{t("nodes.offlineHint")}</Text> : null}
               <AppPressable disabled={Boolean(working)} onPress={() => void enter(node)} style={styles.enter}>
                 {working === node.node_id
-                  ? <ActivityIndicator color={colors.white} size="small" />
+                  ? <ActivityIndicator color={colors.onAccent} size="small" />
                   : <Text style={styles.enterText}>{bound ? t("nodes.enterNode") : t("nodes.pairApp")}</Text>}
               </AppPressable>
             </View>
@@ -195,38 +199,34 @@ export default function WorkspaceNodesScreen() {
           </View>
         ) : null}
 
-        {!loading && nodes.length === 0 && !enrollmentCode ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.nodeName}>{t("nodes.noNodesYet")}</Text>
-            <Text style={styles.meta}>{t("nodes.emptyDetail")}</Text>
-          </View>
+        {!loading && !error && nodes.length === 0 && !enrollmentCode ? (
+          <AsyncStateView state="empty" title={t("nodes.noNodesYet")} message={t("nodes.emptyDetail")} />
         ) : null}
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {error && nodes.length > 0 ? <Text style={styles.error}>{error}</Text> : null}
       </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 17, gap: 12, paddingBottom: 48 },
-  header: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  icon: { width: 48, height: 48, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
+  container: { padding: spacing.large, gap: spacing.medium, paddingBottom: 48 },
+  header: { flexDirection: "row", alignItems: "center", gap: spacing.medium, padding: spacing.large, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line , ...shadows.card },
+  icon: { width: 48, height: 48, borderRadius: radii.large, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
   flex: { flex: 1, minWidth: 0 },
   title: { color: colors.ink, fontSize: 19, fontWeight: "800" },
-  meta: { color: colors.muted, fontSize: 12, lineHeight: 18 },
-  iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center", borderRadius: 13 },
-  callout: { padding: 14, gap: 6, borderRadius: 16, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accent },
+  meta: { color: colors.muted, ...typography.small, lineHeight: 18 },
+  iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center", borderRadius: radii.medium },
+  callout: { padding: spacing.large, gap: spacing.small, borderRadius: radii.large, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accent },
   calloutTitle: { color: colors.ink, fontWeight: "800" },
-  card: { padding: 15, gap: 12, borderRadius: 17, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
-  row: { flexDirection: "row", alignItems: "center", gap: 11 },
+  card: { padding: spacing.large, gap: spacing.medium, borderRadius: radii.large, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, ...shadows.card },
+  row: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
   nodeName: { color: colors.ink, fontSize: 16, fontWeight: "800" },
   online: { color: colors.accent, fontWeight: "800", fontSize: 12 },
   offline: { color: colors.muted, fontWeight: "700", fontSize: 12 },
-  enter: { minHeight: 42, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.accent },
-  enterText: { color: colors.white, fontWeight: "800" },
-  secondary: { minHeight: 42, borderRadius: 12, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.accent },
+  enter: { minHeight: 42, borderRadius: radii.medium, alignItems: "center", justifyContent: "center", backgroundColor: colors.accent },
+  enterText: { color: colors.onAccent, fontWeight: "800" },
+  secondary: { minHeight: 42, borderRadius: radii.medium, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.accent },
   secondaryText: { color: colors.accent, fontWeight: "800" },
-  code: { color: colors.ink, fontFamily: "monospace", fontSize: 11, lineHeight: 16, padding: 10, borderRadius: 10, backgroundColor: colors.background },
-  emptyState: { padding: 18, gap: 5, borderRadius: 17, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
+  code: { color: colors.ink, fontFamily: "monospace", fontSize: 11, lineHeight: 16, padding: spacing.medium, borderRadius: radii.small, backgroundColor: colors.background },
   error: { color: colors.danger, lineHeight: 20 },
 });

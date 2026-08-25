@@ -50,6 +50,8 @@ from knoa_agent_contracts import (
 
 logger = logging.getLogger(__name__)
 
+GUI_TOOLS = frozenset({"mouse", "ui", "press_key", "type_text", "hotkey"})
+
 
 class AgentModelRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -119,6 +121,7 @@ class KnoaAgentRuntime(AgentRuntime):
         agent_id: str = "knoa",
         display_name: str = "Knoa",
         supports_vision: bool = False,
+        screen_verify_enabled: bool = False,
     ) -> None:
         if max_iterations <= 0 or max_tool_calls <= 0:
             raise ValueError("Knoa Agent limits must be positive")
@@ -141,6 +144,7 @@ class KnoaAgentRuntime(AgentRuntime):
         self._agent_id = agent_id
         self._display_name = display_name
         self._supports_vision = supports_vision
+        self._screen_verify_enabled = screen_verify_enabled
         self._active: dict[str, tuple[RuntimeSession, asyncio.Event]] = {}
         self._operations: dict[str, str] = {}
         self._guard = asyncio.Lock()
@@ -239,6 +243,9 @@ class KnoaAgentRuntime(AgentRuntime):
                     self._turn_query(request),
                 )
                 tools = projection.tools
+                available_tool_names = {
+                    str(tool.get("name") or "") for tool in tools if tool.get("name")
+                }
                 durable_user = self._durable_user_message(request)
                 image_inspection_available = any(
                     str(tool.get("name") or "") == "image_inspect" for tool in tools
@@ -475,6 +482,16 @@ class KnoaAgentRuntime(AgentRuntime):
                         }
                         model_messages.append(result_message)
                         durable_messages.append(result_message)
+                        verify_message = await self._maybe_verify_gui_action(
+                            client,
+                            tool_name=str(proposed.name),
+                            tool_args=dict(proposed.arguments),
+                            tool_result=result.output,
+                            available_tool_names=available_tool_names,
+                        )
+                        if verify_message is not None:
+                            model_messages.append(verify_message)
+                            durable_messages.append(verify_message)
                         if (
                             proposed.name == "image_inspect"
                             and str(result.status) == "completed"
@@ -827,3 +844,101 @@ class KnoaAgentRuntime(AgentRuntime):
             return frozenset()
         name = str(schema.get("name") or output.get("tool") or "").strip()
         return frozenset({name}) if name else frozenset()
+
+    async def _maybe_verify_gui_action(
+        self,
+        client: McpClient,
+        *,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        tool_result: Any,
+        available_tool_names: frozenset[str],
+    ) -> dict[str, Any] | None:
+        if not self._screen_verify_enabled:
+            return None
+        if tool_name not in GUI_TOOLS:
+            return None
+        if not self._should_verify_gui_action(tool_name, tool_args):
+            return None
+        if isinstance(tool_result, dict) and tool_result.get("error"):
+            return None
+        if "screen" not in available_tool_names:
+            return None
+
+        description = self._describe_gui_action(tool_name, tool_args)
+        verify_call = McpToolCall(
+            call_id=uuid.uuid4().hex,
+            name="screen",
+            arguments={
+                "action": "verify",
+                "action_description": description,
+            },
+        )
+        try:
+            verify_result = await client.call_tool(verify_call)
+        except Exception:
+            logger.exception("Automatic GUI verification failed for tool=%s", tool_name)
+            return None
+        if str(getattr(verify_result, "status", "")) != "completed":
+            return None
+        output = getattr(verify_result, "output", None)
+        if not isinstance(output, dict):
+            return None
+        if output.get("error"):
+            return {
+                "role": "user",
+                "content": (
+                    f"[System] Automatic screen verification could not run after "
+                    f"{tool_name}: {output['error']}. The action may not have succeeded."
+                ),
+            }
+        if output.get("verified") is True:
+            return None
+        observation = str(output.get("observation") or "").strip()
+        uncertain = bool(output.get("uncertain"))
+        detail = observation or "The verifier could not confirm success."
+        qualifier = "may not have" if uncertain else "did not appear to"
+        return {
+            "role": "user",
+            "content": (
+                f"[System] Automatic screen verification suggests the recent GUI action "
+                f"({description}) {qualifier} succeed. Visual observation: {detail} "
+                "Retry the action, choose another approach, or inspect the screen before continuing."
+            ),
+        }
+
+    @staticmethod
+    def _should_verify_gui_action(tool_name: str, tool_args: dict[str, Any]) -> bool:
+        action = str(tool_args.get("action") or "").strip().casefold()
+        if tool_name == "mouse":
+            return action in {"click", "double_click", "right_click", "drag"}
+        if tool_name == "ui":
+            return action in {"click", "fill", "select", "focus"}
+        return True
+
+    @staticmethod
+    def _describe_gui_action(tool_name: str, tool_args: dict[str, Any]) -> str:
+        action = str(tool_args.get("action") or tool_name)
+        if tool_name == "mouse":
+            parts = [f"mouse {action}"]
+            if tool_args.get("x") is not None and tool_args.get("y") is not None:
+                parts.append(f"at ({tool_args['x']}, {tool_args['y']})")
+            if tool_args.get("button"):
+                parts.append(f"button={tool_args['button']}")
+            return " ".join(parts)
+        if tool_name == "ui":
+            target = tool_args.get("element_path") or tool_args.get("name") or "element"
+            parts = [f"ui {action}", f"target={target}"]
+            if tool_args.get("value"):
+                parts.append(f"value={tool_args['value']}")
+            return " ".join(parts)
+        if tool_name == "press_key":
+            return f"press key {tool_args.get('key', '')}".strip()
+        if tool_name == "type_text":
+            text = str(tool_args.get("text") or "")
+            preview = text if len(text) <= 40 else f"{text[:37]}..."
+            return f"type text '{preview}'"
+        if tool_name == "hotkey":
+            keys = tool_args.get("keys") or tool_args.get("hotkey") or tool_args.get("key")
+            return f"hotkey {keys}"
+        return f"{tool_name} {json.dumps(tool_args, ensure_ascii=False, sort_keys=True)}"

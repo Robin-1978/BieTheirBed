@@ -8,7 +8,7 @@ import { AppPressable } from "@/components/AppPressable";
 import { AsyncStateView } from "@/components/AsyncStateView";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { shareResultJson, shareResultPdf, shareResultText } from "@/api/shareResult";
 import { loadTaskCache, storeTaskCache } from "@/storage/taskCache";
 import { presentNodeName } from "@/presentation/nodePresentation";
@@ -25,14 +25,8 @@ export default function ResultsScreen() {
   const [agentFilter, setAgentFilter] = useState("");
   const [timeFilter, setTimeFilter] = useState<"all" | "7d" | "30d">("all");
   const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string; nodeId?: string }>();
-  const taskCacheScope = params.nodeId?.trim() || gateway.nodeId || "unselected";
-
-  useEffect(() => {
-    const requestedNode = params.nodeId?.trim();
-    if (requestedNode && requestedNode !== gateway.nodeId && gateway.nodes.some((node) => node.nodeId === requestedNode)) {
-      void gateway.switchNode(requestedNode);
-    }
-  }, [gateway.nodeId, gateway.nodes, gateway.switchNode, params.nodeId]);
+  const [nodeFilter, setNodeFilter] = useState(params.nodeId?.trim() || gateway.nodeId || "");
+  const taskCacheScope = nodeFilter || gateway.nodeId || "unselected";
 
   const refresh = useCallback(async (manual = false) => {
     if (!gateway.client) {
@@ -91,13 +85,13 @@ export default function ResultsScreen() {
         </View>
         <Text style={styles.filterLabel}>{t("results.filterNode")}</Text>
         <View style={styles.filters}>
-          {gateway.nodes.map((node) => <AppPressable key={node.nodeId} style={[styles.filter, gateway.nodeId === node.nodeId && styles.filterActive]} onPress={() => void gateway.switchNode(node.nodeId)}><Text style={[styles.filterText, gateway.nodeId === node.nodeId && styles.filterTextActive]}>{node.displayName}</Text></AppPressable>)}
+          {gateway.nodes.map((node) => <AppPressable key={node.nodeId} style={[styles.filter, nodeFilter === node.nodeId && styles.filterActive]} onPress={() => setNodeFilter(node.nodeId)}><Text style={[styles.filterText, nodeFilter === node.nodeId && styles.filterTextActive]}>{node.displayName}</Text></AppPressable>)}
         </View>
         <Text style={styles.filterLabel}>{t("results.filterTime")}</Text>
         <View style={styles.filters}>
           {(["all", "7d", "30d"] as const).map((value) => <AppPressable key={value} style={[styles.filter, timeFilter === value && styles.filterActive]} onPress={() => setTimeFilter(value)}><Text style={[styles.filterText, timeFilter === value && styles.filterTextActive]}>{t(`results.time.${value}` as never)}</Text></AppPressable>)}
         </View>
-        <Text style={styles.nodeScope}>{t("results.nodeScope", { node: presentNodeName(gateway.nodes.find((item) => item.nodeId === gateway.nodeId), t("common.unnamedComputer")) })}</Text>
+        <Text style={styles.nodeScope}>{t("results.nodeScope", { node: presentNodeName(gateway.nodes.find((item) => item.nodeId === nodeFilter), t("common.unnamedComputer")) })}</Text>
       </View>
       {loading ? <AsyncStateView state="loading" /> : null}
       {error ? <AsyncStateView state="error" message={error} retryLabel={t("results.retry")} onRetry={() => void refresh(true)} /> : null}
@@ -153,5 +147,5 @@ function resultState(task: Task, t: ReturnType<typeof useI18n>["t"]): string {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 17, gap: 13, paddingBottom: 52 }, hero: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, icon: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: 15, backgroundColor: colors.accentSoft }, flex: { flex: 1, minWidth: 0 }, title: { color: colors.ink, fontSize: 20, fontWeight: "800" }, meta: { color: colors.muted, fontSize: 12, lineHeight: 18 }, artifactAction: { minHeight: 42, justifyContent: "center", alignItems: "center", borderRadius: 12, borderWidth: 1, borderColor: colors.accent }, artifactActionText: { color: colors.accent, fontWeight: "800" }, filterSection: { padding: 13, gap: 8, borderRadius: 15, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, filterLabel: { color: colors.muted, fontSize: 12, fontWeight: "700" }, filters: { flexDirection: "row", gap: 7, flexWrap: "wrap" }, filter: { minHeight: 34, paddingHorizontal: 11, justifyContent: "center", borderRadius: 17, borderWidth: 1, borderColor: colors.line }, filterActive: { borderColor: colors.accent, backgroundColor: colors.accentSoft }, filterText: { color: colors.muted, fontSize: 12, fontWeight: "700" }, filterTextActive: { color: colors.accent }, nodeScope: { color: colors.muted, fontSize: 11 }, card: { padding: 15, gap: 10, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line }, cardHeader: { flexDirection: "row", alignItems: "flex-start", gap: 10 }, cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" }, result: { color: colors.ink, lineHeight: 21 }, failure: { color: colors.danger, fontSize: 12 }, facts: { gap: 3, padding: 10, borderRadius: 11, backgroundColor: colors.accentFaint }, fact: { color: colors.muted, fontSize: 11, lineHeight: 16 }, factNext: { color: colors.accent, fontWeight: "700" }, actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, primaryAction: { minHeight: 40, justifyContent: "center", paddingHorizontal: 13, borderRadius: 11, backgroundColor: colors.accent }, primaryText: { color: colors.white, fontWeight: "800" }, secondaryAction: { minHeight: 40, justifyContent: "center", paddingHorizontal: 13, borderRadius: 11, borderWidth: 1, borderColor: colors.accent }, secondaryText: { color: colors.accent, fontWeight: "800" },
+  container: { padding: spacing.large, gap: spacing.medium, paddingBottom: 52 }, hero: { flexDirection: "row", alignItems: "center", gap: spacing.medium, padding: spacing.large, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line , ...shadows.card }, icon: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: radii.large, backgroundColor: colors.accentSoft }, flex: { flex: 1, minWidth: 0 }, title: { color: colors.ink, ...typography.heading }, meta: { color: colors.muted, ...typography.small, lineHeight: 18 }, artifactAction: { minHeight: 42, justifyContent: "center", alignItems: "center", borderRadius: radii.medium, borderWidth: 1, borderColor: colors.accent }, artifactActionText: { color: colors.accent, fontWeight: "800" }, filterSection: { padding: spacing.medium, gap: spacing.small, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line , ...shadows.card }, filterLabel: { color: colors.muted, ...typography.small, fontWeight: "700" }, filters: { flexDirection: "row", gap: spacing.small, flexWrap: "wrap" }, filter: { minHeight: 34, paddingHorizontal: spacing.medium, justifyContent: "center", borderRadius: radii.large, borderWidth: 1, borderColor: colors.line }, filterActive: { borderColor: colors.accent, backgroundColor: colors.accentSoft }, filterText: { color: colors.muted, ...typography.small, fontWeight: "700" }, filterTextActive: { color: colors.accent }, nodeScope: { color: colors.muted, fontSize: 11 }, card: { padding: spacing.large, gap: spacing.medium, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line , ...shadows.card }, cardHeader: { flexDirection: "row", alignItems: "flex-start", gap: spacing.medium }, cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" }, result: { color: colors.ink, lineHeight: 21 }, failure: { color: colors.danger, fontSize: 12 }, facts: { gap: spacing.xsmall, padding: spacing.medium, borderRadius: radii.medium, backgroundColor: colors.accentFaint }, fact: { color: colors.muted, fontSize: 11, lineHeight: 16 }, factNext: { color: colors.accent, fontWeight: "700" }, actions: { flexDirection: "row", flexWrap: "wrap", gap: spacing.small }, primaryAction: { minHeight: 40, justifyContent: "center", paddingHorizontal: spacing.medium, borderRadius: radii.medium, backgroundColor: colors.accent }, primaryText: { color: colors.onAccent, fontWeight: "800" }, secondaryAction: { minHeight: 40, justifyContent: "center", paddingHorizontal: spacing.medium, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.accent }, secondaryText: { color: colors.accent, fontWeight: "800" },
 });

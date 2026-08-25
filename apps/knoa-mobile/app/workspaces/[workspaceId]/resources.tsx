@@ -1,9 +1,10 @@
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { AsyncStateView } from "@/components/AsyncStateView";
 import { WorkspaceCacheBanner } from "@/components/WorkspaceCacheBanner";
 import {
   listHubNodes,
@@ -16,7 +17,7 @@ import { useI18n } from "@/i18n";
 import { updateNodeDirectGatewayUrl } from "@/security/deviceIdentity";
 import { useGateway } from "@/state/GatewayProvider";
 import { loadWorkspaceCache, mergeWorkspaceCache, type WorkspaceCacheSnapshot } from "@/storage/workspaceCache";
-import { colors } from "@/theme";
+import { colors, radii, shadows, spacing, typography } from "@/theme";
 import { presentHubNodeName } from "@/presentation/nodePresentation";
 import { userFacingError } from "@/ui/userFacingError";
 
@@ -111,6 +112,17 @@ export default function WorkspaceResourcesScreen() {
     }
   }
 
+  function confirmRevoke(grantId: string, nodeId: string) {
+    Alert.alert(
+      t("resources.revokeGrantTitle"),
+      t("resources.revokeGrantMessage", { node: nodeName(nodeId) }),
+      [
+        { text: t("common.cancel"), style: "cancel" },
+        { text: t("resources.revokeGrantConfirm"), style: "destructive", onPress: () => void revoke(grantId) },
+      ],
+    );
+  }
+
   async function revoke(grantId: string) {
     setWorking(grantId);
     setError("");
@@ -151,7 +163,10 @@ export default function WorkspaceResourcesScreen() {
         </AppPressable>
       </View>
       <WorkspaceCacheBanner snapshot={cacheSnapshot} loading={refreshing} error={error} onRefresh={() => void refresh()} />
-      {loading ? <ActivityIndicator color={colors.accent} /> : null}
+      {loading && !resources.length ? <AsyncStateView state="loading" /> : null}
+      {error && !loading && !resources.length ? (
+        <AsyncStateView state="error" message={error} retryLabel={t("common.refresh")} onRetry={() => void refresh()} />
+      ) : null}
 
       {resources.map((resource) => {
         const deployments = state?.workspaceDeployments.filter((item) => item.resource_id === resource.resource_id && item.enabled) ?? [];
@@ -199,7 +214,7 @@ export default function WorkspaceResourcesScreen() {
                       key={grant.grant_id}
                       disabled={Boolean(working)}
                       style={styles.linkButton}
-                      onPress={() => void revoke(grant.grant_id)}
+                      onPress={() => confirmRevoke(grant.grant_id, grant.caller_node_id)}
                     >
                       <Text style={styles.linkText}>
                         {working === grant.grant_id
@@ -224,42 +239,40 @@ export default function WorkspaceResourcesScreen() {
         );
       })}
 
-      {!loading && !resources.length ? (
-        <View style={styles.empty}>
-          <Text style={styles.cardTitle}>{t("resources.emptyTitle")}</Text>
-          <Text style={styles.meta}>{t("resources.emptyDetail")}</Text>
+      {!loading && !error && !resources.length ? (
+        <>
+          <AsyncStateView state="empty" title={t("resources.emptyTitle")} message={t("resources.emptyDetail")} />
           <AppPressable style={styles.primary} onPress={() => router.push({ pathname: "/workspaces/[workspaceId]/nodes", params })}>
             <Text style={styles.primaryText}>{t("resources.selectNode")}</Text>
           </AppPressable>
-        </View>
+        </>
       ) : null}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error && resources.length > 0 ? <Text style={styles.error}>{error}</Text> : null}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 17, gap: 13, paddingBottom: 52 },
-  header: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  icon: { width: 48, height: 48, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
+  container: { padding: spacing.large, gap: spacing.medium, paddingBottom: 52 },
+  header: { flexDirection: "row", alignItems: "center", gap: spacing.medium, padding: spacing.large, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, ...shadows.card },
+  icon: { width: 48, height: 48, borderRadius: radii.large, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
   flex: { flex: 1, minWidth: 0 },
   title: { color: colors.ink, fontSize: 19, fontWeight: "800" },
-  meta: { color: colors.muted, fontSize: 12, lineHeight: 18 },
+  meta: { color: colors.muted, ...typography.small, lineHeight: 18 },
   iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center" },
-  card: { padding: 15, gap: 12, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  row: { flexDirection: "row", alignItems: "center", gap: 11 },
-  resourceIcon: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
+  card: { padding: spacing.medium, gap: spacing.medium, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, ...shadows.card },
+  row: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
+  resourceIcon: { width: 44, height: 44, borderRadius: radii.medium, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
   cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" },
   rowTitle: { color: colors.ink, fontWeight: "800" },
-  endpoint: { padding: 13, gap: 7, borderRadius: 13, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.line },
-  healthy: { color: colors.accent, fontSize: 12, fontWeight: "800" },
-  warning: { color: colors.warning, fontSize: 12, fontWeight: "800" },
-  secondary: { minHeight: 42, alignItems: "center", justifyContent: "center", borderRadius: 12, borderWidth: 1, borderColor: colors.accent },
+  endpoint: { padding: spacing.medium, gap: spacing.small, borderRadius: radii.medium, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.line },
+  healthy: { color: colors.accent, ...typography.small, fontWeight: "800" },
+  warning: { color: colors.warning, ...typography.small, fontWeight: "800" },
+  secondary: { minHeight: 42, alignItems: "center", justifyContent: "center", borderRadius: radii.medium, borderWidth: 1, borderColor: colors.accent },
   secondaryText: { color: colors.accent, fontWeight: "800" },
   linkButton: { minHeight: 34, alignItems: "flex-start", justifyContent: "center" },
-  linkText: { color: colors.danger, fontSize: 12, fontWeight: "700" },
-  empty: { padding: 18, gap: 11, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  primary: { minHeight: 46, alignItems: "center", justifyContent: "center", borderRadius: 13, backgroundColor: colors.accent },
-  primaryText: { color: colors.white, fontWeight: "800" },
+  linkText: { color: colors.danger, ...typography.small, fontWeight: "700" },
+  primary: { minHeight: 46, alignItems: "center", justifyContent: "center", borderRadius: radii.medium, backgroundColor: colors.accent },
+  primaryText: { color: colors.onAccent, fontWeight: "800" },
   error: { color: colors.danger, lineHeight: 20 },
 });

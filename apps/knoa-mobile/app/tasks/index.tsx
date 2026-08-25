@@ -17,7 +17,7 @@ import { currentTaskSections } from "@/components/taskListPresentation";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { useTaskReminders } from "@/state/TaskReminderProvider";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { loadOfflineTasks, removeOfflineTask, type QueuedTask } from "@/storage/offlineTaskQueue";
 import { loadTaskCache, storeTaskCache } from "@/storage/taskCache";
 
@@ -136,7 +136,7 @@ export default function TasksScreen() {
             onPress={() => router.push("/tasks/new")}
             style={styles.newButton}
           >
-            <AppIcon name="plus" color={colors.white} size={22} />
+            <AppIcon name="plus" color={colors.onAccent} size={22} />
           </AppPressable>
         </View>
       </View>
@@ -293,42 +293,42 @@ function launchLabel(task: Task, t: ReturnType<typeof useI18n>["t"]): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  topline: { padding: 18, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  topline: { padding: spacing.xlarge, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   heading: { color: colors.ink, fontSize: 24, fontWeight: "700" },
-  description: { color: colors.muted, marginTop: 4, fontSize: 13 },
-  newButton: { width: 42, height: 42, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center", borderRadius: 14 },
-  sourceButton: { width: 42, height: 42, borderWidth: 1, borderColor: colors.accent, alignItems: "center", justifyContent: "center", borderRadius: 14 },
-  topActions: { flexDirection: "row", alignItems: "center", gap: 14 },
-  updateBanner: { marginHorizontal: 16, marginBottom: 14, padding: 14, borderRadius: 16, backgroundColor: colors.accentSoft, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  description: { color: colors.muted, marginTop: spacing.xsmall, fontSize: 13 },
+  newButton: { width: 42, height: 42, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center", borderRadius: radii.medium },
+  sourceButton: { width: 42, height: 42, borderWidth: 1, borderColor: colors.accent, alignItems: "center", justifyContent: "center", borderRadius: radii.medium },
+  topActions: { flexDirection: "row", alignItems: "center", gap: spacing.large },
+  updateBanner: { marginHorizontal: spacing.large, marginBottom: spacing.large, padding: spacing.large, borderRadius: radii.large, backgroundColor: colors.accentSoft, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   updateTitle: { color: colors.ink, fontWeight: "700" },
-  updateDetail: { color: colors.muted, fontSize: 12, marginTop: 3 },
+  updateDetail: { color: colors.muted, fontSize: 12, marginTop: spacing.xsmall },
   updateLink: { color: colors.accent, fontWeight: "700" },
-  offlineBanner: { marginHorizontal: 16, marginBottom: 14, padding: 14, borderRadius: 16, backgroundColor: colors.warningSoft, gap: 4 },
+  offlineBanner: { marginHorizontal: spacing.large, marginBottom: spacing.large, padding: spacing.large, borderRadius: radii.large, backgroundColor: colors.warningSoft, gap: spacing.xsmall },
   offlineTitle: { color: colors.ink, fontWeight: "700" },
   offlineDetail: { color: colors.muted, fontSize: 12 },
-  filters: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 8 },
-  filter: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14, backgroundColor: colors.surface },
+  filters: { flexDirection: "row", gap: spacing.small, paddingHorizontal: spacing.large, paddingBottom: spacing.small },
+  filter: { paddingHorizontal: spacing.medium, paddingVertical: spacing.small, borderRadius: radii.medium, backgroundColor: colors.surface },
   filterActive: { backgroundColor: colors.accentSoft },
   filterText: { color: colors.muted },
   filterTextActive: { color: colors.accent, fontWeight: "600" },
-  list: { padding: 16, gap: 12, flexGrow: 1 },
-  sectionHeader: { marginTop: 7, marginBottom: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  list: { padding: spacing.large, gap: spacing.medium, flexGrow: 1 },
+  sectionHeader: { marginTop: spacing.small, marginBottom: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sectionTitle: { color: colors.ink, fontSize: 16, fontWeight: "700" },
   sectionCount: { color: colors.muted, fontSize: 12 },
-  task: { padding: 16, backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.line, gap: 8 },
-  taskHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
-  titleRow: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 },
+  task: { padding: spacing.large, backgroundColor: colors.surface, borderRadius: radii.large, borderWidth: 1, borderColor: colors.line, gap: spacing.small , ...shadows.card },
+  taskHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.medium },
+  titleRow: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: spacing.small },
   unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.danger },
   title: { flex: 1, color: colors.ink, fontWeight: "700", fontSize: 17 },
   state: { color: colors.accent, fontWeight: "600", fontSize: 12 },
   warningState: { color: colors.warning },
   dangerState: { color: colors.danger },
   goal: { color: colors.ink, fontSize: 15, lineHeight: 22 },
-  latestResult: { gap: 3 },
-  latestLabel: { color: colors.muted, fontSize: 11, fontWeight: "700" },
+  latestResult: { gap: spacing.xsmall },
+  latestLabel: { color: colors.muted, ...typography.tiny, fontWeight: "700" },
   result: { color: colors.ink, fontSize: 15, lineHeight: 22 },
   failure: { color: colors.danger, fontSize: 14, lineHeight: 21 },
   metaRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  metaCopy: { flexDirection: "row", flexWrap: "wrap", gap: 10, flex: 1, marginRight: 8 },
+  metaCopy: { flexDirection: "row", flexWrap: "wrap", gap: spacing.medium, flex: 1, marginRight: spacing.small },
   meta: { color: colors.muted, fontSize: 12 },
 });

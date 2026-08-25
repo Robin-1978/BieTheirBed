@@ -7,7 +7,7 @@ import { AppPressable } from "@/components/AppPressable";
 import { transportLabelKey } from "@/api/transportPresentation";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { presentNodeName } from "@/presentation/nodePresentation";
 
 export default function NodeMenuScreen() {
@@ -89,27 +89,27 @@ function stringParam(value: string | string[] | undefined): string {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 17, gap: 14, paddingBottom: 48 },
-  hero: { alignItems: "center", padding: 20, gap: 7, borderRadius: 19, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  nodeIcon: { width: 58, height: 58, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
+  container: { padding: spacing.large, gap: spacing.large, paddingBottom: 48 },
+  hero: { alignItems: "center", padding: spacing.xlarge, gap: spacing.small, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line , ...shadows.card },
+  nodeIcon: { width: 58, height: 58, borderRadius: radii.large, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
   title: { color: colors.ink, fontSize: 22, fontWeight: "800" },
-  meta: { color: colors.muted, fontSize: 12, marginTop: 2 },
-  transport: { color: colors.ink, fontSize: 12, fontWeight: "800" },
+  meta: { color: colors.muted, ...typography.small, marginTop: 2 },
+  transport: { color: colors.ink, ...typography.small, fontWeight: "800" },
   transportDetail: { color: colors.muted, fontSize: 11, lineHeight: 16, textAlign: "center" },
-  statusRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  statusRow: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
   online: { color: colors.accent, fontWeight: "800" },
   offline: { color: colors.muted, fontWeight: "700" },
-  card: { paddingHorizontal: 15, paddingVertical: 4, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  row: { minHeight: 62, flexDirection: "row", alignItems: "center", gap: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
+  card: { paddingHorizontal: spacing.large, paddingVertical: spacing.xsmall, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line , ...shadows.card },
+  row: { minHeight: 62, flexDirection: "row", alignItems: "center", gap: spacing.medium, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
   flex: { flex: 1, minWidth: 0 },
   rowTitle: { color: colors.ink, fontWeight: "800" },
-  sectionTitle: { color: colors.ink, fontSize: 17, fontWeight: "800", marginTop: 10 },
-  detail: { color: colors.muted, fontSize: 11, marginTop: 7 },
+  sectionTitle: { color: colors.ink, ...typography.subheading, fontWeight: "800", marginTop: spacing.medium },
+  detail: { color: colors.muted, fontSize: 11, marginTop: spacing.small },
   mono: { color: colors.ink, fontFamily: "monospace", fontSize: 12 },
-  secondary: { alignItems: "center", padding: 13, marginVertical: 12, borderRadius: 13, borderWidth: 1, borderColor: colors.accent },
+  secondary: { alignItems: "center", padding: spacing.medium, marginVertical: spacing.medium, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.accent },
   secondaryText: { color: colors.accent, fontWeight: "800" },
-  advancedToggle: { alignItems: "center", paddingVertical: 10 },
-  advanced: { gap: 3, paddingTop: 5 },
-  leave: { alignItems: "center", padding: 14 },
+  advancedToggle: { alignItems: "center", paddingVertical: spacing.medium },
+  advanced: { gap: spacing.xsmall, paddingTop: spacing.xsmall },
+  leave: { alignItems: "center", padding: spacing.large },
   leaveText: { color: colors.accent, fontWeight: "800" },
 });

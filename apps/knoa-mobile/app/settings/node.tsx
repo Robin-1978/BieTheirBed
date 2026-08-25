@@ -7,7 +7,7 @@ import { AppPressable } from "@/components/AppPressable";
 import { transportDetailKey, transportLabelKey } from "@/api/transportPresentation";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { presentNodeName } from "@/presentation/nodePresentation";
 
 type RuntimeDiagnostic = {
@@ -108,7 +108,7 @@ export default function NodeSettingsScreen() {
           style={styles.save}
           onPress={() => void run("rename", () => gateway.renameNode(nodeDisplayName), t("settings.node.renameSuccess"))}
         >
-          {working === "rename" ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>{t("settings.node.saveName")}</Text>}
+          {working === "rename" ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.saveText}>{t("settings.node.saveName")}</Text>}
         </AppPressable>
       </View>
 
@@ -181,29 +181,29 @@ function Action({ title, detail, busy = false, onPress }: { title: string; detai
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 17, gap: 13, paddingBottom: 52 },
-  card: { padding: 16, gap: 10, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  header: { flexDirection: "row", alignItems: "center", gap: 12 },
-  icon: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: 15, backgroundColor: colors.accentSoft },
+  container: { padding: spacing.large, gap: spacing.medium, paddingBottom: 52 },
+  card: { padding: spacing.large, gap: spacing.medium, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line , ...shadows.card },
+  header: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
+  icon: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: radii.large, backgroundColor: colors.accentSoft },
   flex: { flex: 1, minWidth: 0 },
   title: { color: colors.ink, fontSize: 19, fontWeight: "800" },
-  online: { color: colors.accent, fontSize: 12, fontWeight: "700" },
-  offline: { color: colors.muted, fontSize: 12, fontWeight: "700" },
-  sectionTitle: { color: colors.ink, fontSize: 17, fontWeight: "800" },
-  metric: { flexDirection: "row", justifyContent: "space-between", gap: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, paddingTop: 10 },
-  meta: { color: colors.muted, fontSize: 12, lineHeight: 18 },
-  transportDetail: { color: colors.muted, fontSize: 12, lineHeight: 18 },
-  p2pError: { color: colors.danger, fontSize: 11, lineHeight: 17, padding: 10, borderRadius: 10, backgroundColor: colors.background },
+  online: { color: colors.accent, ...typography.small, fontWeight: "700" },
+  offline: { color: colors.muted, ...typography.small, fontWeight: "700" },
+  sectionTitle: { color: colors.ink, ...typography.subheading, fontWeight: "800" },
+  metric: { flexDirection: "row", justifyContent: "space-between", gap: spacing.medium, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, paddingTop: spacing.medium },
+  meta: { color: colors.muted, ...typography.small, lineHeight: 18 },
+  transportDetail: { color: colors.muted, ...typography.small, lineHeight: 18 },
+  p2pError: { color: colors.danger, fontSize: 11, lineHeight: 17, padding: spacing.medium, borderRadius: radii.small, backgroundColor: colors.background },
   lanEndpoint: { color: colors.accent, fontSize: 11, lineHeight: 17 },
   metricValue: { flex: 1, color: colors.ink, fontWeight: "700", textAlign: "right" },
   compact: { fontFamily: "monospace", fontSize: 11 },
-  action: { minHeight: 62, flexDirection: "row", alignItems: "center", gap: 11, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
+  action: { minHeight: 62, flexDirection: "row", alignItems: "center", gap: spacing.medium, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
   actionTitle: { color: colors.ink, fontWeight: "800" },
   remove: { minHeight: 48, alignItems: "center", justifyContent: "center" },
   removeText: { color: colors.danger, fontWeight: "800" },
-  message: { color: colors.ink, backgroundColor: colors.accentSoft, borderRadius: 13, padding: 13 },
-  fieldLabel: { color: colors.muted, fontSize: 12, marginTop: 4 },
-  input: { minHeight: 45, borderRadius: 12, borderWidth: 1, borderColor: colors.line, paddingHorizontal: 12, color: colors.ink, backgroundColor: colors.background },
-  save: { minHeight: 45, alignItems: "center", justifyContent: "center", borderRadius: 12, backgroundColor: colors.accent },
-  saveText: { color: "#fff", fontWeight: "800" },
+  message: { color: colors.ink, backgroundColor: colors.accentSoft, borderRadius: radii.medium, padding: spacing.medium },
+  fieldLabel: { color: colors.muted, fontSize: 12, marginTop: spacing.xsmall },
+  input: { minHeight: 45, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line, paddingHorizontal: spacing.medium, color: colors.ink, backgroundColor: colors.background },
+  save: { minHeight: 45, alignItems: "center", justifyContent: "center", borderRadius: radii.medium, backgroundColor: colors.accent },
+  saveText: { color: colors.onAccent, fontWeight: "800" },
 });

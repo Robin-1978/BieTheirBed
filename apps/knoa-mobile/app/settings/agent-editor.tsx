@@ -13,6 +13,7 @@ import {
 
 import type { ManagedConfig, ManagedNodeAgent } from "@/api/models";
 import { AppIcon } from "@/components/AppIcon";
+import { AsyncStateView } from "@/components/AsyncStateView";
 import { AppPressable } from "@/components/AppPressable";
 import { useI18n } from "@/i18n";
 import {
@@ -25,7 +26,7 @@ import {
   upsertNodeAgent,
 } from "@/models/agentConfiguration";
 import { useGateway } from "@/state/GatewayProvider";
-import { colors } from "@/theme";
+import { colors, radii, spacing, shadows, typography } from "@/theme";
 
 export default function AgentEditorScreen() {
   const params = useLocalSearchParams<{ agentId?: string; mode?: string }>();
@@ -139,7 +140,19 @@ export default function AgentEditorScreen() {
   }
 
   if (!agent || !document) {
-    return <View style={styles.center}>{working === "load" ? <ActivityIndicator color={colors.accent} /> : <Text style={styles.message}>{message || t("settings.agentEditor.openFailed")}</Text>}</View>;
+    if (working === "load") {
+      return <View style={styles.center}><AsyncStateView state="loading" /></View>;
+    }
+    return (
+      <View style={styles.center}>
+        <AsyncStateView
+          state="error"
+          message={message || t("settings.agentEditor.openFailed")}
+          retryLabel={t("common.refresh")}
+          onRetry={() => void load()}
+        />
+      </View>
+    );
   }
 
   const isSystem = agent.visibility === "system";
@@ -253,7 +266,7 @@ export default function AgentEditorScreen() {
         </Section>
 
         <AppPressable disabled={Boolean(working)} style={styles.primary} onPress={() => void save()}>
-          {working === "save" ? <ActivityIndicator color={colors.white} /> : <><AppIcon name="check" color={colors.white} size={19} /><Text style={styles.primaryText}>{t("settings.agentEditor.publishButton")}</Text></>}
+          {working === "save" ? <ActivityIndicator color={colors.onAccent} /> : <><AppIcon name="check" color={colors.onAccent} size={19} /><Text style={styles.primaryText}>{t("settings.agentEditor.publishButton")}</Text></>}
         </AppPressable>
         <Text style={styles.impact}>{t("settings.agentEditor.impactHint")}</Text>
         {originalAgentId && !isBuiltIn ? <AppPressable disabled={Boolean(working)} style={styles.dangerButton} onPress={confirmDelete}><Text style={styles.dangerText}>{t("settings.agentEditor.deleteAgent")}</Text></AppPressable> : null}
@@ -296,40 +309,40 @@ function OptionalNumberField({ label, value, onChange, min }: { label: string; v
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: colors.background },
-  container: { padding: 17, paddingBottom: 58, gap: 14 },
-  hero: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  heroIcon: { width: 48, height: 48, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
-  flex: { flex: 1, minWidth: 0, gap: 3 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xlarge, backgroundColor: colors.background },
+  container: { padding: spacing.large, paddingBottom: 58, gap: spacing.large },
+  hero: { flexDirection: "row", alignItems: "center", gap: spacing.medium, padding: spacing.large, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line , ...shadows.card },
+  heroIcon: { width: 48, height: 48, borderRadius: radii.large, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
+  flex: { flex: 1, minWidth: 0, gap: spacing.xsmall },
   title: { color: colors.ink, fontSize: 19, fontWeight: "800" },
-  meta: { color: colors.muted, fontSize: 12, lineHeight: 18 },
-  section: { padding: 16, gap: 13, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  sectionTitle: { color: colors.ink, fontSize: 17, fontWeight: "800" },
-  row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
-  field: { gap: 6 },
+  meta: { color: colors.muted, ...typography.small, lineHeight: 18 },
+  section: { padding: spacing.large, gap: spacing.medium, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line , ...shadows.card },
+  sectionTitle: { color: colors.ink, ...typography.subheading, fontWeight: "800" },
+  row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.medium },
+  field: { gap: spacing.small },
   label: { color: colors.ink, fontSize: 13, fontWeight: "700" },
   itemTitle: { color: colors.ink, fontWeight: "700" },
   metric: { color: colors.ink, fontWeight: "700", textAlign: "right" },
-  input: { minHeight: 44, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.background, color: colors.ink },
-  prompt: { minHeight: 130, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.background, color: colors.ink, textAlignVertical: "top" },
-  notice: { gap: 8, padding: 12, borderRadius: 13, backgroundColor: colors.surfaceMuted },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: { minHeight: 38, justifyContent: "center", paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: colors.line },
-  smallChip: { minHeight: 34, justifyContent: "center", paddingHorizontal: 10, borderRadius: 999, borderWidth: 1, borderColor: colors.line },
+  input: { minHeight: 44, paddingHorizontal: spacing.medium, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.background, color: colors.ink },
+  prompt: { minHeight: 130, padding: spacing.medium, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.background, color: colors.ink, textAlignVertical: "top" },
+  notice: { gap: spacing.small, padding: spacing.medium, borderRadius: radii.medium, backgroundColor: colors.surfaceMuted },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.small },
+  chip: { minHeight: 38, justifyContent: "center", paddingHorizontal: spacing.medium, borderRadius: radii.pill, borderWidth: 1, borderColor: colors.line },
+  smallChip: { minHeight: 34, justifyContent: "center", paddingHorizontal: spacing.medium, borderRadius: radii.pill, borderWidth: 1, borderColor: colors.line },
   chipSelected: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
-  chipText: { color: colors.muted, fontSize: 12, fontWeight: "700" },
-  chipTextSelected: { color: colors.accent, fontSize: 12, fontWeight: "800" },
-  skillRow: { flexDirection: "row", alignItems: "center", gap: 7, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.line },
-  numberGrid: { gap: 10 },
-  numberField: { flex: 1, minWidth: 130, gap: 6 },
-  secondary: { minHeight: 40, alignItems: "center", justifyContent: "center", paddingHorizontal: 12, borderRadius: 11, borderWidth: 1, borderColor: colors.accent },
+  chipText: { color: colors.muted, ...typography.small, fontWeight: "700" },
+  chipTextSelected: { color: colors.accent, ...typography.small, fontWeight: "800" },
+  skillRow: { flexDirection: "row", alignItems: "center", gap: spacing.small, paddingTop: spacing.small, borderTopWidth: 1, borderTopColor: colors.line },
+  numberGrid: { gap: spacing.medium },
+  numberField: { flex: 1, minWidth: 130, gap: spacing.small },
+  secondary: { minHeight: 40, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.medium, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.accent },
   secondaryText: { color: colors.accent, fontWeight: "800", fontSize: 13 },
-  primary: { minHeight: 52, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 15, backgroundColor: colors.accent },
-  primaryText: { color: colors.white, fontWeight: "800" },
-  dangerButton: { minHeight: 48, alignItems: "center", justifyContent: "center", borderRadius: 14, borderWidth: 1, borderColor: colors.danger },
+  primary: { minHeight: 52, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.small, borderRadius: radii.large, backgroundColor: colors.accent },
+  primaryText: { color: colors.onAccent, fontWeight: "800" },
+  dangerButton: { minHeight: 48, alignItems: "center", justifyContent: "center", borderRadius: radii.medium, borderWidth: 1, borderColor: colors.danger },
   dangerText: { color: colors.danger, fontWeight: "800" },
-  warning: { color: colors.warning, fontSize: 12, lineHeight: 18 },
-  impact: { color: colors.muted, fontSize: 12, lineHeight: 18, paddingHorizontal: 4 },
-  message: { color: colors.ink, backgroundColor: colors.accentSoft, borderRadius: 13, padding: 13 },
+  warning: { color: colors.warning, ...typography.small, lineHeight: 18 },
+  impact: { color: colors.muted, ...typography.small, lineHeight: 18, paddingHorizontal: spacing.xsmall },
+  message: { color: colors.ink, backgroundColor: colors.accentSoft, borderRadius: radii.medium, padding: spacing.medium },
   disabled: { opacity: 0.45 },
 });

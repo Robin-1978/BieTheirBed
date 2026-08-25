@@ -5,24 +5,31 @@ import { ActivityIndicator, ScrollView, StyleSheet, Switch, Text, View } from "r
 import type { ManagedConfig } from "@/api/models";
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { AsyncStateView } from "@/components/AsyncStateView";
 import { cloneManagedConfig } from "@/models/modelConfiguration";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
-import { colors } from "@/theme";
+import { colors, radii, shadows, spacing, typography } from "@/theme";
 
 export default function AgentsScreen() {
   const gateway = useGateway();
   const { t } = useI18n();
   const [document, setDocument] = useState<ManagedConfig | null>(null);
+  const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState("");
   const [message, setMessage] = useState("");
 
   const load = useCallback(async () => {
+    setLoading(true);
+    setMessage("");
     try {
       const current = await gateway.runAuthenticated((client) => client.getConfigCurrent());
       setDocument(current.revision.document);
     } catch (error) {
+      setDocument(null);
       setMessage(error instanceof Error ? error.message : t("settings.agents.loadFailed"));
+    } finally {
+      setLoading(false);
     }
   }, [gateway.runAuthenticated, t]);
 
@@ -82,7 +89,11 @@ export default function AgentsScreen() {
         </View>
       </View>
 
-      {!document ? <ActivityIndicator color={colors.accent} /> : Object.entries(document.agents.agents).map(([id, agent]) => {
+      {!loading && !document && message ? (
+        <AsyncStateView state="error" message={message} retryLabel={t("common.refresh")} onRetry={() => void load()} />
+      ) : null}
+      {loading && !document ? <AsyncStateView state="loading" /> : null}
+      {document ? Object.entries(document.agents.agents).map(([id, agent]) => {
         const isDefault = document.agents.default_agent === id;
         const targets = agent.delegation.targets.map((targetId) => document.agents.agents[targetId]?.display_name || targetId);
         const toolsLabel = agent.allowed_platform_tools.includes("*")
@@ -128,38 +139,38 @@ export default function AgentsScreen() {
             </View>
           </View>
         );
-      })}
+      }) : null}
 
       <AppPressable disabled={Boolean(working) || !document} style={styles.primary} onPress={() => router.push({ pathname: "/settings/agent-editor", params: { mode: "new" } })}>
-        <AppIcon name="plus" color={colors.white} size={20} /><Text style={styles.primaryText}>{t("settings.agents.createKnoaAgent")}</Text>
+        <AppIcon name="plus" color={colors.onAccent} size={20} /><Text style={styles.primaryText}>{t("settings.agents.createKnoaAgent")}</Text>
       </AppPressable>
       <AppPressable style={styles.advanced} onPress={() => router.push("/settings/system")}>
         <Text style={styles.advancedText}>{t("settings.agents.advancedLink")}</Text><AppIcon name="chevron-right" color={colors.muted} size={18} />
       </AppPressable>
       {working ? <ActivityIndicator color={colors.accent} /> : null}
-      {message ? <Text style={styles.message}>{message}</Text> : null}
+      {message && document ? <Text style={styles.message}>{message}</Text> : null}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 17, gap: 13, paddingBottom: 52 },
-  hero: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  icon: { width: 48, height: 48, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
+  container: { padding: spacing.large, gap: spacing.medium, paddingBottom: 52 },
+  hero: { flexDirection: "row", alignItems: "center", gap: spacing.medium, padding: spacing.large, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, ...shadows.card },
+  icon: { width: 48, height: 48, borderRadius: radii.large, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
   flex: { flex: 1, minWidth: 0 },
   title: { color: colors.ink, fontSize: 19, fontWeight: "800" },
-  meta: { color: colors.muted, fontSize: 12, lineHeight: 18 },
-  card: { padding: 15, gap: 10, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  row: { flexDirection: "row", alignItems: "center", gap: 12 },
+  meta: { color: colors.muted, ...typography.small, lineHeight: 18 },
+  card: { padding: spacing.medium, gap: spacing.small, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, ...shadows.card },
+  row: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
   cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" },
-  detail: { color: colors.muted, fontSize: 12, lineHeight: 18 },
-  healthy: { color: colors.accent, fontSize: 12, lineHeight: 18, fontWeight: "700" },
-  actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  secondary: { minHeight: 42, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingHorizontal: 13, borderRadius: 12, borderWidth: 1, borderColor: colors.accent },
+  detail: { color: colors.muted, ...typography.small, lineHeight: 18 },
+  healthy: { color: colors.accent, ...typography.small, lineHeight: 18, fontWeight: "700" },
+  actions: { flexDirection: "row", flexWrap: "wrap", gap: spacing.small },
+  secondary: { minHeight: 42, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.small, paddingHorizontal: spacing.medium, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.accent },
   secondaryText: { color: colors.accent, fontWeight: "800" },
-  primary: { minHeight: 50, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, borderRadius: 14, backgroundColor: colors.accent },
-  primaryText: { color: colors.white, fontWeight: "800" },
-  advanced: { minHeight: 56, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 15, borderRadius: 17, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
+  primary: { minHeight: 50, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.small, borderRadius: radii.medium, backgroundColor: colors.accent },
+  primaryText: { color: colors.onAccent, fontWeight: "800" },
+  advanced: { minHeight: 56, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.medium, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, ...shadows.card },
   advancedText: { color: colors.muted, fontWeight: "700" },
-  message: { color: colors.ink, backgroundColor: colors.accentSoft, borderRadius: 13, padding: 13 },
+  message: { color: colors.ink, backgroundColor: colors.accentSoft, borderRadius: radii.medium, padding: spacing.medium },
 });

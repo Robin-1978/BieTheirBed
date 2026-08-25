@@ -14,9 +14,15 @@ export type AppIconName =
   | "chevron-left"
   | "chevron-right"
   | "clock"
+  | "code"
+  | "desktop"
   | "edit"
+  | "eye"
   | "file"
+  | "folder"
+  | "globe"
   | "history"
+  | "image"
   | "keyboard"
   | "mic"
   | "more"
@@ -25,6 +31,7 @@ export type AppIconName =
   | "pause"
   | "play"
   | "plus"
+  | "pulse"
   | "refresh"
   | "restore"
   | "save"
@@ -33,6 +40,7 @@ export type AppIconName =
   | "share"
   | "stop"
   | "tasks"
+  | "timer"
   | "trash"
   | "user"
   | "workspace"
@@ -50,8 +58,16 @@ const glyphs: Record<AppIconName, React.ComponentProps<typeof Ionicons>["name"]>
   "chevron-left": "chevron-back",
   "chevron-right": "chevron-forward",
   clock: "time-outline",
+  code: "code-slash-outline",
+  desktop: "desktop-outline",
   edit: "create-outline",
+  eye: "eye-outline",
   file: "document-outline",
+  folder: "folder-outline",
+  globe: "globe-outline",
+  image: "image-outline",
+  pulse: "pulse-outline",
+  timer: "timer-outline",
   history: "albums-outline",
   keyboard: "chatbox-outline",
   mic: "mic-outline",

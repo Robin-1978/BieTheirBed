@@ -494,28 +494,37 @@ socket and PID files use the operating system runtime directory.
 
 ## Tools
 
-| Tool | Actions | Description |
-|------|---------|-------------|
-| `shell` | command | Execute shell commands with timeout |
-| `filesystem` | read, write, list, mkdir, delete, copy, move, exists | File operations |
-| `application` | launch, list_running, search, info, kill | Desktop app management |
-| `web` | fetch, search | Web page fetching and search |
-| `system` | info, disk_usage | System information |
-| `clipboard` | read, write | Clipboard access |
-| `memory` | store, retrieve, search, delete, store_episode, recall_episodes | Persistent user & episodic memory |
-| `weather` | current, forecast | Weather data for any location |
-| `exchange` | rate, convert, list | Currency exchange rates |
-| `timer` | set, list, cancel, status, pause, resume, modify | Countdown timers and reminders |
-| `window` | list, info, focus, move, resize, minimize, maximize, restore, close | Window management |
-| `notification` | show, alert, reminder | System notifications |
-| `keyboard` | press, type, hotkey, write, shortcut | Keyboard input control |
-| `mouse` | position, move, click, double_click, right_click, scroll, drag | Mouse control |
-| `scheduler` | create, list, run, delete, enable, disable, start, stop, status | Cron-like task scheduling |
-| `image_inspect` | describe, ocr, locate, compare | Observe visible image content by `image_id`; diagnosis and solutions remain with the main model |
-| `screenshot` | — | Capture a full-desktop PNG for delivery to the current conversation |
-| `artifact_prepare` | path | Borrow an existing file for client delivery without copying or deleting it; protected paths are blocked and out-of-workspace paths require confirmation |
-| `mcp_deploy` | path, server_id | Validate, atomically install or update, and activate a local MCP package after explicit confirmation |
-| `describe_tool` | tool_name | Meta-tool: query the full JSON schema of any registered tool |
+| Tool | Description |
+|------|-------------|
+| `run_command` | Execute shell commands with timeout, working directory, and environment |
+| `read_file` | Read local files (512 KB / 1000 lines max) |
+| `write_file` | Create or overwrite local UTF-8 files |
+| `read_artifact` | Read text from a session-attached artifact by ID |
+| `web_search` | Web search (DDGS + Bing fallback; Chinese query routing) |
+| `web_fetch` | Fetch URL as text; blocks non-global IPs |
+| `clipboard` | Read or write the system clipboard |
+| `memory` | Store, retrieve, search, and delete user preferences (categories + importance) |
+| `weather` | Current weather via wttr.in |
+| `currency` | FX rates, conversion, and currency list via frankfurter.dev |
+| `windows` | List, focus, move, resize, minimize, maximize, restore, or close windows |
+| `notify` | Desktop notifications; `critical` triggers an alert |
+| `press_key` | Press a single key via pyautogui |
+| `type_text` | Type text via clipboard paste (Unicode-safe) |
+| `hotkey` | Key combinations via pyautogui |
+| `mouse` | Position, move, click, scroll, drag, press, and release |
+| `screenshot` | Capture a full-desktop JPEG for delivery to the current conversation |
+| `ui` | Semantic GUI via accessibility tree: snapshot, click, fill, select, focus |
+| `screen` | Grid-overlay screenshot for visual grounding: look, verify, understand |
+| `image_inspect` | Dedicated vision model observation of image artifacts |
+| `attach` | Deliver an existing local file as an artifact (read-only borrow) |
+| `tool_help` | Search tools or return full schema and examples |
+| `spawn_subagent` | Create a governed child Task with a delegate Agent |
+| `subagent` | Await, check status, or cancel delegated child Tasks |
+| `create_task` | Create a Task with launch policy: immediate, one_time, interval, cron, event |
+| `task` | List, get, update, delete, pause, resume, archive, execute, or rerun Tasks |
+| `mcp_inspect` | Probe an MCP server (tools/resources/prompts) without enabling |
+| `mcp_connect` | Confirmation-gated enable of a stdio or streamable HTTP MCP server |
+| `mcp_disable` | Disable a running MCP extension |
 
 ## Development
 
@@ -533,80 +542,33 @@ pytest --cov=knoa_platform --cov-report=term-missing
 ## Architecture
 
 ```
-src/knoa_platform/
-├── agent.py             # ReAct agent loop with SDB, planning, reflection
-├── eventbus.py          # Pub/sub event bus for decoupled subscribers
-├── planner.py           # Plan-Execute layer for complex tasks
-├── reflection.py        # Self-critique before final answer
-├── llm_provider.py      # Facade: transport, per-session cancel, retry
-├── model_adapter/
-│   ├── types.py         # Canonical IR (LLMResponse, StreamChunk)
-│   ├── profiles.py      # Per-provider endpoint/header/capability profiles
-│   ├── retry.py         # Retry with backoff for transient HTTP failures
-│   └── parsers/
-│       ├── openai.py    # OpenAI-style payload & stream parsing
-│       └── anthropic.py # Anthropic messages & SSE parsing
-├── vision/
-│   ├── broker.py        # Dedicated perception-only vision provider boundary
-│   └── preprocess.py    # Image resize/encoding helpers
-├── artifacts/
-│   └── store.py         # Session-scoped user-deliverable artifact registry
-├── session.py           # Multi-session state with LRU eviction & rollback
-├── config.py            # Pydantic config model + YAML + env overrides
-├── exceptions.py        # Typed exception hierarchy
-├── platform_.py         # Cross-platform utilities
-├── logger.py            # Structured JSON logging
-├── context/
-│   ├── assembly.py      # Cache-friendly message assembly & truncation
-│   ├── conversation.py  # Conversation history management
-│   ├── memory.py        # Memory value types + procedural/legacy adapters
-│   ├── memory_db.py     # Principal/session-scoped SQLite memory repository
-│   ├── scope.py         # Request-local principal_id + session_id
-│   ├── prompt.py        # System prompt & session context builders
-│   ├── compact.py       # Heuristic history compression
-│   ├── llm_compact.py   # LLM-assisted compaction (optional)
-│   ├── filter.py        # Stale content trimming
-│   ├── tags.py          # XML context wrappers
-│   ├── cache.py         # Prompt cache planning
-│   ├── token_estimate.py# Token estimation with runtime calibration
-│   └── evidence.py      # Evidence policy for factual queries
-├── tools/
-│   ├── base.py          # Tool contract, capability/effect/risk and origin
-│   ├── registry.py      # Validated name→tool map with origin ownership
-│   ├── describe_tool.py # Meta-tool: full schema for any registered tool
-│   ├── image_inspect.py # Structured image observation by attachment ID
-│   └── ...              # 16 built-in tool implementations
-├── extensions/
-│   ├── manager.py       # Failure-isolated extension lifecycle
-│   ├── models.py        # Strict local MCP policy configuration
-│   ├── mcp.py           # Official HTTP/stdio MCP clients and ToolBase adapter
-│   ├── mcp_package.py   # Confined local package discovery and manifest loading
-│   └── skill.py         # Safe Skill loading, indexing and selective activation
-├── skill_packages/
-│   └── research_report/ # Built-in research workflow instructions
-├── harness/
-│   ├── verifier.py      # SDB: deterministic verifier (propose→verify→commit)
-│   ├── refusal.py       # Typed refusal codes & Verdict
-│   ├── safety.py        # Command/path safety policy rules
-│   ├── idempotency.py   # Side-effect dedup with hash-based keys
-│   ├── limiter.py       # Sliding-window rate limiting
-│   └── audit.py         # JSONL audit trail
-├── observability/
-│   └── trace.py         # LLM call & turn tracing
-├── channels/
-│   ├── feishu.py        # CoreClient-based Feishu/Lark adapter
-│   └── __init__.py      # Channel exports
-├── benchmark/
-│   ├── runner.py        # Benchmark executor
-│   ├── scorer.py        # Rule-based scoring
-│   ├── evaluator.py     # LLM judge scoring
-│   ├── reporter.py      # Markdown report generator
-│   ├── dataset.py       # JSONL dataset loader
-│   └── types.py         # Data models
-└── ui/
-    ├── chat.py          # Full-screen Rich TUI
-    ├── state.py         # UI state management
-    └── theme.py         # Tokyo Night theme
+src/
+├── knoa_platform/               # Main platform package
+│   ├── service/                 # CoreServer, CoreClient, Core API, lifecycle
+│   ├── gateway/                 # Secure Gateway for mobile/remote access
+│   ├── hub/                     # Hosted Hub control plane
+│   ├── agent_runtime/           # Agent Runtime SPI — turn execution, events
+│   ├── agents/                  # Agent definitions, delegation, policies
+│   ├── conversation/            # Conversation and ChatTurn management
+│   ├── tasks/                   # Durable Tasks, executions, checkpoints
+│   ├── approvals/               # Approval workflow and reviewer agent
+│   ├── capabilities/            # Capability Gateway, grants, policy
+│   ├── tools/                   # 29 built-in tools (incl. ui, screen)
+│   ├── extensions/              # MCP client lifecycle, skill packages
+│   ├── channels/                # Feishu, DingTalk adapters (mixin-based)
+│   ├── context/                 # Memory, prompt assembly, token estimation
+│   ├── model_adapter/           # Canonical LLM IR, provider profiles, parsers
+│   ├── vision/                  # VisionBroker, a11y tree, grid overlay
+│   ├── artifacts/               # Session-scoped artifact store
+│   ├── automation/              # Schedules, triggers, durable automation
+│   ├── events/                  # EventBus pub/sub
+│   ├── observability/           # LLM/turn tracing
+│   ├── ui/                      # Rich Textual TUI
+│   ├── skill_packages/          # Built-in skills: research, file org, health, monitor, image
+│   └── adapters/                # Platform-specific adapters (POSIX/Windows)
+├── knoa_agent/                  # Built-in Knoa Agent: ReAct loop, tool selection
+├── knoa_agent_contracts/        # Shared agent runtime contracts/factory
+└── knoa_codex_agent/            # Codex Agent adapter
 ```
 
 ## License
