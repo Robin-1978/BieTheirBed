@@ -1038,7 +1038,10 @@ class DingTalkChannel(
         )
         return {
             "msgTitle": title,
-            "msgContent": "",
+            # AI Card V2 renders the live body from msgContent.  Keeping the
+            # same projection in staticMsgContent lets the template preserve
+            # the final snapshot when flowStatus switches to terminal.
+            "msgContent": markdown,
             "staticMsgContent": markdown,
             "flowStatus": flow_status,
             "sys_full_json_obj": json.dumps(
