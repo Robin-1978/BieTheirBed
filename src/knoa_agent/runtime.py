@@ -482,16 +482,55 @@ class KnoaAgentRuntime(AgentRuntime):
                         }
                         model_messages.append(result_message)
                         durable_messages.append(result_message)
-                        verify_message = await self._maybe_verify_gui_action(
-                            client,
+                        verify_call = self._gui_verification_call(
                             tool_name=str(proposed.name),
                             tool_args=dict(proposed.arguments),
                             tool_result=result.output,
                             available_tool_names=available_tool_names,
                         )
-                        if verify_message is not None:
-                            model_messages.append(verify_message)
-                            durable_messages.append(verify_message)
+                        if verify_call is not None and tool_calls < self._max_tool_calls:
+                            yield ToolCallStarted(
+                                **self._event_base(request, runtime_turn_ref),
+                                tool_call_id=verify_call.call_id,
+                                tool_name=verify_call.name,
+                                arguments=verify_call.arguments,
+                            )
+                            try:
+                                verify_result = await client.call_tool(verify_call)
+                            except Exception as exc:
+                                tool_calls += 1
+                                logger.exception(
+                                    "Automatic GUI verification failed for tool=%s",
+                                    proposed.name,
+                                )
+                                yield ToolCallFinished(
+                                    **self._event_base(request, runtime_turn_ref),
+                                    tool_call_id=verify_call.call_id,
+                                    tool_name=verify_call.name,
+                                    status="failed",
+                                    code="automatic_verification_failed",
+                                    output={"error": str(exc)},
+                                )
+                            else:
+                                tool_calls += 1
+                                yield ToolCallFinished(
+                                    **self._event_base(request, runtime_turn_ref),
+                                    tool_call_id=str(verify_result.call_id),
+                                    tool_name=str(verify_result.tool_name),
+                                    status=str(verify_result.status),
+                                    code=str(verify_result.code),
+                                    output=verify_result.output,
+                                )
+                                verify_message = self._gui_verification_message(
+                                    str(proposed.name),
+                                    self._describe_gui_action(
+                                        str(proposed.name), dict(proposed.arguments)
+                                    ),
+                                    verify_result,
+                                )
+                                if verify_message is not None:
+                                    model_messages.append(verify_message)
+                                    durable_messages.append(verify_message)
                         if (
                             proposed.name == "image_inspect"
                             and str(result.status) == "completed"
@@ -845,15 +884,14 @@ class KnoaAgentRuntime(AgentRuntime):
         name = str(schema.get("name") or output.get("tool") or "").strip()
         return frozenset({name}) if name else frozenset()
 
-    async def _maybe_verify_gui_action(
+    def _gui_verification_call(
         self,
-        client: McpClient,
         *,
         tool_name: str,
         tool_args: dict[str, Any],
         tool_result: Any,
         available_tool_names: frozenset[str],
-    ) -> dict[str, Any] | None:
+    ) -> McpToolCall | None:
         if not self._screen_verify_enabled:
             return None
         if tool_name not in GUI_TOOLS:
@@ -866,7 +904,7 @@ class KnoaAgentRuntime(AgentRuntime):
             return None
 
         description = self._describe_gui_action(tool_name, tool_args)
-        verify_call = McpToolCall(
+        return McpToolCall(
             call_id=uuid.uuid4().hex,
             name="screen",
             arguments={
@@ -874,11 +912,13 @@ class KnoaAgentRuntime(AgentRuntime):
                 "action_description": description,
             },
         )
-        try:
-            verify_result = await client.call_tool(verify_call)
-        except Exception:
-            logger.exception("Automatic GUI verification failed for tool=%s", tool_name)
-            return None
+
+    @staticmethod
+    def _gui_verification_message(
+        tool_name: str,
+        description: str,
+        verify_result: Any,
+    ) -> dict[str, Any] | None:
         if str(getattr(verify_result, "status", "")) != "completed":
             return None
         output = getattr(verify_result, "output", None)
@@ -929,15 +969,14 @@ class KnoaAgentRuntime(AgentRuntime):
         if tool_name == "ui":
             target = tool_args.get("element_path") or tool_args.get("name") or "element"
             parts = [f"ui {action}", f"target={target}"]
-            if tool_args.get("value"):
-                parts.append(f"value={tool_args['value']}")
+            if action in {"fill", "select"} and tool_args.get("value") is not None:
+                parts.append(f"characters={len(str(tool_args['value']))}")
             return " ".join(parts)
         if tool_name == "press_key":
             return f"press key {tool_args.get('key', '')}".strip()
         if tool_name == "type_text":
             text = str(tool_args.get("text") or "")
-            preview = text if len(text) <= 40 else f"{text[:37]}..."
-            return f"type text '{preview}'"
+            return f"type text characters={len(text)}"
         if tool_name == "hotkey":
             keys = tool_args.get("keys") or tool_args.get("hotkey") or tool_args.get("key")
             return f"hotkey {keys}"

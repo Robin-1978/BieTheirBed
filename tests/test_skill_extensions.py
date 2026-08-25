@@ -242,6 +242,10 @@ async def test_builtin_skill_reaches_model_only_for_matching_personal_run(
     )
     assert '<skill id="research_report"' in rendered
     assert "Search for multiple relevant sources" in rendered
-    skill_status = next(status for status in statuses if status.kind == "skill")
+    skill_status = next(
+        status
+        for status in statuses
+        if status.extension_id == "skill:research_report"
+    )
     assert skill_status.extension_id == "skill:research_report"
     assert skill_status.state == "running"

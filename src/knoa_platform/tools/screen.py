@@ -201,24 +201,54 @@ class ScreenTool(ToolBase):
     def _capture_blocking(self, use_grid: bool) -> tuple[dict[str, Any], bytes]:
         save_path = self._paths.allocate(prefix="screen", suffix=".jpg")
         try:
-            import mss
             from PIL import Image
         except ImportError as exc:
             save_path.unlink(missing_ok=True)
-            raise RuntimeError("Screen capture unavailable (mss or Pillow not installed)") from exc
+            raise RuntimeError("Screen capture unavailable (Pillow not installed)") from exc
 
-        with mss.mss() as sct:
-            shot = sct.grab(sct.monitors[0])
-            image = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
-            max_width = 3200
-            if image.width > max_width:
-                image = image.resize(
-                    (max_width, max(1, round(image.height * max_width / image.width))),
-                    Image.Resampling.LANCZOS,
+        from knoa_platform.desktop_companion import (
+            desktop_companion_required,
+            invoke_desktop_companion,
+        )
+
+        if desktop_companion_required():
+            result = invoke_desktop_companion("screenshot", {})
+            try:
+                import base64
+
+                image_bytes = base64.b64decode(
+                    str(result["content_base64"]), validate=True
                 )
-            buffer = BytesIO()
-            image.save(buffer, format="JPEG", quality=85, optimize=True)
-            image_bytes = buffer.getvalue()
+                image = Image.open(BytesIO(image_bytes))
+                image.load()
+            except (KeyError, ValueError, OSError) as exc:
+                save_path.unlink(missing_ok=True)
+                raise RuntimeError(
+                    "Desktop Companion returned an invalid screenshot"
+                ) from exc
+        else:
+            try:
+                import mss
+            except ImportError as exc:
+                save_path.unlink(missing_ok=True)
+                raise RuntimeError(
+                    "Screen capture unavailable (mss not installed)"
+                ) from exc
+            with mss.mss() as sct:
+                shot = sct.grab(sct.monitors[0])
+                image = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+                max_width = 3200
+                if image.width > max_width:
+                    image = image.resize(
+                        (
+                            max_width,
+                            max(1, round(image.height * max_width / image.width)),
+                        ),
+                        Image.Resampling.LANCZOS,
+                    )
+                buffer = BytesIO()
+                image.save(buffer, format="JPEG", quality=85, optimize=True)
+                image_bytes = buffer.getvalue()
 
         if use_grid:
             image_bytes = overlay_grid(image_bytes, grid_size=self._grid_size)

@@ -7,7 +7,6 @@ import logging
 import threading
 import uuid
 from pathlib import Path
-from typing import Any
 
 from knoa_platform.config import AppConfig
 from knoa_platform.runtime import RuntimePaths

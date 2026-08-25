@@ -28,7 +28,24 @@ class UiTool(ToolBase):
     risk = ToolRisk.MEDIUM
 
     def __init__(self, *, ui_backend: str = "auto") -> None:
+        self._ui_backend = ui_backend
         self._service = A11yService(backend=ui_backend)
+
+    async def execute_scoped(self, scope: Any, **kwargs: Any) -> Any:
+        del scope
+        from knoa_platform.desktop_companion import (
+            desktop_companion_required,
+            invoke_desktop_companion,
+        )
+
+        if desktop_companion_required():
+            arguments = {**kwargs, "_ui_backend": self._ui_backend}
+            return await asyncio.to_thread(
+                invoke_desktop_companion,
+                self.name,
+                arguments,
+            )
+        return await self.execute(**kwargs)
 
     def policy_for(self, arguments: dict[str, Any]) -> ToolPolicy:
         if arguments.get("action") == "snapshot":
