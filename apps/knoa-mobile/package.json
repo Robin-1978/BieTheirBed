@@ -1,6 +1,6 @@
 {
   "name": "knoa-mobile",
-  "version": "0.2.92",
+  "version": "0.2.93",
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
@@ -12,7 +12,7 @@
     "contract": "python ../../scripts/export_gateway_openapi.py && openapi-typescript openapi.json -o src/api/schema.ts",
     "doctor": "EXPO_NO_TELEMETRY=1 expo-doctor",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --maxWorkers=2"
   },
   "dependencies": {
     "@config-plugins/react-native-webrtc": "^15.0.2",

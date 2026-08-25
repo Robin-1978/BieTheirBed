@@ -12,6 +12,7 @@
   <color name="knoa_accent_pressed">#96CCBC</color>
   <color name="knoa_accent_soft">#284038</color>
   <color name="knoa_accent_faint">#1C3029</color>
+  <color name="knoa_on_accent">#102E24</color>
   <color name="knoa_line">#34413C</color>
   <color name="knoa_line_strong">#485751</color>
   <color name="knoa_danger">#E59089</color>

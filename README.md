@@ -376,6 +376,14 @@ with the same owner-controlled signing key and increase its Android version
 code, then publish it locally:
 
 ```bash
+# Typecheck, unit tests, production bundle, and (when attached) Android
+# install/Node-route crash smoke test
+scripts/test-mobile-app.sh /path/to/app-release.apk
+
+# Full gated build and publication
+scripts/build-and-publish-mobile-apk.sh
+
+# Individual release steps
 scripts/build-mobile-apk.sh
 KNOA_MOBILE_RELEASE_NOTES="Personal release" scripts/publish-mobile-apk.sh
 knoa gateway release latest
