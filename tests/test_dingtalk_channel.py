@@ -1032,6 +1032,7 @@ def test_dingtalk_interactive_card_is_created_delivered_and_updated(
     assert requests[1][2]["openSpaceId"] == "dtv1.card//IM_ROBOT.staff-1"
     assert "privateData" not in requests[0][2]
     assert requests[0][2]["userIdType"] == 1
+    assert "正在思考…" in requests[0][2]["cardData"]["cardParamMap"]["msgContent"]
     assert "<font" not in requests[0][2]["cardData"]["cardParamMap"]["staticMsgContent"]
     assert requests[0][2]["cardData"]["cardParamMap"]["flowStatus"] == "2"
 
@@ -1046,6 +1047,7 @@ def test_dingtalk_interactive_card_is_created_delivered_and_updated(
     assert requests[-1][2]["outTrackId"] == message_id
     assert "privateData" not in requests[-1][2]
     assert requests[-1][2]["userIdType"] == 1
+    assert requests[-1][2]["cardData"]["cardParamMap"]["msgContent"] == "结果已交付"
     assert sent == []
 
 
