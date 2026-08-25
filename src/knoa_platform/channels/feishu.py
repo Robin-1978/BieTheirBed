@@ -11,14 +11,14 @@ import time
 from typing import Any
 
 from knoa_platform.channels.feishu_cards import (
-    _ActiveTaskPresentation,
-    _StreamingCardState,
-    _markdown_table_count,
+    _ActiveTaskPresentation as _ActiveTaskPresentation,
+    _StreamingCardState as _StreamingCardState,
+    _markdown_table_count as _markdown_table_count,
     _patch_ws_card_dispatch,
     _principal_for_log,
-    _render_card_markdown,
+    _render_card_markdown as _render_card_markdown,
     _service_notice,
-    _split_text,
+    _split_text as _split_text,
 )
 from knoa_platform.channels.conversation_mixin import ChannelConversationMixin
 from knoa_platform.channels.session_mixin import ChannelSessionMixin

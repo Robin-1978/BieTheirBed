@@ -30,6 +30,7 @@ _ALLOWED_TOOLS = frozenset(
         "press_key",
         "screenshot",
         "type_text",
+        "ui",
         "windows",
     }
 )
@@ -196,6 +197,15 @@ def _capture_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
 async def _execute_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if tool_name == "screenshot":
         return await asyncio.to_thread(_capture_screenshot, arguments)
+    if tool_name == "ui":
+        from knoa_platform.tools.ui import UiTool
+
+        ui_arguments = dict(arguments)
+        backend = str(ui_arguments.pop("_ui_backend", "auto"))
+        result = await UiTool(ui_backend=backend).execute(**ui_arguments)
+        if not isinstance(result, dict):
+            raise DesktopCompanionError("Desktop tool returned a non-object result")
+        return result
 
     from knoa_platform.tools.clipboard import ClipboardTool
     from knoa_platform.tools.hotkey import HotkeyTool

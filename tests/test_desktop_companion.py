@@ -9,6 +9,7 @@ from knoa_platform.artifacts import ArtifactStore
 from knoa_platform.context.scope import MemoryScope, reset_memory_scope, set_memory_scope
 from knoa_platform.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRisk
 from knoa_platform.tools.screenshot import ScreenshotTool
+from knoa_platform.tools.ui import UiTool
 
 
 class _DesktopTool(ToolBase):
@@ -54,6 +55,24 @@ async def test_desktop_tool_executes_directly_in_user_session(
     monkeypatch.setattr(desktop_companion, "desktop_companion_required", lambda: False)
 
     assert await _DesktopTool().execute_scoped(None, x=10) == {"direct": {"x": 10}}
+
+
+@pytest.mark.asyncio
+async def test_ui_tool_forwards_backend_to_desktop_companion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+    monkeypatch.setattr(desktop_companion, "desktop_companion_required", lambda: True)
+    monkeypatch.setattr(
+        desktop_companion,
+        "invoke_desktop_companion",
+        lambda name, arguments: calls.append((name, arguments)) or {"success": True},
+    )
+
+    result = await UiTool(ui_backend="uia").execute_scoped(None, action="snapshot")
+
+    assert result == {"success": True}
+    assert calls == [("ui", {"action": "snapshot", "_ui_backend": "uia"})]
 
 
 @pytest.mark.asyncio

@@ -2,11 +2,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 import time
-import uuid
 
 from knoa_platform.branding import ASSISTANT_NAME
 from knoa_platform.notification_intent import (

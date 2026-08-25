@@ -210,7 +210,8 @@ def test_core_composition_builds_forward_only_registry_and_profiles(
         }
         & remote
     )
-    assert not {"screen", "ui", "schedule", "inspect_image"} & local
+    assert {"screen", "ui"} <= local
+    assert not {"schedule", "inspect_image"} & local
     assert "create_task" in local
     assert "schedule_task" not in local
 

@@ -91,22 +91,27 @@ class _AtspiBackend:
 
     def get_accessible_tree(self, window_name: str | None = None) -> list[AccessibleElement]:
         desktop = self._pyatspi.Registry.getDesktop(0)
-        roots = []
+        roots: list[tuple[int, Any]] = []
         for index in range(desktop.childCount):
             child = desktop.getChildAtIndex(index)
             if child is None:
                 continue
             if window_name and not self._matches_window(child, window_name):
                 continue
-            roots.append(child)
+            roots.append((index, child))
         if window_name and not roots:
             raise LookupError(f"Window not found: {window_name}")
         if not roots:
             active = self._active_application()
             if active is not None:
-                roots = [active]
+                roots = [
+                    (index, child)
+                    for index in range(desktop.childCount)
+                    for child in (desktop.getChildAtIndex(index),)
+                    if child is active
+                ]
         elements: list[AccessibleElement] = []
-        for root_index, root in enumerate(roots):
+        for root_index, root in roots:
             prefix = str(root_index)
             self._walk(root, prefix, elements, max_depth=8)
         return elements
@@ -309,7 +314,7 @@ class _AtspiBackend:
                 pyautogui.hotkey("command", "v")
             else:
                 pyautogui.hotkey("ctrl", "v")
-            return {"success": True, "action": "fill", "value": value}
+            return {"success": True, "action": "fill", "characters": len(value)}
         except ImportError:
             return {"error": "pyautogui and pyperclip are required for text entry"}
 
@@ -360,18 +365,18 @@ class _UiaBackend:
     def get_accessible_tree(self, window_name: str | None = None) -> list[AccessibleElement]:
         desktop = self._Desktop(backend="uia")
         windows = desktop.windows()
-        selected = windows
+        selected = list(enumerate(windows))
         if window_name:
             needle = window_name.casefold()
             selected = [
-                window
-                for window in windows
+                (index, window)
+                for index, window in enumerate(windows)
                 if needle in str(window.window_text()).casefold()
             ]
             if not selected:
                 raise LookupError(f"Window not found: {window_name}")
         elements: list[AccessibleElement] = []
-        for root_index, window in enumerate(selected[:1]):
+        for root_index, window in selected[:1]:
             wrapper = window.wrapper_object()
             self._walk(wrapper, str(root_index), elements, max_depth=8)
         return elements
@@ -395,12 +400,12 @@ class _UiaBackend:
                     return {"error": "value is required for fill action"}
                 element.set_focus()
                 element.set_edit_text(value)
-                return {"success": True, "action": "fill", "value": value}
+                return {"success": True, "action": "fill", "characters": len(value)}
             if action == "select":
                 if value is None:
                     return {"error": "value is required for select action"}
                 element.select(value)
-                return {"success": True, "action": "select", "value": value}
+                return {"success": True, "action": "select"}
             if action == "focus":
                 element.set_focus()
                 return {"success": True, "action": "focus"}

@@ -18,7 +18,6 @@ from knoa_platform.channels.feishu_cards import (
     _split_plain_text,
     _split_text,
 )
-from knoa_platform.service.core_client import CoreClient
 from knoa_platform.tasks import (
     TaskState,
 )
