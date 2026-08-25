@@ -980,6 +980,16 @@ def test_dingtalk_markdown_preserves_html_inside_code_fence() -> None:
     ) == ("```html\n<span>literal</span>\n```\ndisplay")
 
 
+def test_dingtalk_markdown_projects_tables_to_bullets() -> None:
+    rendered = dingtalk_markdown(
+        "| Job | 状态 |\n|---|---|\n| build | failed |\n| test | passed |"
+    )
+
+    assert "|" not in rendered
+    assert "- Job: build；状态: failed" in rendered
+    assert "- Job: test；状态: passed" in rendered
+
+
 def test_dingtalk_interactive_card_is_created_delivered_and_updated(
     tmp_path,
     monkeypatch,
@@ -1049,6 +1059,36 @@ def test_dingtalk_interactive_card_is_created_delivered_and_updated(
     assert requests[-1][2]["userIdType"] == 1
     assert requests[-1][2]["cardData"]["cardParamMap"]["msgContent"] == "结果已交付"
     assert sent == []
+
+    terminal_id = channel._send_card_returning_id(
+        "staff-1",
+        {
+            "header": {"title": {"content": "已完成"}},
+            "body": {"elements": [{"tag": "markdown", "content": "GitLab 结果"}]},
+        },
+    )
+    assert terminal_id
+    assert requests[-2][2]["cardTemplateId"] == (
+        "1366a1eb-bc54-4859-ac88-517c56a9acb1.schema"
+    )
+    assert requests[-2][2]["cardData"]["cardParamMap"]["markdown"] == "GitLab 结果"
+
+
+def test_dingtalk_terminal_card_uses_markdown_template_payload(tmp_path) -> None:
+    channel = _channel(tmp_path)
+    params = channel._static_card_params(
+        {
+            "header": {"title": {"content": "已完成"}},
+            "body": {"elements": [{"tag": "markdown", "content": "结果已交付"}]},
+        }
+    )
+
+    assert params == {
+        "title": "已完成",
+        "markdown": "结果已交付",
+        "tips": "",
+        "sys_full_json_obj": '{"msgButtons": []}',
+    }
 
 
 def test_dingtalk_cancelled_card_stops_ai_card_spinner(tmp_path) -> None:
