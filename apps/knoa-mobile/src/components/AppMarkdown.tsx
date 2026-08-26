@@ -1,5 +1,5 @@
-import { memo } from "react";
-import { View, type StyleProp, type ViewStyle } from "react-native";
+import { memo, useCallback, type ReactElement } from "react";
+import { FlatList, type StyleProp, type ViewStyle } from "react-native";
 import { useMarkdown, type MarkedStyles } from "react-native-marked";
 
 import { colors } from "@/theme";
@@ -25,5 +25,16 @@ const markdownStyles: MarkedStyles = {
 
 export const AppMarkdown = memo(function AppMarkdown({ value, style }: { value: string; style?: StyleProp<ViewStyle> }) {
   const elements = useMarkdown(value, { theme, styles: markdownStyles });
-  return <View style={[{ width: "100%", alignSelf: "stretch" }, style]}>{elements}</View>;
+  const renderItem = useCallback(({ item }: { item: unknown }) => item as ReactElement, []);
+  const keyExtractor = useCallback((_: unknown, index: number) => index.toString(), []);
+  return (
+    <FlatList
+      data={elements}
+      renderItem={renderItem}
+      keyExtractor={keyExtractor}
+      removeClippedSubviews={false}
+      scrollEnabled={false}
+      style={[{ width: "100%", alignSelf: "stretch", backgroundColor: "transparent" }, style]}
+    />
+  );
 });

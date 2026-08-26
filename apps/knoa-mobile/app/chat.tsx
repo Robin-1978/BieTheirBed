@@ -509,6 +509,8 @@ export default function ChatScreen() {
           artifact.artifact_id,
         ));
         setText((current) => current ? `${current}\n${transcript}` : transcript);
+      } catch {
+        showFeedback(t("chat.transcriptionFailed"), "error");
       } finally {
         await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
         setTranscribing(false);

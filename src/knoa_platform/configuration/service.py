@@ -66,6 +66,15 @@ class ConfigurationService:
     def current(self) -> ConfigRevision:
         return self._registry.current()
 
+    def desired(self) -> ConfigRevision:
+        """Return the revision currently targeted by the control plane.
+
+        This can differ from ``current`` while an apply is in progress or has
+        failed, so callers building a new draft must use the same base that the
+        registry uses for draft creation.
+        """
+        return self._registry.desired()
+
     def state(self):
         return self._registry.state()
 

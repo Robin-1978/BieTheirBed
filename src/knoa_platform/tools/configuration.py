@@ -12,14 +12,24 @@ import copy
 from typing import Any
 
 from knoa_platform.configuration import ConfigurationService
-from knoa_platform.tools.base import ToolBase, ToolCapability, ToolEffect, ToolPolicy, ToolRisk
+from knoa_platform.tools.base import (
+    ToolBase,
+    ToolCapability,
+    ToolEffect,
+    ToolPolicy,
+    ToolRisk,
+)
 
 
 def _merge(base: Any, patch: Any) -> Any:
     if isinstance(base, dict) and isinstance(patch, dict):
         result = copy.deepcopy(base)
         for key, value in patch.items():
-            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            if (
+                key in result
+                and isinstance(result[key], dict)
+                and isinstance(value, dict)
+            ):
                 result[key] = _merge(result[key], value)
             else:
                 result[key] = copy.deepcopy(value)
@@ -43,7 +53,9 @@ class ConfigurationTool(ToolBase):
 
     @property
     def policy(self) -> ToolPolicy:
-        enabled = self._service.current().document.operational.agent_configuration_enabled
+        enabled = (
+            self._service.current().document.operational.agent_configuration_enabled
+        )
         if not self._enabled and not enabled:
             return ToolPolicy(
                 effect=ToolEffect.UNKNOWN,
@@ -72,7 +84,13 @@ class ConfigurationTool(ToolBase):
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["describe", "inspect", "propose", "publish", "rollback"],
+                        "enum": [
+                            "describe",
+                            "inspect",
+                            "propose",
+                            "publish",
+                            "rollback",
+                        ],
                     },
                     "changes": {"type": "object"},
                     "draft_id": {"type": "string", "minLength": 1, "maxLength": 128},
@@ -89,7 +107,12 @@ class ConfigurationTool(ToolBase):
         if action == "describe":
             return {
                 "purpose": "Translate a user's natural-language configuration request into a safe draft.",
-                "workflow": ["describe/inspect", "propose", "show returned changes to user", "publish after explicit confirmation"],
+                "workflow": [
+                    "describe/inspect",
+                    "propose",
+                    "show returned changes to user",
+                    "publish after explicit confirmation",
+                ],
                 "sections": {
                     "providers": "LLM provider endpoints and secret references",
                     "models": "model aliases and provider bindings",
@@ -113,11 +136,13 @@ class ConfigurationTool(ToolBase):
             changes = kwargs.get("changes")
             if not isinstance(changes, dict) or not changes:
                 return {"error": "changes must be a non-empty object"}
-            current = self._service.current()
-            candidate_data = _merge(current.document.model_dump(mode="python"), changes)
+            base = self._service.desired()
+            candidate_data = _merge(base.document.model_dump(mode="python"), changes)
             try:
-                candidate = type(current.document).model_validate(candidate_data)
-            except Exception as exc:  # validation details are safe to return to the Agent
+                candidate = type(base.document).model_validate(candidate_data)
+            except (
+                Exception
+            ) as exc:  # validation details are safe to return to the Agent
                 return {"error": "invalid_configuration", "detail": str(exc)}
             draft = self._service.create_draft(actor=scope.principal_id)
             draft = self._service.replace_draft(
@@ -132,10 +157,16 @@ class ConfigurationTool(ToolBase):
                     "error": "preflight_failed",
                     "draft_id": draft.draft_id,
                     "draft_version": draft.draft_version,
-                    "issues": [item.model_dump(mode="json") for item in preflight.issues],
+                    "issues": [
+                        item.model_dump(mode="json") for item in preflight.issues
+                    ],
                 }
-            before = current.document.model_dump(mode="json")
-            after = candidate.model_dump(mode="json")
+            # The service normalizer (for example, skill digest freezing) is
+            # part of the persisted draft. Preview the actual stored document
+            # so confirmation covers every resulting field.
+            stored = self._service.draft(draft.draft_id)
+            before = base.document.model_dump(mode="json")
+            after = stored.document.model_dump(mode="json")
             return {
                 "draft_id": draft.draft_id,
                 "draft_version": draft.draft_version,
@@ -153,7 +184,9 @@ class ConfigurationTool(ToolBase):
                 draft_id,
                 expected_version=expected,
                 actor=scope.principal_id,
-                summary=str(kwargs.get("summary") or "Knoa Agent configuration update")[:512],
+                summary=str(kwargs.get("summary") or "Knoa Agent configuration update")[
+                    :512
+                ],
             )
             return {
                 "revision_id": result.revision.revision_id,
@@ -166,7 +199,9 @@ class ConfigurationTool(ToolBase):
             result = await self._service.rollback(
                 revision_id,
                 actor=scope.principal_id,
-                summary=str(kwargs.get("summary") or "Knoa Agent configuration rollback")[:512],
+                summary=str(
+                    kwargs.get("summary") or "Knoa Agent configuration rollback"
+                )[:512],
             )
             return {
                 "revision_id": result.revision.revision_id,
@@ -179,7 +214,9 @@ class ConfigurationTool(ToolBase):
         return await self.execute_scoped(None, **kwargs)
 
 
-def _diff_documents(before: dict[str, Any], after: dict[str, Any]) -> list[dict[str, Any]]:
+def _diff_documents(
+    before: dict[str, Any], after: dict[str, Any]
+) -> list[dict[str, Any]]:
     changes: list[dict[str, Any]] = []
 
     def walk(left: Any, right: Any, path: str) -> None:
@@ -194,7 +231,9 @@ def _diff_documents(before: dict[str, Any], after: dict[str, Any]) -> list[dict[
                     walk(left[key], right[key], child)
             return
         if left != right:
-            changes.append({"op": "replace", "path": path or "/", "old": left, "value": right})
+            changes.append(
+                {"op": "replace", "path": path or "/", "old": left, "value": right}
+            )
 
     walk(before, after, "")
     return changes
