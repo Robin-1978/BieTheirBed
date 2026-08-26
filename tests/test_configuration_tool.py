@@ -7,6 +7,7 @@ import pytest
 from knoa_platform.agent_runtime.contracts import RuntimeScope
 from knoa_platform.config import AppConfig
 from knoa_platform.configuration import ConfigRegistry, ConfigurationService
+from knoa_platform.configuration.models import ConfigApplyError
 from knoa_platform.tools.configuration import ConfigurationTool
 
 
@@ -47,7 +48,10 @@ async def test_configuration_tool_creates_draft_and_publishes_after_enable(
         changes={"operational": {"max_iterations": 40}},
     )
     assert proposed["draft_id"]
-    assert any(change["path"] == "/operational/max_iterations" for change in proposed["changes"])
+    assert any(
+        change["path"] == "/operational/max_iterations"
+        for change in proposed["changes"]
+    )
     published = await tool.execute_scoped(
         scope,
         action="publish",
@@ -56,3 +60,55 @@ async def test_configuration_tool_creates_draft_and_publishes_after_enable(
     )
     assert published["state"]["apply_status"] == "idle"
     assert service.current().document.operational.max_iterations == 40
+
+
+@pytest.mark.asyncio
+async def test_configuration_tool_proposes_from_desired_revision_after_apply_failure(
+    tmp_path: Path,
+) -> None:
+    async def fail_apply(_previous, _revision) -> None:
+        raise ConfigApplyError("apply_failed", "simulated apply failure")
+
+    document = (
+        AppConfig()
+        .managed_config()
+        .model_copy(
+            update={
+                "operational": AppConfig()
+                .managed_config()
+                .operational.model_copy(update={"agent_configuration_enabled": True})
+            }
+        )
+    )
+    service = ConfigurationService(
+        ConfigRegistry(tmp_path / "config.db"),
+        document,
+        bootstrap_actor="test",
+        applier=fail_apply,
+    )
+    tool = ConfigurationTool(service)
+    scope = RuntimeScope(principal_id="local", session_handle="s")
+
+    first = await tool.execute_scoped(
+        scope,
+        action="propose",
+        changes={"operational": {"max_iterations": 40}},
+    )
+    failed = await tool.execute_scoped(
+        scope,
+        action="publish",
+        draft_id=first["draft_id"],
+        expected_version=first["draft_version"],
+    )
+    assert failed["state"]["apply_status"] == "failed"
+
+    second = await tool.execute_scoped(
+        scope,
+        action="propose",
+        changes={"operational": {"max_total_tool_calls": 99}},
+    )
+    assert not any(
+        change["path"] == "/operational/max_iterations" and change["op"] == "replace"
+        for change in second["changes"]
+    )
+    assert service.draft(second["draft_id"]).document.operational.max_iterations == 40
