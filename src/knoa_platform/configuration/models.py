@@ -204,6 +204,9 @@ class ManagedOperationalConfig(ConfigurationModel):
     task_capacity: int = Field(default=128, ge=1, le=10_000)
     principal_task_capacity: int = Field(default=32, ge=1, le=10_000)
     generation_drain_seconds: float = Field(default=120.0, ge=1.0, le=3600.0)
+    # The configuration Agent is an opt-in control-plane capability.  Keep it
+    # disabled for existing Nodes and enable it explicitly from Console.
+    agent_configuration_enabled: bool = False
 
     @model_validator(mode="after")
     def validate_capacity(self) -> ManagedOperationalConfig:

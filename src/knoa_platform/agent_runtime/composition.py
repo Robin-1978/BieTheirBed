@@ -144,6 +144,7 @@ from knoa_platform.tasks.preflight import TaskLaunchPreflightEvaluator
 from knoa_platform.tools.artifact_prepare import ArtifactPrepareTool
 from knoa_platform.tools.base import ToolCapability, ToolEffect, ToolRisk
 from knoa_platform.tools.clipboard import ClipboardTool
+from knoa_platform.tools.configuration import ConfigurationTool
 from knoa_platform.tools.create_task import CreateTaskTool
 from knoa_platform.tools.describe_tool import DescribeTool
 from knoa_platform.tools.exchange import ExchangeTool
@@ -1420,6 +1421,10 @@ def build_core_runtime(
         )
     )
     config_controller = ConfigurationController(configuration)
+    # Expose configuration through the governed Agent tool boundary.  The
+    # tool is registered only after the service exists so every mutation goes
+    # through Draft -> Validate -> Preflight -> Publish.
+    registry.register(ConfigurationTool(configuration))
     mcp_onboarding = MCPOnboardingService(
         extensions,
         config_controller,
