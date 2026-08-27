@@ -222,7 +222,8 @@ class AppConfig(BaseModel):
                 visibility="delegate",
                 enabled=False,
                 model_binding=ModelBindingSpec(ownership="runtime"),
-                command=("codex", "app-server"),
+                backend="exec_json",
+                command=("codex", "exec"),
                 native_capability_ceiling=frozenset(
                     {"workspace_read", "command_execution"}
                 ),

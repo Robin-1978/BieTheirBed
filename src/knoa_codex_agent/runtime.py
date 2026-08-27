@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,6 +42,7 @@ from knoa_agent_contracts import (
     UsageReported,
 )
 from knoa_codex_agent.app_server import CodexAppServerClient
+from knoa_codex_agent.exec_json import CodexExecJsonClient
 from knoa_codex_agent.session_store import CodexSessionRepository
 
 
@@ -85,6 +87,7 @@ class CodexAgentRuntime(AgentRuntime):
         display_name: str = "Codex",
         instructions: str,
         command: Sequence[str] = ("codex", "app-server"),
+        backend: str = "app_server",
         home: str | Path | None = None,
         cwd: str | Path,
         model: str = "",
@@ -104,11 +107,14 @@ class CodexAgentRuntime(AgentRuntime):
             raise ValueError("Codex Agent Profile instructions are required")
         if sandbox not in {"read-only", "workspace-write"}:
             raise ValueError("Codex sandbox must be read-only or workspace-write")
+        if backend not in {"app_server", "exec_json"}:
+            raise ValueError("Codex backend must be app_server or exec_json")
         self._sessions = sessions
         self._agent_id = agent_id.strip()
         self._display_name = display_name.strip()
         self._instructions = instructions.strip()
         self._command = tuple(command)
+        self._backend = backend
         self._home = None if home in (None, "") else Path(home).expanduser().resolve()
         if self._home is not None:
             self._home.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -128,27 +134,33 @@ class CodexAgentRuntime(AgentRuntime):
 
     @property
     def descriptor(self) -> AgentDescriptor:
-        return AgentDescriptor(
-            agent_id=self._agent_id,
-            display_name=self._display_name,
-            implementation_version="1.0.0",
-            protocol_name="codex-app-server",
-            protocol_version="2",
-            capabilities=frozenset(
+        capabilities = {
+            "input.image",
+            "input.file",
+            "input.audio",
+            "event.usage",
+            "event.context_compaction",
+            "event.tool_lifecycle",
+        }
+        if self._backend == "app_server":
+            capabilities.update(
                 {
                     "turn.steer",
                     "interaction.user_input",
                     "mcp.client",
-                    "input.image",
-                    "input.file",
-                    "input.audio",
                     "event.reasoning_summary",
                     "event.plan",
-                    "event.tool_lifecycle",
-                    "event.usage",
-                    "event.context_compaction",
                 }
-            ),
+            )
+        return AgentDescriptor(
+            agent_id=self._agent_id,
+            display_name=self._display_name,
+            implementation_version="1.0.0",
+            protocol_name="codex-app-server"
+            if self._backend == "app_server"
+            else "codex-exec-json",
+            protocol_version="2",
+            capabilities=frozenset(capabilities),
             limits=RuntimeLimits(max_concurrent_turns=1),
         )
 
@@ -184,6 +196,8 @@ class CodexAgentRuntime(AgentRuntime):
         )
         if existing is not None:
             raise RuntimeError("turn_outcome_requires_reconciliation")
+        if self._backend == "exec_json":
+            return await self._start_exec_turn(request, record)
         client = self._client_factory(
             {"KNOA_CAPABILITY_GRANT": request.mcp.authorization}
         )
@@ -257,6 +271,194 @@ class CodexAgentRuntime(AgentRuntime):
         except BaseException:
             await client.close()
             raise
+
+    async def _start_exec_turn(
+        self, request: RuntimeTurnRequest, record
+    ) -> RuntimeTurn:
+        prompt = self._exec_prompt(request)
+        client = self._new_exec_client(
+            {"KNOA_CAPABILITY_GRANT": request.mcp.authorization}
+        )
+        try:
+            await client.start(prompt, thread_id=record.upstream_thread_ref)
+            if record.upstream_thread_ref is None:
+                upstream_thread_ref = await client.wait_thread_started()
+                await asyncio.to_thread(
+                    self._sessions.bind_upstream_thread,
+                    request.session.runtime_session_ref,
+                    upstream_thread_ref,
+                )
+            else:
+                upstream_thread_ref = record.upstream_thread_ref
+            turn_id = f"exec-{uuid.uuid4().hex}"
+            recorded = await asyncio.to_thread(
+                self._sessions.record_turn,
+                operation_id=request.operation_id,
+                runtime_session_ref=request.session.runtime_session_ref,
+                runtime_turn_ref=turn_id,
+            )
+            if recorded != turn_id:
+                raise RuntimeError("turn_outcome_requires_reconciliation")
+            active = _ActiveTurn(request.session, upstream_thread_ref, client)
+            async with self._guard:
+                self._active[turn_id] = active
+            return RuntimeTurn(
+                runtime_turn_ref=turn_id,
+                events=self._exec_events(request, turn_id, active),
+            )
+        except BaseException:
+            await client.close()
+            raise
+
+    def _new_exec_client(self, extra_env: Mapping[str, str]) -> CodexExecJsonClient:
+        environment = dict(extra_env)
+        if self._home is not None:
+            environment["CODEX_HOME"] = str(self._home)
+        return CodexExecJsonClient(
+            self._command,
+            cwd=self._cwd,
+            env=environment,
+            sandbox=self._sandbox,
+            approval_policy=self._approval_policy,
+            model=self._model,
+            request_timeout_seconds=self._request_timeout,
+            max_line_bytes=self._max_line_bytes,
+            max_event_queue=self._max_event_queue,
+        )
+
+    def _exec_prompt(self, request: RuntimeTurnRequest) -> str:
+        sections: list[str] = [self._instructions]
+        context = self._platform_context_input(request)
+        if context:
+            sections.append(context["text"])
+        for part in request.input:
+            if isinstance(part, TextPart):
+                sections.append(part.text)
+            elif isinstance(part, ArtifactPart):
+                sections.append(
+                    f"[Knoa artifact: {part.resource_uri}]\n{part.caption}".strip()
+                )
+            else:
+                sections.append(f"[Knoa resource: {part.uri}]")
+        return "\n\n".join(item for item in sections if item)
+
+    async def _exec_events(
+        self, request: RuntimeTurnRequest, turn_id: str, active: _ActiveTurn
+    ):
+        terminal = False
+        final_output = ""
+        try:
+            async for event in active.client.events():
+                kind = str(event.get("type") or "")
+                base = self._event_base(request, turn_id, event)
+                if kind in {"item.agent_message.delta", "item.updated"}:
+                    item = (
+                        event.get("item") if isinstance(event.get("item"), dict) else {}
+                    )
+                    text = event.get("delta") or item.get("text")
+                    if text and (
+                        kind == "item.agent_message.delta"
+                        or item.get("type") in {"agent_message", "agentMessage"}
+                    ):
+                        final_output += str(text)
+                        yield AssistantDelta(**base, content=str(text))
+                elif kind == "item.completed":
+                    item = (
+                        event.get("item") if isinstance(event.get("item"), dict) else {}
+                    )
+                    item_type = str(item.get("type") or "")
+                    if item_type in {"agent_message", "agentMessage"}:
+                        text = str(item.get("text") or "")
+                        if text and text != final_output:
+                            final_output = text
+                            yield AssistantDelta(**base, content=text)
+                    elif item_type in {
+                        "command_execution",
+                        "commandExecution",
+                        "file_change",
+                        "fileChange",
+                    }:
+                        yield ToolCallFinished(
+                            **base,
+                            tool_call_id=str(item.get("id") or "exec-item"),
+                            tool_name=item_type,
+                            status="completed"
+                            if str(item.get("status") or "completed") == "completed"
+                            else "failed",
+                            code=str(item.get("status") or ""),
+                            output=item.get("output") or item.get("aggregated_output"),
+                        )
+                elif kind == "item.started":
+                    item = (
+                        event.get("item") if isinstance(event.get("item"), dict) else {}
+                    )
+                    item_type = str(item.get("type") or "")
+                    if item_type in {
+                        "command_execution",
+                        "commandExecution",
+                        "file_change",
+                        "fileChange",
+                    }:
+                        arguments = item.get("command") or item.get("changes") or {}
+                        yield ToolCallStarted(
+                            **base,
+                            tool_call_id=str(item.get("id") or "exec-item"),
+                            tool_name=item_type,
+                            arguments=arguments
+                            if isinstance(arguments, dict)
+                            else {"value": arguments},
+                        )
+                elif kind in {"turn.completed", "turn_complete"}:
+                    usage = event.get("usage")
+                    if isinstance(usage, dict):
+                        yield UsageReported(**base, usage=self._flatten_usage(usage))
+                    status = str(event.get("status") or "completed")
+                    yield TurnFinished(
+                        **base,
+                        status="completed"
+                        if status in {"completed", "complete"}
+                        else "interrupted"
+                        if status == "interrupted"
+                        else "failed",
+                        final_output=str(event.get("final_output") or final_output),
+                        error_code=str(event.get("error_code") or ""),
+                    )
+                    terminal = True
+                    return
+                elif kind in {"error", "turn.failed"}:
+                    yield RuntimeWarning(
+                        **base,
+                        code="codex_exec_error",
+                        message=str(event.get("message") or event),
+                    )
+                    if kind == "turn.failed":
+                        yield TurnFinished(
+                            **base,
+                            status="failed",
+                            final_output=final_output,
+                            error_code="codex_exec_failed",
+                        )
+                        terminal = True
+                        return
+            if not terminal:
+                yield TurnFinished(
+                    **self._event_base(request, turn_id, {}),
+                    status="outcome_unknown",
+                    error_code="transport_closed_without_terminal",
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if not terminal:
+                yield TurnFinished(
+                    **self._event_base(request, turn_id, {}),
+                    status="outcome_unknown",
+                    error_code=type(exc).__name__,
+                )
+        finally:
+            async with self._guard:
+                self._active.pop(turn_id, None)
+            await active.client.close()
 
     async def _events(
         self,
@@ -382,6 +584,10 @@ class CodexAgentRuntime(AgentRuntime):
         active = await self._active_turn(command.session, command.runtime_turn_ref)
         if active is None:
             return RuntimeCommandResult(status="not_found")
+        if self._backend == "exec_json":
+            return RuntimeCommandResult(
+                status="rejected", code="unsupported_by_exec_backend"
+            )
         try:
             result = await active.client.request(
                 "turn/steer",
@@ -402,6 +608,12 @@ class CodexAgentRuntime(AgentRuntime):
         active = await self._active_turn(command.session, command.runtime_turn_ref)
         if active is None:
             return RuntimeCommandResult(status="not_found")
+        if self._backend == "exec_json":
+            try:
+                await active.client.interrupt()  # type: ignore[attr-defined]
+            except Exception:
+                return RuntimeCommandResult(status="unknown", code="transport_failed")
+            return RuntimeCommandResult(status="accepted")
         try:
             await active.client.request(
                 "turn/interrupt",
@@ -533,6 +745,15 @@ class CodexAgentRuntime(AgentRuntime):
     async def health_check(self) -> RuntimeHealth:
         if self._draining:
             return RuntimeHealth(healthy=True, state="draining")
+        if self._backend == "exec_json":
+            import shutil
+
+            executable = self._command[0] if self._command else "codex"
+            if shutil.which(executable) is None:
+                return RuntimeHealth(
+                    healthy=False, state="failed", detail=f"{executable} not found"
+                )
+            return RuntimeHealth(healthy=True, state="ready")
         client = self._client_factory({})
         try:
             await client.start()
