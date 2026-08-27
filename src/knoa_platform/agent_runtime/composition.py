@@ -542,6 +542,7 @@ def _build_agent_runtime_set(
             display_name=agent.display_name,
             instructions=instructions,
             command=agent.command,
+            backend=agent.backend,
             home=runtime_home,
             cwd=workspace,
             model=agent.model_binding.hint,

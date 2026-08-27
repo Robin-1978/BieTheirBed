@@ -137,7 +137,8 @@ node_agents:
     model_binding:
       ownership: runtime
     max_concurrency: 1
-    command: ["codex", "app-server"]
+    backend: exec_json
+    command: ["codex", "exec"]
     home: "agents/codex/home"
     cwd: "agents/codex/workspace"
     approval_policy: "never"

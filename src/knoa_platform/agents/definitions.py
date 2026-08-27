@@ -30,6 +30,7 @@ ResourceId = Annotated[
 InvocationKind = Literal["user", "delegate", "system"]
 Visibility = Literal["user", "delegate", "system"]
 AgentKind = Literal["knoa", "codex"]
+CodexBackend = Literal["app_server", "exec_json"]
 NativeCapability = Literal[
     "workspace_read",
     "workspace_write",
@@ -169,6 +170,7 @@ class NodeAgent(AgentConfigModel):
     callable_by: frozenset[str] = frozenset()
 
     command: tuple[str, ...] = ()
+    backend: CodexBackend = "app_server"
     home: str = ""
     cwd: str = ""
     sandbox: Literal["read-only", "workspace-write"] = "read-only"
