@@ -460,7 +460,44 @@ class KnoaAgentRuntime(AgentRuntime):
                             tool_name=proposed.name,
                             arguments=proposed.arguments,
                         )
-                        result = await client.call_tool(proposed)
+                        try:
+                            result = await client.call_tool(proposed)
+                        except Exception as exc:  # noqa: BLE001 - transport failures become tool results
+                            tool_calls += 1
+                            logger.exception(
+                                "MCP tool call failed: %s (%s)",
+                                proposed.name,
+                                type(exc).__name__,
+                            )
+                            yield ToolCallFinished(
+                                **self._event_base(request, runtime_turn_ref),
+                                tool_call_id=proposed.call_id,
+                                tool_name=proposed.name,
+                                status="failed",
+                                code="mcp_tool_call_failed",
+                                output={
+                                    "error": f"{type(exc).__name__}: {str(exc)[:1000]}"
+                                },
+                            )
+                            result_message = {
+                                "role": "tool",
+                                "tool_call_id": proposed.call_id,
+                                "content": json.dumps(
+                                    {
+                                        "call_id": proposed.call_id,
+                                        "tool_name": proposed.name,
+                                        "status": "failed",
+                                        "code": "mcp_tool_call_failed",
+                                        "message": f"{type(exc).__name__}: {str(exc)[:1000]}",
+                                    },
+                                    ensure_ascii=False,
+                                    sort_keys=True,
+                                    default=str,
+                                ),
+                            }
+                            model_messages.append(result_message)
+                            durable_messages.append(result_message)
+                            continue
                         tool_calls += 1
                         yield ToolCallFinished(
                             **self._event_base(request, runtime_turn_ref),
