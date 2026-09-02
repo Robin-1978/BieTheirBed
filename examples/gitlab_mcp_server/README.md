@@ -44,17 +44,20 @@ is:
 ```text
 Analyze the prepared failed-pipeline snapshot. Report attribution, compile/build
 totals and each failed Job's fingerprint. For every failed Job that is confirmed
-as OOM while peer compile Jobs succeeded, and that is still safely retryable,
-call the source GitLab MCP's precise Job retry Tool. Otherwise return stop or
-needs_human with the reason. Only report a retry after the Tool returns.
+as OOM while peer compile Jobs succeeded, has `retry_attempts < retry_limit`,
+and is still safely retryable, call the source GitLab MCP's precise Job retry
+Tool. Do not suppress a retry merely because earlier pipelines also had OOM.
+Otherwise return stop or needs_human with the reason. Only report a retry after
+the Tool returns.
 ```
 
 Immediately before each Job retry, the Provider re-reads the Job and its Pipeline
 Job list. It permits only `failed` or `canceled` and rejects the retry when a
 newer Job with the same name is already `created`, `pending`, `preparing`,
 `running` or otherwise active. Each Job is checked independently, so one Task
-may safely retry multiple eligible failed Jobs. Retry remains an ordinary
-approval-gated MCP Tool call.
+may safely retry multiple eligible failed Jobs. `gitlab.retry_oom_jobs` wraps
+that same check in one approval-gated call and performs at most three attempts
+per logical Job, stopping as soon as that Job succeeds.
 
 Store private configuration in `~/.knoa/secrets/mcp/gitlab.env` with mode 0600:
 

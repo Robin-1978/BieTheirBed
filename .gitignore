@@ -8,6 +8,7 @@ build/
 *.egg
 .coverage
 htmlcov/
+/tmp*/
 .pytest_cache/
 /logs/
 *.log
