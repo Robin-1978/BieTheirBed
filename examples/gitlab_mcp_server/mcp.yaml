@@ -34,4 +34,9 @@ tools:
   gitlab.retry_job:
     effect: external_side_effect
     capabilities: [mcp, network]
-    risk: high
+    # Bounded and idempotency-protected CI retry; still approval-gated.
+    risk: medium
+  gitlab.retry_oom_jobs:
+    effect: external_side_effect
+    capabilities: [mcp, network]
+    risk: medium

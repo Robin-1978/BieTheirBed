@@ -32,6 +32,9 @@ _RETRYABLE_JOB_STATUSES = frozenset({"failed", "canceled"})
 _SNAPSHOT_TRACE_LINES = 120
 _SNAPSHOT_TRACE_BYTES = 8 * 1024
 _SNAPSHOT_MAX_FAILED_JOBS = 8
+_MAX_RETRY_ATTEMPTS = 3
+_RETRY_POLL_SECONDS = 5
+_RETRY_WAIT_TIMEOUT_SECONDS = 1800
 logger = logging.getLogger("gitlab-mcp-example")
 
 _FAILURE_EVENT_INTRO = (
@@ -667,6 +670,16 @@ class GitLabClient:
         pipeline = pipeline or await self.get_pipeline(project, pipeline_id)
         attempts = await self.list_pipeline_jobs(project, pipeline_id)
         jobs = self._latest_logical_jobs(attempts)
+        attempts_by_name: dict[str, int] = {}
+        for attempt in attempts:
+            name = str(attempt.get("name", "")).strip()
+            if name:
+                attempts_by_name[name] = attempts_by_name.get(name, 0) + 1
+        for job in jobs:
+            name = str(job.get("name", "")).strip()
+            # GitLab creates another Job with the same name for each retry.
+            job["retry_attempts"] = max(attempts_by_name.get(name, 1) - 1, 0)
+            job["retry_limit"] = _MAX_RETRY_ATTEMPTS
         failed = [
             job for job in jobs
             if str(job.get("status", "")).casefold() in _RETRYABLE_JOB_STATUSES
@@ -826,6 +839,93 @@ class GitLabClient:
         self, project: str, job_id: str, idempotency_key: str
     ) -> dict[str, Any]:
         return await self._retry("job", project, job_id, idempotency_key)
+
+    async def retry_oom_jobs(
+        self,
+        project: str,
+        pipeline_id: str,
+        job_ids: list[str] | tuple[str, ...],
+        max_attempts: int = _MAX_RETRY_ATTEMPTS,
+    ) -> dict[str, Any]:
+        """Run a bounded OOM retry loop behind one approved Tool call.
+
+        The method revalidates the pipeline and traces before every attempt,
+        waits for the retried Job to finish, and stops early on success or a
+        non-OOM failure.  The batch idempotency record makes a duplicate Tool
+        call a read of the prior result rather than another retry sequence.
+        """
+        if not self.settings.actions_enabled:
+            raise PermissionError("GitLab retry actions are disabled")
+        pipeline_id = self._numeric_id(pipeline_id, "pipeline")
+        if not 1 <= int(max_attempts) <= _MAX_RETRY_ATTEMPTS:
+            raise ValueError(f"max_attempts must be between 1 and {_MAX_RETRY_ATTEMPTS}")
+        normalized_ids = tuple(dict.fromkeys(self._numeric_id(str(job_id), "job") for job_id in job_ids))
+        if not normalized_ids:
+            raise ValueError("job_ids must contain at least one Job ID")
+        key_material = json.dumps(
+            {"kind": "oom_batch", "project": project, "pipeline_id": pipeline_id,
+             "job_ids": normalized_ids, "max_attempts": int(max_attempts)},
+            sort_keys=True,
+        )
+        idempotency_key = f"knoa-oom-{hashlib.sha256(key_material.encode()).hexdigest()[:32]}"
+        request_hash = hashlib.sha256(key_material.encode()).hexdigest()
+        lock = self._action_locks.setdefault(idempotency_key, asyncio.Lock())
+        async with lock:
+            state, prior = self.store.claim_retry(idempotency_key, request_hash)
+            if state == "success":
+                return prior
+            if state in {"failed", "outcome_unknown", "pending"}:
+                raise RuntimeError(prior.get("error", f"retry action is {state}"))
+            jobs = self._latest_logical_jobs(await self.list_pipeline_jobs(project, pipeline_id))
+            compile_jobs = [
+                j for j in jobs
+                if any(m in str(j.get("name", "")).casefold() or m in str(j.get("stage", "")).casefold()
+                       for m in ("build", "compile"))
+                and str(j.get("status", "")).casefold() != "manual"
+            ]
+            if not any(str(j.get("status", "")).casefold() == "success" for j in compile_jobs):
+                failure = {"error": "OOM batch retry requires a successful peer compile Job"}
+                self.store.complete_retry(idempotency_key, "failed", failure)
+                raise RuntimeError(failure["error"])
+            results: list[dict[str, Any]] = []
+            for original_id in normalized_ids:
+                current_id = original_id
+                attempts = 0
+                job_result: dict[str, Any] = {"original_job_id": original_id, "attempts": 0}
+                while attempts < int(max_attempts):
+                    job = await self.get_job(project, current_id)
+                    status = str(job.get("status", "")).casefold()
+                    if status not in _RETRYABLE_JOB_STATUSES:
+                        job_result.update({"status": status, "stopped": True})
+                        break
+                    trace = await self.get_job_trace(project, current_id, tail_lines=_SNAPSHOT_TRACE_LINES, max_bytes=_SNAPSHOT_TRACE_BYTES)
+                    text = str(trace.get("trace", "")).casefold()
+                    if "killed (program cc1plus)" not in text and "out of memory" not in text and not re.search(r"\boom\b", text):
+                        job_result.update({"status": "non_oom", "stopped": True})
+                        break
+                    retried = await self._retry("job", project, current_id, f"{idempotency_key}-{original_id}-{attempts + 1}")
+                    attempts += 1
+                    new_id = str(retried.get("provider_result", {}).get("id", ""))
+                    if not _NUMERIC_ID.fullmatch(new_id):
+                        job_result.update({"status": "retry_submitted", "attempts": attempts, "provider_result": retried})
+                        break
+                    deadline = time.monotonic() + _RETRY_WAIT_TIMEOUT_SECONDS
+                    while True:
+                        latest = await self.get_job(project, new_id)
+                        latest_status = str(latest.get("status", "")).casefold()
+                        if latest_status not in _ACTIVE_JOB_STATUSES:
+                            break
+                        if time.monotonic() >= deadline:
+                            raise RuntimeError(f"timed out waiting for retried Job {new_id}")
+                        await asyncio.sleep(_RETRY_POLL_SECONDS)
+                    job_result.update({"last_job_id": new_id, "attempts": attempts, "last_status": latest_status})
+                    if latest_status == "success":
+                        break
+                    current_id = new_id
+                results.append(job_result)
+            result = {"status": "success", "kind": "oom_batch", "project": project, "pipeline_id": pipeline_id, "max_attempts": int(max_attempts), "jobs": results}
+            self.store.complete_retry(idempotency_key, "success", result)
+            return result
 
     async def _retry(
         self, kind: str, project: str, target_id: str, idempotency_key: str

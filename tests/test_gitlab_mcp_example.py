@@ -29,14 +29,14 @@ def _settings(tmp_path: Path, *, actions_enabled: bool = False) -> GitLabSetting
     )
 
 
-def test_gitlab_manifest_keeps_retry_behind_high_risk_approval() -> None:
+def test_gitlab_manifest_keeps_retry_behind_medium_risk_approval() -> None:
     manifest = yaml.safe_load(
         (Path(__file__).parents[1] / "examples/gitlab_mcp_server/mcp.yaml").read_text()
     )
     assert manifest["tools"]["gitlab.retry_job"] == {
         "effect": "external_side_effect",
         "capabilities": ["mcp", "network"],
-        "risk": "high",
+        "risk": "medium",
     }
     assert "gitlab.retry_pipeline" not in manifest["tools"]
     assert manifest["tools"]["gitlab.get_job_trace"]["effect"] == "read_only"
@@ -516,7 +516,7 @@ async def test_retry_job_rejects_newer_active_instance_with_same_name(
 
 
 @pytest.mark.asyncio
-async def test_mcp_exposes_resources_and_five_tools(tmp_path: Path) -> None:
+async def test_mcp_exposes_resources_and_retry_tools(tmp_path: Path) -> None:
     app = GitLabMCPApplication(_settings(tmp_path))
     result = await app._list_tools(None, None)
     names = {tool.name for tool in result.tools}
@@ -526,6 +526,7 @@ async def test_mcp_exposes_resources_and_five_tools(tmp_path: Path) -> None:
         "gitlab.get_job",
         "gitlab.get_job_trace",
         "gitlab.retry_job",
+        "gitlab.retry_oom_jobs",
     }
     retry_job = next(tool for tool in result.tools if tool.name == "gitlab.retry_job")
     assert retry_job.input_schema["required"] == ["project", "job_id"]

@@ -194,13 +194,29 @@ class GitLabMCPApplication:
         tools.append(
             types.Tool(
                 name="gitlab.retry_job",
-                description="Retry one failed GitLab CI job after host approval; the server blocks active or duplicate logical jobs.",
+                description="Retry one failed GitLab CI job after host approval; eligible OOM jobs may be retried up to three attempts, and the server blocks active or duplicate logical jobs.",
                 input_schema=_schema(
                     {
                         "project": {"type": "string"},
                         "job_id": {"type": ["string", "integer"]},
                     },
                     ["project", "job_id"],
+                ),
+                annotations=retry,
+            )
+        )
+        tools.append(
+            types.Tool(
+                name="gitlab.retry_oom_jobs",
+                description="After one host approval, retry confirmed OOM compile Jobs independently up to three attempts; stop early when a Job succeeds or ceases to be OOM.",
+                input_schema=_schema(
+                    {
+                        "project": {"type": "string"},
+                        "pipeline_id": {"type": ["string", "integer"]},
+                        "job_ids": {"type": "array", "items": {"type": ["string", "integer"]}, "minItems": 1, "maxItems": 8},
+                        "max_attempts": {"type": "integer", "minimum": 1, "maximum": 3, "default": 3},
+                    },
+                    ["project", "pipeline_id", "job_ids"],
                 ),
                 annotations=retry,
             )
@@ -231,6 +247,13 @@ class GitLabMCPApplication:
                     project,
                     job_id,
                     self._retry_key(name, project, job_id),
+                )
+            elif name == "gitlab.retry_oom_jobs":
+                payload = await self.gitlab.retry_oom_jobs(
+                    project,
+                    str(args.get("pipeline_id", "")),
+                    [str(job_id) for job_id in args.get("job_ids", [])],
+                    int(args.get("max_attempts", 3)),
                 )
             else:
                 raise LookupError("Unknown GitLab tool")
