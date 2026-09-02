@@ -1,5 +1,26 @@
+# =============================================================================
+# Knoa Node 默认配置模板 (default.yaml)
+# -----------------------------------------------------------------------------
+# 本文件按优先级被 local.yaml / --config / 环境变量覆盖;daemon 启动时通过
+# load_config() 读取。字段分两类:
+#
+#   1. 基础设施 (Infrastructure) —— 每次启动生效:
+#      service_host/port、webhook_*、gateway_*、feishu_*、dingtalk_*、
+#      trace_*、log_*、attachment_*、audio_transcription、capability_mcp_* 等。
+#
+#   2. Managed (运行时行为) —— 仅首次安装播种,运行时以数据库控制面为准:
+#      providers / models / default_model / fallback_* / default_agent /
+#      node_agents / approval_review / mcp_servers / skills。
+#      首次启动时这些字段被写入 assistant.db 的 config_revisions 作为种子,
+#      之后以 App / Node Console / CLI 发布到控制面的 applied revision 为准。
+#      直接改本文件/local.yaml 的这些字段不会影响已初始化的运行实例!
+#
+# 权威来源与修改方式见 docs/knoa-configuration-control-plane-design.md。
+# =============================================================================
 # Named API accounts/endpoints. Cloud accounts and their keys belong in the
 # per-user ~/.knoa/config/local.yaml file, outside the source tree.
+# NOTE: Managed (bootstrap-only) -- runtime provider config comes from the
+# Config Registry control plane, not this file, after first startup.
 providers:
   local_llama:
     driver: "llamacpp"
@@ -8,6 +29,7 @@ providers:
     timeout: 120
 
 # Stable application aliases mapped to upstream model identifiers.
+# NOTE: Managed (bootstrap-only) -- see the header comment.
 models:
   local_default:
     provider: "local_llama"
@@ -149,6 +171,8 @@ node_agents:
     max_event_queue: 1024
 
 approval_review:
+  # Managed (bootstrap-only) -- runtime mode is governed by the Config Registry
+  # control plane (App/Console). local.yaml edits do not change a running Node.
   mode: "off" # off | suggest | auto
   agent: "reviewer_agent"
   model: ""

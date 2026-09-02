@@ -30,6 +30,7 @@
 - [Knoa Unified Agent Runtime Design](knoa-agent-runtime-design.md)
 - [Knoa NodeAgent、Runtime 与委派设计](knoa-agent-profile-delegation-design.md)
 - [Knoa 配置控制面与管理页面架构设计](knoa-configuration-control-plane-design.md)
+- [Knoa 配置权威说明：YAML 与数据库控制面](knoa-config-authority.md)
 - [Knoa 扩展生态、模型接入与多节点 Hub 架构设计](knoa-extension-model-hub-node-design.md)
 - [Knoa Workspace 资源织网与共享执行架构设计](knoa-workspace-resource-fabric-design.md)
 - [Knoa Node、Agent 与共享资源架构](knoa-node-package-resource-instance-architecture.md)

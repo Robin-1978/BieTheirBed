@@ -744,3 +744,106 @@ async def test_knoa_runtime_interrupts_active_turn_with_explicit_terminal(
     assert result.status == "accepted"
     assert first.event_type == "turn_finished"
     assert first.status == "interrupted"
+
+
+class FailingToolProvider(Provider):
+    def stream(self, request, cancellation):
+        del cancellation
+
+        async def iterate():
+            self.requests.append(request)
+            if len(self.requests) == 1:
+                yield ProviderChunk(
+                    tool_calls=(
+                        ProposedToolCall(
+                            call_id="call-oom-1",
+                            name="mcp__gitlab__gitlab_retry_oom_jobs",
+                            arguments={
+                                "project": "software/gs_map",
+                                "pipeline_id": 757409,
+                                "job_ids": [9462790],
+                                "max_attempts": 1,
+                            },
+                        ),
+                    ),
+                    finish_reason="tool_calls",
+                    terminal=True,
+                )
+                return
+            yield ProviderChunk(content_delta="retry failed, stop")
+            yield ProviderChunk(finish_reason="stop", terminal=True)
+
+        return iterate()
+
+
+class FailingToolClient(Client):
+    async def list_tools(self):
+        return (
+            {
+                "name": "mcp__gitlab__gitlab_retry_oom_jobs",
+                "description": "Retry OOM jobs",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"project": {"type": "string"}},
+                    "required": ["project"],
+                },
+            },
+        )
+
+    async def call_tool(self, call):
+        raise RuntimeError("Invalid request parameters")
+
+
+class FailingToolConnector:
+    def connect(self, grant):
+        del grant
+
+        class Bound:
+            async def __aenter__(self):
+                return FailingToolClient()
+
+            async def __aexit__(self, *_args):
+                return None
+
+        return Bound()
+
+
+@pytest.mark.asyncio
+async def test_runtime_converts_mcp_tool_call_failure_to_failed_result(
+    tmp_path: Path,
+) -> None:
+    provider = FailingToolProvider()
+    runtime = KnoaAgentRuntime(
+        provider,
+        ContextCheckpointRepository(tmp_path / "context.db"),
+        FailingToolConnector(),
+        system_prompt="system",
+        health_probe=healthy,
+    )
+    session = await runtime.create_session(
+        CreateRuntimeSession(operation_id="create-a", binding_epoch=1)
+    )
+    turn = await runtime.start_turn(
+        RuntimeTurnRequest(
+            session=session,
+            operation_id="operation-a",
+            input=(TextPart(text="retry the oom job"),),
+            mcp=grant(),
+        )
+    )
+
+    events = [event async for event in turn.events]
+
+    finished = [
+        event
+        for event in events
+        if event.event_type == "tool_call_finished"
+    ]
+    assert len(finished) == 1
+    assert finished[0].tool_name == "mcp__gitlab__gitlab_retry_oom_jobs"
+    assert finished[0].status == "failed"
+    assert finished[0].code == "mcp_tool_call_failed"
+    assert "Invalid request parameters" in str(finished[0].output)
+    assert events[-1].event_type == "turn_finished"
+    assert events[-1].status == "completed"
+    assert events[-1].final_output == "retry failed, stop"
