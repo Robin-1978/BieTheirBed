@@ -1,0 +1,119 @@
+<mxfile host="app.diagrams.net"><diagram id="09fbd8nb-45aj" name="Page-1"><mxGraphModel>
+  <root>
+    <mxCell id="0"/>
+    <mxCell id="1" parent="0"/>
+    
+    <mxCell id="user" value="移动端用户&#xa;(User)" style="rounded=1;fillColor=#f1f5f9;strokeColor=#94a3b8;fontStyle=1;fontSize=12;fontColor=#1e293b;align=center;" vertex="1" parent="1">
+      <mxGeometry x="50" y="40" width="110" height="40" as="geometry"/>
+    </mxCell>
+    <mxCell id="line_user" value="" style="endArrow=none;dashed=1;strokeColor=#94a3b8;strokeWidth=1.5;" edge="1" parent="1" source="user">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="105" y="560" as="targetPoint"/>
+      </mxGeometry>
+    </mxCell>
+
+    <mxCell id="composer" value="ChatComposer&#xa;(输入解耦组件)" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;fontStyle=1;fontSize=12;fontColor=#1e3a8a;align=center;" vertex="1" parent="1">
+      <mxGeometry x="210" y="40" width="120" height="40" as="geometry"/>
+    </mxCell>
+    <mxCell id="line_composer" value="" style="endArrow=none;dashed=1;strokeColor=#2563eb;strokeWidth=1.5;" edge="1" parent="1" source="composer">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="270" y="560" as="targetPoint"/>
+      </mxGeometry>
+    </mxCell>
+
+    <mxCell id="watcher" value="TurnStreamWatcher&#xa;(流式监听总线)" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;fontStyle=1;fontSize=12;fontColor=#1e3a8a;align=center;" vertex="1" parent="1">
+      <mxGeometry x="380" y="40" width="130" height="40" as="geometry"/>
+    </mxCell>
+    <mxCell id="line_watcher" value="" style="endArrow=none;dashed=1;strokeColor=#2563eb;strokeWidth=1.5;" edge="1" parent="1" source="watcher">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="445" y="560" as="targetPoint"/>
+      </mxGeometry>
+    </mxCell>
+
+    <mxCell id="gateway" value="KnoaGateway&#xa;(安全通道/P2P)" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;fontStyle=1;fontSize=12;fontColor=#1e3a8a;align=center;" vertex="1" parent="1">
+      <mxGeometry x="560" y="40" width="120" height="40" as="geometry"/>
+    </mxCell>
+    <mxCell id="line_gateway" value="" style="endArrow=none;dashed=1;strokeColor=#2563eb;strokeWidth=1.5;" edge="1" parent="1" source="gateway">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="620" y="560" as="targetPoint"/>
+      </mxGeometry>
+    </mxCell>
+
+    <mxCell id="step_1" value="1. 输入文本/语音/图片并点击发送" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;fontSize=11;fontColor=#1e293b;" edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="105" y="110" as="sourcePoint"/>
+        <mxPoint x="270" y="110" as="targetPoint"/>
+      </mxGeometry>
+    </mxCell>
+
+    <mxCell id="step_2" value="2. 乐观更新插入 PendingTurn" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;fontSize=11;fontColor=#1e293b;" edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="270" y="145" as="sourcePoint"/>
+        <mxPoint x="445" y="145" as="targetPoint"/>
+      </mxGeometry>
+    </mxCell>
+
+    <mxCell id="step_3" value="3. createChatTurn(requestId, attachments)" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;fontSize=11;fontColor=#1e293b;" edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="270" y="180" as="sourcePoint"/>
+        <mxPoint x="620" y="180" as="targetPoint"/>
+      </mxGeometry>
+    </mxCell>
+
+    <mxCell id="step_4" value="4. SSE / WS: turn_delta (流式增量)" style="endArrow=classic;strokeColor=#2563eb;strokeWidth=1.5;dashed=1;fontSize=11;fontColor=#1e3a8a;" edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="620" y="225" as="sourcePoint"/>
+        <mxPoint x="445" y="225" as="targetPoint"/>
+      </mxGeometry>
+    </mxCell>
+
+    <mxCell id="step_5" value="5. 虚拟滚动容器增量上屏 (低频限流)" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;fontSize=11;fontColor=#1e293b;" edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="445" y="260" as="sourcePoint"/>
+        <mxPoint x="105" y="260" as="targetPoint"/>
+      </mxGeometry>
+    </mxCell>
+
+    <mxCell id="step_6" value="6. SSE: approval_required (拦截敏感操作)" style="endArrow=classic;strokeColor=#dc2626;strokeWidth=1.5;fontSize=11;fontColor=#991b1b;" edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="620" y="305" as="sourcePoint"/>
+        <mxPoint x="445" y="305" as="targetPoint"/>
+      </mxGeometry>
+    </mxCell>
+
+    <mxCell id="step_7" value="7. 弹出触觉反馈与 ApprovalCard" style="endArrow=classic;strokeColor=#dc2626;strokeWidth=1.5;fontSize=11;fontColor=#991b1b;" edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="445" y="340" as="sourcePoint"/>
+        <mxPoint x="105" y="340" as="targetPoint"/>
+      </mxGeometry>
+    </mxCell>
+
+    <mxCell id="step_8" value="8. 用户点击「批准/拒绝」" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;fontSize=11;fontColor=#1e293b;" edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="105" y="390" as="sourcePoint"/>
+        <mxPoint x="445" y="390" as="targetPoint"/>
+      </mxGeometry>
+    </mxCell>
+
+    <mxCell id="step_9" value="9. resolveChatApproval(decision)" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;fontSize=11;fontColor=#1e293b;" edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="445" y="425" as="sourcePoint"/>
+        <mxPoint x="620" y="425" as="targetPoint"/>
+      </mxGeometry>
+    </mxCell>
+
+    <mxCell id="step_10" value="10. 执行完成 / 写入资产缓存 (ArtifactCache)" style="endArrow=classic;strokeColor=#16a34a;strokeWidth=1.5;dashed=1;fontSize=11;fontColor=#166534;" edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="620" y="475" as="sourcePoint"/>
+        <mxPoint x="445" y="475" as="targetPoint"/>
+      </mxGeometry>
+    </mxCell>
+
+    <mxCell id="step_11" value="11. 渲染最终状态与产物卡片" style="endArrow=classic;strokeColor=#16a34a;strokeWidth=1.5;fontSize=11;fontColor=#166534;" edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="445" y="510" as="sourcePoint"/>
+        <mxPoint x="105" y="510" as="targetPoint"/>
+      </mxGeometry>
+    </mxCell>
+  </root>
+</mxGraphModel></diagram></mxfile>

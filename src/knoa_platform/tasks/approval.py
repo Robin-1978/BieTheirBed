@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 
 from knoa_platform.agent_runtime.contracts import RuntimeScope
@@ -16,6 +17,9 @@ from knoa_platform.tasks.event_hub import TaskEventHub
 from knoa_platform.tasks.identity import task_approval_action_id
 from knoa_platform.tasks.models import TaskApprovalRecord, TaskState
 from knoa_platform.tasks.repository import TaskRepository
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -83,18 +87,20 @@ class DurableApprovalService:
                 future=future,
             )
         try:
+            review: ApprovalReviewResult | None = None
+            review_request: ApprovalReviewRequest | None = None
             if (
                 _created
                 and self._reviewer is not None
                 and self._review_mode is not ApprovalReviewMode.OFF
             ):
-                task = await asyncio.to_thread(
-                    self._repository.get,
-                    scope.principal_id,
-                    run_id,
-                )
-                review = await self._reviewer.review(
-                    ApprovalReviewRequest(
+                try:
+                    task = await asyncio.to_thread(
+                        self._repository.get,
+                        scope.principal_id,
+                        run_id,
+                    )
+                    review_request = ApprovalReviewRequest(
                         principal_id=scope.principal_id,
                         run_id=run_id,
                         human_instruction=task.goal,
@@ -106,24 +112,41 @@ class DurableApprovalService:
                             "reason": reason,
                         },
                     )
-                )
-                rules = ",".join(review.rule_ids)
-                approval, event = await asyncio.to_thread(
-                    self._repository.annotate_approval_review,
-                    scope.principal_id,
-                    approval.approval_id,
-                    reason=(
-                        f"{reason}; reviewer[{review.reviewer_id}/{review.model}]="
-                        f"{review.decision.value}: {review.reason}"
-                        f"{'; rules=' + rules if rules else ''}"
-                    )[:2000],
-                )
+                    review = await self._reviewer.review(review_request)
+                    rules = ",".join(review.rule_ids)
+                    approval, event = await asyncio.to_thread(
+                        self._repository.annotate_approval_review,
+                        scope.principal_id,
+                        approval.approval_id,
+                        reason=(
+                            f"{reason}; reviewer[{review.reviewer_id}/{review.model}]="
+                            f"{review.decision.value}: {review.reason}"
+                            f"{'; rules=' + rules if rules else ''}"
+                        )[:2000],
+                    )
+                except Exception as reviewer_exc:
+                    logger.warning(
+                        "Approval reviewer failed for task %s, approval %s: %s",
+                        run_id,
+                        approval.approval_id,
+                        reviewer_exc,
+                    )
+                    review = None
             await self._events.publish(event)
             if (
                 _created
                 and self._reviewer is not None
                 and self._review_mode is ApprovalReviewMode.AUTO
-                and self._may_auto_resolve(review.decision, reason)
+                and review is not None
+                and self._may_auto_resolve(
+                    review.decision,
+                    reason,
+                    instruction_truncated=(
+                        review_request.instruction_truncated
+                        if review_request is not None
+                        else False
+                    ),
+                )
             ):
                 resolved, _changed, _state = await self.resolve(
                     scope.principal_id,
@@ -133,6 +156,21 @@ class DurableApprovalService:
                 )
                 return resolved.state.value == "approved"
             return await future
+        except BaseException:
+            if approval.state.value == "pending":
+                try:
+                    await self.resolve(
+                        scope.principal_id,
+                        approval.approval_id,
+                        approved=False,
+                        resolved_by="system:confirmation_error",
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to resolve pending approval %s after confirmation error",
+                        approval.approval_id,
+                    )
+            raise
         finally:
             async with self._lock:
                 current = self._waiters.get(approval.approval_id)
@@ -143,7 +181,11 @@ class DurableApprovalService:
         self,
         decision: ApprovalReviewDecision,
         policy_reason: str,
+        *,
+        instruction_truncated: bool = False,
     ) -> bool:
+        if instruction_truncated:
+            return False
         if self._review_mode is not ApprovalReviewMode.AUTO:
             return False
         if decision is ApprovalReviewDecision.ESCALATE:

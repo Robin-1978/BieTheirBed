@@ -8,7 +8,7 @@ import uuid
 from enum import Enum
 from typing import Any, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from knoa_agent_contracts import (
     AssistantDelta,
@@ -75,6 +75,18 @@ class ApprovalReviewRequest(BaseModel):
     human_instruction: str = Field(min_length=1, max_length=8000)
     proposed_action: ApprovalProposedAction
     verified_facts: dict[str, Any] = Field(default_factory=dict)
+    instruction_truncated: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _check_truncation(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            instruction = data.get("human_instruction")
+            if isinstance(instruction, str) and len(instruction) > 8000:
+                data = dict(data)
+                data["human_instruction"] = instruction[:8000]
+                data["instruction_truncated"] = True
+        return data
 
 
 class ApprovalReviewResult(BaseModel):
@@ -116,6 +128,16 @@ class KnoaReviewerAgent:
         self._timeout = timeout_seconds
 
     async def review(self, request: ApprovalReviewRequest) -> ApprovalReviewResult:
+        if request.instruction_truncated:
+            return ApprovalReviewResult(
+                decision=ApprovalReviewDecision.ESCALATE,
+                reason=(
+                    "Human instruction exceeds maximum length (8000 chars); "
+                    "automated review escalated to human to avoid truncation risk"
+                ),
+                reviewer_id=self._agent_id,
+                model=self._model,
+            )
         try:
             return await asyncio.wait_for(self._review(request), self._timeout)
         except asyncio.TimeoutError:

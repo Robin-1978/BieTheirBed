@@ -45,6 +45,7 @@ function AppNavigator() {
           }}
         >
           <Stack.Screen name="index" options={{ headerShown: false }} />
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="connect" options={{ headerShown: false }} />
           <Stack.Screen name="account/login" options={{ headerShown: false }} />
           <Stack.Screen name="account/index" options={{ title: t("nav.account") }} />
@@ -76,6 +77,8 @@ function AppNavigator() {
           />
           <Stack.Screen name="tasks/new" options={{ title: t("nav.newTask") }} />
           <Stack.Screen name="results" options={{ title: t("nav.results") }} />
+          <Stack.Screen name="artifacts" options={{ title: t("artifacts.title") }} />
+          <Stack.Screen name="event-sources/index" options={{ title: t("eventSources.title") }} />
           <Stack.Screen name="tasks/[id]" options={{ title: t("nav.taskDetails") }} />
           <Stack.Screen name="tasks/[id]/edit" options={{ title: t("nav.editTask") }} />
           <Stack.Screen name="task-executions/[id]" options={{ title: t("nav.executionDetails") }} />

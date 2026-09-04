@@ -42,7 +42,7 @@ export default function CaptureScreen() {
   function usePhoto() {
     if (!captured) return;
     router.replace({
-        pathname: "/chat",
+        pathname: "/(tabs)",
         params: {
           capturedUri: captured.uri,
           capturedName: captured.name,

@@ -24,7 +24,7 @@ type NodeRouteParams = {
 export function navigatePrimary(current: PrimaryScreen, target: PrimaryScreen, params: NodeRouteParams = {}) {
   if (current === target) return;
   pendingEntryDirection = target === "tasks" ? 1 : -1;
-  router.replace({ pathname: target === "tasks" ? "/tasks" : "/chat", params });
+  router.replace({ pathname: target === "tasks" ? "/(tabs)/tasks" : "/(tabs)", params });
 }
 
 function consumeEntryDirection(): -1 | 0 | 1 {

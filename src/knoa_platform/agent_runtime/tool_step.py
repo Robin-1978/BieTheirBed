@@ -253,12 +253,27 @@ class ToolStep:
                     code="confirmation_required",
                     message="Tool execution requires confirmation",
                 )
-            approved = await context.confirmation.confirm(
-                context.scope,
-                context.run_id,
-                call.model_copy(update={"name": tool_name, "arguments": arguments}),
-                f"{policy.effect.value}:{policy.risk.value}",
-            )
+            try:
+                approved = await context.confirmation.confirm(
+                    context.scope,
+                    context.run_id,
+                    call.model_copy(update={"name": tool_name, "arguments": arguments}),
+                    f"{policy.effect.value}:{policy.risk.value}",
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Confirmation failed for tool=%s run_id=%s: %s",
+                    tool_name,
+                    context.run_id,
+                    exc,
+                )
+                return self._result(
+                    call,
+                    "rejected",
+                    tool_name=tool_name,
+                    code="confirmation_failed",
+                    message=f"Confirmation failed: {exc}",
+                )
             if context.cancellation.is_set():
                 return self._result(
                     call,

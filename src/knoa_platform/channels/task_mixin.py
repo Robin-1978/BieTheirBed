@@ -228,7 +228,7 @@ class ChannelTaskMixin:
             return None
         action_key = "approval_id" if expected == "approval_requested" else "interaction_id"
         expected_action = str(intent.deep_link.get(action_key) or "")
-        stream = client.task_events(intent.execution_id)
+        stream = client.task_events(intent.execution_id, handle_approvals=False)
         try:
             async for event in stream:
                 if event.event_type != expected:

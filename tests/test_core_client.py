@@ -546,3 +546,33 @@ async def test_client_approval_handler_resolves_durable_approval(
         assert "approval_resolved" in [event.event_type for event in events]
     finally:
         await connected.close()
+
+
+@pytest.mark.asyncio
+async def test_client_task_events_handle_approvals_false_skips_handler(
+    tmp_path: Path,
+) -> None:
+    requests: list[TaskEvent] = []
+
+    async def approve(event: TaskEvent) -> bool:
+        requests.append(event)
+        return True
+
+    connected = await _connected(tmp_path, approval_handler=approve)
+    connected.runtime.confirm = True
+    try:
+        session = await connected.client.create_session()
+        accepted = await connected.client.create_task(session, "publish")
+        events = []
+        async for event in connected.client.task_events(
+            accepted.task_id, handle_approvals=False
+        ):
+            events.append(event)
+            if event.event_type == "approval_requested":
+                break
+
+        assert len(requests) == 0
+        assert any(event.event_type == "approval_requested" for event in events)
+    finally:
+        await connected.close()
+

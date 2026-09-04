@@ -52,4 +52,58 @@ describe("task reminders", () => {
     expect([...index.executionIds]).toEqual(["execution-3"]);
     expect([...index.taskIds]).toEqual(["task-a", "task-b"]);
   });
+
+  it("marks prior unread approval reminders as read when a terminal state arrives for the same execution", () => {
+    const approvalReminder: TaskReminder = {
+      reminderId: "intent:approval-1",
+      feedEventId: 10,
+      category: "approval",
+      taskId: "task-a",
+      executionId: "execution-1",
+      taskTitle: "GitLab CI",
+      occurredAt: 10,
+      read: false,
+    };
+    const completedReminder: TaskReminder = {
+      reminderId: "intent:completed-1",
+      feedEventId: 20,
+      category: "completed",
+      taskId: "task-a",
+      executionId: "execution-1",
+      taskTitle: "GitLab CI",
+      occurredAt: 20,
+      read: false,
+    };
+    const result = mergeTaskReminder([approvalReminder], completedReminder);
+    expect(result).toHaveLength(2);
+    expect(result.find((item) => item.reminderId === "intent:approval-1")?.read).toBe(true);
+    expect(result.find((item) => item.reminderId === "intent:completed-1")?.read).toBe(false);
+  });
+
+  it("supersedes prior unread approval reminders when a new approval arrives for the same execution", () => {
+    const approval1: TaskReminder = {
+      reminderId: "intent:approval-1",
+      feedEventId: 10,
+      category: "approval",
+      taskId: "task-a",
+      executionId: "execution-1",
+      taskTitle: "GitLab CI",
+      occurredAt: 10,
+      read: false,
+    };
+    const approval2: TaskReminder = {
+      reminderId: "intent:approval-2",
+      feedEventId: 15,
+      category: "approval",
+      taskId: "task-a",
+      executionId: "execution-1",
+      taskTitle: "GitLab CI",
+      occurredAt: 15,
+      read: false,
+    };
+    const result = mergeTaskReminder([approval1], approval2);
+    expect(result).toHaveLength(2);
+    expect(result.find((item) => item.reminderId === "intent:approval-1")?.read).toBe(true);
+    expect(result.find((item) => item.reminderId === "intent:approval-2")?.read).toBe(false);
+  });
 });

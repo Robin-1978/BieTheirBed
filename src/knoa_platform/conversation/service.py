@@ -174,6 +174,7 @@ class ConversationApprovalService:
             )
             if current.state != "pending" and not future.done():
                 future.set_result(current.state == "approved")
+            review_request: ApprovalReviewRequest | None = None
             if (
                 _created
                 and self._reviewer is not None
@@ -185,19 +186,20 @@ class ConversationApprovalService:
                     scope.principal_id,
                     run_id,
                 )
+                review_request = ApprovalReviewRequest(
+                    principal_id=scope.principal_id,
+                    run_id=run_id,
+                    human_instruction=turn.user_input,
+                    proposed_action={
+                        "tool_name": call.name,
+                        "arguments": call.arguments,
+                        "effect": reason.partition(":")[0] or "unknown",
+                        "risk": reason.partition(":")[2] or "high",
+                        "reason": reason,
+                    },
+                )
                 review_task = asyncio.create_task(
-                    self._reviewer.review(ApprovalReviewRequest(
-                        principal_id=scope.principal_id,
-                        run_id=run_id,
-                        human_instruction=turn.user_input,
-                        proposed_action={
-                            "tool_name": call.name,
-                            "arguments": call.arguments,
-                            "effect": reason.partition(":")[0] or "unknown",
-                            "risk": reason.partition(":")[2] or "high",
-                            "reason": reason,
-                        },
-                    ))
+                    self._reviewer.review(review_request)
                 )
                 done, _pending = await asyncio.wait(
                     {review_task, future},
@@ -207,25 +209,41 @@ class ConversationApprovalService:
                     review_task.cancel()
                     await asyncio.gather(review_task, return_exceptions=True)
                     return await future
-                review = await review_task
-                rules = ",".join(review.rule_ids)
-                approval = await asyncio.to_thread(
-                    self._repository.annotate_approval_review,
-                    scope.principal_id,
-                    approval.approval_id,
-                    reason=(
-                        f"{reason}; reviewer[{review.reviewer_id}/{review.model}]="
-                        f"{review.decision.value}: {review.reason}"
-                        f"{'; rules=' + rules if rules else ''}"
-                    )[:2000],
-                )
+                try:
+                    review = await review_task
+                    rules = ",".join(review.rule_ids)
+                    approval = await asyncio.to_thread(
+                        self._repository.annotate_approval_review,
+                        scope.principal_id,
+                        approval.approval_id,
+                        reason=(
+                            f"{reason}; reviewer[{review.reviewer_id}/{review.model}]="
+                            f"{review.decision.value}: {review.reason}"
+                            f"{'; rules=' + rules if rules else ''}"
+                        )[:2000],
+                    )
+                except Exception as reviewer_exc:
+                    logger.warning(
+                        "Conversation approval reviewer failed for run %s: %s",
+                        run_id,
+                        reviewer_exc,
+                    )
+                    review = None
             await self._notify(run_id)
             if (
                 _created
                 and self._reviewer is not None
                 and self._review_mode is ApprovalReviewMode.AUTO
                 and review is not None
-                and self._may_auto_resolve(review.decision, reason)
+                and self._may_auto_resolve(
+                    review.decision,
+                    reason,
+                    instruction_truncated=(
+                        review_request.instruction_truncated
+                        if review_request is not None
+                        else False
+                    ),
+                )
             ):
                 resolved, _changed = await self.resolve(
                     scope.principal_id,
@@ -247,7 +265,11 @@ class ConversationApprovalService:
         self,
         decision: ApprovalReviewDecision,
         policy_reason: str,
+        *,
+        instruction_truncated: bool = False,
     ) -> bool:
+        if instruction_truncated:
+            return False
         if self._review_mode is not ApprovalReviewMode.AUTO:
             return False
         if decision is ApprovalReviewDecision.ESCALATE:

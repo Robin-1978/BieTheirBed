@@ -30,11 +30,12 @@ export default function TaskDetailScreen() {
   const [executions, setExecutions] = useState<TaskExecution[]>([]);
   const [working, setWorking] = useState("");
   const [error, setError] = useState("");
+  const taskRef = useRef<Task | null>(null);
+  taskRef.current = task;
   const latestRefreshEvent = useRef(gateway.latestEvent?.feed_event_id ?? 0);
 
   const refresh = useCallback(async () => {
     if (!gateway.client || !taskId) return;
-    setError("");
     try {
       const [nextTask, nextExecutions] = await gateway.runAuthenticated((client) => Promise.all([
         client.getTask(taskId),
@@ -42,9 +43,12 @@ export default function TaskDetailScreen() {
       ]));
       setTask(nextTask);
       setExecutions(nextExecutions);
+      setError("");
       void storeTaskDetailCache(taskId, { task: nextTask, executions: nextExecutions });
     } catch {
-      setError(t("taskDetail.loadFailed"));
+      if (!taskRef.current) {
+        setError(t("taskDetail.loadFailed"));
+      }
     }
   }, [gateway.client, gateway.runAuthenticated, t, taskId]);
 
@@ -52,13 +56,16 @@ export default function TaskDetailScreen() {
     let active = true;
     void loadTaskDetailCache(taskId).then((cached) => {
       if (!active || !cached) return;
-      setTask(cached.task);
-      setExecutions(cached.executions);
-    }).finally(() => {
-      if (active) void refresh();
+      setTask((current) => current ?? cached.task);
+      setExecutions((current) => current.length ? current : cached.executions);
     });
     return () => { active = false; };
-  }, [refresh, taskId]);
+  }, [taskId]);
+
+  useEffect(() => {
+    if (!taskId || gateway.status !== "ready") return;
+    void refresh();
+  }, [gateway.status, refresh, taskId]);
   useEffect(() => {
     if (!gateway.latestEvent || gateway.latestEvent.feed_event_id <= latestRefreshEvent.current) return;
     latestRefreshEvent.current = gateway.latestEvent.feed_event_id;

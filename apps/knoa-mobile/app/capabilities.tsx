@@ -65,7 +65,7 @@ export default function CapabilitiesScreen() {
     : 0;
 
   function openScenario(prompt: string) {
-    router.push({ pathname: "/chat", params: { prefill: prompt } });
+    router.push({ pathname: "/(tabs)", params: { prefill: prompt } });
   }
 
   return (

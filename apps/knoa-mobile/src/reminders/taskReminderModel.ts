@@ -20,7 +20,22 @@ export function mergeTaskReminder(
   if (reminders.some((reminder) => reminder.reminderId === incoming.reminderId)) {
     return reminders;
   }
-  return [...reminders, incoming]
+
+  let next = reminders;
+  if (incoming.category === "completed" || incoming.category === "failed" || incoming.category === "approval") {
+    next = next.map((reminder) => {
+      if (
+        reminder.executionId === incoming.executionId &&
+        reminder.category === "approval" &&
+        !reminder.read
+      ) {
+        return { ...reminder, read: true };
+      }
+      return reminder;
+    });
+  }
+
+  return [...next, incoming]
     .sort((left, right) => left.feedEventId - right.feedEventId)
     .slice(-MAX_REMINDERS);
 }

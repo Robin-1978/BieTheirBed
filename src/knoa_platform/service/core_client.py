@@ -935,6 +935,7 @@ class CoreClient(CoreArtifactClientMixin, CoreAutomationClientMixin):
         task_id: str,
         *,
         after_seq: int = 0,
+        handle_approvals: bool = True,
     ) -> AsyncIterator[TaskEvent]:
         request_id = self._request_id()
         response = await self._request(
@@ -959,6 +960,7 @@ class CoreClient(CoreArtifactClientMixin, CoreAutomationClientMixin):
                     )
                 if (
                     item.event_type == "approval_requested"
+                    and handle_approvals
                     and self._approval_handler is not None
                 ):
                     approved = False

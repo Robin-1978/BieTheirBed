@@ -1,0 +1,87 @@
+<mxfile host="app.diagrams.net"><diagram id="n32f2zwz-c50s" name="Page-1"><mxGraphModel>
+  <root>
+    <mxCell id="0"/>
+    <mxCell id="1" parent="0"/>
+    
+    <mxCell id="group_ui" value="终端表现层 (Mobile Presentation Layer)" style="rounded=1;fillColor=#f1f5f9;strokeColor=#94a3b8;fontStyle=1;align=left;verticalAlign=top;spacingLeft=15;spacingTop=10;fontSize=13;fontColor=#1e293b;" vertex="1" parent="1">
+      <mxGeometry x="40" y="40" width="720" height="150" as="geometry"/>
+    </mxCell>
+    
+    <mxCell id="tab_chat" value="会话中心&#xa;(Chat Screen)&#xa;流式交互/多模态" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;fontStyle=1;fontSize=12;fontColor=#1e3a8a;align=center;" vertex="1" parent="group_ui">
+      <mxGeometry x="20" y="45" width="150" height="75" as="geometry"/>
+    </mxCell>
+    
+    <mxCell id="tab_tasks" value="任务中心&#xa;(Task Hub)&#xa;离线队列/执行回放" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;fontStyle=1;fontSize=12;fontColor=#1e3a8a;align=center;" vertex="1" parent="group_ui">
+      <mxGeometry x="195" y="45" width="150" height="75" as="geometry"/>
+    </mxCell>
+    
+    <mxCell id="tab_assets" value="资产中心&#xa;(Unified Assets)&#xa;成果报告/工件归档" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;fontStyle=1;fontSize=12;fontColor=#1e3a8a;align=center;" vertex="1" parent="group_ui">
+      <mxGeometry x="370" y="45" width="150" height="75" as="geometry"/>
+    </mxCell>
+    
+    <mxCell id="tab_settings" value="控制中心&#xa;(Node &amp; Settings)&#xa;节点抽屉/通道诊断" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;fontStyle=1;fontSize=12;fontColor=#1e3a8a;align=center;" vertex="1" parent="group_ui">
+      <mxGeometry x="545" y="45" width="150" height="75" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="group_components" value="核心领域解耦层 (Domain Components Layer)" style="rounded=1;fillColor=#f1f5f9;strokeColor=#94a3b8;fontStyle=1;align=left;verticalAlign=top;spacingLeft=15;spacingTop=10;fontSize=13;fontColor=#1e293b;" vertex="1" parent="1">
+      <mxGeometry x="40" y="220" width="720" height="150" as="geometry"/>
+    </mxCell>
+    
+    <mxCell id="comp_chat_core" value="ChatComposer&#xa;&amp; TurnStreamList&#xa;虚拟滚动/输入缓冲" style="rounded=1;fillColor=#ffffff;strokeColor=#2563eb;fontSize=12;fontColor=#1e293b;align=center;" vertex="1" parent="group_components">
+      <mxGeometry x="20" y="45" width="150" height="75" as="geometry"/>
+    </mxCell>
+    
+    <mxCell id="comp_task_core" value="TaskTimelineView&#xa;&amp; ApprovalInterceptor&#xa;步骤解析/交互卡片" style="rounded=1;fillColor=#ffffff;strokeColor=#2563eb;fontSize=12;fontColor=#1e293b;align=center;" vertex="1" parent="group_components">
+      <mxGeometry x="195" y="45" width="150" height="75" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="comp_asset_core" value="AssetAggregationEngine&#xa;多维检索/预览/分享导出" style="rounded=1;fillColor=#ffffff;strokeColor=#2563eb;fontSize=12;fontColor=#1e293b;align=center;" vertex="1" parent="group_components">
+      <mxGeometry x="370" y="45" width="150" height="75" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="comp_node_core" value="NodeSwitchDrawer&#xa;轻量级单机直连/多节点" style="rounded=1;fillColor=#ffffff;strokeColor=#2563eb;fontSize=12;fontColor=#1e293b;align=center;" vertex="1" parent="group_components">
+      <mxGeometry x="545" y="45" width="150" height="75" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="group_infra" value="数据管道与传输底座 (Data &amp; Transport Layer)" style="rounded=1;fillColor=#f1f5f9;strokeColor=#94a3b8;fontStyle=1;align=left;verticalAlign=top;spacingLeft=15;spacingTop=10;fontSize=13;fontColor=#1e293b;" vertex="1" parent="1">
+      <mxGeometry x="40" y="400" width="720" height="150" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="data_cache" value="统一数据缓存层&#xa;(Query Cache &amp; Storage)&#xa;离线持久化 / 乐观更新" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;fontStyle=1;fontSize=12;fontColor=#1e3a8a;align=center;" vertex="1" parent="group_infra">
+      <mxGeometry x="40" y="45" width="200" height="75" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="data_event" value="事件流总线&#xa;(SSE / WebSocket Feed)&#xa;实时任务流 / 节点状态" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;fontStyle=1;fontSize=12;fontColor=#1e3a8a;align=center;" vertex="1" parent="group_infra">
+      <mxGeometry x="260" y="45" width="200" height="75" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="data_transport" value="多通道传输引擎&#xa;P2P Direct / LAN / Relay&#xa;双向加密 / 动态重试" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;fontStyle=1;fontSize=12;fontColor=#1e3a8a;align=center;" vertex="1" parent="group_infra">
+      <mxGeometry x="480" y="45" width="200" height="75" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="edge_1" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;" edge="1" parent="1" source="tab_chat" target="comp_chat_core">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="edge_2" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;" edge="1" parent="1" source="tab_tasks" target="comp_task_core">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="edge_3" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;" edge="1" parent="1" source="tab_assets" target="comp_asset_core">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="edge_4" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;" edge="1" parent="1" source="tab_settings" target="comp_node_core">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="edge_5" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;" edge="1" parent="1" source="comp_chat_core" target="data_cache">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="edge_6" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;" edge="1" parent="1" source="comp_task_core" target="data_event">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="edge_7" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;" edge="1" parent="1" source="comp_asset_core" target="data_cache">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="edge_8" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;" edge="1" parent="1" source="comp_node_core" target="data_transport">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+  </root>
+</mxGraphModel></diagram></mxfile>

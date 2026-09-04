@@ -81,7 +81,7 @@ export default function WorkspaceWorkScreen() {
         void gateway.openConversation(item.entity_id).catch((caught) => {
           setActionError(userFacingError(caught, t("work.connectFailed")));
         });
-        router.push({ pathname: "/chat", params: routeParams });
+        router.push({ pathname: "/(tabs)", params: routeParams });
       } else {
         router.push({ pathname: "/tasks/[id]", params: { ...routeParams, id: item.entity_id } });
       }

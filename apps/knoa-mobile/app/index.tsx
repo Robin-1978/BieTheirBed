@@ -116,7 +116,7 @@ async function restoreLanding(gateway: ReturnType<typeof useGateway>): Promise<v
   try {
     await gateway.switchNode(preference.nodeId);
     router.replace({
-      pathname: "/node",
+      pathname: "/(tabs)",
       params: {
         workspaceId: workspace.workspaceId,
         workspaceName: workspace.displayName,
