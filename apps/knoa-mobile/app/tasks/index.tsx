@@ -1,6 +1,7 @@
 import { router } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   RefreshControl,
   SectionList,
   StyleSheet,
@@ -12,7 +13,6 @@ import type { Task, TaskDefinitionState, TaskState } from "@/api/models";
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { AsyncStateView } from "@/components/AsyncStateView";
-import { PrimarySwipeNavigation } from "@/components/PrimarySwipeNavigation";
 import { currentTaskSections } from "@/components/taskListPresentation";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
@@ -28,34 +28,41 @@ export default function TasksScreen() {
   const gateway = useGateway();
   const { unreadTaskIds } = useTaskReminders();
   const { t } = useI18n();
-  const filters: Array<{ label: string; value: Filter }> = [
-    { label: t("tasks.filter.current"), value: "current" },
-    { label: t("tasks.filter.active"), value: "active" },
-    { label: t("tasks.filter.paused"), value: "paused" },
-    { label: t("tasks.filter.archived"), value: "archived" },
-  ];
+
   const [tasks, setTasks] = useState<Task[]>([]);
   const [filter, setFilter] = useState<Filter>("current");
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [runningTaskId, setRunningTaskId] = useState("");
+  const tasksRef = useRef<Task[]>([]);
+  tasksRef.current = tasks;
   const taskCacheScope = gateway.nodeId || "unselected";
   const [queued, setQueued] = useState<QueuedTask[]>([]);
   const latestRefreshEvent = useRef(gateway.latestEvent?.feed_event_id ?? 0);
 
+  const filters: Array<{ label: string; value: Filter; count: number }> = useMemo(() => [
+    { label: t("tasks.filter.current"), value: "current", count: tasks.filter((task) => task.state !== "archived").length },
+    { label: t("tasks.filter.active"), value: "active", count: tasks.filter((task) => task.state === "active").length },
+    { label: t("tasks.filter.paused"), value: "paused", count: tasks.filter((task) => task.state === "paused").length },
+    { label: t("tasks.filter.archived"), value: "archived", count: tasks.filter((task) => task.state === "archived").length },
+  ], [t, tasks]);
+
   const refresh = useCallback(async () => {
     if (!gateway.client) return;
     setRefreshing(true);
-    setError("");
     try {
       const result = await gateway.runAuthenticated((client) => client.listTasks({
         includeArchived: true,
         limit: 200,
       }));
       setTasks(result.tasks);
+      setError("");
       void storeTaskCache(taskCacheScope, result.tasks);
     } catch {
-      setError(t("tasks.loadFailed"));
+      if (!tasksRef.current.length) {
+        setError(t("tasks.loadFailed"));
+      }
     } finally {
       setRefreshing(false);
       setLoading(false);
@@ -66,14 +73,21 @@ export default function TasksScreen() {
     let active = true;
     void loadTaskCache(taskCacheScope).then((cached) => {
       if (!active || !cached) return;
-      setTasks(cached);
+      setTasks((current) => current.length ? current : cached);
       setLoading(false);
-    }).finally(() => {
-      if (active) void refresh();
     });
     return () => { active = false; };
-  }, [refresh, taskCacheScope]);
-  useEffect(() => { void loadOfflineTasks().then(setQueued); }, []);
+  }, [taskCacheScope]);
+
+  useEffect(() => {
+    if (gateway.status !== "ready") return;
+    void refresh();
+  }, [gateway.status, refresh]);
+
+  useEffect(() => {
+    void loadOfflineTasks().then(setQueued);
+  }, []);
+
   const flushQueued = useCallback(async () => {
     if (!gateway.client || gateway.status !== "ready") return;
     for (const item of queued) {
@@ -94,7 +108,11 @@ export default function TasksScreen() {
     setQueued(await loadOfflineTasks());
     await refresh();
   }, [gateway.client, gateway.runAuthenticated, gateway.status, queued, refresh]);
-  useEffect(() => { if (gateway.status === "ready" && queued.length) void flushQueued(); }, [flushQueued, gateway.status, queued.length]);
+
+  useEffect(() => {
+    if (gateway.status === "ready" && queued.length) void flushQueued();
+  }, [flushQueued, gateway.status, queued.length]);
+
   useEffect(() => {
     if (!gateway.latestEvent || gateway.latestEvent.feed_event_id <= latestRefreshEvent.current) return;
     latestRefreshEvent.current = gateway.latestEvent.feed_event_id;
@@ -102,10 +120,24 @@ export default function TasksScreen() {
     return () => clearTimeout(timer);
   }, [gateway.latestEvent, refresh]);
 
+  async function handleExecuteNow(taskId: string) {
+    if (!gateway.client || runningTaskId) return;
+    setRunningTaskId(taskId);
+    try {
+      const execution = await gateway.runAuthenticated((client) => client.executeTask(taskId));
+      router.push(`/task-executions/${execution.execution_id}`);
+    } catch {
+      router.push(`/tasks/${taskId}`);
+    } finally {
+      setRunningTaskId("");
+    }
+  }
+
   const visibleTasks = useMemo(
     () => tasks.filter((task) => filter === "current" ? task.state !== "archived" : task.state === filter),
     [filter, tasks],
   );
+
   const sections = useMemo<TaskSection[]>(() => filter === "current"
     ? currentTaskSections(visibleTasks).map((section) => ({
         ...section,
@@ -114,114 +146,179 @@ export default function TasksScreen() {
     : [{ key: filter, title: "", data: visibleTasks }], [filter, t, visibleTasks]);
 
   return (
-    <PrimarySwipeNavigation current="tasks">
-      <View style={styles.container}>
-      <View style={styles.topline}>
-        <View>
-          <Text style={styles.heading}>{t("tasks.title")}</Text>
-          <Text style={styles.description}>{t("tasks.description")}</Text>
-        </View>
-        <View style={styles.topActions}>
-          <AppPressable
-            accessibilityRole="button"
-            accessibilityLabel={t("eventSources.title")}
-            onPress={() => router.push("/event-sources")}
-            style={styles.sourceButton}
-          >
-            <AppIcon name="history" color={colors.accent} size={21} />
-          </AppPressable>
-          <AppPressable
-            accessibilityRole="button"
-            accessibilityLabel={t("tasks.new")}
-            onPress={() => router.push("/tasks/new")}
-            style={styles.newButton}
-          >
-            <AppIcon name="plus" color={colors.onAccent} size={22} />
-          </AppPressable>
-        </View>
-      </View>
-      {gateway.availableUpdate ? (
-        <AppPressable style={styles.updateBanner} onPress={() => router.push("/update") }>
-          <View>
-            <Text style={styles.updateTitle}>{t("tasks.updateAvailable", { version: gateway.availableUpdate.version_name })}</Text>
-            <Text style={styles.updateDetail}>{t("tasks.updateResume")}</Text>
-          </View>
-          <Text style={styles.updateLink}>{t("tasks.view")}</Text>
-        </AppPressable>
-      ) : null}
-      {queued.length ? <AppPressable style={styles.offlineBanner} onPress={() => void flushQueued()}><Text style={styles.offlineTitle}>{t("tasks.offlineQueued", { count: queued.length })}</Text><Text style={styles.offlineDetail}>{t("tasks.offlineQueuedDetail")}</Text></AppPressable> : null}
-      <View style={styles.filters}>
-        {filters.map((item) => (
-          <AppPressable
-            key={item.value}
-            accessibilityRole="button"
-            accessibilityState={{ selected: filter === item.value }}
-            onPress={() => setFilter(item.value)}
-            style={[styles.filter, filter === item.value && styles.filterActive]}
-          >
-            <Text style={[styles.filterText, filter === item.value && styles.filterTextActive]}>{item.label}</Text>
-          </AppPressable>
-        ))}
-      </View>
-      {loading ? <AsyncStateView state="loading" /> : null}
-      {error ? <AsyncStateView state="error" message={error} retryLabel={t("tasks.reload")} onRetry={() => void refresh()} /> : null}
-      <SectionList
-        sections={sections}
-        keyExtractor={(task) => task.task_id}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />}
-        contentContainerStyle={styles.list}
-        ListEmptyComponent={!loading && !error ? (
-          <AsyncStateView state="empty" title={t("tasks.emptyTitle")} message={t("tasks.emptyBody")} />
-        ) : null}
-        renderSectionHeader={({ section }) => section.title ? (
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>{section.title}</Text>
-            <Text style={styles.sectionCount}>{section.data.length}</Text>
-          </View>
-        ) : null}
-        renderItem={({ item }) => (
-          <AppPressable
-            accessibilityRole="button"
-            accessibilityLabel={`${item.title}，${taskStatusLabel(item, t)}，${t("tasks.executions", { count: item.execution_count })}${unreadTaskIds.has(item.task_id) ? `，${t("reminders.unread")}` : ""}`}
-            style={styles.task}
-            onPress={() => router.push(`/tasks/${item.task_id}`)}
-          >
-            <View style={styles.taskHeader}>
-              <View style={styles.titleRow}>
-                {unreadTaskIds.has(item.task_id) ? <View accessibilityElementsHidden style={styles.unreadDot} /> : null}
-                <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
-              </View>
-              <Text style={[
-                styles.state,
-                taskStatusTone(item) === "warning" && styles.warningState,
-                taskStatusTone(item) === "danger" && styles.dangerState,
-              ]}>{taskStatusLabel(item, t)}</Text>
+    <View style={styles.container}>
+      {/* 顶部版本与离线队列横条 */}
+        {gateway.availableUpdate ? (
+          <AppPressable style={styles.updateBanner} onPress={() => router.push("/update")}>
+            <View style={styles.flex}>
+              <Text style={styles.updateTitle}>
+                {t("tasks.updateAvailable", { version: gateway.availableUpdate.version_name })}
+              </Text>
+              <Text style={styles.updateDetail}>{t("tasks.updateResume")}</Text>
             </View>
-            {item.latest_execution_state === "failed" && item.latest_execution_failure_code ? (
-              <Text style={styles.failure} numberOfLines={2}>{t("tasks.latestFailure", { code: item.latest_execution_failure_code })}</Text>
-            ) : item.latest_execution_summary ? (
-              <View style={styles.latestResult}>
-                <Text style={styles.latestLabel}>{t("tasks.latestResult")}</Text>
-                <Text style={styles.result} numberOfLines={3}>{item.latest_execution_summary}</Text>
-              </View>
-            ) : item.latest_execution_failure_code ? (
-              <Text style={styles.failure} numberOfLines={2}>{t("tasks.latestFailure", { code: item.latest_execution_failure_code })}</Text>
-            ) : (
-              <Text style={styles.goal} numberOfLines={3}>{item.goal}</Text>
-            )}
-            <View style={styles.metaRow}>
-              <View style={styles.metaCopy}>
-                <Text style={styles.meta}>{launchLabel(item, t)}</Text>
-                <Text style={styles.meta}>{t("tasks.executions", { count: item.execution_count })}</Text>
-                {item.state !== "active" ? <Text style={styles.meta}>{stateLabel(item.state, t)}</Text> : null}
-              </View>
-              <AppIcon name="chevron-right" color={colors.muted} size={18} />
-            </View>
+            <Text style={styles.updateLink}>{t("tasks.view")}</Text>
           </AppPressable>
-        )}
-      />
+        ) : null}
+
+        {queued.length ? (
+          <AppPressable style={styles.offlineBanner} onPress={() => void flushQueued()}>
+            <Text style={styles.offlineTitle}>{t("tasks.offlineQueued", { count: queued.length })}</Text>
+            <Text style={styles.offlineDetail}>{t("tasks.offlineQueuedDetail")}</Text>
+          </AppPressable>
+        ) : null}
+
+        {/* 过滤药丸栏 */}
+        <View style={styles.filters}>
+          {filters.map((item) => {
+            const isActive = filter === item.value;
+            return (
+              <AppPressable
+                key={item.value}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isActive }}
+                onPress={() => setFilter(item.value)}
+                style={[styles.filter, isActive && styles.filterActive]}
+              >
+                <Text style={[styles.filterText, isActive && styles.filterTextActive]}>
+                  {item.label} ({item.count})
+                </Text>
+              </AppPressable>
+            );
+          })}
+        </View>
+
+        {loading ? <AsyncStateView state="loading" /> : null}
+        {error ? (
+          <AsyncStateView
+            state="error"
+            message={error}
+            retryLabel={t("tasks.reload")}
+            onRetry={() => void refresh()}
+          />
+        ) : null}
+
+        <SectionList
+          sections={sections}
+          keyExtractor={(task) => task.task_id}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />}
+          contentContainerStyle={styles.list}
+          ListEmptyComponent={
+            !loading && !error ? (
+              <AsyncStateView state="empty" title={t("tasks.emptyTitle")} message={t("tasks.emptyBody")} />
+            ) : null
+          }
+          renderSectionHeader={({ section }) => (
+            section.title ? (
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>{section.title}</Text>
+                <View style={styles.countBadge}>
+                  <Text style={styles.countBadgeText}>{section.data.length}</Text>
+                </View>
+              </View>
+            ) : null
+          )}
+          renderItem={({ item }) => {
+            const tone = taskStatusTone(item);
+            const isExecutingThis = runningTaskId === item.task_id;
+            return (
+              <AppPressable
+                accessibilityRole="button"
+                style={styles.taskCard}
+                onPress={() => router.push(`/tasks/${item.task_id}`)}
+              >
+                {/* 左侧状态色条 */}
+                <View
+                  style={[
+                    styles.statusStripe,
+                    tone === "warning" && styles.stripeWarning,
+                    tone === "danger" && styles.stripeDanger,
+                    tone === "success" && styles.stripeSuccess,
+                  ]}
+                />
+
+                <View style={styles.cardMain}>
+                  <View style={styles.taskHeader}>
+                    <View style={styles.titleRow}>
+                      {unreadTaskIds.has(item.task_id) ? <View style={styles.unreadDot} /> : null}
+                      <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.stateBadge,
+                        tone === "warning" && styles.badgeWarning,
+                        tone === "danger" && styles.badgeDanger,
+                        tone === "success" && styles.badgeSuccess,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.stateText,
+                          tone === "warning" && styles.stateTextWarning,
+                          tone === "danger" && styles.stateTextDanger,
+                          tone === "success" && styles.stateTextSuccess,
+                        ]}
+                      >
+                        {taskStatusLabel(item, t)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {item.latest_execution_state === "failed" && item.latest_execution_failure_code ? (
+                    <Text style={styles.failure} numberOfLines={2}>
+                      {t("tasks.latestFailure", { code: item.latest_execution_failure_code })}
+                    </Text>
+                  ) : item.latest_execution_summary ? (
+                    <View style={styles.latestResult}>
+                      <Text style={styles.resultText} numberOfLines={3}>
+                        {item.latest_execution_summary}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.goal} numberOfLines={2}>{item.goal}</Text>
+                  )}
+
+                  <View style={styles.cardFooter}>
+                    <View style={styles.metaGroup}>
+                      <Text style={styles.metaText}>{launchLabel(item, t)}</Text>
+                      <Text style={styles.metaDivider}>·</Text>
+                      <Text style={styles.metaText}>
+                        {t("tasks.executions", { count: item.execution_count })}
+                      </Text>
+                    </View>
+
+                    {/* 快捷动作 */}
+                    <View style={styles.actionGroup}>
+                      {item.latest_execution_id ? (
+                        <AppPressable
+                          style={styles.quickButton}
+                          onPress={() => router.push(`/task-executions/${item.latest_execution_id}`)}
+                        >
+                          <Text style={styles.quickButtonText}>{t("results.openExecution")}</Text>
+                        </AppPressable>
+                      ) : null}
+
+                      <AppPressable
+                        disabled={Boolean(runningTaskId)}
+                        style={styles.executeButton}
+                        onPress={() => void handleExecuteNow(item.task_id)}
+                      >
+                        {isExecutingThis ? (
+                          <ActivityIndicator color={colors.onAccent} size="small" />
+                        ) : (
+                          <>
+                            <AppIcon name="play" color={colors.onAccent} size={12} />
+                            <Text style={styles.executeButtonText}>{t("taskDetail.executeNow")}</Text>
+                          </>
+                        )}
+                      </AppPressable>
+                    </View>
+                  </View>
+                </View>
+              </AppPressable>
+            );
+          }}
+        />
       </View>
-    </PrimarySwipeNavigation>
   );
 }
 
@@ -273,14 +370,16 @@ function executionStateLabel(state: TaskState, t: ReturnType<typeof useI18n>["t"
   })[state];
 }
 
-function taskStatusTone(task: Task): "normal" | "warning" | "danger" {
+function taskStatusTone(task: Task): "normal" | "warning" | "danger" | "success" {
   if (task.work_status) {
     if (task.work_status.status === "waiting_for_you" || task.work_status.status === "paused") return "warning";
     if (task.work_status.status === "failed") return "danger";
+    if (task.work_status.status === "completed") return "success";
     return "normal";
   }
   if (task.pending_approval_count > 0 || task.latest_execution_state === "waiting_approval") return "warning";
   if (task.latest_execution_state === "failed") return "danger";
+  if (task.latest_execution_state === "completed") return "success";
   if (task.latest_execution_state === "paused" || task.state === "paused") return "warning";
   return "normal";
 }
@@ -292,43 +391,216 @@ function launchLabel(task: Task, t: ReturnType<typeof useI18n>["t"]): string {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  topline: { padding: spacing.xlarge, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  heading: { color: colors.ink, fontSize: 24, fontWeight: "700" },
-  description: { color: colors.muted, marginTop: spacing.xsmall, fontSize: 13 },
-  newButton: { width: 42, height: 42, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center", borderRadius: radii.medium },
-  sourceButton: { width: 42, height: 42, borderWidth: 1, borderColor: colors.accent, alignItems: "center", justifyContent: "center", borderRadius: radii.medium },
-  topActions: { flexDirection: "row", alignItems: "center", gap: spacing.large },
-  updateBanner: { marginHorizontal: spacing.large, marginBottom: spacing.large, padding: spacing.large, borderRadius: radii.large, backgroundColor: colors.accentSoft, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  flex: { flex: 1 },
+  container: { flex: 1, backgroundColor: colors.background },
+  updateBanner: {
+    marginHorizontal: spacing.large,
+    marginTop: spacing.small,
+    padding: spacing.medium,
+    borderRadius: radii.medium,
+    backgroundColor: colors.accentSoft,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
   updateTitle: { color: colors.ink, fontWeight: "700" },
   updateDetail: { color: colors.muted, fontSize: 12, marginTop: spacing.xsmall },
   updateLink: { color: colors.accent, fontWeight: "700" },
-  offlineBanner: { marginHorizontal: spacing.large, marginBottom: spacing.large, padding: spacing.large, borderRadius: radii.large, backgroundColor: colors.warningSoft, gap: spacing.xsmall },
+  offlineBanner: {
+    marginHorizontal: spacing.large,
+    marginTop: spacing.small,
+    padding: spacing.medium,
+    borderRadius: radii.medium,
+    backgroundColor: colors.warningSoft,
+    gap: spacing.xsmall,
+  },
   offlineTitle: { color: colors.ink, fontWeight: "700" },
   offlineDetail: { color: colors.muted, fontSize: 12 },
-  filters: { flexDirection: "row", gap: spacing.small, paddingHorizontal: spacing.large, paddingBottom: spacing.small },
-  filter: { paddingHorizontal: spacing.medium, paddingVertical: spacing.small, borderRadius: radii.medium, backgroundColor: colors.surface },
-  filterActive: { backgroundColor: colors.accentSoft },
-  filterText: { color: colors.muted },
-  filterTextActive: { color: colors.accent, fontWeight: "600" },
-  list: { padding: spacing.large, gap: spacing.medium, flexGrow: 1 },
-  sectionHeader: { marginTop: spacing.small, marginBottom: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  sectionTitle: { color: colors.ink, fontSize: 16, fontWeight: "700" },
-  sectionCount: { color: colors.muted, fontSize: 12 },
-  task: { padding: spacing.large, backgroundColor: colors.surface, borderRadius: radii.large, borderWidth: 1, borderColor: colors.line, gap: spacing.small , ...shadows.card },
-  taskHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.medium },
-  titleRow: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: spacing.small },
-  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.danger },
-  title: { flex: 1, color: colors.ink, fontWeight: "700", fontSize: 17 },
-  state: { color: colors.accent, fontWeight: "600", fontSize: 12 },
-  warningState: { color: colors.warning },
-  dangerState: { color: colors.danger },
-  goal: { color: colors.ink, fontSize: 15, lineHeight: 22 },
-  latestResult: { gap: spacing.xsmall },
-  latestLabel: { color: colors.muted, ...typography.tiny, fontWeight: "700" },
-  result: { color: colors.ink, fontSize: 15, lineHeight: 22 },
-  failure: { color: colors.danger, fontSize: 14, lineHeight: 21 },
-  metaRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  metaCopy: { flexDirection: "row", flexWrap: "wrap", gap: spacing.medium, flex: 1, marginRight: spacing.small },
-  meta: { color: colors.muted, fontSize: 12 },
+  filters: {
+    flexDirection: "row",
+    gap: spacing.small,
+    paddingHorizontal: spacing.large,
+    paddingVertical: spacing.small,
+  },
+  filter: {
+    paddingHorizontal: spacing.medium,
+    paddingVertical: 6,
+    borderRadius: radii.medium,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  filterActive: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  filterText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  filterTextActive: {
+    color: colors.onAccent,
+    fontWeight: "700",
+  },
+  list: {
+    paddingHorizontal: spacing.large,
+    paddingBottom: 48,
+    gap: spacing.medium,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.small,
+    paddingTop: spacing.medium,
+    paddingBottom: spacing.small,
+  },
+  sectionTitle: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  countBadge: {
+    backgroundColor: colors.line,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radii.small,
+  },
+  countBadgeText: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  taskCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.large,
+    borderWidth: 1,
+    borderColor: colors.line,
+    flexDirection: "row",
+    overflow: "hidden",
+    ...shadows.card,
+  },
+  statusStripe: {
+    width: 5,
+    backgroundColor: colors.accent,
+  },
+  stripeWarning: { backgroundColor: colors.warning },
+  stripeDanger: { backgroundColor: colors.danger },
+  stripeSuccess: { backgroundColor: colors.accent },
+  cardMain: {
+    flex: 1,
+    padding: spacing.large,
+    gap: spacing.small,
+  },
+  taskHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.small,
+  },
+  titleRow: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.small,
+  },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.danger,
+  },
+  title: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "800",
+    flex: 1,
+  },
+  stateBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radii.small,
+    backgroundColor: colors.accentSoft,
+  },
+  badgeWarning: { backgroundColor: colors.warningSoft },
+  badgeDanger: { backgroundColor: "#fee2e2" },
+  badgeSuccess: { backgroundColor: colors.accentSoft },
+  stateText: { color: colors.accent, fontSize: 11, fontWeight: "700" },
+  stateTextWarning: { color: colors.warning },
+  stateTextDanger: { color: colors.danger },
+  stateTextSuccess: { color: colors.accent },
+  goal: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  failure: {
+    color: colors.danger,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  latestResult: {
+    padding: spacing.small,
+    borderRadius: radii.small,
+    backgroundColor: colors.background,
+  },
+  resultText: {
+    color: colors.ink,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  cardFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: spacing.xsmall,
+    paddingTop: spacing.small,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+  },
+  metaGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  metaText: {
+    color: colors.muted,
+    fontSize: 11,
+  },
+  metaDivider: {
+    color: colors.muted,
+    fontSize: 11,
+  },
+  actionGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.small,
+  },
+  quickButton: {
+    paddingHorizontal: spacing.small,
+    paddingVertical: 4,
+    borderRadius: radii.small,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  quickButtonText: {
+    color: colors.ink,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  executeButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: spacing.medium,
+    paddingVertical: 5,
+    borderRadius: radii.small,
+    backgroundColor: colors.accent,
+  },
+  executeButtonText: {
+    color: colors.onAccent,
+    fontSize: 11,
+    fontWeight: "700",
+  },
 });

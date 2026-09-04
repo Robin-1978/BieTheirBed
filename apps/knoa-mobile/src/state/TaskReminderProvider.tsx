@@ -155,6 +155,21 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
           if (latestUnread && appIsActiveRef.current) {
             setActiveReminder(latestUnread);
             Vibration.vibrate(45);
+          } else {
+            setActiveReminder((current) => {
+              if (
+                current &&
+                current.category === "approval" &&
+                incoming.some(
+                  (inc) =>
+                    inc.executionId === current.executionId &&
+                    (inc.category === "completed" || inc.category === "failed"),
+                )
+              ) {
+                return null;
+              }
+              return current;
+            });
           }
         }
         cursor = result.nextCursor;

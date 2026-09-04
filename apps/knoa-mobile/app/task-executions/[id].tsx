@@ -3,7 +3,7 @@ import * as Crypto from "expo-crypto";
 import { router, useLocalSearchParams } from "expo-router";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -52,19 +52,23 @@ export default function TaskExecutionDetailScreen() {
   const [stepsExpanded, setStepsExpanded] = useState(false);
   const [followUp, setFollowUp] = useState("");
   const [followUpFiles, setFollowUpFiles] = useState<PendingFollowUpFile[]>([]);
+  const executionRef = useRef<TaskExecution | null>(null);
+  executionRef.current = execution;
 
   const refresh = useCallback(async () => {
     if (!gateway.client || !executionId) return;
-    setError("");
     try {
       const snapshot = await gateway.runAuthenticated((client) => client.getTaskExecution(executionId));
       const definition = await gateway.runAuthenticated((client) => client.getTask(snapshot.task_id));
       setExecution(snapshot);
       setTask(definition);
+      setError("");
       void storeExecutionCache(executionId, { execution: snapshot, task: definition });
       setExecutionViewing(executionId);
     } catch {
-      setError(t("execution.loadFailed"));
+      if (!executionRef.current) {
+        setError(t("execution.loadFailed"));
+      }
     }
   }, [executionId, gateway.client, gateway.runAuthenticated, setExecutionViewing, t]);
 
@@ -72,14 +76,17 @@ export default function TaskExecutionDetailScreen() {
     let active = true;
     void loadExecutionCache(executionId).then((cached) => {
       if (!active || !cached) return;
-      setExecution(cached.execution);
-      setTask(cached.task);
+      setExecution((current) => current ?? cached.execution);
+      setTask((current) => current ?? cached.task);
       setExecutionViewing(executionId);
-    }).finally(() => {
-      if (active) void refresh();
     });
     return () => { active = false; };
-  }, [executionId, refresh, setExecutionViewing]);
+  }, [executionId, setExecutionViewing]);
+
+  useEffect(() => {
+    if (!executionId || gateway.status !== "ready") return;
+    void refresh();
+  }, [executionId, gateway.status, refresh]);
 
   useEffect(() => () => setExecutionViewing(null), [executionId, setExecutionViewing]);
 
@@ -91,7 +98,12 @@ export default function TaskExecutionDetailScreen() {
       if (refreshTimer) return;
       refreshTimer = setTimeout(() => {
         refreshTimer = null;
-        void gateway.runAuthenticated((client) => client.getTaskExecution(executionId)).then(setExecution).catch(() => undefined);
+        void gateway.runAuthenticated((client) => client.getTaskExecution(executionId))
+          .then((snapshot) => {
+            setExecution(snapshot);
+            setError("");
+          })
+          .catch(() => undefined);
       }, 300);
     });
     return () => {
@@ -261,8 +273,6 @@ export default function TaskExecutionDetailScreen() {
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {message ? <Text style={styles.message}>{message}</Text> : null}
 
-      <WorkResultSummary execution={execution} />
-
       {approvals.map((approval, index) => (
         <View key={approval.approval_id} style={styles.approval}>
           {approvals.length > 1 ? <Text style={styles.approvalCount}>{index + 1}/{approvals.length}</Text> : null}
@@ -293,6 +303,8 @@ export default function TaskExecutionDetailScreen() {
           onSubmit={(value) => void resolveInteraction(interaction, value)}
         />
       ))}
+
+      <WorkResultSummary execution={execution} />
 
       {timeline.length ? (
         <View style={styles.timeline}>

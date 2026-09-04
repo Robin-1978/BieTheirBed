@@ -339,3 +339,83 @@ async def test_auto_review_never_auto_resolves_high_risk(tmp_path: Path):
     assert not pending.done()
     await service.resolve(scope.principal_id, "approval-a", approved=False)
     assert await pending is False
+
+
+@pytest.mark.asyncio
+async def test_auto_review_never_auto_approves_truncated_oversized_instruction(tmp_path: Path):
+    database = tmp_path / "tasks.db"
+    sessions = RuntimeSessionRepository(database, handle_factory=lambda: "session-a")
+    scope = sessions.create("principal-a")
+    repository = TaskRepository(
+        database,
+        task_id_factory=lambda: "task-oversized",
+        approval_id_factory=lambda: "approval-oversized",
+    )
+    task, _ = repository.create(
+        scope,
+        client_request_id="request-oversized",
+        goal="x" * 25431,
+        attachments=(),
+        tools_enabled=True,
+        priority=0,
+    )
+    repository.claim_next("worker", lease_seconds=60)
+    reviewer = Reviewer(ApprovalReviewDecision.APPROVE)
+    service = DurableApprovalService(
+        repository,
+        TaskEventHub(),
+        reviewer=reviewer,
+        review_mode=ApprovalReviewMode.AUTO,
+        auto_max_risk="medium",
+    )
+
+    pending = asyncio.create_task(
+        service.confirm(
+            scope,
+            task.task_id,
+            ProposedToolCall(call_id="call-a", name="gitlab.retry_job", arguments={"job_id": 1}),
+            "external_side_effect:medium",
+        )
+    )
+    await asyncio.sleep(0.05)
+
+    # Must NOT auto-approve even though reviewer returned APPROVE: truncated instructions require human review
+    assert not pending.done()
+    assert len(reviewer.requests) == 1
+    assert len(reviewer.requests[0].human_instruction) == 8000
+    assert reviewer.requests[0].instruction_truncated is True
+
+    # Human can still resolve it explicitly
+    await service.resolve(scope.principal_id, "approval-oversized", approved=True)
+    assert await pending is True
+
+
+@pytest.mark.asyncio
+async def test_reviewer_agent_escalates_truncated_instruction_without_llm(tmp_path: Path) -> None:
+    execution = CapturingExecution()
+    sessions = RuntimeSessionRepository(tmp_path / "reviewer.db")
+    reviewer = KnoaReviewerAgent(
+        execution,
+        sessions,
+    )
+
+    request = ApprovalReviewRequest(
+        principal_id="principal-a",
+        run_id="run-a",
+        human_instruction="x" * 12000,
+        proposed_action={
+            "tool_name": "gitlab.retry_job",
+            "arguments": {"job_id": 1},
+            "effect": "external_side_effect",
+            "risk": "medium",
+        },
+    )
+    assert request.instruction_truncated is True
+    assert len(request.human_instruction) == 8000
+
+    result = await reviewer.review(request)
+    assert result.decision is ApprovalReviewDecision.ESCALATE
+    assert "truncation risk" in result.reason
+    # LLM execution should not even be called when truncated
+    assert len(execution.requests) == 0
+

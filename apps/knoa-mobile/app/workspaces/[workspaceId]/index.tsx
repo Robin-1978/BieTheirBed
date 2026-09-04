@@ -195,7 +195,7 @@ export default function WorkspaceScreen() {
         <AppPressable
           style={styles.startWork}
           onPress={() => router.push(gateway.status === "ready"
-            ? { pathname: "/chat", params: { workspaceId, workspaceName: displayName, nodeId: gateway.nodeId } }
+            ? { pathname: "/(tabs)", params: { workspaceId, workspaceName: displayName, nodeId: gateway.nodeId } }
             : { pathname: "/workspaces/[workspaceId]/nodes", params: routeParams })}
         >
           <AppIcon name="chat" color={colors.onAccent} size={22} />
@@ -241,7 +241,7 @@ export default function WorkspaceScreen() {
             <AppPressable
               style={[styles.connectedAction, gateway.status !== "ready" && styles.connectedActionDisabled]}
               disabled={gateway.status !== "ready"}
-              onPress={() => router.push({ pathname: "/chat", params: { workspaceId, workspaceName: displayName, nodeId: gateway.nodeId } })}
+              onPress={() => router.push({ pathname: "/(tabs)", params: { workspaceId, workspaceName: displayName, nodeId: gateway.nodeId } })}
             >
               {gateway.status === "ready"
                 ? <Text style={styles.connectedActionText}>{t("workspace.startChatting")}</Text>

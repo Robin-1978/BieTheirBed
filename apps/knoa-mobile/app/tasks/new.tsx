@@ -49,6 +49,7 @@ export default function NewTaskScreen() {
   const [attachments, setAttachments] = useState<PickedAttachment[]>([]);
   const [folder, setFolder] = useState<FolderSelection | null>(null);
   const [folderProgress, setFolderProgress] = useState(0);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const requestIdentity = useRef<{ fingerprint: string; requestId: string } | null>(null);
 
   async function chooseAttachments() {
@@ -120,8 +121,6 @@ export default function NewTaskScreen() {
       }
       let uploadedAttachments: Awaited<ReturnType<typeof uploadSessionAttachments>>["uploaded"] = [];
       if (attachments.length) {
-        // Attachments live in a conversation session; tasks reference the
-        // uploaded artifact ids. Offline queues cannot carry file bytes yet.
         const sessionHandle = await gateway.ensureConversation();
         const result = await gateway.runAuthenticated(
           (client) => uploadSessionAttachments(client, sessionHandle, attachments),
@@ -167,8 +166,6 @@ export default function NewTaskScreen() {
       }));
       router.replace(`/tasks/${result.task.task_id}`);
     } catch (caught) {
-      // A disconnected Node must not make the user retype a long task.  Keep
-      // the exact idempotency key so reconnect/retry cannot create duplicates.
       if (gateway.status !== "ready") {
         if (attachments.length || folder) {
           setError(t("taskNew.attachmentOffline"));
@@ -188,8 +185,6 @@ export default function NewTaskScreen() {
         });
         setError(t("taskNew.queuedOffline"));
       } else {
-        // The server preflights create-and-run; its message (e.g. blocked
-        // preflight details) is already user-facing.
         setError(caught instanceof Error && caught.message ? caught.message : t("taskNew.createFailed"));
       }
     } finally {
@@ -199,69 +194,67 @@ export default function NewTaskScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.flex}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
+      style={styles.flex}
     >
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={styles.container}>
+        {/* 顶部强制版本更新提示 */}
         {gateway.requiredUpdate ? (
           <AppPressable style={styles.updateRequired} onPress={() => router.replace("/update")}>
             <Text style={styles.updateRequiredTitle}>{t("taskNew.updateRequired")}</Text>
             <Text style={styles.launchText}>{t("taskNew.updateAction")}</Text>
           </AppPressable>
         ) : null}
+
+        {/* 1. 快捷任务模板卡片 */}
         <View style={styles.card}>
-          <View style={styles.nodeHeader}>
-            <View style={styles.flex}>
-              <Text style={styles.label}>{t("taskNew.executionNode")}</Text>
-              <Text style={styles.templateMeta}>{t("taskNew.executionNodeDetail")}</Text>
-            </View>
-            {switchingNode ? <ActivityIndicator color={colors.accent} size="small" /> : null}
+          <View style={styles.sectionHeader}>
+            <AppIcon name="agent" color={colors.accent} size={18} />
+            <Text style={styles.sectionTitle}>{t("taskTemplates.title")}</Text>
           </View>
-          {gateway.nodes.length ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nodeRow}>
-              {gateway.nodes.map((node) => (
-                <AppPressable
-                  key={node.nodeId}
-                  style={[styles.nodeChoice, selectedNodeId === node.nodeId && styles.nodeChoiceSelected]}
-                  onPress={() => void chooseNode(node.nodeId)}
-                  disabled={switchingNode}
-                >
-                  <AppIcon name="node" color={selectedNodeId === node.nodeId ? colors.accent : colors.muted} size={17} />
-                  <Text style={[styles.nodeChoiceText, selectedNodeId === node.nodeId && styles.nodeChoiceTextSelected]} numberOfLines={1}>{presentNodeName(node, t("common.unnamedComputer"))}</Text>
-                  <Text style={styles.nodeChoiceStatus}>{node.nodeId === gateway.nodeId && gateway.status === "ready" ? t("taskNew.nodeReady") : t("taskNew.nodeAvailable")}</Text>
-                </AppPressable>
-              ))}
-            </ScrollView>
-          ) : <Text style={styles.templateMeta}>{t("taskNew.noNode")}</Text>}
-          <Text style={styles.label}>{t("taskTemplates.title")}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.templateRow}>
-            {TASK_TEMPLATES.map((template) => (
-              <AppPressable
-                key={template.id}
-                style={[styles.template, selectedTemplate === template.id && styles.templateSelected]}
-                onPress={() => {
-                  setSelectedTemplate(template.id);
-                  setTitle(t(template.titleKey));
-                  setGoal(t(template.goalKey));
-                }}
-              >
-                <Text style={[styles.templateTitle, selectedTemplate === template.id && styles.templateSelectedText]}>{t(template.titleKey)}</Text>
-                <Text style={styles.templateDetail}>{t(template.detailKey)}</Text>
-              </AppPressable>
-            ))}
+            {TASK_TEMPLATES.map((template) => {
+              const isSelected = selectedTemplate === template.id;
+              return (
+                <AppPressable
+                  key={template.id}
+                  style={[styles.template, isSelected && styles.templateSelected]}
+                  onPress={() => {
+                    setSelectedTemplate(template.id);
+                    setTitle(t(template.titleKey));
+                    setGoal(t(template.goalKey));
+                  }}
+                >
+                  <Text style={[styles.templateTitle, isSelected && styles.templateSelectedText]}>
+                    {t(template.titleKey)}
+                  </Text>
+                  <Text style={styles.templateDetail} numberOfLines={2}>
+                    {t(template.detailKey)}
+                  </Text>
+                </AppPressable>
+              );
+            })}
           </ScrollView>
+
           {activeTemplate ? (
             <View style={styles.templateDetails}>
               <Text style={styles.templateDetailsTitle}>{t(activeTemplate.titleKey)}</Text>
-              <Text style={styles.templateMeta}>{t("taskTemplates.connection", { value: t(activeTemplate.connectionKey) })}</Text>
-              <Text style={styles.templateMeta}>{t("taskTemplates.permission", { value: t(activeTemplate.permissionKey) })}</Text>
-              <Text style={styles.templateMeta}>{t("taskTemplates.duration", { value: t(activeTemplate.durationKey) })}</Text>
+              <View style={styles.chipsRow}>
+                <View style={styles.metaChip}><Text style={styles.metaChipText}>{t(activeTemplate.durationKey)}</Text></View>
+                <View style={styles.metaChip}><Text style={styles.metaChipText}>{t(activeTemplate.connectionKey)}</Text></View>
+              </View>
               <Text style={styles.templateMeta}>{t("taskTemplates.result", { value: t(activeTemplate.resultKey) })}</Text>
-              <Text style={styles.templateMeta}>{t("taskTemplates.failure", { value: t(activeTemplate.failureKey) })}</Text>
-              <Text style={styles.templateMeta}>{t("taskTemplates.notification", { value: t(activeTemplate.notificationKey) })}</Text>
             </View>
           ) : null}
-          <Text style={styles.label}>{t("taskNew.name")}</Text>
+        </View>
+
+        {/* 2. 核心任务定义卡片 */}
+        <View style={styles.card}>
+          <View style={styles.sectionHeader}>
+            <AppIcon name="tasks" color={colors.accent} size={18} />
+            <Text style={styles.sectionTitle}>{t("taskNew.goal")}</Text>
+          </View>
+          <Text style={styles.inputSubLabel}>{t("taskNew.name")}</Text>
           <TextInput
             accessibilityLabel={t("taskNew.name")}
             value={title}
@@ -271,7 +264,7 @@ export default function NewTaskScreen() {
             style={styles.titleInput}
             returnKeyType="next"
           />
-          <Text style={styles.label}>{t("taskNew.goal")}</Text>
+          <Text style={styles.inputSubLabel}>{t("taskNew.goal")}</Text>
           <TextInput
             accessibilityLabel={t("taskNew.goal")}
             value={goal}
@@ -279,56 +272,100 @@ export default function NewTaskScreen() {
             placeholder={t("taskNew.goalPlaceholder")}
             placeholderTextColor={colors.muted}
             multiline
-            autoFocus
             style={styles.goalInput}
             textAlignVertical="top"
           />
-          <Text style={styles.label}>{t("taskNew.attachments")}</Text>
-          <View style={styles.attachmentRow}>
-            <AppPressable
-              accessibilityLabel={t("taskNew.addAttachment")}
-              disabled={attachments.length >= MAX_ATTACHMENTS || saving}
-              onPress={() => void chooseAttachments()}
-              style={styles.attachmentButton}
-            >
-              <Text style={styles.attachmentButtonText}>{t("taskNew.addAttachment")}</Text>
-            </AppPressable>
-            <Text style={styles.templateMeta}>{t("taskNew.attachmentCount", { count: attachments.length, max: MAX_ATTACHMENTS })}</Text>
-          </View>
-          <View style={styles.attachmentRow}>
-            <AppPressable
-              accessibilityLabel={t("taskNew.addFolder")}
-              disabled={Boolean(folder) || attachments.length >= MAX_ATTACHMENTS || saving}
-              onPress={() => void chooseFolder()}
-              style={styles.attachmentButton}
-            >
-              <Text style={styles.attachmentButtonText}>{t("taskNew.addFolder")}</Text>
-            </AppPressable>
-            <Text style={styles.templateMeta}>{t("taskNew.folderHint")}</Text>
-          </View>
-          {folder ? (
-            <View style={styles.folderCard}>
-              <Text style={styles.attachmentName} numberOfLines={1}>{folder.rootName}</Text>
-              <Text style={styles.templateMeta}>{t("taskNew.folderStats", { count: folder.files.length, size: formatBytes(folder.totalBytes) })}</Text>
-              {saving && folderProgress ? <Text style={styles.templateMeta}>{t("taskNew.folderProgress", { completed: folderProgress, total: folder.files.length })}</Text> : null}
-              <AppPressable disabled={saving} onPress={() => setFolder(null)} style={styles.attachmentRemove}>
-                <Text style={styles.attachmentRemoveText}>{t("taskNew.removeAttachment")}</Text>
-              </AppPressable>
-            </View>
-          ) : null}
-          {attachments.map((item, index) => (
-            <View key={`${item.uri}:${index}`} style={styles.attachmentRow}>
-              <Text style={styles.attachmentName} numberOfLines={1}>{item.name}</Text>
+
+          {/* 附件与文件夹挂载 */}
+          <View style={styles.attachmentGroup}>
+            <View style={styles.attachmentRow}>
               <AppPressable
-                accessibilityLabel={t("taskNew.removeAttachment")}
-                disabled={saving}
-                onPress={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}
-                style={styles.attachmentRemove}
+                accessibilityLabel={t("taskNew.addAttachment")}
+                disabled={attachments.length >= MAX_ATTACHMENTS || saving}
+                onPress={() => void chooseAttachments()}
+                style={styles.attachmentButton}
               >
-                <Text style={styles.attachmentRemoveText}>{t("taskNew.removeAttachment")}</Text>
+                <AppIcon name="file" color={colors.accent} size={16} />
+                <Text style={styles.attachmentButtonText}>{t("taskNew.addAttachment")}</Text>
+              </AppPressable>
+              <AppPressable
+                accessibilityLabel={t("taskNew.addFolder")}
+                disabled={Boolean(folder) || attachments.length >= MAX_ATTACHMENTS || saving}
+                onPress={() => void chooseFolder()}
+                style={styles.attachmentButton}
+              >
+                <AppIcon name="folder" color={colors.accent} size={16} />
+                <Text style={styles.attachmentButtonText}>{t("taskNew.addFolder")}</Text>
               </AppPressable>
             </View>
-          ))}
+
+            {folder ? (
+              <View style={styles.folderCard}>
+                <Text style={styles.attachmentName} numberOfLines={1}>{folder.rootName}</Text>
+                <Text style={styles.templateMeta}>
+                  {t("taskNew.folderStats", { count: folder.files.length, size: formatBytes(folder.totalBytes) })}
+                </Text>
+                {saving && folderProgress ? (
+                  <Text style={styles.templateMeta}>
+                    {t("taskNew.folderProgress", { completed: folderProgress, total: folder.files.length })}
+                  </Text>
+                ) : null}
+                <AppPressable disabled={saving} onPress={() => setFolder(null)} style={styles.attachmentRemove}>
+                  <Text style={styles.attachmentRemoveText}>{t("taskNew.removeAttachment")}</Text>
+                </AppPressable>
+              </View>
+            ) : null}
+
+            {attachments.map((item, index) => (
+              <View key={`${item.uri}:${index}`} style={styles.attachmentItemRow}>
+                <Text style={styles.attachmentName} numberOfLines={1}>{item.name}</Text>
+                <AppPressable
+                  accessibilityLabel={t("taskNew.removeAttachment")}
+                  disabled={saving}
+                  onPress={() => setAttachments((current) => current.filter((_, i) => i !== index))}
+                  style={styles.attachmentRemove}
+                >
+                  <AppIcon name="x" color={colors.muted} size={16} />
+                </AppPressable>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        {/* 3. 执行环境与智能体卡片 */}
+        <View style={styles.card}>
+          <View style={styles.sectionHeader}>
+            <AppIcon name="node" color={colors.accent} size={18} />
+            <Text style={styles.sectionTitle}>{t("taskNew.executionNode")}</Text>
+          </View>
+          {gateway.nodes.length ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nodeRow}>
+              {gateway.nodes.map((node) => {
+                const isSelected = selectedNodeId === node.nodeId;
+                return (
+                  <AppPressable
+                    key={node.nodeId}
+                    style={[styles.nodeChoice, isSelected && styles.nodeChoiceSelected]}
+                    onPress={() => void chooseNode(node.nodeId)}
+                    disabled={switchingNode}
+                  >
+                    <View style={styles.nodeTopRow}>
+                      <AppIcon name="node" color={isSelected ? colors.accent : colors.muted} size={16} />
+                      <Text style={styles.nodeChoiceStatus}>
+                        {node.nodeId === gateway.nodeId && gateway.status === "ready" ? t("taskNew.nodeReady") : t("taskNew.nodeAvailable")}
+                      </Text>
+                    </View>
+                    <Text style={[styles.nodeChoiceText, isSelected && styles.nodeChoiceTextSelected]} numberOfLines={1}>
+                      {presentNodeName(node, t("common.unnamedComputer"))}
+                    </Text>
+                  </AppPressable>
+                );
+              })}
+            </ScrollView>
+          ) : (
+            <Text style={styles.templateMeta}>{t("taskNew.noNode")}</Text>
+          )}
+
           <AgentSelector
             agents={gateway.agents}
             selectedAgentId={agentId}
@@ -337,32 +374,70 @@ export default function NewTaskScreen() {
             lockedLabel={t("agent.lockedTask")}
             onChange={setAgentId}
           />
-          <TaskLaunchEditor policy={launchPolicy} onChange={setLaunchPolicy} mcpResources={mcpResources} />
-          <View style={styles.notificationCard}>
-            <Text style={styles.launchTitle}>{t("taskNew.notifyMe")}</Text>
-            <Toggle label={t("taskNew.completed")} value={notifyCompleted} onChange={setNotifyCompleted} />
-            <Toggle label={t("taskNew.failed")} value={notifyFailed} onChange={setNotifyFailed} />
-            <Toggle label={t("taskNew.approval")} value={notifyApproval} onChange={setNotifyApproval} />
-            <Text style={styles.launchText}>{t("taskNew.notifyScopeHint")}</Text>
-          </View>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-          <AppPressable
-            accessibilityRole="button"
-            accessibilityLabel={launchPolicy.kind === "immediate" ? t("taskNew.createAndStart") : t("taskNew.create")}
-            disabled={!goal.trim() || saving || switchingNode || !selectedNodeId || selectedNodeId !== gateway.nodeId || Boolean(gateway.requiredUpdate) || !isLaunchPolicyValid(launchPolicy)}
-            onPress={() => void create()}
-            style={[styles.primary, (!goal.trim() || saving || gateway.requiredUpdate || !isLaunchPolicyValid(launchPolicy)) && styles.disabled]}
-          >
-            {saving ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.primaryText}>{launchPolicy.kind === "immediate" ? t("taskNew.createAndStart") : t("taskNew.create")}</Text>}
-          </AppPressable>
         </View>
+
+        {/* 4. 高级调度与通知设置 (可折叠) */}
+        <View style={styles.card}>
+          <AppPressable
+            style={styles.advancedToggle}
+            onPress={() => setShowAdvanced(!showAdvanced)}
+          >
+            <View style={styles.sectionHeader}>
+              <AppIcon name="settings" color={colors.muted} size={18} />
+              <Text style={styles.sectionTitle}>{t("nav.settings")}</Text>
+            </View>
+            <AppIcon name={showAdvanced ? "chevron-up" : "chevron-down"} color={colors.muted} size={18} />
+          </AppPressable>
+
+          {showAdvanced ? (
+            <View style={styles.advancedContent}>
+              <TaskLaunchEditor policy={launchPolicy} onChange={setLaunchPolicy} mcpResources={mcpResources} />
+              <View style={styles.notificationCard}>
+                <Text style={styles.launchTitle}>{t("taskNew.notifyMe")}</Text>
+                <Toggle label={t("taskNew.completed")} value={notifyCompleted} onChange={setNotifyCompleted} />
+                <Toggle label={t("taskNew.failed")} value={notifyFailed} onChange={setNotifyFailed} />
+                <Toggle label={t("taskNew.approval")} value={notifyApproval} onChange={setNotifyApproval} />
+                <Text style={styles.launchText}>{t("taskNew.notifyScopeHint")}</Text>
+              </View>
+            </View>
+          ) : null}
+        </View>
+
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+
+        {/* 底部主操作按钮 */}
+        <AppPressable
+          accessibilityRole="button"
+          accessibilityLabel={launchPolicy.kind === "immediate" ? t("taskNew.createAndStart") : t("taskNew.create")}
+          disabled={!goal.trim() || saving || switchingNode || !selectedNodeId || selectedNodeId !== gateway.nodeId || Boolean(gateway.requiredUpdate) || !isLaunchPolicyValid(launchPolicy)}
+          onPress={() => void create()}
+          style={[styles.primary, (!goal.trim() || saving || gateway.requiredUpdate || !isLaunchPolicyValid(launchPolicy)) && styles.disabled]}
+        >
+          {saving ? (
+            <ActivityIndicator color={colors.onAccent} />
+          ) : (
+            <Text style={styles.primaryText}>
+              {launchPolicy.kind === "immediate" ? t("taskNew.createAndStart") : t("taskNew.create")}
+            </Text>
+          )}
+        </AppPressable>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 function Toggle({ label, value, onChange }: { label: string; value: boolean; onChange(value: boolean): void }) {
-  return <View style={styles.toggle}><Text style={styles.toggleLabel}>{label}</Text><Switch value={value} onValueChange={onChange} trackColor={{ true: colors.accentSoft }} thumbColor={value ? colors.accent : colors.line} /></View>;
+  return (
+    <View style={styles.toggle}>
+      <Text style={styles.toggleLabel}>{label}</Text>
+      <Switch
+        value={value}
+        onValueChange={onChange}
+        trackColor={{ true: colors.accentSoft }}
+        thumbColor={value ? colors.accent : colors.line}
+      />
+    </View>
+  );
 }
 
 function formatBytes(value: number): string {
@@ -383,44 +458,276 @@ function folderErrorMessage(code: string, t: ReturnType<typeof useI18n>["t"]): s
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  container: { padding: spacing.large, paddingBottom: 48 },
-  card: { backgroundColor: colors.surface, borderRadius: radii.large, borderWidth: 1, borderColor: colors.line, padding: spacing.xlarge, gap: spacing.medium , ...shadows.card },
-  nodeHeader: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
-  nodeRow: { gap: spacing.small, paddingVertical: 2 },
-  nodeChoice: { width: 150, minHeight: 62, padding: spacing.medium, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.background, gap: spacing.xsmall },
-  nodeChoiceSelected: { borderColor: colors.accent, backgroundColor: colors.accentFaint },
-  nodeChoiceText: { color: colors.ink, ...typography.small, fontWeight: "800" },
-  nodeChoiceTextSelected: { color: colors.accent },
-  nodeChoiceStatus: { color: colors.muted, fontSize: 10 },
-  templateRow: { gap: spacing.small, paddingVertical: 2 },
-  template: { width: 156, minHeight: 78, padding: spacing.medium, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.background, gap: spacing.xsmall },
-  templateSelected: { borderColor: colors.accent, backgroundColor: colors.accentFaint },
-  templateTitle: { color: colors.ink, fontSize: 13, fontWeight: "800" },
-  templateSelectedText: { color: colors.accent },
-  templateDetail: { color: colors.muted, fontSize: 11, lineHeight: 15 },
-  templateDetails: { marginTop: spacing.xsmall, padding: spacing.medium, borderRadius: radii.medium, backgroundColor: colors.accentSoft, gap: spacing.xsmall },
-  templateDetailsTitle: { color: colors.ink, fontWeight: "800", marginBottom: 2 },
-  templateMeta: { color: colors.muted, fontSize: 11, lineHeight: 16 },
-  updateRequired: { marginBottom: spacing.medium, padding: spacing.large, borderRadius: radii.medium, backgroundColor: colors.dangerSoft, gap: spacing.xsmall },
-  updateRequiredTitle: { color: colors.danger, fontWeight: "700" },
-  label: { color: colors.ink, fontWeight: "700", marginTop: spacing.xsmall },
-  titleInput: { minHeight: 46, borderWidth: 1, borderColor: colors.line, borderRadius: radii.medium, paddingHorizontal: spacing.medium, color: colors.ink, fontSize: 16 },
-  goalInput: { minHeight: 180, borderWidth: 1, borderColor: colors.line, borderRadius: radii.medium, padding: spacing.medium, color: colors.ink, fontSize: 16, lineHeight: 23 },
-  launchCard: { marginTop: spacing.small, padding: spacing.large, borderRadius: radii.medium, backgroundColor: colors.accentSoft, gap: spacing.xsmall },
-  launchTitle: { color: colors.ink, fontWeight: "700" },
-  launchText: { color: colors.muted, lineHeight: 20 },
-  notificationCard: { marginTop: spacing.small, padding: spacing.large, borderRadius: radii.medium, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, gap: spacing.small , ...shadows.card },
-  attachmentRow: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
-  attachmentButton: { minHeight: 38, paddingHorizontal: spacing.medium, alignItems: "center", justifyContent: "center", borderRadius: radii.medium, borderWidth: 1, borderColor: colors.accent },
-  attachmentButtonText: { color: colors.accent, fontWeight: "800" },
-  attachmentName: { color: colors.ink, flex: 1, minWidth: 0 },
-  attachmentRemove: { minHeight: 32, paddingHorizontal: spacing.medium, alignItems: "center", justifyContent: "center", borderRadius: radii.small, borderWidth: 1, borderColor: colors.line },
-  attachmentRemoveText: { color: colors.muted, fontWeight: "700", fontSize: 12 },
-  folderCard: { padding: spacing.medium, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line, gap: spacing.xsmall },
-  toggle: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  toggleLabel: { color: colors.ink },
-  error: { color: colors.danger },
-  primary: { marginTop: spacing.small, minHeight: 48, borderRadius: radii.medium, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
-  disabled: { opacity: 0.45 },
-  primaryText: { color: colors.onAccent, fontWeight: "700", fontSize: 16 },
+  container: {
+    padding: spacing.large,
+    gap: spacing.medium,
+    paddingBottom: 48,
+  },
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.large,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: spacing.large,
+    gap: spacing.medium,
+    ...shadows.card,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.small,
+  },
+  sectionTitle: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  inputSubLabel: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: spacing.xsmall,
+  },
+  titleInput: {
+    minHeight: 44,
+    borderRadius: radii.medium,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing.medium,
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  goalInput: {
+    minHeight: 110,
+    borderRadius: radii.medium,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.background,
+    padding: spacing.medium,
+    color: colors.ink,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  templateRow: {
+    gap: spacing.small,
+    paddingVertical: 4,
+  },
+  template: {
+    width: 160,
+    minHeight: 82,
+    padding: spacing.medium,
+    borderRadius: radii.medium,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.background,
+    gap: 4,
+  },
+  templateSelected: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentFaint,
+  },
+  templateTitle: {
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  templateSelectedText: {
+    color: colors.accent,
+  },
+  templateDetail: {
+    color: colors.muted,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  templateDetails: {
+    padding: spacing.medium,
+    borderRadius: radii.medium,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.line,
+    gap: spacing.xsmall,
+  },
+  templateDetailsTitle: {
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  chipsRow: {
+    flexDirection: "row",
+    gap: spacing.small,
+    marginVertical: 4,
+  },
+  metaChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: radii.small,
+    backgroundColor: colors.accentSoft,
+  },
+  metaChipText: {
+    color: colors.accent,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  templateMeta: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  nodeRow: {
+    gap: spacing.small,
+    paddingVertical: 2,
+  },
+  nodeChoice: {
+    width: 140,
+    minHeight: 60,
+    padding: spacing.medium,
+    borderRadius: radii.medium,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.background,
+    gap: 4,
+  },
+  nodeTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  nodeChoiceSelected: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentFaint,
+  },
+  nodeChoiceText: {
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  nodeChoiceTextSelected: {
+    color: colors.accent,
+  },
+  nodeChoiceStatus: {
+    color: colors.muted,
+    fontSize: 10,
+  },
+  attachmentGroup: {
+    gap: spacing.small,
+    paddingTop: spacing.xsmall,
+  },
+  attachmentRow: {
+    flexDirection: "row",
+    gap: spacing.medium,
+  },
+  attachmentButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: radii.medium,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.background,
+  },
+  attachmentButtonText: {
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  attachmentItemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: spacing.small,
+    borderRadius: radii.small,
+    backgroundColor: colors.background,
+  },
+  attachmentName: {
+    color: colors.ink,
+    fontSize: 12,
+    fontWeight: "600",
+    flex: 1,
+  },
+  attachmentRemove: {
+    padding: 4,
+  },
+  attachmentRemoveText: {
+    color: colors.danger,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  folderCard: {
+    padding: spacing.medium,
+    borderRadius: radii.medium,
+    backgroundColor: colors.background,
+    gap: 4,
+  },
+  advancedToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  advancedContent: {
+    gap: spacing.medium,
+    paddingTop: spacing.small,
+  },
+  notificationCard: {
+    borderRadius: radii.medium,
+    backgroundColor: colors.background,
+    padding: spacing.medium,
+    gap: spacing.small,
+  },
+  launchTitle: {
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  launchText: {
+    color: colors.muted,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  toggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    minHeight: 36,
+  },
+  toggleLabel: {
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  primary: {
+    minHeight: 48,
+    borderRadius: radii.medium,
+    backgroundColor: colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  primaryText: {
+    color: colors.onAccent,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  disabled: {
+    opacity: 0.45,
+  },
+  error: {
+    color: colors.danger,
+    fontSize: 13,
+    textAlign: "center",
+  },
+  updateRequired: {
+    marginBottom: spacing.medium,
+    padding: spacing.large,
+    borderRadius: radii.medium,
+    backgroundColor: colors.dangerSoft,
+    gap: spacing.xsmall,
+  },
+  updateRequiredTitle: {
+    color: colors.danger,
+    fontWeight: "700",
+  },
 });

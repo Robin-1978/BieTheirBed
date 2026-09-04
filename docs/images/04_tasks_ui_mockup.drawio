@@ -1,0 +1,286 @@
+<mxGraphModel>
+  <root>
+    <mxCell id="0"/>
+    <mxCell id="1" parent="0"/>
+
+    <!-- ==================== 屏幕 A：任务中心列表页 (Tasks Screen) ==================== -->
+    <mxCell id="p1_frame" value="" style="rounded=1;arcSize=6;fillColor=#ffffff;strokeColor=#94a3b8;strokeWidth=2;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="40" y="30" width="340" height="660" as="geometry"/>
+    </mxCell>
+    
+    <!-- 顶部说明 -->
+    <mxCell id="p1_title" value="屏幕 A：任务中心列表页 (Tasks Tab)&#xa;状态分段过滤 + 分组卡片层次 + 快捷直接运行" style="text;html=1;fontSize=12;fontStyle=1;align=center;fontColor=#1e293b;" vertex="1" parent="1">
+      <mxGeometry x="40" y="0" width="340" height="26" as="geometry"/>
+    </mxCell>
+
+    <!-- 手机 1 状态栏 -->
+    <mxCell id="p1_status" value="9:41                        5G  [98%]" style="text;html=1;fontSize=10;fontColor=#64748b;align=center;" vertex="1" parent="p1_frame">
+      <mxGeometry x="0" y="6" width="340" height="18" as="geometry"/>
+    </mxCell>
+
+    <!-- 手机 1 顶部 Header -->
+    <mxCell id="p1_header_bg" value="" style="rounded=0;fillColor=#f8fafc;strokeColor=#e2e8f0;strokeWidth=1;" vertex="1" parent="p1_frame">
+      <mxGeometry x="0" y="26" width="340" height="46" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_node_pill" value="Robin Desktop · P2P 在线 ▾" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;fontSize=11;fontStyle=1;fontColor=#1e40af;align=center;" vertex="1" parent="p1_frame">
+      <mxGeometry x="75" y="34" width="170" height="30" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_btn_new" value="+ 新建" style="rounded=1;fillColor=#2563eb;strokeColor=#1d4ed8;fontSize=11;fontStyle=1;fontColor=#ffffff;align=center;" vertex="1" parent="p1_frame">
+      <mxGeometry x="270" y="35" width="58" height="28" as="geometry"/>
+    </mxCell>
+
+    <!-- 过滤药丸选择栏 (Pill Filters) -->
+    <mxCell id="p1_filter_1" value="当前进行 (4)" style="rounded=1;fillColor=#2563eb;strokeColor=#1d4ed8;fontSize=10;fontStyle=1;fontColor=#ffffff;align=center;" vertex="1" parent="p1_frame">
+      <mxGeometry x="12" y="80" width="76" height="24" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_filter_2" value="活跃中 (2)" style="rounded=1;fillColor=#f1f5f9;strokeColor=#cbd5e1;fontSize=10;fontColor=#475569;align=center;" vertex="1" parent="p1_frame">
+      <mxGeometry x="94" y="80" width="68" height="24" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_filter_3" value="已暂停 (1)" style="rounded=1;fillColor=#f1f5f9;strokeColor=#cbd5e1;fontSize=10;fontColor=#475569;align=center;" vertex="1" parent="p1_frame">
+      <mxGeometry x="168" y="80" width="68" height="24" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_filter_4" value="已归档 (8)" style="rounded=1;fillColor=#f1f5f9;strokeColor=#cbd5e1;fontSize=10;fontColor=#475569;align=center;" vertex="1" parent="p1_frame">
+      <mxGeometry x="242" y="80" width="68" height="24" as="geometry"/>
+    </mxCell>
+
+    <!-- 分组标题 1: 需要处理 (Needs Action) -->
+    <mxCell id="p1_sec_1" value="需要处理 · 1 项等待审批" style="text;html=1;fontSize=11;fontStyle=1;fontColor=#b91c1c;align=left;" vertex="1" parent="p1_frame">
+      <mxGeometry x="14" y="112" width="200" height="20" as="geometry"/>
+    </mxCell>
+
+    <!-- 任务卡片 1 (需要审批) -->
+    <mxCell id="p1_card_1" value="" style="rounded=1;fillColor=#ffffff;strokeColor=#fca5a5;strokeWidth=1.5;shadow=1;" vertex="1" parent="p1_frame">
+      <mxGeometry x="12" y="134" width="316" height="116" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_card_1_stripe" value="" style="rounded=0;fillColor=#ef4444;strokeColor=none;" vertex="1" parent="p1_card_1">
+      <mxGeometry x="0" y="0" width="5" height="116" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c1_title" value="生产日志清理与安全归档" style="text;html=1;fontSize=12;fontStyle=1;fontColor=#0f172a;align=left;" vertex="1" parent="p1_card_1">
+      <mxGeometry x="14" y="8" width="180" height="20" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c1_badge" value="等待审批" style="rounded=1;fillColor=#fee2e2;strokeColor=#ef4444;fontSize=10;fontStyle=1;fontColor=#b91c1c;align=center;" vertex="1" parent="p1_card_1">
+      <mxGeometry x="235" y="8" width="68" height="20" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c1_summary" value="需要您授权删除 /var/log/app/*.old 历史文件，已归档压缩 240MB。" style="text;html=1;fontSize=11;fontColor=#475569;align=left;spacing=4;" vertex="1" parent="p1_card_1">
+      <mxGeometry x="14" y="30" width="288" height="34" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c1_footer_line" value="" style="line;strokeColor=#f1f5f9;strokeWidth=1;" vertex="1" parent="p1_card_1">
+      <mxGeometry x="14" y="68" width="288" height="2" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c1_meta" value="手动触发 · 执行 14 次" style="text;html=1;fontSize=10;fontColor=#64748b;align=left;" vertex="1" parent="p1_card_1">
+      <mxGeometry x="14" y="76" width="130" height="24" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c1_btn_view" value="查看详情" style="rounded=1;fillColor=#f8fafc;strokeColor=#cbd5e1;fontSize=10;fontColor=#334155;align=center;" vertex="1" parent="p1_card_1">
+      <mxGeometry x="160" y="74" width="64" height="28" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c1_btn_run" value="▶ 立即运行" style="rounded=1;fillColor=#2563eb;strokeColor=#1d4ed8;fontSize=10;fontStyle=1;fontColor=#ffffff;align=center;" vertex="1" parent="p1_card_1">
+      <mxGeometry x="230" y="74" width="74" height="28" as="geometry"/>
+    </mxCell>
+
+    <!-- 分组标题 2: 进行中与最近完成 -->
+    <mxCell id="p1_sec_2" value="日常任务 · 3 项" style="text;html=1;fontSize=11;fontStyle=1;fontColor=#334155;align=left;" vertex="1" parent="p1_frame">
+      <mxGeometry x="14" y="260" width="180" height="20" as="geometry"/>
+    </mxCell>
+
+    <!-- 任务卡片 2 (运行正常) -->
+    <mxCell id="p1_card_2" value="" style="rounded=1;fillColor=#ffffff;strokeColor=#cbd5e1;strokeWidth=1;shadow=1;" vertex="1" parent="p1_frame">
+      <mxGeometry x="12" y="282" width="316" height="116" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_card_2_stripe" value="" style="rounded=0;fillColor=#10b981;strokeColor=none;" vertex="1" parent="p1_card_2">
+      <mxGeometry x="0" y="0" width="5" height="116" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c2_title" value="每日代码库变更智能巡检" style="text;html=1;fontSize=12;fontStyle=1;fontColor=#0f172a;align=left;" vertex="1" parent="p1_card_2">
+      <mxGeometry x="14" y="8" width="180" height="20" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c2_badge" value="已就绪" style="rounded=1;fillColor=#dcfce7;strokeColor=#22c55e;fontSize=10;fontStyle=1;fontColor=#15803d;align=center;" vertex="1" parent="p1_card_2">
+      <mxGeometry x="245" y="8" width="58" height="20" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c2_summary" value="每天凌晨 02:00 自动执行 git fetch 分析分支与待合入 PR，生成 Markdown 报表。" style="text;html=1;fontSize=11;fontColor=#475569;align=left;spacing=4;" vertex="1" parent="p1_card_2">
+      <mxGeometry x="14" y="30" width="288" height="34" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c2_footer_line" value="" style="line;strokeColor=#f1f5f9;strokeWidth=1;" vertex="1" parent="p1_card_2">
+      <mxGeometry x="14" y="68" width="288" height="2" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c2_meta" value="定时执行 · 每天 02:00" style="text;html=1;fontSize=10;fontColor=#64748b;align=left;" vertex="1" parent="p1_card_2">
+      <mxGeometry x="14" y="76" width="130" height="24" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c2_btn_view" value="执行记录" style="rounded=1;fillColor=#f8fafc;strokeColor=#cbd5e1;fontSize=10;fontColor=#334155;align=center;" vertex="1" parent="p1_card_2">
+      <mxGeometry x="160" y="74" width="64" height="28" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c2_btn_run" value="▶ 立即运行" style="rounded=1;fillColor=#2563eb;strokeColor=#1d4ed8;fontSize=10;fontStyle=1;fontColor=#ffffff;align=center;" vertex="1" parent="p1_card_2">
+      <mxGeometry x="230" y="74" width="74" height="28" as="geometry"/>
+    </mxCell>
+
+    <!-- 任务卡片 3 (正在运行) -->
+    <mxCell id="p1_card_3" value="" style="rounded=1;fillColor=#ffffff;strokeColor=#93c5fd;strokeWidth=1;shadow=1;" vertex="1" parent="p1_frame">
+      <mxGeometry x="12" y="408" width="316" height="116" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_card_3_stripe" value="" style="rounded=0;fillColor=#2563eb;strokeColor=none;" vertex="1" parent="p1_card_3">
+      <mxGeometry x="0" y="0" width="5" height="116" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c3_title" value="移动端测试包自动化构建" style="text;html=1;fontSize=12;fontStyle=1;fontColor=#0f172a;align=left;" vertex="1" parent="p1_card_3">
+      <mxGeometry x="14" y="8" width="180" height="20" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c3_badge" value="执行中 ⟳" style="rounded=1;fillColor=#dbeafe;strokeColor=#3b82f6;fontSize=10;fontStyle=1;fontColor=#1d4ed8;align=center;" vertex="1" parent="p1_card_3">
+      <mxGeometry x="245" y="8" width="58" height="20" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c3_summary" value="执行中 (步骤 3/5): 正在运行 vitest 单元测试集并生成覆盖率报告..." style="text;html=1;fontSize=11;fontColor=#2563eb;align=left;spacing=4;" vertex="1" parent="p1_card_3">
+      <mxGeometry x="14" y="30" width="288" height="34" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c3_footer_line" value="" style="line;strokeColor=#f1f5f9;strokeWidth=1;" vertex="1" parent="p1_card_3">
+      <mxGeometry x="14" y="68" width="288" height="2" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c3_meta" value="事件触发 · 持续 48s" style="text;html=1;fontSize=10;fontColor=#64748b;align=left;" vertex="1" parent="p1_card_3">
+      <mxGeometry x="14" y="76" width="130" height="24" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_c3_btn_view" value="实时进度" style="rounded=1;fillColor=#eff6ff;strokeColor=#93c5fd;fontSize=10;fontStyle=1;fontColor=#1d4ed8;align=center;" vertex="1" parent="p1_card_3">
+      <mxGeometry x="230" y="74" width="74" height="28" as="geometry"/>
+    </mxCell>
+
+    <!-- 手机 1 底部 TabBar -->
+    <mxCell id="p1_tabbar" value="" style="rounded=0;fillColor=#ffffff;strokeColor=#cbd5e1;strokeWidth=1;" vertex="1" parent="p1_frame">
+      <mxGeometry x="0" y="604" width="340" height="56" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_tab_1" value="💬&#xa;会话" style="text;html=1;fontSize=10;fontColor=#64748b;align=center;" vertex="1" parent="p1_tabbar">
+      <mxGeometry x="14" y="6" width="60" height="42" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_tab_2" value="📋&#xa;任务" style="text;html=1;fontSize=10;fontStyle=1;fontColor=#2563eb;align=center;" vertex="1" parent="p1_tabbar">
+      <mxGeometry x="96" y="6" width="60" height="42" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_tab_badge" value="1" style="ellipse;fillColor=#ef4444;strokeColor=none;fontSize=9;fontStyle=1;fontColor=#ffffff;align=center;" vertex="1" parent="p1_tabbar">
+      <mxGeometry x="140" y="4" width="14" height="14" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_tab_3" value="📦&#xa;资产" style="text;html=1;fontSize=10;fontColor=#64748b;align=center;" vertex="1" parent="p1_tabbar">
+      <mxGeometry x="178" y="6" width="60" height="42" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1_tab_4" value="⚙️&#xa;设置" style="text;html=1;fontSize=10;fontColor=#64748b;align=center;" vertex="1" parent="p1_tabbar">
+      <mxGeometry x="260" y="6" width="60" height="42" as="geometry"/>
+    </mxCell>
+
+
+    <!-- ==================== 屏幕 B：新建任务向导 (New Task Wizard) ==================== -->
+    <mxCell id="p2_frame" value="" style="rounded=1;arcSize=6;fillColor=#ffffff;strokeColor=#94a3b8;strokeWidth=2;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="430" y="30" width="340" height="660" as="geometry"/>
+    </mxCell>
+
+    <!-- 顶部说明 -->
+    <mxCell id="p2_title" value="屏幕 B：任务创建卡片流向导 (New Task Screen)&#xa;快捷模板横滑一键预填 + 分块卡片 + 折叠高级配置" style="text;html=1;fontSize=12;fontStyle=1;align=center;fontColor=#1e293b;" vertex="1" parent="1">
+      <mxGeometry x="430" y="0" width="340" height="26" as="geometry"/>
+    </mxCell>
+
+    <!-- 手机 2 状态栏 -->
+    <mxCell id="p2_status" value="9:41                        5G  [98%]" style="text;html=1;fontSize=10;fontColor=#64748b;align=center;" vertex="1" parent="p2_frame">
+      <mxGeometry x="0" y="6" width="340" height="18" as="geometry"/>
+    </mxCell>
+
+    <!-- 手机 2 顶部 Header -->
+    <mxCell id="p2_header_bg" value="" style="rounded=0;fillColor=#f8fafc;strokeColor=#e2e8f0;strokeWidth=1;" vertex="1" parent="p2_frame">
+      <mxGeometry x="0" y="26" width="340" height="46" as="geometry"/>
+    </mxCell>
+    <mxCell id="p2_btn_back" value="‹ 返回" style="text;html=1;fontSize=12;fontColor=#2563eb;align=left;" vertex="1" parent="p2_frame">
+      <mxGeometry x="12" y="38" width="50" height="22" as="geometry"/>
+    </mxCell>
+    <mxCell id="p2_head_title" value="新建任务向导" style="text;html=1;fontSize=13;fontStyle=1;fontColor=#0f172a;align=center;" vertex="1" parent="p2_frame">
+      <mxGeometry x="110" y="38" width="120" height="22" as="geometry"/>
+    </mxCell>
+
+    <!-- 卡片 1: 场景化快捷模板横滑栏 -->
+    <mxCell id="p2_card_tmpl" value="" style="rounded=1;fillColor=#f8fafc;strokeColor=#cbd5e1;strokeWidth=1;" vertex="1" parent="p2_frame">
+      <mxGeometry x="12" y="80" width="316" height="106" as="geometry"/>
+    </mxCell>
+    <mxCell id="p2_tmpl_head" value="✨ 场景化推荐模板 (点击一键填入)" style="text;html=1;fontSize=11;fontStyle=1;fontColor=#2563eb;align=left;" vertex="1" parent="p2_card_tmpl">
+      <mxGeometry x="10" y="6" width="220" height="18" as="geometry"/>
+    </mxCell>
+    
+    <!-- 模板卡片 A (已选中状态) -->
+    <mxCell id="p2_tmpl_item_1" value="代码健康巡检&#xa;[预计 3-5 分钟]" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;strokeWidth=1.5;fontSize=10;fontStyle=1;fontColor=#1e40af;align=center;" vertex="1" parent="p2_card_tmpl">
+      <mxGeometry x="10" y="28" width="94" height="46" as="geometry"/>
+    </mxCell>
+    <!-- 模板卡片 B -->
+    <mxCell id="p2_tmpl_item_2" value="每日总结汇总&#xa;[预计 2 分钟]" style="rounded=1;fillColor=#ffffff;strokeColor=#cbd5e1;fontSize=10;fontColor=#475569;align=center;" vertex="1" parent="p2_card_tmpl">
+      <mxGeometry x="112" y="28" width="94" height="46" as="geometry"/>
+    </mxCell>
+    <!-- 模板卡片 C -->
+    <mxCell id="p2_tmpl_item_3" value="安全日志归档&#xa;[预计 8 分钟]" style="rounded=1;fillColor=#ffffff;strokeColor=#cbd5e1;fontSize=10;fontColor=#475569;align=center;" vertex="1" parent="p2_card_tmpl">
+      <mxGeometry x="214" y="28" width="94" height="46" as="geometry"/>
+    </mxCell>
+    <mxCell id="p2_tmpl_tip" value="💡 模板已自动填充目标描述，手机无需大段输入" style="text;html=1;fontSize=9;fontColor=#64748b;align=left;" vertex="1" parent="p2_card_tmpl">
+      <mxGeometry x="10" y="80" width="290" height="18" as="geometry"/>
+    </mxCell>
+
+    <!-- 卡片 2: 核心任务定义 -->
+    <mxCell id="p2_card_core" value="" style="rounded=1;fillColor=#ffffff;strokeColor=#cbd5e1;strokeWidth=1;shadow=1;" vertex="1" parent="p2_frame">
+      <mxGeometry x="12" y="194" width="316" height="168" as="geometry"/>
+    </mxCell>
+    <mxCell id="p2_core_head" value="🎯 任务核心定义" style="text;html=1;fontSize=11;fontStyle=1;fontColor=#0f172a;align=left;" vertex="1" parent="p2_card_core">
+      <mxGeometry x="10" y="6" width="180" height="18" as="geometry"/>
+    </mxCell>
+    <mxCell id="p2_input_name" value="任务名称: 代码库架构与依赖巡检" style="rounded=1;fillColor=#f8fafc;strokeColor=#cbd5e1;fontSize=10;fontColor=#334155;align=left;spacingLeft=8;" vertex="1" parent="p2_card_core">
+      <mxGeometry x="10" y="28" width="296" height="30" as="geometry"/>
+    </mxCell>
+    <mxCell id="p2_input_goal" value="执行目标: 扫描主干分支最近提交记录，分析模块代码坏味道与测试通过率，输出 Markdown 格式的健康诊断报告并通知我。" style="rounded=1;fillColor=#f8fafc;strokeColor=#cbd5e1;fontSize=10;fontColor=#334155;align=left;spacing=8;" vertex="1" parent="p2_card_core">
+      <mxGeometry x="10" y="64" width="296" height="54" as="geometry"/>
+    </mxCell>
+    <!-- 附件按钮行 -->
+    <mxCell id="p2_btn_add_file" value="📎 添加附件 (0/10)" style="rounded=1;fillColor=#f1f5f9;strokeColor=#cbd5e1;fontSize=10;fontColor=#475569;align=center;" vertex="1" parent="p2_card_core">
+      <mxGeometry x="10" y="126" width="112" height="28" as="geometry"/>
+    </mxCell>
+    <mxCell id="p2_btn_add_folder" value="📁 挂载本地代码目录" style="rounded=1;fillColor=#f1f5f9;strokeColor=#cbd5e1;fontSize=10;fontColor=#475569;align=center;" vertex="1" parent="p2_card_core">
+      <mxGeometry x="130" y="126" width="124" height="28" as="geometry"/>
+    </mxCell>
+
+    <!-- 卡片 3: 执行环境与智能体 -->
+    <mxCell id="p2_card_env" value="" style="rounded=1;fillColor=#ffffff;strokeColor=#cbd5e1;strokeWidth=1;shadow=1;" vertex="1" parent="p2_frame">
+      <mxGeometry x="12" y="370" width="316" height="114" as="geometry"/>
+    </mxCell>
+    <mxCell id="p2_env_head" value="💻 执行环境与分配智能体" style="text;html=1;fontSize=11;fontStyle=1;fontColor=#0f172a;align=left;" vertex="1" parent="p2_card_env">
+      <mxGeometry x="10" y="6" width="200" height="18" as="geometry"/>
+    </mxCell>
+    <!-- 节点选择条 (横向滚动) -->
+    <mxCell id="p2_node_item_1" value="Robin Desktop (本机)&#xa;[已就绪 · P2P]" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;strokeWidth=1.5;fontSize=10;fontStyle=1;fontColor=#1e40af;align=center;" vertex="1" parent="p2_card_env">
+      <mxGeometry x="10" y="28" width="142" height="38" as="geometry"/>
+    </mxCell>
+    <mxCell id="p2_node_item_2" value="Build-Server-Linux&#xa;[在线 · 局域网]" style="rounded=1;fillColor=#ffffff;strokeColor=#cbd5e1;fontSize=10;fontColor=#64748b;align=center;" vertex="1" parent="p2_card_env">
+      <mxGeometry x="160" y="28" width="144" height="38" as="geometry"/>
+    </mxCell>
+    <!-- 智能体下拉 -->
+    <mxCell id="p2_agent_select" value="选择智能体: knoa 默认全能 Agent ▾" style="rounded=1;fillColor=#f8fafc;strokeColor=#cbd5e1;fontSize=10;fontColor=#334155;align=left;spacingLeft=8;" vertex="1" parent="p2_card_env">
+      <mxGeometry x="10" y="74" width="296" height="30" as="geometry"/>
+    </mxCell>
+
+    <!-- 卡片 4: 高级调度与通知 (可折叠) -->
+    <mxCell id="p2_card_adv" value="" style="rounded=1;fillColor=#f8fafc;strokeColor=#cbd5e1;strokeWidth=1;" vertex="1" parent="p2_frame">
+      <mxGeometry x="12" y="492" width="316" height="96" as="geometry"/>
+    </mxCell>
+    <mxCell id="p2_adv_head" value="⚙️ 高级调度与通知设置 ▾" style="text;html=1;fontSize=11;fontStyle=1;fontColor=#475569;align=left;" vertex="1" parent="p2_card_adv">
+      <mxGeometry x="10" y="6" width="220" height="18" as="geometry"/>
+    </mxCell>
+    <mxCell id="p2_adv_item_1" value="调度策略: 立即启动并转入常规手动" style="text;html=1;fontSize=10;fontColor=#334155;align=left;" vertex="1" parent="p2_card_adv">
+      <mxGeometry x="10" y="26" width="280" height="18" as="geometry"/>
+    </mxCell>
+    <mxCell id="p2_adv_item_2" value="通知权限: 完成推送 [✓]  |  失败告警 [✓]  |  审批拦截 [✓]" style="text;html=1;fontSize=10;fontColor=#2563eb;align=left;" vertex="1" parent="p2_card_adv">
+      <mxGeometry x="10" y="48" width="290" height="18" as="geometry"/>
+    </mxCell>
+    <mxCell id="p2_adv_tip" value="离线队列机制保护：即使节点断网，任务也将自动持久化排队" style="text;html=1;fontSize=9;fontColor=#64748b;align=left;" vertex="1" parent="p2_card_adv">
+      <mxGeometry x="10" y="70" width="296" height="18" as="geometry"/>
+    </mxCell>
+
+    <!-- 手机 2 底部悬浮主操作按钮 -->
+    <mxCell id="p2_btn_submit" value="创建并立即启动任务 (Run Now)" style="rounded=1;fillColor=#2563eb;strokeColor=#1d4ed8;fontSize=13;fontStyle=1;fontColor=#ffffff;align=center;shadow=1;" vertex="1" parent="p2_frame">
+      <mxGeometry x="12" y="602" width="316" height="46" as="geometry"/>
+    </mxCell>
+
+
+    <!-- ==================== 中间体验升级标注 ==================== -->
+    <mxCell id="anno_1" value="双向高效联动&#xa;• 列表页直接一键触发&#xa;• 智能摘要直接透出&#xa;• 模板横滑秒级生成&#xa;• 折叠配置释放屏幕" style="rounded=1;fillColor=#ecfdf5;strokeColor=#059669;strokeWidth=1.5;fontSize=11;fontStyle=1;fontColor=#065f46;align=left;spacing=8;" vertex="1" parent="1">
+      <mxGeometry x="800" y="260" width="180" height="150" as="geometry"/>
+    </mxCell>
+    <mxCell id="arrow_c1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#059669;strokeWidth=2;dashed=1;" edge="1" parent="1" source="anno_1" target="p1_frame">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="arrow_c2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#059669;strokeWidth=2;dashed=1;" edge="1" parent="1" source="anno_1" target="p2_frame">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+
+  </root>
+</mxGraphModel>

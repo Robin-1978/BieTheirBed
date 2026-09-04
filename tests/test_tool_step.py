@@ -450,3 +450,31 @@ async def test_tool_commit_binds_principal_and_session_for_scoped_memory(
     assert repository.get_memory("local", "user_name")["value"] == "Robin"
     with pytest.raises(RuntimeError, match="not bound"):
         current_memory_scope()
+
+
+@pytest.mark.asyncio
+async def test_confirmation_exception_returns_rejected_tool_result(
+    tmp_path: Path,
+) -> None:
+    tool = RecordingTool()
+    step = _step(tmp_path, tool)
+
+    class FailingConfirmation:
+        async def confirm(self, scope, run_id, call, reason: str) -> bool:
+            del scope, run_id, call, reason
+            raise RuntimeError("Task must be running before requesting approval")
+
+    context = _context(confirmation=FailingConfirmation())
+    result = await step.execute(
+        context,
+        ProposedToolCall(
+            call_id="call-fail",
+            name="record",
+            arguments={"path": "out.txt", "options": {"enabled": True}},
+        ),
+    )
+
+    assert result.status == "rejected"
+    assert result.code == "confirmation_failed"
+    assert "Task must be running" in result.message
+    assert tool.calls == []

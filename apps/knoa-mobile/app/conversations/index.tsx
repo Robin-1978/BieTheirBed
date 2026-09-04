@@ -168,7 +168,7 @@ export default function ConversationHistoryScreen() {
     // metadata in the background so opening a topic is instant.
     void gateway.openConversation(session.session_handle, { agentId: session.agent_id, state: session.state })
       .catch(() => setError(t("conversations.openFailed")));
-    router.replace({ pathname: "/chat", params: nodeRouteParams(params) });
+    router.replace({ pathname: "/(tabs)", params: nodeRouteParams(params) });
     setWorking("");
   }
 
@@ -181,7 +181,7 @@ export default function ConversationHistoryScreen() {
       ListHeaderComponent={(
         <>
           <View style={styles.headerActions}>
-            <AppPressable accessibilityLabel={t("conversations.new")} style={styles.primary} onPress={() => void gateway.newConversation().then(() => router.replace({ pathname: "/chat", params: nodeRouteParams(params) }))}>
+            <AppPressable accessibilityLabel={t("conversations.new")} style={styles.primary} onPress={() => void gateway.newConversation().then(() => router.replace({ pathname: "/(tabs)", params: nodeRouteParams(params) }))}>
               <AppIcon name="new-topic" color={colors.onAccent} size={21} />
             </AppPressable>
             <AppPressable style={styles.filter} onPress={() => setShowArchived((value) => !value)}>

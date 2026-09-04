@@ -5,25 +5,49 @@ import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { transportCompactLabelKey } from "@/api/transportPresentation";
 import { useGateway } from "@/state/GatewayProvider";
-import { colors } from "@/theme";
+import { colors, radii } from "@/theme";
 import { useI18n } from "@/i18n";
 import { presentNodeName } from "@/presentation/nodePresentation";
 
 export function NodeHeaderTitle() {
   const gateway = useGateway();
   const { t } = useI18n();
-  const params = useLocalSearchParams<{ workspaceName?: string }>();
+  const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string; nodeId?: string }>();
   const node = gateway.nodes.find((item) => item.nodeId === gateway.nodeId);
-  const statusLabel = gateway.status === "ready"
+  const isOnline = gateway.status === "ready";
+  const statusLabel = isOnline
     ? `${t("nodeHeader.online")} · ${t(transportCompactLabelKey(gateway.transportMode))}`
     : t("nodeHeader.connecting");
+
+  const handlePress = () => {
+    const nodeParams = {
+      workspaceId: stringParam(params.workspaceId),
+      workspaceName: stringParam(params.workspaceName),
+      nodeId: stringParam(params.nodeId) || gateway.nodeId,
+    };
+    router.push({ pathname: "/node", params: nodeParams });
+  };
+
   return (
-    <View style={styles.titleWrap}>
-      <Text style={styles.node} numberOfLines={1}>{presentNodeName(node, t("common.unnamedComputer"))}</Text>
-      <Text style={styles.workspace} numberOfLines={1}>
-        {stringParam(params.workspaceName) || t("nav.workspace")} · {statusLabel}
-      </Text>
-    </View>
+    <AppPressable
+      accessibilityRole="button"
+      accessibilityLabel={presentNodeName(node, t("common.unnamedComputer"))}
+      onPress={handlePress}
+      style={styles.pillContainer}
+    >
+      <View style={[styles.statusDot, isOnline ? styles.dotOnline : styles.dotOffline]} />
+      <View style={styles.titleWrap}>
+        <View style={styles.nameRow}>
+          <Text style={styles.node} numberOfLines={1}>
+            {presentNodeName(node, t("common.unnamedComputer"))}
+          </Text>
+          <AppIcon name="chevron-down" color={colors.muted} size={12} />
+        </View>
+        <Text style={styles.workspace} numberOfLines={1}>
+          {statusLabel}
+        </Text>
+      </View>
+    </AppPressable>
   );
 }
 
@@ -62,8 +86,37 @@ function stringParam(value: string | string[] | undefined): string {
 }
 
 const styles = StyleSheet.create({
-  titleWrap: { minWidth: 0 },
-  node: { color: colors.ink, fontSize: 16, fontWeight: "800" },
-  workspace: { color: colors.muted, fontSize: 11, marginTop: 1 },
+  pillContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radii.medium,
+    backgroundColor: colors.surfaceMuted,
+    gap: 8,
+    maxWidth: 240,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  dotOnline: {
+    backgroundColor: colors.accent,
+  },
+  dotOffline: {
+    backgroundColor: colors.warning,
+  },
+  nameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  titleWrap: {
+    minWidth: 0,
+    flexShrink: 1,
+  },
+  node: { color: colors.ink, fontSize: 13, fontWeight: "800" },
+  workspace: { color: colors.muted, fontSize: 10, marginTop: 1 },
   back: { width: 42, height: 42, alignItems: "center", justifyContent: "center", marginLeft: -8 },
 });

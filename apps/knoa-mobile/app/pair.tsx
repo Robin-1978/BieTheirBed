@@ -77,7 +77,7 @@ export default function PairScreen() {
         return;
       }
       router.replace({
-        pathname: "/node",
+        pathname: "/(tabs)",
         params: {
           workspaceId,
           workspaceName: stringParam(params.workspaceName),

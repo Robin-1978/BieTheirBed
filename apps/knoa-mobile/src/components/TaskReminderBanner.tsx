@@ -15,6 +15,7 @@ export function TaskReminderBanner() {
   const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(-24)).current;
   const opacity = useRef(new Animated.Value(0)).current;
+  const isApproval = activeReminder?.category === "approval";
 
   useEffect(() => {
     if (!activeReminder) return;
@@ -24,9 +25,9 @@ export function TaskReminderBanner() {
       Animated.spring(translateY, { toValue: 0, useNativeDriver: true, damping: 18, stiffness: 220 }),
       Animated.timing(opacity, { toValue: 1, duration: 160, useNativeDriver: true }),
     ]).start();
-    const timer = setTimeout(dismissActive, 6500);
+    const timer = setTimeout(dismissActive, isApproval ? 30000 : 6500);
     return () => clearTimeout(timer);
-  }, [activeReminder, dismissActive, opacity, translateY]);
+  }, [activeReminder, dismissActive, isApproval, opacity, translateY]);
 
   if (!activeReminder) return null;
   const title = unreadCount > 1
@@ -40,7 +41,11 @@ export function TaskReminderBanner() {
   function open() {
     markRead(activeReminder!.reminderId);
     dismissActive();
-    router.push(`/task-executions/${activeReminder!.executionId}`);
+    if (activeReminder!.executionId) {
+      router.push(`/task-executions/${activeReminder!.executionId}`);
+    } else if (activeReminder!.taskId) {
+      router.push(`/tasks/${activeReminder!.taskId}`);
+    }
   }
 
   return (
@@ -48,18 +53,29 @@ export function TaskReminderBanner() {
       pointerEvents="box-none"
       style={[styles.position, { top: insets.top + 54, opacity, transform: [{ translateY }] }]}
     >
-      <AppPressable accessibilityRole="button" accessibilityLabel={title} onPress={open} style={styles.banner}>
-        <View style={styles.icon}>
+      <AppPressable
+        accessibilityRole="button"
+        accessibilityLabel={title}
+        onPress={open}
+        style={[styles.banner, isApproval && styles.bannerApproval]}
+      >
+        <View style={[styles.icon, isApproval && styles.iconApproval]}>
           <AppIcon
-            name={activeReminder.category === "failed" ? "x" : activeReminder.category === "approval" ? "alert" : "check"}
-            color={activeReminder.category === "failed" ? colors.danger : activeReminder.category === "approval" ? colors.warning : colors.accent}
+            name={activeReminder.category === "failed" ? "x" : isApproval ? "alert" : "check"}
+            color={activeReminder.category === "failed" ? colors.danger : isApproval ? colors.warning : colors.accent}
             size={18}
           />
         </View>
         <View style={styles.copy}>
-          <Text style={styles.title}>{title}</Text>
+          <Text style={[styles.title, isApproval && styles.titleApproval]}>{title}</Text>
           <Text numberOfLines={1} style={styles.detail}>{activeReminder.taskTitle}</Text>
         </View>
+        {isApproval ? (
+          <View style={styles.actionPill}>
+            <Text style={styles.actionPillText}>{t("reminders.reviewAction")}</Text>
+            <AppIcon name="chevron-right" color={colors.warning} size={13} />
+          </View>
+        ) : null}
         <AppPressable
           accessibilityRole="button"
           accessibilityLabel={t("reminders.dismiss")}
@@ -92,9 +108,31 @@ const styles = StyleSheet.create({
     gap: 11,
     ...shadows.floating,
   },
+  bannerApproval: {
+    backgroundColor: colors.warningSoft,
+    borderColor: colors.warning,
+  },
   icon: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.accentSoft, alignItems: "center", justifyContent: "center" },
+  iconApproval: { backgroundColor: colors.surfaceElevated },
   copy: { flex: 1, gap: 2 },
   title: { color: colors.ink, fontSize: 15, fontWeight: "700" },
+  titleApproval: { color: colors.warning },
   detail: { color: colors.muted, fontSize: 13 },
+  actionPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surfaceElevated,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.warning,
+    gap: 2,
+  },
+  actionPillText: {
+    color: colors.warning,
+    fontSize: 12,
+    fontWeight: "700",
+  },
   close: { width: 30, height: 30, alignItems: "center", justifyContent: "center", borderRadius: 10 },
 });
