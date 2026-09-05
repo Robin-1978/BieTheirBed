@@ -149,7 +149,7 @@ const styles = StyleSheet.create({
   generatedImage: {
     width: "100%",
     height: 180,
-    backgroundColor: "#000000",
+    backgroundColor: colors.surfaceMuted,
   },
   generatedImageState: {
     width: "100%",

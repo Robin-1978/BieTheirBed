@@ -11,6 +11,7 @@ import { assistantArtifactItems } from "@/api/chatArtifacts";
 import { TERMINAL_STATES } from "./types";
 import { AssistantArtifactItem } from "./AssistantArtifactItem";
 import { ChatApprovalCard } from "./ChatApprovalCard";
+import { AppIcon } from "@/components/AppIcon";
 import { AppMarkdown } from "@/components/AppMarkdown";
 import { InteractionCard } from "@/components/InteractionCard";
 import { TurnProgress } from "@/components/TurnProgress";
@@ -34,6 +35,7 @@ export type ChatTurnItemProps = {
   onSaveArtifact(item: AssistantArtifactItemType): Promise<void>;
   onRetry(turn: ChatTurnSnapshot): void;
   onEdit(turn: ChatTurnSnapshot): void;
+  onConvertToTask?(turn: ChatTurnSnapshot): void;
 };
 
 export const ChatTurnItem = memo(function ChatTurnItem({
@@ -52,6 +54,7 @@ export const ChatTurnItem = memo(function ChatTurnItem({
   onSaveArtifact,
   onRetry,
   onEdit,
+  onConvertToTask,
 }: ChatTurnItemProps) {
   const { t } = useI18n();
   const terminal = TERMINAL_STATES.has(turn.state);
@@ -119,6 +122,33 @@ export const ChatTurnItem = memo(function ChatTurnItem({
           />
         ) : null}
 
+        {turn.state === "completed" && response ? (
+          <View style={styles.completedActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("chat.copyResponse")}
+              onPress={() => onCopy(response)}
+              style={styles.completedAction}
+            >
+              <AppIcon name="file" color={colors.muted} size={12} />
+              <Text style={styles.completedActionText}>{t("chat.copyShort")}</Text>
+            </Pressable>
+            {onConvertToTask ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t("chat.convertToTask")}
+                onPress={() => onConvertToTask(turn)}
+                style={[styles.completedAction, styles.convertAction]}
+              >
+                <AppIcon name="timer" color={colors.accent} size={12} />
+                <Text style={[styles.completedActionText, styles.convertActionText]}>
+                  {t("chat.convertToTask")}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+
         {turn.state === "failed" || turn.state === "cancelled" ? (
           <View style={styles.turnActions}>
             <Pressable accessibilityRole="button" onPress={() => onRetry(turn)} style={styles.turnAction}>
@@ -137,6 +167,35 @@ export const ChatTurnItem = memo(function ChatTurnItem({
 const styles = StyleSheet.create({
   turn: { gap: spacing.small },
   messageTimestamp: { alignSelf: "center", color: colors.muted, fontSize: 11, marginBottom: 2 },
+  completedActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.small,
+    marginTop: spacing.small,
+    paddingTop: spacing.xsmall,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+  },
+  completedAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radii.small,
+    backgroundColor: colors.surfaceMuted,
+  },
+  completedActionText: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  convertAction: {
+    backgroundColor: colors.accentSoft,
+  },
+  convertActionText: {
+    color: colors.accent,
+  },
   userBubble: {
     alignSelf: "flex-end",
     maxWidth: "84%",

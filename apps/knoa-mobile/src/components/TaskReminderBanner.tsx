@@ -1,21 +1,24 @@
 import { router } from "expo-router";
-import { useEffect, useRef } from "react";
-import { Animated, StyleSheet, Text, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Animated, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { useI18n } from "@/i18n";
+import { useGateway } from "@/state/GatewayProvider";
 import { useTaskReminders } from "@/state/TaskReminderProvider";
-import { colors, shadows } from "@/theme";
+import { colors, radii, shadows, spacing } from "@/theme";
 
 export function TaskReminderBanner() {
   const { activeReminder, unreadCount, dismissActive, markRead } = useTaskReminders();
+  const gateway = useGateway();
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(-24)).current;
   const opacity = useRef(new Animated.Value(0)).current;
   const isApproval = activeReminder?.category === "approval";
+  const [approving, setApproving] = useState(false);
 
   useEffect(() => {
     if (!activeReminder) return;
@@ -48,6 +51,25 @@ export function TaskReminderBanner() {
     }
   }
 
+  async function quickResolve(approved: boolean) {
+    if (!activeReminder?.executionId || approving || !gateway.client) return;
+    setApproving(true);
+    try {
+      const snapshot = await gateway.runAuthenticated((client) => client.getTaskExecution(activeReminder.executionId));
+      const pendingApproval = snapshot.approvals.find((a) => a.state === "pending");
+      if (pendingApproval) {
+        await gateway.runAuthenticated((client) => client.resolveApproval(pendingApproval.approval_id, approved));
+      }
+      markRead(activeReminder.reminderId);
+      dismissActive();
+    } catch {
+      // If quick resolve fails, fall back to opening the execution page
+      open();
+    } finally {
+      setApproving(false);
+    }
+  }
+
   return (
     <Animated.View
       pointerEvents="box-none"
@@ -68,12 +90,41 @@ export function TaskReminderBanner() {
         </View>
         <View style={styles.copy}>
           <Text style={[styles.title, isApproval && styles.titleApproval]}>{title}</Text>
-          <Text numberOfLines={1} style={styles.detail}>{activeReminder.taskTitle}</Text>
+          <Text numberOfLines={1} style={styles.detail}>
+            {activeReminder.nodeName ? `${t("reminders.deviceFrom", { device: activeReminder.nodeName })} · ` : ""}
+            {activeReminder.taskTitle}
+          </Text>
         </View>
         {isApproval ? (
-          <View style={styles.actionPill}>
-            <Text style={styles.actionPillText}>{t("reminders.reviewAction")}</Text>
-            <AppIcon name="chevron-right" color={colors.warning} size={13} />
+          <View style={styles.approvalActions}>
+            <AppPressable
+              accessibilityRole="button"
+              accessibilityLabel={t("reminders.quickApprove")}
+              disabled={approving}
+              onPress={(event) => {
+                event.stopPropagation();
+                void quickResolve(true);
+              }}
+              style={[styles.quickButton, styles.quickApprove]}
+            >
+              {approving ? (
+                <ActivityIndicator color={colors.onAccent} size="small" />
+              ) : (
+                <Text style={styles.quickApproveText}>{t("reminders.quickApprove")}</Text>
+              )}
+            </AppPressable>
+            <AppPressable
+              accessibilityRole="button"
+              accessibilityLabel={t("reminders.quickReject")}
+              disabled={approving}
+              onPress={(event) => {
+                event.stopPropagation();
+                void quickResolve(false);
+              }}
+              style={[styles.quickButton, styles.quickReject]}
+            >
+              <Text style={styles.quickRejectText}>{t("reminders.quickReject")}</Text>
+            </AppPressable>
           </View>
         ) : null}
         <AppPressable
@@ -82,6 +133,7 @@ export function TaskReminderBanner() {
           hitSlop={10}
           onPress={(event) => {
             event.stopPropagation();
+            markRead(activeReminder.reminderId);
             dismissActive();
           }}
           style={styles.close}
@@ -118,6 +170,37 @@ const styles = StyleSheet.create({
   title: { color: colors.ink, fontSize: 15, fontWeight: "700" },
   titleApproval: { color: colors.warning },
   detail: { color: colors.muted, fontSize: 13 },
+  approvalActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  quickButton: {
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: radii.small,
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 44,
+  },
+  quickApprove: {
+    backgroundColor: colors.accent,
+  },
+  quickApproveText: {
+    color: colors.onAccent,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  quickReject: {
+    backgroundColor: colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  quickRejectText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "600",
+  },
   actionPill: {
     flexDirection: "row",
     alignItems: "center",

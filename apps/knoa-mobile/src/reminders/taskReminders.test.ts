@@ -106,4 +106,35 @@ describe("task reminders", () => {
     expect(result.find((item) => item.reminderId === "intent:approval-1")?.read).toBe(true);
     expect(result.find((item) => item.reminderId === "intent:approval-2")?.read).toBe(false);
   });
+
+  it("filters unread task reminders strictly by nodeId", () => {
+    const list: TaskReminder[] = [
+      { ...reminder(1), nodeId: "node-a", taskId: "task-1" },
+      { ...reminder(2), nodeId: "node-b", taskId: "task-2" },
+      { ...reminder(3), nodeId: "node-a", taskId: "task-3" },
+    ];
+    const indexA = unreadTaskReminderIndex(list, "node-a");
+    expect(indexA.count).toBe(2);
+    expect([...indexA.taskIds]).toEqual(["task-1", "task-3"]);
+
+    const indexB = unreadTaskReminderIndex(list, "node-b");
+    expect(indexB.count).toBe(1);
+    expect([...indexB.taskIds]).toEqual(["task-2"]);
+
+    const indexC = unreadTaskReminderIndex(list, "node-c");
+    expect(indexC.count).toBe(0);
+  });
+
+  it("marks unread task reminders as read selectively by nodeId", () => {
+    const list: TaskReminder[] = [
+      { ...reminder(1), nodeId: "node-a" },
+      { ...reminder(2), nodeId: "node-b" },
+    ];
+    const updated = markAllTaskRemindersRead(list, "node-a");
+    expect(updated[0]?.read).toBe(true);
+    expect(updated[1]?.read).toBe(false);
+
+    const allRead = markAllTaskRemindersRead(list);
+    expect(allRead.every((item) => item.read)).toBe(true);
+  });
 });

@@ -29,22 +29,34 @@ import { MAX_ATTACHMENTS, pickAttachments, type PickedAttachment } from "@/media
 import { uploadSessionAttachments } from "@/api/uploadAttachments";
 import { pickFolderSnapshot, uploadFolderSnapshot, type FolderSelection } from "@/media/folderManifest";
 
+function stringParam(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+}
+
 export default function NewTaskScreen() {
   const gateway = useGateway();
   const { t } = useI18n();
-  const params = useLocalSearchParams<{ template?: string; workspaceId?: string; workspaceName?: string; nodeId?: string }>();
-  const [title, setTitle] = useState("");
-  const [goal, setGoal] = useState("");
+  const params = useLocalSearchParams<{
+    template?: string;
+    title?: string;
+    goal?: string;
+    agentId?: string;
+    workspaceId?: string;
+    workspaceName?: string;
+    nodeId?: string;
+  }>();
+  const [title, setTitle] = useState(stringParam(params.title));
+  const [goal, setGoal] = useState(stringParam(params.goal));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notifyCompleted, setNotifyCompleted] = useState(true);
   const [notifyFailed, setNotifyFailed] = useState(true);
   const [notifyApproval, setNotifyApproval] = useState(true);
   const [launchPolicy, setLaunchPolicy] = useState<TaskLaunchPolicy>(immediatePolicy);
-  const [agentId, setAgentId] = useState(gateway.defaultAgentId || "knoa");
+  const [agentId, setAgentId] = useState(stringParam(params.agentId) || gateway.defaultAgentId || "knoa");
   const [mcpResources, setMcpResources] = useState<MCPResourceCatalogItem[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState("");
-  const [selectedNodeId, setSelectedNodeId] = useState(gateway.nodeId || params.nodeId || "");
+  const [selectedNodeId, setSelectedNodeId] = useState(gateway.nodeId || stringParam(params.nodeId) || "");
   const [switchingNode, setSwitchingNode] = useState(false);
   const [attachments, setAttachments] = useState<PickedAttachment[]>([]);
   const [folder, setFolder] = useState<FolderSelection | null>(null);
@@ -81,12 +93,20 @@ export default function NewTaskScreen() {
   const activeTemplate = TASK_TEMPLATES.find((template) => template.id === selectedTemplate);
 
   useEffect(() => {
-    const requested = TASK_TEMPLATES.find((template) => template.id === params.template);
+    const paramTitle = stringParam(params.title);
+    const paramGoal = stringParam(params.goal);
+    const paramAgentId = stringParam(params.agentId);
+    if (paramTitle) setTitle(paramTitle);
+    if (paramGoal) setGoal(paramGoal);
+    if (paramAgentId) setAgentId(paramAgentId);
+
+    const templateId = stringParam(params.template);
+    const requested = TASK_TEMPLATES.find((template) => template.id === templateId);
     if (!requested) return;
     setSelectedTemplate(requested.id);
     setTitle(t(requested.titleKey));
     setGoal(t(requested.goalKey));
-  }, [params.template, t]);
+  }, [params.agentId, params.goal, params.template, params.title, t]);
 
   useEffect(() => {
     if (gateway.nodeId) setSelectedNodeId(gateway.nodeId);

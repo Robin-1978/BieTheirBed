@@ -11,14 +11,17 @@ import { colors } from "@/theme";
 
 export default function TabsLayout() {
   const { t } = useI18n();
-  const { unreadCount } = useTaskReminders();
   const gateway = useGateway();
   const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string; nodeId?: string }>();
+  const { unreadCountForNode } = useTaskReminders();
+
+  const currentNodeId = gateway.nodeId || stringParam(params.nodeId);
+  const currentUnreadCount = unreadCountForNode(currentNodeId);
 
   const nodeParams = {
     workspaceId: stringParam(params.workspaceId),
     workspaceName: stringParam(params.workspaceName),
-    nodeId: stringParam(params.nodeId) || gateway.nodeId,
+    nodeId: currentNodeId,
   };
 
   return (
@@ -31,6 +34,7 @@ export default function TabsLayout() {
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.muted,
         tabBarLabelStyle: styles.tabLabel,
+        sceneStyle: { backgroundColor: colors.background },
       }}
     >
       <Tabs.Screen
@@ -64,7 +68,7 @@ export default function TabsLayout() {
         options={{
           title: t("tabs.tasks"),
           tabBarLabel: t("tabs.tasks"),
-          tabBarBadge: unreadCount > 0 ? (unreadCount > 9 ? "9+" : unreadCount) : undefined,
+          tabBarBadge: currentUnreadCount > 0 ? (currentUnreadCount > 9 ? "9+" : currentUnreadCount) : undefined,
           tabBarBadgeStyle: styles.badge,
           tabBarIcon: ({ color, size }) => <AppIcon name="tasks" color={color} size={size ?? 22} />,
           headerRight: () => (

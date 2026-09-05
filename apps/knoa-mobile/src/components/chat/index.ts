@@ -5,3 +5,4 @@ export * from "./ChatTurnItem";
 export * from "./PendingTurnItem";
 export * from "./AssistantArtifactItem";
 export * from "./ChatFeedbackBanner";
+export * from "./ClipboardSuggestionPill";

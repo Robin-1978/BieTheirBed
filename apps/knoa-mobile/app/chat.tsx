@@ -19,11 +19,14 @@ import {
   Modal,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type {
   ChatApproval,
@@ -38,8 +41,10 @@ import {
   ChatComposer,
   ChatFeedbackBanner,
   ChatTurnItem,
+  ClipboardSuggestionPill,
   PendingTurnItem,
   type ChatListItem,
+  type ClipboardSuggestion,
   type Feedback,
   type InputMode,
   type PendingAttachment,
@@ -76,6 +81,7 @@ const SCROLL_OFFSET_THRESHOLD = 80;
 
 export default function ChatScreen() {
   const gateway = useGateway();
+  const insets = useSafeAreaInsets();
   const gatewayRef = useRef(gateway);
   gatewayRef.current = gateway;
 
@@ -121,15 +127,45 @@ export default function ChatScreen() {
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recordingState = useAudioRecorderState(recorder, 250);
 
+  const lastDismissedClipboardRef = useRef("");
+  const [clipboardSuggestion, setClipboardSuggestion] = useState<ClipboardSuggestion | null>(null);
+
   const showFeedback = useCallback((value: string, tone: Feedback["tone"] = "info") => {
     setFeedback({ text: value, tone });
   }, []);
 
   const copyMessage = useCallback(async (content: string) => {
     if (!content.trim()) return;
+    lastDismissedClipboardRef.current = content.trim();
     await Clipboard.setStringAsync(content);
     showFeedback(t("chat.messageCopied"), "success");
   }, [showFeedback, t]);
+
+  const checkClipboard = useCallback(async () => {
+    try {
+      const hasStr = await Clipboard.hasStringAsync();
+      if (!hasStr) return;
+      const content = (await Clipboard.getStringAsync())?.trim();
+      if (!content || content.length < 4 || content.length > 2000) return;
+      if (content === lastDismissedClipboardRef.current) return;
+      if (text.trim().includes(content)) return;
+
+      const isUrl = /^https?:\/\/[^\s]+$/i.test(content);
+      const isCode = content.includes("\n") && (
+        content.includes("Error") ||
+        content.includes("error") ||
+        content.includes("Exception") ||
+        content.includes("failed") ||
+        content.includes("function")
+      );
+      setClipboardSuggestion({
+        text: content,
+        kind: isUrl ? "url" : isCode ? "code" : "text",
+      });
+    } catch {
+      // ignore clipboard permission error
+    }
+  }, [text]);
 
   const [turnWatcher] = useState(() => new ChatTurnWatcher({
     connection: () => gatewayRef.current.connection(),
@@ -143,8 +179,9 @@ export default function ChatScreen() {
   }));
 
   useEffect(() => {
-    if (!feedback || feedback.tone === "error" || feedback.tone === "warning") return;
-    const timeout = setTimeout(() => setFeedback(null), 3200);
+    if (!feedback) return;
+    const duration = feedback.tone === "error" || feedback.tone === "warning" ? 5000 : 3000;
+    const timeout = setTimeout(() => setFeedback(null), duration);
     return () => clearTimeout(timeout);
   }, [feedback]);
 
@@ -224,14 +261,18 @@ export default function ChatScreen() {
 
   useFocusEffect(useCallback(() => {
     void refresh();
-  }, [refresh]));
+    void checkClipboard();
+  }, [checkClipboard, refresh]));
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") void refresh();
+      if (state === "active") {
+        void refresh();
+        void checkClipboard();
+      }
     });
     return () => subscription.remove();
-  }, [refresh]);
+  }, [checkClipboard, refresh]);
 
   useEffect(() => {
     let active = true;
@@ -381,6 +422,7 @@ export default function ChatScreen() {
 
   async function send() {
     if (!gateway.client || !canSend) return;
+    setFeedback(null);
     if (attachments.some((item) => item.mediaType.startsWith("image/"))) {
       setValidatingInput(true);
       try {
@@ -550,6 +592,7 @@ export default function ChatScreen() {
   async function startNewTopic(agentId?: string) {
     if (startingTopic || sending) return;
     setStartingTopic(true);
+    setFeedback(null);
     try {
       const previousSession = gateway.sessionHandle;
       await gateway.newConversation(agentId);
@@ -646,7 +689,11 @@ export default function ChatScreen() {
   const stoppingResponse = Boolean(cancelling);
 
   return (
-    <View style={styles.screen}>
+    <KeyboardAvoidingView
+      style={styles.screen}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={insets.top + (Platform.OS === "ios" ? 44 : 56)}
+    >
       <View style={styles.topbar}>
           <AppPressable
             accessibilityLabel={t("agent.selectConversation")}
@@ -677,12 +724,13 @@ export default function ChatScreen() {
           </AppPressable>
         </View>
 
-        <ChatFeedbackBanner feedback={feedback} />
+        <ChatFeedbackBanner feedback={feedback} onDismiss={() => setFeedback(null)} />
 
         <View style={styles.listArea}>
           <FlatList
             ref={listRef}
             contentContainerStyle={styles.messages}
+            keyboardShouldPersistTaps="handled"
             data={listItems}
             keyExtractor={(item) => item.key}
             onContentSizeChange={() => {
@@ -719,6 +767,20 @@ export default function ChatScreen() {
                   onEdit={(turn) => {
                     setText(turn.user_input);
                     showFeedback(t("chat.editedToComposer"), "info");
+                  }}
+                  onConvertToTask={(turn) => {
+                    const goal = turn.user_input;
+                    const title = goal.length > 24 ? `${goal.slice(0, 24)}…` : goal;
+                    const targetNodeId = gateway.nodeId || stringParam(params.nodeId);
+                    router.push({
+                      pathname: "/tasks/new",
+                      params: {
+                        ...nodeRouteParams(params),
+                        ...(targetNodeId ? { nodeId: targetNodeId } : {}),
+                        title,
+                        goal,
+                      },
+                    });
                   }}
                 />
               ) : (
@@ -770,9 +832,27 @@ export default function ChatScreen() {
           ) : null}
         </View>
 
+        {clipboardSuggestion ? (
+          <ClipboardSuggestionPill
+            suggestion={clipboardSuggestion}
+            onApply={(appliedText) => {
+              setText(appliedText);
+              lastDismissedClipboardRef.current = clipboardSuggestion.text;
+              setClipboardSuggestion(null);
+            }}
+            onDismiss={() => {
+              lastDismissedClipboardRef.current = clipboardSuggestion.text;
+              setClipboardSuggestion(null);
+            }}
+          />
+        ) : null}
+
         <ChatComposer
           text={text}
-          onTextChange={setText}
+          onTextChange={(val) => {
+            setText(val);
+            if (feedback?.tone === "error") setFeedback(null);
+          }}
           inputMode={inputMode}
           onInputModeChange={setInputMode}
           attachments={attachments}
@@ -848,7 +928,7 @@ export default function ChatScreen() {
             </View>
           </View>
         </Modal>
-      </View>
+      </KeyboardAvoidingView>
   );
 }
 

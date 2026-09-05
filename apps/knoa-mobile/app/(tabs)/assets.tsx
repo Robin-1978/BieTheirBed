@@ -136,6 +136,7 @@ export default function UnifiedAssetsScreen() {
   return (
     <>
       <ScrollView
+        style={styles.screen}
         contentContainerStyle={styles.container}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh(true)} />}
       >
@@ -300,6 +301,10 @@ function resultState(task: Task, t: ReturnType<typeof useI18n>["t"]): string {
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
   container: {
     padding: spacing.large,
     gap: spacing.medium,
@@ -368,7 +373,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accentSoft,
   },
   badgeFail: {
-    backgroundColor: "#fee2e2",
+    backgroundColor: colors.dangerSoft,
   },
   statusBadgeText: {
     fontSize: 11,

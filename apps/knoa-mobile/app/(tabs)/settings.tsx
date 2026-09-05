@@ -32,7 +32,7 @@ export default function NodeAndSettingsScreen() {
   }, [gateway]);
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
       {/* 节点概览与通道状态卡片 */}
       <View style={styles.heroCard}>
         <View style={styles.heroHeader}>
@@ -76,6 +76,26 @@ export default function NodeAndSettingsScreen() {
             <Text style={styles.quickActionText}>{t("nav.nodeSettings")}</Text>
           </AppPressable>
         </View>
+      </View>
+
+      {/* 工作区看板与多设备中枢卡片 */}
+      <View style={styles.sectionCard}>
+        <Text style={styles.sectionTitle}>{t("nodeSwitch.workspaceHub")}</Text>
+        <SettingRow
+          icon="workspace"
+          title={t("nodeMenu.backToWorkspace")}
+          detail={workspaceName}
+          onPress={() => {
+            if (workspaceId) router.push({ pathname: "/workspaces/[workspaceId]", params: { workspaceId, workspaceName } });
+            else router.push("/account");
+          }}
+        />
+        <SettingRow
+          icon="settings"
+          title={t("nav.account")}
+          detail={t("account.appSection")}
+          onPress={() => router.push("/account")}
+        />
       </View>
 
       {/* 核心治理与扩展卡片 */}
@@ -122,15 +142,6 @@ export default function NodeAndSettingsScreen() {
           detail={t("settings.checkAppUpdateHint")}
           onPress={() => router.push("/update")}
         />
-        <SettingRow
-          icon="workspace"
-          title={t("nodeMenu.backToWorkspace")}
-          detail={workspaceName}
-          onPress={() => {
-            if (workspaceId) router.replace({ pathname: "/workspaces/[workspaceId]", params: { workspaceId, workspaceName } });
-            else router.replace("/account");
-          }}
-        />
       </View>
     </ScrollView>
   );
@@ -165,6 +176,10 @@ function stringParam(value: string | string[] | undefined): string {
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
   container: {
     padding: spacing.large,
     gap: spacing.large,

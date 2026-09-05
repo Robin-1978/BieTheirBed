@@ -7,7 +7,7 @@ import { colors } from "@/theme";
 const theme = {
   colors: {
     background: "transparent",
-    code: colors.background,
+    code: colors.surfaceMuted,
     link: colors.accent,
     text: colors.ink,
     border: colors.line,
@@ -15,12 +15,15 @@ const theme = {
 };
 
 const markdownStyles: MarkedStyles = {
-  text: { fontSize: 16, lineHeight: 24 },
-  strong: { fontSize: 16, lineHeight: 24, fontWeight: "700" },
-  h1: { fontSize: 21, lineHeight: 29, marginVertical: 8 },
-  h2: { fontSize: 19, lineHeight: 27, marginVertical: 8 },
-  h3: { fontSize: 17, lineHeight: 25, marginVertical: 6 },
-  h4: { fontSize: 16, lineHeight: 24, marginVertical: 6 },
+  text: { fontSize: 15, lineHeight: 23, color: colors.ink },
+  strong: { fontSize: 15, lineHeight: 23, fontWeight: "700", color: colors.ink },
+  h1: { fontSize: 20, lineHeight: 28, marginVertical: 8, fontWeight: "800", color: colors.ink },
+  h2: { fontSize: 18, lineHeight: 26, marginVertical: 8, fontWeight: "700", color: colors.ink },
+  h3: { fontSize: 16, lineHeight: 24, marginVertical: 6, fontWeight: "700", color: colors.ink },
+  h4: { fontSize: 15, lineHeight: 23, marginVertical: 6, fontWeight: "600", color: colors.ink },
+  blockquote: { borderLeftColor: colors.accent, borderLeftWidth: 3, paddingLeft: 10, marginVertical: 6 },
+  codespan: { fontSize: 13, color: colors.accent, backgroundColor: colors.surfaceMuted },
+  code: { backgroundColor: colors.surfaceMuted, borderRadius: 8, padding: 8 },
 };
 
 export const AppMarkdown = memo(function AppMarkdown({ value, style }: { value: string; style?: StyleProp<ViewStyle> }) {
