@@ -1,0 +1,103 @@
+<mxfile host="app.diagrams.net"><diagram id="coworker-arch-06" name="Page-1"><mxGraphModel>
+  <root>
+    <mxCell id="0"/>
+    <mxCell id="1" parent="0"/>
+
+    <!-- 1. Mobile Presentation Deck -->
+    <mxCell id="group_mobile" value="随身指挥终端 (Mobile Command Deck)" style="rounded=1;fillColor=#f1f5f9;strokeColor=#94a3b8;fontStyle=1;align=left;verticalAlign=top;spacingLeft=15;spacingTop=10;fontSize=13;fontColor=#1e293b;" vertex="1" parent="1">
+      <mxGeometry x="40" y="40" width="760" height="150" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="deck_chat" value="灵动即时指挥台&#xa;(Chat Command Deck)&#xa;动态诊断建议/剪贴板感知" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;fontStyle=1;fontSize=12;fontColor=#1e3a8a;align=center;" vertex="1" parent="group_mobile">
+      <mxGeometry x="20" y="45" width="165" height="75" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="deck_tasks" value="Bento 任务工作台&#xa;(Bento Tasks Hub)&#xa;狂飙/待裁决/收官看板" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;fontStyle=1;fontSize=12;fontColor=#1e3a8a;align=center;" vertex="1" parent="group_mobile">
+      <mxGeometry x="205" y="45" width="165" height="75" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="deck_assets" value="数字战果陈列室&#xa;(Trophy Showcase)&#xa;多维聚合检索/富媒体交付" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;fontStyle=1;fontSize=12;fontColor=#1e3a8a;align=center;" vertex="1" parent="group_mobile">
+      <mxGeometry x="390" y="45" width="165" height="75" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="deck_memory" value="透明记忆与机甲库&#xa;(Memory &amp; Fleet)&#xa;可审计偏好/技能一键装备" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;fontStyle=1;fontSize=12;fontColor=#1e3a8a;align=center;" vertex="1" parent="group_mobile">
+      <mxGeometry x="575" y="45" width="165" height="75" as="geometry"/>
+    </mxCell>
+
+    <!-- 2. Domain & SDB Layer -->
+    <mxCell id="group_domain" value="协同领域与安全门禁中枢 (Domain &amp; SDB Gateway Layer)" style="rounded=1;fillColor=#f1f5f9;strokeColor=#94a3b8;fontStyle=1;align=left;verticalAlign=top;spacingLeft=15;spacingTop=10;fontSize=13;fontColor=#1e293b;" vertex="1" parent="1">
+      <mxGeometry x="40" y="230" width="760" height="150" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="core_orchestrator" value="Durable Task 状态机&#xa;Attempt检查点/断线自愈" style="rounded=1;fillColor=#ffffff;strokeColor=#2563eb;fontSize=12;fontColor=#1e293b;align=center;" vertex="1" parent="group_domain">
+      <mxGeometry x="20" y="45" width="165" height="75" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="core_sdb" value="SDB 确定性安全门禁&#xa;HITL高危拦截/幂等审查" style="rounded=1;fillColor=#ffffff;strokeColor=#2563eb;fontSize=12;fontColor=#1e293b;align=center;" vertex="1" parent="group_domain">
+      <mxGeometry x="205" y="45" width="165" height="75" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="core_artifact" value="成果聚合与证据交付引擎&#xa;Artifact管道/结构化报告" style="rounded=1;fillColor=#ffffff;strokeColor=#2563eb;fontSize=12;fontColor=#1e293b;align=center;" vertex="1" parent="group_domain">
+      <mxGeometry x="390" y="45" width="165" height="75" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="core_memory_port" value="Scoped Memory 适配层&#xa;分类打标/置信度校验" style="rounded=1;fillColor=#ffffff;strokeColor=#2563eb;fontSize=12;fontColor=#1e293b;align=center;" vertex="1" parent="group_domain">
+      <mxGeometry x="575" y="45" width="165" height="75" as="geometry"/>
+    </mxCell>
+
+    <!-- 3. Node & Execution Foundation -->
+    <mxCell id="group_node" value="宿主实体与多模态执行底座 (Node &amp; Execution Foundation)" style="rounded=1;fillColor=#f1f5f9;strokeColor=#94a3b8;fontStyle=1;align=left;verticalAlign=top;spacingLeft=15;spacingTop=10;fontSize=13;fontColor=#1e293b;" vertex="1" parent="1">
+      <mxGeometry x="40" y="420" width="760" height="150" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="node_vision" value="桌面视觉感知 (Split Vision)&#xa;Qwen-VL / Screen 窥探" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;fontStyle=1;fontSize=12;fontColor=#1e3a8a;align=center;" vertex="1" parent="group_node">
+      <mxGeometry x="20" y="45" width="165" height="75" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="node_exec" value="真机执行环境 (Host Runtime)&#xa;Shell / 本地文件 / GUI自动化" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;fontStyle=1;fontSize=12;fontColor=#1e3a8a;align=center;" vertex="1" parent="group_node">
+      <mxGeometry x="205" y="45" width="165" height="75" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="node_skills" value="扩展沙箱 (MCP &amp; Skills)&#xa;受管外部工具 / 生态扩展" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;fontStyle=1;fontSize=12;fontColor=#1e3a8a;align=center;" vertex="1" parent="group_node">
+      <mxGeometry x="390" y="45" width="165" height="75" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="node_db" value="私有记忆库 (SQLite DB)&#xa;用户偏好 / 核心事实存储" style="rounded=1;fillColor=#dbeafe;strokeColor=#2563eb;fontStyle=1;fontSize=12;fontColor=#1e3a8a;align=center;" vertex="1" parent="group_node">
+      <mxGeometry x="575" y="45" width="165" height="75" as="geometry"/>
+    </mxCell>
+
+    <!-- Connectors -->
+    <mxCell id="edge_1" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;" edge="1" parent="1" source="deck_chat" target="core_orchestrator">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="edge_2" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;" edge="1" parent="1" source="deck_tasks" target="core_sdb">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="edge_3" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;" edge="1" parent="1" source="deck_assets" target="core_artifact">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="edge_4" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;" edge="1" parent="1" source="deck_memory" target="core_memory_port">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="edge_5" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;" edge="1" parent="1" source="core_orchestrator" target="node_vision">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="edge_6" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;" edge="1" parent="1" source="core_sdb" target="node_exec">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="edge_7" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;" edge="1" parent="1" source="core_artifact" target="node_skills">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="edge_8" style="endArrow=classic;strokeColor=#64748b;strokeWidth=1.5;" edge="1" parent="1" source="core_memory_port" target="node_db">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+
+  </root>
+</mxGraphModel></mxfile>
