@@ -650,12 +650,17 @@ async def test_text_model_cannot_finish_before_image_is_observed(
 
 
 @pytest.mark.asyncio
-async def test_native_vision_model_receives_image_bytes_directly(tmp_path: Path) -> None:
+@pytest.mark.parametrize("expose_image_inspect", [False, True])
+async def test_native_vision_model_receives_image_bytes_directly(
+    tmp_path: Path,
+    expose_image_inspect: bool,
+) -> None:
     provider = Provider()
+    client = ImageClient(expose_tool=expose_image_inspect)
     runtime = KnoaAgentRuntime(
         provider,
         ContextCheckpointRepository(tmp_path / "context.db"),
-        ImageConnector(ImageClient(expose_tool=False)),
+        ImageConnector(client),
         system_prompt="system",
         health_probe=healthy,
         supports_vision=True,
@@ -675,6 +680,13 @@ async def test_native_vision_model_receives_image_bytes_directly(tmp_path: Path)
     assert events[-1].status == "completed"
     content = provider.requests[0].messages[-1]["content"]
     assert any(block.get("type") == "image" for block in content)
+    guidance = "\n".join(block.get("text", "") for block in content)
+    assert "Inline image: artifact_id=image-a; name=photo.png" in guidance
+    assert "Analyze it directly." in guidance
+    assert ("Reserve image_inspect for follow-up reinspection." in guidance) is (
+        expose_image_inspect
+    )
+    assert client.calls == []
 
 
 @pytest.mark.asyncio
