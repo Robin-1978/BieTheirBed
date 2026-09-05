@@ -62,7 +62,35 @@ export default function NewTaskScreen() {
   const [folder, setFolder] = useState<FolderSelection | null>(null);
   const [folderProgress, setFolderProgress] = useState(0);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [nlPrompt, setNlPrompt] = useState("");
+  const [nlSuccessMessage, setNlSuccessMessage] = useState("");
   const requestIdentity = useRef<{ fingerprint: string; requestId: string } | null>(null);
+
+  function parseNaturalLanguagePrompt() {
+    const raw = nlPrompt.trim();
+    if (!raw) return;
+    setNlSuccessMessage("");
+
+    // 智能提取：若输入包含明确换行或分隔符，取首行作为标题
+    const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    let extractedTitle = "";
+    let extractedGoal = raw;
+
+    if (lines.length > 1) {
+      extractedTitle = lines[0]!.slice(0, 30);
+      extractedGoal = lines.slice(1).join("\n");
+    } else {
+      // 提取核心句作为标题（过滤常用引导词）
+      const cleanSummary = raw
+        .replace(/^(请帮我|麻烦|帮我|请|每天|每小时|实时|立刻|定时)/, "")
+        .trim();
+      extractedTitle = cleanSummary.length > 20 ? `${cleanSummary.slice(0, 20)}…` : cleanSummary;
+    }
+
+    setTitle(extractedTitle || raw.slice(0, 20));
+    setGoal(extractedGoal);
+    setNlSuccessMessage(t("taskNew.nlSuccess"));
+  }
 
   async function chooseAttachments() {
     try {
@@ -226,7 +254,41 @@ export default function NewTaskScreen() {
           </AppPressable>
         ) : null}
 
-        {/* 1. 快捷任务模板卡片 */}
+        {/* 1. 自然语言一句话建任务解析器 */}
+        <View style={styles.card}>
+          <View style={styles.sectionHeader}>
+            <AppIcon name="agent" color={colors.accent} size={18} />
+            <Text style={styles.sectionTitle}>{t("taskNew.nlTitle")}</Text>
+          </View>
+          <TextInput
+            accessibilityLabel={t("taskNew.nlTitle")}
+            value={nlPrompt}
+            onChangeText={(val) => {
+              setNlPrompt(val);
+              if (nlSuccessMessage) setNlSuccessMessage("");
+            }}
+            placeholder={t("taskNew.nlPlaceholder")}
+            placeholderTextColor={colors.muted}
+            multiline
+            numberOfLines={3}
+            style={styles.nlInput}
+          />
+          <View style={styles.nlActionRow}>
+            {nlSuccessMessage ? (
+              <Text style={styles.nlSuccessText} numberOfLines={1}>{nlSuccessMessage}</Text>
+            ) : <View style={styles.flex} />}
+            <AppPressable
+              disabled={!nlPrompt.trim()}
+              style={[styles.nlParseButton, !nlPrompt.trim() && styles.nlParseButtonDisabled]}
+              onPress={parseNaturalLanguagePrompt}
+            >
+              <AppIcon name="agent" color={colors.onAccent} size={14} />
+              <Text style={styles.nlParseButtonText}>{t("taskNew.nlParse")}</Text>
+            </AppPressable>
+          </View>
+        </View>
+
+        {/* 2. 快捷任务模板卡片 */}
         <View style={styles.card}>
           <View style={styles.sectionHeader}>
             <AppIcon name="agent" color={colors.accent} size={18} />
@@ -501,6 +563,46 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: 15,
     fontWeight: "800",
+  },
+  nlInput: {
+    minHeight: 72,
+    borderRadius: radii.medium,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.background,
+    padding: spacing.medium,
+    color: colors.ink,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  nlActionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.small,
+  },
+  nlSuccessText: {
+    flex: 1,
+    color: "#10B981",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  nlParseButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: colors.accent,
+    paddingHorizontal: spacing.medium,
+    paddingVertical: spacing.small,
+    borderRadius: radii.medium,
+  },
+  nlParseButtonDisabled: {
+    opacity: 0.5,
+  },
+  nlParseButtonText: {
+    color: colors.onAccent,
+    fontSize: 12,
+    fontWeight: "700",
   },
   inputSubLabel: {
     color: colors.muted,

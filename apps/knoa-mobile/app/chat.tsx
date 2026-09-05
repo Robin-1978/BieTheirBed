@@ -875,6 +875,7 @@ export default function ChatScreen() {
           recordingState={recordingState}
           transcribing={transcribing}
           nodeRouteParams={nodeRouteParams(params)}
+          onNewTopic={() => void startNewTopic()}
         />
 
         <ArtifactViewer
