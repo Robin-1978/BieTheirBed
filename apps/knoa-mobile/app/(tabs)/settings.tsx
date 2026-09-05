@@ -125,6 +125,12 @@ export default function NodeAndSettingsScreen() {
           detail={t("settings.extensions.addHint")}
           onPress={() => router.push("/settings/extensions")}
         />
+        <SettingRow
+          icon="history"
+          title={t("settings.memoriesTitle")}
+          detail={t("settings.memoriesDetail")}
+          onPress={() => router.push("/memories")}
+        />
       </View>
 
       {/* 应用设置与系统服务卡片 */}

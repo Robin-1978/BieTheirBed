@@ -26,6 +26,7 @@ import type {
   CapabilityInstallation,
   CapabilityCatalogEntry,
   DesktopGlanceRecord,
+  MemoryRecord,
   PairingPayload,
   PrincipalTaskEvent,
   Task,
@@ -467,6 +468,21 @@ export class GatewayClient {
     } catch {
       return null;
     }
+  }
+
+  async listMemories(
+    category?: string,
+    importance?: string,
+  ): Promise<{ items: MemoryRecord[]; total: number }> {
+    const query = new URLSearchParams();
+    if (category) query.set("category", category);
+    if (importance) query.set("importance", importance);
+    const q = query.toString();
+    return this.json<{ items: MemoryRecord[]; total: number }>(`/v1/memories${q ? `?${q}` : ""}`);
+  }
+
+  async clearMemories(): Promise<{ cleared: boolean }> {
+    return this.json<{ cleared: boolean }>("/v1/memories/clear", { method: "POST" });
   }
 
   async taskExecutionEvents(executionId: string, afterSeq = 0): Promise<TaskEvent[]> {
