@@ -69,6 +69,11 @@ export function NodeHeaderTitle() {
     router.push({ pathname: "/capabilities", params: nodeParams });
   };
 
+  const handleOpenMemories = () => {
+    setSwitcherOpen(false);
+    router.push("/memories");
+  };
+
   const handleReturnToWorkspace = () => {
     setSwitcherOpen(false);
     if (workspaceId) {
@@ -167,6 +172,11 @@ export function NodeHeaderTitle() {
 
                 <AppPressable onPress={handleOpenCapabilities} style={styles.nodeDetailAction}>
                   <Text style={styles.nodeDetailActionText}>{t("nodeSwitch.capabilities")}</Text>
+                  <AppIcon name="chevron-right" color={colors.accent} size={14} />
+                </AppPressable>
+
+                <AppPressable onPress={handleOpenMemories} style={styles.nodeDetailAction}>
+                  <Text style={styles.nodeDetailActionText}>{t("settings.memoriesTitle")}</Text>
                   <AppIcon name="chevron-right" color={colors.accent} size={14} />
                 </AppPressable>
 
