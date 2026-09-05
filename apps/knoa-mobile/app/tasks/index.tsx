@@ -142,6 +142,28 @@ export default function TasksScreen() {
     }
   }
 
+  async function handleTogglePause(task: Task) {
+    if (!gateway.client) return;
+    const command = task.state === "active" ? "pause" : "resume";
+    try {
+      await gateway.runAuthenticated((client) => client.taskDefinitionCommand(task.task_id, command));
+      await refresh();
+    } catch {
+      // Refresh to keep state synced
+      void refresh();
+    }
+  }
+
+  async function handleArchive(task: Task) {
+    if (!gateway.client) return;
+    try {
+      await gateway.runAuthenticated((client) => client.taskDefinitionCommand(task.task_id, "archive"));
+      await refresh();
+    } catch {
+      void refresh();
+    }
+  }
+
   const visibleTasks = useMemo(
     () => tasks.filter((task) => filter === "current" ? task.state !== "archived" : task.state === filter),
     [filter, tasks],
@@ -325,6 +347,22 @@ export default function TasksScreen() {
 
                     {/* 快捷动作 */}
                     <View style={styles.actionGroup}>
+                      {item.state !== "archived" ? (
+                        <AppPressable
+                          style={styles.quickButton}
+                          onPress={() => void handleTogglePause(item)}
+                        >
+                          <AppIcon
+                            name={item.state === "active" ? "pause" : "play"}
+                            color={colors.muted}
+                            size={12}
+                          />
+                          <Text style={styles.quickButtonText}>
+                            {item.state === "active" ? t("tasks.swipePause") : t("tasks.swipeResume")}
+                          </Text>
+                        </AppPressable>
+                      ) : null}
+
                       {item.latest_execution_id ? (
                         <AppPressable
                           style={styles.quickButton}
@@ -665,6 +703,9 @@ const styles = StyleSheet.create({
     gap: spacing.small,
   },
   quickButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
     paddingHorizontal: spacing.small,
     paddingVertical: 4,
     borderRadius: radii.small,
