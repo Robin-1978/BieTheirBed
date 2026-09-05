@@ -4,9 +4,18 @@ import base64
 import io
 import time
 from unittest.mock import patch
+import pytest
 from PIL import Image
 
+import knoa_platform.vision.glance as glance
 from knoa_platform.vision.glance import capture_desktop_glance
+
+
+@pytest.fixture(autouse=True)
+def reset_glance_cache():
+    glance._cached_glance = None
+    yield
+    glance._cached_glance = None
 
 
 def test_capture_desktop_glance_fallback():

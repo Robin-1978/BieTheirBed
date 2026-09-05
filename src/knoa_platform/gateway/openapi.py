@@ -1034,6 +1034,17 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     },
                 }
             },
+            "/v1/desktop/glance": {
+                "get": {
+                    "operationId": "getDesktopGlance",
+                    "security": bearer,
+                    "parameters": [],
+                    "responses": {
+                        "200": _json_response("Live desktop glance", DesktopGlanceResponse),
+                        **_errors("401", "429", "503"),
+                    },
+                }
+            },
             "/v1/tasks/{task_id}/glance": {
                 "get": {
                     "operationId": "getTaskGlance",

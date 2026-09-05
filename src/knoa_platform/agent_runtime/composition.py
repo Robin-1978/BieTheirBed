@@ -801,10 +801,16 @@ def build_core_runtime(
     managed_holder = {"current": managed}
     model_holder: dict[str, ResolvedModelConfig] = {}
     sessions = RuntimeSessionRepository(database)
+    active_agent = managed.agents.agents.get("knoa")
+    active_model_alias = active_agent.model_binding.model if active_agent else ""
+    active_model = managed.models.get(active_model_alias)
+    effective_capacity = (
+        (active_model.context_window if active_model and active_model.context_window else 0)
+        or managed.operational.context_window_budget
+    )
     prompt_budget = max(
         256,
-        managed.operational.context_window_budget
-        - managed.operational.max_output_tokens,
+        effective_capacity - managed.operational.max_output_tokens,
     )
     tasks = TaskRepository(
         database,

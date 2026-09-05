@@ -200,7 +200,7 @@ class ManagedOperationalConfig(ConfigurationModel):
     max_iterations: int = Field(default=32, ge=1, le=128)
     max_total_tool_calls: int = Field(default=50, ge=0, le=10_000)
     max_output_tokens: int = Field(default=4096, ge=64, le=131_072)
-    context_window_budget: int = Field(default=8192, ge=512, le=10_000_000)
+    context_window_budget: int = Field(default=65536, ge=512, le=10_000_000)
     task_capacity: int = Field(default=128, ge=1, le=10_000)
     principal_task_capacity: int = Field(default=32, ge=1, le=10_000)
     generation_drain_seconds: float = Field(default=120.0, ge=1.0, le=3600.0)

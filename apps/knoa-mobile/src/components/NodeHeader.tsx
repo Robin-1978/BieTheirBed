@@ -4,6 +4,8 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-nati
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
+import { DesktopGlanceModal } from "@/components/DesktopGlanceModal";
+import type { DesktopGlanceRecord } from "@/api/models";
 import { transportCompactLabelKey } from "@/api/transportPresentation";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors, radii, shadows, spacing } from "@/theme";
@@ -27,6 +29,34 @@ export function NodeHeaderTitle() {
     : t("nodeHeader.connecting");
 
   const [capability, setCapability] = useState<CapabilityCache | null>(null);
+
+  const [glanceRecord, setGlanceRecord] = useState<DesktopGlanceRecord | null>(null);
+  const [glanceModalVisible, setGlanceModalVisible] = useState(false);
+  const [glanceRefreshing, setGlanceRefreshing] = useState(false);
+
+  const handleOpenLiveGlance = async () => {
+    if (!gateway.client) return;
+    setSwitcherOpen(false);
+    setGlanceRefreshing(true);
+    setGlanceModalVisible(true);
+    try {
+      const record = await gateway.runAuthenticated((client) => client.getLiveDesktopGlance());
+      if (record) setGlanceRecord(record);
+    } finally {
+      setGlanceRefreshing(false);
+    }
+  };
+
+  const handleRefreshLiveGlance = async () => {
+    if (!gateway.client || glanceRefreshing) return;
+    setGlanceRefreshing(true);
+    try {
+      const record = await gateway.runAuthenticated((client) => client.getLiveDesktopGlance());
+      if (record) setGlanceRecord(record);
+    } finally {
+      setGlanceRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     if (!switcherOpen || !currentNodeId) return;
@@ -175,6 +205,11 @@ export function NodeHeaderTitle() {
                   <AppIcon name="chevron-right" color={colors.accent} size={14} />
                 </AppPressable>
 
+                <AppPressable onPress={handleOpenLiveGlance} style={styles.nodeDetailAction}>
+                  <Text style={styles.nodeDetailActionText}>{t("tasks.bentoGlance")}</Text>
+                  <AppIcon name="desktop" color={colors.accent} size={14} />
+                </AppPressable>
+
                 <AppPressable onPress={handleOpenMemories} style={styles.nodeDetailAction}>
                   <Text style={styles.nodeDetailActionText}>{t("settings.memoriesTitle")}</Text>
                   <AppIcon name="chevron-right" color={colors.accent} size={14} />
@@ -253,6 +288,14 @@ export function NodeHeaderTitle() {
           </View>
         </View>
       </Modal>
+
+      <DesktopGlanceModal
+        glance={glanceRecord}
+        visible={glanceModalVisible}
+        onClose={() => setGlanceModalVisible(false)}
+        onRefresh={handleRefreshLiveGlance}
+        refreshing={glanceRefreshing}
+      />
     </>
   );
 }

@@ -14,6 +14,7 @@ export interface ProactiveDeckProps {
   isOnline?: boolean;
   onSelectPrompt: (prompt: string, autoSend?: boolean) => void;
   onLaunchTask: (title: string, goal: string) => void;
+  onPressGlance?: () => void;
 }
 
 export const ProactiveDeck = memo(function ProactiveDeck({
@@ -23,6 +24,7 @@ export const ProactiveDeck = memo(function ProactiveDeck({
   isOnline = true,
   onSelectPrompt,
   onLaunchTask,
+  onPressGlance,
 }: ProactiveDeckProps) {
   const { t } = useI18n();
 
@@ -120,11 +122,36 @@ export const ProactiveDeck = memo(function ProactiveDeck({
                 { backgroundColor: colors.surfaceMuted, borderRadius: radii.small },
               ]}
             >
-              <AppIcon name="desktop" color={colors.accent} size={12} />
+              <AppIcon name="code" color={colors.accent} size={12} />
               <Text style={[styles.metaBadgeText, { color: colors.ink, ...typography.tiny }]}>
                 {modelName}
               </Text>
             </View>
+          ) : null}
+
+          {onPressGlance ? (
+            <AppPressable
+              onPress={onPressGlance}
+              style={[
+                styles.metaBadge,
+                {
+                  backgroundColor: colors.accentSoft,
+                  borderRadius: radii.small,
+                  borderWidth: 1,
+                  borderColor: colors.accent,
+                },
+              ]}
+            >
+              <AppIcon name="desktop" color={colors.accent} size={12} />
+              <Text
+                style={[
+                  styles.metaBadgeText,
+                  { color: colors.accent, ...typography.tiny, fontWeight: "600" },
+                ]}
+              >
+                {t("tasks.bentoGlance")}
+              </Text>
+            </AppPressable>
           ) : null}
         </View>
       </View>

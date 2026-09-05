@@ -98,3 +98,39 @@ def test_context_engine_compacts_complete_turns_and_persists_summary() -> None:
         for message in remaining
     )
     assert remaining[-1] == {"role": "user", "content": "current"}
+
+
+def test_context_engine_sliding_tool_window_in_same_turn() -> None:
+    engine = ContextEngine(context_window=600, completion_reserve=150)
+    history = [
+        {"role": "user", "content": "Search multiple topics"},
+        {
+            "role": "assistant",
+            "content": "Searching step 1",
+            "tool_calls": [{"id": "call-1", "type": "function", "function": {"name": "web_search", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "call-1", "content": "Large search result 1: " + "a" * 800},
+        {
+            "role": "assistant",
+            "content": "Searching step 2",
+            "tool_calls": [{"id": "call-2", "type": "function", "function": {"name": "web_search", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "call-2", "content": "Large search result 2: " + "b" * 800},
+    ]
+
+    prepared = engine.prepare(
+        system_prompt="system",
+        model_history=list(history),
+        durable_history=list(history),
+        tools=(),
+        context=RuntimeTurnContext(),
+    )
+
+    # First tool result should be trimmed aggressively
+    tool_msgs = [m for m in prepared.messages if m.get("role") == "tool"]
+    assert len(tool_msgs) == 2
+    assert "trimmed" in tool_msgs[0]["content"]
+    assert len(tool_msgs[0]["content"]) < 400
+    # Context should fit without throwing ContextBudgetExceeded
+    assert prepared.tokens_after <= 1000
+

@@ -1027,6 +1027,7 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
             json={"approved": True},
         )
         glance = await http.get("/v1/tasks/task-a/glance", headers=headers)
+        live_glance = await http.get("/v1/desktop/glance", headers=headers)
         memories = await http.get("/v1/memories", headers=headers)
         cleared_memories = await http.post("/v1/memories/clear", headers=headers)
         deleted_memory = await http.delete("/v1/memories/editor_preference", headers=headers)
@@ -1060,6 +1061,9 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
     assert glance.status_code == 200
     assert glance.json()["taskId"] == "task-a"
     assert "timestamp" in glance.json()
+    assert live_glance.status_code == 200
+    assert live_glance.json()["windowTitle"] != ""
+    assert "timestamp" in live_glance.json()
     assert memories.status_code == 200
     assert memories.json()["total"] == 1
     assert memories.json()["items"][0]["key"] == "editor_preference"

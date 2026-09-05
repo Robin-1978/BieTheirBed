@@ -189,6 +189,23 @@ class ContextEngine:
             )
         message_tokens = self._tokens.messages_tokens(assembled)
         if message_tokens > message_budget:
+            # Attempt emergency in-turn progressive compaction before failing
+            emerg_model, emerg_durable = self._emergency_in_turn_compaction(
+                compact_model, compact_durable
+            )
+            if emerg_model != compact_model:
+                compact_model, compact_durable = emerg_model, emerg_durable
+                changed = True
+                assembled = self._assemble(
+                    system_prompt,
+                    compact_model,
+                    summary,
+                    covered_messages,
+                    runtime_context,
+                )
+                message_tokens = self._tokens.messages_tokens(assembled)
+
+        if message_tokens > message_budget:
             raise ContextBudgetExceeded("Current Turn exceeds the model context budget")
         return PreparedContext(
             messages=tuple(assembled),
@@ -386,13 +403,65 @@ class ContextEngine:
         model_out = [dict(message) for message in model]
         durable_out = [dict(message) for message in durable]
         current_index = self._current_turn_index(model_out)
-        for index in range(current_index, len(model_out)):
-            if model_out[index].get("role") != "tool":
-                continue
+
+        tool_indices = [
+            index
+            for index in range(current_index, len(model_out))
+            if model_out[index].get("role") == "tool"
+        ]
+        if not tool_indices:
+            return model_out, durable_out
+
+        # The latest tool observation preserves higher fidelity so the model can inspect it.
+        # Older tool observations in earlier iterations of the same turn are aggressively trimmed.
+        latest_tool_index = tool_indices[-1]
+
+        for index in tool_indices:
             content = self._content(model_out[index])
-            if len(content) <= 1200:
+            is_latest = index == latest_tool_index
+            max_limit = 1200 if is_latest else 350
+            trim_to = 800 if is_latest else 250
+
+            if len(content) <= max_limit:
                 continue
-            preview = self._bounded(content, 800) + f" [trimmed from {len(content)} chars]"
+            preview = (
+                self._bounded(content, trim_to)
+                + f" [trimmed from {len(content)} chars]"
+            )
             model_out[index]["content"] = preview
             durable_out[index]["content"] = preview
+        return model_out, durable_out
+
+    def _emergency_in_turn_compaction(
+        self,
+        model: list[dict[str, Any]],
+        durable: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        model_out = [dict(message) for message in model]
+        durable_out = [dict(message) for message in durable]
+        current_index = self._current_turn_index(model_out)
+
+        # 1. First pass: aggressively compress all tool results in the current turn
+        for index in range(current_index, len(model_out)):
+            if model_out[index].get("role") == "tool":
+                content = self._content(model_out[index])
+                if len(content) > 180:
+                    preview = self._bounded(content, 150) + " [compacted]"
+                    model_out[index]["content"] = preview
+                    durable_out[index]["content"] = preview
+
+        # 2. Second pass: trim older assistant thoughts in the current turn
+        assistant_indices = [
+            index
+            for index in range(current_index, len(model_out))
+            if model_out[index].get("role") == "assistant"
+        ]
+        if len(assistant_indices) > 1:
+            for index in assistant_indices[:-1]:
+                content = self._content(model_out[index])
+                if len(content) > 250:
+                    preview = self._bounded(content, 200) + " [thought compacted]"
+                    model_out[index]["content"] = preview
+                    durable_out[index]["content"] = preview
+
         return model_out, durable_out
