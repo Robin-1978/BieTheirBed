@@ -611,6 +611,15 @@ export type DesktopGlanceRecord = {
   activeApp?: string;
 };
 
+export type MemoryRecord = {
+  key: string;
+  value: string;
+  category: string;
+  importance: "core" | "relevant";
+  confidence: number;
+  source?: string;
+};
+
 export type AndroidRelease = {
   platform: "android";
   channel: "personal" | "hosted";
