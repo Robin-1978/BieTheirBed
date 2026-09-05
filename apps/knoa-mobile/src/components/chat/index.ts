@@ -6,3 +6,4 @@ export * from "./PendingTurnItem";
 export * from "./AssistantArtifactItem";
 export * from "./ChatFeedbackBanner";
 export * from "./ClipboardSuggestionPill";
+export * from "./ProactiveDeck";

@@ -43,6 +43,7 @@ import {
   ChatTurnItem,
   ClipboardSuggestionPill,
   PendingTurnItem,
+  ProactiveDeck,
   type ChatListItem,
   type ClipboardSuggestion,
   type Feedback,
@@ -53,6 +54,8 @@ import {
   TIMESTAMP_GROUP_MS,
   agentReasonLabel,
 } from "@/components/chat";
+import { presentNodeName } from "@/presentation/nodePresentation";
+import { loadCapabilityCache, type CapabilityCache } from "@/storage/capabilityCache";
 import {
   resolveAssistantArtifactFile,
   type AssistantArtifactItem,
@@ -115,6 +118,19 @@ export default function ChatScreen() {
   const [imagePreview, setImagePreview] = useState<ResolvedArtifactFile | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+
+  const currentNodeId = gateway.nodeId || stringParam(params.nodeId);
+  const currentNode = gateway.nodes.find((item) => item.nodeId === currentNodeId);
+  const [nodeCapability, setNodeCapability] = useState<CapabilityCache | null>(null);
+
+  useEffect(() => {
+    if (!currentNodeId) return;
+    let active = true;
+    void loadCapabilityCache(currentNodeId).then((cached) => {
+      if (active) setNodeCapability(cached);
+    });
+    return () => { active = false; };
+  }, [currentNodeId]);
 
   const listRef = useRef<FlatList<ChatListItem>>(null);
   const followLatest = useRef(true);
@@ -468,6 +484,50 @@ export default function ChatScreen() {
     });
   }
 
+  const handleSelectPrompt = useCallback((prompt: string, autoSend = false) => {
+    const canAutoSend = Boolean(
+      !pendingTurn
+        && !validatingInput
+        && gateway.client
+        && !gateway.requiredUpdate,
+    );
+    if (autoSend && canAutoSend) {
+      const localId = `local-${Date.now()}`;
+      const requestId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      setText("");
+      setAttachments([]);
+      setFeedback(null);
+      followLatest.current = true;
+      setShowJumpToLatest(false);
+      scrollIntent.current = "instant";
+      void submitPendingTurn({
+        localId,
+        requestId,
+        userInput: prompt.trim(),
+        attachments: [],
+        state: "sending",
+        error: "",
+        createdAt: Date.now(),
+      });
+    } else {
+      setText(prompt);
+      showFeedback(t("chat.editedToComposer"), "info");
+    }
+  }, [gateway.client, gateway.requiredUpdate, pendingTurn, showFeedback, t, validatingInput]);
+
+  const handleLaunchTask = useCallback((title: string, goal: string) => {
+    const targetNodeId = gateway.nodeId || stringParam(params.nodeId);
+    router.push({
+      pathname: "/tasks/new",
+      params: {
+        ...nodeRouteParams(params),
+        ...(targetNodeId ? { nodeId: targetNodeId } : {}),
+        title,
+        goal,
+      },
+    });
+  }, [gateway.nodeId, params]);
+
   async function cancelTurn(turn: ChatTurnSnapshot) {
     if (!gateway.client || cancelling) return;
     setCancelling(true);
@@ -802,21 +862,14 @@ export default function ChatScreen() {
               )
             )}
             ListEmptyComponent={
-              <View style={styles.empty}>
-                <Text style={styles.emptyTitle}>{t("chat.empty")}</Text>
-                <Text style={styles.emptyBody}>{t("chat.emptyBody")}</Text>
-                <View style={styles.emptyExamples}>
-                  {[t("chat.exampleFiles"), t("chat.exampleImage"), t("chat.exampleCode")].map((example) => (
-                    <AppPressable
-                      key={example}
-                      style={styles.emptyExample}
-                      onPress={() => setText(example)}
-                    >
-                      <Text style={styles.emptyExampleText}>{example}</Text>
-                    </AppPressable>
-                  ))}
-                </View>
-              </View>
+              <ProactiveDeck
+                computerName={currentNode ? presentNodeName(currentNode, t("common.unnamedComputer")) : undefined}
+                toolCount={nodeCapability?.toolCount}
+                modelName={nodeCapability?.document?.default_model}
+                isOnline={gateway.status === "ready"}
+                onSelectPrompt={handleSelectPrompt}
+                onLaunchTask={handleLaunchTask}
+              />
             }
           />
 
