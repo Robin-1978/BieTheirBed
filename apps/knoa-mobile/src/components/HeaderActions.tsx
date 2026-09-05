@@ -12,7 +12,7 @@ import { colors } from "@/theme";
 
 export function HeaderActions({ current }: { current: PrimaryScreen }) {
   const { t } = useI18n();
-  const { unreadCount } = useTaskReminders();
+  const { unreadCountForNode } = useTaskReminders();
   const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string; nodeId?: string }>();
   const nodeParams = {
     workspaceId: stringParam(params.workspaceId),
@@ -35,7 +35,7 @@ export function HeaderActions({ current }: { current: PrimaryScreen }) {
           icon="tasks"
           label={t("header.tasks")}
           selected={current === "tasks"}
-          badge={unreadCount}
+          badge={unreadCountForNode(nodeParams.nodeId)}
           onPress={() => navigatePrimary(current, "tasks", nodeParams)}
         />
         <AppPressable

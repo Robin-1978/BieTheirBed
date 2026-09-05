@@ -26,8 +26,17 @@ type TaskSection = { key: string; title: string; data: Task[] };
 
 export default function TasksScreen() {
   const gateway = useGateway();
-  const { unreadTaskIds } = useTaskReminders();
+  const { reminders, unreadIndexForNode, markAllRead } = useTaskReminders();
   const { t } = useI18n();
+
+  const currentNodeUnread = unreadIndexForNode(gateway.nodeId);
+  const unreadTaskIds = currentNodeUnread.taskIds;
+
+  const unreadReminders = useMemo(() => reminders.filter((r) => !r.read), [reminders]);
+  const otherNodeReminders = useMemo(
+    () => unreadReminders.filter((r) => Boolean(r.nodeId && r.nodeId !== gateway.nodeId)),
+    [gateway.nodeId, unreadReminders],
+  );
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [filter, setFilter] = useState<Filter>("current");
@@ -165,6 +174,34 @@ export default function TasksScreen() {
             <Text style={styles.offlineTitle}>{t("tasks.offlineQueued", { count: queued.length })}</Text>
             <Text style={styles.offlineDetail}>{t("tasks.offlineQueuedDetail")}</Text>
           </AppPressable>
+        ) : null}
+
+        {/* 未读提醒通知与一键全读 */}
+        {unreadReminders.length > 0 ? (
+          <View style={styles.unreadNoticeBanner}>
+            <View style={styles.unreadNoticeLeft}>
+              <AppIcon name="alert" color={colors.accent} size={16} />
+              <View style={styles.unreadNoticeTextWrap}>
+                <Text style={styles.unreadNoticeTitle}>
+                  {t("reminders.summary", { count: unreadReminders.length })}
+                </Text>
+                {otherNodeReminders.length > 0 ? (
+                  <Text style={styles.unreadNoticeDetail}>
+                    {t("reminders.otherDevices", { count: otherNodeReminders.length })}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+            <AppPressable
+              accessibilityRole="button"
+              accessibilityLabel={t("reminders.markAllRead")}
+              onPress={() => void markAllRead()}
+              style={styles.markAllReadButton}
+            >
+              <AppIcon name="check" color={colors.accent} size={14} />
+              <Text style={styles.markAllReadText}>{t("reminders.markAllRead")}</Text>
+            </AppPressable>
+          </View>
         ) : null}
 
         {/* 过滤药丸栏 */}
@@ -416,6 +453,57 @@ const styles = StyleSheet.create({
   },
   offlineTitle: { color: colors.ink, fontWeight: "700" },
   offlineDetail: { color: colors.muted, fontSize: 12 },
+  unreadNoticeBanner: {
+    marginHorizontal: spacing.large,
+    marginTop: spacing.small,
+    paddingHorizontal: spacing.medium,
+    paddingVertical: spacing.small,
+    borderRadius: radii.medium,
+    backgroundColor: colors.accentSoft,
+    borderWidth: 1,
+    borderColor: colors.line,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.small,
+  },
+  unreadNoticeLeft: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.small,
+    minWidth: 0,
+  },
+  unreadNoticeTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  unreadNoticeTitle: {
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  unreadNoticeDetail: {
+    color: colors.muted,
+    fontSize: 11,
+    marginTop: 1,
+  },
+  markAllReadButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.small,
+    paddingVertical: 5,
+    borderRadius: radii.small,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  markAllReadText: {
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: "800",
+  },
   filters: {
     flexDirection: "row",
     gap: spacing.small,
@@ -523,7 +611,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accentSoft,
   },
   badgeWarning: { backgroundColor: colors.warningSoft },
-  badgeDanger: { backgroundColor: "#fee2e2" },
+  badgeDanger: { backgroundColor: colors.dangerSoft },
   badgeSuccess: { backgroundColor: colors.accentSoft },
   stateText: { color: colors.accent, fontSize: 11, fontWeight: "700" },
   stateTextWarning: { color: colors.warning },

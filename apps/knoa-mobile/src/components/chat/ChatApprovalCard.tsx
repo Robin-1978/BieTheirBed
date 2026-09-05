@@ -60,9 +60,9 @@ export function ChatApprovalCard({
 const styles = StyleSheet.create({
   approval: {
     borderRadius: radii.medium,
-    backgroundColor: "#fff5f5",
+    backgroundColor: colors.dangerSoft,
     borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: colors.line,
     padding: spacing.medium,
     gap: spacing.medium,
     marginVertical: spacing.xsmall,

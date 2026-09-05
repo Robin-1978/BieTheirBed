@@ -36,11 +36,13 @@ type TaskReminderState = {
   unreadCount: number;
   unreadExecutionIds: ReadonlySet<string>;
   unreadTaskIds: ReadonlySet<string>;
+  unreadCountForNode(nodeId?: string): number;
+  unreadIndexForNode(nodeId?: string): { executionIds: ReadonlySet<string>; taskIds: ReadonlySet<string>; count: number };
   dismissActive(): void;
   markRead(reminderId: string): void;
   markExecutionRead(executionId: string): void;
   setExecutionViewing(executionId: string | null): void;
-  markAllRead(): void;
+  markAllRead(nodeId?: string): void;
 };
 
 const Context = createContext<TaskReminderState | null>(null);
@@ -126,6 +128,8 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
     if (!category || intent.work_kind !== "task") return null;
     const taskId = String(intent.deep_link.task_id || intent.work_id || "");
     const executionId = String(intent.deep_link.execution_id || intent.execution_id || "");
+    const nodeId = String(intent.deep_link.node_id || intent.parameters.node_id || intent.parameters.nodeId || "");
+    const nodeName = String(intent.parameters.node_name || intent.parameters.nodeName || "");
     if (!taskId) return null;
     return {
       reminderId: `intent:${intent.intent_id}`,
@@ -136,6 +140,8 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
       taskTitle: typeof intent.parameters.title === "string" ? intent.parameters.title : "小诺任务",
       occurredAt: intent.received_at,
       read: intent.acknowledged_at !== null || viewingExecutionRef.current === executionId,
+      nodeId: nodeId || undefined,
+      nodeName: nodeName || undefined,
     };
   }, []);
 
@@ -234,16 +240,35 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
     setActiveReminder((current) => current?.executionId === executionId ? null : current);
   }, [reminders, replaceAndStore]);
 
-  const markAllRead = useCallback(() => {
+  const markAllRead = useCallback((targetNodeId?: string) => {
     for (const reminder of reminders) {
-      if (!reminder.read && reminder.reminderId.startsWith("intent:")) {
-        void acknowledgeHubNotification(reminder.reminderId.slice(7)).catch(() => undefined);
+      if (!reminder.read && (!targetNodeId || !reminder.nodeId || reminder.nodeId === targetNodeId)) {
+        if (reminder.reminderId.startsWith("intent:")) {
+          void acknowledgeHubNotification(reminder.reminderId.slice(7)).catch(() => undefined);
+        }
       }
     }
-    replaceAndStore(markAllTaskRemindersRead);
+    replaceAndStore((current) => markAllTaskRemindersRead(current, targetNodeId));
+    setActiveReminder((current) => {
+      if (!current) return null;
+      if (!targetNodeId || !current.nodeId || current.nodeId === targetNodeId) return null;
+      return current;
+    });
   }, [reminders, replaceAndStore]);
 
   const dismissActive = useCallback(() => setActiveReminder(null), []);
+
+  const unreadCountForNode = useCallback((nodeId?: string) => {
+    return reminders.filter((reminder) => {
+      if (reminder.read) return false;
+      if (nodeId && reminder.nodeId && reminder.nodeId !== nodeId) return false;
+      return true;
+    }).length;
+  }, [reminders]);
+
+  const unreadIndexForNode = useCallback((nodeId?: string) => {
+    return unreadTaskReminderIndex(reminders, nodeId);
+  }, [reminders]);
 
   const value = useMemo<TaskReminderState>(() => {
     const unread = reminders.filter((reminder) => !reminder.read);
@@ -254,13 +279,15 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
       unreadCount: unread.length,
       unreadExecutionIds: index.executionIds,
       unreadTaskIds: index.taskIds,
+      unreadCountForNode,
+      unreadIndexForNode,
       dismissActive,
       markRead,
       markExecutionRead,
       setExecutionViewing,
       markAllRead,
     };
-  }, [activeReminder, dismissActive, markAllRead, markExecutionRead, markRead, reminders, setExecutionViewing]);
+  }, [activeReminder, dismissActive, markAllRead, markExecutionRead, markRead, reminders, setExecutionViewing, unreadCountForNode, unreadIndexForNode]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

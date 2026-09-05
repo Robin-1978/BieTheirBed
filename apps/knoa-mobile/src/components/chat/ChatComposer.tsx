@@ -214,6 +214,22 @@ export function ChatComposer({
                   void chooseFile();
                 }}
               />
+              <MediaAction
+                icon="tasks"
+                label={t("chat.createTask")}
+                onPress={() => {
+                  setActionsOpen(false);
+                  router.push({ pathname: "/tasks/new", params: nodeRouteParams });
+                }}
+              />
+              <MediaAction
+                icon="agent"
+                label={t("chat.capabilities")}
+                onPress={() => {
+                  setActionsOpen(false);
+                  router.push({ pathname: "/capabilities", params: nodeRouteParams });
+                }}
+              />
             </View>
           </View>
         </View>
