@@ -100,32 +100,36 @@ async function restoreLanding(gateway: ReturnType<typeof useGateway>): Promise<v
   if (connection.accountId && workspace.workspaceId !== connection.workspaceId) {
     await selectHostedWorkspace(workspace);
   }
-  const workspaceRoute = {
-    pathname: "/workspaces/[workspaceId]" as const,
-    params: { workspaceId: workspace.workspaceId, workspaceName: workspace.displayName },
-  };
-  if (preference.landing === "workspace" || !preference.nodeId) {
-    router.replace(workspaceRoute);
-    return;
-  }
   const bindings = await listNodeBindings();
-  if (!bindings.some((item) => item.nodeId === preference.nodeId)) {
-    router.replace(workspaceRoute);
-    return;
-  }
-  try {
-    await gateway.switchNode(preference.nodeId);
+  const targetNodeId = preference.nodeId && bindings.some((b) => b.nodeId === preference.nodeId)
+    ? preference.nodeId
+    : (bindings[0]?.nodeId || gateway.nodeId || "");
+
+  if (targetNodeId) {
+    try {
+      await gateway.switchNode(targetNodeId);
+    } catch {
+      // ignore switch error, still proceed to tabs
+    }
     router.replace({
       pathname: "/(tabs)",
       params: {
         workspaceId: workspace.workspaceId,
         workspaceName: workspace.displayName,
-        nodeId: preference.nodeId,
+        nodeId: targetNodeId,
       },
     });
-  } catch {
-    router.replace(workspaceRoute);
+    return;
   }
+
+  // If no node is bound, guide user directly to pair their computer
+  router.replace({
+    pathname: "/pair",
+    params: {
+      workspaceId: workspace.workspaceId,
+      workspaceName: workspace.displayName,
+    },
+  });
 }
 
 const styles = StyleSheet.create({

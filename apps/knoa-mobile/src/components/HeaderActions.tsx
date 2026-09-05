@@ -40,12 +40,12 @@ export function HeaderActions({ current }: { current: PrimaryScreen }) {
         />
         <AppPressable
           accessibilityRole="button"
-          accessibilityLabel={t("header.nodeMenu")}
+          accessibilityLabel={t("nav.nodeSettings")}
           hitSlop={8}
-          onPress={() => router.push({ pathname: "/node", params: nodeParams })}
+          onPress={() => router.push({ pathname: "/settings/node", params: nodeParams })}
           style={styles.action}
         >
-          <AppIcon name="more" color={colors.muted} size={22} />
+          <AppIcon name="settings" color={colors.muted} size={22} />
         </AppPressable>
       </View>
   );
