@@ -814,6 +814,23 @@ class KnoaAgentRuntime(AgentRuntime):
                             "media_type": media_type,
                         }
                     )
+                    if isinstance(part, ArtifactPart):
+                        artifact_id = part.artifact.artifact_id
+                        name = (
+                            getattr(part, "name", "")
+                            or getattr(getattr(part, "artifact", None), "name", "")
+                            or artifact_id
+                        )
+                        blocks.append({
+                            "type": "text",
+                            "text": (
+                                f"[Attached image artifact_id={artifact_id}; name={name}. "
+                                "You are viewing this image directly; do not call image_inspect "
+                                "unless you need a closer look at details you cannot resolve "
+                                "from the inline image. If you do call it, use the artifact_id "
+                                "above.]"
+                            ),
+                        })
                 elif "text" in content:
                     blocks.append({"type": "text", "text": str(content["text"])})
                 else:
