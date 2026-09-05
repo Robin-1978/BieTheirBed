@@ -5,6 +5,7 @@ import {
   Image,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -44,7 +45,66 @@ export type ChatComposerProps = {
   recordingState: ReturnType<typeof useAudioRecorderState>;
   transcribing: boolean;
   nodeRouteParams: Record<string, string>;
+  onNewTopic?(): void;
 };
+
+type SlashCommandItem = {
+  id: string;
+  icon: AppIconName;
+  command: string;
+  titleKey: "chat.slashTask" | "chat.slashSummary" | "chat.slashStatus" | "chat.slashClean" | "chat.slashClear";
+  descKey: "chat.slashTaskDesc" | "chat.slashSummaryDesc" | "chat.slashStatusDesc" | "chat.slashCleanDesc" | "chat.slashClearDesc";
+  action: "insert" | "route" | "topic";
+  insertText?: string;
+  routePath?: string;
+};
+
+const SLASH_COMMANDS: SlashCommandItem[] = [
+  {
+    id: "task",
+    icon: "tasks",
+    command: "/task",
+    titleKey: "chat.slashTask",
+    descKey: "chat.slashTaskDesc",
+    action: "route",
+    routePath: "/tasks/new",
+  },
+  {
+    id: "summary",
+    icon: "agent",
+    command: "/summary",
+    titleKey: "chat.slashSummary",
+    descKey: "chat.slashSummaryDesc",
+    action: "insert",
+    insertText: "请汇总提炼一下当前会话的上下文要点和待跟进任务。",
+  },
+  {
+    id: "status",
+    icon: "pulse",
+    command: "/status",
+    titleKey: "chat.slashStatus",
+    descKey: "chat.slashStatusDesc",
+    action: "route",
+    routePath: "/settings/node",
+  },
+  {
+    id: "clean",
+    icon: "trash",
+    command: "/clean",
+    titleKey: "chat.slashClean",
+    descKey: "chat.slashCleanDesc",
+    action: "insert",
+    insertText: "请检查当前工作区的生成文件与缓存产物，帮我做一次清理评估。",
+  },
+  {
+    id: "clear",
+    icon: "new-topic",
+    command: "/clear",
+    titleKey: "chat.slashClear",
+    descKey: "chat.slashClearDesc",
+    action: "topic",
+  },
+];
 
 export function ChatComposer({
   text,
@@ -66,6 +126,7 @@ export function ChatComposer({
   recordingState,
   transcribing,
   nodeRouteParams,
+  onNewTopic,
 }: ChatComposerProps) {
   const { t } = useI18n();
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -77,6 +138,25 @@ export function ChatComposer({
     }
   }
 
+  const trimmedText = text.trim();
+  const isSlashMode = inputMode === "text" && trimmedText.startsWith("/");
+  const slashFilter = isSlashMode ? trimmedText.toLowerCase() : "";
+  const matchingSlashCommands = isSlashMode
+    ? SLASH_COMMANDS.filter((cmd) => cmd.command.startsWith(slashFilter) || slashFilter === "/")
+    : [];
+
+  const handleSlashSelect = (item: SlashCommandItem) => {
+    if (item.action === "insert") {
+      onTextChange(item.insertText || "");
+    } else if (item.action === "route" && item.routePath) {
+      onTextChange("");
+      router.push({ pathname: item.routePath as any, params: nodeRouteParams });
+    } else if (item.action === "topic") {
+      onTextChange("");
+      if (onNewTopic) onNewTopic();
+    }
+  };
+
   const primaryDisabled = showStopAction
     ? stoppingResponse || cancelling
     : inputMode === "voice"
@@ -85,6 +165,36 @@ export function ChatComposer({
 
   return (
     <>
+      {/* 快捷 Slash 指令浮动条 */}
+      {matchingSlashCommands.length > 0 ? (
+        <View style={styles.slashContainer}>
+          <View style={styles.slashHeader}>
+            <AppIcon name="code" color={colors.accent} size={14} />
+            <Text style={styles.slashHeaderTitle}>{t("chat.slashCommands")}</Text>
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.slashList}
+            keyboardShouldPersistTaps="handled"
+          >
+            {matchingSlashCommands.map((cmd) => (
+              <AppPressable
+                key={cmd.id}
+                style={styles.slashPill}
+                onPress={() => handleSlashSelect(cmd)}
+              >
+                <AppIcon name={cmd.icon} color={colors.accent} size={14} />
+                <View>
+                  <Text style={styles.slashPillCommand}>{cmd.command}</Text>
+                  <Text style={styles.slashPillDesc} numberOfLines={1}>{t(cmd.titleKey)}</Text>
+                </View>
+              </AppPressable>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
+
       {/* 附件缩略条 */}
       {attachments.length ? (
         <View style={styles.attachmentStrip}>
@@ -258,6 +368,49 @@ function MediaAction({
 }
 
 const styles = StyleSheet.create({
+  slashContainer: {
+    backgroundColor: colors.surfaceElevated,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    paddingVertical: spacing.small,
+    paddingHorizontal: spacing.large,
+    gap: 6,
+  },
+  slashHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  slashHeaderTitle: {
+    color: colors.accent,
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  slashList: {
+    gap: spacing.small,
+    paddingVertical: 2,
+  },
+  slashPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.small,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.medium,
+    paddingHorizontal: spacing.medium,
+    paddingVertical: 6,
+  },
+  slashPillCommand: {
+    color: colors.accent,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  slashPillDesc: {
+    color: colors.muted,
+    fontSize: 11,
+  },
   attachmentStrip: {
     paddingHorizontal: spacing.large,
     paddingTop: spacing.small,
