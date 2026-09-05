@@ -22,6 +22,7 @@ export interface TaskBentoCardProps {
   onExecute: (taskId: string) => void;
   onTogglePause: (task: Task) => void;
   onOpenExecution?: (executionId: string) => void;
+  onPressGlance?: (record: DesktopGlanceRecord) => void;
 }
 
 export function TaskBentoCard({
@@ -33,6 +34,7 @@ export function TaskBentoCard({
   onExecute,
   onTogglePause,
   onOpenExecution,
+  onPressGlance,
 }: TaskBentoCardProps) {
   const { t } = useI18n();
   const category = taskBentoCategory(task);
@@ -113,7 +115,10 @@ export function TaskBentoCard({
       {category === "running" ? (
         <View style={styles.glanceContainer}>
           {glanceRecord?.thumbnailBase64 ? (
-            <View style={styles.glanceImageWrap}>
+            <AppPressable
+              style={styles.glanceImageWrap}
+              onPress={() => onPressGlance?.(glanceRecord)}
+            >
               <Image
                 source={{ uri: `data:image/jpeg;base64,${glanceRecord.thumbnailBase64}` }}
                 style={styles.glanceThumbnail}
@@ -125,7 +130,7 @@ export function TaskBentoCard({
                   {glanceRecord.windowTitle || glanceRecord.activeApp || t("tasks.bentoGlance")}
                 </Text>
               </View>
-            </View>
+            </AppPressable>
           ) : (
             <View style={styles.pipelineWrap}>
               <View style={styles.pipelineHeader}>
