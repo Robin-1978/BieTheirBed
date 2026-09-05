@@ -246,3 +246,4 @@ app/
 | 1.4 | 2026-09-05 | Robin | 多模态直觉感知与上下文强化 (Phase 6)：落地剪贴板智能感知浮条 (ClipboardSuggestionPill)，支持链接/报错/代码一键分析；节点抽屉支持立体能力画像动态展示可用工具数与默认模型；优化 AppMarkdown 代码块移动端高对比度排版 |
 | 1.5 | 2026-09-05 | Robin | 极速人机审批干预 (Actionable HITL Banner)：顶部任务通知横幅全面支持内联快捷审批 (Approve/Reject)，实现跨页面 0 跳转秒级安全拦截与决策闭环 |
 | 2.0 | 2026-09-05 | Robin | 极速瘦身与工作区架构重塑 (Phase 7)：实现 App 启动一律直达 `/(tabs)`；彻底重构繁琐的 Workspace 页面，剔除 PC 静态大卡片，重塑为多终端轻量中枢；收敛废弃 `node.tsx`/`results.tsx`/`artifacts.tsx` 冗余死胡同页面 |
+| 2.1 | 2026-09-05 | Robin | 生产力飞跃 (Phase 8)：实现 Chat 输入框 Slash 快捷指令面板（/task, /summary, /status, /clean, /clear）；任务向导落地自然语言一句话建任务解析器（Smart NL Task Parsing） |
