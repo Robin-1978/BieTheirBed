@@ -8,6 +8,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import * as Clipboard from "expo-clipboard";
 import { File, Paths } from "expo-file-system";
 
 import type { Task } from "@/api/models";
@@ -19,6 +20,11 @@ import { assistantArtifactItems, resolveAssistantArtifactFile, type ResolvedArti
 import { saveArtifactFile } from "@/api/saveArtifactFile";
 import { shareResultJson, shareResultPdf, shareResultText } from "@/api/shareResult";
 import { resultOutcome } from "@/components/resultSummaryPresentation";
+import {
+  calculateTotalSavedHours,
+  classifyArtifactType,
+  hostRelativePath,
+} from "@/components/trophyPresentation";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { loadTaskCache, storeTaskCache } from "@/storage/taskCache";
@@ -39,6 +45,7 @@ export default function UnifiedAssetsScreen() {
   const [error, setError] = useState("");
   const [sharing, setSharing] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [feedbackMessage, setFeedbackMessage] = useState("");
   const [previewFile, setPreviewFile] = useState<ResolvedArtifactFile | null>(null);
 
   const taskCacheScope = params.nodeId?.trim() || gateway.nodeId || "unselected";
@@ -131,6 +138,15 @@ export default function UnifiedAssetsScreen() {
     }
   }
 
+  const totalSavedHours = useMemo(() => calculateTotalSavedHours(tasks), [tasks]);
+
+  const copyHostPath = useCallback(async (fileName: string, artifactId: string) => {
+    const path = hostRelativePath(fileName, artifactId);
+    await Clipboard.setStringAsync(path);
+    setFeedbackMessage(t("trophy.hostPathCopied"));
+    setTimeout(() => setFeedbackMessage(""), 2000);
+  }, [t]);
+
   const normalizedQuery = searchQuery.trim().toLowerCase();
 
   const filteredTaskResults = useMemo(
@@ -159,6 +175,8 @@ export default function UnifiedAssetsScreen() {
     || (activeFilter === "tasks" && filteredTaskResults.length > 0)
     || (activeFilter === "artifacts" && filteredArtifacts.length > 0);
 
+  const totalDeliverables = filteredTaskResults.length + filteredArtifacts.length;
+
   return (
     <>
       <ScrollView
@@ -166,6 +184,30 @@ export default function UnifiedAssetsScreen() {
         contentContainerStyle={styles.container}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh(true)} />}
       >
+        {/* 数字战果陈列室 Hero 标头 */}
+        <View style={styles.trophyHero}>
+          <View style={styles.trophyHeroIcon}>
+            <AppIcon name="archive" color={colors.accent} size={22} />
+          </View>
+          <View style={styles.trophyHeroContent}>
+            <Text style={styles.trophyHeroTitle}>{t("trophy.heroTitle")}</Text>
+            <Text style={styles.trophyHeroSubtitle}>{t("trophy.heroSubtitle")}</Text>
+            <View style={styles.trophyStatBadge}>
+              <AppIcon name="pulse" color={colors.accent} size={12} />
+              <Text style={styles.trophyStatText}>
+                {t("trophy.statSummary", { hours: totalSavedHours, count: totalDeliverables })}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {feedbackMessage ? (
+          <View style={styles.feedbackToast}>
+            <AppIcon name="check" color={colors.accent} size={14} />
+            <Text style={styles.feedbackToastText}>{feedbackMessage}</Text>
+          </View>
+        ) : null}
+
         {/* 全文搜索输入条 */}
         <View style={styles.searchBar}>
           <AppIcon name="more" color={colors.muted} size={16} />
@@ -243,6 +285,18 @@ export default function UnifiedAssetsScreen() {
                 <Text style={styles.resultText} numberOfLines={4}>{task.latest_execution_summary}</Text>
               ) : null}
 
+              {/* 远端真机交付路径 */}
+              <AppPressable
+                style={styles.hostPathChip}
+                onPress={() => void copyHostPath(`${task.title}.pdf`, task.task_id)}
+              >
+                <AppIcon name="file" color={colors.accent} size={12} />
+                <Text style={styles.hostPathText} numberOfLines={1}>
+                  {hostRelativePath(`${task.title}.pdf`, task.task_id)}
+                </Text>
+                <Text style={styles.copyPathHint}>{t("trophy.copyHostPath")}</Text>
+              </AppPressable>
+
               <View style={styles.cardActions}>
                 {task.latest_execution_id ? (
                   <AppPressable
@@ -284,35 +338,56 @@ export default function UnifiedAssetsScreen() {
         })}
 
         {/* 会话生成工件列表 */}
-        {(activeFilter === "all" || activeFilter === "artifacts") && filteredArtifacts.map((artifact) => (
-          <View key={artifact.artifact_id} style={styles.card}>
-            <View style={styles.cardHeader}>
-              <View style={styles.artifactIconWrap}>
-                <AppIcon name={artifact.kind === "image" ? "image" : "file"} color={colors.accent} size={22} />
+        {(activeFilter === "all" || activeFilter === "artifacts") && filteredArtifacts.map((artifact) => {
+          const typeInfo = classifyArtifactType(artifact.name, artifact.media_type, artifact.kind);
+          return (
+            <View key={artifact.artifact_id} style={styles.card}>
+              <View style={styles.cardHeader}>
+                <View style={styles.artifactIconWrap}>
+                  <AppIcon name={typeInfo.icon} color={colors.accent} size={22} />
+                </View>
+                <View style={styles.flex}>
+                  <View style={styles.titleRow}>
+                    <Text style={styles.cardTitle} numberOfLines={1}>{artifact.name}</Text>
+                    <View style={styles.typeBadge}>
+                      <Text style={styles.typeBadgeText}>{typeInfo.label}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.meta}>
+                    {artifact.media_type} · {(artifact.size / 1024).toFixed(1)} KB
+                  </Text>
+                </View>
               </View>
-              <View style={styles.flex}>
-                <Text style={styles.cardTitle} numberOfLines={1}>{artifact.name}</Text>
-                <Text style={styles.meta}>
-                  {artifact.media_type} · {(artifact.size / 1024).toFixed(1)} KB
+
+              {/* 远端真机交付路径 */}
+              <AppPressable
+                style={styles.hostPathChip}
+                onPress={() => void copyHostPath(artifact.name, artifact.artifact_id)}
+              >
+                <AppIcon name="file" color={colors.accent} size={12} />
+                <Text style={styles.hostPathText} numberOfLines={1}>
+                  {hostRelativePath(artifact.name, artifact.artifact_id)}
                 </Text>
+                <Text style={styles.copyPathHint}>{t("trophy.copyHostPath")}</Text>
+              </AppPressable>
+
+              <View style={styles.cardActions}>
+                <AppPressable
+                  style={styles.primaryAction}
+                  onPress={() => void openArtifactPreview(artifact, false)}
+                >
+                  <Text style={styles.primaryActionText}>{t("artifacts.open")}</Text>
+                </AppPressable>
+                <AppPressable
+                  style={styles.secondaryAction}
+                  onPress={() => void openArtifactPreview(artifact, true)}
+                >
+                  <Text style={styles.secondaryActionText}>{t("artifacts.save")}</Text>
+                </AppPressable>
               </View>
             </View>
-            <View style={styles.cardActions}>
-              <AppPressable
-                style={styles.primaryAction}
-                onPress={() => void openArtifactPreview(artifact, false)}
-              >
-                <Text style={styles.primaryActionText}>{t("artifacts.open")}</Text>
-              </AppPressable>
-              <AppPressable
-                style={styles.secondaryAction}
-                onPress={() => void openArtifactPreview(artifact, true)}
-              >
-                <Text style={styles.secondaryActionText}>{t("artifacts.save")}</Text>
-              </AppPressable>
-            </View>
-          </View>
-        ))}
+          );
+        })}
       </ScrollView>
 
       {previewFile ? (
@@ -493,5 +568,109 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.accentSoft,
+  },
+  trophyHero: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: colors.surface,
+    borderRadius: radii.large,
+    padding: spacing.medium,
+    gap: spacing.medium,
+    borderWidth: 1,
+    borderColor: colors.line,
+    ...shadows.card,
+  },
+  trophyHeroIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.accentSoft,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 2,
+  },
+  trophyHeroContent: {
+    flex: 1,
+  },
+  trophyHeroTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: colors.ink,
+  },
+  trophyHeroSubtitle: {
+    fontSize: 12,
+    color: colors.muted,
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  trophyStatBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 4,
+    backgroundColor: colors.accentSoft,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radii.pill,
+    marginTop: 6,
+  },
+  trophyStatText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.accent,
+  },
+  feedbackToast: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.accentSoft,
+    paddingHorizontal: spacing.medium,
+    paddingVertical: spacing.small,
+    borderRadius: radii.medium,
+    alignSelf: "center",
+  },
+  feedbackToastText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.accent,
+  },
+  hostPathChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.medium,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  hostPathText: {
+    flex: 1,
+    fontSize: 11,
+    color: colors.muted,
+    fontFamily: "monospace",
+  },
+  copyPathHint: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: colors.accent,
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 6,
+  },
+  typeBadge: {
+    backgroundColor: colors.accentSoft,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radii.small,
+  },
+  typeBadgeText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: colors.accent,
   },
 });
