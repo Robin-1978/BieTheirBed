@@ -5,6 +5,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { File, Paths } from "expo-file-system";
@@ -37,6 +38,7 @@ export default function UnifiedAssetsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [sharing, setSharing] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [previewFile, setPreviewFile] = useState<ResolvedArtifactFile | null>(null);
 
   const taskCacheScope = params.nodeId?.trim() || gateway.nodeId || "unselected";
@@ -129,9 +131,33 @@ export default function UnifiedAssetsScreen() {
     }
   }
 
-  const hasData = (activeFilter === "all" && (taskResults.length > 0 || artifacts.length > 0))
-    || (activeFilter === "tasks" && taskResults.length > 0)
-    || (activeFilter === "artifacts" && artifacts.length > 0);
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+
+  const filteredTaskResults = useMemo(
+    () => taskResults.filter((task) => {
+      if (!normalizedQuery) return true;
+      return (
+        task.title.toLowerCase().includes(normalizedQuery) ||
+        (task.latest_execution_summary && task.latest_execution_summary.toLowerCase().includes(normalizedQuery))
+      );
+    }),
+    [normalizedQuery, taskResults],
+  );
+
+  const filteredArtifacts = useMemo(
+    () => artifacts.filter((artifact) => {
+      if (!normalizedQuery) return true;
+      return (
+        artifact.name.toLowerCase().includes(normalizedQuery) ||
+        artifact.media_type.toLowerCase().includes(normalizedQuery)
+      );
+    }),
+    [artifacts, normalizedQuery],
+  );
+
+  const hasData = (activeFilter === "all" && (filteredTaskResults.length > 0 || filteredArtifacts.length > 0))
+    || (activeFilter === "tasks" && filteredTaskResults.length > 0)
+    || (activeFilter === "artifacts" && filteredArtifacts.length > 0);
 
   return (
     <>
@@ -140,13 +166,31 @@ export default function UnifiedAssetsScreen() {
         contentContainerStyle={styles.container}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh(true)} />}
       >
+        {/* 全文搜索输入条 */}
+        <View style={styles.searchBar}>
+          <AppIcon name="more" color={colors.muted} size={16} />
+          <TextInput
+            style={styles.searchInput}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder={t("assets.searchPlaceholder")}
+            placeholderTextColor={colors.muted}
+            clearButtonMode="while-editing"
+          />
+          {searchQuery ? (
+            <AppPressable onPress={() => setSearchQuery("")} style={styles.clearSearch}>
+              <AppIcon name="x" color={colors.muted} size={14} />
+            </AppPressable>
+          ) : null}
+        </View>
+
         <View style={styles.segmentContainer}>
           <AppPressable
             style={[styles.segmentItem, activeFilter === "all" && styles.segmentActive]}
             onPress={() => setActiveFilter("all")}
           >
             <Text style={[styles.segmentText, activeFilter === "all" && styles.segmentTextActive]}>
-              {t("tabs.assets")}
+              {t("assets.filterAll")}
             </Text>
           </AppPressable>
           <AppPressable
@@ -154,7 +198,7 @@ export default function UnifiedAssetsScreen() {
             onPress={() => setActiveFilter("tasks")}
           >
             <Text style={[styles.segmentText, activeFilter === "tasks" && styles.segmentTextActive]}>
-              {t("header.tasks")} ({taskResults.length})
+              {t("assets.filterTasks")} ({filteredTaskResults.length})
             </Text>
           </AppPressable>
           <AppPressable
@@ -162,7 +206,7 @@ export default function UnifiedAssetsScreen() {
             onPress={() => setActiveFilter("artifacts")}
           >
             <Text style={[styles.segmentText, activeFilter === "artifacts" && styles.segmentTextActive]}>
-              {t("artifacts.title")} ({artifacts.length})
+              {t("assets.filterArtifacts")} ({filteredArtifacts.length})
             </Text>
           </AppPressable>
         </View>
@@ -176,7 +220,7 @@ export default function UnifiedAssetsScreen() {
         ) : null}
 
         {/* 任务成果列表 */}
-        {(activeFilter === "all" || activeFilter === "tasks") && taskResults.map((task) => {
+        {(activeFilter === "all" || activeFilter === "tasks") && filteredTaskResults.map((task) => {
           const outcome = resultOutcome(task);
           const stateLabel = resultState(task, t);
           return (
@@ -240,7 +284,7 @@ export default function UnifiedAssetsScreen() {
         })}
 
         {/* 会话生成工件列表 */}
-        {(activeFilter === "all" || activeFilter === "artifacts") && artifacts.map((artifact) => (
+        {(activeFilter === "all" || activeFilter === "artifacts") && filteredArtifacts.map((artifact) => (
           <View key={artifact.artifact_id} style={styles.card}>
             <View style={styles.cardHeader}>
               <View style={styles.artifactIconWrap}>
@@ -309,6 +353,27 @@ const styles = StyleSheet.create({
     padding: spacing.large,
     gap: spacing.medium,
     paddingBottom: 48,
+  },
+  searchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.small,
+    backgroundColor: colors.surface,
+    borderRadius: radii.large,
+    paddingHorizontal: spacing.medium,
+    minHeight: 44,
+    borderWidth: 1,
+    borderColor: colors.line,
+    ...shadows.card,
+  },
+  searchInput: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 14,
+    paddingVertical: 8,
+  },
+  clearSearch: {
+    padding: 4,
   },
   segmentContainer: {
     flexDirection: "row",
