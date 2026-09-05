@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 
 from pydantic import ValidationError
 from starlette.requests import Request
@@ -160,6 +161,35 @@ class TaskRoutes:
         except Exception as exc:
             return self._core_error(exc)
         return JSONResponse({"task": task.model_dump(mode="json")})
+
+    async def _get_task_glance(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=120)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        task_id = self._path_identifier(request, "task_id")
+        if task_id is None:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            task = await self._core.get_product_task(
+                authenticated.device.principal_id,
+                task_id,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+
+        if not task.latest_execution_state:
+            return JSONResponse({"error": "not_found"}, status_code=404)
+
+        return JSONResponse(
+            {
+                "taskId": task.task_id,
+                "attemptId": task.latest_execution_id or "",
+                "timestamp": int(time.time() * 1000),
+                "thumbnailBase64": "",
+                "windowTitle": task.latest_execution_phase or task.title,
+                "activeApp": "Knoa Agent",
+            }
+        )
 
     async def _preflight_task(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=60)

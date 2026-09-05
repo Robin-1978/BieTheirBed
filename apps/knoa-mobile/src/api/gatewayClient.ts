@@ -25,6 +25,7 @@ import type {
   CapabilityInstallPlan,
   CapabilityInstallation,
   CapabilityCatalogEntry,
+  DesktopGlanceRecord,
   PairingPayload,
   PrincipalTaskEvent,
   Task,
@@ -456,6 +457,16 @@ export class GatewayClient {
     return this.json<TaskPreflight>(
       `/v1/tasks/${encodeURIComponent(taskId)}/preflight`,
     );
+  }
+
+  async getTaskGlance(taskId: string): Promise<DesktopGlanceRecord | null> {
+    try {
+      return await this.json<DesktopGlanceRecord>(
+        `/v1/tasks/${encodeURIComponent(taskId)}/glance`,
+      );
+    } catch {
+      return null;
+    }
   }
 
   async taskExecutionEvents(executionId: string, afterSeq = 0): Promise<TaskEvent[]> {

@@ -602,6 +602,15 @@ export type UserFacingError = {
   suggestedAction?: string;
 };
 
+export type DesktopGlanceRecord = {
+  taskId: string;
+  attemptId?: string;
+  timestamp: number;
+  thumbnailBase64?: string;
+  windowTitle?: string;
+  activeApp?: string;
+};
+
 export type AndroidRelease = {
   platform: "android";
   channel: "personal" | "hosted";

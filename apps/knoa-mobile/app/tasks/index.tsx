@@ -9,10 +9,11 @@ import {
   View,
 } from "react-native";
 
-import type { Task, TaskDefinitionState, TaskState } from "@/api/models";
+import type { DesktopGlanceRecord, Task, TaskDefinitionState, TaskState } from "@/api/models";
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { AsyncStateView } from "@/components/AsyncStateView";
+import { DesktopGlanceModal } from "@/components/DesktopGlanceModal";
 import { TaskBentoCard } from "@/components/TaskBentoCard";
 import { currentTaskSections } from "@/components/taskListPresentation";
 import { useI18n } from "@/i18n";
@@ -45,6 +46,8 @@ export default function TasksScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [runningTaskId, setRunningTaskId] = useState("");
+  const [glanceMap, setGlanceMap] = useState<Record<string, DesktopGlanceRecord>>({});
+  const [activeGlance, setActiveGlance] = useState<DesktopGlanceRecord | null>(null);
   const tasksRef = useRef<Task[]>([]);
   tasksRef.current = tasks;
   const taskCacheScope = gateway.nodeId || "unselected";
@@ -129,6 +132,24 @@ export default function TasksScreen() {
     const timer = setTimeout(() => void refresh(), 250);
     return () => clearTimeout(timer);
   }, [gateway.latestEvent, refresh]);
+
+  useEffect(() => {
+    if (!gateway.client || gateway.status !== "ready") return;
+    const runningTasks = tasks.filter((t) => t.latest_execution_state === "running");
+    if (!runningTasks.length) return;
+
+    let active = true;
+    for (const runningTask of runningTasks) {
+      void gateway.runAuthenticated((client) => client.getTaskGlance(runningTask.task_id))
+        .then((glance) => {
+          if (active && glance) {
+            setGlanceMap((current) => ({ ...current, [glance.taskId]: glance }));
+          }
+        })
+        .catch(() => {});
+    }
+    return () => { active = false; };
+  }, [gateway.client, gateway.runAuthenticated, gateway.status, tasks]);
 
   async function handleExecuteNow(taskId: string) {
     if (!gateway.client || runningTaskId) return;
@@ -282,12 +303,20 @@ export default function TasksScreen() {
               task={item}
               unread={unreadTaskIds.has(item.task_id)}
               isExecuting={runningTaskId === item.task_id}
+              glanceRecord={glanceMap[item.task_id]}
               onPress={(task) => router.push(`/tasks/${task.task_id}`)}
               onExecute={(taskId) => void handleExecuteNow(taskId)}
               onTogglePause={(task) => void handleTogglePause(task)}
               onOpenExecution={(executionId) => router.push(`/task-executions/${executionId}`)}
+              onPressGlance={(glance) => setActiveGlance(glance)}
             />
           )}
+        />
+
+        <DesktopGlanceModal
+          glance={activeGlance}
+          visible={Boolean(activeGlance)}
+          onClose={() => setActiveGlance(null)}
         />
       </View>
   );
