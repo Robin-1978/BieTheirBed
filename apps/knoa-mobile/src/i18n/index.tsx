@@ -2984,6 +2984,7 @@ const en: Record<keyof typeof zh, string> = {
 
 type MessageKey = keyof typeof zh;
 export type { MessageKey };
+export { en, zh };
 type I18nValue = {
   mode: LanguageMode;
   locale: "zh-CN" | "en-US";
