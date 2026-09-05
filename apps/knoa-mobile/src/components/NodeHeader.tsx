@@ -56,7 +56,7 @@ export function NodeHeaderTitle() {
       workspaceName,
       nodeId: currentNodeId,
     };
-    router.push({ pathname: "/node", params: nodeParams });
+    router.push({ pathname: "/settings/node", params: nodeParams });
   };
 
   const handleOpenCapabilities = () => {
@@ -259,17 +259,16 @@ export function NodeHeaderBack() {
       accessibilityRole="button"
       accessibilityLabel={t("nodeHeader.back")}
       hitSlop={8}
-      onPress={() => nodeId
-        ? router.replace({
-            pathname: "/node",
+      onPress={() => {
+        if (router.canGoBack()) {
+          router.back();
+        } else {
+          router.replace({
+            pathname: "/(tabs)",
             params: { workspaceId, workspaceName, nodeId },
-          })
-        : workspaceId
-          ? router.replace({
-              pathname: "/workspaces/[workspaceId]",
-              params: { workspaceId, workspaceName },
-            })
-          : router.replace("/account")}
+          });
+        }
+      }}
       style={styles.back}
     >
       <AppIcon name="chevron-left" color={colors.ink} size={25} />

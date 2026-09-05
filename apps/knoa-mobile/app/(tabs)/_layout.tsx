@@ -53,11 +53,11 @@ export default function TabsLayout() {
                 <AppIcon name="history" color={colors.ink} size={21} />
               </AppPressable>
               <AppPressable
-                accessibilityLabel={t("header.nodeMenu")}
-                onPress={() => router.push({ pathname: "/node", params: nodeParams })}
+                accessibilityLabel={t("nav.nodeSettings")}
+                onPress={() => router.push({ pathname: "/settings/node", params: nodeParams })}
                 style={styles.headerButton}
               >
-                <AppIcon name="more" color={colors.muted} size={22} />
+                <AppIcon name="settings" color={colors.ink} size={21} />
               </AppPressable>
             </View>
           ),
