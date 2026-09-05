@@ -821,15 +821,17 @@ class KnoaAgentRuntime(AgentRuntime):
                             or getattr(getattr(part, "artifact", None), "name", "")
                             or artifact_id
                         )
+                        guidance = (
+                            f"[Inline image: artifact_id={artifact_id}; name={name}. "
+                            "Analyze it directly."
+                        )
+                        if image_inspection_available:
+                            guidance += (
+                                " Reserve image_inspect for follow-up reinspection."
+                            )
                         blocks.append({
                             "type": "text",
-                            "text": (
-                                f"[Attached image artifact_id={artifact_id}; name={name}. "
-                                "You are viewing this image directly; do not call image_inspect "
-                                "unless you need a closer look at details you cannot resolve "
-                                "from the inline image. If you do call it, use the artifact_id "
-                                "above.]"
-                            ),
+                            "text": f"{guidance}]",
                         })
                 elif "text" in content:
                     blocks.append({"type": "text", "text": str(content["text"])})
