@@ -29,6 +29,7 @@ from knoa_platform.service.core_api import (
     CreateChatTurnRequest,
     CreateSessionRequest,
     DeleteConversationSessionRequest,
+    DeleteMemoryRequest,
     GetChatTurnRequest,
     GetConversationSessionRequest,
     GetHistoryRequest,
@@ -41,6 +42,7 @@ from knoa_platform.service.core_api import (
     ListToolsRequest,
     MCPResourcesMessage,
     MemoryClearedMessage,
+    MemoryDeletedMessage,
     MemoryListMessage,
     ResolveChatApprovalRequest,
     RetryChatTurnRequest,
@@ -231,6 +233,12 @@ class ConversationCommandHandler:
             await send(MemoryClearedMessage(
                 request_id=request.request_id,
                 result=await self._control.clear_memory(scope),
+            ))
+        elif isinstance(request, DeleteMemoryRequest):
+            scope = RuntimeScope(principal_id=principal, session_handle=request.session_handle)
+            await send(MemoryDeletedMessage(
+                request_id=request.request_id,
+                result=await self._control.delete_memory(scope, request.key),
             ))
         elif isinstance(request, ListToolsRequest):
             scope = RuntimeScope(principal_id=principal, session_handle=request.session_handle)

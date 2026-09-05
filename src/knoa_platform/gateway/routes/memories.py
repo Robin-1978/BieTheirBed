@@ -43,3 +43,19 @@ class MemoriesRouteMixin:
         except Exception as exc:
             return self._core_error(exc)
         return JSONResponse({"cleared": result.cleared})
+
+    async def _delete_memory(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=30)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        key = self._path_identifier(request, "key")
+        if not key:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        try:
+            result = await self._core.delete_memory(
+                authenticated.device.principal_id,
+                key=key,
+            )
+        except Exception as exc:
+            return self._core_error(exc)
+        return JSONResponse({"deleted": result.deleted})

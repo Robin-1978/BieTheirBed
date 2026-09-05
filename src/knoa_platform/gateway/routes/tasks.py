@@ -1,6 +1,7 @@
 """Fail-closed HTTP/TLS surface for Secure Gateway mobile access."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -180,16 +181,16 @@ class TaskRoutes:
         if not task.latest_execution_state:
             return JSONResponse({"error": "not_found"}, status_code=404)
 
-        return JSONResponse(
-            {
-                "taskId": task.task_id,
-                "attemptId": task.latest_execution_id or "",
-                "timestamp": int(time.time() * 1000),
-                "thumbnailBase64": "",
-                "windowTitle": task.latest_execution_phase or task.title,
-                "activeApp": "Knoa Agent",
-            }
+        from knoa_platform.vision.glance import capture_desktop_glance
+
+        glance_data = await asyncio.to_thread(
+            capture_desktop_glance,
+            task_id=task.task_id,
+            attempt_id=task.latest_execution_id or "",
+            task_title=task.title,
+            execution_phase=task.latest_execution_phase or "",
         )
+        return JSONResponse(glance_data)
 
     async def _preflight_task(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=60)

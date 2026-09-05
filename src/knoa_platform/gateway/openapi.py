@@ -46,6 +46,7 @@ from knoa_platform.gateway.protocol import (
     CreateEvaluationCaseRequest,
     CreateImprovementCandidateRequest,
     DeletedResponse,
+    DesktopGlanceResponse,
     DeviceRevokedResponse,
     ErrorResponse,
     ExtensionImportResponse,
@@ -68,6 +69,8 @@ from knoa_platform.gateway.protocol import (
     ImprovementReplayResponse,
     InvocationPolicyPreviewResponse,
     MCPResourceCatalogResponse,
+    MemoryClearedResponse,
+    MemoryListResponse,
     NodeDescriptorResponse,
     NodeHubEnrollmentRequest,
     NodeHubEnrollmentResponse,
@@ -1031,6 +1034,20 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     },
                 }
             },
+            "/v1/tasks/{task_id}/glance": {
+                "get": {
+                    "operationId": "getTaskGlance",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "task_id", "in": "path", "required": True,
+                        "schema": {"type": "string", "maxLength": 128},
+                    }],
+                    "responses": {
+                        "200": _json_response("Task desktop glance", DesktopGlanceResponse),
+                        **_errors("400", "401", "404", "429", "503"),
+                    },
+                }
+            },
             "/v1/task-executions/{execution_id}": {
                 "get": {
                     "operationId": "getTaskExecution",
@@ -1456,6 +1473,56 @@ def gateway_openapi_schema() -> dict[str, Any]:
                         **_errors("400", "401", "403", "415", "422", "429"),
                     },
                 }
+            },
+            "/v1/memories": {
+                "get": {
+                    "operationId": "listMemories",
+                    "security": bearer,
+                    "parameters": [
+                        {
+                            "name": "category",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "string"},
+                        },
+                        {
+                            "name": "importance",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "string", "enum": ["core", "relevant"]},
+                        },
+                    ],
+                    "responses": {
+                        "200": _json_response("List of memories", MemoryListResponse),
+                        **_errors("400", "401", "429", "503"),
+                    },
+                },
+            },
+            "/v1/memories/clear": {
+                "post": {
+                    "operationId": "clearMemories",
+                    "security": bearer,
+                    "responses": {
+                        "200": _json_response("Memories cleared", MemoryClearedResponse),
+                        **_errors("400", "401", "429", "503"),
+                    },
+                },
+            },
+            "/v1/memories/{key}": {
+                "delete": {
+                    "operationId": "deleteMemory",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "key",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string", "maxLength": 128},
+                    }],
+                    "responses": {
+                        "200": _json_response("Memory deleted", DeletedResponse),
+                        **_errors("400", "401", "404", "429", "503"),
+                    },
+                },
             },
             "/v1/event-sources": {
                 "get": {

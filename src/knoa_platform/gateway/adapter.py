@@ -544,6 +544,7 @@ class SecureGatewayAdapter(
                 Route("/v1/tasks", self._list_tasks, methods=["GET"]),
                 Route("/v1/memories", self._list_memories, methods=["GET"]),
                 Route("/v1/memories/clear", self._clear_memories, methods=["POST"]),
+                Route("/v1/memories/{key:str}", self._delete_memory, methods=["DELETE"]),
                 Route("/v1/event-sources", self._list_event_sources, methods=["GET"]),
                 Route("/v1/event-sources", self._create_event_source, methods=["POST"]),
                 Route(
