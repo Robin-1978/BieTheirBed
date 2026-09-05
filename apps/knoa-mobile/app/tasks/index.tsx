@@ -13,6 +13,7 @@ import type { Task, TaskDefinitionState, TaskState } from "@/api/models";
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { AsyncStateView } from "@/components/AsyncStateView";
+import { TaskBentoCard } from "@/components/TaskBentoCard";
 import { currentTaskSections } from "@/components/taskListPresentation";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
@@ -276,122 +277,17 @@ export default function TasksScreen() {
               </View>
             ) : null
           )}
-          renderItem={({ item }) => {
-            const tone = taskStatusTone(item);
-            const isExecutingThis = runningTaskId === item.task_id;
-            return (
-              <AppPressable
-                accessibilityRole="button"
-                style={styles.taskCard}
-                onPress={() => router.push(`/tasks/${item.task_id}`)}
-              >
-                {/* 左侧状态色条 */}
-                <View
-                  style={[
-                    styles.statusStripe,
-                    tone === "warning" && styles.stripeWarning,
-                    tone === "danger" && styles.stripeDanger,
-                    tone === "success" && styles.stripeSuccess,
-                  ]}
-                />
-
-                <View style={styles.cardMain}>
-                  <View style={styles.taskHeader}>
-                    <View style={styles.titleRow}>
-                      {unreadTaskIds.has(item.task_id) ? <View style={styles.unreadDot} /> : null}
-                      <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
-                    </View>
-                    <View
-                      style={[
-                        styles.stateBadge,
-                        tone === "warning" && styles.badgeWarning,
-                        tone === "danger" && styles.badgeDanger,
-                        tone === "success" && styles.badgeSuccess,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.stateText,
-                          tone === "warning" && styles.stateTextWarning,
-                          tone === "danger" && styles.stateTextDanger,
-                          tone === "success" && styles.stateTextSuccess,
-                        ]}
-                      >
-                        {taskStatusLabel(item, t)}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {item.latest_execution_state === "failed" && item.latest_execution_failure_code ? (
-                    <Text style={styles.failure} numberOfLines={2}>
-                      {t("tasks.latestFailure", { code: item.latest_execution_failure_code })}
-                    </Text>
-                  ) : item.latest_execution_summary ? (
-                    <View style={styles.latestResult}>
-                      <Text style={styles.resultText} numberOfLines={3}>
-                        {item.latest_execution_summary}
-                      </Text>
-                    </View>
-                  ) : (
-                    <Text style={styles.goal} numberOfLines={2}>{item.goal}</Text>
-                  )}
-
-                  <View style={styles.cardFooter}>
-                    <View style={styles.metaGroup}>
-                      <Text style={styles.metaText}>{launchLabel(item, t)}</Text>
-                      <Text style={styles.metaDivider}>·</Text>
-                      <Text style={styles.metaText}>
-                        {t("tasks.executions", { count: item.execution_count })}
-                      </Text>
-                    </View>
-
-                    {/* 快捷动作 */}
-                    <View style={styles.actionGroup}>
-                      {item.state !== "archived" ? (
-                        <AppPressable
-                          style={styles.quickButton}
-                          onPress={() => void handleTogglePause(item)}
-                        >
-                          <AppIcon
-                            name={item.state === "active" ? "pause" : "play"}
-                            color={colors.muted}
-                            size={12}
-                          />
-                          <Text style={styles.quickButtonText}>
-                            {item.state === "active" ? t("tasks.swipePause") : t("tasks.swipeResume")}
-                          </Text>
-                        </AppPressable>
-                      ) : null}
-
-                      {item.latest_execution_id ? (
-                        <AppPressable
-                          style={styles.quickButton}
-                          onPress={() => router.push(`/task-executions/${item.latest_execution_id}`)}
-                        >
-                          <Text style={styles.quickButtonText}>{t("results.openExecution")}</Text>
-                        </AppPressable>
-                      ) : null}
-
-                      <AppPressable
-                        disabled={Boolean(runningTaskId)}
-                        style={styles.executeButton}
-                        onPress={() => void handleExecuteNow(item.task_id)}
-                      >
-                        {isExecutingThis ? (
-                          <ActivityIndicator color={colors.onAccent} size="small" />
-                        ) : (
-                          <>
-                            <AppIcon name="play" color={colors.onAccent} size={12} />
-                            <Text style={styles.executeButtonText}>{t("taskDetail.executeNow")}</Text>
-                          </>
-                        )}
-                      </AppPressable>
-                    </View>
-                  </View>
-                </View>
-              </AppPressable>
-            );
-          }}
+          renderItem={({ item }) => (
+            <TaskBentoCard
+              task={item}
+              unread={unreadTaskIds.has(item.task_id)}
+              isExecuting={runningTaskId === item.task_id}
+              onPress={(task) => router.push(`/tasks/${task.task_id}`)}
+              onExecute={(taskId) => void handleExecuteNow(taskId)}
+              onTogglePause={(task) => void handleTogglePause(task)}
+              onOpenExecution={(executionId) => router.push(`/task-executions/${executionId}`)}
+            />
+          )}
         />
       </View>
   );
