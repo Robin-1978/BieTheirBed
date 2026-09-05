@@ -22,6 +22,10 @@ from knoa_platform.agent_runtime.contracts import (
     ArtifactDownloadResult,
     ArtifactTranscriptionResult,
     ExtensionStatusRecord,
+    MemoryClearResult,
+    MemoryDeleteResult,
+    MemoryListResult,
+    MemoryRecord,
     RuntimeStatus,
     ToolDescriptorRecord,
     ToolListResult,
@@ -762,6 +766,28 @@ class _Core:
         )
         return ToolListResult(tools=(descriptor.name,), descriptors=(descriptor,))
 
+    async def list_memory(self, principal_id, session_handle=""):
+        self.calls.append(("list_memory", principal_id, session_handle))
+        return MemoryListResult(
+            memories=(
+                MemoryRecord(
+                    key="editor_preference",
+                    value="vscode",
+                    category="workflow",
+                    importance="core",
+                    confidence=0.95,
+                ),
+            )
+        )
+
+    async def clear_memory(self, principal_id, session_handle=""):
+        self.calls.append(("clear_memory", principal_id, session_handle))
+        return MemoryClearResult(cleared=True)
+
+    async def delete_memory(self, principal_id, key, session_handle=""):
+        self.calls.append(("delete_memory", principal_id, key, session_handle))
+        return MemoryDeleteResult(deleted=True)
+
     async def resolve_approval(self, principal_id, approval_id, *, approved):
         self.calls.append(
             ("resolve_approval", principal_id, approval_id, approved)
@@ -1000,6 +1026,10 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
             headers=headers,
             json={"approved": True},
         )
+        glance = await http.get("/v1/tasks/task-a/glance", headers=headers)
+        memories = await http.get("/v1/memories", headers=headers)
+        cleared_memories = await http.post("/v1/memories/clear", headers=headers)
+        deleted_memory = await http.delete("/v1/memories/editor_preference", headers=headers)
 
     assert session.status_code == 201
     assert session.json() == {"session_handle": "session-a"}
@@ -1027,6 +1057,16 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
         "resolved": True,
         "state": "approved",
     }
+    assert glance.status_code == 200
+    assert glance.json()["taskId"] == "task-a"
+    assert "timestamp" in glance.json()
+    assert memories.status_code == 200
+    assert memories.json()["total"] == 1
+    assert memories.json()["items"][0]["key"] == "editor_preference"
+    assert cleared_memories.status_code == 200
+    assert cleared_memories.json() == {"cleared": True}
+    assert deleted_memory.status_code == 200
+    assert deleted_memory.json() == {"deleted": True}
     assert {call[1] for call in core.calls} == {"personal:owner"}
 
 

@@ -67,6 +67,10 @@ class MemoryClearResult(ContractModel):
     cleared: bool
 
 
+class MemoryDeleteResult(ContractModel):
+    deleted: bool
+
+
 class ToolDescriptorRecord(ContractModel):
     name: NonEmptyString
     description: Annotated[str, StringConstraints(max_length=2000)] = ""
@@ -185,6 +189,12 @@ class ControlServicePort(Protocol):
         self,
         scope: RuntimeScope,
     ) -> MemoryClearResult: ...
+
+    async def delete_memory(
+        self,
+        scope: RuntimeScope,
+        key: str,
+    ) -> MemoryDeleteResult: ...
 
     async def list_tools(
         self,

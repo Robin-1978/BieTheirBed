@@ -485,6 +485,12 @@ export class GatewayClient {
     return this.json<{ cleared: boolean }>("/v1/memories/clear", { method: "POST" });
   }
 
+  async deleteMemory(key: string): Promise<{ deleted: boolean }> {
+    return this.json<{ deleted: boolean }>(`/v1/memories/${encodeURIComponent(key)}`, {
+      method: "DELETE",
+    });
+  }
+
   async taskExecutionEvents(executionId: string, afterSeq = 0): Promise<TaskEvent[]> {
     const response = await this.json<{ events: TaskEvent[] }>(
       `/v1/task-executions/${encodeURIComponent(executionId)}/events?after_seq=${afterSeq}`,

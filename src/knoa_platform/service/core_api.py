@@ -23,6 +23,7 @@ from knoa_platform.agent_runtime.contracts import (
     HealthStatus,
     HistoryResult,
     MemoryClearResult,
+    MemoryDeleteResult,
     MemoryListResult,
     MCPResourceCatalogResult,
     RuntimeStatus,
@@ -1108,6 +1109,14 @@ class ClearMemoryRequest(SessionRequest):
     method: Literal["memory_clear"] = "memory_clear"
 
 
+class DeleteMemoryRequest(SessionRequest):
+    method: Literal["memory_delete"] = "memory_delete"
+    key: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=128),
+    ]
+
+
 class ListToolsRequest(SessionRequest):
     method: Literal["tools"] = "tools"
 
@@ -1280,6 +1289,7 @@ CoreRequest: TypeAlias = Annotated[
     | GetHistoryRequest
     | ListMemoryRequest
     | ClearMemoryRequest
+    | DeleteMemoryRequest
     | ListToolsRequest
     | ListMCPResourcesRequest
     | SetConfigRequest
@@ -1585,6 +1595,13 @@ class MemoryClearedMessage(CoreModel):
     result: MemoryClearResult
 
 
+class MemoryDeletedMessage(CoreModel):
+    message_type: Literal["memory_deleted"] = "memory_deleted"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    result: MemoryDeleteResult
+
+
 class ToolsMessage(CoreModel):
     message_type: Literal["tools"] = "tools"
     api_version: Literal["v1"] = "v1"
@@ -1813,6 +1830,7 @@ CoreServerMessage: TypeAlias = Annotated[
     | HistoryMessage
     | MemoryListMessage
     | MemoryClearedMessage
+    | MemoryDeletedMessage
     | ToolsMessage
     | MCPResourcesMessage
     | ConfigSetMessage

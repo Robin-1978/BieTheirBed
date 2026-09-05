@@ -11,6 +11,7 @@ from knoa_platform.agent_runtime.contracts import (
     ExtensionStatusRecord,
     HistoryResult,
     MemoryClearResult,
+    MemoryDeleteResult,
     MemoryListResult,
     MemoryRecord,
     MCPResourceCatalogRecord,
@@ -141,6 +142,11 @@ class ControlService:
         owned = await self._owned_scope(scope)
         await asyncio.to_thread(self._memory.clear_memories, owned.principal_id)
         return MemoryClearResult(cleared=True)
+
+    async def delete_memory(self, scope: RuntimeScope, key: str) -> MemoryDeleteResult:
+        owned = await self._owned_scope(scope)
+        deleted = await asyncio.to_thread(self._memory.delete_memory, owned.principal_id, key)
+        return MemoryDeleteResult(deleted=deleted)
 
     async def list_tools(self, scope: RuntimeScope) -> ToolListResult:
         owned = await self._owned_scope(scope)

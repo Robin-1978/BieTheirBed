@@ -13,6 +13,7 @@ from knoa_platform.agent_runtime.contracts import (
     HealthStatus,
     HistoryResult,
     MemoryClearResult,
+    MemoryDeleteResult,
     MemoryListResult,
     MCPResourceCatalogResult,
     RuntimeStatus,
@@ -65,6 +66,7 @@ from knoa_platform.service.core_api import (
     CreateSessionRequest,
     CreateTaskRequest,
     DeleteConversationSessionRequest,
+    DeleteMemoryRequest,
     DeleteProductTaskExecutionRequest,
     DeleteProductTaskRequest,
     DeployMCPPackageRequest,
@@ -99,6 +101,7 @@ from knoa_platform.service.core_api import (
     MCPPackageDeploymentSnapshot,
     MCPResourcesMessage,
     MemoryClearedMessage,
+    MemoryDeletedMessage,
     MemoryListMessage,
     PauseTaskRequest,
     PreflightConfigDraftRequest,
@@ -535,6 +538,18 @@ class CoreClient(CoreArtifactClientMixin, CoreAutomationClientMixin):
         )
         if not isinstance(response, MemoryClearedMessage):
             raise RuntimeError("CoreServer returned an invalid memory clear response")
+        return response.result
+
+    async def delete_memory(self, session_handle: str, key: str) -> MemoryDeleteResult:
+        response = await self._request(
+            DeleteMemoryRequest(
+                request_id=self._request_id(),
+                session_handle=session_handle,
+                key=key,
+            )
+        )
+        if not isinstance(response, MemoryDeletedMessage):
+            raise RuntimeError("CoreServer returned an invalid memory delete response")
         return response.result
 
     async def list_tools(self, session_handle: str) -> ToolListResult:

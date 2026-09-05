@@ -842,3 +842,30 @@ class AndroidReleaseResponse(BaseModel):
     published_at: float = Field(gt=0)
     release_notes: str = Field(default="", max_length=20_000)
     download_path: str = Field(min_length=1, max_length=256)
+
+
+class DesktopGlanceResponse(BaseModel):
+    taskId: str
+    attemptId: str = ""
+    timestamp: int
+    thumbnailBase64: str = ""
+    windowTitle: str = ""
+    activeApp: str = ""
+
+
+class MemoryItemRecord(BaseModel):
+    key: str
+    value: str
+    category: str
+    importance: str
+    confidence: float
+    source: str = "explicit"
+
+
+class MemoryListResponse(BaseModel):
+    items: tuple[MemoryItemRecord, ...]
+    total: int
+
+
+class MemoryClearedResponse(BaseModel):
+    cleared: bool = True

@@ -81,6 +81,29 @@ export default function MemoriesScreen() {
     );
   }, [clearing, gateway.client, gateway.runAuthenticated, t]);
 
+  const handleDeleteMemory = useCallback((key: string) => {
+    Alert.alert(
+      t("memories.delete"),
+      t("memories.deleteConfirm", { key }),
+      [
+        { text: t("common.cancel"), style: "cancel" },
+        {
+          text: t("common.confirm"),
+          style: "destructive",
+          onPress: async () => {
+            if (!gateway.client) return;
+            try {
+              await gateway.runAuthenticated((client) => client.deleteMemory(key));
+              setMemories((prev) => prev.filter((m) => m.key !== key));
+            } catch {
+              // ignore
+            }
+          },
+        },
+      ],
+    );
+  }, [gateway.client, gateway.runAuthenticated, t]);
+
   const filteredItems = useMemo(
     () => filterMemories(memories, filter),
     [filter, memories],
@@ -192,11 +215,19 @@ export default function MemoriesScreen() {
                   </View>
                 </View>
 
-                <View style={styles.confidencePill}>
-                  <Text style={styles.confidenceLabel}>{t("memories.confidence")}</Text>
-                  <Text style={styles.confidenceValue}>
-                    {formatConfidencePercent(item.confidence)}
-                  </Text>
+                <View style={styles.cardHeaderRight}>
+                  <View style={styles.confidencePill}>
+                    <Text style={styles.confidenceLabel}>{t("memories.confidence")}</Text>
+                    <Text style={styles.confidenceValue}>
+                      {formatConfidencePercent(item.confidence)}
+                    </Text>
+                  </View>
+                  <AppPressable
+                    style={styles.deleteItemBtn}
+                    onPress={() => handleDeleteMemory(item.key)}
+                  >
+                    <AppIcon name="x" color={colors.muted} size={14} />
+                  </AppPressable>
                 </View>
               </View>
 
@@ -343,6 +374,15 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.small,
+  },
+  cardHeaderRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.small,
+  },
+  deleteItemBtn: {
+    padding: 4,
+    borderRadius: radii.small,
   },
   categoryBadge: {
     backgroundColor: colors.surfaceMuted,
