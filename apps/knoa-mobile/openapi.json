@@ -4986,6 +4986,59 @@
         }
       }
     },
+    "/v1/desktop/glance": {
+      "get": {
+        "operationId": "getDesktopGlance",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Live desktop glance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopGlanceResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tasks/{task_id}/glance": {
       "get": {
         "operationId": "getTaskGlance",
@@ -12911,7 +12964,7 @@
             "type": "integer"
           },
           "context_window_budget": {
-            "default": 8192,
+            "default": 65536,
             "maximum": 10000000,
             "minimum": 512,
             "title": "Context Window Budget",

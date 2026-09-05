@@ -256,7 +256,7 @@ class AppConfig(BaseModel):
     max_total_tool_calls: int = 50
     max_tokens: int = 1024
     shell_timeout: int = 30
-    context_window_budget: int = 8192
+    context_window_budget: int = 65536
     trace_enabled: bool = True
     llm_trace_log: str = "logs/llm_calls.jsonl"
     turn_trace_log: str = "logs/turns.jsonl"

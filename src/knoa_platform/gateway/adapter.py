@@ -586,6 +586,7 @@ class SecureGatewayAdapter(
                     self._download_artifact,
                     methods=["GET"],
                 ),
+                Route("/v1/desktop/glance", self._get_desktop_glance, methods=["GET"]),
                 Route("/v1/tasks/{task_id:str}", self._get_task, methods=["GET"]),
                 Route(
                     "/v1/tasks/{task_id:str}/glance",

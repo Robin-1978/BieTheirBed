@@ -470,6 +470,14 @@ export class GatewayClient {
     }
   }
 
+  async getLiveDesktopGlance(): Promise<DesktopGlanceRecord | null> {
+    try {
+      return await this.json<DesktopGlanceRecord>("/v1/desktop/glance");
+    } catch {
+      return null;
+    }
+  }
+
   async listMemories(
     category?: string,
     importance?: string,

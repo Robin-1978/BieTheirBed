@@ -31,12 +31,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type {
   ChatApproval,
   ChatTurnSnapshot,
+  DesktopGlanceRecord,
   HumanInteraction,
 } from "@/api/models";
 import { AgentSelector } from "@/components/AgentSelector";
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { ArtifactViewer } from "@/components/ArtifactViewer";
+import { DesktopGlanceModal } from "@/components/DesktopGlanceModal";
 import {
   ChatComposer,
   ChatFeedbackBanner,
@@ -145,6 +147,33 @@ export default function ChatScreen() {
 
   const lastDismissedClipboardRef = useRef("");
   const [clipboardSuggestion, setClipboardSuggestion] = useState<ClipboardSuggestion | null>(null);
+
+  const [liveGlance, setLiveGlance] = useState<DesktopGlanceRecord | null>(null);
+  const [glanceModalVisible, setGlanceModalVisible] = useState(false);
+  const [glanceRefreshing, setGlanceRefreshing] = useState(false);
+
+  const handleOpenLiveGlance = useCallback(async () => {
+    if (!gateway.client) return;
+    setGlanceRefreshing(true);
+    setGlanceModalVisible(true);
+    try {
+      const record = await gateway.runAuthenticated((client) => client.getLiveDesktopGlance());
+      if (record) setLiveGlance(record);
+    } finally {
+      setGlanceRefreshing(false);
+    }
+  }, [gateway.client, gateway.runAuthenticated]);
+
+  const handleRefreshLiveGlance = useCallback(async () => {
+    if (!gateway.client || glanceRefreshing) return;
+    setGlanceRefreshing(true);
+    try {
+      const record = await gateway.runAuthenticated((client) => client.getLiveDesktopGlance());
+      if (record) setLiveGlance(record);
+    } finally {
+      setGlanceRefreshing(false);
+    }
+  }, [gateway.client, gateway.runAuthenticated, glanceRefreshing]);
 
   const showFeedback = useCallback((value: string, tone: Feedback["tone"] = "info") => {
     setFeedback({ text: value, tone });
@@ -869,6 +898,7 @@ export default function ChatScreen() {
                 isOnline={gateway.status === "ready"}
                 onSelectPrompt={handleSelectPrompt}
                 onLaunchTask={handleLaunchTask}
+                onPressGlance={handleOpenLiveGlance}
               />
             }
           />
@@ -982,6 +1012,14 @@ export default function ChatScreen() {
             </View>
           </View>
         </Modal>
+
+        <DesktopGlanceModal
+          glance={liveGlance}
+          visible={glanceModalVisible}
+          onClose={() => setGlanceModalVisible(false)}
+          onRefresh={handleRefreshLiveGlance}
+          refreshing={glanceRefreshing}
+        />
       </KeyboardAvoidingView>
   );
 }

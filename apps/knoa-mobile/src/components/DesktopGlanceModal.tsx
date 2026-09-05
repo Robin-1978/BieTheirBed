@@ -17,12 +17,16 @@ export interface DesktopGlanceModalProps {
   glance: DesktopGlanceRecord | null;
   visible: boolean;
   onClose: () => void;
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }
 
 export function DesktopGlanceModal({
   glance,
   visible,
   onClose,
+  onRefresh,
+  refreshing,
 }: DesktopGlanceModalProps) {
   const { t } = useI18n();
 
@@ -48,9 +52,20 @@ export function DesktopGlanceModal({
               <AppIcon name="desktop" color={colors.accent} size={16} />
               <Text style={styles.headerTitle}>{t("tasks.bentoGlance")}</Text>
             </View>
-            <AppPressable style={styles.closeButton} onPress={onClose}>
-              <AppIcon name="x" color={colors.muted} size={16} />
-            </AppPressable>
+            <View style={styles.headerRightActions}>
+              {onRefresh ? (
+                <AppPressable
+                  style={[styles.refreshButton, refreshing && styles.refreshing]}
+                  onPress={onRefresh}
+                  disabled={refreshing}
+                >
+                  <AppIcon name="refresh" color={colors.accent} size={15} />
+                </AppPressable>
+              ) : null}
+              <AppPressable style={styles.closeButton} onPress={onClose}>
+                <AppIcon name="x" color={colors.muted} size={16} />
+              </AppPressable>
+            </View>
           </View>
 
           {/* 桌面图像大图 */}
@@ -137,6 +152,19 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: 15,
     fontWeight: "700",
+  },
+  headerRightActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.small,
+  },
+  refreshButton: {
+    padding: 6,
+    borderRadius: radii.pill,
+    backgroundColor: colors.surfaceMuted,
+  },
+  refreshing: {
+    opacity: 0.5,
   },
   closeButton: {
     padding: 6,

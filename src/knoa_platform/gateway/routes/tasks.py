@@ -163,6 +163,22 @@ class TaskRoutes:
             return self._core_error(exc)
         return JSONResponse({"task": task.model_dump(mode="json")})
 
+    async def _get_desktop_glance(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=60)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+
+        from knoa_platform.vision.glance import capture_desktop_glance
+
+        glance_data = await asyncio.to_thread(
+            capture_desktop_glance,
+            task_id="",
+            attempt_id="",
+            task_title="Live Desktop",
+            execution_phase="Live Screen",
+        )
+        return JSONResponse(glance_data)
+
     async def _get_task_glance(self, request: Request) -> JSONResponse:
         authenticated = self._authorize(request, limit=120)
         if isinstance(authenticated, JSONResponse):

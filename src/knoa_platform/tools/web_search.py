@@ -114,6 +114,8 @@ class WebSearchTool(ToolBase):
 
                 snippet_el = item.select_one(".b_caption p, .b_lineclamp2")
                 snippet = snippet_el.get_text(strip=True) if snippet_el else ""
+                if len(snippet) > 180:
+                    snippet = snippet[:179] + "…"
 
                 results.append({
                     "title": title_el.get_text(strip=True),
@@ -165,6 +167,8 @@ class WebSearchTool(ToolBase):
             snippet = r.get("body", r.get("snippet", ""))
             if not snippet:
                 continue
+            if len(snippet) > 180:
+                snippet = snippet[:179] + "…"
             formatted.append({
                 "title": r.get("title", ""),
                 "url": url,
@@ -212,6 +216,8 @@ class WebSearchTool(ToolBase):
                     snippet = snippet_el.get_text(strip=True) if snippet_el else ""
                     if not snippet:
                         continue
+                    if len(snippet) > 180:
+                        snippet = snippet[:179] + "…"
                     results.append({
                         "title": title_el.get_text(strip=True),
                         "url": href,

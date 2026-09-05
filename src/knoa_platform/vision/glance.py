@@ -91,7 +91,7 @@ def capture_desktop_glance(
 
     if _cached_glance is not None:
         cached_ts, cached_b64, cached_app, cached_title = _cached_glance
-        if current_time - cached_ts < _GLANCE_CACHE_TTL_SECONDS:
+        if 0 <= current_time - cached_ts < _GLANCE_CACHE_TTL_SECONDS:
             return {
                 "taskId": task_id,
                 "attemptId": attempt_id,
