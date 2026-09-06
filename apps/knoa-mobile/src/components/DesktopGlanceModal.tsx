@@ -40,9 +40,9 @@ export function DesktopGlanceModal({
   const [steerSending, setSteerSending] = useState(false);
   const [steerFeedback, setSteerFeedback] = useState("");
 
-  if (!glance || !visible) return null;
+  if (!visible) return null;
 
-  const sampleTime = glance.timestamp
+  const sampleTime = glance?.timestamp
     ? new Date(glance.timestamp).toLocaleTimeString()
     : "";
 
@@ -99,7 +99,12 @@ export function DesktopGlanceModal({
 
           {/* 桌面图像大图 */}
           <View style={styles.imageContainer}>
-            {glance.thumbnailBase64 ? (
+            {refreshing && !glance?.thumbnailBase64 ? (
+              <View style={styles.loadingWrap}>
+                <ActivityIndicator color={colors.accent} size="large" />
+                <Text style={styles.loadingText}>正在采样真机桌面画面...</Text>
+              </View>
+            ) : glance?.thumbnailBase64 ? (
               <Image
                 source={{ uri: `data:image/jpeg;base64,${glance.thumbnailBase64}` }}
                 style={styles.image}
@@ -108,13 +113,14 @@ export function DesktopGlanceModal({
             ) : (
               <View style={styles.emptyImageWrap}>
                 <AppIcon name="desktop" color={colors.muted} size={32} />
+                <Text style={styles.emptyText}>暂无桌面画面，点击右上角刷新</Text>
               </View>
             )}
           </View>
 
           {/* 元数据详情行 */}
           <View style={styles.metaContainer}>
-            {glance.activeApp ? (
+            {glance?.activeApp ? (
               <View style={styles.metaRow}>
                 <Text style={styles.metaLabel}>App:</Text>
                 <Text style={styles.metaValue} numberOfLines={1}>
@@ -123,7 +129,7 @@ export function DesktopGlanceModal({
               </View>
             ) : null}
 
-            {glance.windowTitle ? (
+            {glance?.windowTitle ? (
               <View style={styles.metaRow}>
                 <Text style={styles.metaLabel}>Window:</Text>
                 <Text style={styles.metaValue} numberOfLines={2}>
@@ -253,6 +259,21 @@ const styles = StyleSheet.create({
   emptyImageWrap: {
     justifyContent: "center",
     alignItems: "center",
+    gap: spacing.small,
+  },
+  emptyText: {
+    color: colors.muted,
+    fontSize: 12,
+  },
+  loadingWrap: {
+    justifyContent: "center",
+    alignItems: "center",
+    gap: spacing.small,
+  },
+  loadingText: {
+    color: "#94A3B8",
+    fontSize: 12,
+    fontWeight: "500",
   },
   metaContainer: {
     padding: spacing.medium,
