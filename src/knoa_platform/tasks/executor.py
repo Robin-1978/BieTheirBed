@@ -246,6 +246,37 @@ class TaskExecutor:
         await self._events.publish(event)
         return updated
 
+    @staticmethod
+    def _synthesize_task_summary(
+        entries: list[TaskTraceEntry],
+        final_output: str,
+        terminal: TurnFinished | None,
+    ) -> str:
+        if final_output and final_output.strip():
+            return final_output.strip()
+
+        for entry in reversed(entries):
+            if (
+                entry.entry_type == "tool_call"
+                and entry.tool_name == "notify"
+                and isinstance(entry.tool_args, dict)
+            ):
+                msg = entry.tool_args.get("message") or entry.tool_args.get("title")
+                if msg and isinstance(msg, str) and msg.strip():
+                    return msg.strip()
+
+        for entry in reversed(entries):
+            if entry.entry_type == "reasoning" and entry.content and entry.content.strip():
+                content = entry.content.strip()
+                if len(content) > 300:
+                    content = content[:300] + "..."
+                return content
+
+        if terminal is not None and terminal.status == "interrupted":
+            return f"Task interrupted ({terminal.error_code or 'cancelled'})"
+
+        return "Task completed"
+
     async def _execute(
         self,
         task: TaskRecord,
@@ -387,10 +418,13 @@ class TaskExecutor:
                 raise ToolOutcomeUnknownError("Agent Turn outcome is unknown")
             if terminal.status not in {"completed", "interrupted"}:
                 raise RuntimeError(terminal.error_code or terminal.status)
+            final_summary = self._synthesize_task_summary(
+                entries, final_output, terminal
+            )
             await self._transition(
                 task,
                 TaskState.COMPLETED,
-                final_summary=final_output or "Task completed",
+                final_summary=final_summary,
             )
         except asyncio.CancelledError:
             cancellation.set()

@@ -680,3 +680,60 @@ async def test_principal_event_stream_replays_and_tails(tmp_path: Path) -> None:
     finally:
         release.set()
         await service.stop()
+
+
+def test_synthesize_task_summary():
+    from knoa_agent_contracts import TurnFinished
+    from knoa_platform.tasks.models import TaskTraceEntry
+
+    # 1. Non-empty final_output
+    assert TaskExecutor._synthesize_task_summary([], "Real output", None) == "Real output"
+
+    # 2. Empty final_output but notify tool was called
+    notify_entry = TaskTraceEntry(
+        entry_type="tool_call",
+        content="",
+        tool_call_id="call_1",
+        tool_name="notify",
+        tool_args={"title": "天气提醒", "message": "上海晴天，记得散步！"},
+        occurred_at=100.0,
+    )
+    assert TaskExecutor._synthesize_task_summary([notify_entry], "", None) == "上海晴天，记得散步！"
+
+    # 3. Empty final_output but reasoning exists
+    reason_entry = TaskTraceEntry(
+        entry_type="reasoning",
+        content="Verified weather is clear.",
+        occurred_at=100.0,
+    )
+    assert TaskExecutor._synthesize_task_summary([reason_entry], "", None) == "Verified weather is clear."
+
+    # 4. Interrupted turn fallback
+    term = TurnFinished(
+        runtime_session_ref="s1",
+        runtime_turn_ref="t1",
+        occurred_at=100.0,
+        status="interrupted",
+        error_code="cancelled",
+        final_output="",
+    )
+    assert TaskExecutor._synthesize_task_summary([], "", term) == "Task interrupted (cancelled)"
+
+    # 5. Default fallback
+    assert TaskExecutor._synthesize_task_summary([], "", None) == "Task completed"
+
+
+def test_notification_tool_policy():
+    from knoa_platform.tools.base import ToolEffect, ToolRisk
+    from knoa_platform.tools.notification import NotificationTool
+
+    tool = NotificationTool()
+    normal_policy = tool.policy_for({"title": "Test", "message": "Normal alert"})
+    assert normal_policy.risk is ToolRisk.LOW
+    assert normal_policy.effect is ToolEffect.INTERNAL_WRITE
+    assert not normal_policy.requires_confirmation
+
+    critical_policy = tool.policy_for({"title": "Alert", "message": "Crit", "urgency": "critical"})
+    assert critical_policy.risk is ToolRisk.HIGH
+    assert critical_policy.effect is ToolEffect.EXTERNAL_SIDE_EFFECT
+    assert critical_policy.requires_confirmation
