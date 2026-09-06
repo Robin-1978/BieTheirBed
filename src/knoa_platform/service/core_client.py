@@ -15,6 +15,8 @@ from knoa_platform.agent_runtime.contracts import (
     MemoryClearResult,
     MemoryDeleteResult,
     MemoryListResult,
+    MemoryRecord,
+    MemorySetResult,
     MCPResourceCatalogResult,
     RuntimeStatus,
     ToolListResult,
@@ -103,6 +105,7 @@ from knoa_platform.service.core_api import (
     MemoryClearedMessage,
     MemoryDeletedMessage,
     MemoryListMessage,
+    MemorySetMessage,
     PauseTaskRequest,
     PreflightConfigDraftRequest,
     PreviewInvocationPolicyRequest,
@@ -130,6 +133,7 @@ from knoa_platform.service.core_api import (
     RetryChatTurnRequest,
     SessionCreatedMessage,
     SetConfigRequest,
+    SetMemoryRequest,
     SetProductTaskStateRequest,
     StatusMessage,
     SubscribeChatTurnRequest,
@@ -550,6 +554,26 @@ class CoreClient(CoreArtifactClientMixin, CoreAutomationClientMixin):
         )
         if not isinstance(response, MemoryDeletedMessage):
             raise RuntimeError("CoreServer returned an invalid memory delete response")
+        return response.result
+
+    async def set_memory(
+        self,
+        session_handle: str,
+        record: MemoryRecord,
+    ) -> MemorySetResult:
+        response = await self._request(
+            SetMemoryRequest(
+                request_id=self._request_id(),
+                session_handle=session_handle,
+                key=record.key,
+                value=record.value,
+                category=record.category,
+                importance=record.importance,
+                confidence=record.confidence,
+            )
+        )
+        if not isinstance(response, MemorySetMessage):
+            raise RuntimeError("CoreServer returned an invalid memory set response")
         return response.result
 
     async def list_tools(self, session_handle: str) -> ToolListResult:

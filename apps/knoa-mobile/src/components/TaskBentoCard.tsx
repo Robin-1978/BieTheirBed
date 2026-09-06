@@ -23,6 +23,7 @@ export interface TaskBentoCardProps {
   onTogglePause: (task: Task) => void;
   onOpenExecution?: (executionId: string) => void;
   onPressGlance?: (record: DesktopGlanceRecord) => void;
+  onSteer?: (task: Task) => void;
 }
 
 export function TaskBentoCard({
@@ -35,6 +36,7 @@ export function TaskBentoCard({
   onTogglePause,
   onOpenExecution,
   onPressGlance,
+  onSteer,
 }: TaskBentoCardProps) {
   const { t } = useI18n();
   const category = taskBentoCategory(task);
@@ -186,6 +188,18 @@ export function TaskBentoCard({
               />
               <Text style={styles.quickButtonText}>
                 {task.state === "active" ? t("tasks.swipePause") : t("tasks.swipeResume")}
+              </Text>
+            </AppPressable>
+          ) : null}
+
+          {category === "running" && onSteer ? (
+            <AppPressable
+              style={[styles.quickButton, styles.quickSteerButton]}
+              onPress={() => onSteer(task)}
+            >
+              <AppIcon name="agent" color={colors.accent} size={12} />
+              <Text style={[styles.quickButtonText, styles.quickSteerButtonText]}>
+                {t("tasks.steerAction")}
               </Text>
             </AppPressable>
           ) : null}
@@ -489,10 +503,18 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     backgroundColor: colors.surface,
   },
+  quickSteerButton: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
+  },
   quickButtonText: {
     color: colors.muted,
     fontSize: 11,
     fontWeight: "600",
+  },
+  quickSteerButtonText: {
+    color: colors.accent,
+    fontWeight: "700",
   },
   primaryActionBtn: {
     flexDirection: "row",

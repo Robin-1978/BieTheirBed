@@ -8,6 +8,7 @@ from knoa_platform.agent_runtime.contracts import (
     ArtifactAttachment,
     ConfigSetRequest,
     ControlServicePort,
+    MemoryRecord,
     RuntimeScope,
 )
 from knoa_platform.approvals.display import approval_display
@@ -44,10 +45,12 @@ from knoa_platform.service.core_api import (
     MemoryClearedMessage,
     MemoryDeletedMessage,
     MemoryListMessage,
+    MemorySetMessage,
     ResolveChatApprovalRequest,
     RetryChatTurnRequest,
     SessionCreatedMessage,
     SetConfigRequest,
+    SetMemoryRequest,
     StatusMessage,
     ToolsMessage,
     UpdateConversationSessionRequest,
@@ -242,6 +245,21 @@ class ConversationCommandHandler:
             await send(MemoryDeletedMessage(
                 request_id=request.request_id,
                 result=await self._control.delete_memory(scope, request.key),
+            ))
+        elif isinstance(request, SetMemoryRequest):
+            session_handle = request.session_handle.strip() or "memory"
+            scope = RuntimeScope(principal_id=principal, session_handle=session_handle)
+            record = MemoryRecord(
+                key=request.key,
+                value=request.value,
+                category=request.category,
+                importance=request.importance,
+                confidence=request.confidence,
+                source="manual",
+            )
+            await send(MemorySetMessage(
+                request_id=request.request_id,
+                result=await self._control.set_memory(scope, record),
             ))
         elif isinstance(request, ListToolsRequest):
             scope = RuntimeScope(principal_id=principal, session_handle=request.session_handle)

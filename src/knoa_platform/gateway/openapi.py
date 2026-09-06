@@ -71,6 +71,8 @@ from knoa_platform.gateway.protocol import (
     MCPResourceCatalogResponse,
     MemoryClearedResponse,
     MemoryListResponse,
+    MemorySavedResponse,
+    MemoryUpsertRequest,
     NodeDescriptorResponse,
     NodeHubEnrollmentRequest,
     NodeHubEnrollmentResponse,
@@ -1508,6 +1510,15 @@ def gateway_openapi_schema() -> dict[str, Any]:
                         **_errors("400", "401", "429", "503"),
                     },
                 },
+                "post": {
+                    "operationId": "createMemory",
+                    "security": bearer,
+                    "requestBody": _json_body(MemoryUpsertRequest),
+                    "responses": {
+                        "201": _json_response("Memory saved", MemorySavedResponse),
+                        **_errors("400", "401", "422", "429", "503"),
+                    },
+                },
             },
             "/v1/memories/clear": {
                 "post": {
@@ -1520,6 +1531,21 @@ def gateway_openapi_schema() -> dict[str, Any]:
                 },
             },
             "/v1/memories/{key}": {
+                "put": {
+                    "operationId": "updateMemory",
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "key",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string", "maxLength": 128},
+                    }],
+                    "requestBody": _json_body(MemoryUpsertRequest),
+                    "responses": {
+                        "200": _json_response("Memory updated", MemorySavedResponse),
+                        **_errors("400", "401", "404", "422", "429", "503"),
+                    },
+                },
                 "delete": {
                     "operationId": "deleteMemory",
                     "security": bearer,

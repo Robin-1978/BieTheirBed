@@ -1,4 +1,5 @@
 import { router } from "expo-router";
+import * as Crypto from "expo-crypto";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -186,6 +187,28 @@ export default function TasksScreen() {
     }
   }
 
+  async function handleSteerTask(taskId: string, instruction: string) {
+    if (!gateway.client || !instruction.trim()) return;
+    await gateway.runAuthenticated((client) =>
+      client.continueTask({
+        clientRequestId: Crypto.randomUUID(),
+        taskId,
+        text: instruction.trim(),
+      }),
+    );
+    await refresh();
+  }
+
+  const handleOpenSteer = (task: Task) => {
+    const glance = glanceMap[task.task_id] || {
+      taskId: task.task_id,
+      timestamp: Date.now(),
+      windowTitle: task.title,
+      activeApp: "Knoa Agent",
+    };
+    setActiveGlance(glance);
+  };
+
   const visibleTasks = useMemo(
     () => tasks.filter((task) => filter === "current" ? task.state !== "archived" : task.state === filter),
     [filter, tasks],
@@ -309,6 +332,7 @@ export default function TasksScreen() {
               onTogglePause={(task) => void handleTogglePause(task)}
               onOpenExecution={(executionId) => router.push(`/task-executions/${executionId}`)}
               onPressGlance={(glance) => setActiveGlance(glance)}
+              onSteer={handleOpenSteer}
             />
           )}
         />
@@ -317,6 +341,18 @@ export default function TasksScreen() {
           glance={activeGlance}
           visible={Boolean(activeGlance)}
           onClose={() => setActiveGlance(null)}
+          onRefresh={() => {
+            if (activeGlance?.taskId && gateway.client) {
+              void gateway.runAuthenticated((c) => c.getTaskGlance(activeGlance.taskId)).then((g) => {
+                if (g) setActiveGlance(g);
+              });
+            }
+          }}
+          onSteer={
+            activeGlance?.taskId
+              ? (instruction) => handleSteerTask(activeGlance.taskId, instruction)
+              : undefined
+          }
         />
       </View>
   );
