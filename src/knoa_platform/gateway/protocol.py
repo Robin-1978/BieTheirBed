@@ -869,3 +869,16 @@ class MemoryListResponse(BaseModel):
 
 class MemoryClearedResponse(BaseModel):
     cleared: bool = True
+
+
+class MemoryUpsertRequest(BaseModel):
+    key: str = Field(min_length=1, max_length=128)
+    value: str = Field(min_length=1, max_length=2000)
+    category: str = "general"
+    importance: Literal["core", "relevant"] = "relevant"
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class MemorySavedResponse(BaseModel):
+    key: str
+    saved: bool = True

@@ -14,6 +14,7 @@ from knoa_platform.agent_runtime.contracts import (
     MemoryDeleteResult,
     MemoryListResult,
     MemoryRecord,
+    MemorySetResult,
     MCPResourceCatalogRecord,
     MCPResourceCatalogResult,
     RuntimeScope,
@@ -153,6 +154,22 @@ class ControlService:
             raise PermissionError("Principal is required")
         deleted = await asyncio.to_thread(self._memory.delete_memory, principal, key)
         return MemoryDeleteResult(deleted=deleted)
+
+    async def set_memory(self, scope: RuntimeScope, record: MemoryRecord) -> MemorySetResult:
+        principal = scope.principal_id.strip()
+        if not principal:
+            raise PermissionError("Principal is required")
+        await asyncio.to_thread(
+            self._memory.set_memory,
+            principal,
+            record.key,
+            record.value,
+            category=record.category,
+            importance=record.importance,
+            confidence=record.confidence,
+            source=record.source or "manual",
+        )
+        return MemorySetResult(key=record.key, saved=True)
 
     async def list_tools(self, scope: RuntimeScope) -> ToolListResult:
         owned = await self._owned_scope(scope)

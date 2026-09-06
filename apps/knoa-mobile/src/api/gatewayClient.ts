@@ -499,6 +499,34 @@ export class GatewayClient {
     });
   }
 
+  async createMemory(record: {
+    key: string;
+    value: string;
+    category?: string;
+    importance?: "core" | "relevant";
+    confidence?: number;
+  }): Promise<{ key: string; saved: boolean }> {
+    return this.json<{ key: string; saved: boolean }>("/v1/memories", {
+      method: "POST",
+      body: record,
+    });
+  }
+
+  async updateMemory(
+    key: string,
+    record: {
+      value: string;
+      category?: string;
+      importance?: "core" | "relevant";
+      confidence?: number;
+    },
+  ): Promise<{ key: string; saved: boolean }> {
+    return this.json<{ key: string; saved: boolean }>(`/v1/memories/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: { key, ...record },
+    });
+  }
+
   async taskExecutionEvents(executionId: string, afterSeq = 0): Promise<TaskEvent[]> {
     const response = await this.json<{ events: TaskEvent[] }>(
       `/v1/task-executions/${encodeURIComponent(executionId)}/events?after_seq=${afterSeq}`,

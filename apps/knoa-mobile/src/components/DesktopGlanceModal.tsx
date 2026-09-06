@@ -1,9 +1,13 @@
-import React from "react";
+import React, { useState } from "react";
 import {
+  ActivityIndicator,
   Image,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
@@ -19,6 +23,7 @@ export interface DesktopGlanceModalProps {
   onClose: () => void;
   onRefresh?: () => void;
   refreshing?: boolean;
+  onSteer?: (instruction: string) => Promise<void> | void;
 }
 
 export function DesktopGlanceModal({
@@ -27,14 +32,35 @@ export function DesktopGlanceModal({
   onClose,
   onRefresh,
   refreshing,
+  onSteer,
 }: DesktopGlanceModalProps) {
   const { t } = useI18n();
+
+  const [steerInput, setSteerInput] = useState("");
+  const [steerSending, setSteerSending] = useState(false);
+  const [steerFeedback, setSteerFeedback] = useState("");
 
   if (!glance || !visible) return null;
 
   const sampleTime = glance.timestamp
     ? new Date(glance.timestamp).toLocaleTimeString()
     : "";
+
+  const handleSendSteer = async () => {
+    const text = steerInput.trim();
+    if (!text || !onSteer || steerSending) return;
+    setSteerSending(true);
+    setSteerFeedback("");
+    try {
+      await onSteer(text);
+      setSteerInput("");
+      setSteerFeedback(t("tasks.steerSuccess"));
+    } catch {
+      setSteerFeedback("插话失败，请重试");
+    } finally {
+      setSteerSending(false);
+    }
+  };
 
   return (
     <Modal
@@ -43,7 +69,10 @@ export function DesktopGlanceModal({
       visible={visible}
       onRequestClose={onClose}
     >
-      <View style={styles.backdrop}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={styles.backdrop}
+      >
         <AppPressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <View style={styles.modalCard}>
           {/* 模态框顶部导航 */}
@@ -110,8 +139,47 @@ export function DesktopGlanceModal({
               </View>
             ) : null}
           </View>
+
+          {/* 实时插话纠偏 (Live Steering) 输入栏 */}
+          {onSteer ? (
+            <View style={styles.steerSection}>
+              <View style={styles.steerHeader}>
+                <AppIcon name="agent" color={colors.accent} size={13} />
+                <Text style={styles.steerTitle}>{t("tasks.steerTitle")}</Text>
+              </View>
+              <View style={styles.steerInputRow}>
+                <TextInput
+                  value={steerInput}
+                  onChangeText={(val) => {
+                    setSteerInput(val);
+                    if (steerFeedback) setSteerFeedback("");
+                  }}
+                  placeholder={t("tasks.steerPlaceholder")}
+                  placeholderTextColor={colors.muted}
+                  style={styles.steerInput}
+                />
+                <AppPressable
+                  disabled={!steerInput.trim() || steerSending}
+                  style={[
+                    styles.steerSendBtn,
+                    (!steerInput.trim() || steerSending) && styles.steerSendBtnDisabled,
+                  ]}
+                  onPress={handleSendSteer}
+                >
+                  {steerSending ? (
+                    <ActivityIndicator color={colors.onAccent} size="small" />
+                  ) : (
+                    <AppIcon name="send" color={colors.onAccent} size={13} />
+                  )}
+                </AppPressable>
+              </View>
+              {steerFeedback ? (
+                <Text style={styles.steerFeedbackText}>{steerFeedback}</Text>
+              ) : null}
+            </View>
+          ) : null}
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -207,5 +275,56 @@ const styles = StyleSheet.create({
     fontSize: 12,
     flex: 1,
     fontWeight: "500",
+  },
+  steerSection: {
+    paddingHorizontal: spacing.medium,
+    paddingBottom: spacing.medium,
+    gap: spacing.small,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+    backgroundColor: colors.surface,
+  },
+  steerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingTop: 8,
+  },
+  steerTitle: {
+    color: colors.ink,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  steerInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.small,
+  },
+  steerInput: {
+    flex: 1,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radii.medium,
+    paddingHorizontal: spacing.medium,
+    paddingVertical: 8,
+    fontSize: 13,
+    color: colors.ink,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  steerSendBtn: {
+    backgroundColor: colors.accent,
+    borderRadius: radii.medium,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  steerSendBtnDisabled: {
+    opacity: 0.5,
+  },
+  steerFeedbackText: {
+    color: colors.accent,
+    fontSize: 11,
+    fontWeight: "600",
   },
 });

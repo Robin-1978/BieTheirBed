@@ -25,6 +25,7 @@ from knoa_platform.agent_runtime.contracts import (
     MemoryClearResult,
     MemoryDeleteResult,
     MemoryListResult,
+    MemorySetResult,
     MCPResourceCatalogResult,
     RuntimeStatus,
     ToolListResult,
@@ -1126,6 +1127,21 @@ class DeleteMemoryRequest(CoreModel):
     session_handle: str = ""
 
 
+class SetMemoryRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    method: Literal["memory_set"] = "memory_set"
+    key: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=128),
+    ]
+    value: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
+    category: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)] = "general"
+    importance: Literal["core", "relevant"] = "relevant"
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    session_handle: str = ""
+
+
 class ListToolsRequest(SessionRequest):
     method: Literal["tools"] = "tools"
 
@@ -1299,6 +1315,7 @@ CoreRequest: TypeAlias = Annotated[
     | ListMemoryRequest
     | ClearMemoryRequest
     | DeleteMemoryRequest
+    | SetMemoryRequest
     | ListToolsRequest
     | ListMCPResourcesRequest
     | SetConfigRequest
@@ -1611,6 +1628,13 @@ class MemoryDeletedMessage(CoreModel):
     result: MemoryDeleteResult
 
 
+class MemorySetMessage(CoreModel):
+    message_type: Literal["memory_set"] = "memory_set"
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
+    result: MemorySetResult
+
+
 class ToolsMessage(CoreModel):
     message_type: Literal["tools"] = "tools"
     api_version: Literal["v1"] = "v1"
@@ -1840,6 +1864,7 @@ CoreServerMessage: TypeAlias = Annotated[
     | MemoryListMessage
     | MemoryClearedMessage
     | MemoryDeletedMessage
+    | MemorySetMessage
     | ToolsMessage
     | MCPResourcesMessage
     | ConfigSetMessage

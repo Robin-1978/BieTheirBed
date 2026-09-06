@@ -12,6 +12,8 @@ from knoa_platform.agent_runtime.contracts import (
     MemoryClearResult,
     MemoryDeleteResult,
     MemoryListResult,
+    MemoryRecord,
+    MemorySetResult,
     RuntimeStatus,
     ToolListResult,
 )
@@ -243,6 +245,8 @@ class GatewayCoreClient(Protocol):
     async def clear_memory(self, session_handle: str = "") -> MemoryClearResult: ...
 
     async def delete_memory(self, session_handle: str = "", key: str = "") -> MemoryDeleteResult: ...
+
+    async def set_memory(self, session_handle: str = "", record: MemoryRecord = ...) -> MemorySetResult: ...
 
     async def list_mcp_resources(self) -> MCPResourceCatalogResult: ...
 
@@ -827,6 +831,14 @@ class GatewayCoreBridge:
         session_handle: str = "",
     ) -> MemoryDeleteResult:
         return await (await self._client_for(principal_id)).delete_memory(session_handle, key)
+
+    async def set_memory(
+        self,
+        principal_id: str,
+        record: MemoryRecord,
+        session_handle: str = "",
+    ) -> MemorySetResult:
+        return await (await self._client_for(principal_id)).set_memory(session_handle, record)
 
     async def list_mcp_resources(
         self,

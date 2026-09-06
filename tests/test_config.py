@@ -11,7 +11,7 @@ class TestAppConfig:
         assert cfg.llm_provider == "llamacpp"
         assert cfg.llm_temperature == 0.7
         assert cfg.max_iterations == 8
-        assert cfg.context_window_budget == 8192
+        assert cfg.context_window_budget == 65536
         assert cfg.audio_transcription.enabled is False
         assert cfg.gateway_enabled is False
         assert cfg.owner_principal_id == "personal:owner"

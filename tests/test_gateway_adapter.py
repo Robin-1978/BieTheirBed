@@ -26,6 +26,7 @@ from knoa_platform.agent_runtime.contracts import (
     MemoryDeleteResult,
     MemoryListResult,
     MemoryRecord,
+    MemorySetResult,
     RuntimeStatus,
     ToolDescriptorRecord,
     ToolListResult,
@@ -788,6 +789,10 @@ class _Core:
         self.calls.append(("delete_memory", principal_id, key, session_handle))
         return MemoryDeleteResult(deleted=True)
 
+    async def set_memory(self, principal_id, record, session_handle=""):
+        self.calls.append(("set_memory", principal_id, record, session_handle))
+        return MemorySetResult(key=record.key, saved=True)
+
     async def resolve_approval(self, principal_id, approval_id, *, approved):
         self.calls.append(
             ("resolve_approval", principal_id, approval_id, approved)
@@ -1029,6 +1034,16 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
         glance = await http.get("/v1/tasks/task-a/glance", headers=headers)
         live_glance = await http.get("/v1/desktop/glance", headers=headers)
         memories = await http.get("/v1/memories", headers=headers)
+        created_memory = await http.post(
+            "/v1/memories",
+            headers=headers,
+            json={"key": "new_rule", "value": "always test", "category": "instruction", "importance": "core"},
+        )
+        updated_memory = await http.put(
+            "/v1/memories/editor_preference",
+            headers=headers,
+            json={"key": "editor_preference", "value": "neovim", "category": "workflow", "importance": "relevant"},
+        )
         cleared_memories = await http.post("/v1/memories/clear", headers=headers)
         deleted_memory = await http.delete("/v1/memories/editor_preference", headers=headers)
 
@@ -1067,6 +1082,10 @@ async def test_gateway_adapter_exposes_only_principal_scoped_core_commands(tmp_p
     assert memories.status_code == 200
     assert memories.json()["total"] == 1
     assert memories.json()["items"][0]["key"] == "editor_preference"
+    assert created_memory.status_code == 201
+    assert created_memory.json() == {"key": "new_rule", "saved": True}
+    assert updated_memory.status_code == 200
+    assert updated_memory.json() == {"key": "editor_preference", "saved": True}
     assert cleared_memories.status_code == 200
     assert cleared_memories.json() == {"cleared": True}
     assert deleted_memory.status_code == 200
