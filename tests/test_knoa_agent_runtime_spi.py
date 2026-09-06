@@ -757,6 +757,16 @@ async def test_knoa_runtime_interrupts_active_turn_with_explicit_terminal(
     assert first.event_type == "turn_finished"
     assert first.status == "interrupted"
 
+    # Verify that the interrupted turn's checkpoint WAS saved to context store!
+    checkpoint = runtime._contexts.load_checkpoint(session.runtime_session_ref)
+    assert checkpoint is not None
+    messages = checkpoint.payload["messages"]
+    assert len(messages) >= 2
+    assert messages[0]["role"] == "user"
+    assert messages[0]["content"] == "hi"
+    assert messages[-1]["role"] == "assistant"
+    assert "[未完成回答" in messages[-1]["content"] or "[由于超时" in messages[-1]["content"]
+
 
 class FailingToolProvider(Provider):
     def stream(self, request, cancellation):
@@ -859,3 +869,93 @@ async def test_runtime_converts_mcp_tool_call_failure_to_failed_result(
     assert events[-1].event_type == "turn_finished"
     assert events[-1].status == "completed"
     assert events[-1].final_output == "retry failed, stop"
+
+
+def test_sanitize_messages_for_abort():
+    # Case 1: unfulfilled tool call gets synthetic tool response and closing assistant message
+    messages = [
+        {"role": "user", "content": "search something"},
+        {
+            "role": "assistant",
+            "content": "searching",
+            "tool_calls": [
+                {"id": "call-1", "type": "function", "function": {"name": "web_search", "arguments": "{}"}},
+                {"id": "call-2", "type": "function", "function": {"name": "web_search", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call-1", "content": "result 1"},
+    ]
+    sanitized = KnoaAgentRuntime._sanitize_messages_for_abort(
+        messages, reason="cancelled", partial_content="searching"
+    )
+    assert len(sanitized) == 5
+    # call-2 got synthetic tool response
+    assert sanitized[3]["role"] == "tool"
+    assert sanitized[3]["tool_call_id"] == "call-2"
+    assert "cancelled" in sanitized[3]["content"]
+    # Ends with assistant message
+    assert sanitized[4]["role"] == "assistant"
+    assert "searching" in sanitized[4]["content"]
+    assert "[由于超时或取消，操作未全部完成]" in sanitized[4]["content"]
+
+
+@pytest.mark.asyncio
+async def test_subsequent_turn_sees_interrupted_turn_in_context(
+    tmp_path: Path,
+) -> None:
+    provider = Provider(wait=False)
+    runtime = KnoaAgentRuntime(
+        provider,
+        ContextCheckpointRepository(tmp_path / "context.db"),
+        Connector(),
+        system_prompt="system",
+        health_probe=healthy,
+    )
+    session = await runtime.create_session(
+        CreateRuntimeSession(operation_id="create-seq", binding_epoch=1)
+    )
+
+    # Turn 1: Starts and gets interrupted
+    interruptible_provider = Provider(wait=True)
+    runtime._provider = interruptible_provider
+
+    turn1 = await runtime.start_turn(
+        RuntimeTurnRequest(
+            session=session,
+            operation_id="turn-1",
+            input=(TextPart(text="帮我查苏州的山"),),
+            mcp=grant(),
+        )
+    )
+    consume = asyncio.create_task(anext(turn1.events))
+    await asyncio.sleep(0)
+    await runtime.interrupt_turn(
+        RuntimeInterruptCommand(
+            session=session,
+            runtime_turn_ref=turn1.runtime_turn_ref,
+            command_id="interrupt-seq",
+        )
+    )
+    first = await consume
+    assert first.status == "interrupted"
+
+    # Turn 2: Standard execution
+    runtime._provider = provider
+    turn2 = await runtime.start_turn(
+        RuntimeTurnRequest(
+            session=session,
+            operation_id="turn-2",
+            input=(TextPart(text="换个引擎搜"),),
+            mcp=grant(),
+        )
+    )
+    events2 = [event async for event in turn2.events]
+    assert events2[-1].status == "completed"
+
+    # Verify provider received the Turn 1 user query in Turn 2's request messages!
+    assert len(provider.requests) == 1
+    req_messages = provider.requests[0].messages
+    user_contents = [str(m.get("content")) for m in req_messages if m.get("role") == "user"]
+    assert any("帮我查苏州的山" in c for c in user_contents)
+    assert any("换个引擎搜" in c for c in user_contents)
+
