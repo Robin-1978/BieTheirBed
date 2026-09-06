@@ -1101,20 +1101,29 @@ class GetHistoryRequest(SessionRequest):
     method: Literal["history"] = "history"
 
 
-class ListMemoryRequest(SessionRequest):
+class ListMemoryRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
     method: Literal["memory_list"] = "memory_list"
+    session_handle: str = ""
 
 
-class ClearMemoryRequest(SessionRequest):
+class ClearMemoryRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
     method: Literal["memory_clear"] = "memory_clear"
+    session_handle: str = ""
 
 
-class DeleteMemoryRequest(SessionRequest):
+class DeleteMemoryRequest(CoreModel):
+    api_version: Literal["v1"] = "v1"
+    request_id: RequestId
     method: Literal["memory_delete"] = "memory_delete"
     key: Annotated[
         str,
         StringConstraints(strip_whitespace=True, min_length=1, max_length=128),
     ]
+    session_handle: str = ""
 
 
 class ListToolsRequest(SessionRequest):
