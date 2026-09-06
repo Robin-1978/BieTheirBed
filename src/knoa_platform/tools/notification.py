@@ -4,15 +4,34 @@ from typing import Any
 
 from knoa_platform.branding import ASSISTANT_NAME
 from knoa_platform.platform_ import get_platform
-from knoa_platform.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRisk
+from knoa_platform.tools.base import (
+    ToolBase,
+    ToolCapability,
+    ToolEffect,
+    ToolPolicy,
+    ToolRisk,
+)
 
 
 class NotificationTool(ToolBase):
     name = "notify"
     description = "Show a desktop notification."
-    effect = ToolEffect.EXTERNAL_SIDE_EFFECT
+    effect = ToolEffect.INTERNAL_WRITE
     capabilities = frozenset({ToolCapability.DESKTOP_CONTROL})
-    risk = ToolRisk.MEDIUM
+    risk = ToolRisk.LOW
+
+    def policy_for(self, arguments: dict[str, Any]) -> ToolPolicy:
+        if arguments.get("urgency") == "critical":
+            return ToolPolicy(
+                effect=ToolEffect.EXTERNAL_SIDE_EFFECT,
+                capabilities=self.capabilities,
+                risk=ToolRisk.HIGH,
+            )
+        return ToolPolicy(
+            effect=ToolEffect.INTERNAL_WRITE,
+            capabilities=self.capabilities,
+            risk=ToolRisk.LOW,
+        )
 
     async def execute(self, **kwargs: Any) -> Any:
         if kwargs.get("urgency") == "critical":
