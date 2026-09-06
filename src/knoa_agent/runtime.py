@@ -1008,16 +1008,16 @@ class KnoaAgentRuntime(AgentRuntime):
         if last_role == "tool":
             if partial_content.strip():
                 note = (
-                    "\n\n[由于超时或取消，操作未全部完成]"
+                    "\n\n[Incomplete response due to timeout or cancellation]"
                     if reason == "cancelled"
-                    else f"\n\n[操作已中断: {reason}]"
+                    else f"\n\n[Turn interrupted: {reason}]"
                 )
                 closing = partial_content.strip() + note
             else:
                 closing = (
-                    "[由于超时或取消，操作未全部完成]"
+                    "[Incomplete response due to timeout or cancellation]"
                     if reason == "cancelled"
-                    else f"[操作已中断: {reason}]"
+                    else f"[Turn interrupted: {reason}]"
                 )
             sanitized.append({"role": "assistant", "content": closing})
         elif (
@@ -1027,23 +1027,23 @@ class KnoaAgentRuntime(AgentRuntime):
         ):
             if partial_content.strip():
                 note = (
-                    "\n\n[由于超时或取消，操作未全部完成]"
+                    "\n\n[Incomplete response due to timeout or cancellation]"
                     if reason == "cancelled"
-                    else f"\n\n[操作已中断: {reason}]"
+                    else f"\n\n[Turn interrupted: {reason}]"
                 )
                 closing = partial_content.strip() + note
             else:
                 closing = (
-                    "[由于超时或取消，操作未全部完成]"
+                    "[Incomplete response due to timeout or cancellation]"
                     if reason == "cancelled"
-                    else f"[操作已中断: {reason}]"
+                    else f"[Turn interrupted: {reason}]"
                 )
             sanitized.append({"role": "assistant", "content": closing})
         elif last_role == "user":
             closing = (
-                "[未完成回答: 单轮超时或取消]"
+                "[Incomplete response: turn timed out or cancelled]"
                 if reason == "cancelled"
-                else f"[未完成回答: {reason}]"
+                else f"[Incomplete response: {reason}]"
             )
             sanitized.append({"role": "assistant", "content": closing})
 

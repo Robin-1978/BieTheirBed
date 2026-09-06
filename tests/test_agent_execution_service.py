@@ -327,3 +327,55 @@ async def test_execution_service_serializes_turns_for_one_platform_session(
 
     assert provider.max_active == 1
     assert len(provider.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_bridge_cancellation_idle_watchdog_triggers_when_inactive():
+    external = asyncio.Event()
+    invocation = asyncio.Event()
+    activity = asyncio.Event()
+    reason_ref = [""]
+
+    task = asyncio.create_task(
+        AgentExecutionService._bridge_cancellation(
+            external,
+            invocation,
+            deadline_seconds=10.0,
+            activity_notifier=activity,
+            reason_ref=reason_ref,
+            idle_timeout_seconds=0.05,
+        )
+    )
+    await invocation.wait()
+    await task
+    assert "idle timeout" in reason_ref[0]
+
+
+@pytest.mark.asyncio
+async def test_bridge_cancellation_idle_watchdog_resets_on_activity():
+    external = asyncio.Event()
+    invocation = asyncio.Event()
+    activity = asyncio.Event()
+    reason_ref = [""]
+
+    task = asyncio.create_task(
+        AgentExecutionService._bridge_cancellation(
+            external,
+            invocation,
+            deadline_seconds=10.0,
+            activity_notifier=activity,
+            reason_ref=reason_ref,
+            idle_timeout_seconds=0.1,
+        )
+    )
+    # Simulate active streaming every 0.04s
+    for _ in range(4):
+        await asyncio.sleep(0.04)
+        activity.set()
+        assert not invocation.is_set()
+
+    # Now stop activity and wait for idle timeout
+    await invocation.wait()
+    await task
+    assert "idle timeout" in reason_ref[0]
+

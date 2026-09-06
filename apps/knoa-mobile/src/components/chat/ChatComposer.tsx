@@ -273,14 +273,14 @@ export function ChatComposer({
           disabled={primaryDisabled}
           style={[
             styles.primaryAction,
+            (showStopAction || stoppingResponse) && styles.primaryStopping,
             recordingState.isRecording && styles.primaryRecording,
-            stoppingResponse && styles.primaryStopping,
             primaryDisabled && styles.sendDisabled,
           ]}
         >
           {sending || validatingInput || transcribing || cancelling ? (
             <ActivityIndicator color={colors.onAccent} size="small" />
-          ) : stoppingResponse ? (
+          ) : showStopAction || stoppingResponse ? (
             <AppIcon name="stop" color="white" size={17} />
           ) : recordingState.isRecording ? (
             <View style={styles.recordingContent}>
@@ -518,7 +518,7 @@ const styles = StyleSheet.create({
     width: 72,
   },
   primaryStopping: {
-    backgroundColor: colors.muted,
+    backgroundColor: colors.danger,
   },
   sendDisabled: {
     opacity: 0.45,
