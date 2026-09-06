@@ -34,17 +34,21 @@ export function NodeHeaderTitle() {
   const [glanceModalVisible, setGlanceModalVisible] = useState(false);
   const [glanceRefreshing, setGlanceRefreshing] = useState(false);
 
-  const handleOpenLiveGlance = async () => {
+  const handleOpenLiveGlance = () => {
     if (!gateway.client) return;
     setSwitcherOpen(false);
-    setGlanceRefreshing(true);
-    setGlanceModalVisible(true);
-    try {
-      const record = await gateway.runAuthenticated((client) => client.getLiveDesktopGlance());
-      if (record) setGlanceRecord(record);
-    } finally {
-      setGlanceRefreshing(false);
-    }
+    setTimeout(() => {
+      setGlanceRefreshing(true);
+      setGlanceModalVisible(true);
+      void gateway
+        .runAuthenticated((client) => client.getLiveDesktopGlance())
+        .then((record) => {
+          if (record) setGlanceRecord(record);
+        })
+        .finally(() => {
+          setGlanceRefreshing(false);
+        });
+    }, 200);
   };
 
   const handleRefreshLiveGlance = async () => {
