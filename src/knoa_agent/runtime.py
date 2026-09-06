@@ -278,6 +278,9 @@ class KnoaAgentRuntime(AgentRuntime):
                 vision_observations = 0
                 final_output = ""
                 usage: dict[str, int | float | str] = {}
+                saved_checkpoint = False
+                last_meaningful_content = ""
+                content = ""
                 for _iteration in range(1, self._max_iterations + 1):
                     if cancellation.is_set():
                         break
@@ -292,6 +295,17 @@ class KnoaAgentRuntime(AgentRuntime):
                             covered_messages=covered_messages,
                         )
                     except ContextBudgetExceeded:
+                        if not saved_checkpoint and durable_messages:
+                            await self._save_aborted_turn_checkpoint(
+                                request,
+                                checkpoint,
+                                durable_messages,
+                                summary=summary,
+                                covered_messages=covered_messages,
+                                reason="context_budget_exceeded",
+                                partial_content=last_meaningful_content,
+                            )
+                            saved_checkpoint = True
                         yield TurnFinished(
                             **self._event_base(request, runtime_turn_ref),
                             status="failed",
@@ -353,6 +367,10 @@ class KnoaAgentRuntime(AgentRuntime):
                             }
                     if cancellation.is_set():
                         break
+                    if content_parts:
+                        content = "".join(content_parts)
+                        if content.strip():
+                            last_meaningful_content = content.strip()
                     if terminal_chunk is None or str(
                         getattr(terminal_chunk, "finish_reason", "")
                     ) == "error":
@@ -361,6 +379,17 @@ class KnoaAgentRuntime(AgentRuntime):
                             if terminal_chunk is not None
                             else "provider_failed"
                         )
+                        if not saved_checkpoint and durable_messages:
+                            await self._save_aborted_turn_checkpoint(
+                                request,
+                                checkpoint,
+                                durable_messages,
+                                summary=summary,
+                                covered_messages=covered_messages,
+                                reason=error_code or "provider_failed",
+                                partial_content=last_meaningful_content,
+                            )
+                            saved_checkpoint = True
                         yield TurnFinished(
                             **self._event_base(request, runtime_turn_ref),
                             status="failed",
@@ -369,6 +398,8 @@ class KnoaAgentRuntime(AgentRuntime):
                         terminal_emitted = True
                         return
                     content = "".join(content_parts)
+                    if content.strip():
+                        last_meaningful_content = content.strip()
                     yield UsageReported(
                         **self._event_base(request, runtime_turn_ref),
                         usage={
@@ -430,6 +461,7 @@ class KnoaAgentRuntime(AgentRuntime):
                             summary=summary,
                             covered_messages=covered_messages,
                         )
+                        saved_checkpoint = True
                         yield TurnFinished(
                             **self._event_base(request, runtime_turn_ref),
                             status="completed",
@@ -442,6 +474,17 @@ class KnoaAgentRuntime(AgentRuntime):
                     durable_messages.append(assistant_message)
                     for call in calls:
                         if tool_calls >= self._max_tool_calls:
+                            if not saved_checkpoint and durable_messages:
+                                await self._save_aborted_turn_checkpoint(
+                                    request,
+                                    checkpoint,
+                                    durable_messages,
+                                    summary=summary,
+                                    covered_messages=covered_messages,
+                                    reason="tool_limit_reached",
+                                    partial_content=last_meaningful_content,
+                                )
+                                saved_checkpoint = True
                             yield TurnFinished(
                                 **self._event_base(request, runtime_turn_ref),
                                 status="failed",
@@ -595,20 +638,54 @@ class KnoaAgentRuntime(AgentRuntime):
                                     schema_hits=projection.schema_hits + len(activated),
                                 )
                 status = "interrupted" if cancellation.is_set() else "failed"
+                error_code = ("cancelled" if cancellation.is_set() else "iteration_limit_reached")
+                if not saved_checkpoint and durable_messages:
+                    await self._save_aborted_turn_checkpoint(
+                        request,
+                        checkpoint,
+                        durable_messages,
+                        summary=summary,
+                        covered_messages=covered_messages,
+                        reason=error_code,
+                        partial_content=last_meaningful_content,
+                    )
+                    saved_checkpoint = True
                 yield TurnFinished(
                     **self._event_base(request, runtime_turn_ref),
                     status=status,
-                    error_code=("cancelled" if cancellation.is_set() else "iteration_limit_reached"),
+                    error_code=error_code,
                 )
                 terminal_emitted = True
         except asyncio.CancelledError:
             cancellation.set()
+            if not saved_checkpoint and durable_messages:
+                await self._save_aborted_turn_checkpoint(
+                    request,
+                    checkpoint,
+                    durable_messages,
+                    summary=summary,
+                    covered_messages=covered_messages,
+                    reason="cancelled",
+                    partial_content=last_meaningful_content,
+                )
+                saved_checkpoint = True
             raise
         except Exception:
             logger.exception(
                 "Knoa runtime turn failed runtime_turn_ref=%s",
                 runtime_turn_ref,
             )
+            if not saved_checkpoint and durable_messages:
+                await self._save_aborted_turn_checkpoint(
+                    request,
+                    checkpoint,
+                    durable_messages,
+                    summary=summary,
+                    covered_messages=covered_messages,
+                    reason="runtime_failed",
+                    partial_content=last_meaningful_content,
+                )
+                saved_checkpoint = True
             if not terminal_emitted:
                 yield TurnFinished(
                     **self._event_base(request, runtime_turn_ref),
@@ -873,6 +950,136 @@ class KnoaAgentRuntime(AgentRuntime):
             checkpoint,
             expected_revision=(previous.revision if previous is not None else None),
         )
+
+    @staticmethod
+    def _sanitize_messages_for_abort(
+        messages: list[dict[str, Any]],
+        *,
+        reason: str,
+        partial_content: str = "",
+    ) -> list[dict[str, Any]]:
+        if not messages:
+            return []
+        sanitized: list[dict[str, Any]] = [dict(m) for m in messages]
+
+        # 1. Fill missing tool responses for any tool calls in assistant messages
+        for i, msg in enumerate(list(sanitized)):
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                tool_calls = msg["tool_calls"]
+                call_ids = [
+                    str(tc["id"])
+                    for tc in tool_calls
+                    if isinstance(tc, dict) and tc.get("id")
+                ]
+                seen_call_ids = set()
+                search_idx = i + 1
+                while search_idx < len(sanitized):
+                    curr = sanitized[search_idx]
+                    if curr.get("role") in ("user", "assistant"):
+                        break
+                    if curr.get("role") == "tool" and curr.get("tool_call_id"):
+                        seen_call_ids.add(str(curr["tool_call_id"]))
+                    search_idx += 1
+
+                for call_id in call_ids:
+                    if call_id not in seen_call_ids:
+                        sanitized.insert(
+                            search_idx,
+                            {
+                                "role": "tool",
+                                "tool_call_id": call_id,
+                                "content": json.dumps(
+                                    {
+                                        "status": "cancelled",
+                                        "code": "turn_aborted",
+                                        "message": f"Tool call was aborted ({reason})",
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            },
+                        )
+                        seen_call_ids.add(call_id)
+                        search_idx += 1
+
+        # 2. Ensure history ends with an assistant message
+        last_msg = sanitized[-1]
+        last_role = last_msg.get("role")
+
+        if last_role == "tool":
+            if partial_content.strip():
+                note = (
+                    "\n\n[由于超时或取消，操作未全部完成]"
+                    if reason == "cancelled"
+                    else f"\n\n[操作已中断: {reason}]"
+                )
+                closing = partial_content.strip() + note
+            else:
+                closing = (
+                    "[由于超时或取消，操作未全部完成]"
+                    if reason == "cancelled"
+                    else f"[操作已中断: {reason}]"
+                )
+            sanitized.append({"role": "assistant", "content": closing})
+        elif (
+            last_role == "assistant"
+            and last_msg.get("tool_calls")
+            and not last_msg.get("content")
+        ):
+            if partial_content.strip():
+                note = (
+                    "\n\n[由于超时或取消，操作未全部完成]"
+                    if reason == "cancelled"
+                    else f"\n\n[操作已中断: {reason}]"
+                )
+                closing = partial_content.strip() + note
+            else:
+                closing = (
+                    "[由于超时或取消，操作未全部完成]"
+                    if reason == "cancelled"
+                    else f"[操作已中断: {reason}]"
+                )
+            sanitized.append({"role": "assistant", "content": closing})
+        elif last_role == "user":
+            closing = (
+                "[未完成回答: 单轮超时或取消]"
+                if reason == "cancelled"
+                else f"[未完成回答: {reason}]"
+            )
+            sanitized.append({"role": "assistant", "content": closing})
+
+        return sanitized
+
+    async def _save_aborted_turn_checkpoint(
+        self,
+        request: RuntimeTurnRequest,
+        checkpoint: ContextCheckpoint | None,
+        messages: list[dict[str, Any]],
+        *,
+        summary: str,
+        covered_messages: int,
+        reason: str,
+        partial_content: str = "",
+    ) -> None:
+        if not messages:
+            return
+        try:
+            sanitized = self._sanitize_messages_for_abort(
+                messages,
+                reason=reason,
+                partial_content=partial_content,
+            )
+            await self._save_checkpoint(
+                request,
+                checkpoint,
+                sanitized,
+                summary=summary,
+                covered_messages=covered_messages,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to save checkpoint for aborted turn in session=%s",
+                request.session.runtime_session_ref,
+            )
 
     @staticmethod
     def _checkpoint_summary(
