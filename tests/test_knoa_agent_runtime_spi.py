@@ -765,7 +765,7 @@ async def test_knoa_runtime_interrupts_active_turn_with_explicit_terminal(
     assert messages[0]["role"] == "user"
     assert messages[0]["content"] == "hi"
     assert messages[-1]["role"] == "assistant"
-    assert "[未完成回答" in messages[-1]["content"] or "[由于超时" in messages[-1]["content"]
+    assert "[Incomplete response" in messages[-1]["content"] or "[Turn interrupted" in messages[-1]["content"]
 
 
 class FailingToolProvider(Provider):
@@ -896,7 +896,7 @@ def test_sanitize_messages_for_abort():
     # Ends with assistant message
     assert sanitized[4]["role"] == "assistant"
     assert "searching" in sanitized[4]["content"]
-    assert "[由于超时或取消，操作未全部完成]" in sanitized[4]["content"]
+    assert "[Incomplete response due to timeout or cancellation]" in sanitized[4]["content"]
 
 
 @pytest.mark.asyncio

@@ -209,11 +209,17 @@ class AgentExecutionService:
                 if capability.value in policy.platform_capabilities
             )
             invocation_cancellation = asyncio.Event()
+            activity_notifier = asyncio.Event()
+            interrupt_reason = [f"Invocation hard deadline exceeded ({policy.limits.deadline_seconds:.0f}s)"]
+            idle_timeout = min(60.0, policy.limits.deadline_seconds)
             cancellation_bridge = asyncio.create_task(
                 self._bridge_cancellation(
                     request.cancellation,
                     invocation_cancellation,
                     policy.limits.deadline_seconds,
+                    activity_notifier=activity_notifier,
+                    reason_ref=interrupt_reason,
+                    idle_timeout_seconds=idle_timeout,
                 )
             )
             try:
@@ -294,6 +300,7 @@ class AgentExecutionService:
                             turn.runtime_turn_ref,
                             request,
                             invocation_cancellation,
+                            reason_ref=interrupt_reason,
                         )
                     )
                     terminal_count = 0
@@ -301,6 +308,7 @@ class AgentExecutionService:
                     terminal: TurnFinished | None = None
                     try:
                         async for event in turn.events:
+                            activity_notifier.set()
                             if isinstance(event, ToolCallStarted):
                                 tool_calls += 1
                             if isinstance(event, UsageReported) and self._usage_observer:
@@ -591,18 +599,20 @@ class AgentExecutionService:
         runtime_turn_ref: str,
         request: ExecuteAgentTurn,
         cancellation: asyncio.Event,
+        reason_ref: list[str] | None = None,
     ) -> None:
         await cancellation.wait()
+        reason = (
+            "Platform cancellation requested"
+            if request.cancellation.is_set()
+            else (reason_ref[0] if reason_ref and reason_ref[0] else "Invocation deadline exceeded")
+        )
         await runtime.interrupt_turn(
             RuntimeInterruptCommand(
                 session=session,
                 runtime_turn_ref=runtime_turn_ref,
                 command_id=f"interrupt:{request.turn_id}:{time.time_ns()}",
-                reason=(
-                    "Platform cancellation requested"
-                    if request.cancellation.is_set()
-                    else "Invocation deadline exceeded"
-                ),
+                reason=reason,
             )
         )
 
@@ -611,20 +621,47 @@ class AgentExecutionService:
         external: asyncio.Event,
         invocation: asyncio.Event,
         deadline_seconds: float,
+        *,
+        activity_notifier: asyncio.Event | None = None,
+        reason_ref: list[str] | None = None,
+        idle_timeout_seconds: float | None = None,
     ) -> None:
         external_wait = asyncio.create_task(external.wait())
         deadline_wait = asyncio.create_task(asyncio.sleep(deadline_seconds))
+
+        async def _idle_watchdog(idle_seconds: float) -> None:
+            if activity_notifier is None:
+                return
+            while True:
+                activity_notifier.clear()
+                try:
+                    await asyncio.wait_for(activity_notifier.wait(), timeout=idle_seconds)
+                except asyncio.TimeoutError:
+                    if reason_ref:
+                        reason_ref[0] = f"Agent idle timeout exceeded ({idle_seconds:.0f}s with no activity)"
+                    return
+
+        tasks: set[asyncio.Task[Any]] = {external_wait, deadline_wait}
+        watchdog_task: asyncio.Task[None] | None = None
+        if activity_notifier is not None and idle_timeout_seconds is not None and idle_timeout_seconds > 0:
+            watchdog_task = asyncio.create_task(_idle_watchdog(idle_timeout_seconds))
+            tasks.add(watchdog_task)
+
         try:
-            await asyncio.wait(
-                {external_wait, deadline_wait},
+            done, _ = await asyncio.wait(
+                tasks,
                 return_when=asyncio.FIRST_COMPLETED,
             )
+            if external_wait in done:
+                if reason_ref:
+                    reason_ref[0] = "Platform cancellation requested"
+            elif watchdog_task is not None and watchdog_task in done:
+                pass  # reason_ref was already set to idle timeout
+            elif deadline_wait in done:
+                if reason_ref:
+                    reason_ref[0] = f"Invocation hard deadline exceeded ({deadline_seconds:.0f}s)"
             invocation.set()
         finally:
-            external_wait.cancel()
-            deadline_wait.cancel()
-            await asyncio.gather(
-                external_wait,
-                deadline_wait,
-                return_exceptions=True,
-            )
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)

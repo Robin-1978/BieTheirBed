@@ -930,6 +930,30 @@ export default function ChatScreen() {
           />
         ) : null}
 
+        {Boolean(activeTurn) ? (
+          <View style={styles.generatingStopPillWrap}>
+            <AppPressable
+              accessibilityLabel={t("chat.stopGenerating")}
+              disabled={cancelling}
+              onPress={() => { if (activeTurn) void cancelTurn(activeTurn); }}
+              style={styles.generatingStopPill}
+            >
+              {cancelling ? (
+                <ActivityIndicator color={colors.danger} size="small" />
+              ) : (
+                <AppIcon name="stop" color={colors.danger} size={13} />
+              )}
+              <Text style={styles.generatingStopText}>
+                {cancelling ? t("chat.stoppingNow") : t("chat.generatingNow")}
+              </Text>
+              <View style={styles.generatingStopDivider} />
+              <Text style={styles.generatingStopBtnText}>
+                {t("chat.stopGenerating")}
+              </Text>
+            </AppPressable>
+          </View>
+        ) : null}
+
         <ChatComposer
           text={text}
           onTextChange={(val) => {
@@ -1177,4 +1201,36 @@ const styles = StyleSheet.create({
     paddingTop: spacing.small,
   },
   configureUnavailableText: { color: colors.accent, fontSize: 12, fontWeight: "700" },
+  generatingStopPillWrap: {
+    alignItems: "center",
+    marginBottom: spacing.small,
+    paddingHorizontal: spacing.large,
+  },
+  generatingStopPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: radii.pill,
+    gap: 8,
+    ...shadows.card,
+  },
+  generatingStopText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  generatingStopDivider: {
+    width: 1,
+    height: 12,
+    backgroundColor: colors.line,
+  },
+  generatingStopBtnText: {
+    color: colors.danger,
+    fontSize: 12,
+    fontWeight: "700",
+  },
 });
