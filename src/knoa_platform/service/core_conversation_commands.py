@@ -223,19 +223,22 @@ class ConversationCommandHandler:
                 result=await self._control.get_history(scope),
             ))
         elif isinstance(request, ListMemoryRequest):
-            scope = RuntimeScope(principal_id=principal, session_handle=request.session_handle)
+            session_handle = request.session_handle.strip() or "memory"
+            scope = RuntimeScope(principal_id=principal, session_handle=session_handle)
             await send(MemoryListMessage(
                 request_id=request.request_id,
                 result=await self._control.list_memory(scope),
             ))
         elif isinstance(request, ClearMemoryRequest):
-            scope = RuntimeScope(principal_id=principal, session_handle=request.session_handle)
+            session_handle = request.session_handle.strip() or "memory"
+            scope = RuntimeScope(principal_id=principal, session_handle=session_handle)
             await send(MemoryClearedMessage(
                 request_id=request.request_id,
                 result=await self._control.clear_memory(scope),
             ))
         elif isinstance(request, DeleteMemoryRequest):
-            scope = RuntimeScope(principal_id=principal, session_handle=request.session_handle)
+            session_handle = request.session_handle.strip() or "memory"
+            scope = RuntimeScope(principal_id=principal, session_handle=session_handle)
             await send(MemoryDeletedMessage(
                 request_id=request.request_id,
                 result=await self._control.delete_memory(scope, request.key),

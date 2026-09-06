@@ -118,10 +118,12 @@ class ControlService:
         return HistoryResult(messages=snapshot.messages)
 
     async def list_memory(self, scope: RuntimeScope) -> MemoryListResult:
-        owned = await self._owned_scope(scope)
+        principal = scope.principal_id.strip()
+        if not principal:
+            raise PermissionError("Principal is required")
         rows = await asyncio.to_thread(
             self._memory.list_memories,
-            owned.principal_id,
+            principal,
             limit=1000,
         )
         return MemoryListResult(
@@ -139,13 +141,17 @@ class ControlService:
         )
 
     async def clear_memory(self, scope: RuntimeScope) -> MemoryClearResult:
-        owned = await self._owned_scope(scope)
-        await asyncio.to_thread(self._memory.clear_memories, owned.principal_id)
+        principal = scope.principal_id.strip()
+        if not principal:
+            raise PermissionError("Principal is required")
+        await asyncio.to_thread(self._memory.clear_memories, principal)
         return MemoryClearResult(cleared=True)
 
     async def delete_memory(self, scope: RuntimeScope, key: str) -> MemoryDeleteResult:
-        owned = await self._owned_scope(scope)
-        deleted = await asyncio.to_thread(self._memory.delete_memory, owned.principal_id, key)
+        principal = scope.principal_id.strip()
+        if not principal:
+            raise PermissionError("Principal is required")
+        deleted = await asyncio.to_thread(self._memory.delete_memory, principal, key)
         return MemoryDeleteResult(deleted=deleted)
 
     async def list_tools(self, scope: RuntimeScope) -> ToolListResult:
