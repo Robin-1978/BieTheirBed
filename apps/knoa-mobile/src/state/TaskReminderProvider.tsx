@@ -18,6 +18,7 @@ import {
   configureTaskNotifications,
   loadNativePushRegistration,
   loadLastTaskNotificationResponse,
+  presentTaskReminderNotification,
   subscribeNativePushToken,
   subscribeTaskNotificationResponses,
 } from "@/notifications/taskNotifications";
@@ -158,9 +159,24 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
         if (incoming.length) {
           replaceAndStore((current) => incoming.reduce(mergeTaskReminder, current));
           const latestUnread = [...incoming].reverse().find((item) => !item.read);
-          if (latestUnread && appIsActiveRef.current) {
-            setActiveReminder(latestUnread);
-            Vibration.vibrate(45);
+          if (latestUnread) {
+            if (appIsActiveRef.current) {
+              setActiveReminder(latestUnread);
+              Vibration.vibrate(45);
+            } else {
+              // When app is in background, present local system notification for actionable tasks
+              void presentTaskReminderNotification({
+                taskId: latestUnread.taskId,
+                executionId: latestUnread.executionId,
+                title: latestUnread.taskTitle || "小诺任务",
+                body:
+                  latestUnread.category === "approval"
+                    ? "任务正在等待您的审批确认"
+                    : latestUnread.category === "completed"
+                      ? "任务已执行完成"
+                      : "任务执行未完成",
+              }).catch(() => undefined);
+            }
           } else {
             setActiveReminder((current) => {
               if (
