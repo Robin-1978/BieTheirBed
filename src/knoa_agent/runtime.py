@@ -264,8 +264,14 @@ class KnoaAgentRuntime(AgentRuntime):
                     )
                     terminal_emitted = True
                     return
-                model_messages = [*durable_history, model_user]
-                durable_messages = [*durable_history, durable_user]
+                turn_timestamp = time.strftime("%Y-%m-%d %H:%M %A")
+                runtime_context_text = self._context.render_runtime_context(
+                    request.context,
+                    timestamp=turn_timestamp,
+                )
+                runtime_user = {"role": "user", "content": runtime_context_text}
+                model_messages = [*durable_history, runtime_user, model_user]
+                durable_messages = [*durable_history, runtime_user, durable_user]
                 tool_calls = 0
                 vision_required = any(
                     isinstance(part, ArtifactPart)
@@ -293,6 +299,7 @@ class KnoaAgentRuntime(AgentRuntime):
                             context=request.context,
                             summary=summary,
                             covered_messages=covered_messages,
+                            turn_timestamp=turn_timestamp,
                         )
                     except ContextBudgetExceeded:
                         if not saved_checkpoint and durable_messages:
@@ -550,15 +557,11 @@ class KnoaAgentRuntime(AgentRuntime):
                             code=str(result.code),
                             output=result.output,
                         )
+                        result_content = self._bound_tool_result_content(result)
                         result_message = {
                             "role": "tool",
                             "tool_call_id": str(result.call_id),
-                            "content": json.dumps(
-                                result.model_dump(mode="json"),
-                                ensure_ascii=False,
-                                sort_keys=True,
-                                default=str,
-                            ),
+                            "content": result_content,
                         }
                         model_messages.append(result_message)
                         durable_messages.append(result_message)
@@ -1118,6 +1121,45 @@ class KnoaAgentRuntime(AgentRuntime):
                 for call in calls
             ],
         }
+
+    @classmethod
+    def _bound_tool_result_content(
+        cls,
+        result: Any,
+        *,
+        max_chars: int = 2000,
+    ) -> str:
+        dumped = (
+            result.model_dump(mode="json")
+            if hasattr(result, "model_dump")
+            else dict(result)
+        )
+        raw_json = json.dumps(dumped, ensure_ascii=False, sort_keys=True, default=str)
+        if len(raw_json) <= max_chars:
+            return raw_json
+
+        output = dumped.get("output")
+        output_str = (
+            output
+            if isinstance(output, str)
+            else json.dumps(output, ensure_ascii=False, default=str)
+        )
+        total_len = len(output_str)
+        preview_limit = max(200, max_chars - 350)
+        preview = output_str[:preview_limit]
+        bounded_payload = {
+            "call_id": dumped.get("call_id"),
+            "tool_name": dumped.get("tool_name"),
+            "status": dumped.get("status"),
+            "code": dumped.get("code"),
+            "output_preview": preview,
+            "total_chars": total_len,
+            "spill_notice": (
+                f"Output exceeded {max_chars} chars ({total_len} total). "
+                "Head preview preserved; full result recorded in tool event."
+            ),
+        }
+        return json.dumps(bounded_payload, ensure_ascii=False, sort_keys=True, default=str)
 
     @staticmethod
     def _cached_tokens(usage: dict[str, Any]) -> int:

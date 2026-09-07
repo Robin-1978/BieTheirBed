@@ -96,6 +96,7 @@ class ContextEngine:
         context: RuntimeTurnContext,
         summary: str = "",
         covered_messages: int = 0,
+        turn_timestamp: str | None = None,
     ) -> PreparedContext:
         if len(model_history) != len(durable_history):
             raise ValueError("Model and durable histories must stay aligned")
@@ -106,7 +107,7 @@ class ContextEngine:
         if message_budget < 256:
             raise ContextBudgetExceeded("Tool schemas consume the model context budget")
 
-        runtime_context = self.render_runtime_context(context)
+        runtime_context = self.render_runtime_context(context, timestamp=turn_timestamp)
         before_messages = self._assemble(
             system_prompt,
             model_history,
@@ -220,7 +221,10 @@ class ContextEngine:
         )
 
     @staticmethod
-    def render_runtime_context(context: RuntimeTurnContext) -> str:
+    def render_runtime_context(
+        context: RuntimeTurnContext,
+        timestamp: str | None = None,
+    ) -> str:
         parts = ["<runtime_context>", "<session>"]
         if context.core_memory or context.relevant_memory:
             parts.append("<user_memory>")
@@ -239,9 +243,19 @@ class ContextEngine:
             parts.append("</episodic_memory>")
         if context.skill_instructions:
             parts.append(context.skill_instructions)
-        parts.append(f"<current_time>{time.strftime('%Y-%m-%d %H:%M %A')}</current_time>")
+        ts = timestamp if timestamp is not None else time.strftime("%Y-%m-%d %H:%M %A")
+        parts.append(f"<current_time>{ts}</current_time>")
         parts.extend(["</session>", "</runtime_context>"])
         return "\n".join(parts)
+
+    @staticmethod
+    def _is_runtime_context(message: dict[str, Any]) -> bool:
+        if message.get("role") != "user":
+            return False
+        content = message.get("content")
+        if isinstance(content, str):
+            return content.strip().startswith("<runtime_context>")
+        return False
 
     def _assemble(
         self,
@@ -259,27 +273,37 @@ class ContextEngine:
         ]
         messages.extend(self._summary_messages(summary, covered_messages))
         messages.extend(prefix)
-        if runtime_context:
+        has_runtime = any(self._is_runtime_context(m) for m in current)
+        if runtime_context and not has_runtime:
             messages.append({"role": "user", "content": runtime_context})
         messages.extend(current)
         return messages
 
-    @staticmethod
-    def _current_turn_index(history: list[dict[str, Any]]) -> int:
+    @classmethod
+    def _current_turn_index(cls, history: list[dict[str, Any]]) -> int:
         indexes = [
-            index for index, message in enumerate(history)
-            if message.get("role") == "user"
+            index
+            for index, message in enumerate(history)
+            if message.get("role") == "user" and not cls._is_runtime_context(message)
         ]
-        return indexes[-1] if indexes else len(history)
+        if not indexes:
+            return len(history)
+        last_user_idx = indexes[-1]
+        if last_user_idx > 0 and cls._is_runtime_context(history[last_user_idx - 1]):
+            return last_user_idx - 1
+        return last_user_idx
 
-    @staticmethod
-    def _turns(history: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    @classmethod
+    def _turns(cls, history: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
         turns: list[list[dict[str, Any]]] = []
         current: list[dict[str, Any]] = []
         for message in history:
-            if message.get("role") == "user" and current:
-                turns.append(current)
-                current = []
+            if message.get("role") == "user" and not cls._is_runtime_context(message) and current:
+                if len(current) == 1 and cls._is_runtime_context(current[0]):
+                    pass
+                else:
+                    turns.append(current)
+                    current = []
             current.append(message)
         if current:
             turns.append(current)
@@ -301,7 +325,10 @@ class ContextEngine:
 
     def _summarize_turn(self, turn: list[dict[str, Any]]) -> str:
         lines: list[str] = []
-        user = [message for message in turn if message.get("role") == "user"]
+        user = [
+            message for message in turn
+            if message.get("role") == "user" and not self._is_runtime_context(message)
+        ]
         if user:
             lines.append("User: " + self._bounded(self._content(user[-1]), 1200))
         calls: dict[str, str] = {}

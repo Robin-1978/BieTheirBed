@@ -134,3 +134,48 @@ def test_context_engine_sliding_tool_window_in_same_turn() -> None:
     # Context should fit without throwing ContextBudgetExceeded
     assert prepared.tokens_after <= 1000
 
+
+def test_context_engine_prefix_immutability_across_iterations_in_same_turn() -> None:
+    engine = ContextEngine(context_window=4096, completion_reserve=512)
+    turn_ts = "2026-09-07 10:30 Monday"
+    context = RuntimeTurnContext(core_memory=("favorite_editor: vim",))
+    runtime_text = engine.render_runtime_context(context, timestamp=turn_ts)
+    runtime_msg = {"role": "user", "content": runtime_text}
+    user_msg = {"role": "user", "content": "Fetch data and summarize"}
+
+    # Iteration 1
+    iter1_history = [runtime_msg, user_msg]
+    prep1 = engine.prepare(
+        system_prompt="system",
+        model_history=list(iter1_history),
+        durable_history=list(iter1_history),
+        tools=(),
+        context=context,
+        turn_timestamp=turn_ts,
+    )
+
+    # Iteration 2: assistant called tool, tool returned bounded result
+    iter2_history = [
+        *iter1_history,
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "call-1", "type": "function", "function": {"name": "fetch", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "call-1", "content": '{"status":"completed","output":"data"}'},
+    ]
+    prep2 = engine.prepare(
+        system_prompt="system",
+        model_history=list(iter2_history),
+        durable_history=list(iter2_history),
+        tools=(),
+        context=context,
+        turn_timestamp=turn_ts,
+    )
+
+    # Verify 100% prefix byte-for-byte immutability:
+    # All messages from Iteration 1 must match the start of Iteration 2 identically
+    assert len(prep2.messages) > len(prep1.messages)
+    assert prep2.messages[: len(prep1.messages)] == prep1.messages
+
+

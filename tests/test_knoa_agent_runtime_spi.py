@@ -762,8 +762,8 @@ async def test_knoa_runtime_interrupts_active_turn_with_explicit_terminal(
     assert checkpoint is not None
     messages = checkpoint.payload["messages"]
     assert len(messages) >= 2
-    assert messages[0]["role"] == "user"
-    assert messages[0]["content"] == "hi"
+    user_contents = [m["content"] for m in messages if m["role"] == "user"]
+    assert "hi" in user_contents
     assert messages[-1]["role"] == "assistant"
     assert "[Incomplete response" in messages[-1]["content"] or "[Turn interrupted" in messages[-1]["content"]
 
@@ -958,4 +958,34 @@ async def test_subsequent_turn_sees_interrupted_turn_in_context(
     user_contents = [str(m.get("content")) for m in req_messages if m.get("role") == "user"]
     assert any("帮我查苏州的山" in c for c in user_contents)
     assert any("换个引擎搜" in c for c in user_contents)
+
+
+def test_runtime_bound_tool_result_content_preserves_schema_and_limits_size():
+    from knoa_platform.agent_runtime.tool_step import ToolStepResult
+
+    small_result = ToolStepResult(
+        call_id="call-s",
+        tool_name="read_file",
+        status="completed",
+        code="ok",
+        output={"content": "short content"},
+    )
+    bounded_small = KnoaAgentRuntime._bound_tool_result_content(small_result, max_chars=1000)
+    assert "short content" in bounded_small
+    assert "spill_notice" not in bounded_small
+
+    large_result = ToolStepResult(
+        call_id="call-l",
+        tool_name="web_fetch",
+        status="completed",
+        code="ok",
+        output="Huge text content " + "x" * 5000,
+    )
+    bounded_large = KnoaAgentRuntime._bound_tool_result_content(large_result, max_chars=1000)
+    assert len(bounded_large) <= 1000
+    assert "spill_notice" in bounded_large
+    assert "Output exceeded 1000 chars" in bounded_large
+    assert '"call_id": "call-l"' in bounded_large
+    assert '"tool_name": "web_fetch"' in bounded_large
+
 
