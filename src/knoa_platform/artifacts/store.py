@@ -240,11 +240,13 @@ class ArtifactStore:
                 (artifact_id,),
             )
 
-    @staticmethod
-    def _session_key(session_id: str) -> str:
+    @classmethod
+    def _session_key(cls, session_id: str) -> str:
         normalized = session_id.strip()
         if not normalized or len(normalized) > 256:
             raise ValueError("Artifact session ID must contain 1-256 characters")
+        if len(normalized) == 64 and all(c in "0123456789abcdefABCDEF" for c in normalized):
+            return normalized.lower()
         return hashlib.sha256(normalized.encode()).hexdigest()
 
     @staticmethod
@@ -733,7 +735,7 @@ class ArtifactStore:
         limit: int | None = None,
     ) -> dict[str, Any]:
         """Read bounded text from an owned inbound file without exposing its path."""
-        entry = self._get(session_id, artifact_id)
+        entry = self._get_readable(session_id, artifact_id)
         if entry.kind != "file":
             raise ValueError("Artifact is not a file")
         textual = (
@@ -817,6 +819,47 @@ class ArtifactStore:
         entry = self._entries.get(artifact_id)
         if entry is None or entry.session_key != self._session_key(session_id):
             raise KeyError(f"Artifact not found: {artifact_id}")
+        if entry.expires_at is not None and entry.expires_at <= self._clock():
+            self._discard(entry)
+            raise KeyError(f"Artifact expired: {artifact_id}")
+        if not entry.path.is_file():
+            self._entries.pop(artifact_id, None)
+            self._delete_registry(artifact_id)
+            raise KeyError(f"Artifact file is unavailable: {artifact_id}")
+        return entry
+
+    def _get_readable(self, session_id: str, artifact_id: str) -> _Artifact:
+        """Resolve an artifact for text reading, resolving cross-layer session keys if needed."""
+        entry = self._entries.get(artifact_id)
+        if entry is None:
+            raise KeyError(f"Artifact not found: {artifact_id}")
+        target_key = self._session_key(session_id)
+        if entry.session_key != target_key:
+            bound = False
+            try:
+                with self._connect() as conn:
+                    # Check by exact string or sha256 equality across session_handle and runtime_session_ref
+                    row_hash = conn.execute(
+                        """
+                        SELECT session_handle, runtime_session_ref
+                        FROM agent_session_bindings
+                        WHERE session_handle=? OR runtime_session_ref=?
+                        """,
+                        (session_id, session_id),
+                    ).fetchall()
+                    for s_handle, r_ref in row_hash:
+                        if (
+                            self._session_key(s_handle) == entry.session_key
+                            or self._session_key(r_ref) == entry.session_key
+                            or s_handle == entry.session_key
+                            or r_ref == entry.session_key
+                        ):
+                            bound = True
+                            break
+            except Exception:
+                pass
+            if not bound:
+                raise KeyError(f"Artifact not found: {artifact_id}")
         if entry.expires_at is not None and entry.expires_at <= self._clock():
             self._discard(entry)
             raise KeyError(f"Artifact expired: {artifact_id}")
