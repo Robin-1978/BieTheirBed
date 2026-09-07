@@ -170,7 +170,9 @@ class SubagentTool(ToolBase):
                         delegation_id,
                     )
                     return {"error": "Parent invocation was cancelled"}
-                await asyncio.sleep(0.1)
+                if tool_context.activity_notifier is not None:
+                    tool_context.activity_notifier.set()
+                await asyncio.sleep(0.5)
                 result = await self._delegations.result(
                     scope,
                     tool_context.run_id,

@@ -194,12 +194,27 @@ class AppConfig(BaseModel):
                 platform_capability_ceiling=frozenset({"*"}),
                 delegation=DelegationPolicy(
                     allowed=True,
-                    targets=frozenset({"codex"}),
+                    targets=frozenset({"worker", "codex"}),
                     max_depth=1,
                     max_children=3,
                     max_parallel_children=3,
                     max_deadline_seconds=1800,
                 ),
+            ),
+            "worker": NodeAgent(
+                kind="knoa",
+                display_name="Knoa Worker",
+                instructions="You are a focused subagent. Execute the assigned goal independently in an isolated context and return a concise, structured summary of findings and outcomes to the orchestrator.",
+                visibility="delegate",
+                enabled=True,
+                model_binding=ModelBindingSpec(
+                    ownership="platform",
+                    model="@default",
+                ),
+                max_concurrency=4,
+                allowed_platform_tools=frozenset({"*"}),
+                platform_capability_ceiling=frozenset({"*"}),
+                delegation=DelegationPolicy(allowed=False),
             ),
             "reviewer_agent": NodeAgent(
                 kind="knoa",
