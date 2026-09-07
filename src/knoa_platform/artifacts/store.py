@@ -729,6 +729,8 @@ class ArtifactStore:
         artifact_id: str,
         *,
         max_bytes: int = 512_000,
+        offset: int | None = None,
+        limit: int | None = None,
     ) -> dict[str, Any]:
         """Read bounded text from an owned inbound file without exposing its path."""
         entry = self._get(session_id, artifact_id)
@@ -751,6 +753,36 @@ class ArtifactStore:
             raise ValueError(
                 f"Artifact type is not readable as text: {entry.media_type}"
             )
+
+        if offset is not None or limit is not None:
+            start_line = max(1, int(offset or 1))
+            line_count = max(1, min(int(limit or 100), 1000))
+            selected_lines: list[str] = []
+            total_lines = 0
+            with entry.path.open("r", encoding="utf-8", errors="replace") as stream:
+                for line in stream:
+                    total_lines += 1
+                    if total_lines >= start_line and len(selected_lines) < line_count:
+                        selected_lines.append(line)
+            content_str = "".join(selected_lines)
+            shown = len(selected_lines)
+            showing = (
+                f"lines {start_line}-{start_line + shown - 1} of {total_lines}"
+                if shown
+                else f"lines {start_line}+ (end of file, total {total_lines} lines)"
+            )
+            return {
+                "artifact_id": entry.artifact_id,
+                "name": entry.name,
+                "media_type": entry.media_type,
+                "content": content_str,
+                "size": entry.size,
+                "showing": showing,
+                "total_lines": total_lines,
+                "has_more": (start_line + shown) <= total_lines,
+                "truncated": False,
+            }
+
         bounded = max(1, min(max_bytes, 512_000))
         with entry.path.open("rb") as stream:
             data = stream.read(bounded + 1)

@@ -11,7 +11,10 @@ _MAX_LINE_COUNT = 1_000
 
 class ReadFileTool(ToolBase):
     name = "read_file"
-    description = "Read an existing local file, including files outside the current directory."
+    description = (
+        "Read an existing local file. For large files or logs, always specify "
+        "offset (1-based start line) and limit (line count) to inspect specific windows."
+    )
     effect = ToolEffect.READ_ONLY
     capabilities = frozenset({ToolCapability.HOST_READ})
     risk = ToolRisk.LOW

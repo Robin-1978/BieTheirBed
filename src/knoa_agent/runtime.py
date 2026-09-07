@@ -123,6 +123,7 @@ class KnoaAgentRuntime(AgentRuntime):
         supports_vision: bool = False,
         screen_verify_enabled: bool = False,
         token_estimator: Any | None = None,
+        artifact_store: Any | None = None,
     ) -> None:
         if max_iterations <= 0 or max_tool_calls <= 0:
             raise ValueError("Knoa Agent limits must be positive")
@@ -136,6 +137,7 @@ class KnoaAgentRuntime(AgentRuntime):
         self._max_output_tokens = max_output_tokens
         self._temperature = temperature
         self._tokens = token_estimator
+        self._artifacts = artifact_store
         self._context = ContextEngine(
             context_window=context_window,
             completion_reserve=max_output_tokens,
@@ -560,7 +562,11 @@ class KnoaAgentRuntime(AgentRuntime):
                             code=str(result.code),
                             output=result.output,
                         )
-                        result_content = self._bound_tool_result_content(result)
+                        result_content = self._bound_tool_result_content(
+                            result,
+                            session_id=str(request.session.runtime_session_ref or ""),
+                            artifacts=self._artifacts,
+                        )
                         result_message = {
                             "role": "tool",
                             "tool_call_id": str(result.call_id),
@@ -1129,8 +1135,10 @@ class KnoaAgentRuntime(AgentRuntime):
     def _bound_tool_result_content(
         cls,
         result: Any,
+        session_id: str = "",
         *,
         max_chars: int = 2000,
+        artifacts: Any | None = None,
     ) -> str:
         dumped = (
             result.model_dump(mode="json")
@@ -1148,8 +1156,45 @@ class KnoaAgentRuntime(AgentRuntime):
             else json.dumps(output, ensure_ascii=False, default=str)
         )
         total_len = len(output_str)
-        preview_limit = max(200, max_chars - 350)
-        preview = output_str[:preview_limit]
+
+        # 1. Spill to ArtifactStore if available and session_id is present
+        artifact_id = None
+        if artifacts is not None and session_id:
+            try:
+                tool_name = str(dumped.get("tool_name") or "tool")
+                call_id = str(dumped.get("call_id") or uuid.uuid4().hex)[:8]
+                created = artifacts.create_generated_text(
+                    session_id,
+                    output_str,
+                    name=f"{tool_name}_{call_id}.txt",
+                    retention="session",
+                )
+                artifact_id = created.get("artifact_id")
+            except Exception:
+                artifact_id = None
+
+        # 2. Universal Head-Tail dual-end preservation
+        overhead = 480 if artifact_id else 380
+        content_budget = max(100, max_chars - overhead)
+        half = content_budget // 2
+        head = output_str[:half]
+        tail = output_str[-half:] if half > 0 else ""
+        omitted = total_len - len(head) - len(tail)
+        preview = f"{head}\n\n[... {omitted} chars omitted ...]\n\n{tail}"
+
+        notice = (
+            f"Output exceeded {max_chars} chars ({total_len} total). "
+            "Head and tail previews preserved."
+        )
+        if artifact_id:
+            notice += (
+                f" Full output saved to artifact '{artifact_id}'. "
+                f"Use read_artifact(artifact_id='{artifact_id}', offset=..., limit=...) "
+                "to inspect specific lines or sections."
+            )
+        else:
+            notice += " Full result recorded in tool event."
+
         bounded_payload = {
             "call_id": dumped.get("call_id"),
             "tool_name": dumped.get("tool_name"),
@@ -1157,12 +1202,21 @@ class KnoaAgentRuntime(AgentRuntime):
             "code": dumped.get("code"),
             "output_preview": preview,
             "total_chars": total_len,
-            "spill_notice": (
-                f"Output exceeded {max_chars} chars ({total_len} total). "
-                "Head preview preserved; full result recorded in tool event."
-            ),
+            "spill_notice": notice,
         }
-        return json.dumps(bounded_payload, ensure_ascii=False, sort_keys=True, default=str)
+        if artifact_id:
+            bounded_payload["artifact_id"] = artifact_id
+
+        res = json.dumps(bounded_payload, ensure_ascii=False, sort_keys=True, default=str)
+        # Dynamic guard ensuring strictly <= max_chars
+        while len(res) > max_chars and len(head) > 20 and len(tail) > 20:
+            head = head[:-20]
+            tail = tail[20:]
+            omitted = total_len - len(head) - len(tail)
+            bounded_payload["output_preview"] = f"{head}\n\n[... {omitted} chars omitted ...]\n\n{tail}"
+            res = json.dumps(bounded_payload, ensure_ascii=False, sort_keys=True, default=str)
+
+        return res
 
     @staticmethod
     def _cached_tokens(usage: dict[str, Any]) -> int:

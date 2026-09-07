@@ -989,3 +989,43 @@ def test_runtime_bound_tool_result_content_preserves_schema_and_limits_size():
     assert '"tool_name": "web_fetch"' in bounded_large
 
 
+def test_runtime_bound_tool_result_content_spills_to_artifact_and_preserves_head_tail(tmp_path):
+    import json
+    from knoa_platform.agent_runtime.tool_step import ToolStepResult
+    from knoa_platform.artifacts import ArtifactStore
+
+    store = ArtifactStore(tmp_path / "attachments")
+    head_text = "HEAD_LINE_OF_TERMINAL_LOG"
+    tail_text = "TAIL_ERROR_ASSERTION_FAILED_TRACEBACK"
+    big_body = "x" * 4000
+    huge_content = f"{head_text}\n{big_body}\n{tail_text}"
+
+    large_result = ToolStepResult(
+        call_id="call-trace-12345",
+        tool_name="bash",
+        status="failed",
+        code="error",
+        output=huge_content,
+    )
+
+    bounded = KnoaAgentRuntime._bound_tool_result_content(
+        large_result,
+        session_id="session-trace-test",
+        max_chars=1000,
+        artifacts=store,
+    )
+    parsed = json.loads(bounded)
+    assert "artifact_id" in parsed
+    assert parsed["artifact_id"].startswith("art_") or len(parsed["artifact_id"]) > 5
+    assert head_text in parsed["output_preview"]
+    assert tail_text in parsed["output_preview"]
+    assert "chars omitted" in parsed["output_preview"]
+    assert f"Full output saved to artifact '{parsed['artifact_id']}'" in parsed["spill_notice"]
+
+    # Verify that the full text can be read back using read_text with pagination
+    page = store.read_text("session-trace-test", parsed["artifact_id"], offset=1, limit=5)
+    assert page["name"].startswith("bash_")
+    assert head_text in page["content"]
+
+
+

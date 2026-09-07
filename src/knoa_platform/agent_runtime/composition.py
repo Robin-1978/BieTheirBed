@@ -429,6 +429,7 @@ def _build_agent_runtime_set(
     provider_factory: Callable[[ResolvedModelConfig], RuntimeModelProvider],
     token_calibration_store: TokenCalibrationStore | None = None,
     token_estimators: dict[str, TokenEstimator] | None = None,
+    artifact_store: ArtifactStore | None = None,
 ) -> tuple[dict[str, AgentRuntime], RuntimeModelProvider, ResolvedModelConfig, str]:
     runtimes: dict[str, AgentRuntime] = {}
     default_primary: RuntimeModelProvider | None = None
@@ -527,6 +528,7 @@ def _build_agent_runtime_set(
                 supports_vision=model_config.supports_vision is True,
                 screen_verify_enabled=bootstrap.screen_verify_enabled,
                 token_estimator=token_estimator,
+                artifact_store=artifact_store,
                 tool_inventory=(
                     ToolInventory(semantic_selector=DisabledToolSelector())
                     if not agent.allowed_platform_tools
@@ -1046,6 +1048,7 @@ def build_core_runtime(
             provider_factory=provider_factory,
             token_calibration_store=token_calibration_store,
             token_estimators=token_estimators,
+            artifact_store=artifacts,
         )
     )
     model_holder["current"] = configured_model
@@ -1200,6 +1203,7 @@ def build_core_runtime(
                     paths=paths,
                     capability_gateway=capability_gateway,
                     provider_factory=provider_factory,
+                    artifact_store=artifacts,
                 )
             )
             health = await asyncio.gather(
@@ -1270,6 +1274,7 @@ def build_core_runtime(
                     provider_factory=provider_factory,
                     token_calibration_store=token_calibration_store,
                     token_estimators=token_estimators,
+                    artifact_store=artifacts,
                 )
             )
             next_resolver = NodeAgentResolver(
