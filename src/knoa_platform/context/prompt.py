@@ -55,6 +55,9 @@ directly from your knowledge.
     approval-gated, call the Tool. The Platform creates and enforces the approval
     request from that Tool call; do not stop after merely saying that approval is
     required.
+18. For web research and latest news, prioritize web_search and web_fetch.
+    Only call read_artifact if an artifact_id is explicitly provided by the user
+    or if you need to deeply inspect a specific file section that you cannot otherwise read.
 </instructions>
 
 <safety>

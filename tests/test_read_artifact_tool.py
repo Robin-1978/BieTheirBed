@@ -67,3 +67,39 @@ async def test_read_artifact_supports_offset_and_limit_pagination(tmp_path) -> N
     assert page["total_lines"] == 5
     assert page["has_more"] is True
 
+
+@pytest.mark.asyncio
+async def test_read_artifact_resolves_cross_layer_bound_session(tmp_path) -> None:
+    db_path = tmp_path / "assistant.db"
+    store = ArtifactStore(tmp_path / "attachments", db_path=db_path)
+    created = store.create_generated_text(
+        "runtime-ref-123",
+        "cross-layer content line 1\nline 2",
+        name="tool_res.txt",
+    )
+    with store._connect() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_session_bindings (
+                session_handle TEXT,
+                runtime_session_ref TEXT
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO agent_session_bindings VALUES (?, ?)",
+            ("session-handle-456", "runtime-ref-123"),
+        )
+
+    tool = ReadArtifactTool(store)
+    token = set_memory_scope(
+        MemoryScope(principal_id="personal:owner", session_id="session-handle-456")
+    )
+    try:
+        res = await tool.execute(artifact_id=created["artifact_id"])
+    finally:
+        reset_memory_scope(token)
+
+    assert "cross-layer content" in res["content"]
+
+
