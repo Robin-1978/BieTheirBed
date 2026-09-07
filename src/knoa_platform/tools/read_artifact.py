@@ -11,8 +11,8 @@ from knoa_platform.tools.base import ToolBase, ToolEffect, ToolRisk
 class ReadArtifactTool(ToolBase):
     name = "read_artifact"
     description = (
-        "Read text content from an attached file by artifact ID. "
-        "Use the artifact ID shown in the user message."
+        "Read text content from an attached file or tool result artifact. "
+        "Supports offset (1-based start line) and limit (line count) for pagination."
     )
     effect = ToolEffect.READ_ONLY
     risk = ToolRisk.LOW
@@ -24,10 +24,14 @@ class ReadArtifactTool(ToolBase):
         artifact_id = str(kwargs.get("artifact_id", "")).strip()
         if not artifact_id:
             return {"error": "artifact_id is required"}
+        offset = kwargs.get("offset")
+        limit = kwargs.get("limit")
         try:
             return self._store.read_text(
                 current_memory_scope().session_id,
                 artifact_id,
+                offset=int(offset) if offset is not None else None,
+                limit=int(limit) if limit is not None else None,
             )
         except (KeyError, OSError, ValueError) as exc:
             return {"error": str(exc)}
@@ -43,7 +47,19 @@ class ReadArtifactTool(ToolBase):
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 128,
-                    }
+                        "description": "Artifact identifier to read",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "1-based starting line number to read",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "description": "Number of lines to read (default 100, max 500)",
+                    },
                 },
                 "required": ["artifact_id"],
                 "additionalProperties": False,

@@ -243,3 +243,7 @@ gantt
    - **单向只增已读对齐**：移动端 `mergeTaskReminder` 升级支持服务端已读权威（`read: true`）覆盖已有本地待办与同一 `executionId` 的衍生通知，杜绝其他设备已读后本地角标依然滞留；
    - **节点级角标精准隔离**：底部导航栏与任务列表未读横幅完全收敛至当前选中 Node（`currentNodeUnread`），彻底解决“跨设备其他节点任务导致无脑显示 9+ 未读但点进列表为空”的负向体验；
    - **一键全读与跨端自动重对齐**：支持针对当前节点或跨节点一键标记全部已读（`markAllRead(targetNodeId)`），并在前台周期性（15s）自动拉取对齐 Hub/Node 端最新通知状态。
+4. **通用工具大输出治理体系（Head-Tail 双端保全 + 自动 Spill-to-Artifact + 分页检视）[COMPLETED 2026-09-07]**：
+   - **L1 协议与工具契约层（Tool Contract）**：`web_fetch` 升级为 Trafilatura 语义降噪 + Query-Focused 目标段落精准提取（彻底告别 1650 字符盲截断，消除重复无效检索）；`read_file` 契约强化引导 `offset`/`limit` 分窗读取；
+   - **L2 运行时通用拦截（Runtime Spill-and-Handle）**：在 `KnoaAgentRuntime._bound_tool_result_content` 实施通用 Head-Tail 双端保全（保留前 700 字符上下文 + 后 700 字符报错堆栈/结论），并在超过 2000 字符时自动物理落盘为只读 Artifact 文件，注入 `artifact_id` 与操作指令；
+   - **L3 次级检视工具（Secondary Inspection Tools）**：`read_artifact` 升级支持行级分页（`offset` 与 `limit`，返回 `showing` 与 `has_more`），支持 Agent 在不撑爆上下文的前提下精准翻页探查超大输出。

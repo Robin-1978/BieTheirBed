@@ -185,3 +185,79 @@ async def test_chunked_response_body_is_stopped_at_hard_limit(monkeypatch) -> No
 
     assert result == {"error": "HTTP response exceeds 5 byte limit"}
     assert chunks_read == [b"123", b"456"]
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_extracts_clean_text_and_focuses_on_query(monkeypatch) -> None:
+    html_content = """
+    <html>
+      <head><title>Test Page</title></head>
+      <body>
+        <nav><a href="/home">Home</a><a href="/faq">FAQ</a></nav>
+        <div class="ad-banner">Annoying Ad Banner</div>
+        <main>
+          <h1>Overview</h1>
+          <p>Introductory paragraph with generic information.</p>
+          <h2>Detailed Benchmark</h2>
+          <p>Astra Code Arena benchmark score is 1797, achieving new state of the art.</p>
+          <p>Safety considerations: deep thought loops need oversight.</p>
+        </main>
+        <footer>Copyright 2026</footer>
+      </body>
+    </html>
+    """
+
+    class Response:
+        is_redirect = False
+        headers = {}
+        encoding = "utf-8"
+        status_code = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def raise_for_status(self):
+            return None
+
+        async def aiter_bytes(self):
+            yield html_content.encode("utf-8")
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def stream(self, _method, _url):
+            return Response()
+
+    monkeypatch.setattr("httpx.AsyncClient", Client)
+    monkeypatch.setattr(
+        "knoa_platform.tools.web_fetch._is_safe_url",
+        lambda _url: (True, ""),
+    )
+
+    tool = WebFetchTool()
+    res = await tool.execute(url="https://example.com/test", query="Code Arena 1797")
+
+    assert res["status_code"] == 200
+    assert "1797" in res["content"]
+    assert "Home" not in res["content"]
+    assert "Annoying Ad Banner" not in res["content"]
+    assert "Copyright 2026" not in res["content"]
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_definition_includes_query() -> None:
+    tool = WebFetchTool()
+    definition = tool.definition()
+    assert "query" in definition["inputSchema"]["properties"]
+    assert definition["inputSchema"]["required"] == ["url"]
+

@@ -38,3 +38,32 @@ async def test_read_artifact_reads_only_current_session_text(tmp_path) -> None:
     finally:
         reset_memory_scope(foreign)
     assert "error" in rejected
+
+
+@pytest.mark.asyncio
+async def test_read_artifact_supports_offset_and_limit_pagination(tmp_path) -> None:
+    store = ArtifactStore(tmp_path / "attachments")
+    multi_line = "line 1\nline 2\nline 3\nline 4\nline 5\n"
+    created = store.create_generated_text(
+        "session-p",
+        multi_line,
+        name="log.txt",
+    )
+    tool = ReadArtifactTool(store)
+    token = set_memory_scope(
+        MemoryScope(principal_id="principal-p", session_id="session-p")
+    )
+    try:
+        page = await tool.execute(
+            artifact_id=created["artifact_id"],
+            offset=2,
+            limit=2,
+        )
+    finally:
+        reset_memory_scope(token)
+
+    assert page["content"] == "line 2\nline 3\n"
+    assert page["showing"] == "lines 2-3 of 5"
+    assert page["total_lines"] == 5
+    assert page["has_more"] is True
+
