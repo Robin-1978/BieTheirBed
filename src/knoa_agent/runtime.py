@@ -122,6 +122,7 @@ class KnoaAgentRuntime(AgentRuntime):
         display_name: str = "Knoa",
         supports_vision: bool = False,
         screen_verify_enabled: bool = False,
+        token_estimator: Any | None = None,
     ) -> None:
         if max_iterations <= 0 or max_tool_calls <= 0:
             raise ValueError("Knoa Agent limits must be positive")
@@ -134,9 +135,11 @@ class KnoaAgentRuntime(AgentRuntime):
         self._max_tool_calls = max_tool_calls
         self._max_output_tokens = max_output_tokens
         self._temperature = temperature
+        self._tokens = token_estimator
         self._context = ContextEngine(
             context_window=context_window,
             completion_reserve=max_output_tokens,
+            estimator=token_estimator,
         )
         self._clock = clock
         self._turn_id_factory = turn_id_factory or (lambda: uuid.uuid4().hex)

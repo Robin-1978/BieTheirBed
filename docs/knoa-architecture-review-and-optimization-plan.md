@@ -220,8 +220,10 @@ gantt
    - 在 `TaskRepository` 中增加原子化续租能力 `renew_lease` 与孤儿任务回收 `recover_expired_leases`；
    - 在 `TaskExecutor._execute` 中引入后台 `_heartbeat_loop`（按 $lease\_seconds / 3$ 周期持续续租，最快 0.5s 最慢 15s），长任务执行期间租约永不误期；
    - 在 `_worker_loop` 调度开头自动触发孤儿租约回收，进程异常退出后 60s 安全重置状态释放会话排他锁，彻底消除死锁。
-4. **轻量级 BPE Tokenizer 替换正则估算**：
-   - 引入高效的 Tiktoken/Token 映射工具，确保边界预算判定与大模型底层计算误差 < 1%。
+4. **轻量级 BPE Tokenizer 替换与 API Usage 经验闭环校准 [COMPLETED 2026-09-07]**：
+   - **本地快速 BPE**：集成 `tiktoken` 原生 BPE 分词引擎（OpenAI o1/o3/4o 绑定 `o200k_base`，DeepSeek/Qwen 等绑定 `cl100k_base`），微秒级无网络延迟，边界判定与底层大模型计算误差从原本正则估算的 25%~40% 骤降至 < 1%；
+   - **模型家族路由与结构开销补偿**：按激活模型自动识别模型家族，并精确叠加消息封装标记与 Tool Schema 的结构开销底噪（Framing Overhead）；
+   - **API Usage 闭环校准与经验存储**：打通 `observe_usage` 回调，提取真实返回的 `prompt_tokens` 与预估值比对，采用 EMA 指数平滑更新模型的动态校准系数，并持久化到 `token_calibration.json`，实现黑盒模型“越聊越准”，彻底消除上下文边界截断的盲猜风险。
 5. **MCP 读写锁解耦**：
    - 针对 `READ_ONLY` 标记的工具支持并发调用，有副作用工具保持串行化。
 

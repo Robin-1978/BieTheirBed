@@ -46,6 +46,11 @@ from knoa_platform.agent_runtime.tool_step import (
 from knoa_platform.agent_runtime.transcription_service import (
     ArtifactTranscriptionService,
 )
+from knoa_platform.context.token_estimate import (
+    TokenCalibrationStore,
+    TokenEstimator,
+    normalize_family,
+)
 from knoa_platform.agents import (
     AgentExecutionService,
     AgentManager,
@@ -422,6 +427,8 @@ def _build_agent_runtime_set(
     paths: RuntimePaths,
     capability_gateway: CapabilityGateway,
     provider_factory: Callable[[ResolvedModelConfig], RuntimeModelProvider],
+    token_calibration_store: TokenCalibrationStore | None = None,
+    token_estimators: dict[str, TokenEstimator] | None = None,
 ) -> tuple[dict[str, AgentRuntime], RuntimeModelProvider, ResolvedModelConfig, str]:
     runtimes: dict[str, AgentRuntime] = {}
     default_primary: RuntimeModelProvider | None = None
@@ -485,6 +492,13 @@ def _build_agent_runtime_set(
 
             agent_iterations = agent.runtime_limits.max_iterations
             agent_output_tokens = agent.runtime_limits.max_output_tokens
+            token_estimator = TokenEstimator(
+                family=normalize_family(model_config.provider_name, model_config.model),
+                model_name=model_config.model,
+                store=token_calibration_store,
+            )
+            if token_estimators is not None:
+                token_estimators[agent_id] = token_estimator
             runtimes[agent_id] = KnoaAgentRuntime(
                 runtime_provider,
                 ContextCheckpointRepository(state_root / "context.db"),
@@ -512,6 +526,7 @@ def _build_agent_runtime_set(
                 display_name=agent.display_name,
                 supports_vision=model_config.supports_vision is True,
                 screen_verify_enabled=bootstrap.screen_verify_enabled,
+                token_estimator=token_estimator,
                 tool_inventory=(
                     ToolInventory(semantic_selector=DisabledToolSelector())
                     if not agent.allowed_platform_tools
@@ -800,6 +815,8 @@ def build_core_runtime(
     resolver_holder = {"current": agent_resolver}
     managed_holder = {"current": managed}
     model_holder: dict[str, ResolvedModelConfig] = {}
+    token_calibration_store = TokenCalibrationStore(paths.data / "token_calibration.json")
+    token_estimators: dict[str, TokenEstimator] = {}
     sessions = RuntimeSessionRepository(database)
     active_agent = managed.agents.agents.get("knoa")
     active_model_alias = active_agent.model_binding.model if active_agent else ""
@@ -891,16 +908,27 @@ def build_core_runtime(
         event: UsageReported,
     ) -> None:
         usage = event.usage
+        actual_prompt = _usage_integer(usage, "prompt_tokens", "input_tokens")
+        estimated_prompt = int(usage.get("prompt_tokens_estimated") or 0)
+        provider_model = str(
+            usage.get("provider_model")
+            or model_holder["current"].alias
+        )
+        if actual_prompt > 0 and estimated_prompt > 0:
+            est = token_estimators.get(request.agent_id)
+            if est is not None:
+                est.calibrate(
+                    observed_tokens=actual_prompt,
+                    estimated_tokens=estimated_prompt,
+                    model_name=provider_model,
+                )
         await asyncio.to_thread(
             llm_traces.record_call,
             principal_id=request.scope.principal_id,
             session_id=request.scope.session_handle,
             run_id=request.turn_id,
             client_request_id=request.client_request_id,
-            model=str(
-                usage.get("provider_model")
-                or model_holder["current"].alias
-            ),
+            model=provider_model,
             iteration=max(1, int(usage.get("iteration") or 1)),
             prompt_tokens=_usage_integer(usage, "prompt_tokens", "input_tokens"),
             completion_tokens=_usage_integer(
@@ -1016,6 +1044,8 @@ def build_core_runtime(
             paths=paths,
             capability_gateway=capability_gateway,
             provider_factory=provider_factory,
+            token_calibration_store=token_calibration_store,
+            token_estimators=token_estimators,
         )
     )
     model_holder["current"] = configured_model
@@ -1238,6 +1268,8 @@ def build_core_runtime(
                     paths=paths,
                     capability_gateway=capability_gateway,
                     provider_factory=provider_factory,
+                    token_calibration_store=token_calibration_store,
+                    token_estimators=token_estimators,
                 )
             )
             next_resolver = NodeAgentResolver(
