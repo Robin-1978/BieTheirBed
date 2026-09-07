@@ -433,7 +433,11 @@ def _product_execution_snapshot(
     )
 
 
-def _chat_snapshot(state: ChatTurnState = ChatTurnState.COMPLETED) -> ChatTurnSnapshot:
+def _chat_snapshot(
+    state: ChatTurnState = ChatTurnState.COMPLETED,
+    content: str = "你好",
+    revision: int = 2,
+) -> ChatTurnSnapshot:
     return ChatTurnSnapshot(
         turn_id="turn-a",
         session_handle="session-a",
@@ -441,13 +445,13 @@ def _chat_snapshot(state: ChatTurnState = ChatTurnState.COMPLETED) -> ChatTurnSn
         user_input="hello",
         tools_enabled=True,
         state=state,
-        content="你好",
-        final_output="你好",
+        content=content,
+        final_output=content,
         cancel_requested=False,
         created_at=1.0,
         updated_at=2.0,
         finished_at=2.0,
-        revision=2,
+        revision=revision,
     )
 
 
@@ -1255,6 +1259,38 @@ async def test_gateway_conversation_uses_turn_snapshots_not_task_feed(tmp_path) 
     assert cancelled.json()["turn"]["state"] == "cancelled"
     assert approval.json()["approval"]["state"] == "approved"
     assert not any(call[0] == "principal_task_events" for call in core.calls)
+
+
+@pytest.mark.asyncio
+async def test_gateway_chat_turn_stream_supports_delta_format(tmp_path) -> None:
+    class StreamCore(_Core):
+        async def chat_turn_updates(self, principal_id, turn_id):
+            first = _chat_snapshot(content="Hello")
+            second = _chat_snapshot(content="Hello world", revision=2)
+            yield first
+            yield second
+
+    core = StreamCore()
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=_Authentication(),
+        core=core,
+    )
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer " + "v1.gws-a." + "t" * 43}
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://gateway.local",
+    ) as http:
+        stream = await http.get(
+            "/v1/conversations/turns/turn-a/stream?format=delta",
+            headers=headers,
+        )
+    assert "event: snapshot\n" in stream.text
+    assert "event: delta\n" in stream.text
+    assert '"delta":" world"' in stream.text
+    assert '"field":"content"' in stream.text
+    assert '"revision":2' in stream.text
 
 
 @pytest.mark.asyncio
