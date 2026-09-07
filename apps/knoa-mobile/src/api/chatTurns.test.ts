@@ -134,4 +134,65 @@ describe("subscribeChatTurn", () => {
     es.emit("delta", { data: "invalid delta {" });
     expect(onError).toHaveBeenCalledWith(expect.any(Error));
   });
+
+  it("detects delta revision gap and triggers onError to recover snapshot", () => {
+    const onError = vi.fn();
+    const onSnapshot = vi.fn();
+    subscribeChatTurn({
+      gatewayUrl: "http://127.0.0.1:9531",
+      token: "test_token",
+      turnId: "turn-3",
+      onSnapshot,
+      onError,
+    });
+
+    const es = MockEventSource.instances.at(-1)!;
+    const snap = baseSnapshot(); // revision 1
+    es.emit("snapshot", { data: JSON.stringify({ turn: snap }) });
+
+    // Emitting revision 3 (skipping revision 2) should trigger onError
+    es.emit("delta", {
+      data: JSON.stringify({
+        turn_id: "turn-3",
+        field: "content",
+        delta: " dropped packet text",
+        revision: 3,
+      }),
+    });
+
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("ChatTurn delta revision gap"),
+      }),
+    );
+  });
+
+  it("safely ignores duplicate or outdated delta revisions", () => {
+    const onDelta = vi.fn();
+    const onSnapshot = vi.fn();
+    subscribeChatTurn({
+      gatewayUrl: "http://127.0.0.1:9531",
+      token: "test_token",
+      turnId: "turn-4",
+      onSnapshot,
+      onDelta,
+      onError: vi.fn(),
+    });
+
+    const es = MockEventSource.instances.at(-1)!;
+    const snap = { ...baseSnapshot(), revision: 5 };
+    es.emit("snapshot", { data: JSON.stringify({ turn: snap }) });
+
+    // Outdated revision 4 should be ignored
+    es.emit("delta", {
+      data: JSON.stringify({
+        turn_id: "turn-4",
+        field: "content",
+        delta: " stale text",
+        revision: 4,
+      }),
+    });
+
+    expect(onDelta).not.toHaveBeenCalled();
+  });
 });

@@ -1133,3 +1133,64 @@ async def test_mcp_client_read_only_tools_concurrency_and_write_exclusion() -> N
     assert max_concurrent_reads >= 2, "Read-only calls must execute concurrently"
     assert not writer_conflict, "Writer call must not overlap with active readers"
 
+
+@pytest.mark.asyncio
+async def test_mcp_client_ensure_alive_detects_closed_dispatcher_and_restarts() -> None:
+    client = StreamableHTTPMCPClient("https://example.test/mcp", timeout_seconds=2)
+    client._owner_task = asyncio.create_task(asyncio.sleep(10))
+    client._owner_stop = asyncio.Event()
+
+    class MockDispatcher:
+        _closed = True
+        _running = False
+
+    class MockSession:
+        _dispatcher = MockDispatcher()
+
+    client._session = MockSession()
+    restarted = False
+
+    async def mock_restart():
+        nonlocal restarted
+        restarted = True
+        client._session = None
+
+    client._restart_owner = mock_restart
+    await client._ensure_alive()
+
+    assert restarted is True
+    client._owner_task.cancel()
+    await asyncio.gather(client._owner_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_mcp_client_call_tool_auto_reconnects_on_connection_closed() -> None:
+    from mcp.shared.exceptions import MCPError
+    from mcp.types import CONNECTION_CLOSED
+
+    client = StreamableHTTPMCPClient("https://example.test/mcp", timeout_seconds=2)
+    attempts = 0
+
+    class MockSession:
+        async def call_tool(self, name, arguments, **_kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise MCPError(code=CONNECTION_CLOSED, message="Connection closed")
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text="recovered")], isError=False)
+
+    client._session = MockSession()
+    restarted = False
+
+    async def mock_restart():
+        nonlocal restarted
+        restarted = True
+
+    client._restart_owner = mock_restart
+    result = await client.call_tool("flaky_tool", {})
+
+    assert attempts == 2
+    assert restarted is True
+    assert result.content[0].text == "recovered"
+
+
