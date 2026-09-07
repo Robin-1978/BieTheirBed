@@ -383,3 +383,55 @@ async def test_web_fetch_returns_friendly_error_when_403_persists(monkeypatch) -
     assert "anti-bot" in res["error"] or "JavaScript challenge" in res["error"]
 
 
+@pytest.mark.asyncio
+async def test_web_fetch_does_not_retry_on_empty_200_response(monkeypatch) -> None:
+    attempts = 0
+
+    class ResponseEmpty:
+        is_redirect = False
+        headers = {}
+        encoding = "utf-8"
+        status_code = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def raise_for_status(self):
+            return None
+
+        async def aiter_bytes(self):
+            if False:
+                yield b""
+
+    class MockClient:
+        def __init__(self, **_kwargs):
+            nonlocal attempts
+            attempts += 1
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def stream(self, _method, _url):
+            return ResponseEmpty()
+
+    monkeypatch.setattr("httpx.AsyncClient", MockClient)
+    monkeypatch.setattr(
+        "knoa_platform.tools.web_fetch._is_safe_url",
+        lambda _url: (True, ""),
+    )
+
+    tool = WebFetchTool()
+    res = await tool.execute(url="https://example.com/empty-page")
+
+    assert attempts == 1
+    assert res["status_code"] == 200
+    assert res["content"] == ""
+
+
+

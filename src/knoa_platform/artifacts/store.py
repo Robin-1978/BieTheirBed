@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import copy
 import hashlib
+import logging
 import mimetypes
 import shutil
 import sqlite3
@@ -21,6 +22,8 @@ from typing import Any, Literal
 from knoa_platform.artifacts.models import ArtifactRef
 from knoa_platform.sqlite_connection import connect_sqlite
 from knoa_platform.sqlite_schema import require_exact_table
+
+logger = logging.getLogger(__name__)
 
 Direction = Literal["inbound", "outbound"]
 Ownership = Literal["borrowed", "managed", "generated"]
@@ -856,8 +859,15 @@ class ArtifactStore:
                         ):
                             bound = True
                             break
-            except Exception:
-                pass
+            except sqlite3.OperationalError as exc:
+                # Table agent_session_bindings might not exist in standalone or test environments
+                logger.debug("agent_session_bindings table check skipped: %s", exc)
+            except Exception as exc:
+                logger.warning(
+                    "Unexpected error resolving cross-layer session binding for artifact %s: %s",
+                    artifact_id,
+                    exc,
+                )
             if not bound:
                 raise KeyError(f"Artifact not found: {artifact_id}")
         if entry.expires_at is not None and entry.expires_at <= self._clock():
