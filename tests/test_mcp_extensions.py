@@ -801,6 +801,64 @@ asyncio.run(app.run_stdio_async())
 
 
 @pytest.mark.asyncio
+async def test_stdio_mcp_client_watchdog_auto_reconnects_after_process_crash(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("mcp.server")
+    server_script = tmp_path / "watchdog_server.py"
+    server_script.write_text(
+        """
+from mcp.server import MCPServer
+
+app = MCPServer("stdio-watchdog")
+
+@app.tool(name="monitor.echo")
+def echo(message: str) -> str:
+    return f"echo:{message}"
+
+import asyncio
+asyncio.run(app.run_stdio_async())
+""".strip(),
+        encoding="utf-8",
+    )
+    client = StdioMCPClient(
+        MCPServerConfig.model_validate(
+            {
+                "enabled": True,
+                "transport": "stdio",
+                "command": sys.executable,
+                "args": [str(server_script)],
+                "working_directory": str(tmp_path),
+                "timeout_seconds": 15,
+            }
+        )
+    )
+    await client.start()
+    try:
+        # 1. First call works
+        res1 = await client.call_tool("monitor.echo", {"message": "hello-1"})
+        assert res1.structured_content == {"result": "echo:hello-1"}
+
+        # 2. Simulate child process dying unexpectedly in the background
+        # (owner task is cancelled/stopped while client was NOT explicitly closed)
+        old_task = client._owner_task
+        assert old_task is not None
+        old_task.cancel()
+        await asyncio.gather(old_task, return_exceptions=True)
+        assert old_task.done()
+
+        # 3. Subsequent call should trigger the watchdog, automatically reconnect, and succeed!
+        res2 = await client.call_tool("monitor.echo", {"message": "hello-2"})
+        assert res2.structured_content == {"result": "echo:hello-2"}
+
+        # 4. Verify discovery also works after reconnection
+        tools = await client.list_tools()
+        assert [t.name for t in tools] == ["monitor.echo"]
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_streamable_http_client_with_live_local_mcp_server() -> None:
     uvicorn = pytest.importorskip("uvicorn")
     mcp_server = pytest.importorskip("mcp.server")
