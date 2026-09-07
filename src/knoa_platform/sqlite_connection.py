@@ -29,7 +29,8 @@ def connect_sqlite(
     timeout: float = 5.0,
     row_factory: bool = True,
     foreign_keys: bool = False,
-    busy_timeout_ms: int | None = None,
+    busy_timeout_ms: int | None = 5000,
+    synchronous: str | None = "NORMAL",
 ) -> sqlite3.Connection:
     """Open a connection whose ``with`` block also owns closing it."""
 
@@ -42,15 +43,19 @@ def connect_sqlite(
         connection.row_factory = sqlite3.Row
     if busy_timeout_ms is not None:
         connection.execute(f"PRAGMA busy_timeout = {int(busy_timeout_ms)}")
+    if synchronous is not None:
+        connection.execute(f"PRAGMA synchronous = {synchronous}")
     if foreign_keys:
         connection.execute("PRAGMA foreign_keys=ON")
     return connection
 
 
 def initialize_wal(path: str | Path, *, timeout: float = 5.0) -> None:
-    """Enable persistent WAL mode once during repository initialization."""
+    """Enable persistent WAL mode and performance pragmas once during repository initialization."""
 
     database = Path(path)
     with connect_sqlite(database, timeout=timeout, row_factory=False) as connection:
         connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=NORMAL")
+        connection.execute("PRAGMA busy_timeout=5000")
     restrict_private_file(database)
