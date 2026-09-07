@@ -248,8 +248,6 @@ class ArtifactStore:
         normalized = session_id.strip()
         if not normalized or len(normalized) > 256:
             raise ValueError("Artifact session ID must contain 1-256 characters")
-        if len(normalized) == 64 and all(c in "0123456789abcdefABCDEF" for c in normalized):
-            return normalized.lower()
         return hashlib.sha256(normalized.encode()).hexdigest()
 
     @staticmethod
@@ -854,8 +852,6 @@ class ArtifactStore:
                         if (
                             self._session_key(s_handle) == entry.session_key
                             or self._session_key(r_ref) == entry.session_key
-                            or s_handle == entry.session_key
-                            or r_ref == entry.session_key
                         ):
                             bound = True
                             break

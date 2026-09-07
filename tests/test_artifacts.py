@@ -221,3 +221,14 @@ def test_generic_mcp_managed_file_is_digest_checked_and_copied(tmp_path):
             "size_bytes": source.stat().st_size,
             "sha256": "0" * 64,
         })
+
+
+def test_session_key_is_uniformly_hashed_to_prevent_collision(tmp_path):
+    store = ArtifactStore(tmp_path / "attachments")
+    # A 64-char hex string must not collide with or bypass raw text hashing
+    hex_session = "a" * 64
+    raw_hash = hashlib.sha256(hex_session.encode()).hexdigest()
+    # It must be hashed through sha256, rather than returning raw hex string
+    assert store._session_key(hex_session) == raw_hash
+    assert store._session_key(hex_session) != hex_session
+
