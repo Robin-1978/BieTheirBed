@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import hashlib
 import json
 import logging
@@ -11,7 +12,7 @@ import re
 import secrets
 import time
 from collections.abc import Awaitable, Callable
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -22,7 +23,74 @@ from knoa_platform.extensions.manager import (
     ExtensionProvider,
 )
 from knoa_platform.extensions.models import MCPServerConfig, MCPToolPolicyConfig
-from knoa_platform.tools.base import ToolBase, ToolCapability
+from knoa_platform.tools.base import ToolBase, ToolCapability, ToolEffect
+
+
+class AsyncRWLock:
+    """An asyncio Read-Write Lock (shared readers, exclusive writer).
+
+    Ensures read-only operations can execute concurrently without serializing,
+    while write operations (and process restarts) obtain exclusive ownership.
+    """
+
+    def __init__(self) -> None:
+        self._readers: int = 0
+        self._writer: bool = False
+        self._waiting_writers: int = 0
+        self._lock = asyncio.Lock()
+        self._read_ok = asyncio.Condition(self._lock)
+        self._write_ok = asyncio.Condition(self._lock)
+
+    async def acquire_read(self) -> None:
+        async with self._lock:
+            while self._writer or self._waiting_writers > 0:
+                await self._read_ok.wait()
+            self._readers += 1
+
+    async def release_read(self) -> None:
+        async with self._lock:
+            self._readers -= 1
+            if self._readers == 0:
+                self._write_ok.notify(1)
+
+    async def acquire_write(self) -> None:
+        async with self._lock:
+            self._waiting_writers += 1
+            try:
+                while self._writer or self._readers > 0:
+                    await self._write_ok.wait()
+                self._writer = True
+            finally:
+                self._waiting_writers -= 1
+
+    async def release_write(self) -> None:
+        async with self._lock:
+            self._writer = False
+            if self._waiting_writers > 0:
+                self._write_ok.notify(1)
+            else:
+                self._read_ok.notify_all()
+
+    @asynccontextmanager
+    async def read_lock(self):
+        await self.acquire_read()
+        try:
+            yield
+        finally:
+            await self.release_read()
+
+    @asynccontextmanager
+    async def write_lock(self):
+        await self.acquire_write()
+        try:
+            yield
+        finally:
+            await self.release_write()
+
+
+_current_elicitation_handler: contextvars.ContextVar[MCPElicitationHandler | None] = (
+    contextvars.ContextVar("_current_elicitation_handler", default=None)
+)
 
 _MAX_DISCOVERY_PAGES = 16
 _MAX_DISCOVERED_TOOLS = 256
@@ -181,6 +249,8 @@ class MCPClientPort(Protocol):
         name: str,
         arguments: dict[str, Any],
         elicitation_handler: MCPElicitationHandler | None = None,
+        *,
+        read_only: bool = False,
     ) -> Any: ...
 
     def resource_capabilities(self) -> MCPResourceCapabilities: ...
@@ -336,14 +406,19 @@ class _SessionClientMixin:
     _resource_subscriptions: set[str]
     _listen_task: asyncio.Task[None] | None
     _elicitation_handler: MCPElicitationHandler | None
-    _tool_call_lock: asyncio.Lock
+    _tool_rw_lock: AsyncRWLock
+
+    @property
+    def _tool_call_lock(self):
+        """Backward compatibility: exposes exclusive write lock for callers expecting _tool_call_lock."""
+        return self._tool_rw_lock.write_lock()
 
     async def _elicit(self, _context: Any, params: Any) -> Any:
         from mcp import types
 
         if getattr(params, "mode", "form") != "form":
             return types.ElicitResult(action="decline")
-        handler = self._elicitation_handler
+        handler = _current_elicitation_handler.get() or self._elicitation_handler
         if handler is None:
             return types.ElicitResult(action="decline")
         try:
@@ -616,34 +691,48 @@ class _SessionClientMixin:
         name: str,
         arguments: dict[str, Any],
         elicitation_handler: MCPElicitationHandler | None = None,
+        *,
+        read_only: bool = False,
     ) -> Any:
-        async with self._tool_call_lock:
-            self._elicitation_handler = elicitation_handler
-            try:
+        token = _current_elicitation_handler.set(elicitation_handler)
+        self._elicitation_handler = elicitation_handler
+        try:
+            lock = (
+                self._tool_rw_lock.read_lock()
+                if read_only
+                else self._tool_rw_lock.write_lock()
+            )
+            reconnect_needed = False
+            async with lock:
                 await self._ensure_alive()
-                for attempt in range(2):
-                    try:
-                        return await self._call_tool_driver(name, arguments)
-                    except (
-                        BrokenPipeError,
-                        ConnectionResetError,
-                        EOFError,
-                        ConnectionError,
-                        OSError,
-                    ) as exc:
-                        if attempt == 0 and not isinstance(exc, asyncio.CancelledError):
-                            logger.warning(
-                                "MCP tool call %s failed with %s; attempting silent reconnection and retry...",
-                                name,
-                                exc,
-                            )
-                            await self._restart_owner()
-                            if self._modern and self._resource_subscriptions:
-                                await self._restart_modern_listener()
-                            continue
+                try:
+                    return await self._call_tool_driver(name, arguments)
+                except (
+                    BrokenPipeError,
+                    ConnectionResetError,
+                    EOFError,
+                    ConnectionError,
+                    OSError,
+                ) as exc:
+                    if not isinstance(exc, asyncio.CancelledError):
+                        logger.warning(
+                            "MCP tool call %s failed with %s; attempting silent reconnection and retry...",
+                            name,
+                            exc,
+                        )
+                        reconnect_needed = True
+                    else:
                         raise
-            finally:
-                self._elicitation_handler = None
+
+            if reconnect_needed:
+                async with self._tool_rw_lock.write_lock():
+                    await self._restart_owner()
+                    if self._modern and self._resource_subscriptions:
+                        await self._restart_modern_listener()
+                    return await self._call_tool_driver(name, arguments)
+        finally:
+            _current_elicitation_handler.reset(token)
+            self._elicitation_handler = None
 
     def resource_capabilities(self) -> MCPResourceCapabilities:
         return self._resource_capabilities
@@ -721,7 +810,7 @@ class StreamableHTTPMCPClient(_SessionClientMixin):
         self._session: Any = None
         self._notification_handler: MCPNotificationHandler | None = None
         self._elicitation_handler: MCPElicitationHandler | None = None
-        self._tool_call_lock = asyncio.Lock()
+        self._tool_rw_lock = AsyncRWLock()
         self._resource_capabilities = MCPResourceCapabilities()
         self._modern = False
         self._resource_subscriptions: set[str] = set()
@@ -799,7 +888,7 @@ class StdioMCPClient(_SessionClientMixin):
         self._session: Any = None
         self._notification_handler: MCPNotificationHandler | None = None
         self._elicitation_handler: MCPElicitationHandler | None = None
-        self._tool_call_lock = asyncio.Lock()
+        self._tool_rw_lock = AsyncRWLock()
         self._resource_capabilities = MCPResourceCapabilities()
         self._modern = False
         self._resource_subscriptions: set[str] = set()
@@ -1035,12 +1124,21 @@ class MCPTool(ToolBase):
             )
             return await handle.wait()
 
+        is_read_only = (self.effect == ToolEffect.READ_ONLY)
         try:
-            result = await self._client.call_tool(
-                self._remote_name,
-                kwargs,
-                elicitation_handler=elicit,
-            )
+            try:
+                result = await self._client.call_tool(
+                    self._remote_name,
+                    kwargs,
+                    elicitation_handler=elicit,
+                    read_only=is_read_only,
+                )
+            except TypeError:
+                result = await self._client.call_tool(
+                    self._remote_name,
+                    kwargs,
+                    elicitation_handler=elicit,
+                )
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - remote provider failures become tool results
