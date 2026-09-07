@@ -1,5 +1,7 @@
 import type { ChatTurnSnapshot } from "./models";
-import { subscribeChatTurn, type ChatTurnSubscription } from "./chatTurns";
+import { subscribeChatTurn, type ChatTurnDelta, type ChatTurnSubscription } from "./chatTurns";
+
+export type { ChatTurnDelta };
 
 type Connection = { gatewayUrl: string; token: string };
 type Timer = ReturnType<typeof setTimeout>;
@@ -10,6 +12,7 @@ type Subscribe = (input: {
   turnId: string;
   onOpen(): void;
   onSnapshot(turn: ChatTurnSnapshot): void;
+  onDelta?(delta: ChatTurnDelta): void;
   onError(error: Error): void;
 }) => ChatTurnSubscription;
 
@@ -30,6 +33,7 @@ export class ChatTurnWatcher {
     connection(): Connection | null;
     fetchSnapshot(turnId: string): Promise<ChatTurnSnapshot>;
     onSnapshot(turn: ChatTurnSnapshot): void;
+    onDelta?(delta: ChatTurnDelta): void;
     onUnavailable(turnId: string, error: Error): void;
     retryDelays?: readonly number[];
     subscribe?: Subscribe;
@@ -74,6 +78,11 @@ export class ChatTurnWatcher {
         this.failures.delete(turnId);
         this.input.onSnapshot(snapshot);
         if (TERMINAL_STATES.has(snapshot.state)) this.close(turnId);
+      },
+      onDelta: (delta) => {
+        if (!this.isCurrent(turnId, generation)) return;
+        this.failures.delete(turnId);
+        this.input.onDelta?.(delta);
       },
       onError: (error) => {
         if (!this.isCurrent(turnId, generation)) return;

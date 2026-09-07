@@ -74,10 +74,15 @@ class GatewayStreaming:
         token = self._bearer_token(request)
         principal_id = authenticated.device.principal_id
 
+        format_param = request.query_params.get("format", "")
+        allow_delta = format_param == "delta"
+
         async def stream():
             iterator = self._core.chat_turn_updates(principal_id, turn_id).__aiter__()
             pending: asyncio.Task[Any] | None = None
             replacement = asyncio.create_task(replaced.wait())
+            last_turn: Any = None
+            sent_snapshot = False
             try:
                 pending = asyncio.create_task(anext(iterator))
                 while True:
@@ -102,10 +107,62 @@ class GatewayStreaming:
                         return
                     if self._authenticate_token(token) is None:
                         return
+
+                    if allow_delta and sent_snapshot and last_turn is not None:
+                        is_same_structure = (
+                            turn.state == last_turn.state
+                            and len(turn.timeline) == len(last_turn.timeline)
+                            and len(turn.artifacts) == len(last_turn.artifacts)
+                            and len(turn.approvals) == len(last_turn.approvals)
+                            and len(turn.interactions) == len(last_turn.interactions)
+                            and turn.cancel_requested == last_turn.cancel_requested
+                            and turn.failure_code == last_turn.failure_code
+                        )
+                        if (
+                            is_same_structure
+                            and turn.content.startswith(last_turn.content)
+                            and len(turn.content) > len(last_turn.content)
+                            and turn.reasoning == last_turn.reasoning
+                        ):
+                            delta_text = turn.content[len(last_turn.content) :]
+                            yield self._sse(
+                                "delta",
+                                {
+                                    "turn_id": turn.turn_id,
+                                    "field": "content",
+                                    "delta": delta_text,
+                                    "revision": turn.revision,
+                                },
+                            )
+                            last_turn = turn
+                            pending = asyncio.create_task(anext(iterator))
+                            continue
+                        if (
+                            is_same_structure
+                            and turn.reasoning.startswith(last_turn.reasoning)
+                            and len(turn.reasoning) > len(last_turn.reasoning)
+                            and turn.content == last_turn.content
+                        ):
+                            delta_text = turn.reasoning[len(last_turn.reasoning) :]
+                            yield self._sse(
+                                "delta",
+                                {
+                                    "turn_id": turn.turn_id,
+                                    "field": "reasoning",
+                                    "delta": delta_text,
+                                    "revision": turn.revision,
+                                },
+                            )
+                            last_turn = turn
+                            pending = asyncio.create_task(anext(iterator))
+                            continue
+
                     yield self._sse(
                         "snapshot",
                         {"turn": turn.model_dump(mode="json")},
                     )
+                    last_turn = turn
+                    sent_snapshot = True
                     pending = asyncio.create_task(anext(iterator))
             finally:
                 if pending is not None and not pending.done():

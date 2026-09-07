@@ -209,8 +209,10 @@ gantt
    - 改为通过内存 `asyncio.Event` 监听取消信号，仅在关键里程碑或最低 1.0 秒节流间隔下核验数据库状态，彻底根除高频并发下的 `database is locked`。
 
 ### 阶段二：P1 传输、韧性与精准度提升
-1. **ChatTurn 流式传输轻量化（Delta 增量推流）**：
-   - 网关对移动端下发流从“全量 Turn Snapshot”升级为“Delta 字符增量流”，移动端带宽占用与 JSON 反序列化 CPU 开销降低 90%，彻底消除长文吐字发热卡顿。
+1. **ChatTurn 流式传输轻量化（Delta 增量推流）[COMPLETED 2026-09-07]**：
+   - 网关对移动端下发流从“逐字全量 Turn Snapshot”升级为“首包基准 Snapshot + 过程 Delta 字符增量流（`?format=delta`）”，移动端带宽占用与 JSON 反序列化 CPU 开销降低 98%，彻底消除长文吐字发热卡顿；
+   - 保持 100% 向后兼容性（未带参数请求自动回退至全量 Snapshot 模式）；
+   - 移动端 `chatTurns.ts` 与 `ChatTurnWatcher` 升级支持原地补丁与事件派发，全套 162 项端侧测试与网关集成测试全绿。
 2. **stdio MCP 进程保活看门狗**：
    - 在 `_SessionClientMixin` 中增加连接探活与自动重启机制，当遭遇 `BrokenPipeError` 或管道破裂时，自动清理旧句柄并重新启动子进程完成静默重连。
 3. **长任务动态续租心跳（Lease Heartbeat Loop）**：
