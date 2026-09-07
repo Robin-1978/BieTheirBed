@@ -46,6 +46,40 @@ _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 _MAX_URL_LENGTH = 4096
 
 
+def _browser_headers(url: str, attempt: int = 0) -> dict[str, str]:
+    """Provide realistic browser request headers to avoid anti-spider 403 blocks."""
+    if attempt == 0:
+        return {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+            ),
+            "Accept": (
+                "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                "image/avif,image/webp,image/apng,*/*;q=0.8"
+            ),
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Sec-Ch-Ua": '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "cross-site",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+            "Referer": "https://www.bing.com/",
+        }
+    return {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+            "(KHTML, like Gecko) Version/17.5 Safari/605.1.15"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh-Hans;q=0.9,en;q=0.8",
+        "Referer": "https://www.google.com/",
+    }
+
+
 class WebFetchTool(ToolBase):
     name = "web_fetch"
     description = "Fetch a URL as text."
@@ -59,41 +93,69 @@ class WebFetchTool(ToolBase):
             return {"error": "url is required"}
         if not isinstance(url, str) or len(url) > _MAX_URL_LENGTH:
             return {"error": f"url must contain at most {_MAX_URL_LENGTH} characters"}
-        try:
-            import httpx
 
-            async with httpx.AsyncClient(
-                follow_redirects=False,
-                timeout=30.0,
-            ) as client:
-                current_url = url
-                for redirect_count in range(_MAX_REDIRECTS + 1):
-                    safe, reason = await asyncio.to_thread(
-                        _is_safe_url,
-                        current_url,
-                    )
-                    if not safe:
-                        return {"error": f"URL blocked: {reason}"}
-                    async with client.stream("GET", current_url) as resp:
-                        if resp.is_redirect:
-                            if redirect_count >= _MAX_REDIRECTS:
-                                return {"error": "URL blocked: Too many redirects"}
-                            location = resp.headers.get("location")
-                            if not location:
-                                return {"error": "URL blocked: Redirect has no location"}
-                            current_url = urljoin(current_url, location)
-                            continue
-                        resp.raise_for_status()
-                        html = await read_limited_text(
-                            resp,
-                            _MAX_RESPONSE_BYTES,
+        html = ""
+        status_code = 200
+        for attempt in range(2):
+            try:
+                import httpx
+
+                headers = _browser_headers(url, attempt=attempt)
+                async with httpx.AsyncClient(
+                    follow_redirects=False,
+                    timeout=25.0,
+                    headers=headers,
+                ) as client:
+                    current_url = url
+                    for redirect_count in range(_MAX_REDIRECTS + 1):
+                        safe, reason = await asyncio.to_thread(
+                            _is_safe_url,
+                            current_url,
                         )
-                        status_code = resp.status_code
+                        if not safe:
+                            return {"error": f"URL blocked: {reason}"}
+                        async with client.stream("GET", current_url) as resp:
+                            if resp.is_redirect:
+                                if redirect_count >= _MAX_REDIRECTS:
+                                    return {"error": "URL blocked: Too many redirects"}
+                                location = resp.headers.get("location")
+                                if not location:
+                                    return {"error": "URL blocked: Redirect has no location"}
+                                current_url = urljoin(current_url, location)
+                                continue
+                            if resp.status_code in (401, 403) and attempt == 0:
+                                req = getattr(resp, "request", None)
+                                raise httpx.HTTPStatusError(
+                                    f"Client error '{resp.status_code}'",
+                                    request=req,
+                                    response=resp,
+                                )
+                            resp.raise_for_status()
+                            html = await read_limited_text(
+                                resp,
+                                _MAX_RESPONSE_BYTES,
+                            )
+                            status_code = resp.status_code
+                            break
+                    if html:
                         break
-        except HttpResponseTooLargeError as e:
-            return {"error": str(e)}
-        except httpx.HTTPError as e:
-            return {"error": f"HTTP error: {e}"}
+            except HttpResponseTooLargeError as e:
+                return {"error": str(e)}
+            except httpx.HTTPStatusError as e:
+                code = getattr(getattr(e, "response", None), "status_code", 0)
+                if code in (401, 403):
+                    if attempt == 0:
+                        continue
+                    return {
+                        "error": (
+                            f"HTTP error: {e}. "
+                            "Note: Website may require dynamic JavaScript challenge or anti-bot verification."
+                        )
+                    }
+                return {"error": f"HTTP error: {e}"}
+            except httpx.HTTPError as e:
+                return {"error": f"HTTP error: {e}"}
+
         clean_text = _extract_clean_text(html)
         query = str(kwargs.get("query", "") or "").strip()
         focused_text = _extract_query_focused(clean_text, query=query, max_chars=1800)

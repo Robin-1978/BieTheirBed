@@ -261,3 +261,125 @@ async def test_web_fetch_definition_includes_query() -> None:
     assert "query" in definition["inputSchema"]["properties"]
     assert definition["inputSchema"]["required"] == ["url"]
 
+
+@pytest.mark.asyncio
+async def test_web_fetch_retries_on_403_with_fallback_headers(monkeypatch) -> None:
+    attempts = []
+
+    class ResponseSuccess:
+        is_redirect = False
+        headers = {}
+        encoding = "utf-8"
+        status_code = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def raise_for_status(self):
+            return None
+
+        async def aiter_bytes(self):
+            yield b"<html><body><p>Recovered content from fallback attempt</p></body></html>"
+
+    class ResponseForbidden:
+        is_redirect = False
+        headers = {}
+        encoding = "utf-8"
+        status_code = 403
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def raise_for_status(self):
+            import httpx
+            raise httpx.HTTPStatusError("403 Forbidden", request=None, response=self)
+
+        async def aiter_bytes(self):
+            yield b"Forbidden"
+
+    class MockClient:
+        def __init__(self, headers=None, **_kwargs):
+            self.headers = headers or {}
+            attempts.append(self.headers)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def stream(self, _method, _url):
+            if len(attempts) == 1:
+                return ResponseForbidden()
+            return ResponseSuccess()
+
+    monkeypatch.setattr("httpx.AsyncClient", MockClient)
+    monkeypatch.setattr(
+        "knoa_platform.tools.web_fetch._is_safe_url",
+        lambda _url: (True, ""),
+    )
+
+    tool = WebFetchTool()
+    res = await tool.execute(url="https://example.com/protected")
+
+    assert len(attempts) == 2
+    assert "Chrome" in attempts[0].get("User-Agent", "")
+    assert "Safari" in attempts[1].get("User-Agent", "")
+    assert res["status_code"] == 200
+    assert "Recovered content" in res["content"]
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_returns_friendly_error_when_403_persists(monkeypatch) -> None:
+    class ResponseForbidden:
+        is_redirect = False
+        headers = {}
+        encoding = "utf-8"
+        status_code = 403
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def raise_for_status(self):
+            import httpx
+            raise httpx.HTTPStatusError("403 Forbidden", request=None, response=self)
+
+        async def aiter_bytes(self):
+            yield b"Forbidden"
+
+    class MockClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def stream(self, _method, _url):
+            return ResponseForbidden()
+
+    monkeypatch.setattr("httpx.AsyncClient", MockClient)
+    monkeypatch.setattr(
+        "knoa_platform.tools.web_fetch._is_safe_url",
+        lambda _url: (True, ""),
+    )
+
+    tool = WebFetchTool()
+    res = await tool.execute(url="https://example.com/anti-spider")
+
+    assert "error" in res
+    assert "403" in res["error"]
+    assert "anti-bot" in res["error"] or "JavaScript challenge" in res["error"]
+
+
