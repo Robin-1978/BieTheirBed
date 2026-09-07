@@ -30,6 +30,7 @@ import {
   loadNativePushRegistration,
   requestTaskNotificationPermission,
   sendTestTaskNotification,
+  subscribeTaskNotificationResponses,
 } from "./taskNotifications";
 
 beforeEach(() => {
@@ -84,5 +85,32 @@ describe("task notifications", () => {
       token: "device-fcm-token",
       appVersion: "0.2.85",
     });
+  });
+
+  it("handles notification response deep-link payloads accurately", () => {
+    let responseHandler: ((res: unknown) => void) | null = null;
+    native.listener.mockImplementation((handler: any) => {
+      responseHandler = handler;
+    });
+
+    const received: Array<{ taskId?: string; executionId?: string }> = [];
+    const sub = subscribeTaskNotificationResponses((payload) => {
+      received.push(payload);
+    });
+
+    expect(responseHandler).not.toBeNull();
+    // Simulate tapping on notification with deep-link data
+    responseHandler!({
+      notification: {
+        request: {
+          content: {
+            data: { taskId: "task-42", executionId: "exec-99" },
+          },
+        },
+      },
+    });
+
+    expect(received).toEqual([{ taskId: "task-42", executionId: "exec-99" }]);
+    sub.remove();
   });
 });
