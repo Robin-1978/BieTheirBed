@@ -507,7 +507,14 @@ class _SessionClientMixin:
 
     async def _ensure_alive(self) -> None:
         if self._owner_task is not None and not self._owner_stop.is_set():
-            if self._owner_task.done() or self._session is None:
+            dispatcher = getattr(self._session, "_dispatcher", None)
+            is_dead = (
+                self._owner_task.done()
+                or self._session is None
+                or getattr(dispatcher, "_closed", False)
+                or not getattr(dispatcher, "_running", True)
+            )
+            if is_dead:
                 logger.warning(
                     "MCP client process terminated unexpectedly; restarting..."
                 )
@@ -707,14 +714,28 @@ class _SessionClientMixin:
                 await self._ensure_alive()
                 try:
                     return await self._call_tool_driver(name, arguments)
-                except (
-                    BrokenPipeError,
-                    ConnectionResetError,
-                    EOFError,
-                    ConnectionError,
-                    OSError,
-                ) as exc:
-                    if not isinstance(exc, asyncio.CancelledError):
+                except Exception as exc:
+                    if isinstance(exc, asyncio.CancelledError):
+                        raise
+                    is_transport_err = isinstance(
+                        exc,
+                        (
+                            BrokenPipeError,
+                            ConnectionResetError,
+                            EOFError,
+                            ConnectionError,
+                            OSError,
+                        ),
+                    )
+                    err_msg = str(exc).lower()
+                    if not is_transport_err and (
+                        "connection closed" in err_msg
+                        or "broken pipe" in err_msg
+                        or getattr(exc, "code", None) == -32000
+                    ):
+                        is_transport_err = True
+
+                    if is_transport_err:
                         logger.warning(
                             "MCP tool call %s failed with %s; attempting silent reconnection and retry...",
                             name,

@@ -43,6 +43,22 @@ export function subscribeChatTurn(input: {
     if (!message.data) return;
     try {
       const delta = JSON.parse(message.data) as ChatTurnDelta;
+      if (latestSnapshot) {
+        if (delta.revision <= latestSnapshot.revision) {
+          // Outdated or duplicate revision, ignore safely
+          return;
+        }
+        if (delta.revision > latestSnapshot.revision + 1) {
+          // Revision jumped forward (network dropped packet or reorder)
+          // Trigger onError so ChatTurnWatcher fetches the fresh authoritative snapshot
+          input.onError(
+            new Error(
+              `ChatTurn delta revision gap: expected ${latestSnapshot.revision + 1}, received ${delta.revision}`,
+            ),
+          );
+          return;
+        }
+      }
       if (input.onDelta) {
         input.onDelta(delta);
       }
