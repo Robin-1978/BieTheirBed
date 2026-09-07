@@ -224,8 +224,11 @@ gantt
    - **本地快速 BPE**：集成 `tiktoken` 原生 BPE 分词引擎（OpenAI o1/o3/4o 绑定 `o200k_base`，DeepSeek/Qwen 等绑定 `cl100k_base`），微秒级无网络延迟，边界判定与底层大模型计算误差从原本正则估算的 25%~40% 骤降至 < 1%；
    - **模型家族路由与结构开销补偿**：按激活模型自动识别模型家族，并精确叠加消息封装标记与 Tool Schema 的结构开销底噪（Framing Overhead）；
    - **API Usage 闭环校准与经验存储**：打通 `observe_usage` 回调，提取真实返回的 `prompt_tokens` 与预估值比对，采用 EMA 指数平滑更新模型的动态校准系数，并持久化到 `token_calibration.json`，实现黑盒模型“越聊越准”，彻底消除上下文边界截断的盲猜风险。
-5. **MCP 读写锁解耦**：
-   - 针对 `READ_ONLY` 标记的工具支持并发调用，有副作用工具保持串行化。
+5. **只读 MCP 工具并发读写锁解耦（AsyncRWLock）[COMPLETED 2026-09-07]**：
+   - **异步读写锁（AsyncRWLock）**：在 `_SessionClientMixin` 中以具备写者优先与协程取消安全的 `AsyncRWLock` 彻底替代原全局粗粒度 `_tool_call_lock` 排他串行锁；
+   - **只读并发吞吐放开**：对 `ToolEffect.READ_ONLY` 标记的无副作用工具（文件读取、代码检索、状态探测、资源抓取等）放开并发读锁，消除串行排队延迟；
+   - **副作用与重连排他保护**：针对 `INTERNAL_WRITE`、`LOCAL_WRITE`、`EXTERNAL_SIDE_EFFECT` 及进程崩溃自动重启（`_restart_owner`）强保证独占写锁；
+   - **Task-Local Elicitation 路由**：采用 `contextvars.ContextVar` 隔离并发工具调用的人机交互 Elicitation Handler，杜绝并发竞争覆盖。
 
 ### 阶段三：P2 架构治理收敛与跨端演进
 1. **统一上下文截断入口**：

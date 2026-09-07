@@ -74,8 +74,11 @@ class _FakeMCPClient:
         name: str,
         arguments: dict,
         elicitation_handler=None,
+        *,
+        read_only: bool = False,
+        **_kwargs,
     ):
-        del elicitation_handler
+        del elicitation_handler, read_only
         self.calls.append((name, arguments))
         return self.result
 
@@ -1061,3 +1064,72 @@ async def test_concurrent_mcp_calls_keep_elicitation_handlers_bound() -> None:
     first_result, second_result = await asyncio.gather(first, second)
     assert (first_result.name, first_result.owner) == ("first", "first")
     assert (second_result.name, second_result.owner) == ("second", "second")
+
+
+@pytest.mark.asyncio
+async def test_async_rw_lock_concurrency_and_exclusion() -> None:
+    from knoa_platform.extensions.mcp import AsyncRWLock
+
+    rw = AsyncRWLock()
+    active_readers = 0
+    max_concurrent_readers = 0
+    writer_ran_while_readers_active = False
+
+    async def reader():
+        nonlocal active_readers, max_concurrent_readers
+        async with rw.read_lock():
+            active_readers += 1
+            max_concurrent_readers = max(max_concurrent_readers, active_readers)
+            await asyncio.sleep(0.04)
+            active_readers -= 1
+
+    async def writer():
+        nonlocal writer_ran_while_readers_active
+        async with rw.write_lock():
+            if active_readers > 0:
+                writer_ran_while_readers_active = True
+            await asyncio.sleep(0.04)
+
+    readers = [asyncio.create_task(reader()) for _ in range(4)]
+    writer_task = asyncio.create_task(writer())
+    more_readers = [asyncio.create_task(reader()) for _ in range(2)]
+
+    await asyncio.gather(*readers, writer_task, *more_readers)
+    assert max_concurrent_readers >= 2
+    assert not writer_ran_while_readers_active
+
+
+@pytest.mark.asyncio
+async def test_mcp_client_read_only_tools_concurrency_and_write_exclusion() -> None:
+    client = StreamableHTTPMCPClient("https://example.test/mcp", timeout_seconds=2)
+
+    active_concurrent_calls = 0
+    max_concurrent_reads = 0
+    writer_conflict = False
+
+    class MockSession:
+        async def call_tool(self, name, arguments, **_kwargs):
+            nonlocal active_concurrent_calls, max_concurrent_reads, writer_conflict
+            if name.startswith("read"):
+                active_concurrent_calls += 1
+                max_concurrent_reads = max(max_concurrent_reads, active_concurrent_calls)
+                await asyncio.sleep(0.04)
+                active_concurrent_calls -= 1
+            else:
+                if active_concurrent_calls > 0:
+                    writer_conflict = True
+                await asyncio.sleep(0.04)
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text=name)], isError=False)
+
+    client._session = MockSession()
+
+    r1 = asyncio.create_task(client.call_tool("read_1", {}, read_only=True))
+    r2 = asyncio.create_task(client.call_tool("read_2", {}, read_only=True))
+    r3 = asyncio.create_task(client.call_tool("read_3", {}, read_only=True))
+    w1 = asyncio.create_task(client.call_tool("write_1", {}, read_only=False))
+    r4 = asyncio.create_task(client.call_tool("read_4", {}, read_only=True))
+
+    await asyncio.gather(r1, r2, r3, w1, r4)
+    assert max_concurrent_reads >= 2, "Read-only calls must execute concurrently"
+    assert not writer_conflict, "Writer call must not overlap with active readers"
+
