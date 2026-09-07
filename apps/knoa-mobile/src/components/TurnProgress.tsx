@@ -3,7 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-nati
 
 import type { ChatTurnSnapshot } from "@/api/models";
 import { useI18n } from "@/i18n";
-import { colors } from "@/theme";
+import { colors, radii } from "@/theme";
 import { timelineDisplayEntries, type TimelineDisplayEntry } from "./turnTimeline";
 import { turnFailureMessage } from "./turnFailurePresentation";
 
@@ -125,8 +125,17 @@ const styles = StyleSheet.create({
   draft: { gap: 3 },
   stepTitle: { color: colors.muted, fontSize: 12, fontWeight: "700" },
   stepText: { color: colors.ink, fontSize: 13, lineHeight: 19 },
-  toolRow: { minHeight: 25, flexDirection: "row", alignItems: "center", gap: 8 },
-  toolName: { color: colors.ink, flex: 1, fontSize: 13 },
+  toolRow: {
+    minHeight: 28,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radii.small,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  toolName: { color: colors.ink, flex: 1, fontSize: 13, fontWeight: "600" },
   toolState: { color: colors.muted, fontSize: 12 },
   runningDot: { color: colors.accent, fontSize: 20, fontWeight: "900", width: 18, textAlign: "center" },
   done: { color: colors.accent, fontWeight: "800", width: 18, textAlign: "center" },
