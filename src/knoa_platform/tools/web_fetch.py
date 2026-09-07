@@ -96,6 +96,7 @@ class WebFetchTool(ToolBase):
 
         html = ""
         status_code = 200
+        fetched = False
         for attempt in range(2):
             try:
                 import httpx
@@ -136,8 +137,9 @@ class WebFetchTool(ToolBase):
                                 _MAX_RESPONSE_BYTES,
                             )
                             status_code = resp.status_code
+                            fetched = True
                             break
-                    if html:
+                    if fetched:
                         break
             except HttpResponseTooLargeError as e:
                 return {"error": str(e)}
