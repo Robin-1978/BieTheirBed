@@ -244,13 +244,13 @@ export default function TasksScreen() {
         ) : null}
 
         {/* 未读提醒通知与一键全读 */}
-        {unreadReminders.length > 0 ? (
+        {currentNodeUnread.count > 0 ? (
           <View style={styles.unreadNoticeBanner}>
             <View style={styles.unreadNoticeLeft}>
               <AppIcon name="alert" color={colors.accent} size={16} />
               <View style={styles.unreadNoticeTextWrap}>
                 <Text style={styles.unreadNoticeTitle}>
-                  {t("reminders.summary", { count: unreadReminders.length })}
+                  {t("reminders.summary", { count: currentNodeUnread.count })}
                 </Text>
                 {otherNodeReminders.length > 0 ? (
                   <Text style={styles.unreadNoticeDetail}>
@@ -262,7 +262,7 @@ export default function TasksScreen() {
             <AppPressable
               accessibilityRole="button"
               accessibilityLabel={t("reminders.markAllRead")}
-              onPress={() => void markAllRead()}
+              onPress={() => void markAllRead(gateway.nodeId)}
               style={styles.markAllReadButton}
             >
               <AppIcon name="check" color={colors.accent} size={14} />
