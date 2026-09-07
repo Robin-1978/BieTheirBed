@@ -327,6 +327,7 @@ class TaskExecutionRepositoryMixin:
     def compact_expired_traces(self) -> int:
         """Drop verbose drafts after retention while preserving Task results."""
         now = self._clock()
+        cutoff = now - self._trace_retention_seconds
         terminal_values = tuple(state.value for state in TERMINAL_TASK_STATES)
         placeholders = ",".join("?" for _ in terminal_values)
         compacted = 0
@@ -336,9 +337,9 @@ class TaskExecutionRepositoryMixin:
                 f"""SELECT trace.* FROM runtime_task_execution_traces trace
                     JOIN runtime_tasks task ON task.task_id=trace.task_id
                     WHERE trace.compacted_at IS NULL
-                      AND trace.retained_until<=?
+                      AND (trace.retained_until<=? OR trace.created_at<=?)
                       AND task.state IN ({placeholders})""",
-                (now, *terminal_values),
+                (now, cutoff, *terminal_values),
             ).fetchall()
             for row in rows:
                 trace = self._trace_record(row)
@@ -372,6 +373,13 @@ class TaskExecutionRepositoryMixin:
                         now,
                         trace.task_id,
                     ),
+                )
+                # Also prune intermediate verbose tool step payloads for compacted tasks
+                db.execute(
+                    """UPDATE runtime_task_tool_steps SET
+                           arguments_json='{}', result_json='{}', updated_at=?
+                       WHERE task_id=?""",
+                    (now, trace.task_id),
                 )
                 compacted += 1
         return compacted

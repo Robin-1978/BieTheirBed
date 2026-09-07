@@ -99,6 +99,15 @@ class CoreDaemon:
 
     async def _cleanup_loop(self) -> None:
         interval = max(10, self._config.attachment_cleanup_interval_seconds)
+        composition = self._composition
+        if composition is not None:
+            try:
+                await asyncio.to_thread(composition.artifacts.cleanup_expired)
+                await composition.task_service.compact_expired_traces()
+                await composition.conversation_service.compact_expired_details()
+                await self._run_database_maintenance(composition)
+            except Exception:
+                logger.warning("Initial cleanup pass failed", exc_info=True)
         while True:
             await asyncio.sleep(interval)
             composition = self._composition
