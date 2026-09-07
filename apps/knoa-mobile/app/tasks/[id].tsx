@@ -73,8 +73,14 @@ export default function TaskDetailScreen() {
     return () => clearTimeout(timer);
   }, [gateway.latestEvent, refresh]);
 
+  const activeExecution = executions.find((item) => !isTerminal(item.state));
+
   async function executeNow() {
     if (!task || working) return;
+    if (activeExecution) {
+      router.push(`/task-executions/${activeExecution.execution_id}`);
+      return;
+    }
     setWorking("execute");
     setError("");
     try {
@@ -104,6 +110,17 @@ export default function TaskDetailScreen() {
       const execution = await gateway.runAuthenticated((client) => client.executeTask(task.task_id));
       router.push(`/task-executions/${execution.execution_id}`);
     } catch {
+      try {
+        const fresh = await gateway.runAuthenticated((client) => client.listTaskExecutions(task.task_id));
+        setExecutions(fresh);
+        const live = fresh.find((item) => !isTerminal(item.state));
+        if (live) {
+          router.push(`/task-executions/${live.execution_id}`);
+          return;
+        }
+      } catch {
+        // Fall back to showing the error
+      }
       setError(t("taskDetail.executeFailed"));
     } finally {
       setWorking("");
@@ -186,7 +203,14 @@ export default function TaskDetailScreen() {
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <View style={styles.actions}>
-        <Action icon="play" label={t("taskDetail.executeNow")} onPress={() => void executeNow()} disabled={Boolean(working)} busy={working === "execute"} primary />
+        <Action
+          icon={activeExecution ? "eye" : "play"}
+          label={activeExecution ? t("taskDetail.viewActiveExecution") : t("taskDetail.executeNow")}
+          onPress={() => void executeNow()}
+          disabled={Boolean(working)}
+          busy={working === "execute"}
+          primary
+        />
         <Action icon="edit" label={t("taskDetail.edit")} onPress={() => router.push(`/tasks/${task.task_id}/edit`)} disabled={Boolean(working)} />
       </View>
       <View style={styles.actions}>

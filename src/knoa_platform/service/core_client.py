@@ -367,11 +367,10 @@ class CoreClient(CoreArtifactClientMixin, CoreAutomationClientMixin):
                 ):
                     future = self._pending.get(message.request_id)
                     if future is None or future.done():
-                        failure = CoreConnectionLostError(
-                            "Core protocol violation: unsolicited Task subscription"
-                        )
-                        await self._websocket.close()
-                        break
+                        # The subscription request may have timed out or been cancelled by the caller.
+                        # Cleanly unsubscribe the late subscription instead of tearing down the shared connection.
+                        asyncio.create_task(self._unsubscribe(message.request_id))
+                        continue
                     self._subscription_queues.setdefault(
                         message.request_id,
                         asyncio.Queue(

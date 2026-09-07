@@ -83,6 +83,7 @@ export function TurnProgress({ turn }: { turn: ChatTurnSnapshot }) {
 
 function getToolIconName(toolName: string): AppIconName {
   const name = toolName.toLowerCase();
+  if (name.includes("sleep") || name.includes("wait")) return "timer";
   if (name.includes("search") || name.includes("fetch")) return "globe";
   if (name.includes("file") || name.includes("artifact")) return "file";
   if (name.includes("command") || name.includes("exec") || name.includes("bash")) return "code";
