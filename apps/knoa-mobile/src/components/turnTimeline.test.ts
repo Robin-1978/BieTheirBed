@@ -56,4 +56,35 @@ describe("timelineDisplayEntries", () => {
       entry({ kind: "tool_result", tool_call_id: "call-a", tool_name: "write_file", blocked: true }),
     ])[0]).toMatchObject({ state: "failed" });
   });
+
+  it("extracts meaningful tool argument detail and handles reasoning fallback", () => {
+    const rows = timelineDisplayEntries([
+      entry({
+        kind: "tool_call",
+        tool_call_id: "call-web",
+        tool_name: "web_search",
+        tool_args: { query: "OpenAI GPT-6 Astra" },
+      }),
+      entry({
+        kind: "tool_result",
+        tool_call_id: "call-web",
+        tool_name: "web_search",
+      }),
+    ]);
+
+    expect(rows[0]).toMatchObject({
+      kind: "tool",
+      toolName: "web_search",
+      detail: '"OpenAI GPT-6 Astra"',
+      state: "completed",
+    });
+
+    // Fallback when no reasoning in timeline
+    const rowsWithFallback = timelineDisplayEntries([], "final output", "独立思考过程");
+    expect(rowsWithFallback[0]).toEqual({
+      kind: "reasoning",
+      key: "reasoning:fallback",
+      content: "独立思考过程",
+    });
+  });
 });

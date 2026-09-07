@@ -229,6 +229,11 @@ class KnoaAgentRuntime(AgentRuntime):
         cancellation: asyncio.Event,
     ) -> AsyncIterator[RuntimeTurnEvent]:
         terminal_emitted = False
+        saved_checkpoint = False
+        durable_messages: list[dict[str, Any]] = []
+        last_meaningful_content = ""
+        summary = ""
+        covered_messages = 0
         try:
             checkpoint = await asyncio.to_thread(
                 self._contexts.load_checkpoint,
@@ -292,15 +297,17 @@ class KnoaAgentRuntime(AgentRuntime):
                 saved_checkpoint = False
                 last_meaningful_content = ""
                 content = ""
+                tool_budget_exhausted = False
                 for _iteration in range(1, self._max_iterations + 1):
                     if cancellation.is_set():
                         break
+                    active_tools = () if tool_budget_exhausted else tools
                     try:
                         prepared = self._context.prepare(
                             system_prompt=self._system_prompt,
                             model_history=model_messages,
                             durable_history=durable_messages,
-                            tools=tools,
+                            tools=active_tools,
                             context=request.context,
                             summary=summary,
                             covered_messages=covered_messages,
@@ -343,7 +350,7 @@ class KnoaAgentRuntime(AgentRuntime):
                     model_request = AgentModelRequest(
                         call_id=uuid.uuid4().hex,
                         messages=prepared.messages,
-                        tools=tools,
+                        tools=active_tools,
                         temperature=self._temperature,
                         max_output_tokens=self._max_output_tokens,
                     )
@@ -484,26 +491,47 @@ class KnoaAgentRuntime(AgentRuntime):
                     assistant_message = self._assistant_tool_message(content, calls)
                     model_messages.append(assistant_message)
                     durable_messages.append(assistant_message)
+                    tool_limit_hit = False
                     for call in calls:
                         if tool_calls >= self._max_tool_calls:
-                            if not saved_checkpoint and durable_messages:
-                                await self._save_aborted_turn_checkpoint(
-                                    request,
-                                    checkpoint,
-                                    durable_messages,
-                                    summary=summary,
-                                    covered_messages=covered_messages,
-                                    reason="tool_limit_reached",
-                                    partial_content=last_meaningful_content,
+                            if tool_budget_exhausted:
+                                if not saved_checkpoint and durable_messages:
+                                    await self._save_aborted_turn_checkpoint(
+                                        request,
+                                        checkpoint,
+                                        durable_messages,
+                                        summary=summary,
+                                        covered_messages=covered_messages,
+                                        reason="tool_limit_reached",
+                                        partial_content=last_meaningful_content,
+                                    )
+                                    saved_checkpoint = True
+                                yield TurnFinished(
+                                    **self._event_base(request, runtime_turn_ref),
+                                    status="failed",
+                                    error_code="tool_limit_reached",
                                 )
-                                saved_checkpoint = True
-                            yield TurnFinished(
-                                **self._event_base(request, runtime_turn_ref),
-                                status="failed",
-                                error_code="tool_limit_reached",
-                            )
-                            terminal_emitted = True
-                            return
+                                terminal_emitted = True
+                                return
+
+                            tool_limit_hit = True
+                            limit_payload = {
+                                "call_id": str(call.call_id),
+                                "tool_name": str(call.name),
+                                "status": "completed",
+                                "output": (
+                                    "Tool budget reached for this turn. "
+                                    "Synthesize your final response now without calling further tools."
+                                ),
+                            }
+                            result_message = {
+                                "role": "tool",
+                                "tool_call_id": str(call.call_id),
+                                "content": json.dumps(limit_payload, ensure_ascii=False),
+                            }
+                            model_messages.append(result_message)
+                            durable_messages.append(result_message)
+                            continue
                         proposed = McpToolCall(
                             call_id=str(call.call_id),
                             name=str(call.name),
@@ -649,6 +677,19 @@ class KnoaAgentRuntime(AgentRuntime):
                                     ),
                                     schema_hits=projection.schema_hits + len(activated),
                                 )
+                    if tool_limit_hit or (tool_calls >= self._max_tool_calls and not tool_budget_exhausted):
+                        tool_budget_exhausted = True
+                        synth_notice = {
+                            "role": "user",
+                            "content": (
+                                "[System Notice] Maximum tool call budget reached for this turn. "
+                                "Synthesize a comprehensive, well-structured final answer now based on all "
+                                "the observations and information collected so far. Do NOT call any more tools."
+                            ),
+                        }
+                        model_messages.append(synth_notice)
+                        durable_messages.append(synth_notice)
+                        continue
                 status = "interrupted" if cancellation.is_set() else "failed"
                 error_code = ("cancelled" if cancellation.is_set() else "iteration_limit_reached")
                 if not saved_checkpoint and durable_messages:
@@ -1150,18 +1191,35 @@ class KnoaAgentRuntime(AgentRuntime):
             return raw_json
 
         output = dumped.get("output")
-        output_str = (
-            output
-            if isinstance(output, str)
-            else json.dumps(output, ensure_ascii=False, default=str)
-        )
+        tool_name = str(dumped.get("tool_name") or "tool")
+
+        # Format output into clean, natural text rather than escaping dictionary into a single JSON line
+        if isinstance(output, str):
+            output_str = output
+        elif isinstance(output, dict):
+            if "content" in output and isinstance(output["content"], str):
+                header_parts = []
+                for k in ("url", "status_code", "title", "query", "file_path"):
+                    if k in output and output[k] is not None:
+                        header_parts.append(f"# {k}: {output[k]}")
+                prefix = ("\n".join(header_parts) + "\n\n") if header_parts else ""
+                output_str = prefix + output["content"]
+            elif "stdout" in output and isinstance(output["stdout"], str):
+                output_str = output["stdout"]
+                if output.get("stderr"):
+                    output_str += f"\n\n[STDERR]\n{output['stderr']}"
+            else:
+                output_str = json.dumps(output, ensure_ascii=False, indent=2, default=str)
+        else:
+            output_str = str(output)
+
         total_len = len(output_str)
 
         # 1. Spill to ArtifactStore if available and session_id is present
+        # Never recursively spill read_artifact calls into new artifacts!
         artifact_id = None
-        if artifacts is not None and session_id:
+        if tool_name != "read_artifact" and artifacts is not None and session_id:
             try:
-                tool_name = str(dumped.get("tool_name") or "tool")
                 call_id = str(dumped.get("call_id") or uuid.uuid4().hex)[:8]
                 created = artifacts.create_generated_text(
                     session_id,
