@@ -235,7 +235,9 @@ gantt
    - **清除底层破坏前缀的二次截断**：彻底清理 `src/knoa_platform/context/assembly.py` 中过时的 `trim_stale_content` 与 `_context_edit` 逻辑，杜绝任何中间字符篡改（`...[trimmed from X chars]`）注入；
    - **前缀不可变性安全边界**：底层 `truncate_messages` 仅作为整轮粗粒度安全防御，保留完整轮次与 System/Current Turn，杜绝局部破坏；
    - **单一权威收敛**：全生命周期的上下文预算控制、滑动窗口、Lossy Compaction 摘要生成完全收敛至 `knoa_agent/context.py` 的 `ContextEngine`，消除双头管理冲突与 Prompt Cache 失效。
-2. **Trace 历史自动分级归档与瘦身**：
-   - 对完成超过 7 天的任务 Trace 实施轻量摘要化（仅留 Final Summary，清理中间无用的 Token Delta 记录）。
+2. **Trace 历史自动分级归档与瘦身 [COMPLETED 2026-09-07]**：
+   - **保留期优化**：将任务执行 Trace 与对话明细默认保留期由 90天/30天优化至 7 天（`task_trace_retention_days=7`，`conversation_detail_retention_days=7`），支持环境变量灵活调整；
+   - **多级平滑瘦身与关联表清理**：针对过期已完结（completed/failed/cancelled）任务实施自动分级压缩，保留权威 `final_output`、执行摘要与关键里程碑（plan, tool_call, artifact, warning），安全抹除中间冗余推理草稿与 `runtime_task_tool_steps` 的庞大 arguments/result JSON，释放海量存储；
+   - **启动主动维护与周期巡检**：守护进程在冷启动时立即触发首轮自动化清理与 WAL 检查点整理，并在后台按需低频巡检，杜绝存储膨胀。
 3. **全双工双向连接与跨端统一已读中心**：
    - 升级支持端到端 WebSocket，并将未读状态收敛至中心节点，彻底解决多机角标不同步。

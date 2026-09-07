@@ -307,8 +307,8 @@ class AppConfig(BaseModel):
     dingtalk_receive_id: str = ""
     attachment_ttl_seconds: int = 3600
     attachment_cleanup_interval_seconds: int = 300
-    task_trace_retention_days: int = Field(default=90, ge=1, le=3650)
-    conversation_detail_retention_days: int = Field(default=30, ge=1, le=3650)
+    task_trace_retention_days: int = Field(default=7, ge=1, le=3650)
+    conversation_detail_retention_days: int = Field(default=7, ge=1, le=3650)
     audio_transcription: AudioTranscriptionConfig = Field(
         default_factory=AudioTranscriptionConfig
     )

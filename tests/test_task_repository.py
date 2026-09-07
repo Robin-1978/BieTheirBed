@@ -19,6 +19,7 @@ from knoa_platform.tasks import (
     TaskNotFoundError,
     TaskRepository,
     TaskState,
+    TaskToolStepState,
     TaskTraceEntry,
     TaskTransitionError,
 )
@@ -342,6 +343,23 @@ def test_expired_terminal_trace_is_compacted_without_losing_result(
         ),
         final_output="done",
     )
+    step, _ = repository.begin_tool_step(
+        scope.principal_id,
+        task.task_id,
+        tool_step_id="step-1",
+        tool_call_id="call-1",
+        tool_name="read_file",
+        arguments={"path": "/tmp/a"},
+        effect="read_only",
+        risk="low",
+    )
+    repository.finish_tool_step(
+        scope.principal_id,
+        task.task_id,
+        tool_step_id=step.tool_step_id,
+        state=TaskToolStepState.COMPLETED,
+        result={"status": "completed", "output": "file content"},
+    )
     repository.transition(
         scope.principal_id,
         task.task_id,
@@ -358,6 +376,10 @@ def test_expired_terminal_trace_is_compacted_without_losing_result(
     assert [entry.entry_type for entry in trace.entries] == ["tool_call"]
     assert trace.entries[0].tool_args == {}
     assert repository.get(scope.principal_id, task.task_id).final_summary == "done"
+    steps = repository.list_tool_steps(scope.principal_id, task.task_id)
+    assert len(steps) == 1
+    assert steps[0].arguments == {}
+    assert steps[0].result == {}
 
 
 def test_task_ownership_does_not_reveal_foreign_identity(tmp_path: Path) -> None:
