@@ -757,9 +757,9 @@ class ArtifactStore:
                 f"Artifact type is not readable as text: {entry.media_type}"
             )
 
-        if offset is not None or limit is not None:
+        if offset is not None or limit is not None or entry.size > 3000:
             start_line = max(1, int(offset or 1))
-            line_count = max(1, min(int(limit or 100), 1000))
+            line_count = max(1, min(int(limit or 60), 1000))
             selected_lines: list[str] = []
             total_lines = 0
             with entry.path.open("r", encoding="utf-8", errors="replace") as stream:
@@ -774,7 +774,8 @@ class ArtifactStore:
                 if shown
                 else f"lines {start_line}+ (end of file, total {total_lines} lines)"
             )
-            return {
+            has_more = (start_line + shown) <= total_lines
+            res = {
                 "artifact_id": entry.artifact_id,
                 "name": entry.name,
                 "media_type": entry.media_type,
@@ -782,9 +783,12 @@ class ArtifactStore:
                 "size": entry.size,
                 "showing": showing,
                 "total_lines": total_lines,
-                "has_more": (start_line + shown) <= total_lines,
+                "has_more": has_more,
                 "truncated": False,
             }
+            if has_more:
+                res["next_offset"] = start_line + shown
+            return res
 
         bounded = max(1, min(max_bytes, 512_000))
         with entry.path.open("rb") as stream:

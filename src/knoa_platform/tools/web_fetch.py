@@ -212,22 +212,7 @@ class WebFetchTool(ToolBase):
 
 
 def _extract_clean_text(html: str) -> str:
-    """Extract clean, dense text from HTML using trafilatura with BeautifulSoup fallback."""
-    try:
-        import trafilatura
-
-        extracted = trafilatura.extract(
-            html,
-            include_links=False,
-            include_images=False,
-            include_tables=True,
-            output_format="txt",
-        )
-        if extracted and len(extracted.strip()) > 40:
-            return extracted.strip()
-    except Exception:
-        pass
-
+    """Extract clean, dense markdown text from HTML with links preserved."""
     try:
         from bs4 import BeautifulSoup
         from markdownify import markdownify as md
@@ -252,12 +237,34 @@ def _extract_clean_text(html: str) -> str:
             class_=re.compile(r"cookie|banner|advertisement|sidebar|comment", re.I)
         ):
             el.decompose()
-        text = md(str(soup), strip=["a", "img"])
+        text = md(str(soup), strip=["img"], heading_style="ATX")
+        if text and len(text.strip()) > 40:
+            return re.sub(r"\n{3,}", "\n\n", text).strip()
     except Exception:
+        pass
+
+    try:
+        import trafilatura
+
+        extracted = trafilatura.extract(
+            html,
+            include_links=True,
+            include_images=False,
+            include_tables=True,
+            output_format="txt",
+        )
+        if extracted and len(extracted.strip()) > 40:
+            return extracted.strip()
+    except Exception:
+        pass
+
+    try:
         from bs4 import BeautifulSoup
 
         soup = BeautifulSoup(html, "html.parser")
         text = soup.get_text(separator="\n", strip=True)
+    except Exception:
+        text = html
 
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 

@@ -1028,4 +1028,142 @@ def test_runtime_bound_tool_result_content_spills_to_artifact_and_preserves_head
     assert head_text in page["content"]
 
 
+def test_runtime_bound_tool_result_formats_dict_content_and_prevents_read_artifact_recursion(tmp_path):
+    import json
+    from knoa_platform.agent_runtime.tool_step import ToolStepResult
+    from knoa_platform.artifacts import ArtifactStore
+
+    store = ArtifactStore(tmp_path / "attachments")
+
+    # 1. Test dict output with "content" field (like web_fetch)
+    multiline_doc = "# Title\n\nLine 1: info\nLine 2: data\n" + ("x" * 3000)
+    web_result = ToolStepResult(
+        call_id="call-web-99",
+        tool_name="web_fetch",
+        status="completed",
+        code="ok",
+        output={
+            "url": "https://example.com/test",
+            "status_code": 200,
+            "content": multiline_doc,
+        },
+    )
+
+    bounded = KnoaAgentRuntime._bound_tool_result_content(
+        web_result,
+        session_id="session-dict-test",
+        max_chars=1000,
+        artifacts=store,
+    )
+    parsed = json.loads(bounded)
+    assert "artifact_id" in parsed
+    # Read back artifact and verify it's NOT escaped JSON {"content": ...}
+    page = store.read_text("session-dict-test", parsed["artifact_id"], offset=1, limit=10)
+    assert page["content"].startswith("# url: https://example.com/test")
+    assert "Line 1: info" in page["content"]
+    assert "{\"content\":" not in page["content"]  # Crucial: not escaped JSON!
+
+    # 2. Test that read_artifact never spills recursively into another artifact
+    read_art_result = ToolStepResult(
+        call_id="call-read-art-1",
+        tool_name="read_artifact",
+        status="completed",
+        code="ok",
+        output="y" * 4000,
+    )
+    bounded_read = KnoaAgentRuntime._bound_tool_result_content(
+        read_art_result,
+        session_id="session-dict-test",
+        max_chars=1000,
+        artifacts=store,
+    )
+    parsed_read = json.loads(bounded_read)
+    assert "artifact_id" not in parsed_read  # Never creates recursive artifact!
+    assert "Full result recorded in tool event" in parsed_read["spill_notice"]
+
+
+@pytest.mark.asyncio
+async def test_knoa_runtime_tool_budget_exhaustion_triggers_final_synthesis_pass(tmp_path) -> None:
+    class ToolBudgetProvider:
+        def stream(self, request, cancellation):
+            async def iterate():
+                # If tools are available, make a tool call
+                if request.tools:
+                    yield ProviderChunk(
+                        tool_calls=(
+                            ProposedToolCall(
+                                call_id="call-1",
+                                name="status",
+                                arguments={},
+                            ),
+                        ),
+                        finish_reason="tool_calls",
+                        terminal=True,
+                    )
+                else:
+                    # When tools are stripped due to budget exhaustion, synthesize final response
+                    yield ProviderChunk(
+                        content_delta="这是基于已收集信息的最终综合对比报告。",
+                        finish_reason="stop",
+                        terminal=True,
+                    )
+            return iterate()
+
+    class StatusConnector:
+        def connect(self, grant):
+            class Bound:
+                async def __aenter__(self):
+                    class Client:
+                        async def list_tools(self):
+                            return (
+                                {
+                                    "name": "status",
+                                    "description": "Return status",
+                                    "inputSchema": {"type": "object"},
+                                },
+                            )
+                        async def call_tool(self, call):
+                            return ToolStepResult(
+                                call_id=call.call_id,
+                                tool_name=call.name,
+                                status="completed",
+                                code="ok",
+                                output={"data": "key_metric_found"},
+                            )
+                    return Client()
+
+                async def __aexit__(self, *_args):
+                    return None
+
+            return Bound()
+
+    runtime = KnoaAgentRuntime(
+        ToolBudgetProvider(),
+        ContextCheckpointRepository(tmp_path / "context.db"),
+        StatusConnector(),
+        system_prompt="system",
+        health_probe=healthy,
+        max_tool_calls=1,  # Exhaust after 1 tool call
+    )
+    session = await runtime.create_session(
+        CreateRuntimeSession(operation_id="create-budget-test", binding_epoch=1)
+    )
+    turn = await runtime.start_turn(
+        RuntimeTurnRequest(
+            session=session,
+            operation_id="operation-budget-test",
+            input=(TextPart(text="帮我查一下对比"),),
+            mcp=grant(),
+        )
+    )
+    events = [event async for event in turn.events]
+    finished = next(e for e in events if e.event_type == "turn_finished")
+
+    # The turn must be COMPLETED with final_output synthesized, NOT failed!
+    assert finished.status == "completed"
+    assert "最终综合对比报告" in finished.final_output
+
+
+
+
 

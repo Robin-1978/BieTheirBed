@@ -11,6 +11,20 @@ _MAX_RESULTS = 10
 _MAX_SEARCH_RESPONSE_BYTES = 2 * 1024 * 1024
 
 
+def _is_low_quality_dictionary_result(results: list[dict[str, str]], query: str) -> bool:
+    """Detect if search results are dominated by single-character dictionary/encyclopedia garbage."""
+    if not results or len(query.strip()) < 3:
+        return False
+    garbage_count = 0
+    terms = ["_百度百科", " - 汉典", "汉语国学", "（汉语文字）", "（汉语汉字）", "维基词典", "字典-意思", "新华字典"]
+    for r in results:
+        title = r.get("title", "")
+        prefix = title.split("_")[0].split("（")[0].split("-")[0].strip()
+        if any(t in title for t in terms) and len(prefix) <= 2:
+            garbage_count += 1
+    return garbage_count >= max(2, len(results) // 2)
+
+
 class WebSearchTool(ToolBase):
     name = "web_search"
     description = "Search the web."
@@ -32,9 +46,19 @@ class WebSearchTool(ToolBase):
         has_chinese = any('\u4e00' <= c <= '\u9fff' for c in query)
 
         if has_chinese:
+            # 1. Domestic search engine priority for Chinese queries
+            baidu_result = await self._search_baidu(query, max_results)
+            if baidu_result is not None and baidu_result.get("results"):
+                return baidu_result
+            # 2. Bing fallback with quality validation
             bing_result = await self._search_bing(query, max_results)
-            if bing_result is not None and bing_result.get("results"):
+            if (
+                bing_result is not None
+                and bing_result.get("results")
+                and not _is_low_quality_dictionary_result(bing_result["results"], query)
+            ):
                 return bing_result
+            # 3. DuckDuckGo / HTTP fallbacks
             ddgs_result = await self._search_ddgs(query, max_results)
             if ddgs_result is not None and ddgs_result.get("results"):
                 return ddgs_result
@@ -44,7 +68,11 @@ class WebSearchTool(ToolBase):
             if ddgs_result is not None and ddgs_result.get("results"):
                 return ddgs_result
             bing_result = await self._search_bing(query, max_results)
-            if bing_result is not None and bing_result.get("results"):
+            if (
+                bing_result is not None
+                and bing_result.get("results")
+                and not _is_low_quality_dictionary_result(bing_result["results"], query)
+            ):
                 return bing_result
             return await self._search_http(query, max_results)
 
@@ -66,6 +94,67 @@ class WebSearchTool(ToolBase):
                 "required": ["query"],
             },
         }
+
+    async def _search_baidu(self, query: str, max_results: int) -> dict[str, Any] | None:
+        try:
+            import httpx
+            from urllib.parse import quote_plus
+
+            url = f"https://www.baidu.com/s?wd={quote_plus(query)}"
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+                ),
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "zh-CN,zh;q=0.9",
+            }
+            async with httpx.AsyncClient(follow_redirects=True, timeout=12.0, headers=headers) as client:
+                async with client.stream("GET", url) as resp:
+                    resp.raise_for_status()
+                    html = await read_limited_text(resp, _MAX_SEARCH_RESPONSE_BYTES)
+        except Exception:
+            return None
+
+        try:
+            from bs4 import BeautifulSoup
+
+            soup = BeautifulSoup(html, "html.parser")
+            results: list[dict[str, str]] = []
+            seen_urls: set[str] = set()
+
+            for item in soup.select(".result, .c-container"):
+                if len(results) >= max_results:
+                    break
+                title_el = item.select_one("h3 a")
+                if not title_el:
+                    continue
+                href = title_el.get("href", "")
+                if not href or href in seen_urls:
+                    continue
+                seen_urls.add(href)
+
+                snippet_el = item.select_one(".content-right_8Zs40, .c-font-normal, [class*='content']")
+                snippet = snippet_el.get_text(strip=True) if snippet_el else ""
+                if len(snippet) > 180:
+                    snippet = snippet[:179] + "…"
+
+                title_text = title_el.get_text(strip=True)
+                if not title_text:
+                    continue
+
+                results.append({
+                    "title": title_text,
+                    "url": href,
+                    "snippet": snippet,
+                })
+
+            if not results or _is_low_quality_dictionary_result(results, query):
+                return None
+
+            return {"results": results, "query": query, "count": len(results)}
+        except Exception:
+            return None
 
     async def _search_bing(self, query: str, max_results: int) -> dict[str, Any] | None:
         try:

@@ -3,9 +3,50 @@ import type { ChatTimelineEntry } from "@/api/models";
 export type TimelineDisplayEntry =
   | { kind: "reasoning" | "content" | "notice"; key: string; content: string }
   | { kind: "completion"; key: string }
-  | { kind: "tool"; key: string; toolName: string; state: "running" | "completed" | "failed" };
+  | { kind: "tool"; key: string; toolName: string; detail?: string; state: "running" | "completed" | "failed" };
 
-export function timelineDisplayEntries(entries: ChatTimelineEntry[], finalOutput = ""): TimelineDisplayEntry[] {
+export function formatToolDetail(toolName: string, args?: Record<string, unknown>): string | undefined {
+  if (!args || typeof args !== "object") return undefined;
+  if (toolName === "web_search" && typeof args.query === "string" && args.query) {
+    return `"${args.query}"`;
+  }
+  if (toolName === "web_fetch" && typeof args.url === "string" && args.url) {
+    try {
+      const u = new URL(args.url);
+      const host = u.hostname.replace(/^www\./, "");
+      const path = u.pathname.length > 24 ? `${u.pathname.slice(0, 24)}…` : u.pathname;
+      return `${host}${path !== "/" ? path : ""}`;
+    } catch {
+      return args.url.length > 35 ? `${args.url.slice(0, 35)}…` : args.url;
+    }
+  }
+  if ((toolName === "read_file" || toolName === "write_file") && typeof args.path === "string") {
+    const parts = args.path.split("/");
+    return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : args.path;
+  }
+  if (toolName === "read_artifact" && typeof args.artifact_id === "string") {
+    const id = args.artifact_id.slice(0, 8);
+    const range = args.offset ? ` (L${args.offset})` : "";
+    return `${id}…${range}`;
+  }
+  if (toolName === "exec_command" && typeof args.command === "string") {
+    return args.command.length > 35 ? `${args.command.slice(0, 35)}…` : args.command;
+  }
+  // Generic fallback: first non-empty string value if available
+  for (const [k, val] of Object.entries(args)) {
+    if (typeof val === "string" && val.trim()) {
+      const display = val.trim();
+      return `${k}: ${display.length > 25 ? `${display.slice(0, 25)}…` : display}`;
+    }
+  }
+  return undefined;
+}
+
+export function timelineDisplayEntries(
+  entries: ChatTimelineEntry[],
+  finalOutput = "",
+  reasoningFallback = "",
+): TimelineDisplayEntry[] {
   const rows: TimelineDisplayEntry[] = [];
   const toolPositions = new Map<string, number>();
 
@@ -16,6 +57,7 @@ export function timelineDisplayEntries(entries: ChatTimelineEntry[], finalOutput
       const state = entry.kind === "tool_call"
         ? "running"
         : entry.blocked ? "failed" : "completed";
+      const detail = formatToolDetail(entry.tool_name, entry.tool_args);
       if (existing === undefined) {
         const key = callId ? `tool:${callId}` : `tool:${entry.iteration}:${index}`;
         if (callId) toolPositions.set(callId, rows.length);
@@ -23,6 +65,7 @@ export function timelineDisplayEntries(entries: ChatTimelineEntry[], finalOutput
           kind: "tool",
           key,
           toolName: entry.tool_name || "Tool",
+          detail,
           state,
         });
       } else {
@@ -31,6 +74,7 @@ export function timelineDisplayEntries(entries: ChatTimelineEntry[], finalOutput
           rows[existing] = {
             ...current,
             toolName: entry.tool_name || current.toolName,
+            detail: detail || current.detail,
             state,
           };
         }
@@ -46,6 +90,16 @@ export function timelineDisplayEntries(entries: ChatTimelineEntry[], finalOutput
       content,
     });
   }
+
+  // Fallback: If no reasoning entry in timeline but turn.reasoning is present, prepend it
+  if (reasoningFallback.trim() && !rows.some((r) => r.kind === "reasoning")) {
+    rows.unshift({
+      kind: "reasoning",
+      key: "reasoning:fallback",
+      content: reasoningFallback.trim(),
+    });
+  }
+
   if (finalOutput.trim()) {
     rows.push({ kind: "completion", key: "answer-completed" });
   }
