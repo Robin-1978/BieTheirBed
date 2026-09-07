@@ -140,8 +140,12 @@ class ModelStep:
         message_hydrator: MessageHydratorPort | None = None,
     ) -> AsyncIterator[ModelStepEvent]:
         started = self._clock()
-        tool_tokens = self._tokens.text_tokens(
-            json.dumps(request.tools, ensure_ascii=False, sort_keys=True)
+        tool_tokens = (
+            self._tokens.text_tokens(
+                json.dumps(request.tools, ensure_ascii=False, sort_keys=True)
+            )
+            if request.tools
+            else 0
         )
         if tool_tokens > request.prompt_budget - 256:
             yield self._terminal(
@@ -175,6 +179,7 @@ class ModelStep:
         messages = truncate_messages(
             hydrated,
             budget=message_budget,
+            estimator=self._tokens,
         )
         prompt_tokens = self._tokens.messages_tokens(messages) + tool_tokens
         call = ProviderCallRequest(
