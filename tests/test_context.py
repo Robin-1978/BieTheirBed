@@ -80,3 +80,41 @@ def test_truncate_messages_does_not_modify_history_when_it_fits() -> None:
     assistant = next(message for message in result if message["role"] == "assistant")
     assert assistant["content"] == previous_answer
     assert "[trimmed" not in assistant["content"]
+
+
+def test_token_estimator_bpe_active_and_fallback_resilience(monkeypatch) -> None:
+    from knoa_agent.context import CjkRegexTokenEstimator, TokenEstimator
+
+    # 1. Standard instance with BPE active (when tiktoken is present)
+    estimator = TokenEstimator()
+    assert estimator.is_bpe_active is True
+
+    code_snippet = "def hello_world():\n    return {'status': 200, 'message': 'OK'}\n"
+    tokens = estimator.text_tokens(code_snippet)
+    assert tokens > 0
+
+    # 2. Test fallback estimator explicitly
+    fallback = CjkRegexTokenEstimator()
+    fallback_tokens = fallback.text_tokens(code_snippet)
+    assert fallback_tokens > 0
+
+    # 3. Test messages_tokens calculation
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Hello!"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "call_1", "function": {"name": "test", "arguments": "{}"}}],
+        },
+    ]
+    msg_tokens = estimator.messages_tokens(messages)
+    assert msg_tokens > len(messages) * 3
+
+    # 4. Fallback resilience when tiktoken raises an error or is missing
+    broken_estimator = TokenEstimator()
+    broken_estimator._encoding = None  # Simulate non-bpe fallback
+    assert broken_estimator.is_bpe_active is False
+    resilient_tokens = broken_estimator.text_tokens(code_snippet)
+    assert resilient_tokens == fallback_tokens
+
