@@ -24,4 +24,17 @@ def test_wal_is_initialized_without_leaving_connection_open(tmp_path) -> None:
 
     with connect_sqlite(database) as connection:
         mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+        sync = connection.execute("PRAGMA synchronous").fetchone()[0]
+        busy = connection.execute("PRAGMA busy_timeout").fetchone()[0]
     assert mode == "wal"
+    assert sync == 1  # 1 is NORMAL
+    assert busy == 5000
+
+
+def test_connect_sqlite_default_busy_timeout(tmp_path) -> None:
+    database = tmp_path / "test_busy.db"
+
+    with connect_sqlite(database) as connection:
+        busy = connection.execute("PRAGMA busy_timeout").fetchone()[0]
+    assert busy == 5000
+

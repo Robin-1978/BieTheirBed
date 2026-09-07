@@ -428,7 +428,7 @@ class TaskExecutor:
                         runtime_event,
                         (ReasoningSummaryDelta, AssistantDelta),
                     )
-                    or now - last_trace_flush >= 0.5
+                    or now - last_trace_flush >= 1.5
                 ):
                     await self._save_trace(task, entries, final_output)
                     trace_dirty = False
