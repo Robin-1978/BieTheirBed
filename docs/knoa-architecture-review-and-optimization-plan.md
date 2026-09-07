@@ -216,8 +216,10 @@ gantt
 2. **stdio MCP 进程保活看门狗 [COMPLETED 2026-09-07]**：
    - 在 `_SessionClientMixin` 中增加连接探活（`_ensure_alive`）与自动重启机制（`_restart_owner`）；
    - 在 `call_tool`、`list_tools`、`list_resources` 中增加崩溃检测与单次静默自动重连重试（覆盖 `BrokenPipeError`、`ConnectionResetError`、`EOFError` 等管道破裂场景），彻底消除外部 MCP 进程异常退出导致的系统卡死。
-3. **长任务动态续租心跳（Lease Heartbeat Loop）**：
-   - 在 `TaskExecutor._execute` 中引入每 15 秒的心跳续约后台协程，防止长时间运行被误判；并引入孤儿任务安全回收机制。
+3. **长任务动态续租心跳（Lease Heartbeat Loop）[COMPLETED 2026-09-07]**：
+   - 在 `TaskRepository` 中增加原子化续租能力 `renew_lease` 与孤儿任务回收 `recover_expired_leases`；
+   - 在 `TaskExecutor._execute` 中引入后台 `_heartbeat_loop`（按 $lease\_seconds / 3$ 周期持续续租，最快 0.5s 最慢 15s），长任务执行期间租约永不误期；
+   - 在 `_worker_loop` 调度开头自动触发孤儿租约回收，进程异常退出后 60s 安全重置状态释放会话排他锁，彻底消除死锁。
 4. **轻量级 BPE Tokenizer 替换正则估算**：
    - 引入高效的 Tiktoken/Token 映射工具，确保边界预算判定与大模型底层计算误差 < 1%。
 5. **MCP 读写锁解耦**：

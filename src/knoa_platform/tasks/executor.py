@@ -127,6 +127,11 @@ class TaskExecutor:
                 for execution in self._executions
                 if not execution.done()
             }
+            expired_events = await asyncio.to_thread(
+                self._repository.recover_expired_leases
+            )
+            for event in expired_events:
+                await self._events.publish(event)
             while len(self._executions) < self._max_concurrency:
                 task = await asyncio.to_thread(
                     self._repository.claim_next,
@@ -277,6 +282,36 @@ class TaskExecutor:
 
         return "Task completed"
 
+    async def _heartbeat_loop(
+        self,
+        task: TaskRecord,
+        cancellation: asyncio.Event,
+        interval_seconds: float,
+    ) -> None:
+        try:
+            while not cancellation.is_set():
+                await asyncio.sleep(interval_seconds)
+                if cancellation.is_set():
+                    break
+                renewed = await asyncio.to_thread(
+                    self._repository.renew_lease,
+                    task.principal_id,
+                    task.task_id,
+                    self._worker_id,
+                    lease_seconds=self._lease_seconds,
+                )
+                if not renewed:
+                    logger.warning(
+                        "Task lease renewal returned False for %s (worker %s); task may have finished or lost lease",
+                        task.task_id,
+                        self._worker_id,
+                    )
+                    break
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("Error in task lease heartbeat loop for %s", task.task_id)
+
     async def _execute(
         self,
         task: TaskRecord,
@@ -292,6 +327,11 @@ class TaskExecutor:
         trace_dirty = False
         last_trace_flush = time.monotonic()
         last_state_check = 0.0
+        heartbeat_interval = max(0.5, min(15.0, self._lease_seconds / 3.0))
+        heartbeat_task = asyncio.create_task(
+            self._heartbeat_loop(task, cancellation, heartbeat_interval),
+            name=f"task-lease-heartbeat-{task.task_id}",
+        )
         try:
             scope = RuntimeScope(
                 principal_id=task.principal_id,
@@ -480,6 +520,8 @@ class TaskExecutor:
             except Exception:
                 logger.exception("Task failure state could not be persisted")
         finally:
+            heartbeat_task.cancel()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
             if trace_dirty:
                 try:
                     await self._save_trace(task, entries, final_output)

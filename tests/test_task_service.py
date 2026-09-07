@@ -737,3 +737,107 @@ def test_notification_tool_policy():
     assert critical_policy.risk is ToolRisk.HIGH
     assert critical_policy.effect is ToolEffect.EXTERNAL_SIDE_EFFECT
     assert critical_policy.requires_confirmation
+
+
+def test_task_lease_renewal_and_orphan_recovery(tmp_path: Path):
+    import time
+    from knoa_platform.tasks.repository import TaskRepository
+    from knoa_platform.tasks.models import TaskState
+
+    database = tmp_path / "assistant.db"
+    sessions = RuntimeSessionRepository(database, handle_factory=lambda: "session-lease")
+    scope = sessions.create("principal-lease")
+    repository = TaskRepository(database)
+    principal_id = scope.principal_id
+
+    created, _event = repository.create(
+        scope=scope,
+        client_request_id="lease-req-1",
+        goal="Test lease",
+    )
+    task_id = created.task_id
+
+    # 1. Claim task with worker-A, 10s lease
+    claimed = repository.claim_next("worker-A", lease_seconds=10.0, principal_id=principal_id)
+    assert claimed is not None
+    assert claimed.task_id == task_id
+    assert claimed.lease_owner == "worker-A"
+    initial_expiry = claimed.lease_expires_at
+    assert initial_expiry is not None
+
+    # 2. Renew lease with worker-A, 50s lease
+    renewed = repository.renew_lease(principal_id, task_id, "worker-A", lease_seconds=50.0)
+    assert renewed is True
+    updated = repository.get(principal_id, task_id)
+    assert updated.lease_expires_at > initial_expiry
+
+    # 3. Renew lease with wrong worker-B -> False
+    renewed_wrong = repository.renew_lease(principal_id, task_id, "worker-B", lease_seconds=50.0)
+    assert renewed_wrong is False
+
+    # 4. Simulate lease expiration by updating lease_expires_at to past
+    with repository._connect() as db:
+        db.execute(
+            "UPDATE runtime_tasks SET lease_expires_at=? WHERE task_id=?",
+            (time.time() - 10.0, task_id),
+        )
+
+    # 5. Recover expired leases
+    expired_events = repository.recover_expired_leases()
+    assert len(expired_events) == 1
+    assert expired_events[0].payload.state is TaskState.PAUSED
+    assert expired_events[0].payload.phase == "lease_expired"
+
+    reclaimed = repository.get(principal_id, task_id)
+    assert reclaimed.state is TaskState.PAUSED
+    assert reclaimed.lease_owner == ""
+    assert reclaimed.lease_expires_at is None
+
+
+@pytest.mark.asyncio
+async def test_task_executor_heartbeat_keeps_long_task_lease_alive(tmp_path: Path):
+    import time
+    hold = asyncio.Event()
+    runtime = _Runtime(hold=hold)
+    database = tmp_path / "assistant.db"
+    sessions = RuntimeSessionRepository(database, handle_factory=lambda: "session-hb")
+    scope = sessions.create("principal-hb")
+    repository = TaskRepository(database)
+    hub = TaskEventHub()
+    approvals = DurableApprovalService(repository, hub)
+    commits = DurableToolCommitService(repository)
+    executor = TaskExecutor(
+        repository,
+        sessions,
+        runtime,
+        approvals,
+        commits,
+        hub,
+        lease_seconds=2.0,  # 2s lease -> heartbeat interval = max(0.5, 2.0/3) = 0.66s
+    )
+    service = TaskService(repository, executor, approvals, hub)
+    await service.start()
+    try:
+        created, _ = repository.create(
+            scope=scope,
+            client_request_id="hb-req-1",
+            goal="Long running task",
+        )
+        task_id = created.task_id
+        await runtime.entered.wait()
+
+        # Task is running
+        initial_task = repository.get(scope.principal_id, task_id)
+        assert initial_task.state is TaskState.RUNNING
+        t1 = initial_task.lease_expires_at
+        assert t1 is not None
+
+        # Sleep for 1.2s so heartbeat executes at least once
+        await asyncio.sleep(1.2)
+
+        t2_task = repository.get(scope.principal_id, task_id)
+        assert t2_task.state is TaskState.RUNNING
+        assert t2_task.lease_expires_at > t1, "Heartbeat failed to push lease_expires_at forward!"
+    finally:
+        hold.set()
+        await service.stop()

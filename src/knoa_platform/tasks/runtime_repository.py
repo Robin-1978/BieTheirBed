@@ -1252,6 +1252,91 @@ class TaskRuntimeRepositoryMixin:
     def is_cancel_requested(self, principal_id: str, task_id: str) -> bool:
         return self.get(principal_id, task_id).cancel_requested
 
+    def renew_lease(
+        self,
+        principal_id: str,
+        task_id: str,
+        worker_id: str,
+        *,
+        lease_seconds: float = 60.0,
+    ) -> bool:
+        """Extend the lease expiration for an actively running task owned by worker_id."""
+        if not 1.0 <= lease_seconds <= 3600.0:
+            raise ValueError("Task lease must be between 1 and 3600 seconds")
+        principal = self._normalize_identifier(
+            principal_id, label="principal_id", limit=256
+        )
+        task = self._normalize_identifier(task_id, label="task_id", limit=128)
+        worker = self._normalize_identifier(
+            worker_id, label="worker_id", limit=128
+        )
+        now = self._clock()
+        new_expires_at = now + lease_seconds
+        with self._connect() as db:
+            cursor = db.execute(
+                """UPDATE runtime_tasks SET
+                       lease_expires_at=?, updated_at=?
+                   WHERE principal_id=? AND task_id=? AND state=?
+                     AND lease_owner=?""",
+                (
+                    new_expires_at,
+                    now,
+                    principal,
+                    task,
+                    TaskState.RUNNING.value,
+                    worker,
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def recover_expired_leases(self) -> tuple[TaskEvent, ...]:
+        """Pause running Tasks whose lease has expired without heartbeat renewal."""
+        now = self._clock()
+        recovered: list[TaskEvent] = []
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute(
+                """SELECT * FROM runtime_tasks
+                   WHERE state=? AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
+                   ORDER BY created_at, task_id""",
+                (TaskState.RUNNING.value, now),
+            ).fetchall()
+            for row in rows:
+                self._finish_active_attempt(
+                    db,
+                    str(row["task_id"]),
+                    TaskAttemptState.INTERRUPTED,
+                    now,
+                    failure_code="lease_expired",
+                )
+                event = self._append_event(
+                    db,
+                    row,
+                    "state_changed",
+                    TaskEventPayload(
+                        previous_state=TaskState.RUNNING,
+                        state=TaskState.PAUSED,
+                        phase="lease_expired",
+                        reason="Task lease expired without heartbeat renewal; explicit resume is required",
+                    ),
+                    now,
+                )
+                db.execute(
+                    """UPDATE runtime_tasks SET
+                           state=?, phase=?, lease_owner='', lease_expires_at=NULL,
+                           updated_at=?, next_event_seq=?, revision=revision+1
+                       WHERE task_id=?""",
+                    (
+                        TaskState.PAUSED.value,
+                        "lease_expired",
+                        now,
+                        event.event_seq + 1,
+                        str(row["task_id"]),
+                    ),
+                )
+                recovered.append(event)
+        return tuple(recovered)
+
     def recover_interrupted(self) -> tuple[TaskEvent, ...]:
         """Pause running Tasks whose last tool outcome cannot be proven."""
 
