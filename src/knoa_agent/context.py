@@ -100,8 +100,12 @@ class ContextEngine:
     ) -> PreparedContext:
         if len(model_history) != len(durable_history):
             raise ValueError("Model and durable histories must stay aligned")
-        schema_tokens = self._tokens.text_tokens(
-            json.dumps(tools, ensure_ascii=False, sort_keys=True, default=str)
+        schema_tokens = (
+            self._tokens.text_tokens(
+                json.dumps(tools, ensure_ascii=False, sort_keys=True, default=str)
+            )
+            if tools
+            else 0
         )
         message_budget = self._context_window - self._completion_reserve - schema_tokens
         if message_budget < 256:

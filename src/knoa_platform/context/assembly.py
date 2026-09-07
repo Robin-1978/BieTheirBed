@@ -5,9 +5,9 @@ import json
 import logging
 from typing import Any
 
-from knoa_platform.context.compact import compact_dialogue_turn
 from knoa_platform.context.tags import (
     is_compacted_history,
+    is_dialogue_user_turn,
     is_session_context_message,
     is_strategy_context_message,
 )
@@ -110,51 +110,31 @@ def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
     return TokenEstimator().messages_tokens(messages)
 
 
-def _context_edit(messages: list[dict[str, Any]], keep_recent_turns: int = 2) -> list[dict[str, Any]]:
-    if not messages:
-        return messages
-
-    from knoa_platform.context.tags import is_dialogue_user_turn
-
-    turns: list[list[dict[str, Any]]] = []
-    current_turn: list[dict[str, Any]] = []
-    for msg in messages:
-        if is_dialogue_user_turn(msg) and current_turn:
-            turns.append(current_turn)
-            current_turn = []
-        current_turn.append(msg)
-    if current_turn:
-        turns.append(current_turn)
-
-    if len(turns) <= keep_recent_turns:
-        return messages
-
-    old_turns = turns[:-keep_recent_turns]
-    recent_turns = turns[-keep_recent_turns:]
-
-    compressed_old: list[dict[str, Any]] = []
-    for turn in old_turns:
-        compressed_old.extend(
-            compact_dialogue_turn(
-                turn,
-                keep_recent_turns=keep_recent_turns,
-                source="context_edit",
-            ),
-        )
-
-    return compressed_old + [m for t in recent_turns for m in t]
-
-
 def truncate_messages(
     messages: list[dict[str, Any]],
     budget: int = 4096,
     *,
     keep_recent_turns: int = 2,
+    estimator: Any | None = None,
 ) -> list[dict[str, Any]]:
-    from knoa_platform.context.filter import trim_stale_content
-    from knoa_platform.context.tags import is_dialogue_user_turn
+    """Safety boundary message pruner.
 
+    Ensures prompt messages fit within budget. To preserve prompt cache
+    prefix immutability and prevent hallucinations, this pruner NEVER mutates
+    the internal text of retained messages (no in-place previews or '[trimmed]'
+    injections). If pruning is necessary, older complete dialogue turns are dropped
+    from the head, keeping the system prompt and recent/active turns intact.
+    Canonical summarization authority is governed by ContextEngine.
+    """
     if not messages:
+        return messages
+
+    def count_tokens(msgs: list[dict[str, Any]]) -> int:
+        if estimator is not None:
+            return estimator.messages_tokens(msgs)
+        return _estimate_tokens(msgs)
+
+    if count_tokens(messages) <= budget:
         return messages
 
     system = [m for m in messages if m.get("role") == "system"]
@@ -167,23 +147,11 @@ def truncate_messages(
         and not is_session_context_message(m)
     ]
 
-    # Do not mutate/preview history merely because a new turn arrived.  The
-    # old filter ran unconditionally and therefore truncated the previous
-    # answer even when the complete request was comfortably within budget.
-    if _estimate_tokens(messages) <= budget:
-        return messages
-
     summary_block: list[dict[str, Any]] = []
     rest: list[dict[str, Any]] = others
     if others and is_compacted_history(others[0].get("content")):
         summary_block = others[:2]
         rest = others[2:]
-
-    if summary_block:
-        rest, _ = trim_stale_content(rest, keep_recent_turns=keep_recent_turns)
-    else:
-        rest = _context_edit(rest, keep_recent_turns=keep_recent_turns)
-        rest, _ = trim_stale_content(rest, keep_recent_turns=keep_recent_turns)
 
     turns: list[list[dict[str, Any]]] = []
     current_turn: list[dict[str, Any]] = []
@@ -195,10 +163,10 @@ def truncate_messages(
     if current_turn:
         turns.append(current_turn)
 
-    # Keep the current turn, but drop older turns all the way down to one when
-    # the budget is tight. Retaining two oversized turns defeats the budget.
+    # Keep the current turn, but drop older turns from the front when the
+    # budget is tight. Retained turns remain 100% byte-for-byte immutable.
     while turns and len(turns) > 1:
-        total = _estimate_tokens(
+        total = count_tokens(
             system + pin_strategy + pin_session + summary_block + [m for t in turns for m in t],
         )
         if total <= budget:
@@ -212,7 +180,7 @@ def truncate_messages(
     else:
         result = system + pin_strategy + pin_session + summary_block + [m for t in turns for m in t]
 
-    final_tokens = _estimate_tokens(result)
+    final_tokens = count_tokens(result)
     utilization = final_tokens / budget if budget else 0
     if utilization > 0.7:
         logger.warning(

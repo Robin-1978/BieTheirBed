@@ -231,8 +231,10 @@ gantt
    - **Task-Local Elicitation 路由**：采用 `contextvars.ContextVar` 隔离并发工具调用的人机交互 Elicitation Handler，杜绝并发竞争覆盖。
 
 ### 阶段三：P2 架构治理收敛与跨端演进
-1. **统一上下文截断入口**：
-   - 清理 `src/knoa_platform/context/assembly.py` 中过时的启发式截断逻辑，将全生命周期上下文控制权完全收敛到 `knoa_agent/context.py` 的 `ContextEngine`，消除双重截断。
+1. **统一上下文截断入口 [COMPLETED 2026-09-07]**：
+   - **清除底层破坏前缀的二次截断**：彻底清理 `src/knoa_platform/context/assembly.py` 中过时的 `trim_stale_content` 与 `_context_edit` 逻辑，杜绝任何中间字符篡改（`...[trimmed from X chars]`）注入；
+   - **前缀不可变性安全边界**：底层 `truncate_messages` 仅作为整轮粗粒度安全防御，保留完整轮次与 System/Current Turn，杜绝局部破坏；
+   - **单一权威收敛**：全生命周期的上下文预算控制、滑动窗口、Lossy Compaction 摘要生成完全收敛至 `knoa_agent/context.py` 的 `ContextEngine`，消除双头管理冲突与 Prompt Cache 失效。
 2. **Trace 历史自动分级归档与瘦身**：
    - 对完成超过 7 天的任务 Trace 实施轻量摘要化（仅留 Final Summary，清理中间无用的 Token Delta 记录）。
 3. **全双工双向连接与跨端统一已读中心**：
