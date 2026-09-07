@@ -29,6 +29,15 @@ export function formatToolDetail(toolName: string, args?: Record<string, unknown
     const range = args.offset ? ` (L${args.offset})` : "";
     return `${id}…${range}`;
   }
+  if (toolName === "sleep") {
+    const sec = args.seconds !== undefined ? `${args.seconds}s` : "";
+    const reason = typeof args.reason === "string" && args.reason ? ` (${args.reason})` : "";
+    return sec ? `等待 ${sec}${reason}` : undefined;
+  }
+  if (toolName === "spawn_subagent" && typeof args.goal === "string" && args.goal) {
+    const goal = args.goal.trim();
+    return goal.length > 30 ? `子任务: ${goal.slice(0, 30)}…` : `子任务: ${goal}`;
+  }
   if (toolName === "exec_command" && typeof args.command === "string") {
     return args.command.length > 35 ? `${args.command.slice(0, 35)}…` : args.command;
   }

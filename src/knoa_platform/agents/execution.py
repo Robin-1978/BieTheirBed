@@ -246,6 +246,7 @@ class AgentExecutionService:
                         name: self._gateway.tool_fingerprint(name)
                         for name in policy.allowed_platform_tools
                     },
+                    activity_notifier=activity_notifier,
                 )
                 external = (
                     resolver.agent(binding.agent_id).kind == "codex"

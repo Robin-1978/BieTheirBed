@@ -170,6 +170,7 @@ from knoa_platform.tools.registry import ToolRegistry
 from knoa_platform.tools.screen import ScreenTool
 from knoa_platform.tools.screenshot import ScreenshotTool
 from knoa_platform.tools.shell import ShellTool
+from knoa_platform.tools.sleep import SleepTool
 from knoa_platform.tools.subagent import SpawnSubagentTool, SubagentTool
 from knoa_platform.tools.task_control import TaskControlTool
 from knoa_platform.tools.type_text import TypeTextTool
@@ -598,6 +599,7 @@ def _build_registry(
         TypeTextTool(),
         HotkeyTool(),
         MouseTool(),
+        SleepTool(max_seconds=60.0),
         UiTool(ui_backend=config.ui_backend),
         ScreenshotTool(artifacts, artifacts.root / "screenshots"),
         ArtifactPrepareTool(

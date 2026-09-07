@@ -91,6 +91,7 @@ class CapabilityGrant:
     allow_tools: bool
     budget: InvocationBudget
     tool_digests: dict[str, str]
+    activity_notifier: asyncio.Event | None = None
 
 
 class CapabilityGrantRegistry:
@@ -122,6 +123,7 @@ class CapabilityGrantRegistry:
         max_artifact_bytes: int = 32 * 1024 * 1024,
         artifact_bytes: int = 0,
         tool_digests: dict[str, str] | None = None,
+        activity_notifier: asyncio.Event | None = None,
     ) -> CapabilityGrant:
         if ttl_seconds <= 0:
             raise ValueError("Capability grant TTL must be positive")
@@ -170,6 +172,7 @@ class CapabilityGrantRegistry:
                 if self._tool_digest_for is not None
                 else {}
             ),
+            activity_notifier=activity_notifier,
         )
         async with self._guard:
             self._purge_expired_locked()
@@ -305,6 +308,7 @@ class CapabilityGateway:
                 confirmation=grant.confirmation,
                 commit=grant.tool_commit,
                 interaction=grant.interaction,
+                activity_notifier=grant.activity_notifier,
             ),
             ProposedToolCall(
                 call_id=call_id,

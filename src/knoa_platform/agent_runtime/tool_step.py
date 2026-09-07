@@ -82,6 +82,7 @@ class ToolStepContext:
     confirmation: ConfirmationPort | None = None
     commit: ToolCommitPort | None = None
     interaction: Any = None
+    activity_notifier: asyncio.Event | None = None
 
 
 _CURRENT_TOOL_STEP_CONTEXT: ContextVar[ToolStepContext | None] = ContextVar(

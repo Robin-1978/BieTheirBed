@@ -12,6 +12,7 @@ from knoa_platform.tools.notification import NotificationTool
 from knoa_platform.tools.press_key import PressKeyTool
 from knoa_platform.tools.read_file import ReadFileTool
 from knoa_platform.tools.shell import ShellTool
+from knoa_platform.tools.sleep import SleepTool
 from knoa_platform.tools.type_text import TypeTextTool
 from knoa_platform.tools.ui import UiTool
 from knoa_platform.tools.weather import WeatherTool
@@ -39,6 +40,7 @@ ALL_TOOLS = [
     MemoryTool(),
     MouseTool(),
     NotificationTool(),
+    SleepTool(),
     UiTool(ui_backend="none"),
     ShellTool(),
     WeatherTool(),
