@@ -469,7 +469,7 @@ class DelegationService:
         try:
             child = await self._tasks.create(
                 child_scope,
-                client_request_id=f"delegation:{idempotency_key}",
+                client_request_id=f"delegation:{parent_id}:{idempotency_key}",
                 goal=child_goal,
                 attachments=attachments,
                 tools_enabled=bool(child_policy.allowed_platform_tools),
