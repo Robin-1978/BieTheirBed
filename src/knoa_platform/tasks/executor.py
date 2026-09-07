@@ -291,6 +291,7 @@ class TaskExecutor:
         final_output = existing_trace.final_output if existing_trace is not None else ""
         trace_dirty = False
         last_trace_flush = time.monotonic()
+        last_state_check = 0.0
         try:
             scope = RuntimeScope(
                 principal_id=task.principal_id,
@@ -320,20 +321,27 @@ class TaskExecutor:
                     interaction=self._interactions,
                 )
             ):
-                current = await asyncio.to_thread(
-                    self._repository.get,
-                    task.principal_id,
-                    task.task_id,
-                )
-                if current.state in TERMINAL_TASK_STATES:
-                    cancellation.set()
-                    break
-                if current.cancel_requested:
-                    cancellation.set()
-                if current.phase == "pause_requested":
-                    cancellation.set()
                 if cancellation.is_set():
                     break
+                now = time.monotonic()
+                is_milestone = not isinstance(
+                    runtime_event,
+                    (AssistantDelta, ReasoningSummaryDelta),
+                )
+                if is_milestone or now - last_state_check >= 1.0:
+                    last_state_check = now
+                    current = await asyncio.to_thread(
+                        self._repository.get,
+                        task.principal_id,
+                        task.task_id,
+                    )
+                    if (
+                        current.state in TERMINAL_TASK_STATES
+                        or current.cancel_requested
+                        or current.phase == "pause_requested"
+                    ):
+                        cancellation.set()
+                        break
                 entry = self._trace_entry(runtime_event)
                 if entry is not None:
                     self._append_trace_entry(entries, entry)
