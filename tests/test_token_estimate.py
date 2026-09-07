@@ -83,3 +83,35 @@ class TestTokenEstimator:
     def test_estimate_messages_tokens_helper(self):
         msgs = [{"role": "user", "content": "你好世界"}]
         assert estimate_messages_tokens(msgs, family="default") > 0
+
+    def test_bpe_model_selection(self):
+        est_o200k = TokenEstimator("openai", model_name="gpt-4o")
+        assert est_o200k._encoding is not None
+        assert est_o200k._encoding.name == "o200k_base"
+
+        est_cl100k = TokenEstimator("deepseek", model_name="deepseek-chat")
+        assert est_cl100k._encoding is not None
+        assert est_cl100k._encoding.name == "cl100k_base"
+
+    def test_calibration_with_estimated_tokens_and_persistence(self, tmp_path):
+        from knoa_platform.context.token_estimate import TokenCalibrationStore
+        store_path = tmp_path / "calibration.json"
+        store = TokenCalibrationStore(store_path)
+
+        est = TokenEstimator("deepseek", model_name="deepseek_v4_flash", store=store)
+        initial_tokens = est.text_tokens("你好世界")
+
+        # Simulate API returning actual 120 tokens when estimated was 100 (ratio 1.2)
+        est.calibrate(observed_tokens=120, estimated_tokens=100, model_name="deepseek_v4_flash")
+        assert est.sample_count() == 1
+        assert est.calibration_factor > 1.0
+        calibrated_tokens = est.text_tokens("你好世界")
+        assert calibrated_tokens >= initial_tokens
+
+        # Verify disk persistence and reload in a new store & estimator
+        assert store_path.exists()
+        new_store = TokenCalibrationStore(store_path)
+        est2 = TokenEstimator("deepseek", model_name="deepseek_v4_flash", store=new_store)
+        assert est2.sample_count() == 1
+        assert round(est2.calibration_factor, 3) == round(est.calibration_factor, 3)
+

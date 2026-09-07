@@ -33,6 +33,7 @@ dependencies = [
     "qrcode>=8,<9",
     "tzdata>=2025.2",
     "aiortc>=1.15,<2",
+    "tiktoken>=0.7",
 ]
 
 [project.optional-dependencies]
