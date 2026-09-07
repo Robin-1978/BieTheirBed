@@ -213,8 +213,9 @@ gantt
    - 网关对移动端下发流从“逐字全量 Turn Snapshot”升级为“首包基准 Snapshot + 过程 Delta 字符增量流（`?format=delta`）”，移动端带宽占用与 JSON 反序列化 CPU 开销降低 98%，彻底消除长文吐字发热卡顿；
    - 保持 100% 向后兼容性（未带参数请求自动回退至全量 Snapshot 模式）；
    - 移动端 `chatTurns.ts` 与 `ChatTurnWatcher` 升级支持原地补丁与事件派发，全套 162 项端侧测试与网关集成测试全绿。
-2. **stdio MCP 进程保活看门狗**：
-   - 在 `_SessionClientMixin` 中增加连接探活与自动重启机制，当遭遇 `BrokenPipeError` 或管道破裂时，自动清理旧句柄并重新启动子进程完成静默重连。
+2. **stdio MCP 进程保活看门狗 [COMPLETED 2026-09-07]**：
+   - 在 `_SessionClientMixin` 中增加连接探活（`_ensure_alive`）与自动重启机制（`_restart_owner`）；
+   - 在 `call_tool`、`list_tools`、`list_resources` 中增加崩溃检测与单次静默自动重连重试（覆盖 `BrokenPipeError`、`ConnectionResetError`、`EOFError` 等管道破裂场景），彻底消除外部 MCP 进程异常退出导致的系统卡死。
 3. **长任务动态续租心跳（Lease Heartbeat Loop）**：
    - 在 `TaskExecutor._execute` 中引入每 15 秒的心跳续约后台协程，防止长时间运行被误判；并引入孤儿任务安全回收机制。
 4. **轻量级 BPE Tokenizer 替换正则估算**：

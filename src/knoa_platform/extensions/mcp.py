@@ -426,6 +426,20 @@ class _SessionClientMixin:
             await self._owner_closed
         await asyncio.gather(task, return_exceptions=True)
 
+    async def _restart_owner(self) -> None:
+        await self._stop_owner()
+        await self._start_owner()
+
+    async def _ensure_alive(self) -> None:
+        if self._owner_task is not None and not self._owner_stop.is_set():
+            if self._owner_task.done() or self._session is None:
+                logger.warning(
+                    "MCP client process terminated unexpectedly; restarting..."
+                )
+                await self._restart_owner()
+                if self._modern and self._resource_subscriptions:
+                    await self._restart_modern_listener()
+
     async def _finish_start(self, session: Any) -> None:
         handshake, self._modern = await _negotiate_session(session, self._timeout)
         self._session = session
@@ -486,6 +500,7 @@ class _SessionClientMixin:
     async def list_tools(self) -> tuple[MCPToolDefinition, ...]:
         from mcp import types
 
+        await self._ensure_alive()
         session = self._require_session()
         cursor: str | None = None
         definitions: list[MCPToolDefinition] = []
@@ -528,6 +543,7 @@ class _SessionClientMixin:
     async def list_prompts(self) -> tuple[MCPPromptDefinition, ...]:
         from mcp import types
 
+        await self._ensure_alive()
         session = self._require_session()
         cursor: str | None = None
         definitions: list[MCPPromptDefinition] = []
@@ -551,6 +567,50 @@ class _SessionClientMixin:
                 return tuple(definitions)
         raise ValueError("MCP prompt discovery pagination limit exceeded")
 
+    async def _call_tool_driver(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+    ) -> Any:
+        from mcp import types
+        from mcp.client.client import run_input_required_driver
+        from mcp.client.session import ClientRequestContext
+
+        session = self._require_session()
+
+        async def retry(input_responses, request_state):
+            return await asyncio.wait_for(
+                session.call_tool(
+                    name,
+                    arguments,
+                    input_responses=input_responses,
+                    request_state=request_state,
+                    allow_input_required=True,
+                ),
+                timeout=self._timeout,
+            )
+
+        first = await retry(None, None)
+        if not isinstance(first, types.InputRequiredResult):
+            return first
+
+        async def dispatch(key, request):
+            return await session.dispatch_input_request(
+                ClientRequestContext(
+                    session=session,
+                    request_id=key,
+                    meta=request.params.meta if request.params else None,
+                ),
+                request,
+            )
+
+        return await run_input_required_driver(
+            first,
+            dispatch=dispatch,
+            retry=retry,
+            max_rounds=8,
+        )
+
     async def call_tool(
         self,
         name: str,
@@ -560,44 +620,28 @@ class _SessionClientMixin:
         async with self._tool_call_lock:
             self._elicitation_handler = elicitation_handler
             try:
-                from mcp import types
-                from mcp.client.client import run_input_required_driver
-                from mcp.client.session import ClientRequestContext
-
-                session = self._require_session()
-
-                async def retry(input_responses, request_state):
-                    return await asyncio.wait_for(
-                        session.call_tool(
-                            name,
-                            arguments,
-                            input_responses=input_responses,
-                            request_state=request_state,
-                            allow_input_required=True,
-                        ),
-                        timeout=self._timeout,
-                    )
-
-                first = await retry(None, None)
-                if not isinstance(first, types.InputRequiredResult):
-                    return first
-
-                async def dispatch(key, request):
-                    return await session.dispatch_input_request(
-                        ClientRequestContext(
-                            session=session,
-                            request_id=key,
-                            meta=request.params.meta if request.params else None,
-                        ),
-                        request,
-                    )
-
-                return await run_input_required_driver(
-                    first,
-                    dispatch=dispatch,
-                    retry=retry,
-                    max_rounds=8,
-                )
+                await self._ensure_alive()
+                for attempt in range(2):
+                    try:
+                        return await self._call_tool_driver(name, arguments)
+                    except (
+                        BrokenPipeError,
+                        ConnectionResetError,
+                        EOFError,
+                        ConnectionError,
+                        OSError,
+                    ) as exc:
+                        if attempt == 0 and not isinstance(exc, asyncio.CancelledError):
+                            logger.warning(
+                                "MCP tool call %s failed with %s; attempting silent reconnection and retry...",
+                                name,
+                                exc,
+                            )
+                            await self._restart_owner()
+                            if self._modern and self._resource_subscriptions:
+                                await self._restart_modern_listener()
+                            continue
+                        raise
             finally:
                 self._elicitation_handler = None
 
@@ -607,6 +651,7 @@ class _SessionClientMixin:
     async def list_resources(self) -> tuple[MCPResourceDefinition, ...]:
         from mcp import types
 
+        await self._ensure_alive()
         session = self._require_session()
         cursor: str | None = None
         definitions: list[MCPResourceDefinition] = []
@@ -629,6 +674,7 @@ class _SessionClientMixin:
         raise ValueError("MCP Resource discovery pagination limit exceeded")
 
     async def read_resource(self, uri: str) -> MCPResourceSnapshot:
+        await self._ensure_alive()
         result = await asyncio.wait_for(
             self._require_session().read_resource(uri),
             timeout=self._timeout,
