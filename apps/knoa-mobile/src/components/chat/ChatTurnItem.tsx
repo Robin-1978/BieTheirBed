@@ -15,6 +15,7 @@ import { AppIcon } from "@/components/AppIcon";
 import { AppMarkdown } from "@/components/AppMarkdown";
 import { InteractionCard } from "@/components/InteractionCard";
 import { TurnProgress } from "@/components/TurnProgress";
+import { ThinkingCard } from "./ThinkingCard";
 import { formatMessageTimestamp } from "@/ui/formatRelativeTime";
 import { useI18n } from "@/i18n";
 import { colors, radii, shadows, spacing } from "@/theme";
@@ -84,6 +85,13 @@ export const ChatTurnItem = memo(function ChatTurnItem({
 
       <View style={styles.assistantBubble}>
         <TurnProgress turn={turn} />
+
+        {turn.reasoning ? (
+          <ThinkingCard
+            reasoning={turn.reasoning}
+            isThinking={!terminal && !response}
+          />
+        ) : null}
 
         {response ? (
           <Pressable accessibilityRole="button" delayLongPress={320} onLongPress={() => onCopy(response)}>
